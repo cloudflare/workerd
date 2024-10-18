@@ -200,11 +200,9 @@ struct Trace @0x8e8d911203762d34 {
     }
   }
 
-  struct Outcome {
-    # The Outcome struct is always sent as the last event in any trace stream. It
-    # contains the final outcome of the trace.
+  struct SpanClose {
+    # A SpanClose is sent only at the completion of a span.
     outcome @0 :EventOutcome;
-
     info :union {
       none @1 :Void;
       fetch @2 :FetchResponseInfo;
@@ -215,31 +213,10 @@ struct Trace @0x8e8d911203762d34 {
     # A detail event indicating a subrequest that was made during a request. This
     # can be a fetch subrequest, an RPC subrequest, a call out to a KV namespace,
     # etc.
-    # TODO(streaming-trace): This needs to be flushed out more.
-    id @0 :UInt32;
-    # A monotonic sequence number that is unique within the tail. The id is
-    # used primarily to correlate with the SubrequestOutcome.
     info :union {
-      none @1 :Void;
-      fetch @2 :FetchEventInfo;
-      jsRpc @3 :JsRpcEventInfo;
-    }
-  }
-
-  struct SpanClose {
-    # A SpanClose is sent only at the completion of a span.
-
-    enum SpanOutcome {
-      unknown @0;
-      ok @1;
-      exception @2;
-      canceled @3;
-    }
-    outcome @0 :SpanOutcome;
-
-    info :union {
-      none @1 :Void;
-      fetch @2 :FetchResponseInfo;
+      none @0 :Void;
+      fetch @1 :FetchEventInfo;
+      jsRpc @2 :JsRpcEventInfo;
     }
   }
 
@@ -296,29 +273,20 @@ struct Trace @0x8e8d911203762d34 {
       # When a tail stream is first created, the first event will always be
       # an onset event.
 
-      outcome @6 :Outcome;
-      # The final event in every successfully completed stream be will an outcome
-      # event.
-
-      dropped @7 :Dropped;
+      dropped @6 :Dropped;
       # The dropped event is used to identify events that have been dropped from
       # the stream. The start field indicates the sequence number of the first
       # event dropped, and the end field indicates the sequence number of the
       # last event dropped.
 
-      spanClose @8 :SpanClose;
+      spanClose @7 :SpanClose;
       # Span events mark the ending and outcome of a span.
 
-      log @9 :LogV2;
-      exception @10 :Exception;
-      diagnosticChannel @11 :DiagnosticChannelEvent;
-      metrics @12 :List(Metric);
-      subrequest @13 :Subrequest;
-      # A custom event is used to enable arbitrary, non-typed extension
-      # events to be injected. It is most useful as a way of extending
-      # the event stream with new types of events without modifying the
-      # schema. This is a tradeoff. Using a custom event is more flexible
-      # but there's no schema to verify the data.
+      log @8 :LogV2;
+      exception @9 :Exception;
+      diagnosticChannel @10 :DiagnosticChannelEvent;
+      metrics @11 :List(Metric);
+      subrequest @12 :Subrequest;
     }
   }
 }

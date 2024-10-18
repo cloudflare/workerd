@@ -207,7 +207,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
           trace.onsetInfo.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
       executionModel(enumToStr(trace.onsetInfo.executionModel)),
-      outcome(enumToStr(trace.outcomeInfo.outcome)),
+      outcome(enumToStr(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
       truncated(trace.truncated) {}

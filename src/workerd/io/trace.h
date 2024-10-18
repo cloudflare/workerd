@@ -101,7 +101,7 @@ public:
 
   // Sets info about the result of this trace. Can be called more than once, overriding the
   // previous detail.
-  void setOutcomeInfo(trace::Outcome&& info);
+  void setOutcomeInfo(EventOutcome info);
 
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There

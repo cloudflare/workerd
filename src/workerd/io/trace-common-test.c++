@@ -230,27 +230,6 @@ KJ_TEST("TraceEventInfo works") {
   KJ_EXPECT(KJ_ASSERT_NONNULL(info3.traces[0].scriptName) == "foo"_kj);
 }
 
-KJ_TEST("Outcome works") {
-  trace::FetchResponseInfo info(200);
-
-  trace::Outcome outcome(EventOutcome::OK, kj::Maybe(kj::mv(info)));
-  KJ_EXPECT(outcome.outcome == EventOutcome::OK);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome.info).statusCode == 200);
-
-  capnp::MallocMessageBuilder message;
-  auto builder = message.initRoot<rpc::Trace::Outcome>();
-  outcome.copyTo(builder);
-
-  auto reader = builder.asReader();
-  trace::Outcome outcome2(reader);
-  KJ_EXPECT(outcome2.outcome == EventOutcome::OK);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome2.info).statusCode == 200);
-
-  auto outcome3 = outcome.clone();
-  KJ_EXPECT(outcome3.outcome == EventOutcome::OK);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome3.info).statusCode == 200);
-}
-
 KJ_TEST("DiagnosticChannelEvent works") {
   kj::Date date = 0 * kj::MILLISECONDS + kj::UNIX_EPOCH;
   trace::DiagnosticChannelEvent event(date, kj::str("foo"), kj::arr(kj::byte(1)));
@@ -361,8 +340,8 @@ KJ_TEST("Subrequest works") {
 }
 
 KJ_TEST("SpanClose works") {
-  trace::SpanClose event(trace::SpanClose::Outcome::OK, kj::none);
-  KJ_EXPECT(event.outcome == trace::SpanClose::Outcome::OK);
+  trace::SpanClose event(EventOutcome::OK, kj::none);
+  KJ_EXPECT(event.outcome == EventOutcome::OK);
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::SpanClose>();
@@ -370,11 +349,11 @@ KJ_TEST("SpanClose works") {
 
   auto reader = builder.asReader();
   trace::SpanClose event2(reader);
-  KJ_EXPECT(event2.outcome == trace::SpanClose::Outcome::OK);
+  KJ_EXPECT(event2.outcome == EventOutcome::OK);
   KJ_EXPECT(event2.info == kj::none);
 
   auto event3 = event.clone();
-  KJ_EXPECT(event3.outcome == trace::SpanClose::Outcome::OK);
+  KJ_EXPECT(event3.outcome == EventOutcome::OK);
   KJ_EXPECT(event3.info == kj::none);
 }
 

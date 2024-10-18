@@ -276,42 +276,18 @@ struct Onset final {
   Onset clone() const;
 };
 
-// Used to describe the final outcome of the trace. Every trace session should
-// have at most a single Outcome event that is the final event in the stream.
-struct Outcome final {
-  Outcome() = default;
-  // TODO(streaming-trace): Currently there's only one kind of info here but we likely
-  // will add more in the future that would make it necessary to use a kj::OneOf.
-  explicit Outcome(EventOutcome outcome, kj::Maybe<FetchResponseInfo> info = kj::none);
-  Outcome(rpc::Trace::Outcome::Reader reader);
-  Outcome(Outcome&&) = default;
-  Outcome& operator=(Outcome&&) = default;
-  KJ_DISALLOW_COPY(Outcome);
-
-  EventOutcome outcome = EventOutcome::UNKNOWN;
-
-  // The closing outcome event should include an info field that matches the kind of
-  // event that started the span. For instance, if the span was started with a
-  // FetchEventInfo event, then the outcome should be closed with a FetchResponseInfo.
-  kj::Maybe<FetchResponseInfo> info;
-
-  void copyTo(rpc::Trace::Outcome::Builder builder) const;
-  Outcome clone() const;
-};
-
 // The SpanClose struct identifies the *close* of a span in the stream. A span is
 // a logical grouping of events. Spans can be nested.
 struct SpanClose final {
-  using Outcome = rpc::Trace::SpanClose::SpanOutcome;
   // TODO(streaming-trace): Currently there's only one kind of info here but we likely
   // will add more in the future that would make it necessary to use a kj::OneOf.
-  explicit SpanClose(Outcome outcome, kj::Maybe<FetchResponseInfo> maybeInfo);
+  explicit SpanClose(EventOutcome outcome, kj::Maybe<FetchResponseInfo> maybeInfo);
   SpanClose(rpc::Trace::SpanClose::Reader reader);
   SpanClose(SpanClose&&) = default;
   SpanClose& operator=(SpanClose&&) = default;
   KJ_DISALLOW_COPY(SpanClose);
 
-  Outcome outcome;
+  EventOutcome outcome;
   kj::Maybe<FetchResponseInfo> info;
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;

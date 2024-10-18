@@ -60,36 +60,6 @@ kj::Own<const StreamingTrace::IdFactory::Id> StreamingTrace::IdFactory::newIdFro
 // ======================================================================================
 // StreamingTrace
 
-namespace {
-constexpr trace::SpanClose::Outcome eventOutcomeToSpanOutcome(const EventOutcome& outcome) {
-  switch (outcome) {
-    case EventOutcome::UNKNOWN:
-      return trace::SpanClose::Outcome::UNKNOWN;
-    case EventOutcome::OK:
-      return trace::SpanClose::Outcome::OK;
-    case EventOutcome::RESPONSE_STREAM_DISCONNECTED:
-      [[fallthrough]];
-    case EventOutcome::CANCELED:
-      return trace::SpanClose::Outcome::CANCELED;
-    case EventOutcome::LOAD_SHED:
-      [[fallthrough]];
-    case EventOutcome::EXCEEDED_CPU:
-      [[fallthrough]];
-    case EventOutcome::KILL_SWITCH:
-      [[fallthrough]];
-    case EventOutcome::DAEMON_DOWN:
-      [[fallthrough]];
-    case EventOutcome::SCRIPT_NOT_FOUND:
-      [[fallthrough]];
-    case EventOutcome::EXCEEDED_MEMORY:
-      [[fallthrough]];
-    case EventOutcome::EXCEPTION:
-      return trace::SpanClose::Outcome::EXCEPTION;
-  }
-  KJ_UNREACHABLE;
-}
-}  // namespace
-
 struct StreamingTrace::Impl {
   kj::Own<const IdFactory::Id> id;
   trace::Onset onsetInfo;
@@ -123,44 +93,24 @@ StreamingTrace::StreamingTrace(kj::Own<const IdFactory::Id> id,
           kj::mv(id), kj::mv(onset), kj::mv(delegate), timeProvider)) {}
 
 StreamingTrace::~StreamingTrace() noexcept(false) {
-  if (impl != kj::none) {
+  for (auto& span: spans) {
     // If the streaming tracing is dropped without having an outcome explicitly
     // specified, the outcome is explicitly set to unknown.
-    setOutcome(trace::Outcome(EventOutcome::UNKNOWN));
+    span.setOutcome(EventOutcome::UNKNOWN);
   }
   // Stage spans should be closed by calling setOutcome above
   KJ_ASSERT(spans.empty(), "all stage spans must be closed before the trace is destroyed");
 }
 
-void StreamingTrace::setEventInfo(trace::EventInfo&& eventInfo) {
+kj::Own<StreamingTrace::Span> StreamingTrace::openRootSpan(trace::EventInfo&& eventInfo) {
   auto& i = KJ_ASSERT_NONNULL(impl, "the streaming trace is closed");
-  KJ_ASSERT(i->onsetInfo.info == kj::none, "the onset event info can only be set once");
+  KJ_ASSERT(i->onsetInfo.info == kj::none, "the root span can only be opened once");
   i->onsetInfo.info = kj::mv(eventInfo);
-  StreamEvent event(
-      i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), i->onsetInfo.clone());
+  // TODO(streaming-trace): Root span needs an id
+  StreamEvent event(i->id->toString(), {.id = kj::str(0), .parent = kj::str(0)},
+      i->timeProvider.getNow(), getNextSequence(), i->onsetInfo.clone());
   addStreamEvent(kj::mv(event));
-}
-
-void StreamingTrace::setOutcome(trace::Outcome&& outcome) {
-  KJ_IF_SOME(i, impl) {
-    // If the event info was never set on the streaming trace, setting the outcome
-    // is a non-op.
-    if (i->onsetInfo.info == kj::none) {
-      impl = kj::none;
-      return;
-    }
-
-    for (auto& span: spans) {
-      span.setOutcome(eventOutcomeToSpanOutcome(outcome.outcome));
-    }
-    KJ_ASSERT(spans.empty(), "all stage spans must be closed before the trace is destroyed");
-    StreamEvent event(
-        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(outcome));
-    addStreamEvent(kj::mv(event));
-
-    // Then close out the stream by destroying the impl
-    impl = kj::none;
-  }
+  return kj::heap<StreamingTrace::Span>(spans, *this, i->id->toString());
 }
 
 void StreamingTrace::addDropped(uint32_t start, uint32_t end) {
@@ -168,59 +118,6 @@ void StreamingTrace::addDropped(uint32_t start, uint32_t end) {
     KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
     StreamEvent event(i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(),
         trace::Dropped{start, end});
-    addStreamEvent(kj::mv(event));
-  }
-}
-
-kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::newChildSpan() {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    return kj::heap<StreamingTrace::Span>(spans, *this, i->id->toString());
-  }
-  return kj::none;
-}
-
-void StreamingTrace::addLog(trace::LogV2&& log) {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(
-        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(log));
-    addStreamEvent(kj::mv(event));
-  }
-}
-
-void StreamingTrace::addException(trace::Exception&& exception) {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(
-        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(exception));
-    addStreamEvent(kj::mv(event));
-  }
-}
-
-void StreamingTrace::addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& dce) {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(
-        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(dce));
-    addStreamEvent(kj::mv(event));
-  }
-}
-
-void StreamingTrace::addMetrics(trace::Metrics&& metrics) {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(
-        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(metrics));
-    addStreamEvent(kj::mv(event));
-  }
-}
-
-void StreamingTrace::addSubrequest(trace::Subrequest&& subrequest) {
-  KJ_IF_SOME(i, impl) {
-    KJ_REQUIRE_NONNULL(i->onsetInfo.info, "the event info must be set before other events");
-    StreamEvent event(
-        i->id->toString(), {}, i->timeProvider.getNow(), getNextSequence(), kj::mv(subrequest));
     addStreamEvent(kj::mv(event));
   }
 }
@@ -294,7 +191,7 @@ StreamingTrace::Span::Span(
 }
 
 void StreamingTrace::Span::setOutcome(
-    trace::SpanClose::Outcome outcome, kj::Maybe<trace::FetchResponseInfo> maybeInfo) {
+    EventOutcome outcome, kj::Maybe<trace::FetchResponseInfo> maybeInfo) {
   KJ_IF_SOME(i, impl) {  // Then close out the stream by destroying the impl
     for (auto& span: spans) {
       span.setOutcome(outcome);
@@ -306,8 +203,7 @@ void StreamingTrace::Span::setOutcome(
 }
 
 StreamingTrace::Span::~Span() noexcept(false) {
-  setOutcome(trace::SpanClose::Outcome::UNKNOWN);
-  KJ_ASSERT(spans.empty(), "all schild spans must be closed before the trace is destroyed");
+  setOutcome(EventOutcome::UNKNOWN);
 }
 
 void StreamingTrace::Span::addLog(trace::LogV2&& log) {
@@ -364,9 +260,6 @@ StreamEvent::Event getEvent(const rpc::Trace::StreamEvent::Reader& reader) {
   switch (event.which()) {
     case rpc::Trace::StreamEvent::Event::Which::ONSET: {
       return trace::Onset(event.getOnset());
-    }
-    case rpc::Trace::StreamEvent::Event::Which::OUTCOME: {
-      return trace::Outcome(event.getOutcome());
     }
     case rpc::Trace::StreamEvent::Event::Which::DROPPED: {
       return trace::Dropped(event.getDropped());
@@ -428,9 +321,6 @@ void StreamEvent::copyTo(rpc::Trace::StreamEvent::Builder builder) const {
     KJ_CASE_ONEOF(onset, trace::Onset) {
       onset.copyTo(eventBuilder.getOnset());
     }
-    KJ_CASE_ONEOF(outcome, trace::Outcome) {
-      outcome.copyTo(eventBuilder.getOutcome());
-    }
     KJ_CASE_ONEOF(dropped, trace::Dropped) {
       dropped.copyTo(eventBuilder.getDropped());
     }
@@ -468,9 +358,6 @@ StreamEvent StreamEvent::clone() const {
     KJ_SWITCH_ONEOF(event) {
       KJ_CASE_ONEOF(onset, trace::Onset) {
         return onset.clone();
-      }
-      KJ_CASE_ONEOF(outcome, trace::Outcome) {
-        return outcome.clone();
       }
       KJ_CASE_ONEOF(dropped, trace::Dropped) {
         return dropped.clone();

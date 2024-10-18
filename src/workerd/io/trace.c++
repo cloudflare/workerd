@@ -175,8 +175,8 @@ void WorkerTracer::addMetrics(trace::Metrics&& metrics) {
   trace->addMetrics(kj::mv(metrics));
 }
 
-void WorkerTracer::setOutcomeInfo(trace::Outcome&& info) {
-  trace->setOutcome(kj::mv(info));
+void WorkerTracer::setOutcomeInfo(EventOutcome outcome) {
+  trace->setOutcome(outcome);
 }
 
 void WorkerTracer::setFetchResponseInfo(trace::FetchResponseInfo&& info) {

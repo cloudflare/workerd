@@ -1456,7 +1456,7 @@ public:
       if (fetchStatus != 0) {
         t->setFetchResponseInfo(trace::FetchResponseInfo(fetchStatus));
       }
-      t->setOutcomeInfo(trace::Outcome(outcome));
+      t->setOutcomeInfo(outcome);
     }
   }
 

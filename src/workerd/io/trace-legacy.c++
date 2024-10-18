@@ -48,7 +48,7 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   }
 
   builder.setTruncated(truncated);
-  builder.setOutcome(outcomeInfo.outcome);
+  builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
   KJ_IF_SOME(name, onsetInfo.scriptName) {
@@ -144,7 +144,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   }
 
   truncated = reader.getTruncated();
-  outcomeInfo.outcome = reader.getOutcome();
+  outcome = reader.getOutcome();
   cpuTime = reader.getCpuTime() * kj::MILLISECONDS;
   wallTime = reader.getWallTime() * kj::MILLISECONDS;
 
@@ -256,8 +256,8 @@ void Trace::setEventInfo(kj::Date timestamp, trace::EventInfo&& info) {
   onsetInfo.info = kj::mv(info);
 }
 
-void Trace::setOutcome(trace::Outcome&& info) {
-  outcomeInfo = kj::mv(info);
+void Trace::setOutcome(EventOutcome outcome) {
+  this->outcome = outcome;
 }
 
 void Trace::addLog(trace::Log&& log, bool isSpan) {

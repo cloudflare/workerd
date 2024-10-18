@@ -207,49 +207,6 @@ Onset Onset::clone() const {
 }
 
 // ======================================================================================
-// Outcome
-
-namespace {
-kj::Maybe<FetchResponseInfo> maybeGetInfo(const rpc::Trace::Outcome::Reader& reader) {
-  //  if (!reader.hasInfo()) return kj::none;
-  auto info = reader.getInfo();
-  switch (info.which()) {
-    case rpc::Trace::Outcome::Info::Which::NONE: {
-      return kj::none;
-    }
-    case rpc::Trace::Outcome::Info::Which::FETCH: {
-      return kj::Maybe(FetchResponseInfo(info.getFetch()));
-    }
-  }
-  KJ_UNREACHABLE;
-}
-
-kj::Maybe<FetchResponseInfo> cloneInfo(const kj::Maybe<FetchResponseInfo>& other) {
-  return other.map([](const FetchResponseInfo& fetch) { return fetch.clone(); });
-}
-}  // namespace
-
-Outcome::Outcome(EventOutcome outcome, kj::Maybe<FetchResponseInfo> info)
-    : outcome(outcome),
-      info(kj::mv(info)) {}
-
-Outcome::Outcome(rpc::Trace::Outcome::Reader reader)
-    : outcome(reader.getOutcome()),
-      info(maybeGetInfo(reader)) {}
-
-void Outcome::copyTo(rpc::Trace::Outcome::Builder builder) const {
-  builder.setOutcome(outcome);
-  KJ_IF_SOME(i, info) {
-    auto infoBuilder = builder.getInfo();
-    i.copyTo(infoBuilder.initFetch());
-  }
-}
-
-Outcome Outcome::clone() const {
-  return Outcome{outcome, cloneInfo(info)};
-}
-
-// ======================================================================================
 // FetchEventInfo
 
 namespace {
@@ -751,7 +708,7 @@ kj::Maybe<FetchResponseInfo> getSpanCloseInfo(const rpc::Trace::SpanClose::Reade
 }
 }  // namespace
 
-SpanClose::SpanClose(Outcome outcome, kj::Maybe<FetchResponseInfo> maybeInfo)
+SpanClose::SpanClose(EventOutcome outcome, kj::Maybe<FetchResponseInfo> maybeInfo)
     : outcome(outcome),
       info(kj::mv(maybeInfo)) {}
 

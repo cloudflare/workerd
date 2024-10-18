@@ -42,14 +42,14 @@ KJ_TEST("We can create a simple, empty streaming trace session with implicit unk
           KJ_EXPECT(event.id == id, "the event id should be the same as the onset id");
           KJ_EXPECT(event.sequence == 1, "the sequence should have been incremented");
           auto& outcome = KJ_ASSERT_NONNULL(
-              event.event.tryGet<trace::Outcome>(), "the event should be an outcome event");
+              event.event.tryGet<trace::SpanClose>(), "the event should be an span close event");
           KJ_EXPECT(outcome.outcome == EventOutcome::UNKNOWN, "the outcome should be unknown");
           break;
         }
       }
     }, mockTimeProvider);
     // The onset event will not be sent until the event info is set.
-    streamingTrace->setEventInfo(
+    streamingTrace->openRootSpan(
         trace::FetchEventInfo(kj::HttpMethod::GET, kj::String(), kj::String(), nullptr));
   }
   KJ_EXPECT(callCount == 2);
@@ -76,16 +76,16 @@ KJ_TEST("We can create a simple, empty streaming trace session with expicit canc
         KJ_EXPECT(event.id == id, "the event id should be the same as the onset id");
         KJ_EXPECT(event.sequence == 1, "the sequence should have been incremented");
         auto& outcome = KJ_ASSERT_NONNULL(
-            event.event.tryGet<trace::Outcome>(), "the event should be an outcome event");
+            event.event.tryGet<trace::SpanClose>(), "the event should be an span close event");
         KJ_EXPECT(outcome.outcome == EventOutcome::CANCELED, "the outcome should be canceled");
         break;
       }
     }
   }, mockTimeProvider);
   // The onset event will not be sent until the event info is set.
-  streamingTrace->setEventInfo(
+  auto root = streamingTrace->openRootSpan(
       trace::FetchEventInfo(kj::HttpMethod::GET, kj::String(), kj::String(), nullptr));
-  streamingTrace->setOutcome(trace::Outcome(EventOutcome::CANCELED));
+  root->setOutcome(EventOutcome::CANCELED);
   KJ_EXPECT(callCount == 2);
 }
 
@@ -118,29 +118,30 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
           KJ_EXPECT(event.id == id);
           auto& span = KJ_ASSERT_NONNULL(
               event.event.tryGet<trace::SpanClose>(), "the event should be a spanclose event");
-          KJ_EXPECT(span.outcome == trace::SpanClose::Outcome::CANCELED);
+          KJ_EXPECT(span.outcome == EventOutcome::CANCELED);
           break;
         }
         case 3: {
           KJ_EXPECT(event.id == id, "the event id should be the same as the onset id");
           KJ_EXPECT(event.sequence == 3, "the sequence should have been incremented");
           auto& outcome = KJ_ASSERT_NONNULL(
-              event.event.tryGet<trace::Outcome>(), "the event should be an outcome event");
+              event.event.tryGet<trace::SpanClose>(), "the event should be an outcome event");
           KJ_EXPECT(outcome.outcome == EventOutcome::CANCELED, "the outcome should be canceled");
           break;
         }
       }
     }, mockTimeProvider);
 
-    streamingTrace->setEventInfo(trace::FetchEventInfo(
+    auto root = streamingTrace->openRootSpan(trace::FetchEventInfo(
         kj::HttpMethod::GET, kj::str("http://example.com"), kj::String(), {}));
-    auto span = KJ_ASSERT_NONNULL(streamingTrace->newChildSpan());
+    auto span = KJ_ASSERT_NONNULL(root->newChildSpan());
     span->addLog(trace::LogV2(LogLevel::INFO, kj::Array<kj::byte>()));
     // Intentionally not calling setOutcome on the span.
-    streamingTrace->setOutcome(trace::Outcome(EventOutcome::CANCELED));
+    root->setOutcome(EventOutcome::CANCELED);
 
     // Once the outcome is set, no more events should be emitted but calling the methods on
     // the span shouldn't crash or error.
+    root->addLog(trace::LogV2(LogLevel::INFO, kj::Array<kj::byte>()));
     span->addLog(trace::LogV2(LogLevel::INFO, kj::Array<kj::byte>()));
   }
   KJ_EXPECT(callCount == 4);

@@ -82,7 +82,7 @@ public:
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
   trace::Onset onsetInfo;
-  trace::Outcome outcomeInfo{};
+  EventOutcome outcome = EventOutcome::UNKNOWN;
   kj::Duration cpuTime;
   kj::Duration wallTime;
 
@@ -97,7 +97,7 @@ public:
   kj::Maybe<trace::FetchResponseInfo> fetchResponseInfo;
 
   void setEventInfo(kj::Date timestamp, trace::EventInfo&& info);
-  void setOutcome(trace::Outcome&& outcome);
+  void setOutcome(EventOutcome outcome);
   void setFetchResponseInfo(trace::FetchResponseInfo&& info);
   void addSpan(const Span&& span, kj::String spanContext);
   void addLog(trace::Log&& log, bool isSpan = false);

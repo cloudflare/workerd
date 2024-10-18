@@ -55,7 +55,6 @@ struct StreamEvent final {
   uint32_t sequence;
 
   using Event = kj::OneOf<trace::Onset,
-      trace::Outcome,
       trace::Dropped,
       trace::SpanClose,
       trace::LogV2,
@@ -147,9 +146,8 @@ public:
   // Unrelated spans are permitted to overlap in time but dropping or setting
   // the outcome of a parent span will implicitly close all active child spans.
   //
-  // Setting the outcome on the StreamingTrace will implicitly close all active
-  // spans.
-  // spans and prevent any new spans from being opened.
+  // Setting the outcome on the StreamingTrace's root span will implicitly close
+  // all active child spans and prevent any new spans from being opened.
   class Span final {
   public:
     KJ_DISALLOW_COPY_AND_MOVE(Span);
@@ -163,9 +161,9 @@ public:
     kj::Maybe<kj::Own<Span>> newChildSpan();
 
     // Setting the outcome of the span explicitly closes the span, after which
-    // no further events can be emitted.
-    void setOutcome(
-        trace::SpanClose::Outcome outcome, kj::Maybe<trace::FetchResponseInfo> info = kj::none);
+    // no further events can be emitted in this span (any other calls will
+    // be silently ignored)
+    void setOutcome(EventOutcome outcome, kj::Maybe<trace::FetchResponseInfo> info = kj::none);
 
   private:
     struct Impl;
@@ -184,26 +182,14 @@ public:
     Span(kj::List<Span, &Span::link>& spans, StreamingTrace& trace, kj::StringPtr parentSpan);
   };
 
-  // Set the EventInfo for the Onset event. If the Onset already has event
-  // info, then this will assert.
-  void setEventInfo(trace::EventInfo&& eventInfo);
-
-  // Explicitly close the tail stream with the given outcome. All open stage
-  // spans will be implicitly closed with the same outcome. If the outcome
-  // has already been set, this will assert.
-  void setOutcome(trace::Outcome&& outcome);
-
   // Notify the streaming trace that events in the sequence range (start:end) have been dropped.
   void addDropped(uint32_t start, uint32_t end);
 
   kj::Maybe<const IdFactory::Id&> getId() const;
 
-  void addLog(trace::LogV2&& log);
-  void addException(trace::Exception&& exception);
-  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
-  void addMetrics(trace::Metrics&& metrics);
-  void addSubrequest(trace::Subrequest&& subrequest);
-  kj::Maybe<kj::Own<Span>> newChildSpan();
+  // Opens the root span associated with this streaming trace.
+  // This can only be called once.
+  kj::Own<Span> openRootSpan(trace::EventInfo&& eventInfo);
 
 private:
   struct Impl;
