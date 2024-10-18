@@ -5,7 +5,7 @@
 namespace workerd::api::pyodide {
 
 jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
-  jsg::JsValue jsval(pyodide::initializeEmscriptenRuntime(js));
+  auto jsval = pyodide::initializeEmscriptenRuntime(js);
   module_ = jsval.addRef(js);
   return KJ_ASSERT_NONNULL(module_).getHandle(js);
 }
@@ -15,17 +15,26 @@ v8::Local<v8::Module> loadEmscriptenSetupModule(jsg::Lock& js) {
       jsg::v8Str(js.v8Isolate, EMSCRIPTEN_SETUP->getCode().asArray());
   v8::ScriptOrigin origin(
       jsg::v8StrIntern(js.v8Isolate, "pyodide-internal:generated/emscriptenSetup"), 0, 0, false, -1,
-      v8::Local<v8::Value>(), false, false, true);
+      {}, false, false, true);
   v8::ScriptCompiler::Source source(contentStr, origin);
   return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 }
+
+jsg::JsValue resolvePromise(jsg::Lock& js, jsg::JsValue prom) {
+  auto promise = KJ_ASSERT_NONNULL(prom.tryCast<jsg::JsPromise>());
+  if (promise.state() == jsg::PromiseState::PENDING) {
+    js.runMicrotasks();
+  }
+  KJ_ASSERT(promise.state() == jsg::PromiseState::FULFILLED);
+  return promise.result();
+}
+
 void instantiateEmscriptenSetupModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   jsg::instantiateModule(js, module);
-  auto handle = jsg::check(module->Evaluate(js.v8Context()));
-  KJ_ASSERT(handle->IsPromise());
-  auto prom = handle.As<v8::Promise>();
-  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
-  KJ_ASSERT(module->GetStatus() != v8::Module::kErrored);
+  auto evalPromise = KJ_ASSERT_NONNULL(
+      jsg::JsValue(jsg::check(module->Evaluate(js.v8Context()))).tryCast<jsg::JsPromise>());
+  resolvePromise(js, evalPromise);
+  KJ_ASSERT(module->GetStatus() == v8::Module::kEvaluated);
 }
 
 v8::Local<v8::Function> getInstantiateEmscriptenModule(
@@ -36,7 +45,15 @@ v8::Local<v8::Function> getInstantiateEmscriptenModule(
   return instantiateEmscriptenModule.As<v8::Function>();
 }
 
-v8::Local<v8::Value> callInstantiateEmscriptenModule(jsg::Lock& js,
+template <typename... Args>
+jsg::JsValue callFunction(jsg::Lock& js, v8::Local<v8::Function>& func, Args... args) {
+  v8::LocalVector<v8::Value> argv(
+      js.v8Isolate, std::initializer_list<v8::Local<v8::Value>>{args...});
+  return jsg::JsValue(
+      jsg::check(func->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data())));
+}
+
+jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
     v8::Local<v8::Function>& func,
     bool isWorkerd,
     capnp::Data::Reader pythonStdlibZipReader,
@@ -47,22 +64,11 @@ v8::Local<v8::Value> callInstantiateEmscriptenModule(jsg::Lock& js,
   memcpy(pythonStdlibZip->Data(), pythonStdlibZipReader.begin(), pythonStdlibZipReader.size());
   auto pyodideAsmWasm = jsg::check(v8::WasmModuleObject::Compile(js.v8Isolate,
       v8::MemorySpan<const uint8_t>(pyodideAsmWasmReader.begin(), pyodideAsmWasmReader.size())));
-
-  v8::LocalVector<v8::Value> argv(js.v8Isolate, 3);
-  argv[0] = v8::Boolean::New(js.v8Isolate, true);
-  argv[1] = kj::mv(pythonStdlibZip);
-  argv[2] = kj::mv(pyodideAsmWasm);
-  auto funcres = jsg::check(func->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data()));
-  KJ_ASSERT(funcres->IsPromise());
-  auto promise = funcres.As<v8::Promise>();
-  if (promise->State() == v8::Promise::PromiseState::kPending) {
-    js.runMicrotasks();
-  }
-  KJ_ASSERT(promise->State() == v8::Promise::PromiseState::kFulfilled);
-  return promise->Result();
+  return resolvePromise(js,
+      callFunction(js, func, js.boolean(true), kj::mv(pythonStdlibZip), kj::mv(pyodideAsmWasm)));
 }
 
-v8::Local<v8::Value> initializeEmscriptenRuntime(jsg::Lock& js) {
+jsg::JsValue initializeEmscriptenRuntime(jsg::Lock& js) {
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
   auto module = loadEmscriptenSetupModule(js);

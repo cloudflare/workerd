@@ -50,6 +50,6 @@ kj::Own<jsg::modules::ModuleBundle> getInternalSetupEmscriptenModuleBundle(auto 
   return builder.finish();
 }
 
-v8::Local<v8::Value> initializeEmscriptenRuntime(jsg::Lock&);
+jsg::JsValue initializeEmscriptenRuntime(jsg::Lock&);
 
 }  // namespace workerd::api::pyodide
