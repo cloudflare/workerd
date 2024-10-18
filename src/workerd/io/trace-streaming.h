@@ -41,8 +41,8 @@ struct StreamEvent final {
   kj::String id;
 
   struct Span {
-    uint32_t id = 0;
-    uint32_t parent = 0;
+    kj::String id;
+    kj::String parent;
   };
   // The span in which this event has occurred.
   Span span;
@@ -61,15 +61,12 @@ struct StreamEvent final {
       trace::LogV2,
       trace::Exception,
       trace::DiagnosticChannelEvent,
-      trace::Mark,
       trace::Metrics,
-      trace::Subrequest,
-      trace::SubrequestOutcome,
-      trace::Tags>;
+      trace::Subrequest>;
   Event event;
 
   explicit StreamEvent(
-      kj::String id, Span span, kj::Date timestampNs, uint32_t sequence, Event event);
+      kj::String id, Span&& span, kj::Date timestampNs, uint32_t sequence, Event&& event);
   StreamEvent(rpc::Trace::StreamEvent::Reader reader);
 
   void copyTo(rpc::Trace::StreamEvent::Builder builder) const;
@@ -79,12 +76,7 @@ struct StreamEvent final {
 // ======================================================================================
 // StreamingTrace
 
-class SpanBase: public trace::TraceBase {
-public:
-  virtual void addLog(trace::LogV2&& log) = 0;
-};
-
-class StreamingTrace final: public SpanBase {
+class StreamingTrace final {
 public:
   // A StreamingTrace Id provides the unique identifier for a streaming tail session.
   // It is used as a correlation key for all events in a single tail stream.
@@ -158,24 +150,22 @@ public:
   // Setting the outcome on the StreamingTrace will implicitly close all active
   // spans.
   // spans and prevent any new spans from being opened.
-  class Span final: public SpanBase {
+  class Span final {
   public:
     KJ_DISALLOW_COPY_AND_MOVE(Span);
     virtual ~Span() noexcept(false);
 
-    void addLog(trace::LogV2&& log) override;
-    void addException(trace::Exception&& exception) override;
-    void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) override;
-    void addMark(kj::StringPtr mark) override;
-    void addMetrics(trace::Metrics&& metrics) override;
-    void addSubrequest(trace::Subrequest&& subrequest) override;
-    void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override;
-    void addCustom(trace::Tags&& tags) override;
-    kj::Maybe<kj::Own<Span>> newChildSpan(trace::Tags tags = nullptr);
+    void addLog(trace::LogV2&& log);
+    void addException(trace::Exception&& exception);
+    void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
+    void addMetrics(trace::Metrics&& metrics);
+    void addSubrequest(trace::Subrequest&& subrequest);
+    kj::Maybe<kj::Own<Span>> newChildSpan();
 
     // Setting the outcome of the span explicitly closes the span, after which
     // no further events can be emitted.
-    void setOutcome(trace::SpanClose::Outcome outcome, trace::Tags tags = nullptr);
+    void setOutcome(
+        trace::SpanClose::Outcome outcome, kj::Maybe<trace::FetchResponseInfo> info = kj::none);
 
   private:
     struct Impl;
@@ -191,10 +181,7 @@ public:
 
   public:
     // Public only to support use of kj::heap. Not intended to be called directly.
-    Span(kj::List<Span, &Span::link>& spans,
-        StreamingTrace& trace,
-        uint32_t parentSpan = 0,
-        trace::Tags tags = nullptr);
+    Span(kj::List<Span, &Span::link>& spans, StreamingTrace& trace, kj::StringPtr parentSpan);
   };
 
   // Set the EventInfo for the Onset event. If the Onset already has event
@@ -211,15 +198,12 @@ public:
 
   kj::Maybe<const IdFactory::Id&> getId() const;
 
-  void addLog(trace::LogV2&& log) override;
-  void addException(trace::Exception&& exception) override;
-  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) override;
-  void addMark(kj::StringPtr mark) override;
-  void addMetrics(trace::Metrics&& metrics) override;
-  void addSubrequest(trace::Subrequest&& subrequest) override;
-  void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override;
-  void addCustom(trace::Tags&& tags) override;
-  kj::Maybe<kj::Own<Span>> newChildSpan(trace::Tags tags = nullptr);
+  void addLog(trace::LogV2&& log);
+  void addException(trace::Exception&& exception);
+  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
+  void addMetrics(trace::Metrics&& metrics);
+  void addSubrequest(trace::Subrequest&& subrequest);
+  kj::Maybe<kj::Own<Span>> newChildSpan();
 
 private:
   struct Impl;

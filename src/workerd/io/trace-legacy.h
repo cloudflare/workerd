@@ -71,7 +71,7 @@ struct Span final {
 // TODO(cleanup) - worth separating into immutable Trace vs. mutable TraceBuilder?
 
 // Collects trace information about the handling of a worker/pipeline fetch event.
-class Trace final: public kj::Refcounted, public trace::TraceBase {
+class Trace final: public kj::Refcounted {
 public:
   explicit Trace(trace::Onset&& onset = trace::Onset());
   Trace(rpc::Trace::Reader reader);
@@ -96,35 +96,14 @@ public:
 
   kj::Maybe<trace::FetchResponseInfo> fetchResponseInfo;
 
-  // ====================================================================================
-  // trace::TraceBase implementation
-
   void setEventInfo(kj::Date timestamp, trace::EventInfo&& info);
   void setOutcome(trace::Outcome&& outcome);
   void setFetchResponseInfo(trace::FetchResponseInfo&& info);
   void addSpan(const Span&& span, kj::String spanContext);
   void addLog(trace::Log&& log, bool isSpan = false);
-
-  void addException(trace::Exception&& exception) override;
-  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) override;
-
-  void addMark(kj::StringPtr mark) override {
-    // These are currently ignored for legacy traces.
-  }
-
-  void addMetrics(trace::Metrics&& metrics) override;
-
-  void addSubrequest(trace::Subrequest&& subrequest) override {
-    // These are currently ignored for legacy traces.
-  }
-
-  void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) override {
-    // These are currently ignored for legacy traces.
-  }
-
-  void addCustom(trace::Tags&& tags) override {
-    // These are currently ignored for legacy traces.
-  }
+  void addException(trace::Exception&& exception);
+  void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
+  void addMetrics(trace::Metrics&& metrics);
 
   bool truncated = false;
   bool exceededLogLimit = false;

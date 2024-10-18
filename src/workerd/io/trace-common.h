@@ -36,35 +36,6 @@ class Trace;
 
 namespace trace {
 
-template <typename T>
-concept IsEnum = std::is_enum<T>::value;
-
-// A trace::Tag is a key-value pair that can be attached to multiple types of objects
-// as an extension field. They can be used to provide additional context, extend
-// types, etc.
-//
-// The tag key can be either a string or a numeric index. When a numeric index is
-// used, the tag represents some internally defined field in the runtime that should
-// be defined in a capnp schema somewhere. Workerd does not define any of these keys.
-//
-// The tag value can be one of either a boolean, signed or unsigned 64-bit integer,
-// a double, a string, or an arbitrary byte array. When a byte array is used, the
-// specific format is specific to the tag key. No general assumptions can be made
-// about the value without knowledge of the specific key.
-struct Tag final {
-  using TagValue = kj::OneOf<bool, int64_t, uint64_t, double, kj::String, kj::Array<kj::byte>>;
-  kj::String key;
-  TagValue value;
-  explicit Tag(kj::String key, TagValue value);
-  explicit Tag(kj::StringPtr key, TagValue value): Tag(kj::str(key), kj::mv(value)) {}
-
-  Tag(rpc::Trace::Tag::Reader reader);
-
-  void copyTo(rpc::Trace::Tag::Builder builder) const;
-  Tag clone() const;
-};
-using Tags = kj::Array<Tag>;
-
 // Metadata describing the start of a fetch request.
 struct FetchEventInfo final {
   struct Header;
@@ -286,15 +257,12 @@ struct Onset final {
       kj::Maybe<kj::String> scriptId,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel,
-      Tags tags = nullptr);
+      ExecutionModel executionModel);
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
-  // Note that all of these fields could be represented by tags but are kept
-  // as separate fields for legacy reasons.
   kj::Maybe<kj::String> scriptName = kj::none;
   kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion = kj::none;
   kj::Maybe<kj::String> dispatchNamespace = kj::none;
@@ -303,7 +271,6 @@ struct Onset final {
   kj::Maybe<kj::String> entrypoint = kj::none;
   ExecutionModel executionModel;
   kj::Maybe<EventInfo> info = kj::none;
-  Tags tags = nullptr;
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
@@ -312,9 +279,10 @@ struct Onset final {
 // Used to describe the final outcome of the trace. Every trace session should
 // have at most a single Outcome event that is the final event in the stream.
 struct Outcome final {
-  using Info = kj::OneOf<FetchResponseInfo, Tags>;
   Outcome() = default;
-  explicit Outcome(EventOutcome outcome, kj::Maybe<Info> info = kj::none);
+  // TODO(streaming-trace): Currently there's only one kind of info here but we likely
+  // will add more in the future that would make it necessary to use a kj::OneOf.
+  explicit Outcome(EventOutcome outcome, kj::Maybe<FetchResponseInfo> info = kj::none);
   Outcome(rpc::Trace::Outcome::Reader reader);
   Outcome(Outcome&&) = default;
   Outcome& operator=(Outcome&&) = default;
@@ -325,7 +293,7 @@ struct Outcome final {
   // The closing outcome event should include an info field that matches the kind of
   // event that started the span. For instance, if the span was started with a
   // FetchEventInfo event, then the outcome should be closed with a FetchResponseInfo.
-  kj::Maybe<Info> info;
+  kj::Maybe<FetchResponseInfo> info;
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
@@ -335,14 +303,16 @@ struct Outcome final {
 // a logical grouping of events. Spans can be nested.
 struct SpanClose final {
   using Outcome = rpc::Trace::SpanClose::SpanOutcome;
-  explicit SpanClose(Outcome outcome, Tags tags = nullptr);
+  // TODO(streaming-trace): Currently there's only one kind of info here but we likely
+  // will add more in the future that would make it necessary to use a kj::OneOf.
+  explicit SpanClose(Outcome outcome, kj::Maybe<FetchResponseInfo> maybeInfo);
   SpanClose(rpc::Trace::SpanClose::Reader reader);
   SpanClose(SpanClose&&) = default;
   SpanClose& operator=(SpanClose&&) = default;
   KJ_DISALLOW_COPY(SpanClose);
 
   Outcome outcome;
-  Tags tags;
+  kj::Maybe<FetchResponseInfo> info;
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
@@ -387,29 +357,17 @@ struct Log final {
 
 // The LogV2 struct is used by the streaming trace model. It serves the same
 // purpose as the Log struct above but allows for v8 serialized binary data
-// as an alternative to plain text and allows for additional metadata tags
-// to be added. It is separated out into a new struct in order to prevent
-// introducing any backwards compat issues with the original legacy trace
-// implementation.
+// as an alternative to plain text
 // TODO(soon): Coallesce Log and LogV2
 struct LogV2 final {
-  explicit LogV2(kj::Date timestamp,
-      LogLevel logLevel,
-      kj::OneOf<kj::Array<kj::byte>, kj::String> message,
-      Tags tags = nullptr,
-      bool truncated = false);
+  explicit LogV2(LogLevel logLevel, kj::Array<kj::byte> message);
   LogV2(rpc::Trace::LogV2::Reader reader);
   LogV2(LogV2&&) = default;
   LogV2& operator=(LogV2&&) = default;
   KJ_DISALLOW_COPY(LogV2);
 
-  // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-  kj::Date timestamp;
-
   LogLevel logLevel;
-  kj::OneOf<kj::Array<kj::byte>, kj::String> message;
-  Tags tags = nullptr;
-  bool truncated = false;
+  kj::Array<kj::byte> message;
 
   void copyTo(rpc::Trace::LogV2::Builder builder) const;
   LogV2 clone() const;
@@ -417,34 +375,8 @@ struct LogV2 final {
 
 // Describes metadata of an Exception that is added to the trace.
 struct Exception final {
-  // The Detail here is additional, optional information about the exception.
-  // Intende to provide additional context when appropriate. Not every error
-  // will have a Detail.
-  struct Detail {
-    // If the JS Error object has a cause property, then it will be serialized
-    // into it's own Exception instance and attached here.
-    kj::Maybe<kj::Own<Exception>> cause = kj::none;
-    // If the JS Error object is an AggregateError or SuppressedError, or if
-    // it has an errors property like those standard types, then those errors
-    // will be serialized into their own Exception instances and attached here.
-    kj::Array<kj::Own<Exception>> errors = nullptr;
-
-    // These flags match the additional workers-specific properties that we
-    // add to errors. See makeInternalError in jsg/util.c++.
-    bool remote = false;
-    bool retryable = false;
-    bool overloaded = false;
-    bool durableObjectReset = false;
-    Tags tags = nullptr;
-
-    Detail clone() const;
-  };
-
-  explicit Exception(kj::Date timestamp,
-      kj::String name,
-      kj::String message,
-      kj::Maybe<kj::String> stack,
-      kj::Maybe<Detail> detail = kj::none);
+  explicit Exception(
+      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
   Exception(rpc::Trace::Exception::Reader reader);
   Exception(Exception&&) = default;
   Exception& operator=(Exception&&) = default;
@@ -456,7 +388,19 @@ struct Exception final {
   kj::String name;
   kj::String message;
   kj::Maybe<kj::String> stack;
-  Detail detail;
+
+  kj::Maybe<kj::Own<Exception>> cause = kj::none;
+  // If the JS Error object is an AggregateError or SuppressedError, or if
+  // it has an errors property like those standard types, then those errors
+  // will be serialized into their own Exception instances and attached here.
+  kj::Array<kj::Own<Exception>> errors = nullptr;
+
+  // These flags match the additional workers-specific properties that we
+  // add to errors. See makeInternalError in jsg/util.c++.
+  bool remote = false;
+  bool retryable = false;
+  bool overloaded = false;
+  bool durableObjectReset = false;
 
   void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
@@ -466,54 +410,16 @@ struct Exception final {
 // For instance, a fetch request or a JS RPC call.
 struct Subrequest final {
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo>;
-  explicit Subrequest(uint32_t id, kj::Maybe<Info> info);
+  explicit Subrequest(kj::Maybe<Info> info = kj::none);
   Subrequest(rpc::Trace::Subrequest::Reader reader);
   Subrequest(Subrequest&&) = default;
   Subrequest& operator=(Subrequest&&) = default;
   KJ_DISALLOW_COPY(Subrequest);
 
-  uint32_t id;
   kj::Maybe<Info> info;
 
   void copyTo(rpc::Trace::Subrequest::Builder builder) const;
   Subrequest clone() const;
-};
-
-// Describes the results of a subrequest initiated during the trace. The id
-// must match a previously emitted Subrequest event, and the info (if provided)
-// should correlate to the kind of subrequest that was made.
-struct SubrequestOutcome final {
-  using Info = kj::OneOf<FetchResponseInfo, Tags>;
-  explicit SubrequestOutcome(uint32_t id, kj::Maybe<Info> info, SpanClose::Outcome outcome);
-  SubrequestOutcome(rpc::Trace::SubrequestOutcome::Reader reader);
-  SubrequestOutcome(SubrequestOutcome&&) = default;
-  SubrequestOutcome& operator=(SubrequestOutcome&&) = default;
-  KJ_DISALLOW_COPY(SubrequestOutcome);
-
-  uint32_t id;
-  kj::Maybe<Info> info;
-
-  // A subrequest is a technically a special form of span, and therefore can
-  // have a Span outcome.
-  SpanClose::Outcome outcome;
-
-  void copyTo(rpc::Trace::SubrequestOutcome::Builder builder) const;
-  SubrequestOutcome clone() const;
-};
-
-// A Mark is a simple event that can be used to mark a significant point in the
-// trace. This currently has no analog in the current tail workers model.
-struct Mark final {
-  explicit Mark(kj::String name);
-  Mark(rpc::Trace::Mark::Reader reader);
-  Mark(Mark&&) = default;
-  Mark& operator=(Mark&&) = default;
-  KJ_DISALLOW_COPY(Mark);
-
-  kj::String name;
-
-  void copyTo(rpc::Trace::Mark::Builder builder) const;
-  Mark clone() const;
 };
 
 // A Metric is a key-value pair that can be emitted as part of the trace. Metrics
@@ -564,20 +470,6 @@ struct Dropped final {
 
   void copyTo(rpc::Trace::Dropped::Builder builder) const;
   Dropped clone() const;
-};
-
-// ======================================================================================
-// The base class for both the original legacy Trace (defined in trace-legacy.h)
-// and the new StreamingTrace (defined in trace-streaming.h)
-class TraceBase {
-public:
-  virtual void addException(trace::Exception&& exception) = 0;
-  virtual void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event) = 0;
-  virtual void addMark(kj::StringPtr mark) = 0;
-  virtual void addMetrics(trace::Metrics&& metrics) = 0;
-  virtual void addSubrequest(trace::Subrequest&& subrequest) = 0;
-  virtual void addSubrequestOutcome(trace::SubrequestOutcome&& outcome) = 0;
-  virtual void addCustom(Tags&& tags) = 0;
 };
 
 }  // namespace trace

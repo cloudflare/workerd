@@ -7,33 +7,9 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("Tags work") {
-  {
-    trace::Tag tag("a", static_cast<uint64_t>(1));
-    auto& value = KJ_ASSERT_NONNULL(tag.value.tryGet<uint64_t>());
-    KJ_EXPECT(tag.key == "a");
-    KJ_EXPECT(value == static_cast<uint64_t>(1));
-
-    capnp::MallocMessageBuilder message;
-    auto builder = message.initRoot<rpc::Trace::Tag>();
-    tag.copyTo(builder);
-
-    // Round trip serialization works
-    auto reader = builder.asReader();
-    trace::Tag tag2(reader);
-    auto& value2 = KJ_ASSERT_NONNULL(tag.value.tryGet<uint64_t>());
-    KJ_EXPECT(tag.key == tag2.key);
-    KJ_EXPECT(value == value2);
-
-    auto tag3 = tag.clone();
-    KJ_EXPECT(tag.key == tag3.key);
-  }
-}
-
 KJ_TEST("Onset works") {
-  auto tags = kj::arr(trace::Tag("a", static_cast<uint64_t>(1)));
   trace::Onset onset(kj::str("bar"), kj::none, kj::str("baz"), kj::str("qux"),
-      kj::arr(kj::str("quux")), kj::str("corge"), ExecutionModel::STATELESS, kj::mv(tags));
+      kj::arr(kj::str("quux")), kj::str("corge"), ExecutionModel::STATELESS);
 
   trace::FetchEventInfo info(kj::HttpMethod::GET, kj::str("http://example.org"), kj::String(),
       kj::arr(trace::FetchEventInfo::Header(kj::str("a"), kj::str("b"))));
@@ -51,8 +27,6 @@ KJ_TEST("Onset works") {
   KJ_EXPECT(onset2.scriptTags.size() == 1);
   KJ_EXPECT(onset2.scriptTags[0] == "quux"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset2.entrypoint) == "corge"_kj);
-  KJ_EXPECT(onset2.tags.size() == 1);
-  KJ_EXPECT(onset2.tags[0].key == "a"_kj);
 
   auto& onset2Info = KJ_ASSERT_NONNULL(onset2.info);
   auto& onset2Fetch = KJ_ASSERT_NONNULL(onset2Info.tryGet<trace::FetchEventInfo>());
@@ -70,8 +44,6 @@ KJ_TEST("Onset works") {
   KJ_EXPECT(onset3.scriptTags.size() == 1);
   KJ_EXPECT(onset3.scriptTags[0] == "quux"_kj);
   KJ_EXPECT(KJ_ASSERT_NONNULL(onset3.entrypoint) == "corge"_kj);
-  KJ_EXPECT(onset3.tags.size() == 1);
-  KJ_EXPECT(onset3.tags[0].key == "a"_kj);
 
   auto& onset3Info = KJ_ASSERT_NONNULL(onset3.info);
   auto& onset3Fetch = KJ_ASSERT_NONNULL(onset3Info.tryGet<trace::FetchEventInfo>());
@@ -263,7 +235,7 @@ KJ_TEST("Outcome works") {
 
   trace::Outcome outcome(EventOutcome::OK, kj::Maybe(kj::mv(info)));
   KJ_EXPECT(outcome.outcome == EventOutcome::OK);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome.info).is<trace::FetchResponseInfo>());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome.info).statusCode == 200);
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::Outcome>();
@@ -272,11 +244,11 @@ KJ_TEST("Outcome works") {
   auto reader = builder.asReader();
   trace::Outcome outcome2(reader);
   KJ_EXPECT(outcome2.outcome == EventOutcome::OK);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome2.info).is<trace::FetchResponseInfo>());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome2.info).statusCode == 200);
 
   auto outcome3 = outcome.clone();
   KJ_EXPECT(outcome3.outcome == EventOutcome::OK);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome3.info).is<trace::FetchResponseInfo>());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outcome3.info).statusCode == 200);
 }
 
 KJ_TEST("DiagnosticChannelEvent works") {
@@ -326,12 +298,10 @@ KJ_TEST("Log works") {
 }
 
 KJ_TEST("LogV2 works") {
-  kj::Date date = 0 * kj::MILLISECONDS + kj::UNIX_EPOCH;
-  trace::LogV2 log(date, LogLevel::INFO, kj::heapArray<kj::byte>(1));
-  KJ_EXPECT(log.timestamp == date);
+  auto data = kj::heapArray<kj::byte>(1);
+  trace::LogV2 log(LogLevel::INFO, kj::heapArray<kj::byte>(data));
   KJ_EXPECT(log.logLevel == LogLevel::INFO);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(log.message.tryGet<kj::Array<kj::byte>>()).size() == 1);
-  KJ_EXPECT(!log.truncated);
+  KJ_EXPECT(log.message == data);
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::LogV2>();
@@ -339,16 +309,12 @@ KJ_TEST("LogV2 works") {
 
   auto reader = builder.asReader();
   trace::LogV2 log2(reader);
-  KJ_EXPECT(log2.timestamp == date);
   KJ_EXPECT(log2.logLevel == LogLevel::INFO);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(log2.message.tryGet<kj::Array<kj::byte>>()).size() == 1);
-  KJ_EXPECT(!log2.truncated);
+  KJ_EXPECT(log2.message == log.message);
 
   auto log3 = log.clone();
-  KJ_EXPECT(log3.timestamp == date);
   KJ_EXPECT(log3.logLevel == LogLevel::INFO);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(log3.message.tryGet<kj::Array<kj::byte>>()).size() == 1);
-  KJ_EXPECT(!log3.truncated);
+  KJ_EXPECT(log3.message == log.message);
 }
 
 KJ_TEST("Exception works") {
@@ -378,11 +344,8 @@ KJ_TEST("Exception works") {
 }
 
 KJ_TEST("Subrequest works") {
-  uint32_t a = 1;
-  trace::Subrequest subrequest(a,
-      trace::Subrequest::Info(trace::FetchEventInfo(
-          kj::HttpMethod::GET, kj::str("http://example.org"), kj::String(), nullptr)));
-  KJ_EXPECT(subrequest.id == a);
+  trace::Subrequest subrequest(trace::Subrequest::Info(trace::FetchEventInfo(
+      kj::HttpMethod::GET, kj::str("http://example.org"), kj::String(), nullptr)));
   KJ_EXPECT(KJ_ASSERT_NONNULL(subrequest.info).is<trace::FetchEventInfo>());
 
   capnp::MallocMessageBuilder message;
@@ -391,38 +354,15 @@ KJ_TEST("Subrequest works") {
 
   auto reader = builder.asReader();
   trace::Subrequest subrequest2(reader);
-  KJ_EXPECT(subrequest2.id == a);
   KJ_EXPECT(KJ_ASSERT_NONNULL(subrequest.info).is<trace::FetchEventInfo>());
 
   auto subrequest3 = subrequest.clone();
-  KJ_EXPECT(subrequest3.id == a);
   KJ_EXPECT(KJ_ASSERT_NONNULL(subrequest.info).is<trace::FetchEventInfo>());
 }
 
-KJ_TEST("SubrequestOutcome works") {
-  uint32_t a = 1;
-  trace::SubrequestOutcome outcome(a, kj::none, trace::SpanClose::Outcome::OK);
-  KJ_EXPECT(outcome.id == a);
-  KJ_EXPECT(outcome.outcome == trace::SpanClose::Outcome::OK);
-
-  capnp::MallocMessageBuilder message;
-  auto builder = message.initRoot<rpc::Trace::SubrequestOutcome>();
-  outcome.copyTo(builder);
-
-  auto reader = builder.asReader();
-  trace::SubrequestOutcome outcome2(reader);
-  KJ_EXPECT(outcome2.id == a);
-  KJ_EXPECT(outcome2.outcome == trace::SpanClose::Outcome::OK);
-
-  auto outcome3 = outcome.clone();
-  KJ_EXPECT(outcome3.id == a);
-  KJ_EXPECT(outcome3.outcome == trace::SpanClose::Outcome::OK);
-}
-
 KJ_TEST("SpanClose works") {
-  trace::SpanClose event(trace::SpanClose::Outcome::OK, nullptr);
+  trace::SpanClose event(trace::SpanClose::Outcome::OK, kj::none);
   KJ_EXPECT(event.outcome == trace::SpanClose::Outcome::OK);
-  KJ_EXPECT(event.tags.size() == 0);
 
   capnp::MallocMessageBuilder message;
   auto builder = message.initRoot<rpc::Trace::SpanClose>();
@@ -431,27 +371,11 @@ KJ_TEST("SpanClose works") {
   auto reader = builder.asReader();
   trace::SpanClose event2(reader);
   KJ_EXPECT(event2.outcome == trace::SpanClose::Outcome::OK);
-  KJ_EXPECT(event2.tags.size() == 0);
+  KJ_EXPECT(event2.info == kj::none);
 
   auto event3 = event.clone();
   KJ_EXPECT(event3.outcome == trace::SpanClose::Outcome::OK);
-  KJ_EXPECT(event3.tags.size() == 0);
-}
-
-KJ_TEST("Mark works") {
-  trace::Mark mark(kj::str("foo"));
-  KJ_EXPECT(mark.name == "foo"_kj);
-
-  capnp::MallocMessageBuilder message;
-  auto builder = message.initRoot<rpc::Trace::Mark>();
-  mark.copyTo(builder);
-
-  auto reader = builder.asReader();
-  trace::Mark mark2(reader);
-  KJ_EXPECT(mark2.name == "foo"_kj);
-
-  auto mark3 = mark.clone();
-  KJ_EXPECT(mark3.name == "foo"_kj);
+  KJ_EXPECT(event3.info == kj::none);
 }
 
 KJ_TEST("Metric works") {

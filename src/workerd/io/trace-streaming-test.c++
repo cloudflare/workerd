@@ -26,8 +26,6 @@ KJ_TEST("We can create a simple, empty streaming trace session with implicit unk
   {
     auto streamingTrace = workerd::StreamingTrace::create(
         *idFactory, kj::mv(onset), [&callCount, &id](workerd::StreamEvent&& event) {
-      KJ_EXPECT(event.span.id == 0, "the root span should have id 0");
-      KJ_EXPECT(event.span.parent == 0, "the root span should have no parent");
       switch (callCount++) {
         case 0: {
           id = kj::str(event.id);
@@ -66,8 +64,6 @@ KJ_TEST("We can create a simple, empty streaming trace session with expicit canc
   kj::String id = nullptr;
   auto streamingTrace = workerd::StreamingTrace::create(
       *idFactory, kj::mv(onset), [&callCount, &id](workerd::StreamEvent&& event) {
-    KJ_EXPECT(event.span.id == 0, "the root span should have id 0");
-    KJ_EXPECT(event.span.parent == 0, "the root span should have no parent");
     switch (callCount++) {
       case 0: {
         id = kj::str(event.id);
@@ -104,8 +100,6 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
         *idFactory, kj::mv(onset), [&callCount, &id](workerd::StreamEvent&& event) {
       switch (callCount++) {
         case 0: {
-          KJ_EXPECT(event.span.id == 0, "the root span should have id 0");
-          KJ_EXPECT(event.span.parent == 0, "the root span should have no parent");
           id = kj::str(event.id);
           KJ_EXPECT(id.size() > 0, "there should be a non-empty id. we don't care what it is.");
           KJ_EXPECT(event.sequence == 0, "the sequence should be 0");
@@ -114,17 +108,12 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
           break;
         }
         case 1: {
-          KJ_EXPECT(event.span.id == 1, "the mark event should have span id 1");
-          KJ_EXPECT(event.span.parent == 0, "the parent span should be the root span");
           KJ_EXPECT(event.id == id);
           KJ_EXPECT(event.sequence == 1);
-          auto& mark = KJ_ASSERT_NONNULL(event.event.tryGet<trace::Mark>());
-          KJ_EXPECT(mark.name == "bar"_kj);
+          KJ_ASSERT_NONNULL(event.event.tryGet<trace::LogV2>());
           break;
         }
         case 2: {
-          KJ_EXPECT(event.span.id == 1, "the spanclose should have span id 1");
-          KJ_EXPECT(event.span.parent == 0, "the parent span should be the root span");
           KJ_EXPECT(event.sequence, 2);
           KJ_EXPECT(event.id == id);
           auto& span = KJ_ASSERT_NONNULL(
@@ -133,8 +122,6 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
           break;
         }
         case 3: {
-          KJ_EXPECT(event.span.id == 0, "the root span should have id 0");
-          KJ_EXPECT(event.span.parent == 0, "the root span should have no parent");
           KJ_EXPECT(event.id == id, "the event id should be the same as the onset id");
           KJ_EXPECT(event.sequence == 3, "the sequence should have been incremented");
           auto& outcome = KJ_ASSERT_NONNULL(
@@ -148,13 +135,13 @@ KJ_TEST("We can create a simple, streaming trace session with a single explicitl
     streamingTrace->setEventInfo(trace::FetchEventInfo(
         kj::HttpMethod::GET, kj::str("http://example.com"), kj::String(), {}));
     auto span = KJ_ASSERT_NONNULL(streamingTrace->newChildSpan());
-    span->addMark("bar");
+    span->addLog(trace::LogV2(LogLevel::INFO, kj::Array<kj::byte>()));
     // Intentionally not calling setOutcome on the span.
     streamingTrace->setOutcome(trace::Outcome(EventOutcome::CANCELED));
 
     // Once the outcome is set, no more events should be emitted but calling the methods on
     // the span shouldn't crash or error.
-    span->addMark("foo");
+    span->addLog(trace::LogV2(LogLevel::INFO, kj::Array<kj::byte>()));
   }
   KJ_EXPECT(callCount == 4);
 }
