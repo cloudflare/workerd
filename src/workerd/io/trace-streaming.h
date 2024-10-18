@@ -132,16 +132,14 @@ public:
   // Calling setOutcome(...) on the span will cause the span to be explicitly
   // closed with a Span event emitted to the tail stream indicating the outcome.
   // If the span is dropped without setting the outcome, and the StreamingTrace
-  // is still active, then a Span event indicating that the span was canceled
-  // will be emitted. If the StreamingTrace is not active, then dropping the
-  // span becomes a non-op and the consumer of the stream will need to infer
-  // the outcome from the absence of a Span event.
+  // is still active, then a Span event indicating that the span was closed with
+  // an unknown outcome will be emitted.
   //
   // Unrelated spans are permitted to overlap in time but dropping or setting
   // the outcome of a parent span will implicitly close all active child spans.
   //
   // Setting the outcome on the StreamingTrace's root span will implicitly close
-  // all active child spans and prevent any new spans from being opened.
+  // all active child spans.
   class Span final {
   public:
     KJ_DISALLOW_COPY_AND_MOVE(Span);
@@ -151,7 +149,7 @@ public:
     void addException(trace::Exception&& exception);
     void addDiagnosticChannelEvent(trace::DiagnosticChannelEvent&& event);
     void addMetrics(trace::Metrics&& metrics);
-    void addSubrequest(trace::Subrequest&& subrequest);
+    kj::Maybe<kj::Own<Span>> addSubrequest(trace::Subrequest&& subrequest);
     kj::Maybe<kj::Own<Span>> newChildSpan();
 
     // Setting the outcome of the span explicitly closes the span, after which

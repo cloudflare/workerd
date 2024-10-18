@@ -206,10 +206,15 @@ void StreamingTrace::Span::addMetrics(trace::Metrics&& metrics) {
   }
 }
 
-void StreamingTrace::Span::addSubrequest(trace::Subrequest&& subrequest) {
+kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::Span::addSubrequest(
+    trace::Subrequest&& subrequest) {
   KJ_IF_SOME(i, impl) {
-    i->trace.addStreamEvent(i->makeStreamEvent(kj::mv(subrequest)));
+    auto span = kj::heap<Span>(
+        spans, i->trace, KJ_ASSERT_NONNULL(i->trace.impl)->idFactory.newSpanId(), i->id);
+    i->trace.addStreamEvent(KJ_ASSERT_NONNULL(span->impl)->makeStreamEvent(kj::mv(subrequest)));
+    return kj::mv(span);
   }
+  return kj::none;
 }
 
 kj::Maybe<kj::Own<StreamingTrace::Span>> StreamingTrace::Span::newChildSpan() {
