@@ -238,6 +238,7 @@ public:
   virtual kj::Promise<kj::String> getCurrentBookmark();
   virtual kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
   virtual kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::StringPtr bookmark);
+  virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark);
 };
 
 // An in-memory caching layer on top of ActorStorage.Stage RPC interface.
