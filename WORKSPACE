@@ -120,10 +120,6 @@ filegroup(
 
 # tcmalloc requires Abseil.
 #
-# WARNING: This MUST appear before rules_fuzzing_dependencies(), below. Otherwise,
-#   rules_fuzzing_dependencies() will choose to pull in an older version of Abseil. Absurdly, Bazel
-#   simply ignores later attempts to define the same repo name, rather than erroring out. This led
-#   to confusing compiler errors in tcmalloc in the past.
 git_repository(
     name = "com_google_absl",
     commit = "ed3733b91e472a1e7a641c1f0c1e6c0ea698e958",
@@ -154,26 +150,6 @@ bind(
     name = "absl_optional",
     actual = "@com_google_absl//absl/types:optional",
 )
-
-# tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
-# though it is unused for our purposes.
-http_archive(
-    name = "rules_fuzzing",
-    integrity = "sha256-PsDu4FskNVLMSnhLMDI9CIv3PLIXfd2gLIJ+aJgZM/E=",
-    strip_prefix = "rules_fuzzing-0.5.2",
-    url = "https://github.com/bazelbuild/rules_fuzzing/archive/refs/tags/v0.5.2.tar.gz",
-)
-
-load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
-
-rules_fuzzing_dependencies(
-    honggfuzz = False,
-    jazzer = False,
-)
-
-load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
-
-rules_fuzzing_init()
 
 # OK, now we can bring in tcmalloc itself.
 http_archive(
@@ -269,11 +245,11 @@ load("@aspect_rules_esbuild//esbuild:dependencies.bzl", "rules_esbuild_dependenc
 
 rules_esbuild_dependencies()
 
-load("@aspect_rules_esbuild//esbuild:repositories.bzl", "esbuild_register_toolchains")
+load("@aspect_rules_esbuild//esbuild:repositories.bzl", "LATEST_ESBUILD_VERSION", "esbuild_register_toolchains")
 
 esbuild_register_toolchains(
     name = "esbuild",
-    esbuild_version = "0.23.0",
+    esbuild_version = LATEST_ESBUILD_VERSION,
 )
 
 # ========================================================================================
