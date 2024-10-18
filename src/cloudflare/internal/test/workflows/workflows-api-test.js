@@ -8,7 +8,10 @@ export const tests = {
   async test(_, env) {
     {
       // Test create instance
-      const instance = await env.workflow.create('foo', { bar: 'baz' });
+      const instance = await env.workflow.create({
+        name: 'foo',
+        payload: { bar: 'baz' },
+      });
       assert.deepStrictEqual(instance.id, 'foo');
     }
 

@@ -18,11 +18,21 @@ declare abstract class Workflow {
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
-   * @param id Id to create the instance of this Workflow with
-   * @param params The payload to send over to this instance
+   * @param options optional fields to customize the instance creation
    * @returns A promise that resolves with a handle for the Instance
    */
-  public create(id: string, params: object): Promise<Instance>;
+  public create(options?: WorkflowInstanceCreateOptions): Promise<Instance>;
+}
+
+interface WorkflowInstanceCreateOptions {
+  /**
+   * Name to create the instance of this Workflow with - it should always be unique
+   */
+  name?: string;
+  /**
+   * The payload to send over to this instance, this is optional since you might need to pass params into the instance
+   */
+  params?: unknown;
 }
 
 type InstanceStatus = {
