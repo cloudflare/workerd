@@ -577,7 +577,7 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
   return kj::mv(paf.promise);
 }
 
-kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+kj::Rc<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
     ExecutionModel executionModel,
     kj::Maybe<kj::String> scriptId,
     kj::Maybe<kj::String> stableId,
@@ -590,7 +590,7 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
       kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
       executionModel);
   traces.add(kj::addRef(*trace));
-  return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
+  return kj::rc<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
 
 void PipelineTracer::addTrace(rpc::Trace::Reader reader) {

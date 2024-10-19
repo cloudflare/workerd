@@ -103,7 +103,7 @@ public:
     return nullptr;
   }
 
-  virtual kj::Maybe<WorkerTracer&> getWorkerTracer() {
+  virtual kj::Maybe<kj::Rc<WorkerTracer>> getWorkerTracer() {
     return kj::none;
   }
 
