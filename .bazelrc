@@ -23,6 +23,10 @@ build --experimental_remote_cache_eviction_retries=3
 # similar bugs in the past. Disable BwoB for now.
 build:windows --remote_download_all
 
+# Import CI-specific configuration. As the amount of custom configuration settings we use grows,
+# consider moving more flags out to separate files.
+import %workspace%/build/ci.bazelrc
+
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
@@ -84,9 +88,15 @@ https://libcxx.llvm.org/DesignDocs/HeaderRemovalPolicy.html
 build:unix --cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 build:unix --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 
-# Need to redefine _WIN32_WINNT to build dawn on Windows
-build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
-build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
+# V8 redefines the _WIN32_WINNT set by bazel, disable warnings for redefined macros. Since V8 uses
+# a global define for this, we need to apply it for everything.
+# TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
+build:windows --copt='-Wno-macro-redefined'
+build:windows --host_copt='-Wno-macro-redefined'
+# Dawn/Tint adds compiler flags that are ignored on Windows
+build:windows --per_file_copt='external/dawn@-Wno-unknown-argument'
+build:windows --host_per_file_copt='external/dawn@-Wno-unknown-argument'
+
 # V8 now requires Windows 10, Bazel fails to set this properly.
 build:windows --per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
 build:windows --host_per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
