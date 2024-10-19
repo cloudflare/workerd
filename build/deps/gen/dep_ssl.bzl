@@ -2,11 +2,11 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://github.com/google/boringssl/tarball/c08ccc9ed166a82b92edd70ab215ae1f2501e838"
-STRIP_PREFIX = "google-boringssl-c08ccc9"
-SHA256 = "7c0822ba820a2d3c11d1cc2b533ea0c220224b11ac50ab56d97ce0b5fb57b303"
+URL = "https://github.com/google/boringssl/tarball/6abe18402eb2a5e9b00158c6459646a948c53060"
+STRIP_PREFIX = "google-boringssl-6abe184"
+SHA256 = "76962c003a298f405d1a5d273a74a94f58b69f65d64b8574a82d4c21c5e407be"
 TYPE = "tgz"
-COMMIT = "c08ccc9ed166a82b92edd70ab215ae1f2501e838"
+COMMIT = "6abe18402eb2a5e9b00158c6459646a948c53060"
 
 def dep_ssl():
     http_archive(
