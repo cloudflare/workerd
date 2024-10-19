@@ -580,6 +580,13 @@ export class ERR_INVALID_FILE_URL_PATH extends NodeError {
   }
 }
 
+export class ERR_INVALID_URI extends NodeError {
+  constructor() {
+    super('ERR_INVALID_URI', 'URI malformed');
+    this.name = 'URIError';
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {
