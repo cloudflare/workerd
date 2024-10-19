@@ -1541,8 +1541,7 @@ public:
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance),
         kj::refcounted<RequestObserver>(),  // default observer makes no observations
         waitUntilTasks,
-        true,      // tunnelExceptions
-        kj::none,  // workerTracer
+        true,  // tunnelExceptions
         kj::mv(metadata.cfBlobJson));
   }
 

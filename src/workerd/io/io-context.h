@@ -107,8 +107,7 @@ class IoContext_IncomingRequest final {
 public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Own<IoChannelFactory> ioChannelFactory,
-      kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+      kj::Own<RequestObserver> metrics);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -154,14 +153,9 @@ public:
     return *metrics;
   }
 
-  kj::Maybe<WorkerTracer&> getWorkerTracer() {
-    return workerTracer;
-  }
-
 private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
-  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
 
   bool wasDelivered = false;
@@ -233,11 +227,6 @@ public:
 
   RequestObserver& getMetrics() {
     return *getCurrentIncomingRequest().metrics;
-  }
-
-  const kj::Maybe<WorkerTracer&> getWorkerTracer() {
-    if (incomingRequests.empty()) return kj::none;
-    return getCurrentIncomingRequest().getWorkerTracer();
   }
 
   LimitEnforcer& getLimitEnforcer() {
