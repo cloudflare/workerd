@@ -244,7 +244,7 @@ void reportStartupError(kj::StringPtr id,
           // won't be able to connect and the developer will never know what happened.
         } else {
           // We should never get here in production if we've validated scripts before deployment.
-          KJ_LOG(ERROR, "script startup exceeded resource limits", id, ex);
+          KJ_LOG(WARNING, "script startup exceeded resource limits", id, ex);
           kj::throwFatalException(kj::cp(ex));
         }
       }
