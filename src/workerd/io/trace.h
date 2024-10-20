@@ -335,7 +335,7 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer final: public kj::Refcounted {
+class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
 public:
   // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer() = default;
@@ -376,7 +376,7 @@ private:
 // via extractTrace.
 class WorkerTracer final: public kj::Refcounted {
 public:
-  explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
+  explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
@@ -432,7 +432,7 @@ private:
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing
-  kj::Maybe<kj::Own<PipelineTracer>> parentPipeline;
+  kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
   // A weak reference for the internal span submitter. We use this so that the span submitter can
   // add spans while the tracer exists, but does not artifically prolong the lifetime of the tracer
   // which would interfere with span submission (traces get submitted when the worker returns its
