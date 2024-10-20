@@ -32,12 +32,35 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Text;
   }
 
+  struct LogV2 {
+    # Streaming tail workers support an expanded version of Log that supports arbitrary
+    # v8 serialized data. We define this as a separate new struct in order to avoid any
+    # possible non-backwards compatible disruption to anything using the existing Log
+    # struct in the original trace worker impl. The two structs are virtually identical
+    # with the exception that the message field can be v8 serialized data.
+    logLevel @0 :Log.Level;
+    message @1 :Data;
+    # The LogV2 message is expected to be a v8 serialized value.
+  }
+
   exceptions @1 :List(Exception);
   struct Exception {
     timestampNs @0 :Int64;
     name @1 :Text;
     message @2 :Text;
     stack @3 :Text;
+
+    cause @4 :Exception;
+    # If the exception has a cause property, it is serialized here.
+
+    errors @5 :List(Exception);
+    # If the exception represents an AggregateError or SupressedError, the
+    # errors are serialized here.
+
+    remote @6 :Bool;
+    retryable @7 :Bool;
+    overloaded @8 :Bool;
+    durableObjectReset @9 :Bool;
   }
 
   outcome @2 :EventOutcome;
@@ -114,7 +137,7 @@ struct Trace @0x8e8d911203762d34 {
     }
   }
 
-  struct CustomEventInfo {}
+  struct CustomEventInfo { }
 
   response @8 :FetchResponseInfo;
   struct FetchResponseInfo {
@@ -147,6 +170,111 @@ struct Trace @0x8e8d911203762d34 {
   executionModel @25 :ExecutionModel;
   # the execution model of the worker being traced. Can be stateless for a regular worker,
   # durableObject for a DO worker or workflow for the upcoming Workflows feature.
+
+  # The following structs are used only in Streaming Traces.
+
+  struct Onset {
+    # The Onset struct is always sent as the first event in any trace stream. It
+    # contains general metadata about the pipeline that is being traced.
+    scriptName @0 :Text;
+    scriptVersion @1 :ScriptVersion;
+    dispatchNamespace @2 :Text;
+    scriptId @3 :Text;
+    scriptTags @4 :List(Text);
+    entrypoint @5 :Text;
+    executionModel @6 :ExecutionModel;
+
+    info :union {
+      # Info structs are used at the start of a stream to identify the kind
+      # of trigger that started the stream. For instance, a fetch event will have
+      # a fetch info event at the start of the stream.
+      none @7 :Void;
+      fetch @8 :FetchEventInfo;
+      jsRpc @9 :JsRpcEventInfo;
+      scheduled @10 :ScheduledEventInfo;
+      alarm @11 :AlarmEventInfo;
+      queue @12 :QueueEventInfo;
+      email @13 :EmailEventInfo;
+      trace @14 :TraceEventInfo;
+      hibernatableWebSocket @15 :HibernatableWebSocketEventInfo;
+    }
+  }
+
+  struct SpanClose {
+    # A SpanClose is sent only at the completion of a span.
+    outcome @0 :EventOutcome;
+    info :union {
+      none @1 :Void;
+      fetch @2 :FetchResponseInfo;
+    }
+  }
+
+  struct Subrequest {
+    # A detail event indicating a subrequest that was made during a request. This
+    # can be a fetch subrequest, an RPC subrequest, a call out to a KV namespace,
+    # etc.
+    info :union {
+      none @0 :Void;
+      fetch @1 :FetchEventInfo;
+      jsRpc @2 :JsRpcEventInfo;
+    }
+  }
+
+  struct Metric {
+    # A metric is a special event that represents a metric value of some form injected
+    # into the trace. A metric can be used, for instance, to communicate the current
+    # isolate memory usage at a given point in time.
+
+    enum Type {
+      counter @0;
+      # A counter metric, for instance, the number of times a given event has occurred,
+      # the number of requests processed, etc. Counters nearly aways represent a conceptually
+      # monotonically increasing value (conceptually because in reality the value may not
+      # be strictly increasing unit-by-unit due to sampling frequency, etc).
+
+      gauge @1;
+      # A gauge metric, for instance, the current memory heap size, etc. Gauges represent
+      # a snapshot of a value at a given point in time and therefore may increase or decrease.
+    }
+
+    type @0 :Type;
+    key @1 :Text;
+    value @2 :Float64;
+  }
+
+  struct StreamEvent {
+    id @0 :Text;
+    # A unique identifier used to correlate traces across multiple events
+    # in a single tail session. Typically this will correlate to a top-level
+    # pipeline or specific pipeline stage.
+
+    span :group {
+      id @1 :Text;
+      parent @2 :Text;
+    }
+    timestampNs @3 :Int64;
+    sequence @4 :UInt32;
+    # The sequence order for this event. This is a strictly monotonically
+    # increasing sequence number that is unique within the tail. The onset
+    # event sequence number will always be 0. The purpose of the sequence
+    # is to make it possible to reconstruct the specific ordering of events
+    # in the stream.
+
+    event :union {
+      onset @5 :Onset;
+      # When a tail stream is first created, the first event will always be
+      # an onset event.
+
+      spanClose @6 :SpanClose;
+      # Span events mark the ending and outcome of a span.
+
+      log @7 :LogV2;
+      exception @8 :Exception;
+      diagnosticChannel @9 :DiagnosticChannelEvent;
+      metrics @10 :List(Metric);
+      subrequest @11 :Subrequest;
+    }
+  }
 }
 
 struct SendTracesRun @0xde913ebe8e1b82a5 {
