@@ -359,7 +359,7 @@ TestFixture::TestFixture(SetupParams&& params)
       auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
                                 ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
         return kj::heap<ActorCache>(
-            kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
+            server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
       };
       auto makeStorage =
           [](jsg::Lock& js, const Worker::Api& api,

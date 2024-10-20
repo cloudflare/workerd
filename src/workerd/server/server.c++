@@ -1947,7 +1947,7 @@ public:
                 // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
                 // ActorCache never to flush, so this effectively creates in-memory storage.
                 return kj::heap<ActorCache>(
-                    kj::heap<EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
+                    newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
               }
             });
           };
@@ -3886,6 +3886,73 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
   }
 
   co_return passCount > 0 && failCount == 0;
+}
+
+// ======================================================================================
+
+namespace {
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes.
+class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
+public:
+  kj::Promise<void> get(GetContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> getMultiple(GetMultipleContext context) override {
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .send()
+        .ignoreResult();
+  }
+  kj::Promise<void> list(ListContext context) override {
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .send()
+        .ignoreResult();
+  }
+  kj::Promise<void> getAlarm(GetAlarmContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> txn(TxnContext context) override {
+    auto results = context.getResults(capnp::MessageSize{2, 1});
+    results.setTransaction(kj::heap<TransactionImpl>());
+    return kj::READY_NOW;
+  }
+
+private:
+  class TransactionImpl final: public rpc::ActorStorage::Stage::Transaction::Server {
+  protected:
+    kj::Promise<void> get(GetContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> getMultiple(GetMultipleContext context) override {
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .send()
+          .ignoreResult();
+    }
+    kj::Promise<void> list(ListContext context) override {
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .send()
+          .ignoreResult();
+    }
+    kj::Promise<void> getAlarm(GetAlarmContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> commit(CommitContext context) override {
+      return kj::READY_NOW;
+    }
+  };
+};
+}  // namespace
+
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {
+  return kj::heap<EmptyReadOnlyActorStorageImpl>();
 }
 
 }  // namespace workerd::server
