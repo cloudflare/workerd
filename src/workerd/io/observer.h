@@ -103,6 +103,10 @@ public:
     return nullptr;
   }
 
+  virtual kj::Maybe<kj::Rc<WorkerTracer>> getWorkerTracer() {
+    return kj::none;
+  }
+
   virtual void addedContextTask() {}
   virtual void finishedContextTask() {}
   virtual void addedWaitUntilTask() {}

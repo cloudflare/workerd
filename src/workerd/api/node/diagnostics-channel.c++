@@ -26,7 +26,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
   }
 
   auto& context = IoContext::current();
-  KJ_IF_SOME(tracer, context.getWorkerTracer()) {
+  KJ_IF_SOME(tracer, context.getMetrics().getWorkerTracer()) {
     jsg::Serializer ser(js,
         jsg::Serializer::Options{
           .omitHeader = false,
@@ -37,7 +37,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
         Error,
         "Diagnostic events cannot be published with SharedArrayBuffer or "
         "transferred ArrayBuffer instances");
-    tracer.addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));
+    tracer->addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));
   }
 }
 

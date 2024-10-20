@@ -200,11 +200,9 @@ IoContext::IoContext(ThreadContext& thread,
 
 IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> contextParam,
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
-    kj::Own<RequestObserver> metricsParam,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
+    kj::Own<RequestObserver> metricsParam)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
-      workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)) {}
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
@@ -340,7 +338,7 @@ void IoContext::logUncaughtException(
 
 void IoContext::logUncaughtExceptionAsync(
     UncaughtExceptionSource source, kj::Exception&& exception) {
-  if (getWorkerTracer() == kj::none && !worker->getIsolate().isInspectorEnabled()) {
+  if (getMetrics().getWorkerTracer() == kj::none && !worker->getIsolate().isInspectorEnabled()) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&

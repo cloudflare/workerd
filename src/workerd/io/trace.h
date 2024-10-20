@@ -354,7 +354,7 @@ public:
   }
 
   // Makes a tracer for a worker stage.
-  kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+  kj::Rc<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
       ExecutionModel executionModel,
       kj::Maybe<kj::String> scriptId,
       kj::Maybe<kj::String> stableId,
