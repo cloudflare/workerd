@@ -17,7 +17,7 @@ export const tests = {
 
     {
       // Test get instance
-      const instance = await env.workflow.get('bar');
+      const instance = await env.workflow.getById('bar');
       assert.deepStrictEqual(instance.id, 'bar');
     }
   },

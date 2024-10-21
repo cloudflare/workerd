@@ -86,12 +86,20 @@ class WorkflowImpl {
     this.fetcher = fetcher;
   }
 
-  public async get(id: string): Promise<Instance> {
-    const result = await callFetcher<{ instanceId: string }>(
-      this.fetcher,
-      '/get',
-      { id }
-    );
+  public async getById(id: string): Promise<Instance> {
+    const result = await callFetcher<{
+      instanceId: string;
+      instanceName: string;
+    }>(this.fetcher, '/getById', { id });
+
+    return new InstanceImpl(result.instanceId, this.fetcher);
+  }
+
+  public async getByName(name: string): Promise<Instance> {
+    const result = await callFetcher<{
+      instanceId: string;
+      instanceName: string;
+    }>(this.fetcher, '/getByName', { name });
 
     return new InstanceImpl(result.instanceId, this.fetcher);
   }
@@ -99,11 +107,10 @@ class WorkflowImpl {
   public async create(
     options?: WorkflowInstanceCreateOptions
   ): Promise<Instance> {
-    const result = await callFetcher<{ instanceId: string }>(
-      this.fetcher,
-      '/create',
-      options ?? {}
-    );
+    const result = await callFetcher<{
+      instanceId: string;
+      instanceName: string;
+    }>(this.fetcher, '/create', options ?? {});
 
     return new InstanceImpl(result.instanceId, this.fetcher);
   }
