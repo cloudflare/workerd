@@ -97,7 +97,7 @@ export default {
       ) {
         return Response.json({});
       } else if (request.method === 'POST' && pathname.endsWith('/query')) {
-        /** @type {VectorizeQueryOptions & {vector: number[]}} */
+        /** @type {VectorizeQueryOptions & ({vector: number[]} | {vectorId: string})} */
         const body = await request.json();
         let returnSet = structuredClone(exampleVectorMatches);
         if (

@@ -236,6 +236,16 @@ declare abstract class Vectorize {
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches>;
   /**
+   * Use the provided vector-id to perform a similarity search across the index.
+   * @param vectorId Id for a vector in the index against which the index should be queried.
+   * @param options Configuration options to massage the returned data.
+   * @returns A promise that resolves with matched and scored vectors.
+   */
+  public queryById(
+    vectorId: string,
+    options?: VectorizeQueryOptions
+  ): Promise<VectorizeMatches>;
+  /**
    * Insert a list of vectors into the index dataset. If a provided id exists, an error will be thrown.
    * @param vectors List of vectors that will be inserted.
    * @returns A promise that resolves with a unique identifier of a mutation containing the insert changeset.
