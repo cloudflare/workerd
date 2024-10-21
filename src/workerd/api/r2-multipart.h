@@ -19,6 +19,12 @@ public:
     JSG_STRUCT(partNumber, etag);
     JSG_STRUCT_TS_OVERRIDE(R2UploadedPart);
   };
+  struct UploadPartOptions {
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
+
+    JSG_STRUCT(ssecKey);
+    JSG_STRUCT_TS_OVERRIDE(R2UploadPartOptions);
+  };
 
   R2MultipartUpload(kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket)
       : key(kj::mv(key)),
@@ -35,6 +41,7 @@ public:
   jsg::Promise<UploadedPart> uploadPart(jsg::Lock& js,
       int partNumber,
       R2PutValue value,
+      jsg::Optional<UploadPartOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<void> abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(jsg::Lock& js,
