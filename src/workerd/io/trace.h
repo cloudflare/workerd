@@ -361,6 +361,8 @@ public:
   // to the host where tracing was initiated.
   void addTrace(rpc::Trace::Reader reader);
 
+  // When collecting traces from multiple stages in a pipeline, this is called by the
+  // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
 private:
