@@ -107,11 +107,11 @@ export const test_path_resolve = {
     const posixyCwd = '/';
 
     const resolveTests = [
-      [['/var/lib', '../', 'file/'], '/var/file/'],
-      [['/var/lib', '/../', 'file/'], '/file/'],
+      [['/var/lib', '../', 'file/'], '/var/file'],
+      [['/var/lib', '/../', 'file/'], '/file'],
       [['a/b/c/', '../../..'], posixyCwd],
       [['.'], posixyCwd],
-      [['/some/dir', '.', '/absolute/'], '/absolute/'],
+      [['/some/dir', '.', '/absolute/'], '/absolute'],
       [['/foo/tmp.3/', '../tmp.3/cycles/root.js'], '/foo/tmp.3/cycles/root.js'],
     ];
     resolveTests.forEach(([test, expected]) => {
@@ -305,6 +305,55 @@ export const test_path_parse_format = {
 
 export const test_path_normalize = {
   test(ctrl, env, ctx) {
+    strictEqual(
+      path.win32.normalize('./fixtures///b/../b/c.js'),
+      'fixtures\\b\\c.js'
+    );
+    strictEqual(path.win32.normalize('/foo/../../../bar'), '\\bar');
+    strictEqual(path.win32.normalize('a//b//../b'), 'a\\b');
+    strictEqual(path.win32.normalize('a//b//./c'), 'a\\b\\c');
+    strictEqual(path.win32.normalize('a//b//.'), 'a\\b');
+    strictEqual(
+      path.win32.normalize('//server/share/dir/file.ext'),
+      '\\\\server\\share\\dir\\file.ext'
+    );
+    strictEqual(path.win32.normalize('/a/b/c/../../../x/y/z'), '\\x\\y\\z');
+    strictEqual(path.win32.normalize('C:'), 'C:.');
+    strictEqual(path.win32.normalize('C:..\\abc'), 'C:..\\abc');
+    strictEqual(
+      path.win32.normalize('C:..\\..\\abc\\..\\def'),
+      'C:..\\..\\def'
+    );
+    strictEqual(path.win32.normalize('C:\\.'), 'C:\\');
+    strictEqual(path.win32.normalize('file:stream'), 'file:stream');
+    strictEqual(path.win32.normalize('bar\\foo..\\..\\'), 'bar\\');
+    strictEqual(path.win32.normalize('bar\\foo..\\..'), 'bar');
+    strictEqual(path.win32.normalize('bar\\foo..\\..\\baz'), 'bar\\baz');
+    strictEqual(path.win32.normalize('bar\\foo..\\'), 'bar\\foo..\\');
+    strictEqual(path.win32.normalize('bar\\foo..'), 'bar\\foo..');
+    strictEqual(path.win32.normalize('..\\foo..\\..\\..\\bar'), '..\\..\\bar');
+    strictEqual(
+      path.win32.normalize('..\\...\\..\\.\\...\\..\\..\\bar'),
+      '..\\..\\bar'
+    );
+    strictEqual(
+      path.win32.normalize('../../../foo/../../../bar'),
+      '..\\..\\..\\..\\..\\bar'
+    );
+    strictEqual(
+      path.win32.normalize('../../../foo/../../../bar/../../'),
+      '..\\..\\..\\..\\..\\..\\'
+    );
+    strictEqual(
+      path.win32.normalize('../foobar/barfoo/foo/../../../bar/../../'),
+      '..\\..\\'
+    );
+    strictEqual(
+      path.win32.normalize('../.../../foobar/../../../bar/../../baz'),
+      '..\\..\\..\\..\\baz'
+    );
+    strictEqual(path.win32.normalize('foo/bar\\baz'), 'foo\\bar\\baz');
+
     strictEqual(
       path.posix.normalize('./fixtures///b/../b/c.js'),
       'fixtures/b/c.js'

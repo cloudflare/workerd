@@ -88,7 +88,7 @@ export const getBuiltinModule = {
   },
 };
 
-// Ref: https://github.com/nodejs/node/blob/ddfef05f118e77cdb80a1f5971f076a03d221cb1/test/parallel/test-url-fileurltopath.js
+// Ref: https://github.com/nodejs/node/blob/e92446536ed4e268c9eef6ae6f911e384c98eecf/test/parallel/test-url-fileurltopath.js
 export const testFileURLToPath = {
   async test() {
     // invalid arguments
@@ -242,7 +242,7 @@ export const testFileURLToPath = {
   },
 };
 
-// Ref: https://github.com/nodejs/node/blob/ddfef05f118e77cdb80a1f5971f076a03d221cb1/test/parallel/test-url-pathtofileurl.js
+// Ref: https://github.com/nodejs/node/blob/e92446536ed4e268c9eef6ae6f911e384c98eecf/test/parallel/test-url-pathtofileurl.js
 export const testPathToFileURL = {
   async test() {
     {
@@ -252,9 +252,15 @@ export const testPathToFileURL = {
     }
 
     {
-      const fileURL = pathToFileURL('test\\').href;
+      const fileURL = pathToFileURL('test\\', { windows: false }).href;
       assert(fileURL.startsWith('file:///'));
-      assert(fileURL.endsWith('%5C'));
+      match(fileURL, /%5C$/);
+    }
+
+    {
+      const fileURL = pathToFileURL('test\\', { windows: true }).href;
+      assert(fileURL.startsWith('file:///'));
+      match(fileURL, /\/$/);
     }
 
     {
@@ -273,6 +279,7 @@ export const testPathToFileURL = {
       throws(() => pathToFileURL('\\\\host', { windows: true }), {
         code: 'ERR_INVALID_ARG_VALUE',
       });
+
       // Regression test for direct String.prototype.startsWith call
       throws(
         () =>
@@ -299,13 +306,9 @@ export const testPathToFileURL = {
           code: 'ERR_INVALID_ARG_TYPE',
         }
       );
-    }
 
-    {
       // UNC paths on posix are considered a single path that has backslashes:
-      const fileURL = pathToFileURL('\\\\nas\\share\\path.txt', {
-        windows: false,
-      }).href;
+      const fileURL = pathToFileURL('\\\\nas\\share\\path.txt').href;
       match(fileURL, /file:\/\/.+%5C%5Cnas%5Cshare%5Cpath\.txt$/);
     }
 
@@ -352,6 +355,12 @@ export const testPathToFileURL = {
       { path: 'C:\\€', expected: 'file:///C:/%E2%82%AC' },
       // Rocket emoji (non-BMP code point)
       { path: 'C:\\🚀', expected: 'file:///C:/%F0%9F%9A%80' },
+      // caret
+      { path: 'C:\\foo^bar', expected: 'file:///C:/foo%5Ebar' },
+      // left bracket
+      { path: 'C:\\foo[bar', expected: 'file:///C:/foo%5Bbar' },
+      // right bracket
+      { path: 'C:\\foo]bar', expected: 'file:///C:/foo%5Dbar' },
       // Local extended path
       {
         path: '\\\\?\\C:\\path\\to\\file.txt',
@@ -411,7 +420,23 @@ export const testPathToFileURL = {
       { path: '/€', expected: 'file:///%E2%82%AC' },
       // Rocket emoji (non-BMP code point)
       { path: '/🚀', expected: 'file:///%F0%9F%9A%80' },
+      // "unsafe" chars
+      {
+        path: '/foo\r\n\t<>"#%{}|^[\\~]`?bar',
+        expected:
+          'file:///foo%0D%0A%09%3C%3E%22%23%25%7B%7D%7C%5E%5B%5C%7E%5D%60%3Fbar',
+      },
     ];
+
+    for (const { path, expected } of windowsTestCases) {
+      const actual = pathToFileURL(path, { windows: true }).href;
+      strictEqual(actual, expected);
+    }
+
+    for (const { path, expected } of posixTestCases) {
+      const actual = pathToFileURL(path, { windows: false }).href;
+      strictEqual(actual, expected);
+    }
 
     for (const { path, expected } of windowsTestCases) {
       const actual = pathToFileURL(path, { windows: true }).href;

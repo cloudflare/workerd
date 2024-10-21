@@ -11,7 +11,12 @@ import {
   ERR_INVALID_URL_SCHEME,
 } from 'node-internal:internal_errors';
 import { default as urlUtil } from 'node-internal:url';
-import { CHAR_LOWERCASE_A, CHAR_LOWERCASE_Z } from 'node-internal:constants';
+import {
+  CHAR_LOWERCASE_A,
+  CHAR_LOWERCASE_Z,
+  CHAR_FORWARD_SLASH,
+  CHAR_BACKWARD_SLASH,
+} from 'node-internal:constants';
 import {
   win32 as pathWin32,
   posix as pathPosix,
@@ -19,41 +24,72 @@ import {
 
 const FORWARD_SLASH = /\//g;
 
-// The following characters are percent-encoded when converting from file path
-// to URL:
-// - %: The percent character is the only character not encoded by the
-//        `pathname` setter.
-// - \: Backslash is encoded on non-windows platforms since it's a valid
-//      character but the `pathname` setters replaces it by a forward slash.
-// - LF: The newline character is stripped out by the `pathname` setter.
-//       (See whatwg/url#419)
-// - CR: The carriage return character is also stripped out by the `pathname`
-//       setter.
-// - TAB: The tab character is also stripped out by the `pathname` setter.
+// RFC1738 defines the following chars as "unsafe" for URLs
+// @see https://www.ietf.org/rfc/rfc1738.txt 2.2. URL Character Encoding Issues
 const percentRegEx = /%/g;
-const backslashRegEx = /\\/g;
 const newlineRegEx = /\n/g;
 const carriageReturnRegEx = /\r/g;
 const tabRegEx = /\t/g;
-const questionRegex = /\?/g;
+const quoteRegEx = /"/g;
 const hashRegex = /#/g;
+const spaceRegEx = / /g;
+const questionMarkRegex = /\?/g;
+const openSquareBracketRegEx = /\[/g;
+const backslashRegEx = /\\/g;
+const closeSquareBracketRegEx = /]/g;
+const caretRegEx = /\^/g;
+const verticalBarRegEx = /\|/g;
+const tildeRegEx = /~/g;
 
 function encodePathChars(
   filepath: string,
-  options?: { windows?: boolean | undefined }
+  options?: { windows: boolean | undefined }
 ): string {
-  const windows = options?.windows;
-  if (filepath.indexOf('%') !== -1)
+  if (filepath.includes('%')) {
     filepath = filepath.replace(percentRegEx, '%25');
-  // In posix, backslash is a valid character in paths:
-  if (!windows && filepath.indexOf('\\') !== -1)
-    filepath = filepath.replace(backslashRegEx, '%5C');
-  if (filepath.indexOf('\n') !== -1)
-    filepath = filepath.replace(newlineRegEx, '%0A');
-  if (filepath.indexOf('\r') !== -1)
-    filepath = filepath.replace(carriageReturnRegEx, '%0D');
-  if (filepath.indexOf('\t') !== -1)
+  }
+
+  if (filepath.includes('\t')) {
     filepath = filepath.replace(tabRegEx, '%09');
+  }
+  if (filepath.includes('\n')) {
+    filepath = filepath.replace(newlineRegEx, '%0A');
+  }
+  if (filepath.includes('\r')) {
+    filepath = filepath.replace(carriageReturnRegEx, '%0D');
+  }
+  if (filepath.includes(' ')) {
+    filepath = filepath.replace(spaceRegEx, '%20');
+  }
+  if (filepath.includes('"')) {
+    filepath = filepath.replace(quoteRegEx, '%22');
+  }
+  if (filepath.includes('#')) {
+    filepath = filepath.replace(hashRegex, '%23');
+  }
+  if (filepath.includes('?')) {
+    filepath = filepath.replace(questionMarkRegex, '%3F');
+  }
+  if (filepath.includes('[')) {
+    filepath = filepath.replace(openSquareBracketRegEx, '%5B');
+  }
+  // Back-slashes must be special-cased on Windows, where they are treated as path separator.
+  if (!options?.windows && filepath.includes('\\')) {
+    filepath = filepath.replace(backslashRegEx, '%5C');
+  }
+  if (filepath.includes(']')) {
+    filepath = filepath.replace(closeSquareBracketRegEx, '%5D');
+  }
+  if (filepath.includes('^')) {
+    filepath = filepath.replace(caretRegEx, '%5E');
+  }
+  if (filepath.includes('|')) {
+    filepath = filepath.replace(verticalBarRegEx, '%7C');
+  }
+  if (filepath.includes('~')) {
+    filepath = filepath.replace(tildeRegEx, '%7E');
+  }
+
   return filepath;
 }
 
@@ -205,19 +241,17 @@ export function pathToFileURL(
   let resolved = windows
     ? pathWin32.resolve(filepath)
     : pathPosix.resolve(filepath);
+  const sep = windows ? pathWin32.sep : pathPosix.sep;
+  // path.resolve strips trailing slashes so we must add them back
+  const filePathLast = filepath.charCodeAt(filepath.length - 1);
+  if (
+    (filePathLast === CHAR_FORWARD_SLASH ||
+      (windows && filePathLast === CHAR_BACKWARD_SLASH)) &&
+    resolved[resolved.length - 1] !== sep
+  )
+    resolved += '/';
 
-  // Call encodePathChars first to avoid encoding % again for ? and #.
-  resolved = encodePathChars(resolved, { windows });
-
-  // Question and hash character should be included in pathname.
-  // Therefore, encoding is required to eliminate parsing them in different states.
-  // This is done as an optimization to not creating a URL instance and
-  // later triggering pathname setter, which impacts performance
-  if (resolved.indexOf('?') !== -1)
-    resolved = resolved.replace(questionRegex, '%3F');
-  if (resolved.indexOf('#') !== -1)
-    resolved = resolved.replace(hashRegex, '%23');
-  return new URL(`file://${resolved}`);
+  return new URL(`file://${encodePathChars(resolved, { windows })}`);
 }
 
 export function toPathIfFileURL(fileURLOrPath: URL | string): string {
