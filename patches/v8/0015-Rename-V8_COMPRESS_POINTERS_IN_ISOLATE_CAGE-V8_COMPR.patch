@@ -1,4 +1,4 @@
-From 125708e60af053fdb12d5e304fd9646a8ca974d0 Mon Sep 17 00:00:00 2001
+From 4feea4cc9a36e678d03566f0e2890c093f702fa5 Mon Sep 17 00:00:00 2001
 From: Jon Phillips <jphillips@cloudflare.com>
 Date: Thu, 9 May 2024 23:36:43 +0100
 Subject: Rename V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE ->
@@ -9,10 +9,10 @@ this rename elsewhere:
 https://chromium-review.googlesource.com/c/v8/v8/+/5279595.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index e99cb6fe2dc950678612d22693fd8dbfa8a3aa7a..4146cef20a6684ae811aacc7a93a0832943a2173 100644
+index 349d523252347b5314950228b1ca0b558c2ac4cb..ca6c577276afd26290dd05f0829d3ad64e9b6d1c 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -329,10 +329,10 @@ selects.config_setting_group(
+@@ -327,10 +327,10 @@ selects.config_setting_group(
      ],
  )
  
@@ -25,7 +25,7 @@ index e99cb6fe2dc950678612d22693fd8dbfa8a3aa7a..4146cef20a6684ae811aacc7a93a0832
      match_all = [
          ":is_v8_enable_pointer_compression",
          ":is_not_v8_enable_pointer_compression_shared_cage",
-@@ -529,8 +529,8 @@ v8_config(
+@@ -526,8 +526,8 @@ v8_config(
          ":enable_pointer_compression_shared_cage": [
              "V8_COMPRESS_POINTERS_IN_SHARED_CAGE",
          ],
