@@ -7,20 +7,12 @@
 
 namespace workerd::api::pyodide {
 
-class EmscriptenModule: public jsg::Object {
-public:
-  explicit EmscriptenModule(jsg::Lock& js) {};
-  JSG_STRUCT(EmscriptenModule);
-
-private:
-};
-
 using instantiateEmscriptenModuleFunction = jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(
     jsg::JsBoolean, jsg::JsString, jsg::JsString)>;
 
 class SetupEmscripten: public jsg::Object {
 public:
-  SetupEmscripten() {};
+  SetupEmscripten(){};
   SetupEmscripten(jsg::Lock& js, const jsg::Url&) {}
 
   jsg::JsValue getModule(jsg::Lock& js);
@@ -30,7 +22,7 @@ public:
   }
 
 private:
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> module_;
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 #define EW_SETUP_EMSCRIPTEN_ISOLATE_TYPES api::pyodide::SetupEmscripten

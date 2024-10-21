@@ -55,6 +55,7 @@ public:
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
+  const kj::Maybe<jsg::JsRef<jsg::JsValue>>& getEmscriptenRuntime() const override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,

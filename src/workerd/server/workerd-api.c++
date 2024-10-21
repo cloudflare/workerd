@@ -136,6 +136,7 @@ struct WorkerdApi::Impl final {
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeEmscriptenRuntime;
 
   class Configuration {
   public:
@@ -170,18 +171,19 @@ struct WorkerdApi::Impl final {
             v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
-    // if (featuresParam.getPythonWorkers()) {
-    //   jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-    //     js.withinHandleScope([&]() -> auto {
-    //       v8::Local<v8::Context> ctx = v8::Context::New(js.v8Isolate);
-    //       KJ_ASSERT(!ctx.IsEmpty(), "unable to enter invalid v8::Context");
-    //       v8::Context::Scope scope(ctx);
-    //       // Init emscripten syncronously, the python script will import setup-emscripten and
-    //       // call setEmscriptenModele
-    //       api::pyodide::initializeEmscriptenRuntime(lock);
-    //     });
-    //   });
-    // }
+    if (featuresParam.getPythonWorkers()) {
+      jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
+        lock.withinHandleScope([&]() -> auto {
+          auto context = lock.newContext<api::ServiceWorkerGlobalScope>({}, lock.v8Isolate);
+          v8::Context::Scope scope(context.getHandle(lock));
+          // Init emscripten syncronously, the python script will import setup-emscripten and
+          // call setEmscriptenModele
+          auto emscriptenRuntime = api::pyodide::initializeEmscriptenRuntime(lock);
+          // `addRef` depends on `lock` only to get the underlying isolate.
+          maybeEmscriptenRuntime = emscriptenRuntime.addRef(lock);
+        });
+      });
+    }
   }
 
   static v8::Local<v8::String> compileTextGlobal(
@@ -279,6 +281,10 @@ jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
   return jsg::JsObject(
       kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
+}
+
+const kj::Maybe<jsg::JsRef<jsg::JsValue>>& WorkerdApi::getEmscriptenRuntime() const {
+  return impl->maybeEmscriptenRuntime;
 }
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
