@@ -1,0 +1,20 @@
+# CI-only configuration. Some of these settings are inspired by bazel-lib https://github.com/bazel-contrib/bazel-lib/blob/v2.9.3/.aspect/bazelrc/ci.bazelrc
+# Not all shared options in the GitHub CI are ported since we use a different remote cache setup for
+# internal CI.
+build:ci --keep_going
+build:ci --verbose_failures
+# Use a higher jobs level to effectively fetch from CPU and and use the remote cache at the same
+# time, see https://github.com/bazelbuild/bazel/issues/6394. 32 is still a fairly small number here
+# and should work for the small CI runners we use, if we switch to a bigger runner consider
+# increasing this closer towards the suggested value of 200. Note the number of maximum build jobs
+# is controlled by the --local_resources=cpu flag and still limited to the number of cores by
+# default.
+build:ci --jobs=32
+# Do not check for changes in external repository files, should speed up bazel invocations after the first one
+build:ci --noexperimental_check_external_repository_files
+# Rate limit progress updates for smaller logs, default is 0.2 which leads to very frequent updates.
+build:ci --show_progress_rate_limit=1
+# Enable color output
+build:ci --color=yes
+# Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
+build:ci --terminal_columns=100
