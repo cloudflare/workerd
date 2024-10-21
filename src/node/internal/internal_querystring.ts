@@ -9,7 +9,7 @@ import { ERR_INVALID_URI } from 'node-internal:internal_errors';
 type EncodeFunction = (value: string) => string;
 type DecodeFunction = (value: string) => string;
 
-const hexTable = new Array(256) as string[];
+export const hexTable = new Array(256) as string[];
 for (let i = 0; i < 256; ++i) {
   hexTable[i] = '%' + ((i < 16 ? '0' : '') + i.toString(16)).toUpperCase();
 }
@@ -35,7 +35,7 @@ const isHexTable = new Int8Array([
 ]);
 
 /* eslint-disable */
-function encodeStr(
+export function encodeStr(
   str: string,
   noEscapeTable: Int8Array,
   hexTable: string[]
@@ -339,8 +339,8 @@ function addKeyVal(
 
 export function parse(
   qs: string,
-  sep: string,
-  eq: string,
+  sep?: string,
+  eq?: string,
   options?: {
     maxKeys?: number;
     decodeURIComponent?: DecodeFunction;

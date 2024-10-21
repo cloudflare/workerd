@@ -258,3 +258,54 @@ export function toPathIfFileURL(fileURLOrPath: URL | string): string {
   if (!isURL(fileURLOrPath)) return fileURLOrPath;
   return fileURLToPath(fileURLOrPath);
 }
+
+/**
+ * Utility function that converts a URL object into an ordinary options object
+ * as expected by the `http.request` and `https.request` APIs.
+ * @param {URL} url
+ * @returns {Record<string, unknown>}
+ */
+export function urlToHttpOptions(url: URL): Record<string, unknown> {
+  const { hostname, pathname, port, username, password, search } = url;
+  const options: Record<string, unknown> = {
+    __proto__: null,
+    ...url, // In case the url object was extended by the user.
+    protocol: url.protocol,
+    hostname:
+      hostname && hostname[0] === '[' ? hostname.slice(1, -1) : hostname,
+    hash: url.hash,
+    search: search,
+    pathname: pathname,
+    path: `${pathname || ''}${search || ''}`,
+    href: url.href,
+  };
+  if (port !== '') {
+    options.port = Number(port);
+  }
+  if (username || password) {
+    options.auth = `${decodeURIComponent(username)}:${decodeURIComponent(password)}`;
+  }
+  return options;
+}
+
+// Protocols that can allow "unsafe" and "unwise" chars.
+export const unsafeProtocol = new Set<string>(['javascript', 'javascript:']);
+// Protocols that never have a hostname.
+export const hostlessProtocol = new Set<string>(['javascript', 'javascript:']);
+// Protocols that always contain a // bit.
+export const slashedProtocol = new Set<string>([
+  'http',
+  'http:',
+  'https',
+  'https:',
+  'ftp',
+  'ftp:',
+  'gopher',
+  'gopher:',
+  'file',
+  'file:',
+  'ws',
+  'ws:',
+  'wss',
+  'wss:',
+]);
