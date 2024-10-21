@@ -398,9 +398,7 @@ void IoContext::addTask(kj::Promise<void> promise) {
     // changes.)
     auto& metrics = getMetrics();
     if (metrics.getSpan().isObserved()) {
-      metrics.addedContextTask();
-      promise = promise.attach(
-          kj::defer([metrics = kj::addRef(metrics)]() mutable { metrics->finishedContextTask(); }));
+      promise = promise.attach(metrics.addedContextTask());
     }
   }
 
@@ -413,9 +411,7 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     // are not tied to requests in actors. So we just skip it in actors.
     auto& metrics = getMetrics();
     if (metrics.getSpan().isObserved()) {
-      metrics.addedWaitUntilTask();
-      promise = promise.attach(kj::defer(
-          [metrics = kj::addRef(metrics)]() mutable { metrics->finishedWaitUntilTask(); }));
+      promise = promise.attach(metrics.addedWaitUntilTask());
     }
   }
 
