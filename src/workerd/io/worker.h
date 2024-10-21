@@ -517,6 +517,8 @@ public:
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
+  virtual const kj::Maybe<jsg::JsRef<jsg::JsValue>>& getEmscriptenRuntime() const = 0;
+
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback = kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
       jsg::Lock& js,
