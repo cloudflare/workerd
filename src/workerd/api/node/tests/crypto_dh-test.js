@@ -50,6 +50,11 @@ export const dh_test = {
         'The value of "generator" is out of range. ' +
         'It must be an integer. Received 13.37',
     });
+    // boringssl throws when key sizes > 10000 bits are requested, we proactively return a
+    // RangeError instead which is more descriptive.
+    assert.throws(() => crypto.createDiffieHellman(10001), {
+      name: 'RangeError',
+    });
 
     for (const bits of [-1, 0, 1]) {
       assert.throws(() => crypto.createDiffieHellman(bits), {
@@ -60,7 +65,6 @@ export const dh_test = {
     // Through a fluke of history, g=0 defaults to DH_GENERATOR (2).
     {
       const g = 0;
-      crypto.createDiffieHellman('abcdef', g);
       crypto.createDiffieHellman('abcdef', 'hex', g);
     }
 
@@ -72,7 +76,13 @@ export const dh_test = {
       assert.throws(() => crypto.createDiffieHellman('abcdef', 'hex', g), ex);
     }
 
-    crypto.createDiffieHellman('abcdef', Buffer.from([2])); // OK
+    // Calls with even p, or p values that are interpreted as <= g will be rejected.
+    crypto.createDiffieHellman('abcdef', 'hex', Buffer.from([2])); // OK
+    for (const bits of ['abcdef', Buffer.from([1]), Buffer.from([4])]) {
+      assert.throws(() => crypto.createDiffieHellman(bits), {
+        name: 'Error',
+      });
+    }
 
     for (const g of [Buffer.from([]), Buffer.from([0]), Buffer.from([1])]) {
       const ex = {
@@ -126,8 +136,9 @@ export const dh_verify_error_test = {
       'EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF';
     crypto.createDiffieHellman(p, 'hex');
 
-    // Confirm DH_check() results are exposed for optional examination.
-    const bad_dh = crypto.createDiffieHellman('02', 'hex');
+    // Confirm DH_check() results are exposed for optional examination. Use an odd value for prime
+    // since even values are rejected immediately.
+    const bad_dh = crypto.createDiffieHellman('03', 'hex');
     assert.notStrictEqual(bad_dh.verifyError, 0);
   },
 };
