@@ -39,7 +39,7 @@ async function callFetcher<T>(
   }
 }
 
-class InstanceImpl implements Instance {
+class InstanceImpl implements WorkflowInstance {
   private readonly fetcher: Fetcher;
   public readonly id: string;
 
@@ -86,7 +86,7 @@ class WorkflowImpl {
     this.fetcher = fetcher;
   }
 
-  public async getById(id: string): Promise<Instance> {
+  public async getById(id: string): Promise<WorkflowInstance> {
     const result = await callFetcher<{
       instanceId: string;
       instanceName: string;
@@ -95,7 +95,7 @@ class WorkflowImpl {
     return new InstanceImpl(result.instanceId, this.fetcher);
   }
 
-  public async getByName(name: string): Promise<Instance> {
+  public async getByName(name: string): Promise<WorkflowInstance> {
     const result = await callFetcher<{
       instanceId: string;
       instanceName: string;
@@ -106,7 +106,7 @@ class WorkflowImpl {
 
   public async create(
     options?: WorkflowInstanceCreateOptions
-  ): Promise<Instance> {
+  ): Promise<WorkflowInstance> {
     const result = await callFetcher<{
       instanceId: string;
       instanceName: string;
