@@ -335,23 +335,16 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer final: public kj::Refcounted {
+class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
 public:
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = kj::none)
-      : parentTracer(kj::mv(parentPipeline)) {}
-
+  explicit PipelineTracer() = default;
   ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
   // exist at a time.
   kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
-
-  // Makes a tracer for a subpipeline.
-  kj::Own<PipelineTracer> makePipelineSubtracer() {
-    return kj::refcounted<PipelineTracer>(kj::addRef(*this));
-  }
 
   // Makes a tracer for a worker stage.
   kj::Rc<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
@@ -368,11 +361,13 @@ public:
   // to the host where tracing was initiated.
   void addTrace(rpc::Trace::Reader reader);
 
+  // When collecting traces from multiple stages in a pipeline, this is called by the
+  // tracer for a subordinate stage to add its collected traces to the parent pipeline.
+  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
+
 private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
-
-  kj::Maybe<kj::Own<PipelineTracer>> parentTracer;
 
   friend class WorkerTracer;
 };
@@ -383,7 +378,7 @@ private:
 // via extractTrace.
 class WorkerTracer final: public kj::Refcounted {
 public:
-  explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
+  explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
@@ -439,7 +434,7 @@ private:
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing
-  kj::Maybe<kj::Own<PipelineTracer>> parentPipeline;
+  kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
   // A weak reference for the internal span submitter. We use this so that the span submitter can
   // add spans while the tracer exists, but does not artifically prolong the lifetime of the tracer
   // which would interfere with span submission (traces get submitted when the worker returns its

@@ -559,13 +559,14 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 }
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_SOME(p, parentTracer) {
-    for (auto& t: traces) {
-      p->traces.add(kj::addRef(*t));
-    }
-  }
   KJ_IF_SOME(f, completeFulfiller) {
     f.get()->fulfill(traces.releaseAsArray());
+  }
+}
+
+void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
+  for (auto& t: traces) {
+    this->traces.add(kj::addRef(*t));
   }
 }
 
@@ -590,7 +591,7 @@ kj::Rc<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipelineL
       kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
       executionModel);
   traces.add(kj::addRef(*trace));
-  return kj::rc<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
+  return kj::rc<WorkerTracer>(addRefToThis(), kj::mv(trace), pipelineLogLevel);
 }
 
 void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
@@ -598,7 +599,7 @@ void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
 }
 
 WorkerTracer::WorkerTracer(
-    kj::Own<PipelineTracer> parentPipeline, kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel)
+    kj::Rc<PipelineTracer> parentPipeline, kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
