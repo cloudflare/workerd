@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const python :Workerd.Worker = (
+  modules = [
+    (name = "worker.py", pythonModule = embed "worker.py")
+  ],
+  bindings = [
+    ( name = "SELF", service = "python-sdk" ),
+  ],
+  compatibilityDate = "2024-10-01",
+  compatibilityFlags = ["python_workers_development", "python_external_bundle"],
+);
+
+const mock :Workerd.Worker = (
+  modules = [
+    (name = "mock.py", pythonModule = embed "mock.py")
+  ],
+  compatibilityDate = "2024-10-01",
+  compatibilityFlags = ["python_workers_development", "python_external_bundle"],
+);
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-sdk",
+      worker = .python
+    ),
+    ( name = "internet",
+      worker = .mock
+    )
+  ],
+);
