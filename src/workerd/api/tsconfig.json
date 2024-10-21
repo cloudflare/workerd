@@ -11,7 +11,8 @@
     },
     "composite": true,
     "declaration": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowJs": true
   },
   "include": ["**/*.ts"],
   "exclude": []
