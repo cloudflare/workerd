@@ -1,13 +1,9 @@
-/**
- * NonRetryableError allows for a user to throw a fatal error
- * that makes a Workflow instance fail immediately without triggering a retry
- */
 declare module "cloudflare:workflows" {
-  export abstract class NonRetryableError extends Error {
-    /**
-     * `__brand` is used to differentiate between `NonRetryableError` and `Error`
-     * and is omitted from the constructor because users should not set it
-     */
+  /**
+   * NonRetryableError allows for a user to throw a fatal error
+   * that makes a Workflow instance fail immediately without triggering a retry
+   */
+  export class NonRetryableError extends Error {
     public constructor(message: string, name?: string);
   }
 }
@@ -22,21 +18,33 @@ declare abstract class Workflow {
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
-   * @param id Id to create the instance of this Workflow with
-   * @param params The payload to send over to this instance
+   * @param options optional fields to customize the instance creation
    * @returns A promise that resolves with a handle for the Instance
    */
-  public create(id: string, params: object): Promise<Instance>;
+  public create(options?: WorkflowInstanceCreateOptions): Promise<Instance>;
+}
+
+interface WorkflowInstanceCreateOptions {
+  /**
+   * Name to create the instance of this Workflow with - it should always be unique
+   */
+  name?: string;
+  /**
+   * The payload to send over to this instance, this is optional since you might need to pass params into the instance
+   */
+  params?: unknown;
 }
 
 type InstanceStatus = {
   status:
-    | "queued"
+    | "queued" // means that instance is waiting to be started (see concurrency limits)
     | "running"
     | "paused"
     | "errored"
-    | "terminated"
+    | "terminated" // user terminated the instance while it was running
     | "complete"
+    | "waiting" // instance is hibernating and waiting for sleep or event to finish
+    | "waitingForPause" // instance is finishing the current work to pause
     | "unknown";
   error?: string;
   output?: object;

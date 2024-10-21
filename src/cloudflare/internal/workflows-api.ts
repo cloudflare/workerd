@@ -3,13 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export class NonRetryableError extends Error {
-  // `__brand` is how engine validates that the user returned a `NonRetryableError`
-  // imported from "cloudflare:workflows"
-  // This enables them to extend NonRetryableError for their own Errors
-  // as well by overriding name
-  // Private fields are not serialized over RPC
-  public readonly __brand: string = 'NonRetryableError';
-
   public constructor(message: string, name = 'NonRetryableError') {
     super(message);
     this.name = name;
@@ -103,11 +96,13 @@ class WorkflowImpl {
     return new InstanceImpl(result.instanceId, this.fetcher);
   }
 
-  public async create(id: string, params?: unknown): Promise<Instance> {
+  public async create(
+    options?: WorkflowInstanceCreateOptions
+  ): Promise<Instance> {
     const result = await callFetcher<{ instanceId: string }>(
       this.fetcher,
       '/create',
-      { id, params }
+      options ?? {}
     );
 
     return new InstanceImpl(result.instanceId, this.fetcher);

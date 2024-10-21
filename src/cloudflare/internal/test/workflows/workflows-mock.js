@@ -26,7 +26,7 @@ export default {
       return Response.json(
         {
           result: {
-            instanceId: data.id,
+            instanceId: data.name,
           },
         },
         {

@@ -603,8 +603,8 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), Trace::TraceEventInfo(traces));
+  KJ_IF_SOME(tracer, incomingRequest->getMetrics().getWorkerTracer()) {
+    tracer->setEventInfo(context.now(), Trace::TraceEventInfo(traces));
   }
 
   // Add the actual JS as a wait until because the handler may be an event listener which can't

@@ -1602,14 +1602,11 @@ void RpcSerializerExternalHander::serializeFunction(
 // call of an RPC session.
 class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 public:
-  EntrypointJsRpcTarget(IoContext& ioCtx,
-      kj::Maybe<kj::StringPtr> entrypointName,
-      kj::Maybe<kj::Own<WorkerTracer>> tracer)
+  EntrypointJsRpcTarget(IoContext& ioCtx, kj::Maybe<kj::StringPtr> entrypointName)
       : JsRpcTargetBase(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
-        entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
-        tracer(kj::mv(tracer)) {}
+        entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
@@ -1647,7 +1644,6 @@ public:
 
 private:
   kj::Maybe<kj::String> entrypointName;
-  kj::Maybe<kj::Own<WorkerTracer>> tracer;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
@@ -1670,8 +1666,8 @@ private:
   }
 
   void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
-    KJ_IF_SOME(t, tracer) {
-      t->setEventInfo(ioctx.now(), Trace::JsRpcEventInfo(kj::str(methodName)));
+    KJ_IF_SOME(tracer, ioctx.getMetrics().getWorkerTracer()) {
+      tracer->setEventInfo(ioctx.now(), Trace::JsRpcEventInfo(kj::str(methodName)));
     }
   }
 };
@@ -1725,8 +1721,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName,
-                                            mapAddRef(incomingRequest->getWorkerTracer())),
+  capFulfiller->fulfill(capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName),
       kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   KJ_DEFER({

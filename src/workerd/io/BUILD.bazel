@@ -130,6 +130,9 @@ wd_cc_library(
         "actor-sqlite.h",
         "actor-storage.h",
     ],
+    implementation_deps = [
+        "@sqlite3",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-storage_capnp",

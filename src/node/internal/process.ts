@@ -92,9 +92,12 @@ export function exit(code: number) {
   utilImpl.processExitImpl(code);
 }
 
+export const platform = utilImpl.processPlatform;
+
 export default {
   nextTick,
   env,
   exit,
   getBuiltinModule,
+  platform,
 };

@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde_json",
+    name = "libc",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -34,24 +34,20 @@ rust_library(
         "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2015",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.128",
+    version = "0.2.161",
     deps = [
-        "@crates_vendor__itoa-1.0.11//:itoa",
-        "@crates_vendor__memchr-2.7.4//:memchr",
-        "@crates_vendor__ryu-1.0.18//:ryu",
-        "@crates_vendor__serde-1.0.210//:serde",
-        "@crates_vendor__serde_json-1.0.128//:build_script_build",
+        "@crates_vendor__libc-0.2.161//:build_script_build",
     ],
 )
 
@@ -92,19 +88,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "serde_json",
+    edition = "2015",
+    pkg_name = "libc",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.128",
+    version = "0.2.161",
     visibility = ["//visibility:private"],
 )
 

@@ -9,6 +9,8 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/util/sentry.h>
 
+#include <sqlite3.h>
+
 #include <algorithm>
 
 namespace workerd {
@@ -646,6 +648,21 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   //   gate is not blocked by `allowUnconfirmed` writes. At present we haven't actually
   //   implemented `allowUnconfirmed` yet.
   return outputGate.wait();
+}
+
+void ActorSqlite::TxnCommitRegulator::onError(
+    kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const {
+  KJ_IF_SOME(c, sqliteErrorCode) {
+    if (c == SQLITE_CONSTRAINT) {
+      JSG_ASSERT(false, Error,
+          "Durable Object was reset and rolled back to its last known good state because the "
+          "application left the database in a state where constraints were violated: ",
+          message);
+    }
+  }
+
+  // For any other type of error, fall back to the default behavior (throwing a non-JSG exception)
+  // as we don't know for sure that the problem is the application's fault.
 }
 
 const ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};

@@ -2,11 +2,11 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://github.com/capnproto/capnproto/tarball/371a221a8708abb2ff36c09bc3ab792170fd07bd"
-STRIP_PREFIX = "capnproto-capnproto-371a221/c++"
-SHA256 = "85e523a85df19d578a5f025ba8114d5e1439fffafe9a4fc0f72714bc85b2380d"
+URL = "https://github.com/capnproto/capnproto/tarball/3c849db4caa127f75fefcfdc9e7105c8a62cbed0"
+STRIP_PREFIX = "capnproto-capnproto-3c849db/c++"
+SHA256 = "acc108b7cb8d3ef6fd37da19529b5a97940e49c75676bb3c8749e32478628265"
 TYPE = "tgz"
-COMMIT = "371a221a8708abb2ff36c09bc3ab792170fd07bd"
+COMMIT = "3c849db4caa127f75fefcfdc9e7105c8a62cbed0"
 
 def dep_capnp_cpp():
     http_archive(

@@ -359,7 +359,7 @@ TestFixture::TestFixture(SetupParams&& params)
       auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
                                 ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
         return kj::heap<ActorCache>(
-            kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
+            server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
       };
       auto makeStorage =
           [](jsg::Lock& js, const Worker::Api& api,
@@ -410,7 +410,7 @@ kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
       threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(*context),
-      kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>(), nullptr);
+      kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>());
   incomingRequest->delivered();
   return incomingRequest;
 }

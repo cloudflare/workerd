@@ -735,6 +735,10 @@ kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestoreBookmark(kj::S
   return cache->onNextSessionRestoreBookmark(bookmark);
 }
 
+kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
+  return cache->waitForBookmark(bookmark);
+}
+
 ActorCacheOps& DurableObjectTransaction::getCache(OpName op) {
   JSG_REQUIRE(!rolledBack, Error, kj::str("Cannot ", op, " on rolled back transaction"));
   auto& result = *JSG_REQUIRE_NONNULL(cacheTxn, Error,

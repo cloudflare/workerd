@@ -5,16 +5,12 @@
     "strict": true,
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "outDir": "dist",
     "sourceMap": true,
-    "baseUrl": ".",
-    "rootDir": ".",
     "paths": {
       "@workerd/*": ["../../bazel-bin/src/workerd/*"]
     },
-    "checkJs": true,
-    "allowJs": true,
     "composite": true,
+    "declaration": true,
     "skipLibCheck": true
   },
   "include": ["**/*.ts"],

@@ -90,8 +90,16 @@ private:
   SqliteKv kv;
   SqliteMetadata metadata;
 
+  // Define a SqliteDatabase::Regulator that is similar to TRUSTED but turns certain SQLite errors
+  // into application errors as appropriate when committing an implicit transaction.
+  class TxnCommitRegulator: public SqliteDatabase::Regulator {
+  public:
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const;
+  };
+  static constexpr TxnCommitRegulator TRUSTED_TXN_COMMIT;
+
   SqliteDatabase::Statement beginTxn = db->prepare("BEGIN TRANSACTION");
-  SqliteDatabase::Statement commitTxn = db->prepare("COMMIT TRANSACTION");
+  SqliteDatabase::Statement commitTxn = db->prepare(TRUSTED_TXN_COMMIT, "COMMIT TRANSACTION");
 
   kj::Maybe<kj::Exception> broken;
 

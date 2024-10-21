@@ -530,8 +530,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     }
   }
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), Trace::QueueEventInfo(kj::mv(queueName), batchSize));
+  KJ_IF_SOME(tracer, incomingRequest->getMetrics().getWorkerTracer()) {
+    tracer->setEventInfo(context.now(), Trace::QueueEventInfo(kj::mv(queueName), batchSize));
   }
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
