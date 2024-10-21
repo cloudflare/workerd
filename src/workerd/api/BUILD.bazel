@@ -1,4 +1,3 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -517,21 +516,10 @@ wd_test(
     data = ["tests/js-rpc-test.js"],
 )
 
-ts_project(
-    name = "http-test@ts_project",
-    srcs = ["http-test-ts.ts"],
-    composite = True,
-    # The declarations here are not being used anywhere, but this is needed due to https://github.com/aspect-build/rules_ts/issues/128
-    declaration = True,
-    source_map = True,
-    tsconfig = "tsconfig.json",
-    deps = ["//src/node:node.capnp@tsproject"],
-)
-
 wd_test(
     src = "http-test-ts.ts-wd-test",
     args = ["--experimental"],
-    data = ["http-test-ts.js"],
+    data = ["http-test-ts.ts"],
 )
 
 wd_test(

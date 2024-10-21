@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "0.36.0"
-URL = "https://api.github.com/repos/bazelbuild/rules_python/tarball/0.36.0"
-STRIP_PREFIX = "bazelbuild-rules_python-387c2f6"
-SHA256 = "6d895b4acb68b89d0a97bb0079513724e753acf0185a55fbb6e1a76837a85d18"
+TAG_NAME = "0.37.0"
+URL = "https://api.github.com/repos/bazelbuild/rules_python/tarball/0.37.0"
+STRIP_PREFIX = "bazelbuild-rules_python-0c0492d"
+SHA256 = "442740dfce802db482633d11302ef0894c2d8641c988aa1aa8f129acccdee2be"
 TYPE = "tgz"
 
 def dep_rules_python():

@@ -28,6 +28,7 @@ def wd_test(
         name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".gpu-wd-test").removesuffix(".ts-wd-test")
 
     if len(ts_srcs) != 0:
+        # Generated declarations are currently not being used, but required based on https://github.com/aspect-build/rules_ts/issues/719
         # TODO When TypeScript 5.6 comes out use noCheck so the test fails throwing a type error.
         ts_project(
             name = name + "@ts_project",
@@ -36,6 +37,7 @@ def wd_test(
             allow_js = True,
             source_map = True,
             composite = True,
+            declaration = True,
             deps = ["//src/node:node.capnp@tsproject"],
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
