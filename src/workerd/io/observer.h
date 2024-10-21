@@ -107,10 +107,12 @@ public:
     return kj::none;
   }
 
-  virtual void addedContextTask() {}
-  virtual void finishedContextTask() {}
-  virtual void addedWaitUntilTask() {}
-  virtual void finishedWaitUntilTask() {}
+  virtual kj::Own<void> addedContextTask() {
+    return kj::Own<void>();
+  }
+  virtual kj::Own<void> addedWaitUntilTask() {
+    return kj::Own<void>();
+  }
 
   virtual void setFailedOpen(bool value) {}
 
