@@ -6,7 +6,7 @@ export default {
   async fetch(request, env, ctx) {
     const data = await request.json();
 
-    if (request.url.includes('/get') && request.method === 'POST') {
+    if (request.url.includes('/getById') && request.method === 'POST') {
       return Response.json(
         {
           result: {

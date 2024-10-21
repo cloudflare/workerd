@@ -14,23 +14,32 @@ declare abstract class Workflow {
    * @param id Id for the instance of this Workflow
    * @returns A promise that resolves with a handle for the Instance
    */
-  public get(id: string): Promise<Instance>;
+  public getById(id: string): Promise<WorkflowInstance>;
+
+  /**
+   * Get a handle to an existing instance of the Workflow.
+   * @param name Name for the instance of this Workflow
+   * @returns A promise that resolves with a handle for the Instance
+   */
+  public getByName(name: string): Promise<WorkflowInstance>;
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
-   * @param options optional fields to customize the instance creation
+   * @param options Options when creating an instance including name and params
    * @returns A promise that resolves with a handle for the Instance
    */
-  public create(options?: WorkflowInstanceCreateOptions): Promise<Instance>;
+  public create(
+    options?: WorkflowInstanceCreateOptions
+  ): Promise<WorkflowInstance>;
 }
 
 interface WorkflowInstanceCreateOptions {
   /**
-   * Name to create the instance of this Workflow with - it should always be unique
+   * A name for your Workflow instance. Must be unique within the Workflow.
    */
   name?: string;
   /**
-   * The payload to send over to this instance, this is optional since you might need to pass params into the instance
+   * The event payload the Workflow instance is triggered with
    */
   params?: unknown;
 }
@@ -55,7 +64,7 @@ interface WorkflowError {
   message: string;
 }
 
-declare abstract class Instance {
+declare abstract class WorkflowInstance {
   public id: string;
 
   /**
@@ -69,9 +78,9 @@ declare abstract class Instance {
   public resume(): Promise<void>;
 
   /**
-   * Abort the instance. If it is errored, terminated or complete, an error will be thrown.
+   * Terminate the instance. If it is errored, terminated or complete, an error will be thrown.
    */
-  public abort(): Promise<void>;
+  public terminate(): Promise<void>;
 
   /**
    * Restart the instance.
