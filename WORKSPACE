@@ -127,6 +127,13 @@ git_repository(
 )
 
 git_repository(
+    name = "fast_float",
+    build_file_content = "exports_files(glob([\"**\"]))",
+    commit = "d7417618f93d2c47e9bbde561510f9fc8bafe003",
+    remote = "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git",
+)
+
+git_repository(
     name = "fp16",
     build_file_content = "exports_files(glob([\"**\"]))",
     commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
@@ -272,7 +279,7 @@ esbuild_register_toolchains(
 
 http_archive(
     name = "v8",
-    integrity = "sha256-OTr3bwOCu50VAtMUd7d1kZXIkT1OoF9+zo9g3E7Vyvo=",
+    integrity = "sha256-2jQHW96t3jpEsjOlv9yyjgUem3kKNnpDAIDR4PPFSnw=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -294,9 +301,10 @@ http_archive(
         "//:patches/v8/0017-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
         "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
         "//:patches/v8/0019-Implement-cross-request-context-promise-resolve-hand.patch",
+        "//:patches/v8/0020-Modify-where-to-look-for-fast_float-dependency.patch",
     ],
-    strip_prefix = "v8-12.9.202.27",
-    url = "https://github.com/v8/v8/archive/refs/tags/12.9.202.27.tar.gz",
+    strip_prefix = "v8-13.0.245.16",
+    url = "https://github.com/v8/v8/archive/refs/tags/13.0.245.16.tar.gz",
 )
 
 git_repository(
