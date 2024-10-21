@@ -1,0 +1,8 @@
+filegroup(
+    name = "wpt-test-harness",
+    srcs = glob(
+        include = ["**/*"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
