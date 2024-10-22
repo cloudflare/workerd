@@ -28,14 +28,7 @@ declare abstract class Workflow {
    * @param id Id for the instance of this Workflow
    * @returns A promise that resolves with a handle for the Instance
    */
-  public getById(id: string): Promise<WorkflowInstance>;
-
-  /**
-   * Get a handle to an existing instance of the Workflow.
-   * @param name Name for the instance of this Workflow
-   * @returns A promise that resolves with a handle for the Instance
-   */
-  public getByName(name: string): Promise<WorkflowInstance>;
+  public get(id: string): Promise<WorkflowInstance>;
 
   /**
    * Create a new instance and return a handle to it. If a provided id exists, an error will be thrown.
@@ -49,9 +42,10 @@ declare abstract class Workflow {
 
 interface WorkflowInstanceCreateOptions {
   /**
-   * A name for your Workflow instance. Must be unique within the Workflow.
+   * An id for your Workflow instance. Must be unique within the Workflow.
+   * This is automatically generated if not passed in.
    */
-  name?: string;
+  id?: string;
   /**
    * The event payload the Workflow instance is triggered with
    */
