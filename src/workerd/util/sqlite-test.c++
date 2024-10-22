@@ -1076,5 +1076,205 @@ KJ_TEST("SQLite onRollback") {
   }
 }
 
+KJ_TEST("SQLite prepareMulti") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
+    CREATE TABLE IF NOT EXISTS things (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value INTEGER
+    );
+    INSERT INTO things(value) VALUES (123);
+    INSERT INTO things(value) VALUES (456);
+    INSERT INTO things(value) VALUES (789);
+    SELECT id, value FROM things;
+  )"));
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    // Re-running the statement inserted duplicates, so we'll see those in the results.
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 4);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 5);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 6);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+
+  // Test resetting the database, which will force re-parsing each statement.
+  db.reset();
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+}
+
+KJ_TEST("SQLite prepareMulti with failure") {
+  // Test running a multi-line prepared statement that fails in the middle.
+
+  // TODO(soon): Currently the failure does not roll back previous lines, but we should probably
+  //   change that so it does. If/when we do that, this test will have to get more complicated:
+  //   we'll need a prepared statement that fails on one call and then succeeds on a later call,
+  //   so that we can figure out whether duplicate statements were added to the prelude, which
+  //   is the bug being checked for here.
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
+    CREATE TABLE IF NOT EXISTS things (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value INTEGER
+    );
+    INSERT INTO things(value) VALUES (123);
+    INSERT INTO things(id, value) VALUES (1, 456);  -- fails, duplicate primary key
+  )"));
+
+  KJ_EXPECT_THROW_MESSAGE("SQLITE_CONSTRAINT", stmt.run());
+  KJ_EXPECT_THROW_MESSAGE("SQLITE_CONSTRAINT", stmt.run());
+  KJ_EXPECT_THROW_MESSAGE("SQLITE_CONSTRAINT", stmt.run());
+
+  // We ran the statement three times. Each time it should have inserted a new row containing
+  // `123`, before failing on the second insert. So there should be three rows. (At one point there
+  // was a bug where the successful prefix of statements would get duplicated on earch run leading
+  // to there being 1 + 2 + 3 = 6 rows here.)
+  auto query = db.run("SELECT COUNT(*) FROM things");
+  KJ_ASSERT(!query.isDone());
+  KJ_EXPECT(query.getInt(0) == 3);
+}
+
+KJ_TEST("SQLite prepareMulti w/BEGIN TRANSACTION") {
+  // Test running a multi-line prepared statement where a transaction state change statement
+  // appears in the middle. At one point, there was a bug causing the state not to be tracked
+  // correctly on the second (and subsequent) execution of the statement.
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
+    CREATE TABLE IF NOT EXISTS things (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value INTEGER
+    );
+    INSERT INTO things(value) VALUES (123);
+    BEGIN TRANSACTION;
+    INSERT INTO things(value) VALUES (456);
+    SELECT id, value FROM things;
+  )"));
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+
+  db.run("ROLLBACK");
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+
+  db.run("ROLLBACK");
+
+  {
+    auto query = db.run("SELECT id, value FROM things;");
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+}
+
 }  // namespace
 }  // namespace workerd
