@@ -206,7 +206,7 @@ public:
   // ].filter((test) => URL.canParse(test));
   //
   static bool canParse(kj::String url, jsg::Optional<kj::String> base = kj::none);
-  static jsg::JsString createObjectURL(jsg::Lock& js, kj::OneOf<workerd::api::File, workerd::api::Blob> object);
+  static jsg::JsString createObjectURL(jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object);
   static void revokeObjectURL(jsg::Lock& js, kj::String object_url);
 
   JSG_RESOURCE_TYPE(URL) {
