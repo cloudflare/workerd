@@ -94,6 +94,25 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
+kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
+    kj::Maybe<kj::String> cfStr) {
+  auto& context = IoContext::current();
+
+  return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+    if (tracing.span.isObserved()) {
+      tracing.span.setTag("actor_id"_kjc, kj::heapString(actorId));
+    }
+
+    // Unlike in `GlobalActorOutgoingFactory`, we do not create this lazily, since our channel was
+    // already open prior to this DO starting up.
+    return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+  },
+      {.inHouse = true,
+        .wrapMetrics = true,
+        .operationName = kj::ConstString("actor_subrequest"_kjc)}));
+}
+
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
   JSG_REQUIRE(actorId.size() > 0 && actorId.size() <= 2048, TypeError,
       "Actor ID length must be in the range [1, 2048].");
