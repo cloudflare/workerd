@@ -54,4 +54,4 @@ update-rust package="full":
 
 # example: just bench mimetype
 bench path:
-  bazel run //src/workerd/tests:bench-{{path}}
+  bazel run //src/workerd/tests:bench-{{path}} -c opt

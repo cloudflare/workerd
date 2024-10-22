@@ -65,6 +65,12 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-builtin-modules",
+    srcs = ["bench-builtin-modules.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
     name = "bench-global-scope",
     srcs = ["bench-global-scope.c++"],
     deps = [":test-fixture"],
