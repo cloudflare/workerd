@@ -1324,12 +1324,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__syn-2.0.82",
-        sha256 = "83540f837a8afc019423a8edb95b52a8effe46957ee402287f4292fae35be021",
+        name = "crates_vendor__syn-2.0.85",
+        sha256 = "5023162dfcd14ef8f32034d8bcd4cc5ddc61ef7a247c024a33e24e1f24d21b56",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/syn/2.0.82/download"],
-        strip_prefix = "syn-2.0.82",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.syn-2.0.82.bazel"),
+        urls = ["https://static.crates.io/crates/syn/2.0.85/download"],
+        strip_prefix = "syn-2.0.85",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.syn-2.0.85.bazel"),
     )
 
     maybe(
@@ -1390,16 +1390,6 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/tracing/0.1.40/download"],
         strip_prefix = "tracing-0.1.40",
         build_file = Label("@workerd//deps/rust/crates:BUILD.tracing-0.1.40.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__tracing-attributes-0.1.27",
-        sha256 = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/tracing-attributes/0.1.27/download"],
-        strip_prefix = "tracing-attributes-0.1.27",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.tracing-attributes-0.1.27.bazel"),
     )
 
     maybe(

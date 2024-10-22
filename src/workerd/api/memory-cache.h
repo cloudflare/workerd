@@ -1,6 +1,5 @@
 #pragma once
 
-#include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 
@@ -11,6 +10,10 @@
 #include <kj/timer.h>
 
 #include <set>
+
+namespace workerd {
+class SpanBuilder;
+}
 
 namespace workerd::api {
 
