@@ -86,33 +86,22 @@ class WorkflowImpl {
     this.fetcher = fetcher;
   }
 
-  public async getById(id: string): Promise<WorkflowInstance> {
+  public async get(id: string): Promise<WorkflowInstance> {
     const result = await callFetcher<{
-      instanceId: string;
-      instanceName: string;
-    }>(this.fetcher, '/getById', { id });
+      id: string;
+    }>(this.fetcher, '/get', { id });
 
-    return new InstanceImpl(result.instanceId, this.fetcher);
-  }
-
-  public async getByName(name: string): Promise<WorkflowInstance> {
-    const result = await callFetcher<{
-      instanceId: string;
-      instanceName: string;
-    }>(this.fetcher, '/getByName', { name });
-
-    return new InstanceImpl(result.instanceId, this.fetcher);
+    return new InstanceImpl(result.id, this.fetcher);
   }
 
   public async create(
     options?: WorkflowInstanceCreateOptions
   ): Promise<WorkflowInstance> {
     const result = await callFetcher<{
-      instanceId: string;
-      instanceName: string;
+      id: string;
     }>(this.fetcher, '/create', options ?? {});
 
-    return new InstanceImpl(result.instanceId, this.fetcher);
+    return new InstanceImpl(result.id, this.fetcher);
   }
 }
 

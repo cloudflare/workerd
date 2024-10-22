@@ -7,8 +7,8 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "workflows-api-test.js")
         ],
-        compatibilityDate = "2024-09-02",
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityDate = "2024-10-18",
+        compatibilityFlags = ["nodejs_compat"],
         bindings = [
         (
           name = "workflow",
@@ -25,8 +25,8 @@ const unitTests :Workerd.Config = (
     ),
     ( name = "workflows-mock",
       worker = (
-        compatibilityDate = "2024-09-02",
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityDate = "2024-10-18",
+        compatibilityFlags = ["nodejs_compat"],
         modules = [
           (name = "worker", esModule = embed "workflows-mock.js")
         ],

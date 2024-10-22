@@ -6,11 +6,11 @@ export default {
   async fetch(request, env, ctx) {
     const data = await request.json();
 
-    if (request.url.includes('/getById') && request.method === 'POST') {
+    if (request.url.includes('/get') && request.method === 'POST') {
       return Response.json(
         {
           result: {
-            instanceId: data.id,
+            id: data.id,
           },
         },
         {
@@ -26,7 +26,7 @@ export default {
       return Response.json(
         {
           result: {
-            instanceId: data.name,
+            id: data.id,
           },
         },
         {
