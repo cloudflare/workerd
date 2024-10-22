@@ -29,16 +29,10 @@ rust_library(
         ],
     ),
     crate_features = [
-        "attributes",
-        "default",
         "std",
-        "tracing-attributes",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
-    proc_macro_deps = [
-        "@crates_vendor__tracing-attributes-0.1.27//:tracing_attributes",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

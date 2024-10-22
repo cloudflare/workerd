@@ -13,8 +13,9 @@ filegroup(
             "encoding.c++",
             "html-rewriter.c++",
             "hyperdrive.c++",
-            "pyodide.c++",
             "pyodide/pyodide.c++",
+            "memory-cache.c++",
+            "r2*.c++",
             "rtti.c++",
             "url.c++",
             "util.c++",
@@ -34,13 +35,43 @@ filegroup(
             "encoding.h",
             "html-rewriter.h",
             "hyperdrive.h",
+            "memory-cache.h",
+            "pyodide/pyodide.h",
             "modules.h",
+            "r2*.h",
             "rtti.h",
             "url.h",
             "util.h",
         ],
     ),
     visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "r2",
+    srcs = glob(["r2*.c++"]),
+    hdrs = glob(["r2*.h"]),
+    implementation_deps = [
+        "//src/workerd/api:r2-api_capnp",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "memory-cache",
+    srcs = ["memory-cache.c++"],
+    hdrs = ["memory-cache.h"],
+    implementation_deps = [
+        "//src/workerd/io",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/util:uuid",
+    ],
 )
 
 wd_cc_library(
@@ -56,6 +87,9 @@ wd_cc_library(
     deps = [
         ":html-rewriter",
         ":hyperdrive",
+        ":memory-cache",
+        ":pyodide",
+        ":r2",
         "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api/node",
@@ -112,7 +146,6 @@ kj_test(
     src = "pyodide/pyodide-test.c++",
     deps = [
         ":pyodide",
-        "//src/workerd/tests:test-fixture",
     ],
 )
 

@@ -50,7 +50,7 @@ rust_library(
         "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
         "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
         "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__syn-2.0.82//:syn",
+        "@crates_vendor__syn-2.0.85//:syn",
     ],
 )
 
@@ -91,6 +91,6 @@ rust_binary(
         "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
         "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
         "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__syn-2.0.82//:syn",
+        "@crates_vendor__syn-2.0.85//:syn",
     ],
 )
