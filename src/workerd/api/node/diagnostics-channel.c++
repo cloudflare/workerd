@@ -37,7 +37,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
         Error,
         "Diagnostic events cannot be published with SharedArrayBuffer or "
         "transferred ArrayBuffer instances");
-    tracer->addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));
+    tracer.addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));
   }
 }
 

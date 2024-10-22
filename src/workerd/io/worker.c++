@@ -139,7 +139,7 @@ void sendExceptionToInspector(jsg::Lock& js,
 
 void addExceptionToTrace(jsg::Lock& js,
     IoContext& ioContext,
-    kj::Rc<WorkerTracer>& tracer,
+    WorkerTracer& tracer,
     UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -214,7 +214,7 @@ void addExceptionToTrace(jsg::Lock& js,
   }
 
   // TODO(someday): Limit size of exception content?
-  tracer->addException(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
+  tracer.addException(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
 void reportStartupError(kj::StringPtr id,
@@ -1842,7 +1842,7 @@ void Worker::handleLog(jsg::Lock& js,
     auto& ioContext = IoContext::current();
     KJ_IF_SOME(tracer, ioContext.getMetrics().getWorkerTracer()) {
       auto timestamp = ioContext.now();
-      tracer->log(timestamp, level, message());
+      tracer.log(timestamp, level, message());
     }
   }
 
