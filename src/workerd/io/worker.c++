@@ -139,7 +139,7 @@ void sendExceptionToInspector(jsg::Lock& js,
 
 void addExceptionToTrace(jsg::Lock& js,
     IoContext& ioContext,
-    kj::Rc<WorkerTracer>& tracer,
+    WorkerTracer& tracer,
     UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -214,7 +214,7 @@ void addExceptionToTrace(jsg::Lock& js,
   }
 
   // TODO(someday): Limit size of exception content?
-  tracer->addException(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
+  tracer.addException(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
 void reportStartupError(kj::StringPtr id,
@@ -1047,7 +1047,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         // Only add exception to trace when running within an I/O context with a tracer.
         if (IoContext::hasCurrent()) {
           auto& ioContext = IoContext::current();
-          KJ_IF_SOME(tracer, ioContext.getMetrics().getWorkerTracer()) {
+          KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
             addExceptionToTrace(js, ioContext, tracer, UncaughtExceptionSource::REQUEST_HANDLER,
                 error, api->getErrorInterfaceTypeHandler(js));
           }
@@ -1840,9 +1840,9 @@ void Worker::handleLog(jsg::Lock& js,
   // Only check tracing if console.log() was not invoked at the top level.
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
-    KJ_IF_SOME(tracer, ioContext.getMetrics().getWorkerTracer()) {
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
-      tracer->log(timestamp, level, message());
+      tracer.log(timestamp, level, message());
     }
   }
 
@@ -2039,7 +2039,7 @@ void Worker::Lock::logUncaughtException(
   // Only add exception to trace when running within an I/O context with a tracer.
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
-    KJ_IF_SOME(tracer, ioContext.getMetrics().getWorkerTracer()) {
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
         addExceptionToTrace(impl->inner, ioContext, tracer, source, exception,
             worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));

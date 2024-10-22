@@ -603,8 +603,8 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
-  KJ_IF_SOME(tracer, incomingRequest->getMetrics().getWorkerTracer()) {
-    tracer->setEventInfo(context.now(), Trace::TraceEventInfo(traces));
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(context.now(), Trace::TraceEventInfo(traces));
   }
 
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));

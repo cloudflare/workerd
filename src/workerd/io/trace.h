@@ -347,7 +347,7 @@ public:
   kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
 
   // Makes a tracer for a worker stage.
-  kj::Rc<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+  kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
       ExecutionModel executionModel,
       kj::Maybe<kj::String> scriptId,
       kj::Maybe<kj::String> stableId,
