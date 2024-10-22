@@ -43,9 +43,6 @@ jobs:
           - os:     { name: linux, image: ubuntu-20.04 }
             config: { suffix: -asan }
           # Windows has a custom non-debug bazel config.
-          # As of 7.2.1 support for Bazel remote cache BwoB is broken on Windows, likely due to
-          # disk I/O race conditions causing permission denied errors (this also happened in
-          # previous versions). Use remote_download_all for now.
           - os:     { name : windows, image : windows-2022 }
             config: { suffix: '' }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
