@@ -253,7 +253,10 @@ public:
     JSG_METHOD(getCurrentBookmark);
     JSG_METHOD(getBookmarkForTime);
     JSG_METHOD(onNextSessionRestoreBookmark);
-    JSG_METHOD(waitForBookmark);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(waitForBookmark);
+    }
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
