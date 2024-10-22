@@ -131,26 +131,6 @@ jsg::JsValue SqlStorage::wrapSqlValue(jsg::Lock& js, SqlValue value) {
   }
 }
 
-jsg::JsObject SqlStorage::wrapSqlRow(jsg::Lock& js, SqlRow row) {
-  return jsg::JsObject(js.withinHandleScope([&]() -> v8::Local<v8::Object> {
-    jsg::JsObject result = js.obj();
-    for (auto& field: row.fields) {
-      result.set(js, field.name, wrapSqlValue(js, kj::mv(field.value)));
-    }
-    return result;
-  }));
-}
-
-jsg::JsArray SqlStorage::wrapSqlRowRaw(jsg::Lock& js, kj::Array<SqlValue> row) {
-  return jsg::JsArray(js.withinHandleScope([&]() -> v8::Local<v8::Array> {
-    v8::LocalVector<v8::Value> values(js.v8Isolate);
-    for (auto& field: row) {
-      values.push_back(wrapSqlValue(js, kj::mv(field)));
-    }
-    return v8::Array::New(js.v8Isolate, values.data(), values.size());
-  }));
-}
-
 SqlStorage::Cursor::State::State(SqliteDatabase& db,
     SqliteDatabase::Regulator& regulator,
     kj::StringPtr sqlCode,
@@ -228,7 +208,7 @@ jsg::JsArray SqlStorage::Cursor::toArray(jsg::Lock& js) {
   for (;;) {
     auto maybeRow = rowIteratorNext(js, self);
     KJ_IF_SOME(row, maybeRow) {
-      results.push_back(wrapSqlRow(js, kj::mv(row)));
+      results.push_back(row);
     } else {
       break;
     }
@@ -243,9 +223,8 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
   }
 
   auto self = JSG_THIS;
-  auto row = JSG_REQUIRE_NONNULL(rowIteratorNext(js, self), Error,
+  auto result = JSG_REQUIRE_NONNULL(rowIteratorNext(js, self), Error,
       "Expected exactly one result from SQL query, but got no results.");
-  auto result = wrapSqlRow(js, kj::mv(row));
 
   // Manually grab the query, check that there are no more results, and clean it up.
   auto& query = KJ_ASSERT_NONNULL(state)->query;
@@ -272,17 +251,18 @@ jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
 
-kj::Maybe<SqlStorage::SqlRow> SqlStorage::Cursor::rowIteratorNext(
-    jsg::Lock& js, jsg::Ref<Cursor>& obj) {
+kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
-  return iteratorImpl(js, obj, [&](State& state, uint i, SqlValue&& value) {
-    return SqlRow::Field{
-      // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
-      // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
-      // which would be relatively slower.
-      .name = names[i].getHandle(js),
-      .value = kj::mv(value)};
-  }).map([&](kj::Array<SqlRow::Field>&& fields) { return SqlRow{.fields = kj::mv(fields)}; });
+  KJ_IF_SOME(values, iteratorImpl(js, obj)) {
+    jsg::JsObject result = js.obj();
+    KJ_ASSERT(names.size() == values.size());
+    for (auto i: kj::zeroTo(names.size())) {
+      result.set(js, names[i].getHandle(js), jsg::JsValue(values[i]));
+    }
+    return result;
+  } else {
+    return kj::none;
+  }
 }
 
 jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
@@ -301,18 +281,16 @@ kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Loc
   }
 }
 
-kj::Maybe<kj::Array<SqlStorage::SqlValue>> SqlStorage::Cursor::rawIteratorNext(
-    jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  return iteratorImpl(
-      js, obj, [&](State& state, uint i, SqlValue&& value) { return kj::mv(value); });
+kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
+  KJ_IF_SOME(values, iteratorImpl(js, obj)) {
+    return jsg::JsArray(v8::Array::New(js.v8Isolate, values.data(), values.size()));
+  } else {
+    return kj::none;
+  }
 }
 
-template <typename Func>
-auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
-    -> kj::Maybe<
-        kj::Array<decltype(func(kj::instance<State&>(), uint(), kj::instance<SqlValue&&>()))>> {
-  using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<SqlValue&&>()));
-
+kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
+    jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto& state = *KJ_UNWRAP_OR(obj->state, {
     if (obj->canceled) {
       JSG_FAIL_REQUIRE(Error,
@@ -344,8 +322,10 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
     return kj::none;
   }
 
-  auto results = kj::heapArrayBuilder<Element>(query.columnCount());
-  for (auto i: kj::zeroTo(results.capacity())) {
+  auto n = query.columnCount();
+  v8::LocalVector<v8::Value> results(js.v8Isolate);
+  results.reserve(n);
+  for (auto i: kj::zeroTo(n)) {
     SqlValue value;
     KJ_SWITCH_ONEOF(query.getValue(i)) {
       KJ_CASE_ONEOF(data, kj::ArrayPtr<const byte>) {
@@ -367,9 +347,9 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
         // leave value null
       }
     }
-    results.add(func(state, i, kj::mv(value)));
+    results.push_back(wrapSqlValue(js, kj::mv(value)));
   }
-  return results.finish();
+  return kj::mv(results);
 }
 
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
