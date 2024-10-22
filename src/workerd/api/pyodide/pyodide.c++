@@ -268,6 +268,9 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
             i += 3;  // skip start quotes.
             // skip until terminating quotes.
             while (i + 2 < file.size() && file[i + 1] != quote && file[i + 2] != quote) {
+              if (file[i] == quote) {
+                i++;
+              }
               i += skipUntil(file, {quote}, i);
             }
             i += 3;  // skip terminating quotes.
@@ -277,6 +280,9 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
             i += 3;  // skip `"\<NL>`
             // skip until quote, but ignore `\"`.
             while (file[i] != quote && file[i - 1] != '\\') {
+              if (file[i] == quote) {
+                i++;
+              }
               i += skipUntil(file, {quote}, i);
             }
             i += 1;  // skip quote.

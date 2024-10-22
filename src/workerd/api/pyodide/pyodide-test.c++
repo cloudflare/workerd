@@ -187,5 +187,14 @@ import openai)SCRIPT"));
   KJ_REQUIRE(result[2] == "openai");
 }
 
+KJ_TEST("quote in multiline string") {
+  auto files = kj::heapArrayBuilder<kj::String>(1);
+  files.add(kj::str(R"SCRIPT(temp = """
+w["h
+""")SCRIPT"));
+  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  KJ_REQUIRE(result.size() == 0);
+}
+
 }  // namespace
 }  // namespace workerd::api
