@@ -53,7 +53,8 @@ bool URL::canParse(kj::String url, jsg::Optional<kj::String> maybeBase) {
   return jsg::Url::canParse(url, maybeBase.map([](kj::String& str) { return str.asPtr(); }));
 }
 
-jsg::JsString URL::createObjectURL(jsg::Lock& js, kj::OneOf<File, Blob> object) {
+jsg::JsString URL::createObjectURL(
+    jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object) {
   // TODO(soon): Implement this
   JSG_FAIL_REQUIRE(Error, "URL.createObjectURL() is not implemented"_kj);
 }
