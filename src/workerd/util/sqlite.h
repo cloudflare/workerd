@@ -123,7 +123,7 @@ public:
   static constexpr Regulator TRUSTED;
 
   // Prepares the given SQL code as a persistent statement that can be used across several queries.
-  // Don't use this for one-off queries; pass the code to the Query constructor.
+  // Don't use this for one-off queries; use run() instead.
   Statement prepare(const Regulator& regulator, kj::StringPtr sqlCode);
 
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
