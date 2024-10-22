@@ -207,6 +207,15 @@ jobs:
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi
+      - name: Upload build statistics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os.name }}${{ matrix.config.suffix }}-bazel-profile
+          path: |
+            build.bazel-profile
+            test.bazel-profile
+            bazel-out/x64_windows-opt/bin/external/v8/_objs/v8_icu/embedded.obj.params
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
