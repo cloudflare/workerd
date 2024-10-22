@@ -53,6 +53,17 @@ bool URL::canParse(kj::String url, jsg::Optional<kj::String> maybeBase) {
   return jsg::Url::canParse(url, maybeBase.map([](kj::String& str) { return str.asPtr(); }));
 }
 
+jsg::JsString URL::createObjectURL(
+    jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object) {
+  // TODO(soon): Implement this
+  JSG_FAIL_REQUIRE(Error, "URL.createObjectURL() is not implemented"_kj);
+}
+
+void URL::revokeObjectURL(jsg::Lock& js, kj::String object_url) {
+  // TODO(soon): Implement this
+  JSG_FAIL_REQUIRE(Error, "URL.revokeObjectURL() is not implemented"_kj);
+}
+
 jsg::Ref<URLSearchParams> URL::getSearchParams() {
   KJ_IF_SOME(searchParams, maybeSearchParams) {
     return searchParams.addRef();

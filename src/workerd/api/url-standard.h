@@ -6,6 +6,7 @@
 
 #include <kj/hash.h>
 #include "form-data.h"
+#include <workerd/api/blob.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -205,6 +206,8 @@ public:
   // ].filter((test) => URL.canParse(test));
   //
   static bool canParse(kj::String url, jsg::Optional<kj::String> base = kj::none);
+  static jsg::JsString createObjectURL(jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object);
+  static void revokeObjectURL(jsg::Lock& js, kj::String object_url);
 
   JSG_RESOURCE_TYPE(URL) {
     JSG_READONLY_PROTOTYPE_PROPERTY(origin, getOrigin);
@@ -223,6 +226,8 @@ public:
     JSG_METHOD_NAMED(toString, getHref);
     JSG_STATIC_METHOD(canParse);
     JSG_STATIC_METHOD(parse);
+    JSG_STATIC_METHOD(createObjectURL);
+    JSG_STATIC_METHOD(revokeObjectURL);
 
     JSG_TS_OVERRIDE(URL {
       constructor(url: string | URL, base?: string | URL);
