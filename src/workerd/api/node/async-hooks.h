@@ -57,11 +57,11 @@ public:
   static v8::Local<v8::Function> snapshot(jsg::Lock& js);
 
   inline void enterWith(jsg::Lock&, v8::Local<v8::Value>) {
-    KJ_UNIMPLEMENTED("asyncLocalStorage.enterWith() is not implemented");
+    JSG_FAIL_REQUIRE(Error, "asyncLocalStorage.enterWith() is not implemented");
   }
 
   inline void disable(jsg::Lock&) {
-    KJ_UNIMPLEMENTED("asyncLocalStorage.disable() is not implemented");
+    JSG_FAIL_REQUIRE(Error, "asyncLocalStorage.disable() is not implemented");
   }
 
   JSG_RESOURCE_TYPE(AsyncLocalStorage) {
