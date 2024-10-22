@@ -74,7 +74,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   auto eventParameters = consumeParams();
 
-  KJ_IF_SOME(t, incomingRequest->getMetrics().getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     Trace::HibernatableWebSocketEventInfo::Type type =
         [&]() -> Trace::HibernatableWebSocketEventInfo::Type {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {

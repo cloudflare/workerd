@@ -52,6 +52,7 @@ public:
       kj::Own<RequestObserver> metrics,
       kj::TaskSet& waitUntilTasks,
       bool tunnelExceptions,
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
       kj::Maybe<kj::String> cfBlobJson);
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -94,7 +95,8 @@ private:
       kj::Own<LimitEnforcer> limitEnforcer,
       kj::Own<void> ioContextDependency,
       kj::Own<IoChannelFactory> ioChannelFactory,
-      kj::Own<RequestObserver> metrics);
+      kj::Own<RequestObserver> metrics,
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -155,12 +157,13 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Own<RequestObserver> metrics,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(cfBlobJson));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
-      kj::mv(ioChannelFactory), kj::addRef(*metrics));
+      kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -182,7 +185,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<LimitEnforcer> limitEnforcer,
     kj::Own<void> ioContextDependency,
     kj::Own<IoChannelFactory> ioChannelFactory,
-    kj::Own<RequestObserver> metrics) {
+    kj::Own<RequestObserver> metrics,
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -208,7 +212,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
   }
 
   incomingRequest = kj::heap<IoContext::IncomingRequest>(
-      kj::mv(context), kj::mv(ioChannelFactory), kj::mv(metrics))
+      kj::mv(context), kj::mv(ioChannelFactory), kj::mv(metrics), kj::mv(workerTracer))
                         .attach(kj::mv(actor));
 }
 
@@ -229,7 +233,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
 
   bool isActor = context.getActor() != kj::none;
 
-  KJ_IF_SOME(t, incomingRequest->getMetrics().getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     auto timestamp = context.now();
     kj::String cfJson;
     KJ_IF_SOME(c, cfBlobJson) {
@@ -472,7 +476,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
 
-  KJ_IF_SOME(t, context.getMetrics().getWorkerTracer()) {
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
     double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
     t.setEventInfo(context.now(), Trace::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
@@ -531,7 +535,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   // There isn't a pre-existing alarm, we can call `delivered()` (and emit metrics events).
   incomingRequest->delivered();
 
-  KJ_IF_SOME(t, incomingRequest->getMetrics().getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(context.now(), Trace::AlarmEventInfo(scheduledTime));
   }
 
@@ -711,10 +715,11 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<RequestObserver> metrics,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency), kj::mv(ioChannelFactory),
-      kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(cfBlobJson));
+      kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(workerTracer), kj::mv(cfBlobJson));
 }
 
 }  // namespace workerd

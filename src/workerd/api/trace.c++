@@ -603,7 +603,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
-  KJ_IF_SOME(t, incomingRequest->getMetrics().getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(context.now(), Trace::TraceEventInfo(traces));
   }
 

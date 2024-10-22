@@ -249,7 +249,7 @@ namespace {
       kj::str("The Node.js process.exit(", code, ") API was called. Canceling the request.");
   auto& ioContext = IoContext::current();
   // If we have a tail worker, let's report the error.
-  KJ_IF_SOME(tracer, ioContext.getMetrics().getWorkerTracer()) {
+  KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
     // Why create the error like this in tracing? Because we're adding the exception
     // to the trace and ideally we'd have the JS stack attached to it. Just using
     // JSG_KJ_EXCEPTION would not give us that, and we only want to incur the cost
