@@ -1076,5 +1076,96 @@ KJ_TEST("SQLite onRollback") {
   }
 }
 
+KJ_TEST("SQLite prepareMulti") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(R"(
+    CREATE TABLE IF NOT EXISTS things (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value INTEGER
+    );
+    INSERT INTO things(value) VALUES (123);
+    INSERT INTO things(value) VALUES (456);
+    INSERT INTO things(value) VALUES (789);
+    SELECT id, value FROM things;
+  )"));
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    // Re-running the statement inserted duplicates, so we'll see those in the results.
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 4);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 5);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 6);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+
+  // Test resetting the database, which will force re-parsing each statement.
+  db.reset();
+
+  {
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 1);
+    KJ_ASSERT(query.getInt(1) == 123);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 2);
+    KJ_ASSERT(query.getInt(1) == 456);
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.getInt(0) == 3);
+    KJ_ASSERT(query.getInt(1) == 789);
+    query.nextRow();
+
+    KJ_ASSERT(query.isDone());
+  }
+}
+
 }  // namespace
 }  // namespace workerd
