@@ -200,9 +200,15 @@ class SqlStorage::Cursor final: public jsg::Object {
 public:
   template <typename... Params>
   Cursor(Params&&... params)
-      : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
-        ownCachedColumnNames(kj::none),  // silence bogus Clang warning on next line
-        cachedColumnNames(ownCachedColumnNames.emplace()) {}
+      : ownCachedColumnNames(kj::none),  // silence bogus Clang warning on next line
+        cachedColumnNames(ownCachedColumnNames.emplace()) {
+    auto stateObj = kj::heap<State>(kj::fwd<Params>(params)...);
+    if (stateObj->query.isDone()) {
+      endQuery(*stateObj);
+    } else {
+      state = IoContext::current().addObject(kj::mv(stateObj));
+    }
+  }
   ~Cursor() noexcept(false);
 
   double getRowsRead();
@@ -254,8 +260,6 @@ private:
 
     SqliteDatabase::Query query;
 
-    bool isFirst = true;
-
     State(SqliteDatabase& db,
         SqliteDatabase::Regulator& regulator,
         kj::StringPtr sqlCode,
@@ -285,6 +289,11 @@ private:
 
   kj::Maybe<CachedColumnNames> ownCachedColumnNames;
   CachedColumnNames& cachedColumnNames;
+
+  // Invoke when `query.isDone()`, or when we want to prematurely cancel the query. This records
+  // row counters and then sets `state` to `none` to drop the query and return the prepared
+  // statement to the statement cache.
+  void endQuery(State& stateRef);
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);

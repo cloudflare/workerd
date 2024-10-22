@@ -226,20 +226,13 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
   auto result = JSG_REQUIRE_NONNULL(rowIteratorNext(js, self), Error,
       "Expected exactly one result from SQL query, but got no results.");
 
-  // Manually grab the query, check that there are no more results, and clean it up.
-  auto& query = KJ_ASSERT_NONNULL(state)->query;
-  query.nextRow();
-  bool hadOneResult = query.isDone();
-
-  // Save off row counts before the query goes away, just like iteratorImpl() would do when done.
-  rowsRead = query.getRowsRead();
-  rowsWritten = query.getRowsWritten();
-
-  // End the query even if it wasn't done.
-  state = kj::none;
-
-  JSG_REQUIRE(
-      hadOneResult, Error, "Expected exactly one result from SQL query, but got multiple results.");
+  KJ_IF_SOME(s, state) {
+    // It appears that the query had more results, otherwise we would have set `state` to `none`
+    // inside `iteratorImpl()`.
+    endQuery(*s);
+    JSG_FAIL_REQUIRE(
+        Error, "Expected exactly one result from SQL query, but got multiple results.");
+  }
 
   return result;
 }
@@ -252,8 +245,8 @@ jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js
 }
 
 kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
-  auto names = obj->cachedColumnNames.get();
   KJ_IF_SOME(values, iteratorImpl(js, obj)) {
+    auto names = obj->cachedColumnNames.get();
     jsg::JsObject result = js.obj();
     KJ_ASSERT(names.size() == values.size());
     for (auto i: kj::zeroTo(names.size())) {
@@ -303,22 +296,10 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
     }
   });
 
-  if (state.isFirst) {
-    // Little hack: We don't want to call query.nextRow() at the end of this method because it
-    // may invalidate the backing buffers of StringPtrs that we haven't returned to JS yet.
-    state.isFirst = false;
-  } else {
-    state.query.nextRow();
-  }
-
   auto& query = state.query;
 
   if (query.isDone()) {
-    // Save off row counts before the query goes away.
-    obj->rowsRead = query.getRowsRead();
-    obj->rowsWritten = query.getRowsWritten();
-    // Clean up the query proactively.
-    obj->state = kj::none;
+    obj->endQuery(state);
     return kj::none;
   }
 
@@ -349,7 +330,34 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
     }
     results.push_back(wrapSqlValue(js, kj::mv(value)));
   }
+
+  // Proactively iterate to the next row and, if it turns out the query is done, discard it. This
+  // is an optimization to make sure that the statement can be returned to the statement cache once
+  // the application has iterated over all results, even if the application fails to call next()
+  // one last time to get `{done: true}`. A common case where this could happen is if the app is
+  // expecting zero or one results, so it calls `exec(...).next()`. In the case that one result
+  // was returned, the application may not bother calling `next()` again. If we hadn't proactively
+  // iterated ahead by one, then the statement would not be returned to the cache until it was
+  // GC'd, which might prevent the cache from being effective in the meantime.
+  //
+  // Unfortunately, this does not help with the case where the application stops iterating with
+  // results still available from the cursor. There's not much we can do about that case since
+  // there's no way to know if the app might come back and try to use the cursor again later.
+  query.nextRow();
+  if (query.isDone()) {
+    obj->endQuery(state);
+  }
+
   return kj::mv(results);
+}
+
+void SqlStorage::Cursor::endQuery(State& stateRef) {
+  // Save off row counts before the query goes away.
+  rowsRead = stateRef.query.getRowsRead();
+  rowsWritten = stateRef.query.getRowsWritten();
+
+  // Clean up the query proactively.
+  state = kj::none;
 }
 
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
