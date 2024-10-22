@@ -71,7 +71,5 @@ build:ci-macOS --copt=-UDEBUG
 
 build:ci-macOS-debug --config=debug
 
-build:ci-windows-common --remote_download_all
-
-build:ci-windows --config=windows_no_dbg --config=ci-windows-common
-build:ci-windows-debug --config=debug --config=ci-windows-common
+build:ci-windows --config=windows_no_dbg
+build:ci-windows-debug --config=debug
