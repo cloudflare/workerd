@@ -7,7 +7,15 @@ import {
   fileURLToPath,
   pathToFileURL,
   toPathIfFileURL,
+  urlToHttpOptions,
 } from 'node-internal:internal_url';
+import {
+  format,
+  parse,
+  resolve,
+  resolveObject,
+  Url,
+} from 'node-internal:legacy_url';
 
 const { URL, URLSearchParams } = globalThis;
 
@@ -31,7 +39,15 @@ export {
   fileURLToPath,
   pathToFileURL,
   toPathIfFileURL,
+  urlToHttpOptions,
 } from 'node-internal:internal_url';
+export {
+  format,
+  parse,
+  resolve,
+  resolveObject,
+  Url,
+} from 'node-internal:legacy_url';
 export { URL, URLSearchParams };
 
 export default {
@@ -42,4 +58,11 @@ export default {
   fileURLToPath,
   pathToFileURL,
   toPathIfFileURL,
+  urlToHttpOptions,
+  // Legacy APIs
+  format,
+  parse,
+  resolve,
+  resolveObject,
+  Url,
 };

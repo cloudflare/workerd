@@ -16,10 +16,17 @@ public:
 
   jsg::JsString domainToUnicode(jsg::Lock& js, kj::String domain);
   jsg::JsString domainToASCII(jsg::Lock& js, kj::String domain);
+  jsg::JsString format(
+      jsg::Lock& js, kj::String href, bool hash, bool unicode, bool search, bool auth);
+  jsg::JsString toASCII(jsg::Lock& js, kj::String url);
 
   JSG_RESOURCE_TYPE(UrlUtil) {
     JSG_METHOD(domainToUnicode);
     JSG_METHOD(domainToASCII);
+
+    // Legacy APIs
+    JSG_METHOD(format);
+    JSG_METHOD(toASCII);
   }
 };
 
