@@ -245,6 +245,7 @@ genrule(
     outs = ["trimmed-supported-compatibility-date.txt"],
     cmd = "tr -d '\n' < $(location supported-compatibility-date.txt) > $(location trimmed-supported-compatibility-date.txt)",
     cmd_ps = "(Get-Content $(location supported-compatibility-date.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-supported-compatibility-date.txt) -NoNewLine -Encoding Ascii",
+    visibility = ["//visibility:public"],
 )
 
 capnp_embed(

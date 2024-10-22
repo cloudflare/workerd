@@ -1,0 +1,11 @@
+# Copyright (c) 2017-2022 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+load("//:build/wpt_test.bzl", "wpt_test")
+
+[wpt_test(
+    name = file.replace("-test.js", ""),
+    test_js = file,
+    wpt_directory = "@wpt//:{}".format(file.replace("-test.js", "")),
+) for file in glob(["*-test.js"])]
