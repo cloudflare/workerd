@@ -11,6 +11,7 @@ wd_cc_library(
     srcs = [
         "async-context.c++",
         "buffersource.c++",
+        "compile-cache.c++",
         "dom-exception.c++",
         "inspector.c++",
         "iterator.c++",
@@ -29,6 +30,7 @@ wd_cc_library(
     hdrs = [
         "async-context.h",
         "buffersource.h",
+        "compile-cache.h",
         "dom-exception.h",
         "function.h",
         "inspector.h",
