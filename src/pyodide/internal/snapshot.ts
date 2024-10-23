@@ -118,21 +118,7 @@ const PRELOADED_SO_FILES: string[] = [];
  */
 export function preloadDynamicLibs(Module: Module): void {
   let SO_FILES_TO_LOAD = SITE_PACKAGES.soFiles;
-  if (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 1) {
-    // Ideally this should be just
-    // [[ '_lzma.so' ], [ '_ssl.so' ]]
-    // but we put a few more because we messed up the memory snapshot...
-    SO_FILES_TO_LOAD = [
-      ['_hashlib.so'],
-      ['_lzma.so'],
-      ['_sqlite3.so'],
-      ['_ssl.so'],
-    ];
-  }
-  if (
-    IS_CREATING_BASELINE_SNAPSHOT ||
-    (LOADED_BASELINE_SNAPSHOT && LOADED_SNAPSHOT_VERSION === 2)
-  ) {
+  if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
     SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
   }
   try {
