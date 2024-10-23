@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde",
+    name = "windows_x86_64_gnullvm",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,30 +29,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "derive",
-        "serde_derive",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
-    proc_macro_deps = [
-        "@crates_vendor__serde_derive-1.0.210//:serde_derive",
-    ],
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=windows_x86_64_gnullvm",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.210",
+    version = "0.52.6",
     deps = [
-        "@crates_vendor__serde-1.0.210//:build_script_build",
+        "@crates_vendor__windows_x86_64_gnullvm-0.52.6//:build_script_build",
     ],
 )
 
@@ -75,12 +66,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "derive",
-        "serde_derive",
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -95,19 +80,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2018",
-    pkg_name = "serde",
+    edition = "2021",
+    pkg_name = "windows_x86_64_gnullvm",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=windows_x86_64_gnullvm",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.210",
+    version = "0.52.6",
     visibility = ["//visibility:private"],
 )
 

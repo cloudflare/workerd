@@ -6,12 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clang_ast",
+    name = "cxx",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,21 +29,41 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__cxxbridge-macro-1.0.128//:cxxbridge_macro",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=cxx",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.26",
+    version = "1.0.128",
     deps = [
-        "@crates_vendor__rustc-hash-2.0.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.213//:serde",
+        ":cxx_cc",
+        "@crates_vendor__link-cplusplus-1.0.9//:link_cplusplus",
     ],
+)
+
+# Additive BUILD file content
+cc_library(
+    name = "cxx_cc",
+    srcs = ["src/cxx.cc"],
+    hdrs = ["include/cxx.h"],
+    include_prefix = "rust",
+    includes = ["include"],
+    linkstatic = True,
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
 )

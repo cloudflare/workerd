@@ -6,16 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnpc",
+    name = "serde",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -32,31 +29,61 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "derive",
+        "serde_derive",
+        "std",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__serde_derive-1.0.213//:serde_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnpc",
+        "crate-name=serde",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.20.0",
+    version = "1.0.213",
     deps = [
-        "@crates_vendor__capnp-0.20.3//:capnp",
+        "@crates_vendor__serde-1.0.213//:build_script_build",
     ],
 )
 
-rust_binary(
-    name = "capnpc-rust__bin",
+cargo_build_script(
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
     compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
+    crate_features = [
+        "default",
+        "derive",
+        "serde_derive",
+        "std",
+    ],
+    crate_name = "build_script_build",
+    crate_root = "build.rs",
+    data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -68,58 +95,24 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_root = "src/capnpc-rust.rs",
-    edition = "2021",
+    edition = "2018",
+    pkg_name = "serde",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnpc",
+        "crate-name=serde",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.20.0",
-    deps = [
-        ":capnpc",
-        "@crates_vendor__capnp-0.20.3//:capnp",
-    ],
+    version = "1.0.213",
+    visibility = ["//visibility:private"],
 )
 
-rust_binary(
-    name = "capnpc-rust-bootstrap__bin",
-    srcs = glob(
-        include = ["**/*.rs"],
-        allow_empty = True,
-    ),
-    compile_data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
-    crate_root = "src/capnpc-rust-bootstrap.rs",
-    edition = "2021",
-    rustc_flags = [
-        "--cap-lints=allow",
-    ],
-    tags = [
-        "cargo-bazel",
-        "crate-name=capnpc",
-        "manual",
-        "noclippy",
-        "norustfmt",
-    ],
-    version = "0.20.0",
-    deps = [
-        ":capnpc",
-        "@crates_vendor__capnp-0.20.3//:capnp",
-    ],
+alias(
+    name = "build_script_build",
+    actual = ":_bs",
+    tags = ["manual"],
 )

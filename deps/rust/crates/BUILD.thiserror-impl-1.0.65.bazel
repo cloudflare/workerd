@@ -6,12 +6,12 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "clang_ast",
+rust_proc_macro(
+    name = "thiserror_impl",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,14 +35,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=thiserror-impl",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.26",
+    version = "1.0.65",
     deps = [
-        "@crates_vendor__rustc-hash-2.0.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.213//:serde",
+        "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
+        "@crates_vendor__quote-1.0.37//:quote",
+        "@crates_vendor__syn-2.0.82//:syn",
     ],
 )
