@@ -32,13 +32,6 @@ jobs:
         with:
           show-progress: false
 
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-benchmarks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
 

@@ -79,15 +79,6 @@ jobs:
         with:
           show-progress: false
           fetch-depth: ${{ inputs.fetch_depth }}
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache${{ inputs.phase}}-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-          # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
-          # ends up with a larger cache at the end when starting with an available cache entry,
-          # resulting in a snowballing cache size and cache download/upload times.
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: Setup lld on macOS
@@ -113,8 +104,9 @@ jobs:
         # support. Since we still need symlinks to compile C++ code properly, compile these targets
         # separately.
         run: |
-          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
+          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
+        if: ${{ inputs.extra_bazel_args == '--config=lint --config=ci-test' }}
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
@@ -145,7 +137,7 @@ jobs:
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
           BAZEL_REPOSITORY_CACHE=$(bazel info repository_cache)
           echo "Bazel cache usage statistics"
-          du -ms -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+          du -ms -t 1 $BAZEL_REPOSITORY_CACHE
           echo "Bazel output usage statistics"
           du -ms -t 1 $BAZEL_OUTPUT_BASE
           echo "Workspace usage statistics"
@@ -159,23 +151,12 @@ jobs:
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
 
-      - name: Drop large Bazel cache files
-        if: always()
-        # Github has a nominal 10GB of storage for all cached builds associated with a project.
-        # Drop large files (>100MB) in our cache to improve shared build cache efficiency. This is
-        # particularly helpful for asan and debug builds that produce larger executables. Also
-        # the process of saving the Bazel disk cache generates a tarball on the runners disk, and
-        # it is possible to run out of storage in that process (does not fail the workflow).
-        shell: bash
-        run: |
-          if [ -d ~/bazel-disk-cache ]; then
-            find ~/bazel-disk-cache -size +100M -type f -exec rm {} \;
-            echo "Trimmed Bazel cache usage statistics"
-            du -ms -t 1 ~/bazel-disk-cache/*
-          else
-            echo "Disk cache does not exist: ~/bazel-disk-cache"
-          fi
-
+      - name: Upload build statistics
+        if: inputs.run_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}${{ inputs.arch_name }}${{ inputs.suffix }}-bazel-profile
+          path: '*.bazel-profile.gz'
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
