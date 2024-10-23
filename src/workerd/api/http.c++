@@ -1203,7 +1203,7 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   switch (cacheMode) {
     case CacheMode::NOSTORE:
       ttl = -1;
-      obj.set(js, "cf-cache-level", js.str("byc"_kjc));
+      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
       break;
     case CacheMode::NOCACHE:
       ttl = 0;
