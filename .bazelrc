@@ -27,8 +27,12 @@ build:windows --remote_download_all
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
 
-# Enable webgpu
-build --//src/workerd/io:enable_experimental_webgpu=True
+# Enable webgpu. Merely fetching the required Dawn library and computing the repo mapping based on
+# it slows down the Windows build significantly, so only enable this on Unix and for Windows release
+# builds. This is mostly motivated by compile time constraints, we hope to lift this limitation
+# again if this Windows performance bottleneck gets fixed within Bazel.
+build:unix --//src/workerd/io:enable_experimental_webgpu=True
+build:release_windows --//src/workerd/io:enable_experimental_webgpu=True
 
 # Avoid generating duplicate runfile trees. This will become the default in a future bazel version.
 build --nolegacy_external_runfiles
