@@ -25,7 +25,11 @@ void PyodideBundleManager::setPyodideBundleData(
     kj::String version, kj::Array<unsigned char> data) const {
   auto wordArray = kj::arrayPtr(
       reinterpret_cast<const capnp::word*>(data.begin()), data.size() / sizeof(capnp::word));
-  auto messageReader = kj::heap<capnp::FlatArrayMessageReader>(wordArray).attach(kj::mv(data));
+  // We're going to reuse this in the ModuleRegistry for every Python isolate, so set the traversal
+  // limit to infinity or else eventually a new Python isolate will fail.
+  auto messageReader = kj::heap<capnp::FlatArrayMessageReader>(
+      wordArray, capnp::ReaderOptions{.traversalLimitInWords = kj::maxValue})
+                           .attach(kj::mv(data));
   auto bundle = messageReader->getRoot<jsg::Bundle>();
   bundles.lockExclusive()->insert(
       kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
