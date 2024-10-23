@@ -117,6 +117,8 @@ jobs:
         if: matrix.os.name == 'windows'
         # Set a custom output root directory to avoid long file name issues.
         run: |
+          git config --global core.symlinks true
+          git config --show-scope --show-origin core.symlinks
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
       - name: Configure download mirrors
         shell: bash

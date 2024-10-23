@@ -143,6 +143,7 @@ build:limited-dbg-info --copt='-g1' --copt="-fdebug-info-for-profiling"
 
 # Miscellaneous platform-independent options
 build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
+build --@capnp-cpp//src/capnp:gen_rust=True
 build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 build --@capnp-cpp//src/capnp:gen_rust=True
 
@@ -152,13 +153,11 @@ build --@capnp-cpp//src/capnp:gen_rust=True
 # improvement to build speed and Rust code size.
 # Using extra_rustc_flag for non-exec flags so they can be overwritten selectively.
 build --@rules_rust//:extra_rustc_flag=-Cembed-bitcode=n
-build --@rules_rust//:extra_rustc_flag=-Cpanic=abort
 build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
-build --@rules_rust//:extra_exec_rustc_flags=-C,panic=abort,-C,debug-assertions=n,-C,embed-bitcode=n
+build --@rules_rust//:extra_exec_rustc_flags=-C,debug-assertions=n,-C,embed-bitcode=n
 
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
-build:rust-debug --@rules_rust//:extra_rustc_flag=-Cpanic=unwind
 build:rust-debug --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=y
 # Use the equivalent of -g/-g2 for Rust here, this is necessary to get qualified stack traces while
 # -Zdebug-info-for-profiling is unavailable. Unlike gcc/clang, Rust defaults to -g3 otherwise.

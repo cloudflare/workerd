@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <openssl/rand.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <rust/cxx-integration/lib.rs.h>
 #include <sys/stat.h>
 
 #include <capnp/dynamic.h>
@@ -1579,6 +1580,7 @@ int main(int argc, char* argv[]) {
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
+  workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
