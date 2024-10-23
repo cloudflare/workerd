@@ -225,7 +225,7 @@ kj::Promise<void> processBody(IoContext& context, kj::Promise<DeferredProxy<void
       co_return;
     }
     // Propagate the exception up.
-    throw;
+    kj::throwFatalException(kj::mv(ex));
   }
 }
 }  // namespace
