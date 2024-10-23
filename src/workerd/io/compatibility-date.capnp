@@ -651,4 +651,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # accepted). This is a bit restrictive, even if it is in the spec. This flag modifies
   # the behavior to uppercase all methods prior to parsing to that the method is always
   # recognized if it is a known method.
+
+  pythonExternalPackages @66 :Bool
+      $compatEnableFlag("python_external_packages");
+  # Temporary flag to load Python packages from external bundle loaded at runtime.
+  #
+  # This is a compat flag so that we can opt in our test workers into it before rolling out to
+  # everyone.
 }
