@@ -6,12 +6,12 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "serde_derive",
+rust_library(
+    name = "tracing",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,29 @@ rust_proc_macro(
         ],
     ),
     crate_features = [
+        "attributes",
         "default",
+        "std",
+        "tracing-attributes",
     ],
     crate_root = "src/lib.rs",
-    edition = "2015",
+    edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__tracing-attributes-0.1.27//:tracing_attributes",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_derive",
+        "crate-name=tracing",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.210",
+    version = "0.1.40",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.88//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__syn-2.0.79//:syn",
+        "@crates_vendor__pin-project-lite-0.2.14//:pin_project_lite",
+        "@crates_vendor__tracing-core-0.1.32//:tracing_core",
     ],
 )

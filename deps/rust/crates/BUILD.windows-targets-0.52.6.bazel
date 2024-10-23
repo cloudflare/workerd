@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clang_ast",
+    name = "windows_targets",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,14 +35,19 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=windows-targets",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.26",
-    deps = [
-        "@crates_vendor__rustc-hash-2.0.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.213//:serde",
-    ],
+    version = "0.52.6",
+    deps = select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows_x86_64_msvc-0.52.6//:windows_x86_64_msvc",  # cfg(all(any(target_arch = "x86_64", target_arch = "arm64ec"), target_env = "msvc", not(windows_raw_dylib)))
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
+            "@crates_vendor__windows_x86_64_gnu-0.52.6//:windows_x86_64_gnu",  # cfg(all(target_arch = "x86_64", target_env = "gnu", not(target_abi = "llvm"), not(windows_raw_dylib)))
+        ],
+        "//conditions:default": [],
+    }),
 )
