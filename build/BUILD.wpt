@@ -5,6 +5,10 @@
 load("@workerd//:build/wpt_get_directories.bzl", "wpt_all_dirs")
 load("@workerd//:build/wpt_test.bzl", "wpt_module", "wpt_server_entrypoint")
 
+# Bazel takes a long time to fetch and configure WPT, especially on Windows. We sets up tons of
+# targets here, but it turns out that changing this to only configure targets for directories does
+# not provide a significant speedup for setting up wpt; it seems more likely that decompressing
+# the archive or writing to disk represents the bottleneck here.
 [wpt_module(
     name = dir,
 ) for dir in wpt_all_dirs()]
