@@ -53,6 +53,7 @@ wd_cc_binary(
         ":workerd-meta_capnp",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/rust/cxx-integration",
         "//src/workerd/util:autogate",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/capnp:capnpc",
