@@ -361,6 +361,10 @@ public:
   kj::Array<QueueRetryMessage> getRetryMessages() const;
   kj::Array<kj::String> getExplicitAcks() const;
 
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED("queue event not supported");
+  }
+
 private:
   kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params;
   QueueEventResult result;
