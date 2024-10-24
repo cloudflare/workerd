@@ -404,14 +404,6 @@ let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
 })();
 
 export function finishSnapshotSetup(pyodide: Pyodide): void {
-  if (LOADED_SNAPSHOT_VERSION !== undefined) {
-    // Invalidate caches if we have a snapshot because the contents of site-packages may have changed.
-    simpleRunPython(
-      pyodide._module,
-      'from importlib import invalidate_caches as f; f(); del f'
-    );
-  }
-
   // This is just here for our test suite. Ugly but just about the only way to test this.
   if (TEST_SNAPSHOT) {
     const snapshotString = new TextDecoder().decode(TEST_SNAPSHOT);

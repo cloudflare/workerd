@@ -19,6 +19,7 @@ import {
   getRandomValues,
 } from 'pyodide-internal:topLevelEntropy/lib';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
+import { simpleRunPython } from 'pyodide-internal:util';
 
 /**
  * This file is a simplified version of the Pyodide loader:
@@ -65,6 +66,12 @@ async function prepareWasmLinearMemory(Module: Module): Promise<void> {
   Module.removeRunDependency('dynlibs');
   if (SHOULD_RESTORE_SNAPSHOT) {
     restoreSnapshot(Module);
+    // Invalidate caches if we have a snapshot because the contents of site-packages
+    // may have changed.
+    simpleRunPython(
+      Module,
+      'from importlib import invalidate_caches as f; f(); del f'
+    );
   }
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   entropyAfterRuntimeInit(Module);
