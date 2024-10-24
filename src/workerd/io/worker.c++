@@ -703,8 +703,6 @@ struct Worker::Isolate::Impl {
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-      limitEnforcer.customizeIsolate(lock->v8Isolate);
-
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");

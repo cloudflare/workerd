@@ -22,6 +22,7 @@
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
@@ -111,6 +112,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     EW_WEBGPU_ISOLATE_TYPES,
 #endif
+    EW_SETUP_EMSCRIPTEN_ISOLATE_TYPES,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -134,6 +136,7 @@ struct WorkerdApi::Impl final {
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
+  kj::Maybe<api::pyodide::EmscriptenRuntime> maybeEmscriptenRuntime;
 
   class Configuration {
   public:
@@ -167,7 +170,18 @@ struct WorkerdApi::Impl final {
         jsgIsolate(
             v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
         memoryCacheProvider(memoryCacheProvider),
-        pythonConfig(pythonConfig) {}
+        pythonConfig(pythonConfig) {
+    if (featuresParam.getPythonWorkers()) {
+      jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
+        limitEnforcer.customizeIsolate(lock.v8Isolate);
+        auto context = lock.newContext<api::ServiceWorkerGlobalScope>({}, lock.v8Isolate);
+        v8::Context::Scope scope(context.getHandle(lock));
+        // Init emscripten syncronously, the python script will import setup-emscripten and
+        // call setEmscriptenModele
+        maybeEmscriptenRuntime = api::pyodide::initializeEmscriptenRuntime(lock, true);
+      });
+    }
+  }
 
   static v8::Local<v8::String> compileTextGlobal(
       JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
@@ -264,6 +278,10 @@ jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
   return jsg::JsObject(
       kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
+}
+
+const kj::Maybe<api::pyodide::EmscriptenRuntime>& WorkerdApi::getEmscriptenRuntime() const {
+  return impl->maybeEmscriptenRuntime;
 }
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,

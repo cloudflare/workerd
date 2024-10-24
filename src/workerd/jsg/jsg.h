@@ -794,12 +794,12 @@ public:
         handle(isolate, handle) {}
 
   // Get the raw underlying v8 handle.
-  v8::Local<v8::Data> getHandle(v8::Isolate* isolate) {
+  v8::Local<v8::Data> getHandle(v8::Isolate* isolate) const {
     return handle.Get(isolate);
   }
 
   // Get the raw underlying v8 handle.
-  v8::Local<v8::Data> getHandle(Lock& js);
+  v8::Local<v8::Data> getHandle(Lock& js) const;
 
   Data addRef(v8::Isolate* isolate) {
     return Data(isolate, getHandle(isolate));
@@ -865,7 +865,7 @@ public:
   }
   KJ_DISALLOW_COPY(V8Ref);
 
-  v8::Local<T> getHandle(v8::Isolate* isolate) {
+  v8::Local<T> getHandle(v8::Isolate* isolate) const {
     if constexpr (std::is_base_of<v8::Value, T>()) {
       // V8 doesn't let us cast directly from v8::Data to subtypes of v8::Value, so we're forced to
       // use this double cast... Ech.
@@ -874,7 +874,7 @@ public:
       return Data::getHandle(isolate).template As<T>();
     }
   }
-  v8::Local<T> getHandle(jsg::Lock& js);
+  v8::Local<T> getHandle(jsg::Lock& js) const;
 
   V8Ref addRef(v8::Isolate* isolate) {
     return V8Ref(isolate, getHandle(isolate));
@@ -1749,10 +1749,10 @@ public:
     return object.get();
   }
 
-  v8::Local<v8::Context> getHandle(v8::Isolate* isolate) {
+  v8::Local<v8::Context> getHandle(v8::Isolate* isolate) const {
     return handle.Get(isolate);
   }
-  v8::Local<v8::Context> getHandle(Lock& js);
+  v8::Local<v8::Context> getHandle(Lock& js) const;
 
 private:
   v8::Global<v8::Context> handle;
@@ -2780,16 +2780,16 @@ inline HashableV8Ref<T> HashableV8Ref<T>::addRef(jsg::Lock& js) {
 }
 
 template <typename T>
-inline v8::Local<T> V8Ref<T>::getHandle(jsg::Lock& js) {
+inline v8::Local<T> V8Ref<T>::getHandle(jsg::Lock& js) const {
   return getHandle(js.v8Isolate);
 }
 
-inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) {
+inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) const {
   return getHandle(js.v8Isolate);
 }
 
 template <typename T>
-inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
+inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
   return handle.Get(js.v8Isolate);
 }
 
