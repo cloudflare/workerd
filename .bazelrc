@@ -371,3 +371,6 @@ build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
 build:clang-coverage --copt="-fcoverage-mapping" --linkopt="-fcoverage-mapping"
+
+build:windows_arm64 --config=windows
+# build:windows_arm64 --extra_execution_platforms=//:arm64_windows-clang-cl

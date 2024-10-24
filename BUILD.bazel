@@ -46,6 +46,15 @@ platform(
     ],
 )
 
+platform(
+    name = "arm64_windows-clang-cl",
+    constraint_values = [
+        "@platforms//cpu:arm64",
+        "@platforms//os:windows",
+        "@bazel_tools//tools/cpp:clang-cl",
+    ],
+)
+
 # Used for cross-compilation
 platform(
     name = "macOS_x86",

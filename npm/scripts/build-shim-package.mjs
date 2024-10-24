@@ -18,6 +18,7 @@ function buildNeutralLib() {
     '@cloudflare/workerd-linux-arm64': process.env.WORKERD_VERSION,
     '@cloudflare/workerd-linux-64': process.env.WORKERD_VERSION,
     '@cloudflare/workerd-windows-64': process.env.WORKERD_VERSION,
+    '@cloudflare/workerd-windows-arm64': process.env.WORKERD_VERSION,
   };
   fs.writeFileSync(pjPath, JSON.stringify(package_json, null, 2) + '\n');
 
