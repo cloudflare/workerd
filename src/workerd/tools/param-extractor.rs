@@ -58,7 +58,7 @@ fn main() -> Result<()> {
         let file = File::open(path)?;
         let serde = match path.extension().and_then(OsStr::to_str) {
             Some("gz") => serde_json::from_reader(BufReader::new(GzDecoder::new(file))),
-            _ => serde_json::from_reader(BufReader::new(file))
+            _ => serde_json::from_reader(BufReader::new(file)),
         };
         serde.map_err(anyhow::Error::from)
     })?;
