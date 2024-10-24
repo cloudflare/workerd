@@ -185,7 +185,6 @@ function recordDsoHandles(Module: Module): DylinkInfo {
 // whose importer is not FrozenImporter or BuiltinImporter.
 //
 const SNAPSHOT_IMPORTS: string[] =
-  // @ts-ignore getSnapshotImports is a static method.
   ArtifactBundler.constructor.getSnapshotImports();
 
 /**
@@ -206,7 +205,7 @@ const SNAPSHOT_IMPORTS: string[] =
  *
  * This function returns a list of modules that have been imported.
  */
-function memorySnapshotDoImports(Module: Module): Array<string> {
+function memorySnapshotDoImports(Module: Module): string[] {
   const toImport = SNAPSHOT_IMPORTS.join(',');
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split('.', 1)[0]))
@@ -230,13 +229,12 @@ function memorySnapshotDoImports(Module: Module): Array<string> {
   // The `importedModules` list will contain all modules that have been imported, including local
   // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
   // grab them and put them into a set for fast filtering.
-  const importedModules: Array<string> =
-    // @ts-ignore filterPythonScriptImportsJs is a static method.
+  const importedModules: string[] =
     ArtifactBundler.constructor.filterPythonScriptImportsJs(
       MetadataReader.getNames(),
-      ArtifactBundler.constructor
-        // @ts-ignore parsePythonScriptImports is a static method.
-        .parsePythonScriptImports(MetadataReader.getWorkerFiles('py'))
+      ArtifactBundler.constructor.parsePythonScriptImports(
+        MetadataReader.getWorkerFiles('py')
+      )
     );
 
   const deduplicatedModules = [...new Set(importedModules)];
@@ -285,7 +283,7 @@ function makeLinearMemorySnapshot(
 
 function setUploadFunction(
   snapshot: Uint8Array,
-  importedModulesList: Array<string>
+  importedModulesList: string[]
 ): void {
   if (snapshot.constructor.name !== 'Uint8Array') {
     throw new TypeError('Expected TO_UPLOAD to be a Uint8Array');
