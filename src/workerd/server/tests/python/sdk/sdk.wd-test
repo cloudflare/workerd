@@ -11,9 +11,9 @@ const python :Workerd.Worker = (
   compatibilityFlags = ["python_workers_development", "python_external_bundle"],
 );
 
-const mock :Workerd.Worker = (
+const server :Workerd.Worker = (
   modules = [
-    (name = "mock.py", pythonModule = embed "mock.py")
+    (name = "server.py", pythonModule = embed "server.py")
   ],
   compatibilityDate = "2024-10-01",
   compatibilityFlags = ["python_workers_development", "python_external_bundle"],
@@ -25,7 +25,7 @@ const unitTests :Workerd.Config = (
       worker = .python
     ),
     ( name = "internet",
-      worker = .mock
+      worker = .server
     )
   ],
 );
