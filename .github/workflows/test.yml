@@ -54,6 +54,8 @@ jobs:
           # configurations, as we can more easily disable PDB file generation.
           # - os:     { name : windows, image : windows-2022 }
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
+          - os:     { name : windows, image : windows-2022 }
+            config: { suffix: '', bazel-args: "--config=windows_arm64 --remote_download_all" }
         exclude:
           # Skip the matrix generated Windows non-debug config to use the one added above.
           - os:     { name : windows, image : windows-2022 }

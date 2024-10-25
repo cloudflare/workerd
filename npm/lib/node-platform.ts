@@ -18,6 +18,7 @@ export const knownPackages: Record<string, string> = {
   "linux arm64 LE": "@cloudflare/workerd-linux-arm64",
   "linux x64 LE": "@cloudflare/workerd-linux-64",
   "win32 x64 LE": "@cloudflare/workerd-windows-64",
+  "win32 arm64 LE": "@cloudflare/workerd-windows-arm64",
 };
 
 const maybeExeExtension = process.platform === "win32" ? ".exe" : "";
