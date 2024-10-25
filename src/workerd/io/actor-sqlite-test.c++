@@ -94,7 +94,13 @@ struct ActorSqliteTest final {
         db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY),
         actor(kj::attachRef(db), gate, KJ_BIND_METHOD(*this, commitCallback), hooks),
         gateBrokenPromise(options.monitorOutputGate ? eagerlyReportExceptions(gate.onBroken())
-                                                    : kj::Promise<void>(kj::READY_NOW)) {}
+                                                    : kj::Promise<void>(kj::READY_NOW)) {
+    db.afterReset([this](SqliteDatabase& cbDb) {
+      KJ_ASSERT(&db == &cbDb);
+      KJ_ASSERT(actor.isCommitScheduled(),
+          "actor should have a commit scheduled during afterReset() callback");
+    });
+  }
 
   ~ActorSqliteTest() noexcept(false) {
     if (!unwindDetector.isUnwinding()) {
@@ -924,7 +930,9 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is set") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
+  KJ_ASSERT(!test.actor.isCommitScheduled());
   ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(test.actor.isCommitScheduled());
   KJ_ASSERT(results.backpressure == kj::none);
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
@@ -954,7 +962,9 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
+  KJ_ASSERT(!test.actor.isCommitScheduled());
   ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(test.actor.isCommitScheduled());
   KJ_ASSERT(results.backpressure == kj::none);
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
@@ -973,10 +983,13 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
 KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm state") {
   ActorSqliteTest test;
 
+  KJ_ASSERT(!test.actor.isCommitScheduled());
+
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
 
   ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(test.actor.isCommitScheduled());
   KJ_ASSERT(results.backpressure == kj::none);
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 

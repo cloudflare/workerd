@@ -513,15 +513,22 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
     }
   }
 
-  if (localAlarmState == kj::none && !deleteAllCommitScheduled) {
-    // If we're not going to perform a write to restore alarm state, we'll want to make sure the
-    // commit callback is called for the deleteAll().
+  if (!deleteAllCommitScheduled) {
+    // Make sure a commit callback is queued for the deleteAll().
     commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
       deleteAllCommitScheduled = false;
-      return commitCallback();
+      if (currentTxn.is<ImplicitTxn*>()) {
+        // An implicit transaction is already scheduled, so we'll count on it to perform a commit when it's
+        // done. This is particularly important for the case where deleteAll() was called while an alarm
+        // is outstanding; resetting the alarm state (below) starts an implicit transaction.
+        // We don't want to commit the deletion without that transaction.
+        return kj::READY_NOW;
+      } else {
+        return commitCallback();
+      }
     })));
     deleteAllCommitScheduled = true;
   }
