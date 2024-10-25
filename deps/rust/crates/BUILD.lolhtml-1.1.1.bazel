@@ -45,6 +45,6 @@ rust_library(
         "@crates_vendor__encoding_rs-0.8.34//:encoding_rs",
         "@crates_vendor__libc-0.2.161//:libc",
         "@crates_vendor__lol_html-2.0.0//:lol_html",
-        "@crates_vendor__thiserror-1.0.64//:thiserror",
+        "@crates_vendor__thiserror-1.0.65//:thiserror",
     ],
 )

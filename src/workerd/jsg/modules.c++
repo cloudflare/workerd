@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "compile-cache.h"
 #include "jsg.h"
-#include "promise.h"
 #include "setup.h"
 
 #include <kj/mutex.h>
@@ -12,35 +12,6 @@
 
 namespace workerd::jsg {
 namespace {
-
-// The CompileCache is used to hold cached compilation data for built-in JavaScript modules.
-//
-// Importantly, this is a process-lifetime in-memory cache that is only appropriate for
-// built-in modules.
-//
-// The memory-safety of this cache depends on the assumption that entries are never removed
-// or replaced. If things are ever changed such that entries are removed/replaced, then
-// we'd likely need to have find return an atomic refcount or something similar.
-class CompileCache {
-public:
-  void add(const void* key, std::unique_ptr<v8::ScriptCompiler::CachedData> cached) const {
-    cache.lockExclusive()->upsert(key, kj::mv(cached), [](auto&, auto&&) {});
-  }
-
-  kj::Maybe<v8::ScriptCompiler::CachedData&> find(const void* key) const {
-    return cache.lockShared()->find(key).map(
-        [](auto& data) -> v8::ScriptCompiler::CachedData& { return *data; });
-  }
-
-  static const CompileCache& get() {
-    static const CompileCache instance;
-    return instance;
-  }
-
-private:
-  // The key is the address of the static global that was compiled to produce the CachedData.
-  kj::MutexGuarded<kj::HashMap<const void*, std::unique_ptr<v8::ScriptCompiler::CachedData>>> cache;
-};
 
 // Implementation of `v8::Module::ResolveCallback`.
 v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
@@ -422,6 +393,9 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
   v8::Local<v8::String> contentStr;
+  v8::ScriptCompiler::CachedData* existingCacheData = nullptr;
+  auto compileOptions = v8::ScriptCompiler::kNoCompileOptions;
+  const auto& compileCache = CompileCache::get();
 
   if (option == ModuleInfoCompileOption::BUILTIN) {
     // TODO(later): Use of newExternalOneByteString here limits our built-in source
@@ -429,32 +403,24 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     // may need to revisit that to import built-ins as UTF-16 (two-byte).
     contentStr = jsg::newExternalOneByteString(js, content);
 
-    // TODO(bug): The cache is failing under certain conditions. Disabling this logic
-    // for now until it can be debugged.
-    // const auto& compileCache = CompileCache::get();
-    // KJ_IF_SOME(cached, compileCache.find(content.begin())) {
-    //   v8::ScriptCompiler::Source source(contentStr, origin, &cached);
-    //   v8::ScriptCompiler::CompileOptions options = v8::ScriptCompiler::kConsumeCodeCache;
-    //   KJ_DEFER(if (source.GetCachedData()->rejected) {
-    //     KJ_LOG(ERROR, kj::str("Failed to load module '", name ,"' using compile cache"));
-    //     js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: Internal error"));
-    //   });
-    //   return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
-    // }
-
-    v8::ScriptCompiler::Source source(contentStr, origin);
-    auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
-
-    auto cachedData = std::unique_ptr<v8::ScriptCompiler::CachedData>(
-        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
-    // compileCache.add(content.begin(), kj::mv(cachedData));
-    return module;
+    // We only enable compile cache for built-in modules for now.
+    KJ_IF_SOME(cached, compileCache.find(name)) {
+      compileOptions = v8::ScriptCompiler::kConsumeCodeCache;
+      existingCacheData = cached.AsCachedData().release();
+    }
+  } else {
+    contentStr = jsg::v8Str(js.v8Isolate, content);
   }
 
-  contentStr = jsg::v8Str(js.v8Isolate, content);
+  v8::ScriptCompiler::Source source(contentStr, origin, existingCacheData);
+  auto module =
+      jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));
 
-  v8::ScriptCompiler::Source source(contentStr, origin);
-  auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+  if (existingCacheData == nullptr) {
+    auto cachedData = std::shared_ptr<v8::ScriptCompiler::CachedData>(
+        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
+    compileCache.add(name, kj::mv(cachedData));
+  }
 
   return module;
 }

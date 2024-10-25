@@ -47,7 +47,7 @@ rust_proc_macro(
     deps = [
         "@crates_vendor__phf_generator-0.8.0//:phf_generator",
         "@crates_vendor__phf_shared-0.8.0//:phf_shared",
-        "@crates_vendor__proc-macro2-1.0.88//:proc_macro2",
+        "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
         "@crates_vendor__quote-1.0.37//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],

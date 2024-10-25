@@ -12,6 +12,7 @@ cc_ast_dump(
     name = "dump_api_ast",
     src = "param-names-ast.c++",
     out = "api.ast.json.gz",
+    tags = ["no-downstream"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],

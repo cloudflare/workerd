@@ -29,7 +29,7 @@ interface FS {
     mode: number
   ): FSNode<Info>;
   isFile: (mode: number) => boolean;
-  readdir: (path: string) => Array<string>;
+  readdir: (path: string) => string[];
   genericErrors: Error[];
 }
 

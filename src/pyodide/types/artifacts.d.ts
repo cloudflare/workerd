@@ -1,7 +1,16 @@
 declare namespace ArtifactBundler {
+  const constructor: {
+    getSnapshotImports(): string[];
+    filterPythonScriptImportsJs(
+      fileNames: string[],
+      imports: string[]
+    ): string[];
+    parsePythonScriptImports(fileNames: string[]): string[];
+  };
+
   type MemorySnapshotResult = {
     snapshot: Uint8Array;
-    importedModulesList: Array<string>;
+    importedModulesList: string[];
   };
 
   const hasMemorySnapshot: () => boolean;

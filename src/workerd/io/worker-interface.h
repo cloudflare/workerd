@@ -118,6 +118,9 @@ public:
         capnp::ByteStreamFactory& byteStreamFactory,
         rpc::EventDispatcher::Client dispatcher) = 0;
 
+    // The event is not supported by the target, raise an appropriate error.
+    virtual kj::Promise<Result> notSupported() = 0;
+
     // Get the type for this event for logging / metrics purposes. This is intended for use by the
     // RequestObserver. The RequestObserver implementation will define what numbers correspond to
     // what types.

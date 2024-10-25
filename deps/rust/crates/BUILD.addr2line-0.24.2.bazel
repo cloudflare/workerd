@@ -6,13 +6,16 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_binary",
+    "rust_library",
+)
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde_json",
+    name = "addr2line",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,34 +32,26 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=addr2line",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.129",
+    version = "0.24.2",
     deps = [
-        "@crates_vendor__itoa-1.0.11//:itoa",
-        "@crates_vendor__memchr-2.7.4//:memchr",
-        "@crates_vendor__ryu-1.0.18//:ryu",
-        "@crates_vendor__serde-1.0.210//:serde",
-        "@crates_vendor__serde_json-1.0.129//:build_script_build",
+        "@crates_vendor__gimli-0.31.1//:gimli",
     ],
 )
 
-cargo_build_script(
-    name = "_bs",
+rust_binary(
+    name = "addr2line__bin",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -66,7 +61,6 @@ cargo_build_script(
         allow_empty = True,
         exclude = [
             "**/* *",
-            "**/*.rs",
             ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
@@ -74,42 +68,21 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
-    edition = "2021",
-    pkg_name = "serde_json",
+    crate_root = "src/bin/addr2line.rs",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=addr2line",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.129",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = ":_bs",
-    tags = ["manual"],
+    version = "0.24.2",
+    deps = [
+        ":addr2line",
+        "@crates_vendor__gimli-0.31.1//:gimli",
+    ],
 )

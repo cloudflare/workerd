@@ -100,7 +100,6 @@ wd_cc_library(
         "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:encoding",
-        "//src/workerd/api:r2-api_capnp",
         "//src/workerd/api:url",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",

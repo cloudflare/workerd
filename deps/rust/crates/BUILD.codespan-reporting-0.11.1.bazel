@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnp",
+    name = "codespan_reporting",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,22 +28,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "alloc",
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnp",
+        "crate-name=codespan-reporting",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.20.2",
+    version = "0.11.1",
+    deps = [
+        "@crates_vendor__termcolor-1.4.1//:termcolor",
+        "@crates_vendor__unicode-width-0.1.14//:unicode_width",
+    ],
 )
