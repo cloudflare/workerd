@@ -952,6 +952,8 @@ public:
     IoContext& ctx = JSG_REQUIRE_NONNULL(
         weakIoContext->tryGet(), Error, "The destination object for this RPC no longer exists.");
 
+    ctx.getLimitEnforcer().topUpActor();
+
     // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the backing
     // object's lifetime is that of the RPC call, but in reality they are refcounted under the
     // hood. Since well be executing the call in the JS microtask queue, we have no ability to
