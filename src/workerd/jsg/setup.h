@@ -488,7 +488,7 @@ public:
         kj::String name, kj::String message, kj::Maybe<kj::String> maybeStack) override {
       return withinHandleScope([&] {
         v8::Local<v8::FunctionTemplate> tmpl =
-            jsgIsolate.wrapper->getTemplate(v8Isolate, (DOMException*)nullptr);
+            jsgIsolate.wrapper->getTemplate(v8Isolate, static_cast<DOMException*>(nullptr));
         KJ_DASSERT(!tmpl.IsEmpty());
         v8::Local<v8::Object> obj = check(tmpl->InstanceTemplate()->NewInstance(v8Context()));
         v8::Local<v8::String> stackName = str("stack"_kjc);
@@ -575,8 +575,8 @@ public:
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
-      return jsgIsolate.wrapper->newContext(
-          *this, options, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
+      return jsgIsolate.wrapper->newContext(*this, options, jsgIsolate.getObserver(),
+          static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
     }
 
     // Creates a new JavaScript "context", i.e. the global object. This is the first step to
@@ -589,7 +589,8 @@ public:
 
     void reportError(const JsValue& value) override {
       KJ_IF_SOME(domException,
-          jsgIsolate.wrapper->tryUnwrap(v8Context(), value, (DOMException*)nullptr, kj::none)) {
+          jsgIsolate.wrapper->tryUnwrap(
+              v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
         auto desc =
             kj::str("DOMException(", domException.getName(), "): ", domException.getMessage());
         jsgIsolate.reportError(*this, kj::mv(desc), value, JsMessage::create(*this, value));
