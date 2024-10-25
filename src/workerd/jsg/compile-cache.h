@@ -42,7 +42,7 @@ public:
     std::shared_ptr<void> owningPtr;
   };
 
-  void add(kj::StringPtr key, std::shared_ptr<v8::ScriptCompiler::CachedData> cached) const;
+  void add(kj::StringPtr key, v8::Local<v8::UnboundModuleScript> script) const;
   kj::Maybe<Data&> find(kj::StringPtr key) const;
 
   static const CompileCache& get() {

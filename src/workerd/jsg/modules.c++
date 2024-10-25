@@ -417,9 +417,7 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
       jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));
 
   if (existingCacheData == nullptr) {
-    auto cachedData = std::shared_ptr<v8::ScriptCompiler::CachedData>(
-        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
-    compileCache.add(name, kj::mv(cachedData));
+    compileCache.add(name, module->GetUnboundModuleScript());
   }
 
   return module;

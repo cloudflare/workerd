@@ -14,8 +14,9 @@ std::unique_ptr<v8::ScriptCompiler::CachedData> CompileCache::Data::AsCachedData
 
 // CompileCache
 
-void CompileCache::add(
-    kj::StringPtr key, std::shared_ptr<v8::ScriptCompiler::CachedData> cached) const {
+void CompileCache::add(kj::StringPtr key, v8::Local<v8::UnboundModuleScript> script) const {
+  auto cached =
+      std::shared_ptr<v8::ScriptCompiler::CachedData>(v8::ScriptCompiler::CreateCodeCache(script));
   cache.lockExclusive()->upsert(kj::str(key), Data(kj::mv(cached)), [](auto&, auto&&) {});
 }
 

@@ -71,3 +71,20 @@ run_binary(
     tool = "param_extractor_bin",
     visibility = ["//visibility:public"],
 )
+
+# This binary is used to generate compile cache for workerd.
+# This will later be used by workerd to access compile caches of JS internals.
+# NOTE: We only enable compile cache for linux at the moment.
+cc_binary(
+    name = "create_compile_cache_bin",
+    srcs = ["create-compile-cache.c++"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)

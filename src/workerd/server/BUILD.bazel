@@ -140,6 +140,7 @@ wd_cc_library(
     hdrs = [
         "v8-platform-impl.h",
     ],
+    visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
