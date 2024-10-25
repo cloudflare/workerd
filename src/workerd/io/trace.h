@@ -31,6 +31,93 @@ using kj::uint;
 typedef rpc::Trace::Log::Level LogLevel;
 typedef rpc::Trace::ExecutionModel ExecutionModel;
 
+namespace tracing {
+// A 128-bit globally unique trace identifier. This will be used for both
+// external and internal tracing. Specifically, for internal tracing, this
+// is used to represent tracing IDs for jaeger traces. For external tracing,
+// this is used for both the trace ID and invocation ID for tail workers.
+class TraceId final {
+public:
+  // A null trace ID. This is only acceptable for use in tests.
+  constexpr TraceId(decltype(nullptr)): low(0), high(0) {}
+
+  // A trace ID with the given low and high values.
+  constexpr TraceId(uint64_t low, uint64_t high): low(low), high(high) {}
+
+  constexpr TraceId(const TraceId& other) = default;
+  constexpr TraceId& operator=(const TraceId& other) = default;
+
+  constexpr TraceId(TraceId&& other): low(other.low), high(other.high) {
+    other.low = 0;
+    other.high = 0;
+  }
+
+  constexpr TraceId& operator=(TraceId&& other) {
+    low = other.low;
+    high = other.high;
+    other.low = 0;
+    other.high = 0;
+    return *this;
+  }
+
+  constexpr TraceId& operator=(decltype(nullptr)) {
+    low = 0;
+    high = 0;
+    return *this;
+  }
+
+  constexpr bool operator==(const TraceId& other) const {
+    return low == other.low && high == other.high;
+  }
+  constexpr bool operator==(decltype(nullptr)) const {
+    return low == 0 && high == 0;
+  }
+  constexpr operator bool() const {
+    return low || high;
+  }
+
+  operator kj::String() const {
+    return toGoString();
+  }
+
+  // Replicates Jaeger go library's string serialization.
+  kj::String toGoString() const;
+
+  // Replicates Jaeger go library's protobuf serialization.
+  kj::Array<byte> toProtobuf() const;
+
+  // Replicates W3C Serialization
+  kj::String toW3C() const;
+
+  // Creates a random Trace Id, optionally usig a given entropy source. If an
+  // entropy source is not given, then we fallback to using BoringSSL's RAND_bytes.
+  static TraceId fromEntropy(kj::Maybe<kj::EntropySource&> entropy = kj::none);
+
+  // Replicates Jaeger go library's string serialization.
+  static kj::Maybe<TraceId> fromGoString(kj::ArrayPtr<const char> s);
+
+  // Replicates Jaeger go library's protobuf serialization.
+  static kj::Maybe<TraceId> fromProtobuf(kj::ArrayPtr<const kj::byte> buf);
+
+  // A null trace ID. This is really only acceptable for use in tests.
+  static const TraceId nullId;
+
+  inline uint64_t getLow() const {
+    return low;
+  }
+  inline uint64_t getHigh() const {
+    return high;
+  }
+
+private:
+  uint64_t low = 0;
+  uint64_t high = 0;
+};
+constexpr TraceId TraceId::nullId = nullptr;
+
+kj::String KJ_STRINGIFY(const TraceId& id);
+}  // namespace tracing
+
 enum class PipelineLogLevel {
   // WARNING: This must be kept in sync with PipelineDef::LogLevel (which is not in the OSS
   //   release).
