@@ -48,7 +48,7 @@ static void v8DcheckError(const char* file, int line, const char* message) {
 class PlatformDisposer final: public kj::Disposer {
 public:
   virtual void disposeImpl(void* pointer) const override {
-    delete reinterpret_cast<v8::Platform*>(pointer);
+    delete static_cast<v8::Platform*>(pointer);
   }
 
   static const PlatformDisposer instance;
@@ -161,12 +161,12 @@ void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
 }
 
 IsolateBase& IsolateBase::from(v8::Isolate* isolate) {
-  return *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  return *static_cast<IsolateBase*>(isolate->GetData(0));
 }
 
 void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data) {
   try {
-    const auto base = reinterpret_cast<IsolateBase*>(data);
+    const auto base = static_cast<IsolateBase*>(data);
     MemoryTracker tracker(isolate, graph);
     tracker.track(base);
   } catch (...) {
@@ -230,12 +230,12 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     // We must clear the freelist in the GC prologue, not the epilogue, because when building in
     // ASAN mode, V8 will poison the objects' memory, so our attempt to clear the freelist after
     // the fact will trigger a spurious ASAN failure.
-    reinterpret_cast<HeapTracer*>(data)->clearFreelistedShims();
+    static_cast<HeapTracer*>(data)->clearFreelistedShims();
   }, this, v8::GCType::kGCTypeMarkSweepCompact);
 
   isolate->AddGCEpilogueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
-    auto& self = *reinterpret_cast<HeapTracer*>(data);
+    auto& self = *static_cast<HeapTracer*>(data);
     for (Wrappable* wrappable: self.detachLater) {
       wrappable->detachWrapper(true);
     }
@@ -262,7 +262,7 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
   auto& wrappable =
-      *reinterpret_cast<Wrappable*>(handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+      *static_cast<Wrappable*>(handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
@@ -398,7 +398,7 @@ IsolateBase::~IsolateBase() noexcept(false) {
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
-  return reinterpret_cast<IsolateBase*>(isolate->GetData(0))->opaqueTemplate.Get(isolate);
+  return static_cast<IsolateBase*>(isolate->GetData(0))->opaqueTemplate.Get(isolate);
 }
 
 void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
@@ -446,13 +446,13 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
   v8::Isolate* isolate = context->GetIsolate();
-  IsolateBase* self = reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(0));
   return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
   // Don't allow WASM unless arbitrary eval() is allowed.
-  IsolateBase* self = reinterpret_cast<IsolateBase*>(context->GetIsolate()->GetData(0));
+  IsolateBase* self = static_cast<IsolateBase*>(context->GetIsolate()->GetData(0));
   return self->evalAllowed;
 }
 
@@ -460,7 +460,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // We register this callback with V8 in order to build a mapping of code addresses to source
   // code locations, which we use when reporting stack traces during crashes.
 
-  IsolateBase* self = reinterpret_cast<IsolateBase*>(event->isolate->GetData(0));
+  IsolateBase* self = static_cast<IsolateBase*>(event->isolate->GetData(0));
   auto& codeMap = self->codeMap;
 
   // Pointer comparison between pointers not from the same array is UB so we'd better operate on
@@ -528,7 +528,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       // For our purposes, the former is strictly more useful than the latter, so we ignore
       // STATEMENT_POSITION.
       if (event->line_info.position_type == v8::JitCodeEvent::POSITION) {
-        UserData* data = reinterpret_cast<UserData*>(event->user_data);
+        UserData* data = static_cast<UserData*>(event->user_data);
         data->mapping.add(CodeBlockInfo::PositionMapping{
           static_cast<uint>(event->line_info.offset), static_cast<uint>(event->line_info.pos)});
       }
@@ -550,7 +550,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       auto& info = codeMap.findOrCreate(
           startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
 
-      UserData* data = reinterpret_cast<UserData*>(event->user_data);
+      UserData* data = static_cast<UserData*>(event->user_data);
       info.mapping = data->mapping.releaseAsArray();
       delete data;
 
@@ -584,7 +584,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   };
 
   v8::RegisterState state;
-  auto& mcontext = reinterpret_cast<ucontext_t*>(ucontext)->uc_mcontext;
+  auto& mcontext = static_cast<ucontext_t*>(ucontext)->uc_mcontext;
 #if defined(__APPLE__) && defined(__x86_64__)
   state.pc = reinterpret_cast<void*>(mcontext->__ss.__rip);
   state.sp = reinterpret_cast<void*>(mcontext->__ss.__rsp);
@@ -645,7 +645,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   }
   appendText("js: (", vmState, ")");
 
-  auto& codeMap = reinterpret_cast<IsolateBase*>(isolate->GetData(0))->codeMap;
+  auto& codeMap = static_cast<IsolateBase*>(isolate->GetData(0))->codeMap;
 
   for (auto i: kj::zeroTo(sampleInfo.frames_count)) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(traceSpace[i]);
