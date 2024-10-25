@@ -631,6 +631,52 @@ KJ_TEST("canceling deferred alarm deletion is idempotent") {
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("alarm handler cleanup succeeds when output gate is broken") {
+  auto runWithSetup = [](auto testFunc) {
+    ActorSqliteTest test({.monitorOutputGate = false});
+    auto promise = test.gate.onBroken();
+
+    // Initialize alarm state to 1ms.
+    test.setAlarm(oneMs);
+    test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+    test.pollAndExpectCalls({"commit"})[0]->fulfill();
+    test.pollAndExpectCalls({});
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+    auto armResult = test.actor.armAlarmHandler(oneMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    auto deferredDelete = kj::mv(armResult.get<ActorSqlite::RunAlarmHandler>().deferredDelete);
+
+    // Break gate
+    test.put("foo", "bar");
+    test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "a_rejected_commit"));
+    KJ_EXPECT_THROW_MESSAGE("a_rejected_commit", promise.wait(test.ws));
+    // Ensure taskFailed handler runs and notices brokenness:
+    test.ws.poll();
+
+    testFunc(test, kj::mv(deferredDelete));
+  };
+
+  // Here, we test that the deferred deleter destructor doesn't throw, both in the case when the
+  // caller cancels deletion and when it does not cancel it:
+
+  runWithSetup([](ActorSqliteTest& test, kj::Own<void> deferredDelete) {
+    // In the case where the handler fails, we assume the caller will explicitly cancel deferred
+    // alarm deletion:
+    test.actor.cancelDeferredAlarmDeletion();
+
+    // Dropping the DeferredAlarmDeleter should succeed -- that is, it should not throw here:
+    { auto drop = kj::mv(deferredDelete); }
+  });
+
+  runWithSetup([](ActorSqliteTest& test, kj::Own<void> deferredDelete) {
+    // In the case where the handler succeeds, the caller will not cancel deferred deletion before
+    // dropping the DeferredAlarmDeleter.  Dropping the DeferredAlarmDeleter should still succeed,
+    // even if the output gate happens to already be broken:
+    { auto drop = kj::mv(deferredDelete); }
+  });
+}
+
 KJ_TEST("handler alarm is not deleted when commit fails") {
   ActorSqliteTest test({.monitorOutputGate = false});
 

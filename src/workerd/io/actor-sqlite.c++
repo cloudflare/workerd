@@ -346,7 +346,17 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
   inAlarmHandler = false;
 
   if (haveDeferredDelete) {
-    metadata.setAlarm(kj::none);
+    // If we have reached this point, the client is destroying its DeferredAlarmDeleter at the end
+    // of an alarm handler run, and deletion hasn't been cancelled, indicating that the handler
+    // returned success.
+    //
+    // If the output gate has somehow broken in the interim, attempting to write the deletion here
+    // will cause the DeferredAlarmDeleter destructor to throw, which the caller probably isn't
+    // expecting.  So we'll skip the deletion attempt, and let the caller detect the gate
+    // brokenness through other means.
+    if (broken == kj::none) {
+      metadata.setAlarm(kj::none);
+    }
     haveDeferredDelete = false;
   }
 }
