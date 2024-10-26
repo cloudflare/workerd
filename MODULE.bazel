@@ -1,0 +1,1 @@
+# We don't use bzlmod at this time, but bazel 8 still expects us to have a MODULE.bazel file.

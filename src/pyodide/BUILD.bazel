@@ -1,5 +1,4 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@workerd//:build/eslint_test.bzl", "eslint_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
 load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
 
