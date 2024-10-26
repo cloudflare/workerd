@@ -16,6 +16,8 @@ package-lock.json
 /external
 # Bazel output symlinks: Same reasoning as /external. You need the * because people can change the name of the directory your repository is cloned into, changing the bazel-<workspace_name> symlink.
 /bazel-*
+# Bazel 8's MODULE lock, since we're not actually locking anything yet.
+MODULE.bazel.lock
 # Compiled output -> don't check in
 /compile_commands.json
 /rust-project.json

@@ -238,6 +238,17 @@ load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies")
 
 rules_ts_dependencies(ts_version_from = "//:package.json")
 
+# TODO: Additional setup needed for rules_ts
+load("@aspect_bazel_lib//lib:repositories.bzl", "aspect_bazel_lib_dependencies", "register_copy_directory_toolchains", "register_copy_to_directory_toolchains", "register_coreutils_toolchains")
+
+register_copy_directory_toolchains()
+
+register_copy_to_directory_toolchains()
+
+aspect_bazel_lib_dependencies()
+
+register_coreutils_toolchains()
+
 load("@aspect_rules_js//npm:repositories.bzl", "npm_translate_lock")
 
 npm_translate_lock(
