@@ -28,6 +28,7 @@ load("@//build/deps:gen/dep_rules_nodejs.bzl", "dep_rules_nodejs")
 load("@//build/deps:gen/dep_rules_pkg.bzl", "dep_rules_pkg")
 load("@//build/deps:gen/dep_rules_python.bzl", "dep_rules_python")
 load("@//build/deps:gen/dep_rules_rust.bzl", "dep_rules_rust")
+load("@//build/deps:gen/dep_rules_shell.bzl", "dep_rules_shell")
 load("@//build/deps:gen/dep_wpt.bzl", "dep_wpt")
 
 def deps_gen():
@@ -42,6 +43,7 @@ def deps_gen():
     dep_cargo_bazel_win_x64()
     dep_cxxbridge_cmd()
     dep_rules_cc()
+    dep_rules_shell()
     dep_aspect_rules_esbuild()
     dep_rules_pkg()
     dep_rules_nodejs()

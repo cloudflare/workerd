@@ -85,6 +85,13 @@
       "file_regex": "^rules_cc-"
     },
     {
+      "name": "rules_shell",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_shell",
+      "file_regex": "^rules_shell-"
+    },
+    {
       "name": "aspect_rules_esbuild",
       "type": "github_release",
       "owner": "aspect-build",
