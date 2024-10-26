@@ -9,7 +9,6 @@ srcs = glob(
 
 ts_project(
     name = "wpt-test-harness",
-    testonly = False,
     srcs = srcs,
     allow_js = True,
     declaration = True,
