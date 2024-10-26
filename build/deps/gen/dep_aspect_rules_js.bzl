@@ -15,4 +15,6 @@ def dep_aspect_rules_js():
         strip_prefix = STRIP_PREFIX,
         type = TYPE,
         sha256 = SHA256,
+        patches = ["//:patches/rules_js/0001-Support-Bazel-8.patch"],
+        patch_args = ["-p1"],
     )
