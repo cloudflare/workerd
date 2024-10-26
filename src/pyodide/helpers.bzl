@@ -131,12 +131,9 @@ def pyodide_static():
         [
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
             "types/*.ts",
             "types/*/*.ts",
         ],
-        allow_empty = True,
     )
     modules = ["python-entrypoint-helper.ts"]
 
@@ -270,9 +267,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     else:
         esbuild(
             name = "emscriptenSetup@" + version,
+            # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
+            # for it. The file is provided in entry_point instead.
             srcs = native.glob([
                 "internal/pool/*.ts",
-            ]) + [
+            ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
                 _out_path("pyodide.asm.js", version),
                 "internal/util.ts",
             ],
