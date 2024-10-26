@@ -155,6 +155,73 @@ kj::String KJ_STRINGIFY(const TraceId& id) {
   return id;
 }
 
+InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
+    kj::Maybe<kj::Rc<SpanIdCounter>> counter,
+    TraceId traceId,
+    TraceId invocationId,
+    kj::uint spanId,
+    kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext)
+    : counter(kj::mv(counter)),
+      traceId(kj::mv(traceId)),
+      invocationId(kj::mv(invocationId)),
+      spanId(spanId),
+      parentSpanContext(kj::mv(parentSpanContext)) {}
+
+kj::Rc<InvocationSpanContext> InvocationSpanContext::newChild() {
+  auto& c = KJ_ASSERT_NONNULL(counter, "unable to create child spans on this context");
+  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), c.addRef(), traceId,
+      invocationId, c->next(), addRefToThis());
+}
+
+kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
+    kj::Maybe<kj::Rc<InvocationSpanContext>&> triggerContext,
+    kj::Maybe<kj::EntropySource&> entropySource) {
+  kj::Maybe<kj::Rc<InvocationSpanContext>> parent;
+  auto traceId = triggerContext
+                     .map([&](kj::Rc<InvocationSpanContext>& ctx) {
+    parent = ctx.addRef();
+    return ctx->traceId;
+  }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
+  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), kj::rc<SpanIdCounter>(),
+      kj::mv(traceId), TraceId::fromEntropy(entropySource), 0, kj::mv(parent));
+}
+
+TraceId TraceId::fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader) {
+  return TraceId(reader.getLow(), reader.getHigh());
+}
+
+void TraceId::toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const {
+  writer.setLow(low);
+  writer.setHigh(high);
+}
+
+kj::Maybe<kj::Rc<InvocationSpanContext>> InvocationSpanContext::fromCapnp(
+    rpc::InvocationSpanContext::Reader reader) {
+  if (!reader.hasTraceId() || !reader.hasInvocationId()) {
+    // If the reader does not have a traceId or invocationId field then it is
+    // invalid and we will just ignore it.
+    return kj::none;
+  }
+
+  auto sc = kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), kj::none,
+      TraceId::fromCapnp(reader.getTraceId()), TraceId::fromCapnp(reader.getInvocationId()),
+      reader.getSpanId());
+  // If the traceId or invocationId are invalid, then we'll ignore them.
+  if (!sc->getTraceId() || !sc->getInvocationId()) return kj::none;
+  return kj::mv(sc);
+}
+
+void InvocationSpanContext::toCapnp(rpc::InvocationSpanContext::Builder writer) const {
+  traceId.toCapnp(writer.initTraceId());
+  invocationId.toCapnp(writer.initInvocationId());
+  writer.setSpanId(spanId);
+  kj::mv(getParent());  // Just invalidating the parent. Not moving it anywhere.
+}
+
+kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context) {
+  return kj::str(context->getTraceId(), "-", context->getInvocationId(), "-", context->getSpanId());
+}
+
 }  // namespace tracing
 
 // Approximately how much external data we allow in a trace before we start ignoring requests.  We

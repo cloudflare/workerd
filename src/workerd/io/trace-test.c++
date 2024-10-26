@@ -3,7 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/trace.h>
+#include <workerd/util/thread-scopes.h>
 
+#include <capnp/message.h>
 #include <kj/test.h>
 
 namespace workerd::tracing {
@@ -60,6 +62,54 @@ KJ_TEST("can write trace ID protobuf format") {
 
   KJ_EXPECT(TraceId(0xfedcba9876543211, 0xfedcba9876543212).toProtobuf() ==
       "\xfe\xdc\xba\x98\x76\x54\x32\x12\xfe\xdc\xba\x98\x76\x54\x32\x11"_kjb);
+}
+
+KJ_TEST("InvocationSpanContext") {
+  setPredictableModeForTest();
+  auto sc = InvocationSpanContext::newForInvocation();
+
+  // We can create an InvocationSpanContext...
+  static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
+  KJ_EXPECT(sc->getTraceId() == kCheck);
+  KJ_EXPECT(sc->getInvocationId() == kCheck);
+  KJ_EXPECT(sc->getSpanId() == 0);
+
+  // And serialize that to a capnp struct...
+  capnp::MallocMessageBuilder builder;
+  auto root = builder.initRoot<rpc::InvocationSpanContext>();
+  sc->toCapnp(root);
+
+  // Then back again...
+  auto sc2 = KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(root.asReader()));
+  KJ_EXPECT(sc2->getTraceId() == kCheck);
+  KJ_EXPECT(sc2->getInvocationId() == kCheck);
+  KJ_EXPECT(sc2->getSpanId() == 0);
+  KJ_EXPECT(sc2->isTrigger());
+
+  // The one that has been deserialized from capnp cannot create children...
+  try {
+    sc2->newChild();
+    KJ_FAIL_ASSERT("should not be able to create child span with SpanContext from capnp");
+  } catch (kj::Exception& ex) {
+    KJ_EXPECT(ex.getDescription() ==
+        "expected counter != nullptr; unable to create child spans on this context"_kj);
+  }
+
+  auto sc3 = sc->newChild();
+  KJ_EXPECT(sc3->getTraceId() == kCheck);
+  KJ_EXPECT(sc3->getInvocationId() == kCheck);
+  KJ_EXPECT(sc3->getSpanId() == 1);
+
+  auto sc4 = InvocationSpanContext::newForInvocation(sc2);
+  KJ_EXPECT(sc4->getTraceId() == kCheck);
+  KJ_EXPECT(sc4->getInvocationId() == kCheck);
+  KJ_EXPECT(sc4->getSpanId() == 0);
+
+  auto& sc5 = KJ_ASSERT_NONNULL(sc4->getParent());
+  KJ_EXPECT(sc5->getTraceId() == kCheck);
+  KJ_EXPECT(sc5->getInvocationId() == kCheck);
+  KJ_EXPECT(sc5->getSpanId() == 0);
+  KJ_EXPECT(sc5->isTrigger());
 }
 
 }  // namespace
