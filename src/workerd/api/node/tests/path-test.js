@@ -618,3 +618,24 @@ export const test_path_basename = {
     );
   },
 };
+
+export const make_sure_posix_win32_works = {
+  async test() {
+    {
+      const pathModule = await import('node:path/win32');
+      strictEqual(typeof pathModule.default.resolve, 'function');
+      strictEqual(
+        typeof process.getBuiltinModule('node:path/win32').resolve,
+        'function'
+      );
+    }
+    {
+      const pathModule = await import('node:path/posix');
+      strictEqual(typeof pathModule.default.resolve, 'function');
+      strictEqual(
+        typeof process.getBuiltinModule('node:path/posix').resolve,
+        'function'
+      );
+    }
+  },
+};

@@ -4368,3 +4368,10 @@ export const isArray = {
     assert.ok(!util.isArray('hello world'));
   },
 };
+
+export const makeSureUtilTypesIsExported = {
+  async test() {
+    const types = await import('node:util/types');
+    assert.ok(types, 'node:util/types is not exported');
+  },
+};
