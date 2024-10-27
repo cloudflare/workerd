@@ -11,7 +11,7 @@ namespace workerd {
 namespace {
 // Optimization: If the same wait list is waited multiple times in the same thread, we want to
 // share the signal rather than send two cross-thread signals.
-thread_local CrossThreadWaitList::WaiterMap threadLocalWaiters;
+static const kj::EventLoopLocal<CrossThreadWaitList::WaiterMap> threadLocalWaiters;
 
 void END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK() {}
 }  // namespace
@@ -50,9 +50,9 @@ CrossThreadWaitList::Waiter::~Waiter() noexcept(false) {
   }
 
   if (state->useThreadLocalOptimization) {
-    auto& entry = KJ_ASSERT_NONNULL(threadLocalWaiters.findEntry(state.get()));
+    auto& entry = KJ_ASSERT_NONNULL(threadLocalWaiters->findEntry(state.get()));
     KJ_ASSERT(entry.value == this);
-    threadLocalWaiters.erase(entry);
+    threadLocalWaiters->erase(entry);
   }
 }
 
@@ -68,8 +68,8 @@ kj::Promise<void> CrossThreadWaitList::addWaiter() const {
   if (state->useThreadLocalOptimization) {
     kj::Own<Waiter> ownWaiter;
 
-    auto& waiter =
-        threadLocalWaiters.findOrCreate(state.get(), [&]() -> decltype(threadLocalWaiters)::Entry {
+    auto& waiter = threadLocalWaiters->findOrCreate(
+        state.get(), [&]() -> CrossThreadWaitList::WaiterMap::Entry {
       auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
       ownWaiter = kj::refcounted<Waiter>(*state, kj::mv(paf.fulfiller));
       ownWaiter->forkedPromise = paf.promise.fork();
