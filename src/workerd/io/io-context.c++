@@ -18,11 +18,11 @@
 namespace workerd {
 
 static thread_local IoContext* threadLocalRequest = nullptr;
-static thread_local void* threadId = nullptr;
+
+static const kj::EventLoopLocal<int> threadId;
 
 static void* getThreadId() {
-  if (threadId == nullptr) threadId = new int;
-  return threadId;
+  return threadId.get();
 }
 
 class IoContext::TimeoutManagerImpl final: public TimeoutManager {
