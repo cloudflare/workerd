@@ -98,8 +98,8 @@ public:
   // not be called while in a JS scope, i.e. when `enterJs()` has been called and the returned
   // object not yet dropped.
   virtual void topUpActor() = 0;
-  // TODO(cleanup): This is called in WebSocket when receiving a message, but should we do
-  //   something more generic like use a membrane to detect any incoming RPC call?
+  // TODO(cleanup): This is called in WebSocket and JsRpcTargetBase when receiving an event, but
+  // should we do something more generic like use a membrane to detect any incoming RPC call?
 
   // Called before starting a new subrequest. Throws a JSG exception if the limit has been
   // reached.
