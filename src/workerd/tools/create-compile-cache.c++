@@ -1,5 +1,3 @@
-#include "fcntl.h"
-
 #include <workerd/jsg/compile-cache.h>
 #include <workerd/jsg/setup.h>
 
@@ -35,8 +33,9 @@ public:
   }
 
   void readFiles() {
-    auto fileListFd = open(filePath.begin(), O_RDONLY);
-    auto fileList = kj::newDiskReadableFile(kj::AutoCloseFd(fileListFd));
+    auto fs = kj::newDiskFilesystem();
+    auto& dir = fs->getCurrent();
+    auto fileList = dir.openFile(filePath);
     auto fileListContent = fileList->mmap(0, fileList->stat().size);
 
     size_t start = 0;
@@ -50,12 +49,13 @@ public:
       auto path = fileListContent.slice(start, end);
 
       if (path.size() > 0) {
-        auto fd = open(path.asChars().begin(), O_RDONLY);
-        auto file = kj::newDiskReadableFile(kj::AutoCloseFd(fd));
+        auto file =
+            dir.openFile(kj::Path::parse(kj::StringPtr(path.asChars().begin(), path.size())));
         auto content = file->mmap(0, file->stat().size);
 
         auto heap = kj::heapArray<kj::byte>(content.size());
         std::memcpy(heap.begin(), content.begin(), content.size());
+        // TODO(soon): Rather than storing them on memory, prepare caches while iterating through the list.
         file_contents.add(kj::tuple(kj::heapString(path.asChars()), kj::mv(heap)));
       }
 
@@ -92,14 +92,14 @@ public:
 
 private:
   kj::ProcessContext& context;
-  kj::StringPtr filePath{};
+  kj::Path filePath{};
 
   jsg::V8System system{};
   v8::Isolate::CreateParams params{};
   CompileCacheIsolate ccIsolate;
 
   kj::MainBuilder::Validity setFilePath(kj::StringPtr path) {
-    filePath = path;
+    filePath = kj::Path::parse(path);
     return true;
   }
 
