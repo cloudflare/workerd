@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "path-test.js")
         ],
-        compatibilityDate = "2023-01-15",
+        compatibilityDate = "2024-10-11",
         compatibilityFlags = ["nodejs_compat"]
       )
     ),
