@@ -5,14 +5,157 @@
 #include <workerd/io/trace.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <openssl/rand.h>
+
 #include <capnp/message.h>
 #include <capnp/schema.h>
+#include <kj/compat/http.h>
 #include <kj/debug.h>
 #include <kj/time.h>
 
 #include <cstdlib>
 
 namespace workerd {
+
+namespace tracing {
+namespace {
+kj::Maybe<kj::uint> tryFromHexDigit(char c) {
+  if ('0' <= c && c <= '9') {
+    return c - '0';
+  } else if ('a' <= c && c <= 'f') {
+    return c - ('a' - 10);
+  } else if ('A' <= c && c <= 'F') {
+    return c - ('A' - 10);
+  } else {
+    return kj::none;
+  }
+}
+
+kj::Maybe<uint64_t> hexToUint64(kj::ArrayPtr<const char> s) {
+  KJ_ASSERT(s.size() <= 16);
+  uint64_t value = 0;
+  for (auto ch: s) {
+    KJ_IF_SOME(d, tryFromHexDigit(ch)) {
+      value = (value << 4) + d;
+    } else {
+      return kj::none;
+    }
+  }
+  return value;
+}
+
+void addHex(kj::Vector<char>& out, uint64_t v) {
+  constexpr char HEX_DIGITS[] = "0123456789abcdef";
+  for (int i = 0; i < 16; ++i) {
+    out.add(HEX_DIGITS[v >> (64 - 4)]);
+    v = v << 4;
+  }
+};
+
+void addBigEndianBytes(kj::Vector<byte>& out, uint64_t v) {
+  for (int i = 0; i < 8; ++i) {
+    out.add(v >> (64 - 8));
+    v = v << 8;
+  }
+};
+}  // namespace
+
+// Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L58
+kj::Maybe<TraceId> TraceId::fromGoString(kj::ArrayPtr<const char> s) {
+  auto n = s.size();
+  if (n > 32) {
+    return kj::none;
+  } else if (n <= 16) {
+    KJ_IF_SOME(low, hexToUint64(s)) {
+      return TraceId(low, 0);
+    }
+  } else {
+    KJ_IF_SOME(high, hexToUint64(s.slice(0, n - 16))) {
+      KJ_IF_SOME(low, hexToUint64(s.slice(n - 16, n))) {
+        return TraceId(low, high);
+      }
+    }
+  }
+  return kj::none;
+}
+
+// Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L50
+kj::String TraceId::toGoString() const {
+  if (high == 0) {
+    kj::Vector<char> s(17);
+    addHex(s, low);
+    s.add('\0');
+    return kj::String(s.releaseAsArray());
+  }
+  kj::Vector<char> s(33);
+  addHex(s, high);
+  addHex(s, low);
+  s.add('\0');
+  return kj::String(s.releaseAsArray());
+}
+
+// Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L111
+kj::Maybe<TraceId> TraceId::fromProtobuf(kj::ArrayPtr<const byte> buf) {
+  if (buf.size() != 16) {
+    return kj::none;
+  }
+  uint64_t high = 0;
+  for (auto i: kj::zeroTo(8)) {
+    high = (high << 8) + buf[i];
+  }
+  uint64_t low = 0;
+  for (auto i: kj::zeroTo(8)) {
+    low = (low << 8) + buf[i + 8];
+  }
+  return TraceId(low, high);
+}
+
+// Reference: https://github.com/jaegertracing/jaeger/blob/e46f8737/model/ids.go#L81
+kj::Array<byte> TraceId::toProtobuf() const {
+  kj::Vector<byte> s(16);
+  addBigEndianBytes(s, high);
+  addBigEndianBytes(s, low);
+  return s.releaseAsArray();
+}
+
+// Reference https://www.w3.org/TR/trace-context/#trace-id
+kj::String TraceId::toW3C() const {
+  kj::Vector<char> s(32);
+  addHex(s, high);
+  addHex(s, low);
+  return kj::str(s.releaseAsArray());
+}
+
+TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
+  if (isPredictableModeForTest()) {
+    return TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
+  }
+
+  uint64_t low = 0;
+  uint64_t high = 0;
+  uint8_t tries = 0;
+
+  do {
+    tries++;
+    KJ_IF_SOME(entropy, entropySource) {
+      entropy.generate(kj::arrayPtr(&low, 1).asBytes());
+      entropy.generate(kj::arrayPtr(&high, 1).asBytes());
+    } else {
+      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&low), sizeof(low)) == 1);
+      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&high), sizeof(high)) == 1);
+    }
+    // On the extreme off chance that we ended with with zeroes for both,
+    // let's try again, but only up to three times.
+  } while (low == 0 && high == 0 && tries < 3);
+
+  return TraceId(low, high);
+}
+
+kj::String KJ_STRINGIFY(const TraceId& id) {
+  return id;
+}
+
+}  // namespace tracing
 
 // Approximately how much external data we allow in a trace before we start ignoring requests.  We
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to

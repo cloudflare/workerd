@@ -160,6 +160,8 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@ssl",
     ],
 )
 
@@ -325,5 +327,12 @@ kj_test(
     deps = [
         ":observer",
         "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+kj_test(
+    src = "trace-test.c++",
+    deps = [
+        ":trace",
     ],
 )
