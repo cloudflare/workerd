@@ -547,7 +547,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   cacheOptionEnabled @53 :Bool
     $compatEnableFlag("cache_option_enabled")
     $compatDisableFlag("cache_option_disabled")
-    $impliedByAfterDate(name = "cacheOptionEnabled", date = "2024-11-11");
+    $compatEnableDate("2024-11-11");
   # Enables the use of no-store headers from requests
 
   kvDirectBinding @54 :Bool
