@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 
 # ========================================================================================
 # Parameter Name Extractor
@@ -75,13 +76,10 @@ run_binary(
 # This binary is used to generate compile cache for workerd.
 # This will later be used by workerd to access compile caches of JS internals.
 # NOTE: We only enable compile cache for linux at the moment.
-cc_binary(
-    name = "create_compile_cache_bin",
+wd_cc_binary(
+    name = "create_compile_cache",
     srcs = ["create-compile-cache.c++"],
-    target_compatible_with = select({
-        "@platforms//os:linux": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
