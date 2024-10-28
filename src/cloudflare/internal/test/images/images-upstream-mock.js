@@ -3,12 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 /**
- * @param {FormData} form
+ * @param {FormDataEntryValue | null} blob
  * @returns {Promise<string | null>}
  */
-async function imageAsString(form) {
-  let blob = form.get('image');
-
+async function imageAsString(blob) {
   if (blob === null) {
     return null;
   }
@@ -26,7 +24,7 @@ export default {
    */
   async fetch(request) {
     const form = await request.formData();
-    const image = (await imageAsString(form)) || '';
+    const image = (await imageAsString(form.get('image'))) || '';
     if (image.includes('BAD')) {
       const resp = new Response('ERROR 123: Bad request', {
         status: 409,
@@ -56,7 +54,7 @@ export default {
          * @type {any}
          */
         const obj = {
-          image: await imageAsString(form),
+          image: await imageAsString(form.get('image')),
           // @ts-ignore
           transforms: JSON.parse(form.get('transforms') || '{}'),
         };
@@ -64,6 +62,14 @@ export default {
           if (form.get(x)) {
             obj[x] = form.get(x);
           }
+        }
+
+        if (form.get('draw_image')) {
+          const drawImages = [];
+          for (const entry of form.getAll('draw_image')) {
+            drawImages.push(await imageAsString(entry));
+          }
+          obj['draw_image'] = drawImages;
         }
 
         return Response.json(obj);
