@@ -113,3 +113,4 @@ def wd_ts_bundle(name, import_name, *args, **kwargs):
         deps = ["@workerd//src/workerd/jsg:modules_capnp"],
         include_prefix = import_name,
     )
+    return data
