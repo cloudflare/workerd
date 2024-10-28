@@ -3444,11 +3444,16 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
   TRACE_EVENT("workerd", "Server::handleDrain()");
   // Tell all HttpServers to drain. This causes them to disconnect any connections that don't
   // have a request in-flight.
-  auto drainPromises = kj::heapArrayBuilder<kj::Promise<void>>(httpServers.size());
   for (auto& httpServer: httpServers) {
-    drainPromises.add(httpServer.httpServer.drain());
+    // The promise returned by `drain()` resolves when all connections have ended. But, we need
+    // the promise returned by handleDrain() to resolve immediately when draining has started,
+    // since that's what signals us to stop accepting incoming connections. So, we should not
+    // co_await the promise returned by `drain()`. Technically, we don't actually have to wait
+    // on it at all -- `drain()` returns the promise end of a promise-and-fulfiller, so simply
+    // dropping it won't acutally cancel anything. But since that's not documented in drain()'s
+    // doc comment, we instead add the promise to `tasks` to be safe.
+    tasks.add(httpServer.httpServer.drain());
   }
-  co_await kj::joinPromisesFailFast(drainPromises.finish());
 }
 
 kj::Promise<void> Server::run(
