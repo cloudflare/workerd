@@ -23,7 +23,50 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* todo: the following is adopted code, enabling linting one day */
 export * from 'node-internal:internal_types';
 import { default as types } from 'node-internal:internal_types';
+export {
+  isCryptoKey,
+  isKeyObject,
+  isAsyncFunction,
+  isGeneratorFunction,
+  isGeneratorObject,
+  isAnyArrayBuffer,
+  isArrayBuffer,
+  isArgumentsObject,
+  isBoxedPrimitive,
+  isDataView,
+  isMap,
+  isMapIterator,
+  isModuleNamespaceObject,
+  isNativeError,
+  isPromise,
+  isProxy,
+  isSet,
+  isSetIterator,
+  isSharedArrayBuffer,
+  isWeakMap,
+  isWeakSet,
+  isRegExp,
+  isDate,
+  isStringObject,
+  isSymbolObject,
+  isNumberObject,
+  isBooleanObject,
+  isBigIntObject,
+  isArrayBufferView,
+  isBigInt64Array,
+  isBigUint64Array,
+  isFloat32Array,
+  isFloat64Array,
+  isInt8Array,
+  isInt16Array,
+  isInt32Array,
+  isTypedArray,
+  isUint8Array,
+  isUint8ClampedArray,
+  isUint16Array,
+  isUint32Array,
+  isExternal,
+} from 'node-internal:internal_types';
 export default types;

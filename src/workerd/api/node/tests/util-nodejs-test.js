@@ -4373,5 +4373,7 @@ export const makeSureUtilTypesIsExported = {
   async test() {
     const types = await import('node:util/types');
     assert.ok(types, 'node:util/types is not exported');
+    assert.ok(types.isTypedArray);
+    assert.ok(types.default.isTypedArray);
   },
 };
