@@ -245,6 +245,8 @@ public:
   TypeWrapperBase(MetaConfiguration& config) {}
 
   inline void initTypeWrapper() {}
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& configuration) {}
 
   void unwrap() = delete;  // StructWrapper only implements tryUnwrap(), not unwrap()
 };
@@ -274,6 +276,8 @@ public:
   void unwrap() = delete;  // extensions only implement tryUnwrap(), not unwrap()
 
   inline void initTypeWrapper() {}
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& configuration) {}
 };
 
 // Specialization of TypeWrapperBase for InjectConfiguration.
@@ -297,6 +301,10 @@ public:
   void getTemplate() = delete;
 
   inline void initTypeWrapper() {}
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& config) {
+    configuration = kj::fwd<MetaConfiguration>(config);
+  }
 
 private:
   Configuration configuration;
@@ -409,6 +417,13 @@ public:
 
   void initTypeWrapper() {
     (TypeWrapperBase<Self, T>::initTypeWrapper(), ...);
+  }
+
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& configuration) {
+    (TypeWrapperBase<Self, T>::updateConfiguration(kj::fwd<MetaConfiguration>(configuration)), ...);
+    MaybeWrapper<Self>::updateConfiguration(kj::fwd<MetaConfiguration>(configuration));
+    PromiseWrapper<Self>::updateConfiguration(kj::fwd<MetaConfiguration>(configuration));
   }
 
   static TypeWrapper& from(v8::Isolate* isolate) {

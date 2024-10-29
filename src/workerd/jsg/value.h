@@ -587,6 +587,10 @@ public:
   // The getConfig allows us to handle any case using reasonable defaults.
   MaybeWrapper(const auto& config): config(getConfig(config)) {}
 
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& configuration) {
+    config = getConfig(kj::fwd<MetaConfiguration>(configuration));
+  }
   template <typename U>
   static constexpr decltype(auto) getName(kj::Maybe<U>*) {
     return TypeWrapper::getName((kj::Decay<U>*)nullptr);
@@ -623,7 +627,7 @@ public:
   }
 
 private:
-  const JsgConfig config;
+  JsgConfig config;
 };
 
 // =======================================================================================
