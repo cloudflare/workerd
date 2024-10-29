@@ -29,3 +29,7 @@ package-lock.json
 /docs/api
 
 *.tsbuildinfo
+
+# Bazel plugin for Intellij paths
+.clwb
+.aswb
