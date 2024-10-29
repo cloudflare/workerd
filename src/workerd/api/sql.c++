@@ -49,10 +49,10 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
     SqliteDatabase::Regulator& regulator = *this;
-    return jsg::alloc<Cursor>(db, regulator, js.toString(querySql), kj::mv(bindings));
+    return jsg::alloc<Cursor>(js, db, regulator, js.toString(querySql), kj::mv(bindings));
   }
 
-  auto result = jsg::alloc<Cursor>(slot.addRef(), kj::mv(bindings));
+  auto result = jsg::alloc<Cursor>(js, slot.addRef(), kj::mv(bindings));
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -155,17 +155,30 @@ SqlStorage::Cursor::~Cursor() noexcept(false) {
   }
 }
 
-void SqlStorage::CachedColumnNames::ensureInitialized(
-    jsg::Lock& js, SqliteDatabase::Query& source) {
-  if (names == kj::none) {
-    js.withinHandleScope([&] {
-      auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(source.columnCount());
-      for (auto i: kj::zeroTo(builder.capacity())) {
-        builder.add(js, js.str(source.getColumnName(i)));
-      }
-      names = builder.finish();
-    });
+void SqlStorage::Cursor::initColumnNames(jsg::Lock& js, State& stateRef) {
+  // TODO(cleanup): Make `js.withinHandleScope` understand `jsg::JsValue` types in addition to
+  //   `v8::Local`.
+  KJ_IF_SOME(cached, stateRef.cachedStatement) {
+    KJ_IF_SOME(names, cached->cachedColumnNames) {
+      // Use cached copy.
+      columnNames = names.addRef(js);
+      return;
+    }
   }
+
+  js.withinHandleScope([&]() {
+    v8::LocalVector<v8::Value> vec(js.v8Isolate);
+    for (auto i: kj::zeroTo(stateRef.query.columnCount())) {
+      vec.push_back(js.str(stateRef.query.getColumnName(i)));
+    }
+    auto array = jsg::JsArray(v8::Array::New(js.v8Isolate, vec.data(), vec.size()));
+    columnNames = jsg::JsRef<jsg::JsArray>(js, array);
+
+    KJ_IF_SOME(cached, stateRef.cachedStatement) {
+      // Cache for the next run.
+      cached->cachedColumnNames = jsg::JsRef<jsg::JsArray>(js, array);
+    }
+  });
 }
 
 double SqlStorage::Cursor::getRowsRead() {
@@ -185,10 +198,6 @@ double SqlStorage::Cursor::getRowsWritten() {
 }
 
 SqlStorage::Cursor::RowIterator::Next SqlStorage::Cursor::next(jsg::Lock& js) {
-  KJ_IF_SOME(s, state) {
-    cachedColumnNames.ensureInitialized(js, s->query);
-  }
-
   auto self = JSG_THIS;
   auto maybeRow = rowIteratorNext(js, self);
   bool done = maybeRow == kj::none;
@@ -199,10 +208,6 @@ SqlStorage::Cursor::RowIterator::Next SqlStorage::Cursor::next(jsg::Lock& js) {
 }
 
 jsg::JsArray SqlStorage::Cursor::toArray(jsg::Lock& js) {
-  KJ_IF_SOME(s, state) {
-    cachedColumnNames.ensureInitialized(js, s->query);
-  }
-
   auto self = JSG_THIS;
   v8::LocalVector<v8::Value> results(js.v8Isolate);
   for (;;) {
@@ -218,10 +223,6 @@ jsg::JsArray SqlStorage::Cursor::toArray(jsg::Lock& js) {
 }
 
 jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
-  KJ_IF_SOME(s, state) {
-    cachedColumnNames.ensureInitialized(js, s->query);
-  }
-
   auto self = JSG_THIS;
   auto result = JSG_REQUIRE_NONNULL(rowIteratorNext(js, self), Error,
       "Expected exactly one result from SQL query, but got no results.");
@@ -238,19 +239,16 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
-  KJ_IF_SOME(s, state) {
-    cachedColumnNames.ensureInitialized(js, s->query);
-  }
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
 
 kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   KJ_IF_SOME(values, iteratorImpl(js, obj)) {
-    auto names = obj->cachedColumnNames.get();
+    auto names = obj->columnNames.getHandle(js);
     jsg::JsObject result = js.obj();
     KJ_ASSERT(names.size() == values.size());
     for (auto i: kj::zeroTo(names.size())) {
-      result.set(js, names[i].getHandle(js), jsg::JsValue(values[i]));
+      result.set(js, names.get(js, i), jsg::JsValue(values[i]));
     }
     return result;
   } else {
@@ -265,13 +263,8 @@ jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
 // Returns the set of column names for the current Cursor. An exception will be thrown if the
 // iterator has already been fully consumed. The resulting columns may contain duplicate entries,
 // for instance a `SELECT *` across a join of two tables that share a column name.
-kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
-  KJ_IF_SOME(s, state) {
-    cachedColumnNames.ensureInitialized(js, s->query);
-    return KJ_MAP(name, this->cachedColumnNames.get()) { return name.addRef(js); };
-  } else {
-    JSG_FAIL_REQUIRE(Error, "Cannot call .getColumnNames after Cursor iterator has been consumed.");
-  }
+jsg::JsArray SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
+  return columnNames.getHandle(js);
 }
 
 kj::Maybe<jsg::JsArray> SqlStorage::Cursor::rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {

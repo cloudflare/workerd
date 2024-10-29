@@ -831,15 +831,18 @@ async function test(state) {
     assert.deepEqual(rawResults[2], [4, 5, 6, 7, 8, 9]);
     assert.deepEqual(rawResults[3], [4, 5, 6, 1, 2, 3]);
 
-    // Once an iterator is consumed, it can no longer access the columnNames.
-    assert.throws(() => {
-      iterator.columnNames;
-    }, 'Error: Cannot call .getColumnNames after Cursor iterator has been consumed.');
+    // After an iterator is consumed, columnNames can still be accessed.
+    assert.deepEqual(iterator.columnNames, ['a', 'b', 'c', 'c', 'd', 'e']);
 
     // Also works with cursors returned from .exec
     const execIterator = sql.exec(`SELECT * FROM abc, cde`);
     assert.deepEqual(execIterator.columnNames, ['a', 'b', 'c', 'c', 'd', 'e']);
     assert.equal(Array.from(execIterator.raw())[0].length, 6);
+
+    // Execute some sort of statement that returns no results, check that we can read the column
+    // names (which is empty).
+    const oneIterator = sql.exec(`UPDATE abc SET a = 1 WHERE b = 123542`);
+    assert.deepEqual(oneIterator.columnNames, []);
   }
 
   await scheduler.wait(1);

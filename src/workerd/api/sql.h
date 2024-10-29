@@ -80,36 +80,12 @@ private:
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaPageCount;
   kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
 
-  // Helper class to cache column names for a query so that we don't have to recreate the V8
-  // strings for every row.
-  class CachedColumnNames {
-    // TODO(perf): Can we further cache the V8 object layout information for a row?
-  public:
-    // Get the cached names. ensureInitialized() must have been called previously.
-    kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() {
-      return KJ_REQUIRE_NONNULL(names);
-    }
-
-    void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
-
-    JSG_MEMORY_INFO(CachedColumnNames) {
-      KJ_IF_SOME(list, names) {
-        for (const auto& name: list) {
-          tracker.trackField(nullptr, name);
-        }
-      }
-    }
-
-  private:
-    kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> names;
-  };
-
   // A statement in the statement cache.
   struct CachedStatement: public kj::Refcounted {
     jsg::HashableV8Ref<v8::String> query;
     size_t statementSize;
     SqliteDatabase::Statement statement;
-    CachedColumnNames cachedColumnNames;
+    kj::Maybe<jsg::JsRef<jsg::JsArray>> cachedColumnNames;  // initialized on first exec
     kj::ListLink<CachedStatement> lruLink;
 
     CachedStatement(jsg::Lock& js,
@@ -199,10 +175,9 @@ private:
 class SqlStorage::Cursor final: public jsg::Object {
 public:
   template <typename... Params>
-  Cursor(Params&&... params)
-      : ownCachedColumnNames(kj::none),  // silence bogus Clang warning on next line
-        cachedColumnNames(ownCachedColumnNames.emplace()) {
+  Cursor(jsg::Lock& js, Params&&... params) {
     auto stateObj = kj::heap<State>(kj::fwd<Params>(params)...);
+    initColumnNames(js, *stateObj);
     if (stateObj->query.isDone()) {
       endQuery(*stateObj);
     } else {
@@ -214,7 +189,7 @@ public:
   double getRowsRead();
   double getRowsWritten();
 
-  kj::Array<jsg::JsRef<jsg::JsString>> getColumnNames(jsg::Lock& js);
+  jsg::JsArray getColumnNames(jsg::Lock& js);
   JSG_RESOURCE_TYPE(Cursor) {
     JSG_METHOD(next);
     JSG_METHOD(toArray);
@@ -233,6 +208,7 @@ public:
       next(): { done?: false, value: T } | { done: true, value?: never };
       toArray(): T[];
       one(): T;
+      columnNames: string[];
     });
   }
 
@@ -247,7 +223,7 @@ public:
     if (state != kj::none) {
       tracker.trackFieldWithSize("IoOwn<State>", sizeof(IoOwn<State>));
     }
-    tracker.trackField("cachedColumnNames", cachedColumnNames);
+    tracker.trackField("columnNames", columnNames);
   }
 
 private:
@@ -287,13 +263,15 @@ private:
   // remain available even after the query is done or canceled.
   uint64_t rowsWritten = 0;
 
-  kj::Maybe<CachedColumnNames> ownCachedColumnNames;
-  CachedColumnNames& cachedColumnNames;
+  jsg::JsRef<jsg::JsArray> columnNames;
 
   // Invoke when `query.isDone()`, or when we want to prematurely cancel the query. This records
   // row counters and then sets `state` to `none` to drop the query and return the prepared
   // statement to the statement cache.
   void endQuery(State& stateRef);
+
+  // Initialize `columnNames` from the state object.
+  void initColumnNames(jsg::Lock& js, State& stateRef);
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);
@@ -303,6 +281,10 @@ private:
   static kj::Maybe<v8::LocalVector<v8::Value>> iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj);
 
   friend class Statement;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(columnNames);
+  }
 };
 
 // The prepared statement API is supported only for backwards compatibility for certain early
