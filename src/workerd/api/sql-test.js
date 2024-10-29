@@ -19,6 +19,10 @@ async function test(state) {
   assert.equal(resultNumberRaw[0].length, 1);
   assert.equal(resultNumberRaw[0][0], 123);
 
+  sql.exec('SELECT 123');
+  sql.exec('SELECT 123');
+  sql.exec('SELECT 123');
+
   // Test string results
   const resultStr = [...sql.exec("SELECT 'hello'")];
   assert.equal(resultStr.length, 1);
@@ -294,14 +298,12 @@ async function test(state) {
   assert.equal(resultPrepared.length, 1);
   assert.equal(resultPrepared[0]['789'], 789);
 
-  // Running the same query twice invalidates the previous cursor.
+  // Running the same query twice, overlapping, works just fine.
   let result1 = prepared();
   let result2 = prepared();
+  // Iterate result2 before result1.
   assert.equal([...result2][0]['789'], 789);
-  assert.throws(
-    () => [...result1],
-    'SQL cursor was closed because the same statement was executed again.'
-  );
+  assert.equal([...result1][0]['789'], 789);
 
   // That said if a cursor was already done before the statement was re-run, it's not considered
   // canceled.
@@ -331,9 +333,7 @@ async function test(state) {
   }
 
   // Prepared statement with multiple statements
-  assert.throws(() => {
-    sql.prepare('SELECT 1; SELECT 2;');
-  }, /A prepared SQL statement must contain only one statement./);
+  assert.deepEqual([...sql.prepare('SELECT 1; SELECT 2;')()], [{ 2: 2 }]);
 
   // Accessing a hidden _cf_ table
   assert.throws(
@@ -831,15 +831,18 @@ async function test(state) {
     assert.deepEqual(rawResults[2], [4, 5, 6, 7, 8, 9]);
     assert.deepEqual(rawResults[3], [4, 5, 6, 1, 2, 3]);
 
-    // Once an iterator is consumed, it can no longer access the columnNames.
-    assert.throws(() => {
-      iterator.columnNames;
-    }, 'Error: Cannot call .getColumnNames after Cursor iterator has been consumed.');
+    // After an iterator is consumed, columnNames can still be accessed.
+    assert.deepEqual(iterator.columnNames, ['a', 'b', 'c', 'c', 'd', 'e']);
 
     // Also works with cursors returned from .exec
     const execIterator = sql.exec(`SELECT * FROM abc, cde`);
     assert.deepEqual(execIterator.columnNames, ['a', 'b', 'c', 'c', 'd', 'e']);
     assert.equal(Array.from(execIterator.raw())[0].length, 6);
+
+    // Execute some sort of statement that returns no results, check that we can read the column
+    // names (which is empty).
+    const oneIterator = sql.exec(`UPDATE abc SET a = 1 WHERE b = 123542`);
+    assert.deepEqual(oneIterator.columnNames, []);
   }
 
   await scheduler.wait(1);
@@ -1070,9 +1073,12 @@ async function testIoStats(storage) {
     while (true) {
       const result = resultsIterator.next();
       if (result.done) {
+        assert.equal(10, cursor.rowsRead);
         break;
       }
-      assert.equal(++rowsSeen, cursor.rowsRead);
+      // + 1 because the cursor is always one result ahead of what has been returned -- but there
+      // are only 10 rows total.
+      assert.equal(Math.min(++rowsSeen + 1, 10), cursor.rowsRead);
     }
   }
 
