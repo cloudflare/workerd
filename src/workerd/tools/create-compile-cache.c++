@@ -53,10 +53,7 @@ public:
             dir.openFile(kj::Path::parse(kj::StringPtr(path.asChars().begin(), path.size())));
         auto content = file->mmap(0, file->stat().size);
 
-        auto heap = kj::heapArray<kj::byte>(content.size());
-        std::memcpy(heap.begin(), content.begin(), content.size());
-        // TODO(soon): Rather than storing them on memory, prepare caches while iterating through the list.
-        file_contents.add(kj::tuple(kj::heapString(path.asChars()), kj::mv(heap)));
+        file_contents.add(kj::tuple(kj::heapString(path.asChars()), kj::mv(content)));
       }
 
       end++;
@@ -73,7 +70,7 @@ public:
     ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& js) {
       for (auto& entry: file_contents) {
         kj::StringPtr name = kj::get<0>(entry);
-        kj::ArrayPtr<kj::byte> content = kj::get<1>(entry);
+        kj::ArrayPtr<const kj::byte> content = kj::get<1>(entry);
 
         v8::ScriptOrigin origin(jsg::v8StrIntern(js.v8Isolate, name), resourceLineOffset,
             resourceColumnOffset, resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque,
@@ -104,7 +101,7 @@ private:
   }
 
   // Key is the path of the file, and value is the content.
-  kj::Vector<kj::Tuple<kj::String, kj::Array<kj::byte>>> file_contents{};
+  kj::Vector<kj::Tuple<kj::String, kj::Array<const kj::byte>>> file_contents{};
 };
 
 }  // namespace
