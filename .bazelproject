@@ -1,0 +1,24 @@
+# For more documentation, please visit https://ij.bazel.build/docs/project-views.html
+
+directories:
+  .
+  -.devcontainer
+  -.vscode
+  -docs
+  -githooks
+  -samples
+
+derive_targets_from_directories: true
+
+additional_languages:
+  typescript
+  python
+  javascript
+
+test_sources:
+  src/workerd/tests/*
+  src/workerd/api/node/tests/*
+  src/workerd/api/tests/*
+  src/workerd/api/*-test.js
+  src/workerd/api/*-test.wd-test
+  src/workerd/api/*-test.c++
