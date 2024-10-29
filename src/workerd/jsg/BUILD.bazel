@@ -61,6 +61,7 @@ wd_cc_library(
         ":modules_capnp",
         ":observer",
         ":url",
+        "//src/workerd/tools:compile_cache_capnp",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",

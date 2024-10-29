@@ -1,12 +1,13 @@
 #include <workerd/jsg/compile-cache.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/tools/compile-cache.capnp.h>
 
+#include <capnp/serialize.h>
 #include <kj/filesystem.h>
 #include <kj/main.h>
 
-namespace workerd::api {
+namespace workerd::tools {
 namespace {
-JSG_DECLARE_ISOLATE_TYPE(CompileCacheIsolate);
 
 constexpr int resourceLineOffset = 0;
 constexpr int resourceColumnOffset = 0;
@@ -15,6 +16,12 @@ constexpr int scriptId = -1;
 constexpr bool resourceIsOpaque = false;
 constexpr bool isWasm = false;
 constexpr bool isModule = true;
+
+struct CompilerCacheContext: public jsg::Object, public jsg::ContextGlobal {
+  JSG_RESOURCE_TYPE(CompilerCacheContext) {}
+};
+
+JSG_DECLARE_ISOLATE_TYPE(CompileCacheIsolate, CompilerCacheContext);
 
 // CompileCacheCreator receives an argument of a text file where each line
 // represents the path of the file to create compile caches for.
@@ -27,6 +34,7 @@ public:
   kj::MainFunc getMain() {
     return kj::MainBuilder(
         context, "Process a file list", "This binary processes the specified file list.")
+        .expectArg("<output_path>", KJ_BIND_METHOD(*this, setOutputPath))
         .expectArg("<file_path>", KJ_BIND_METHOD(*this, setFilePath))
         .callAfterParsing(KJ_BIND_METHOD(*this, run))
         .build();
@@ -67,22 +75,40 @@ public:
     const auto& compileCache = jsg::CompileCache::get();
     auto options = v8::ScriptCompiler::kNoCompileOptions;
 
-    ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& js) {
-      for (auto& entry: file_contents) {
-        kj::StringPtr name = kj::get<0>(entry);
-        kj::ArrayPtr<const kj::byte> content = kj::get<1>(entry);
+    ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& isolateLock) {
+      JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+          isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock),
+          [&](jsg::Lock& js) {
+        for (auto& entry: file_contents) {
+          kj::StringPtr name = kj::get<0>(entry);
+          kj::ArrayPtr<const kj::byte> content = kj::get<1>(entry);
 
-        v8::ScriptOrigin origin(jsg::v8StrIntern(js.v8Isolate, name), resourceLineOffset,
-            resourceColumnOffset, resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque,
-            isWasm, isModule);
+          v8::ScriptOrigin origin(jsg::v8StrIntern(js.v8Isolate, name), resourceLineOffset,
+              resourceColumnOffset, resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque,
+              isWasm, isModule);
 
-        auto contentStr = jsg::newExternalOneByteString(js, content.asChars());
-        auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
-        auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
+          auto contentStr = jsg::newExternalOneByteString(js, content.asChars());
+          auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
+          auto module =
+              jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
 
-        compileCache.add(name, module->GetUnboundModuleScript());
-      }
+          compileCache.add(name, module->GetUnboundModuleScript());
+        }
+      });
     });
+
+    auto fs = kj::newDiskFilesystem();
+    auto& dir = fs->getCurrent();
+    auto output = dir.openFile(outputPath, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
+
+    capnp::MallocMessageBuilder message;
+    compileCache.serialize(message);
+
+    KJ_IF_SOME(fd, output->getFd()) {
+      capnp::writeMessageToFd(fd, message);
+    } else {
+      KJ_FAIL_ASSERT("Failed to get file descriptor of output file"_kj);
+    }
 
     return true;
   }
@@ -90,6 +116,7 @@ public:
 private:
   kj::ProcessContext& context;
   kj::Path filePath{};
+  kj::Path outputPath{};
 
   jsg::V8System system{};
   v8::Isolate::CreateParams params{};
@@ -100,11 +127,16 @@ private:
     return true;
   }
 
+  kj::MainBuilder::Validity setOutputPath(kj::StringPtr path) {
+    outputPath = kj::Path::parse(path);
+    return true;
+  }
+
   // Key is the path of the file, and value is the content.
   kj::Vector<kj::Tuple<kj::String, kj::Array<const kj::byte>>> file_contents{};
 };
 
 }  // namespace
-}  // namespace workerd::api
+}  // namespace workerd::tools
 
-KJ_MAIN(workerd::api::CompileCacheCreator)
+KJ_MAIN(workerd::tools::CompileCacheCreator)

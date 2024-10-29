@@ -8,6 +8,7 @@
 
 #include <v8.h>
 
+#include <capnp/message.h>
 #include <kj/string.h>
 
 namespace workerd::jsg {
@@ -44,6 +45,7 @@ public:
 
   void add(kj::StringPtr key, v8::Local<v8::UnboundModuleScript> script) const;
   kj::Maybe<Data&> find(kj::StringPtr key) const;
+  void serialize(capnp::MessageBuilder& message) const;
 
   static const CompileCache& get() {
     static const CompileCache instance;

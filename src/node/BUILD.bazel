@@ -1,7 +1,7 @@
 load("@workerd//:build/wd_compile_cache.bzl", "wd_compile_cache")
 load("@workerd//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
-srcs = wd_ts_bundle(
+wd_ts_bundle(
     name = "node",
     eslintrc_json = "eslint.config.mjs",
     import_name = "node",
@@ -23,6 +23,8 @@ srcs = wd_ts_bundle(
 )
 
 wd_compile_cache(
-    name = "node_compile_cache",
-    srcs = srcs,
+    name = "compile_cache",
+    srcs = [
+        ":assert.js",
+    ],
 )

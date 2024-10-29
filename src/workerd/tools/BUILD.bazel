@@ -2,6 +2,7 @@ load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 
 # ========================================================================================
 # Parameter Name Extractor
@@ -27,7 +28,10 @@ cc_ast_dump(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "@capnp-cpp//src/capnp",
-    ],
+    ] + select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
+    }),
 )
 
 rust_binary(
@@ -73,6 +77,14 @@ run_binary(
     visibility = ["//visibility:public"],
 )
 
+wd_cc_capnp_library(
+    name = "compile_cache_capnp",
+    srcs = ["compile-cache.capnp"],
+    data = [],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
 # This binary is used to generate compile cache for workerd.
 # This will later be used by workerd to access compile caches of JS internals.
 # NOTE: We only enable compile cache for linux at the moment.
@@ -81,6 +93,7 @@ wd_cc_binary(
     srcs = ["create-compile-cache.c++"],
     visibility = ["//visibility:public"],
     deps = [
+        ":compile_cache_capnp",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",

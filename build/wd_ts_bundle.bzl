@@ -24,7 +24,8 @@ def wd_ts_bundle_capnp(
         internal_json_modules = [],
         lint = True,
         deps = [],
-        js_deps = []):
+        js_deps = [],
+        data = []):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -75,6 +76,7 @@ def wd_ts_bundle_capnp(
         declarations = declarations,
         schema_id = schema_id,
         deps = deps + js_deps,
+        data = data,
     )
 
     if lint:
@@ -113,4 +115,3 @@ def wd_ts_bundle(name, import_name, *args, **kwargs):
         deps = ["@workerd//src/workerd/jsg:modules_capnp"],
         include_prefix = import_name,
     )
-    return data

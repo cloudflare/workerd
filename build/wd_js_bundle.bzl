@@ -124,7 +124,8 @@ def wd_js_bundle_capnp(
         internal_data_modules = [],
         internal_json_modules = [],
         declarations = [],
-        deps = []):
+        deps = [],
+        data = []):
     """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
@@ -190,7 +191,7 @@ def wd_js_bundle_capnp(
         declarations,
     )
 
-    data = (
+    data = data + (
         list(builtin_modules_dict) +
         list(internal_modules_dict) +
         list(internal_wasm_modules_dict) +

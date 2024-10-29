@@ -3,6 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "compile-cache.h"
 
+#include <workerd/tools/compile-cache.capnp.h>
+
+#include <capnp/dynamic.h>
+#include <capnp/schema.h>
+
 namespace workerd::jsg {
 
 // CompileCache::Data
@@ -27,6 +32,23 @@ kj::Maybe<CompileCache::Data&> CompileCache::find(kj::StringPtr key) const {
     }
   }
   return kj::none;
+}
+
+void CompileCache::serialize(capnp::MessageBuilder& message) const {
+  capnp::DynamicStruct::Builder builder = message.initRoot<workerd::tools::CompileCache>();
+
+  auto lock = cache.lockShared();
+  auto entries = builder.init("entries", lock->size()).as<capnp::DynamicList>();
+
+  size_t i = 0;
+  for (auto& current: *lock) {
+    auto entry = entries[i].as<capnp::DynamicStruct>();
+    capnp::Text::Reader key(current.key);
+    entry.set("path"_kj, key);
+    capnp::Data::Reader data(kj::ArrayPtr(current.value.data, current.value.length));
+    entry.set("data"_kj, data);
+    i++;
+  }
 }
 
 }  // namespace workerd::jsg
