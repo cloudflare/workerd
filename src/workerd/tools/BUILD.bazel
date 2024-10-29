@@ -87,7 +87,6 @@ wd_cc_capnp_library(
 
 # This binary is used to generate compile cache for workerd.
 # This will later be used by workerd to access compile caches of JS internals.
-# NOTE: We only enable compile cache for linux at the moment.
 wd_cc_binary(
     name = "create_compile_cache",
     srcs = ["create-compile-cache.c++"],
