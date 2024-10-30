@@ -2336,7 +2336,7 @@ public:
   //
   // Some kinds of exceptions explicitly will not be caught:
   // - Exceptions where JavaScript execution cannot continue, such as the "uncatchable exception"
-  //   produced by IsolateBase::terminateExecution().
+  //   produced by IsolateBase::TerminateExecution().
   // - C++ exceptions other than `kj::Exception`, e.g. `std::bad_alloc`. These exceptions are
   //   assumed to be serious enough that they cannot be caught as if they were JavaScript errors,
   //   and instead unwind must continue until C++ catches them.
@@ -2354,13 +2354,14 @@ public:
       } catch (JsExceptionThrown&) {
         // If tryCatch.HasCaught() is false, it typically means that JsExceptionThrown
         // was thrown without an exception actually being scheduled on the isolate.
-        // This may happen in particular when the JsExceptionThrows was the result of
-        // TerminateException() but V8 has since cleared the terminate flag because all
+        // This may happen in particular when the JsExceptionThrown was the result of
+        // TerminateExecution() but V8 has since cleared the terminate flag because all
         // JavaScript call frames have been unwound. Hence, we want to treat this the
         // same as if `CanContinue()` returned false.
         // TODO(cleanup): Do more investigation, maybe explicitly check for the termination
         // flag or arrange to maintain our own separate termination flag to avoid confusion.
         if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+          tryCatch.ReThrow();
           throw;
         }
 

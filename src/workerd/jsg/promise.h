@@ -513,8 +513,8 @@ PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
     if (tryCatch.HasCaught() && tryCatch.CanContinue()) {
       return rejectedPromise<Result>(tryCatch.Exception());
     } else {
-      // probably TerminateExecution() called
-      if (tryCatch.CanContinue()) tryCatch.ReThrow();
+      // Probably TerminateExecution() called.
+      tryCatch.ReThrow();
       throw;
     }
   } catch (kj::Exception& e) {
