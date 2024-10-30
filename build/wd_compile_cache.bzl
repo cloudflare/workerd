@@ -11,20 +11,22 @@ def _gen_compile_cache_impl(ctx):
     srcs = []
     for src in ctx.attr.srcs:
         srcs.extend(src.files.to_list())
+    outs = [ctx.actions.declare_file(src.path + "_cache") for src in srcs]
+
+    content = []
+    for i in range(0, len(srcs)):
+        content.append("{} {}".format(srcs[i].path, outs[i].path))
 
     ctx.actions.write(
         output = file_list,
-        content = "\n".join([f.path for f in srcs]) + "\n",
+        content = "\n".join(content) + "\n",
     )
 
-    out = ctx.outputs.out
-
     args = ctx.actions.args()
-    args.add(out)
     args.add(file_list)
 
     ctx.actions.run(
-        outputs = [out],
+        outputs = outs,
         inputs = [file_list] + srcs,
         arguments = [args],
         executable = ctx.executable._tool,
@@ -32,14 +34,13 @@ def _gen_compile_cache_impl(ctx):
     )
 
     return [
-        DefaultInfo(files = depset([out])),
+        DefaultInfo(files = depset(outs)),
     ]
 
 gen_compile_cache = rule(
     implementation = _gen_compile_cache_impl,
     attrs = {
         "srcs": attr.label_list(mandatory = True, allow_files = True),
-        "out": attr.output(mandatory = True),
         "_tool": attr.label(executable = True, allow_single_file = True, cfg = "exec", default = "//src/workerd/tools:create_compile_cache"),
     },
 )
@@ -48,5 +49,4 @@ def wd_compile_cache(name, srcs):
     gen_compile_cache(
         name = name + "_gen",
         srcs = srcs,
-        out = name,
     )

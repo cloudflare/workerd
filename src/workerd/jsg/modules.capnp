@@ -25,7 +25,7 @@ struct Module {
   type @2 :ModuleType;
 
   # Optional compile cache to be used to speed up module loading
-  compileCache @3 :Data;
+  compileCache @7 :Data;
 }
 
 
