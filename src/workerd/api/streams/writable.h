@@ -101,6 +101,7 @@ class WritableStream: public jsg::Object {
 public:
   explicit WritableStream(IoContext& ioContext,
       kj::Own<WritableStreamSink> sink,
+      kj::Maybe<kj::Own<ByteStreamObserver>> observer,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 

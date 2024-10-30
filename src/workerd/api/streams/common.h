@@ -726,7 +726,8 @@ public:
 
 kj::Own<WritableStreamController> newWritableStreamJsController();
 kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext& ioContext,
-    kj::Own<WritableStreamSink> source,
+    kj::Own<WritableStreamSink> sink,
+    kj::Maybe<kj::Own<ByteStreamObserver>> observer,
     kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 

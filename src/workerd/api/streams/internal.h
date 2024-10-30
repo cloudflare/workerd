@@ -8,6 +8,7 @@
 #include "writable.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/observer.h>
 
 #include <deque>
 
@@ -183,9 +184,11 @@ public:
   explicit WritableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
   explicit WritableStreamInternalController(kj::Own<WritableStreamSink> writable,
+      kj::Maybe<kj::Own<ByteStreamObserver>> observer,
       kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
       kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none)
       : state(IoContext::current().addObject(kj::heap<Writable>(kj::mv(writable)))),
+        observer(kj::mv(observer)),
         maybeHighWaterMark(maybeHighWaterMark),
         maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
 
@@ -278,6 +281,8 @@ private:
   kj::Maybe<WritableStream&> owner;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, IoOwn<Writable>> state;
   kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked> writeState = Unlocked();
+
+  kj::Maybe<kj::Own<ByteStreamObserver>> observer;
 
   kj::Maybe<PendingAbort> maybePendingAbort;
 
