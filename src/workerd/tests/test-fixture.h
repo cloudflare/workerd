@@ -103,7 +103,6 @@ private:
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
   capnp::HttpOverCapnpFactory httpOverCapnpFactory;
   ThreadContext threadContext;
-  kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
   kj::Own<Worker::Api> api;

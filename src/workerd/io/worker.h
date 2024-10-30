@@ -272,9 +272,7 @@ public:
   // session has one isolate which may load many iterations of the script (this allows the
   // inspector session to stay open across them).
   explicit Isolate(kj::Own<Api> api,
-      kj::Own<IsolateObserver>&& metrics,
       kj::StringPtr id,
-      kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
       ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
 
@@ -284,8 +282,12 @@ public:
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
 
+  inline IsolateObserver& getMetrics() {
+    return metrics;
+  }
+
   inline const IsolateObserver& getMetrics() const {
-    return *metrics;
+    return metrics;
   }
 
   inline kj::StringPtr getId() const {
@@ -299,8 +301,16 @@ public:
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
+  inline IsolateLimitEnforcer& getLimitEnforcer() {
+    return limitEnforcer;
+  }
+
   inline const IsolateLimitEnforcer& getLimitEnforcer() const {
-    return *limitEnforcer;
+    return limitEnforcer;
+  }
+
+  inline Api& getApi() {
+    return *api;
   }
 
   inline const Api& getApi() const {
@@ -390,16 +400,16 @@ private:
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
 
   kj::String id;
-  kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<Api> api;
+  IsolateLimitEnforcer& limitEnforcer;
   ConsoleMode consoleMode;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.
   kj::Maybe<kj::String> featureFlagsForFl;
 
-  kj::Own<IsolateObserver> metrics;
-  TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
+  IsolateObserver& metrics;
+  TeardownFinishedGuard<IsolateObserver&> teardownGuard{metrics};
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -516,6 +526,11 @@ public:
   // params.
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
+
+  virtual IsolateLimitEnforcer& getLimitEnforcer() = 0;
+  virtual const IsolateLimitEnforcer& getLimitEnforcer() const = 0;
+  virtual IsolateObserver& getMetrics() = 0;
+  virtual const IsolateObserver& getMetrics() const = 0;
 
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback = kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
