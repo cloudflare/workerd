@@ -38,7 +38,7 @@ def wd_test(
             source_map = True,
             composite = True,
             declaration = True,
-            deps = ["//src/node:node.capnp@tsproject"],
+            deps = ["//src/node:node@tsproject"],
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 

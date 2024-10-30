@@ -627,6 +627,8 @@ public:
     KJ_UNIMPLEMENTED("trace event not supported");
   }
 
+  static constexpr uint16_t TYPE = 2;
+
 private:
   uint16_t typeId;
   kj::Array<kj::Own<workerd::Trace>> traces;

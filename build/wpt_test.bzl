@@ -89,10 +89,11 @@ def generate_external_modules(files):
 
     for file in files.to_list():
         file_path = wd_relative_path(file)
-        if file.basename.endswith(".js"):
+        if file.extension == "js":
             entry = """(name = "{}", esModule = embed "{}")""".format(file.basename, file_path)
-        elif file.basename.endswith(".json"):
-            entry = """(name = "{}", json = embed "{}")""".format(file.basename, file_path)
+        elif file.extension == "json":
+            # TODO(soon): It's difficult to manipulate paths in Bazel, so we assume that all JSONs are in a resources/ directory for now
+            entry = """(name = "resources/{}", json = embed "{}")""".format(file.basename, file_path)
         else:
             # For other file types, you can add more conditions or skip them
             continue
