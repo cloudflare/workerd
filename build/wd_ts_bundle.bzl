@@ -1,7 +1,9 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
-load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle_capnp")
+load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
+
+def to_js(filenames):
+    return [_to_js(f) for f in filenames]
 
 def _to_js(file_name):
     if file_name.endswith(".ts"):
@@ -11,7 +13,7 @@ def _to_js(file_name):
 def _to_d_ts(file_name):
     return file_name.removesuffix(".ts") + ".d.ts"
 
-def wd_ts_bundle_capnp(
+def wd_ts_bundle(
         name,
         import_name,
         schema_id,
@@ -61,7 +63,7 @@ def wd_ts_bundle_capnp(
         visibility = ["//visibility:public"],
     )
 
-    data = wd_js_bundle_capnp(
+    wd_js_bundle(
         name = name,
         import_name = import_name,
         # builtin modules are accessible under "<import_name>:<module_name>" name
@@ -100,16 +102,3 @@ def wd_ts_bundle_capnp(
                 "//conditions:default": [],
             }),
         )
-    return data
-
-def wd_ts_bundle(name, import_name, *args, **kwargs):
-    data = wd_ts_bundle_capnp(name + ".capnp", import_name, *args, **kwargs)
-    cc_capnp_library(
-        name = name,
-        srcs = [name + ".capnp"],
-        strip_include_prefix = "",
-        visibility = ["//visibility:public"],
-        data = data,
-        deps = ["@workerd//src/workerd/jsg:modules_capnp"],
-        include_prefix = import_name,
-    )

@@ -6,7 +6,7 @@ load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
 load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
-load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle_capnp")
+load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 copy_file(
     name = "pyodide_packages_archive",
@@ -193,32 +193,38 @@ esbuild(
     deps = ["pyodide.asm.js@rule_js"],
 )
 
-data = wd_ts_bundle_capnp(
-    name = "pyodide.capnp",
+INTERNAL_MODULES = glob(
+    [
+        "internal/*.ts",
+        "internal/topLevelEntropy/*.ts",
+        # The pool directory is only needed by typescript, it shouldn't be used at runtime.
+        "internal/pool/*.ts",
+        "types/*.ts",
+        "types/*/*.ts",
+    ],
+    allow_empty = True,
+)
+
+MODULES = ["python-entrypoint-helper.ts"]
+
+INTERNAL_DATA_MODULES = glob([
+    "internal/*.py",
+    "internal/patches/*.py",
+    "internal/topLevelEntropy/*.py",
+])
+
+wd_ts_bundle(
+    name = "pyodide",
     eslintrc_json = "eslint.config.mjs",
     import_name = "pyodide",
-    internal_data_modules = ["generated/python_stdlib.zip"] + glob([
-        "internal/*.py",
-        "internal/patches/*.py",
-        "internal/topLevelEntropy/*.py",
-    ]),
+    internal_data_modules = ["generated/python_stdlib.zip"] + INTERNAL_DATA_MODULES,
     internal_json_modules = [
         "generated/pyodide-lock.json",
         "generated/pyodide-bucket.json",
     ],
     internal_modules = [
         "generated/emscriptenSetup.js",
-    ] + glob(
-        [
-            "internal/*.ts",
-            "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
-            "types/*.ts",
-            "types/*/*.ts",
-        ],
-        allow_empty = True,
-    ),
+    ] + INTERNAL_MODULES,
     internal_wasm_modules = ["generated/pyodide.asm.wasm"],
     js_deps = [
         "generated/emscriptenSetup",
@@ -229,27 +235,41 @@ data = wd_ts_bundle_capnp(
         "pyodide-bucket.json@rule",
     ],
     lint = False,
-    modules = ["python-entrypoint-helper.ts"],
+    modules = MODULES,
     schema_id = "0xbcc8f57c63814005",
     tsconfig_json = "tsconfig.json",
-)
-
-cc_capnp_library(
-    name = "pyodide",
-    srcs = ["pyodide.capnp"],
-    data = data,
-    include_prefix = "pyodide",
-    strip_include_prefix = "",
-    visibility = ["//visibility:public"],
-    deps = ["@workerd//src/workerd/jsg:modules_capnp"],
 )
 
 genrule(
     name = "pyodide.capnp.bin@rule",
     srcs = [
-        "pyodide.capnp",
+        ":pyodide.capnp",
         "//src/workerd/jsg:modules.capnp",
-    ] + data,
+    ] + [
+        ":pyodide-" + m.replace("/", "_").removesuffix(".ts")
+        for m in INTERNAL_MODULES
+        if not m.endswith(".d.ts")
+    ] + [
+        ":pyodide-" + m.replace("/", "_").removesuffix(".ts") + ".d.ts"
+        for m in INTERNAL_MODULES
+        if not m.endswith(".d.ts") and m.endswith(".ts")
+    ] + [
+        ":pyodide_" + m.replace("/", "_").removesuffix(".ts")
+        for m in MODULES
+    ] + [
+        ":pyodide_" + m.replace("/", "_").removesuffix(".ts") + ".d.ts"
+        for m in MODULES
+    ] + [
+        ":pyodide-" + m.replace("/", "_")
+        for m in INTERNAL_DATA_MODULES
+        if m.endswith(".py")
+    ] + [
+        ":pyodide-internal_generated_emscriptenSetup",
+        ":pyodide-internal_generated_pyodide.asm.wasm",
+        ":pyodide-internal_generated_python_stdlib.zip",
+        ":pyodide-internal_generated_pyodide-lock.json",
+        ":pyodide-internal_generated_pyodide-bucket.json",
+    ],
     outs = ["pyodide.capnp.bin"],
     cmd = " ".join([
         # Annoying logic to deal with different paths in workerd vs downstream.
