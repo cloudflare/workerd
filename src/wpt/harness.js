@@ -64,6 +64,14 @@ globalThis.assert_array_equals = (a, b, message) => {
   deepStrictEqual(a, b, message);
 };
 
+globalThis.assert_object_equals = (a, b, message) => {
+  deepStrictEqual(a, b, message);
+};
+
+globalThis.assert_implements = (a, message) => {
+  ok(a, message);
+};
+
 globalThis.assert_throws_js = (type, fn, message) => {
   throws(fn, type, message);
 };
