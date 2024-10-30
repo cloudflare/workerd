@@ -393,7 +393,7 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
   v8::Local<v8::String> contentStr;
-  v8::ScriptCompiler::CachedData* existingCacheData = nullptr;
+  kj::Own<v8::ScriptCompiler::CachedData> existingCacheData;
   auto compileOptions = v8::ScriptCompiler::kNoCompileOptions;
   const auto& compileCache = CompileCache::get();
 
@@ -406,17 +406,17 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     // We only enable compile cache for built-in modules for now.
     KJ_IF_SOME(cached, compileCache.find(name)) {
       compileOptions = v8::ScriptCompiler::kConsumeCodeCache;
-      existingCacheData = cached.AsCachedData().release();
+      existingCacheData = cached->AsCachedData();
     }
   } else {
     contentStr = jsg::v8Str(js.v8Isolate, content);
   }
 
-  v8::ScriptCompiler::Source source(contentStr, origin, existingCacheData);
+  v8::ScriptCompiler::Source source(contentStr, origin, existingCacheData.get());
   auto module =
       jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));
 
-  if (existingCacheData == nullptr) {
+  if (existingCacheData.get() == nullptr) {
     compileCache.add(name, module->GetUnboundModuleScript());
   }
 

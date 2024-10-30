@@ -6,9 +6,12 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/tools/compile-cache.capnp.h>
+
 #include <v8.h>
 
 #include <capnp/message.h>
+#include <capnp/serialize-packed.h>
 #include <kj/string.h>
 
 namespace workerd::jsg {
@@ -23,29 +26,22 @@ namespace workerd::jsg {
 // we'd likely need to have find return an atomic refcount or something similar.
 class CompileCache {
 public:
-  class Data {
+  class Data: public kj::AtomicRefcounted, public kj::EnableAddRefToThis<Data> {
   public:
-    Data(): data(nullptr), length(0), owningPtr(nullptr) {};
-    explicit Data(std::shared_ptr<v8::ScriptCompiler::CachedData> cached_data)
-        : data(cached_data->data),
-          length(cached_data->length),
-          owningPtr(cached_data) {};
+    explicit Data(kj::Array<kj::byte> cached_data): data(kj::mv(cached_data)) {}
 
     // Returns a v8::ScriptCompiler::CachedData corresponding to this
     // CompileCache::Data. The lifetime of the returned
     // v8::ScriptCompiler::CachedData must not outlive that of the data.
-    std::unique_ptr<v8::ScriptCompiler::CachedData> AsCachedData();
+    kj::Own<v8::ScriptCompiler::CachedData> AsCachedData();
 
-    const uint8_t* data;
-    size_t length;
-
-  private:
-    std::shared_ptr<void> owningPtr;
+    kj::Array<kj::byte> data;
   };
 
   void add(kj::StringPtr key, v8::Local<v8::UnboundModuleScript> script) const;
-  kj::Maybe<Data&> find(kj::StringPtr key) const;
+  kj::Maybe<kj::Arc<Data>> find(kj::StringPtr key) const;
   void serialize(capnp::MessageBuilder& message) const;
+  void deserialize(capnp::PackedFdMessageReader& message) const;
 
   static const CompileCache& get() {
     static const CompileCache instance;
@@ -54,7 +50,7 @@ public:
 
 private:
   // The key is the address of the static global that was compiled to produce the CachedData.
-  kj::MutexGuarded<kj::HashMap<kj::String, Data>> cache;
+  kj::MutexGuarded<kj::HashMap<kj::String, kj::Arc<Data>>> cache;
 };
 
 }  // namespace workerd::jsg

@@ -3,30 +3,28 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "compile-cache.h"
 
-#include <workerd/tools/compile-cache.capnp.h>
-
 namespace workerd::jsg {
 
 // CompileCache::Data
 
-std::unique_ptr<v8::ScriptCompiler::CachedData> CompileCache::Data::AsCachedData() {
-  return std::make_unique<v8::ScriptCompiler::CachedData>(
-      data, length, v8::ScriptCompiler::CachedData::BufferNotOwned);
+kj::Own<v8::ScriptCompiler::CachedData> CompileCache::Data::AsCachedData() {
+  return kj::heap<v8::ScriptCompiler::CachedData>(
+      data.begin(), data.size(), v8::ScriptCompiler::CachedData::BufferNotOwned)
+      .attach(addRefToThis());
 }
 
 // CompileCache
 
 void CompileCache::add(kj::StringPtr key, v8::Local<v8::UnboundModuleScript> script) const {
-  auto cached =
-      std::shared_ptr<v8::ScriptCompiler::CachedData>(v8::ScriptCompiler::CreateCodeCache(script));
-  cache.lockExclusive()->upsert(kj::str(key), Data(kj::mv(cached)), [](auto&, auto&&) {});
+  auto cached = v8::ScriptCompiler::CreateCodeCache(script);
+  auto data = kj::heapArray<kj::byte>(cached->data, cached->length);
+  cache.lockExclusive()->upsert(kj::str(key), kj::arc<Data>(kj::mv(data)), [](auto&, auto&&) {});
+  delete cached;
 }
 
-kj::Maybe<CompileCache::Data&> CompileCache::find(kj::StringPtr key) const {
+kj::Maybe<kj::Arc<CompileCache::Data>> CompileCache::find(kj::StringPtr key) const {
   KJ_IF_SOME(value, cache.lockExclusive()->find(key)) {
-    if (value.data != nullptr) {
-      return value;
-    }
+    return value.addRef();
   }
   return kj::none;
 }
@@ -40,8 +38,19 @@ void CompileCache::serialize(capnp::MessageBuilder& message) const {
   for (auto& current: *lock) {
     auto entry = entries[i];
     entry.setPath(current.key);
-    entry.setData(kj::ArrayPtr(current.value.data, current.value.length));
+    entry.setData(current.value->data);
     i++;
+  }
+}
+
+void CompileCache::deserialize(capnp::PackedFdMessageReader& message) const {
+  auto input = message.getRoot<workerd::tools::CompileCache>();
+  auto lock = cache.lockExclusive();
+  for (auto entry: input.getEntries()) {
+    auto path = entry.getPath();
+    auto data = entry.getData();
+    auto compiled_cache = kj::heapArray<kj::byte>(data.begin(), data.size());
+    lock->insert(kj::heapString(path.cStr(), path.size()), kj::arc<Data>(kj::mv(compiled_cache)));
   }
 }
 
