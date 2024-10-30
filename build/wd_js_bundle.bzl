@@ -114,7 +114,7 @@ def _copy_modules(modules, declarations):
         result[new_filename] = modules[m]
     return result, declarations_result
 
-def wd_js_bundle_capnp(
+def wd_js_bundle(
         name,
         import_name,
         schema_id,
@@ -202,7 +202,7 @@ def wd_js_bundle_capnp(
 
     gen_api_bundle_capnpn(
         name = name + "@gen",
-        out = name,
+        out = name + ".capnp",
         schema_id = schema_id,
         const_name = import_name + "Bundle",
         builtin_modules = builtin_modules_dict,
@@ -214,10 +214,7 @@ def wd_js_bundle_capnp(
         data = data,
         deps = deps,
     )
-    return data
 
-def wd_js_bundle(name, import_name, *args, **kwargs):
-    data = wd_js_bundle_capnp(name + ".capnp", import_name, *args, **kwargs)
     cc_capnp_library(
         name = name,
         srcs = [name + ".capnp"],
