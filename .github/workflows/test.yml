@@ -176,6 +176,15 @@ jobs:
         # 'Show timestamps' on the web interface)
         run: |
           bazel build --remote_download_minimal ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci -s --config=v8-codegen-opt //src/workerd/tests:dummy
+      - name: Upload build statistics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os.name }}${{ matrix.config.suffix }}-bazel-profile
+          path: |
+              build.bazel-profile
+              test.bazel-profile
+              bazel-out/x64_windows-fastbuild/bin/src/workerd/tests/_objs/dummy/dummy.obj.params
       - name: Report disk usage (in MB)
         if: always()
         shell: bash
