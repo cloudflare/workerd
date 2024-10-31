@@ -6,12 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap_builder",
+    name = "cxx",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,30 +30,40 @@ rust_library(
         ],
     ),
     crate_features = [
-        "color",
-        "error-context",
-        "help",
+        "alloc",
+        "default",
         "std",
-        "suggestions",
-        "usage",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__cxxbridge-macro-1.0.129//:cxxbridge_macro",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_builder",
+        "crate-name=cxx",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.20",
+    version = "1.0.129",
     deps = [
-        "@crates_vendor__anstream-0.6.17//:anstream",
-        "@crates_vendor__anstyle-1.0.8//:anstyle",
-        "@crates_vendor__clap_lex-0.7.2//:clap_lex",
-        "@crates_vendor__strsim-0.11.1//:strsim",
+        ":cxx_cc",
+        "@crates_vendor__link-cplusplus-1.0.9//:link_cplusplus",
     ],
+)
+
+# Additive BUILD file content
+cc_library(
+    name = "cxx_cc",
+    srcs = ["src/cxx.cc"],
+    hdrs = ["include/cxx.h"],
+    include_prefix = "rust",
+    includes = ["include"],
+    linkstatic = True,
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
 )

@@ -40,6 +40,7 @@ node-test test_name:
 
 format:
   python3 tools/cross/format.py
+  bazel run @rules_rust//:rustfmt
 
 internal-pr:
   ./tools/unix/create-internal-pr.sh
@@ -51,6 +52,9 @@ update-deps prefix="":
 # equivalent to `cargo update`; use `workspace` or <package> to limit update scope
 update-rust package="full":
   bazel run //deps/rust:crates_vendor -- --repin {{package}}
+
+rust-analyzer:
+  bazel run @rules_rust//tools/rust_analyzer:gen_rust_project
 
 # example: just bench mimetype
 bench path:

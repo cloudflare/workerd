@@ -1,0 +1,19 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+# Build file for cxxbridge-cmd tool.
+
+rust_binary(
+    name = "cxxbridge-cmd",
+    srcs = glob(["src/**/*.rs"]),
+    data = ["src/gen/include/cxx.h"],
+    edition = "2021",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:clap",
+        "@crates_vendor//:codespan-reporting",
+        "@crates_vendor//:cxx",
+        "@crates_vendor//:proc-macro2",
+        "@crates_vendor//:quote",
+        "@crates_vendor//:syn",
+    ],
+)

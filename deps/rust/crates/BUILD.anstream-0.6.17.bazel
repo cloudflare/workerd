@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap_builder",
+    name = "anstream",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,12 +29,9 @@ rust_library(
         ],
     ),
     crate_features = [
-        "color",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
+        "auto",
+        "default",
+        "wincon",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -43,16 +40,23 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_builder",
+        "crate-name=anstream",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.20",
+    version = "0.6.17",
     deps = [
-        "@crates_vendor__anstream-0.6.17//:anstream",
         "@crates_vendor__anstyle-1.0.8//:anstyle",
-        "@crates_vendor__clap_lex-0.7.2//:clap_lex",
-        "@crates_vendor__strsim-0.11.1//:strsim",
-    ],
+        "@crates_vendor__anstyle-parse-0.2.6//:anstyle_parse",
+        "@crates_vendor__anstyle-query-1.1.2//:anstyle_query",
+        "@crates_vendor__colorchoice-1.0.3//:colorchoice",
+        "@crates_vendor__is_terminal_polyfill-1.70.1//:is_terminal_polyfill",
+        "@crates_vendor__utf8parse-0.2.2//:utf8parse",
+    ] + select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__anstyle-wincon-3.0.6//:anstyle_wincon",  # x86_64-pc-windows-msvc
+        ],
+        "//conditions:default": [],
+    }),
 )

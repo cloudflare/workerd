@@ -33,6 +33,8 @@ rust_library(
         ],
     ),
     crate_features = [
+        "color",
+        "default",
         "error-context",
         "help",
         "std",
@@ -76,6 +78,8 @@ rust_binary(
         ],
     ),
     crate_features = [
+        "color",
+        "default",
         "error-context",
         "help",
         "std",

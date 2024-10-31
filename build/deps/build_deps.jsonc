@@ -73,6 +73,11 @@
       "downloaded_file_path": "downloaded.exe"
     },
     {
+      "name": "cxxbridge-cmd",
+      "type": "crate",
+      "build_file": "//deps/rust:BUILD.cxxbridge-cmd"
+    },
+    {
       "name": "aspect_rules_esbuild",
       "type": "github_release",
       "owner": "aspect-build",

@@ -79,7 +79,9 @@ crates_vendor(
 cc_library(
     name = "runtime",
     linkopts = select({
-        "@platforms//os:windows": ["ntdll.lib"],
+        "@platforms//os:windows": [
+            "ntdll.lib",
+        ],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],

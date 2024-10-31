@@ -300,14 +300,18 @@ _NORMAL_DEPENDENCIES = {
             "capnp": Label("@crates_vendor__capnp-0.20.3//:capnp"),
             "capnpc": Label("@crates_vendor__capnpc-0.20.0//:capnpc"),
             "clang-ast": Label("@crates_vendor__clang-ast-0.1.26//:clang_ast"),
-            "cxx": Label("@crates_vendor__cxx-1.0.128//:cxx"),
-            "cxxbridge-cmd": Label("@crates_vendor__cxxbridge-cmd-1.0.128//:cxxbridge_cmd"),
+            "clap": Label("@crates_vendor__clap-4.5.20//:clap"),
+            "codespan-reporting": Label("@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting"),
+            "cxx": Label("@crates_vendor__cxx-1.0.129//:cxx"),
             "flate2": Label("@crates_vendor__flate2-1.0.34//:flate2"),
             "lolhtml": Label("@crates_vendor__lolhtml-1.1.1//:lolhtml"),
             "nix": Label("@crates_vendor__nix-0.29.0//:nix"),
             "pico-args": Label("@crates_vendor__pico-args-0.5.0//:pico_args"),
+            "proc-macro2": Label("@crates_vendor__proc-macro2-1.0.89//:proc_macro2"),
+            "quote": Label("@crates_vendor__quote-1.0.37//:quote"),
             "serde": Label("@crates_vendor__serde-1.0.213//:serde"),
             "serde_json": Label("@crates_vendor__serde_json-1.0.132//:serde_json"),
+            "syn": Label("@crates_vendor__syn-2.0.85//:syn"),
             "tokio": Label("@crates_vendor__tokio-1.41.0//:tokio"),
             "tracing": Label("@crates_vendor__tracing-0.1.40//:tracing"),
         },
@@ -436,12 +440,52 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__anstream-0.6.17",
+        sha256 = "23a1e53f0f5d86382dafe1cf314783b2044280f406e7e1506368220ad11b1338",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/anstream/0.6.17/download"],
+        strip_prefix = "anstream-0.6.17",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.anstream-0.6.17.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__anstyle-1.0.8",
         sha256 = "1bec1de6f59aedf83baf9ff929c98f2ad654b97c9510f4e70cf6f661d49fd5b1",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/anstyle/1.0.8/download"],
         strip_prefix = "anstyle-1.0.8",
         build_file = Label("@workerd//deps/rust/crates:BUILD.anstyle-1.0.8.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__anstyle-parse-0.2.6",
+        sha256 = "3b2d16507662817a6a20a9ea92df6652ee4f94f914589377d69f3b21bc5798a9",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/anstyle-parse/0.2.6/download"],
+        strip_prefix = "anstyle-parse-0.2.6",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.anstyle-parse-0.2.6.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__anstyle-query-1.1.2",
+        sha256 = "79947af37f4177cfead1110013d678905c37501914fba0efea834c3fe9a8d60c",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/anstyle-query/1.1.2/download"],
+        strip_prefix = "anstyle-query-1.1.2",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.anstyle-query-1.1.2.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__anstyle-wincon-3.0.6",
+        sha256 = "2109dbce0e72be3ec00bed26e6a7479ca384ad226efdd66db8fa2e3a38c83125",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/anstyle-wincon/3.0.6/download"],
+        strip_prefix = "anstyle-wincon-3.0.6",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.anstyle-wincon-3.0.6.bazel"),
     )
 
     maybe(
@@ -606,6 +650,16 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__colorchoice-1.0.3",
+        sha256 = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/colorchoice/1.0.3/download"],
+        strip_prefix = "colorchoice-1.0.3",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.colorchoice-1.0.3.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__convert_case-0.4.0",
         sha256 = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e",
         type = "tar.gz",
@@ -645,42 +699,33 @@ def crate_repositories():
     )
 
     maybe(
-        new_git_repository,
-        name = "crates_vendor__cxx-1.0.128",
-        commit = "4c2fa90c513af345e1858b3385d28b70118f2123",
-        init_submodules = True,
-        remote = "https://github.com/cloudflare/workerd-cxx.git",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.cxx-1.0.128.bazel"),
+        http_archive,
+        name = "crates_vendor__cxx-1.0.129",
+        sha256 = "cbdc8cca144dce1c4981b5c9ab748761619979e515c3d53b5df385c677d1d007",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/cxx/1.0.129/download"],
+        strip_prefix = "cxx-1.0.129",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.cxx-1.0.129.bazel"),
     )
 
     maybe(
-        new_git_repository,
-        name = "crates_vendor__cxxbridge-cmd-1.0.128",
-        commit = "4c2fa90c513af345e1858b3385d28b70118f2123",
-        init_submodules = True,
-        remote = "https://github.com/cloudflare/workerd-cxx.git",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.cxxbridge-cmd-1.0.128.bazel"),
-        strip_prefix = "gen/cmd",
+        http_archive,
+        name = "crates_vendor__cxxbridge-flags-1.0.129",
+        sha256 = "d422aff542b4fa28c2ce8e5cc202d42dbf24702345c1fba3087b2d3f8a1b90ff",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/cxxbridge-flags/1.0.129/download"],
+        strip_prefix = "cxxbridge-flags-1.0.129",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.cxxbridge-flags-1.0.129.bazel"),
     )
 
     maybe(
-        new_git_repository,
-        name = "crates_vendor__cxxbridge-flags-1.0.128",
-        commit = "4c2fa90c513af345e1858b3385d28b70118f2123",
-        init_submodules = True,
-        remote = "https://github.com/cloudflare/workerd-cxx.git",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.cxxbridge-flags-1.0.128.bazel"),
-        strip_prefix = "flags",
-    )
-
-    maybe(
-        new_git_repository,
-        name = "crates_vendor__cxxbridge-macro-1.0.128",
-        commit = "4c2fa90c513af345e1858b3385d28b70118f2123",
-        init_submodules = True,
-        remote = "https://github.com/cloudflare/workerd-cxx.git",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.cxxbridge-macro-1.0.128.bazel"),
-        strip_prefix = "macro",
+        http_archive,
+        name = "crates_vendor__cxxbridge-macro-1.0.129",
+        sha256 = "a1719100f31492cd6adeeab9a0f46cdbc846e615fdb66d7b398aa46ec7fdd06f",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/cxxbridge-macro/1.0.129/download"],
+        strip_prefix = "cxxbridge-macro-1.0.129",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.cxxbridge-macro-1.0.129.bazel"),
     )
 
     maybe(
@@ -791,6 +836,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/hermit-abi/0.3.9/download"],
         strip_prefix = "hermit-abi-0.3.9",
         build_file = Label("@workerd//deps/rust/crates:BUILD.hermit-abi-0.3.9.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__is_terminal_polyfill-1.70.1",
+        sha256 = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/is_terminal_polyfill/1.70.1/download"],
+        strip_prefix = "is_terminal_polyfill-1.70.1",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.is_terminal_polyfill-1.70.1.bazel"),
     )
 
     maybe(
@@ -1424,6 +1479,16 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__utf8parse-0.2.2",
+        sha256 = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/utf8parse/0.2.2/download"],
+        strip_prefix = "utf8parse-0.2.2",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.utf8parse-0.2.2.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__version_check-0.9.5",
         sha256 = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a",
         type = "tar.gz",
@@ -1597,14 +1662,18 @@ def crate_repositories():
         struct(repo = "crates_vendor__capnp-0.20.3", is_dev_dep = False),
         struct(repo = "crates_vendor__capnpc-0.20.0", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.26", is_dev_dep = False),
-        struct(repo = "crates_vendor__cxx-1.0.128", is_dev_dep = False),
-        struct(repo = "crates_vendor__cxxbridge-cmd-1.0.128", is_dev_dep = False),
+        struct(repo = "crates_vendor__clap-4.5.20", is_dev_dep = False),
+        struct(repo = "crates_vendor__codespan-reporting-0.11.1", is_dev_dep = False),
+        struct(repo = "crates_vendor__cxx-1.0.129", is_dev_dep = False),
         struct(repo = "crates_vendor__flate2-1.0.34", is_dev_dep = False),
         struct(repo = "crates_vendor__lolhtml-1.1.1", is_dev_dep = False),
         struct(repo = "crates_vendor__nix-0.29.0", is_dev_dep = False),
         struct(repo = "crates_vendor__pico-args-0.5.0", is_dev_dep = False),
+        struct(repo = "crates_vendor__proc-macro2-1.0.89", is_dev_dep = False),
+        struct(repo = "crates_vendor__quote-1.0.37", is_dev_dep = False),
         struct(repo = "crates_vendor__serde-1.0.213", is_dev_dep = False),
         struct(repo = "crates_vendor__serde_json-1.0.132", is_dev_dep = False),
+        struct(repo = "crates_vendor__syn-2.0.85", is_dev_dep = False),
         struct(repo = "crates_vendor__tokio-1.41.0", is_dev_dep = False),
         struct(repo = "crates_vendor__tracing-0.1.40", is_dev_dep = False),
     ]
