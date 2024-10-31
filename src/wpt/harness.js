@@ -129,6 +129,17 @@ function prepare(options) {
   globalThis.testOptions = options;
 }
 
+function sanitizeMessage(message) {
+  // Test logs will be exported to XML, so we must escape any characters that
+  // are forbidden in an XML CDATA section, namely "[...] the surrogate blocks,
+  // FFFE, and FFFF".
+  // See https://www.w3.org/TR/REC-xml/#NT-Char
+  return message.replace(
+    /[\u{D800}-\u{DFFF}\u{FFFE}\u{FFFF}]/gu,
+    (char) => '\\u' + char.charCodeAt().toString(16).padStart(4, '0')
+  );
+}
+
 async function validate(options) {
   await Promise.all(globalThis.promises);
 
@@ -136,10 +147,14 @@ async function validate(options) {
   let failed = false;
 
   for (const err of globalThis.errors) {
+    const sanitizedError = new AggregateError(
+      err.errors,
+      sanitizeMessage(err.message)
+    );
     if (expectedFailures.includes(err.message)) {
-      console.warn('Expected failure: ', err);
+      console.warn('Expected failure: ', sanitizedError);
     } else {
-      console.error(err);
+      console.error(sanitizedError);
       failed = true;
     }
   }
