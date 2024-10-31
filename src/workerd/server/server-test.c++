@@ -369,6 +369,12 @@ public:
     return TestStream(ws, KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().wait(ws));
   }
 
+  // Try to connect to the address and return whether or not this connection attempt hangs,
+  // i.e. a listener exists but connections are not being accepted.
+  bool connectHangs(kj::StringPtr addr) {
+    return !KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().poll(ws);
+  }
+
   // Expect an incoming connection on the given address and from a network with the given
   // allowed / denied peer list.
   TestStream receiveSubrequest(kj::StringPtr addr,
@@ -2535,6 +2541,9 @@ KJ_TEST("Server: drain incoming HTTP connections") {
 
   // But conn2 is still open.
   KJ_EXPECT(!conn2.isEof());
+
+  // New connections shouldn't be accepted at this point.
+  KJ_EXPECT(test.connectHangs("test-addr"));
 
   // Finish the request on conn2.
   conn2.send(" / HTTP/1.1\nHost: foo\n\n");
