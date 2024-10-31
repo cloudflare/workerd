@@ -25,6 +25,11 @@ wd_cc_library(
     ],
 )
 
+cc_library(
+    name = "dummy",
+    srcs = ["dummy.S"],
+)
+
 kj_test(
     src = "test-fixture-test.c++",
     deps = [":test-fixture"],

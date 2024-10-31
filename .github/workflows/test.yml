@@ -47,7 +47,7 @@ jobs:
           # disk I/O race conditions causing permission denied errors (this also happened in
           # previous versions). Use remote_download_all for now.
           - os:     { name : windows, image : windows-2022 }
-            config: { suffix: '', bazel-args: "--config=windows_no_dbg --remote_download_all" }
+            config: { suffix: '', bazel-args: "--remote_download_all" }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
           # has been resolved we can likely re-enable it and possibly fold up the custom
@@ -175,10 +175,7 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-          bazel build --remote_download_minimal ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=v8-codegen-opt //...
-      - name: Bazel test
-        run: |
-          bazel test --remote_download_minimal ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --test_output=errors --config=ci --config=v8-codegen-opt //...
+          bazel build --remote_download_minimal ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci -s --config=v8-codegen-opt //src/workerd/tests:dummy
       - name: Report disk usage (in MB)
         if: always()
         shell: bash

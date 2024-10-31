@@ -91,6 +91,8 @@ build:unix --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 # V8 redefines the _WIN32_WINNT set by bazel, disable warnings for redefined macros. Since V8 uses
 # a global define for this, we need to apply it for everything.
 # TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
+build:windows --features=-compiler_param_files --host_features=-compiler_param_files
+
 build:windows --copt='-Wno-macro-redefined'
 build:windows --host_copt='-Wno-macro-redefined'
 # Dawn/Tint adds compiler flags that are ignored on Windows
@@ -297,12 +299,6 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 # In an optional configuration, use the opt configuration and manually disable optimizations as a
 # workaround.
 
-build:windows_no_dbg -c opt
-build:windows_no_dbg --copt='-O0'
-build:windows_no_dbg --copt='/Od'
-build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
-build:windows_no_dbg --features=-smaller_binary
-
 # Mitigate the large size impact of Windows debug binaries somewhat by applying string merging and
 # linker garbage collection.
 build:windows_dbg --config=debug
@@ -314,7 +310,6 @@ build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 # -fvisibility-inlines-hidden on Unix systems (https://blog.llvm.org/2018/11/30-faster-windows-builds-with-clang-cl_14.html)
 # Currently this only reduces object sizes slightly, larger gains are possible if we compile V8 as
 # a shared library.
-build:windows --copt='/Zc:dllexportInlines-'
 
 # Release configuration.
 build:release -c opt
@@ -357,16 +352,7 @@ build:release_windows --copt="/clang:-O3"
 # Unix which turns it on for opt builds.
 build:release_windows --copt="-fstrict-aliasing"
 
-build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
-build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
-build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
-# The `/std:c++20` argument is unused during boringssl compilation and we don't
-# want a warning when compiling each file.
 build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'
-
-# MSVC disappointingly sets __cplusplus to 199711L by default. Defining /Zc:__cplusplus makes it
-# set the correct value. We currently don't check __cplusplus, but some dependencies do.
-build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
