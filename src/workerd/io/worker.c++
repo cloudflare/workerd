@@ -653,7 +653,7 @@ struct Worker::Isolate::Impl {
       metrics.gcEpilogue();
     }
 
-    // Call limitEnforcer->exitJs(), and also schedule to call limitEnforcer->reportMetrics()
+    // Call limitEnforcer.exitJs(), and also schedule to call limitEnforcer.reportMetrics()
     // later. Returns true if condemned. We take a mutable reference to it to make sure the caller
     // believes it has exclusive access.
     bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
@@ -703,8 +703,6 @@ struct Worker::Isolate::Impl {
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
-      limitEnforcer.customizeIsolate(lock->v8Isolate);
-
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
@@ -1002,21 +1000,19 @@ const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
 }  // namespace
 
 Worker::Isolate::Isolate(kj::Own<Api> apiParam,
-    kj::Own<IsolateObserver>&& metricsParam,
     kj::StringPtr id,
-    kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
     ConsoleMode consoleMode)
     : id(kj::str(id)),
-      limitEnforcer(kj::mv(limitEnforcerParam)),
       api(kj::mv(apiParam)),
+      limitEnforcer(api->getLimitEnforcer()),
       consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
-      metrics(kj::mv(metricsParam)),
-      impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
+      metrics(api->getMetrics()),
+      impl(kj::heap<Impl>(*api, metrics, limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
-  metrics->created();
+  metrics.created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);
@@ -1272,7 +1268,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       modular(source.is<ModulesSource>()),
       impl(kj::heap<Impl>()) {
   this->isPython = false;
-  auto parseMetrics = isolate->metrics->parse(startType);
+  auto parseMetrics = isolate->metrics.parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
   //   previews, where it doesn't matter. If we ever do co-locate multiple scripts in the same
@@ -1406,13 +1402,13 @@ kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() con
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {
-  metrics->teardownStarted();
+  metrics.teardownStarted();
 
   // Update the isolate stats one last time to make sure we're accurate for cleanup in
   // `evicted()`.
-  limitEnforcer->reportMetrics(*metrics);
+  limitEnforcer.reportMetrics(metrics);
 
-  metrics->evicted();
+  metrics.evicted();
   weakIsolateRef->invalidate();
 
   // Make sure to destroy things under lock. This lock should never be contended since the isolate
@@ -1421,7 +1417,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
   // worker destruction queue.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     Isolate::Impl::Lock recordedLock(*this, Worker::Lock::TakeSynchronously(kj::none), stackScope);
-    metrics->teardownLockAcquired();
+    metrics.teardownLockAcquired();
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
   });
@@ -3793,7 +3789,7 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
 }
 
 void Worker::Isolate::completedRequest() const {
-  limitEnforcer->completedRequest(id);
+  limitEnforcer.completedRequest(id);
 }
 
 bool Worker::Isolate::isInspectorEnabled() const {

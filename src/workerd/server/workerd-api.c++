@@ -131,6 +131,8 @@ static const PythonConfig defaultConfig{
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
+  kj::Own<IsolateLimitEnforcer> limitEnforcer;
+  kj::Own<IsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
@@ -157,17 +159,24 @@ struct WorkerdApi::Impl final {
 
   Impl(jsg::V8System& v8System,
       CompatibilityFlags::Reader featuresParam,
-      IsolateLimitEnforcer& limitEnforcer,
-      kj::Own<jsg::IsolateObserver> observer,
+      kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
+      kj::Own<IsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
-        jsgIsolate(
-            v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()),
+        limitEnforcer(kj::mv(limitEnforcerParam)),
+        observer(kj::atomicAddRef(*observerParam)),
+        jsgIsolate(v8System,
+            Configuration(*this),
+            kj::mv(observerParam),
+            limitEnforcer->getCreateParams()),
         memoryCacheProvider(memoryCacheProvider),
-        pythonConfig(pythonConfig) {}
+        pythonConfig(pythonConfig) {
+    jsgIsolate.runInLockScope(
+        [&](JsgWorkerdIsolate::Lock& lock) { limitEnforcer->customizeIsolate(lock.v8Isolate); });
+  }
 
   static v8::Local<v8::String> compileTextGlobal(
       JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
@@ -209,14 +218,14 @@ struct WorkerdApi::Impl final {
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
-    IsolateLimitEnforcer& limitEnforcer,
-    kj::Own<jsg::IsolateObserver> observer,
+    kj::Own<IsolateLimitEnforcer> limitEnforcer,
+    kj::Own<IsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
     : impl(kj::heap<Impl>(v8System,
           features,
-          limitEnforcer,
+          kj::mv(limitEnforcer),
           kj::mv(observer),
           memoryCacheProvider,
           pythonConfig,
@@ -264,6 +273,22 @@ jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
   return jsg::JsObject(
       kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
+}
+
+IsolateLimitEnforcer& WorkerdApi::getLimitEnforcer() {
+  return *impl->limitEnforcer;
+}
+
+const IsolateLimitEnforcer& WorkerdApi::getLimitEnforcer() const {
+  return *impl->limitEnforcer;
+}
+
+IsolateObserver& WorkerdApi::getMetrics() {
+  return *impl->observer;
+}
+
+const IsolateObserver& WorkerdApi::getMetrics() const {
+  return *impl->observer;
 }
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,

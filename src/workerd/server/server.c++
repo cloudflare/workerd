@@ -2940,15 +2940,15 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         *observer, conf, featureFlags.asReader(), pythonConfig);
   }
 
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), *limitEnforcer,
-      kj::atomicAddRef(*observer), *memoryCacheProvider, pythonConfig, kj::mv(newModuleRegistry));
+  auto api =
+      kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), kj::mv(limitEnforcer),
+          kj::mv(observer), *memoryCacheProvider, pythonConfig, kj::mv(newModuleRegistry));
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
-  auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
-      kj::mv(limitEnforcer), inspectorPolicy,
+  auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), name, inspectorPolicy,
       conf.isServiceWorkerScript() ? Worker::ConsoleMode::INSPECTOR_ONLY : consoleMode);
 
   // If we are using the inspector, we need to register the Worker::Isolate
