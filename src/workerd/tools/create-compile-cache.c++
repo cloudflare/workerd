@@ -53,13 +53,11 @@ public:
         end++;
       }
 
-      auto line = fileListContent.slice(start, end);
-
+      auto line = kj::str(fileListContent.slice(start, end).asChars());
       if (line.size() > 0) {
-        auto strLine = kj::StringPtr(line.asChars().begin(), line.size());
-        auto space = KJ_REQUIRE_NONNULL(strLine.findFirst(' '));
-        auto path = kj::str(strLine.first(space).asChars());
-        auto out = kj::str(strLine.slice(space + 1));
+        auto space = KJ_REQUIRE_NONNULL(line.findFirst(' '));
+        auto path = kj::str(line.first(space));
+        auto out = kj::str(line.slice(space + 1));
 
         auto file = dir.openFile(kj::Path::parse(path));
         auto content = file->mmap(0, file->stat().size);

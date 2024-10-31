@@ -1,5 +1,6 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+load("@workerd//:build/wd_compile_cache.bzl", "compile_cache_name", "wd_compile_cache")
 
 CAPNP_TEMPLATE = """@{schema_id};
 
@@ -13,7 +14,7 @@ const {const_name} :Modules.Bundle = (
 ]);
 """
 
-MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {ts_declaration})"""
+MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {extras})"""
 
 def _to_name(file_name):
     return file_name.removesuffix(".js")
@@ -26,10 +27,30 @@ def _relative_path(file_path, dir_path):
         fail("file_path need to start with dir_path: " + file_path + " vs " + dir_path)
     return file_path.removeprefix(dir_path)
 
+def _get_compile_cache(compile_cache, m):
+    if not compile_cache:
+        return None
+    files = m.files.to_list()
+
+    if len(files) != 1:
+        fail("only single file expected")
+
+    return compile_cache.get(files[0].path)
+
 def _gen_api_bundle_capnpn_impl(ctx):
     output_dir = ctx.outputs.out.dirname + "/"
 
-    def _render_module(name, label, src_type, type):
+    def _render_module(name, label, src_type, type, compile_cache = None):
+        ts_declaration = (
+            "tsDeclaration = embed \"" + _relative_path(
+                ctx.expand_location("$(location {})".format(ctx.attr.declarations[name]), ctx.attr.data),
+                output_dir,
+            ) + "\", "
+        ) if name in ctx.attr.declarations else ""
+        compile_cache = (
+            "compileCache = embed \"{}\", ".format(_relative_path(compile_cache, output_dir))
+        ) if compile_cache else ""
+
         return MODULE_TEMPLATE.format(
             name = name,
             # capnp doesn't allow ".." dir escape, make paths relative.
@@ -40,20 +61,21 @@ def _gen_api_bundle_capnpn_impl(ctx):
                 output_dir,
             ),
             type = type,
-            ts_declaration = (
-                "tsDeclaration = embed \"" + _relative_path(
-                    ctx.expand_location("$(location {})".format(ctx.attr.declarations[name]), ctx.attr.data),
-                    output_dir,
-                ) + "\", "
-            ) if name in ctx.attr.declarations else "",
+            extras = ts_declaration + compile_cache,
         )
 
+    compile_cache = {}
+    if ctx.attr.compile_cache:
+        locations = ctx.expand_location("$(locations {})".format(ctx.attr.compile_cache.label)).split(" ")
+        for loc in locations:
+            compile_cache[loc.removesuffix("_cache")] = loc
+
     modules = [
-        _render_module(ctx.attr.builtin_modules[m], m.label, "src", "builtin")
+        _render_module(ctx.attr.builtin_modules[m], m.label, "src", "builtin", _get_compile_cache(compile_cache, m))
         for m in ctx.attr.builtin_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_modules[m], m.label, "src", "internal")
+        _render_module(ctx.attr.internal_modules[m], m.label, "src", "internal", _get_compile_cache(compile_cache, m))
         for m in ctx.attr.internal_modules
     ]
     modules += [
@@ -86,10 +108,11 @@ gen_api_bundle_capnpn = rule(
         "internal_wasm_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_data_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_json_modules": attr.label_keyed_string_dict(allow_files = True),
+        "compile_cache": attr.label(),
         "declarations": attr.string_dict(),
         "data": attr.label_list(allow_files = True),
         "const_name": attr.string(mandatory = True),
-        "deps": attr.label_list(),
+        "deps": attr.label_list(providers = [DefaultInfo]),
     },
 )
 
@@ -125,7 +148,8 @@ def wd_js_bundle(
         internal_json_modules = [],
         declarations = [],
         deps = [],
-        data = []):
+        data = [],
+        gen_compile_cache = False):
     """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
@@ -201,6 +225,17 @@ def wd_js_bundle(
         list(internal_declarations.values())
     )
 
+    compile_cache = None
+    if gen_compile_cache:
+        srcs = builtin_modules_dict.keys() + internal_modules_dict.keys()
+        wd_compile_cache(
+            name = name + "@compile_cache",
+            srcs = srcs,
+        )
+        compile_cache = name + "@compile_cache"
+        deps = deps + [compile_cache]
+        data = data + [compile_cache]
+
     gen_api_bundle_capnpn(
         name = name + "@gen",
         out = name + ".capnp",
@@ -212,6 +247,7 @@ def wd_js_bundle(
         internal_data_modules = internal_data_modules_dict,
         internal_json_modules = internal_json_modules_dict,
         declarations = builtin_declarations | internal_declarations,
+        compile_cache = compile_cache,
         data = data,
         deps = deps,
     )

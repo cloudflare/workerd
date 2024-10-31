@@ -27,7 +27,8 @@ def wd_ts_bundle(
         lint = True,
         deps = [],
         js_deps = [],
-        data = []):
+        data = [],
+        gen_compile_cache = False):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -79,6 +80,7 @@ def wd_ts_bundle(
         schema_id = schema_id,
         deps = deps + js_deps,
         data = data,
+        gen_compile_cache = gen_compile_cache,
     )
 
     if lint:
