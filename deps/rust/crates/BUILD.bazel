@@ -56,20 +56,26 @@ alias(
 )
 
 alias(
+    name = "clap",
+    actual = "@crates_vendor__clap-4.5.20//:clap",
+    tags = ["manual"],
+)
+
+alias(
+    name = "codespan-reporting",
+    actual = "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
+    tags = ["manual"],
+)
+
+alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.128//:cxx",
+    actual = "@crates_vendor__cxx-1.0.129//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.128//:cxx_cc",
-    tags = ["manual"],
-)
-
-alias(
-    name = "cxxbridge-cmd",
-    actual = "@crates_vendor__cxxbridge-cmd-1.0.128//:cxxbridge_cmd",
+    actual = "@crates_vendor__cxx-1.0.129//:cxx_cc",
     tags = ["manual"],
 )
 
@@ -98,6 +104,18 @@ alias(
 )
 
 alias(
+    name = "proc-macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
+    tags = ["manual"],
+)
+
+alias(
+    name = "quote",
+    actual = "@crates_vendor__quote-1.0.37//:quote",
+    tags = ["manual"],
+)
+
+alias(
     name = "serde",
     actual = "@crates_vendor__serde-1.0.213//:serde",
     tags = ["manual"],
@@ -106,6 +124,12 @@ alias(
 alias(
     name = "serde_json",
     actual = "@crates_vendor__serde_json-1.0.132//:serde_json",
+    tags = ["manual"],
+)
+
+alias(
+    name = "syn",
+    actual = "@crates_vendor__syn-2.0.85//:syn",
     tags = ["manual"],
 )
 
@@ -143,12 +167,6 @@ alias(
 alias(
     name = "clap__stdio-fixture",
     actual = "@crates_vendor__clap-4.5.20//:stdio-fixture__bin",
-    tags = ["manual"],
-)
-
-alias(
-    name = "cxxbridge-cmd__cxxbridge",
-    actual = "@crates_vendor__cxxbridge-cmd-1.0.128//:cxxbridge__bin",
     tags = ["manual"],
 )
 

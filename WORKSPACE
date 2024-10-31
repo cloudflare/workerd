@@ -190,7 +190,7 @@ rust_register_toolchains(
     # also avoids registering support for the wasm32-unknown-unknown and wasm32-wasi targets, which
     # are otherwise added by default.
     extra_target_triples = ["x86_64-apple-darwin"],
-    versions = ["1.81.0"],  # LLVM 18
+    versions = ["1.82.0"],  # LLVM 19
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")

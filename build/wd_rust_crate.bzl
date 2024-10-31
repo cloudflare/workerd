@@ -1,12 +1,11 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
-load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 def rust_cxx_include(name, visibility = [], include_prefix = None):
     native.genrule(
         name = "%s/generated" % name,
         outs = ["cxx.h"],
-        cmd = "$(location @crates_vendor//:cxxbridge-cmd__cxxbridge) --header > \"$@\"",
-        tools = ["@crates_vendor//:cxxbridge-cmd__cxxbridge"],
+        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) --header > \"$@\"",
+        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
     )
 
     native.cc_library(
@@ -31,8 +30,8 @@ def _rust_cxx_bridge(
             src + ".h",
             src + ".cc",
         ],
-        cmd = "$(location @crates_vendor//:cxxbridge-cmd__cxxbridge) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
-        tools = ["@crates_vendor//:cxxbridge-cmd__cxxbridge"],
+        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
     )
 
     native.cc_library(
@@ -110,18 +109,18 @@ def wd_rust_crate(
         crate_features = crate_features,
     )
 
-    # rust_test(
-    #     name = name + "_test",
-    #     crate = ":" + name,
-    #     env = {
-    #         "RUST_BACKTRACE": "1",
-    #         # rust test runner captures stderr by default, which makes debugging tests very hard
-    #         "RUST_TEST_NOCAPTURE": "1",
-    #         # our tests are usually very heavy and do not support concurrent invocation
-    #         "RUST_TEST_THREADS": "1",
-    #     } | test_env,
-    #     tags = test_tags,
-    #     crate_features = crate_features,
-    #     deps = test_deps,
-    #     proc_macro_deps = test_proc_macro_deps,
-    # )
+    rust_test(
+        name = name + "_test",
+        crate = ":" + name,
+        env = {
+            "RUST_BACKTRACE": "1",
+            # rust test runner captures stderr by default, which makes debugging tests very hard
+            "RUST_TEST_NOCAPTURE": "1",
+            # our tests are usually very heavy and do not support concurrent invocation
+            "RUST_TEST_THREADS": "1",
+        } | test_env,
+        tags = test_tags,
+        crate_features = crate_features,
+        deps = test_deps,
+        proc_macro_deps = test_proc_macro_deps,
+    )

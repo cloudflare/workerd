@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap_builder",
+    name = "anstyle_wincon",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,14 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "color",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -43,16 +35,18 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_builder",
+        "crate-name=anstyle-wincon",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.20",
+    version = "3.0.6",
     deps = [
-        "@crates_vendor__anstream-0.6.17//:anstream",
         "@crates_vendor__anstyle-1.0.8//:anstyle",
-        "@crates_vendor__clap_lex-0.7.2//:clap_lex",
-        "@crates_vendor__strsim-0.11.1//:strsim",
-    ],
+    ] + select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(windows)
+        ],
+        "//conditions:default": [],
+    }),
 )
