@@ -28,11 +28,12 @@ def _gen_compile_cache_impl(ctx):
     args = ctx.actions.args()
     args.add(file_list)
 
-    ctx.actions.run(
+    ctx.actions.run_shell(
         outputs = outs,
         inputs = [file_list] + srcs,
+        command = ctx.executable._tool.path + " $@",
         arguments = [args],
-        executable = ctx.executable._tool,
+        use_default_shell_env = True,
         tools = [ctx.executable._tool],
     )
 
