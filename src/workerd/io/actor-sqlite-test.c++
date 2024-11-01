@@ -94,7 +94,13 @@ struct ActorSqliteTest final {
         db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY),
         actor(kj::attachRef(db), gate, KJ_BIND_METHOD(*this, commitCallback), hooks),
         gateBrokenPromise(options.monitorOutputGate ? eagerlyReportExceptions(gate.onBroken())
-                                                    : kj::Promise<void>(kj::READY_NOW)) {}
+                                                    : kj::Promise<void>(kj::READY_NOW)) {
+    db.afterReset([this](SqliteDatabase& cbDb) {
+      KJ_ASSERT(&db == &cbDb);
+      KJ_ASSERT(actor.isCommitScheduled(),
+          "actor should have a commit scheduled during afterReset() callback");
+    });
+  }
 
   ~ActorSqliteTest() noexcept(false) {
     if (!unwindDetector.isUnwinding()) {
@@ -625,6 +631,52 @@ KJ_TEST("canceling deferred alarm deletion is idempotent") {
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
+KJ_TEST("alarm handler cleanup succeeds when output gate is broken") {
+  auto runWithSetup = [](auto testFunc) {
+    ActorSqliteTest test({.monitorOutputGate = false});
+    auto promise = test.gate.onBroken();
+
+    // Initialize alarm state to 1ms.
+    test.setAlarm(oneMs);
+    test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+    test.pollAndExpectCalls({"commit"})[0]->fulfill();
+    test.pollAndExpectCalls({});
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+    auto armResult = test.actor.armAlarmHandler(oneMs, false);
+    KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
+    auto deferredDelete = kj::mv(armResult.get<ActorSqlite::RunAlarmHandler>().deferredDelete);
+
+    // Break gate
+    test.put("foo", "bar");
+    test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "a_rejected_commit"));
+    KJ_EXPECT_THROW_MESSAGE("a_rejected_commit", promise.wait(test.ws));
+    // Ensure taskFailed handler runs and notices brokenness:
+    test.ws.poll();
+
+    testFunc(test, kj::mv(deferredDelete));
+  };
+
+  // Here, we test that the deferred deleter destructor doesn't throw, both in the case when the
+  // caller cancels deletion and when it does not cancel it:
+
+  runWithSetup([](ActorSqliteTest& test, kj::Own<void> deferredDelete) {
+    // In the case where the handler fails, we assume the caller will explicitly cancel deferred
+    // alarm deletion:
+    test.actor.cancelDeferredAlarmDeletion();
+
+    // Dropping the DeferredAlarmDeleter should succeed -- that is, it should not throw here:
+    { auto drop = kj::mv(deferredDelete); }
+  });
+
+  runWithSetup([](ActorSqliteTest& test, kj::Own<void> deferredDelete) {
+    // In the case where the handler succeeds, the caller will not cancel deferred deletion before
+    // dropping the DeferredAlarmDeleter.  Dropping the DeferredAlarmDeleter should still succeed,
+    // even if the output gate happens to already be broken:
+    { auto drop = kj::mv(deferredDelete); }
+  });
+}
+
 KJ_TEST("handler alarm is not deleted when commit fails") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
@@ -924,19 +976,48 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is set") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  ActorCache::DeleteAllResults results = test.actor.deleteAll({});
-  KJ_ASSERT(results.backpressure == kj::none);
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  {
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    KJ_ASSERT(results.backpressure == kj::none);
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-  KJ_ASSERT(results.count.wait(test.ws) == 0);
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    KJ_ASSERT(results.count.wait(test.ws) == 0);
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  commitFulfiller->fulfill();
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  test.pollAndExpectCalls({});
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    test.pollAndExpectCalls({});
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  }
+
+  {
+    // Should be fine to call deleteAll() a few times in succession, too:
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    ActorCache::DeleteAllResults results1 = test.actor.deleteAll({});
+    ActorCache::DeleteAllResults results2 = test.actor.deleteAll({});
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    KJ_ASSERT(results1.backpressure == kj::none);
+    KJ_ASSERT(results2.backpressure == kj::none);
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+    // Presumably fine to be performing the alarm state restoration after each db reset:
+    auto commitFulfillers = test.pollAndExpectCalls({"commit", "commit"});
+    KJ_ASSERT(results1.count.wait(test.ws) == 0);
+    KJ_ASSERT(results2.count.wait(test.ws) == 0);
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+    commitFulfillers[0]->fulfill();
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+    commitFulfillers[1]->fulfill();
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+    test.pollAndExpectCalls({});
+    KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  }
 }
 
 KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
@@ -954,29 +1035,61 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
-  ActorCache::DeleteAllResults results = test.actor.deleteAll({});
-  KJ_ASSERT(results.backpressure == kj::none);
-  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+  {
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    KJ_ASSERT(results.backpressure == kj::none);
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
-  auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
-  KJ_ASSERT(results.count.wait(test.ws) == 0);
-  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    KJ_ASSERT(results.count.wait(test.ws) == 0);
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
-  commitFulfiller->fulfill();
-  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
-  // We can also assert that we leave the database empty, in case that turns out to be useful later:
-  auto q = test.db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_METADATA'");
-  KJ_ASSERT(q.isDone());
+    // We can also assert that we leave the database empty, in case that turns out to be useful later:
+    auto q =
+        test.db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_METADATA'");
+    KJ_ASSERT(q.isDone());
+  }
+
+  {
+    // Should be fine to call deleteAll() a few times in succession, too:
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    ActorCache::DeleteAllResults results1 = test.actor.deleteAll({});
+    ActorCache::DeleteAllResults results2 = test.actor.deleteAll({});
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    KJ_ASSERT(results1.backpressure == kj::none);
+    KJ_ASSERT(results2.backpressure == kj::none);
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    // Presumably fine that the deletion commits coalesce:
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    KJ_ASSERT(results1.count.wait(test.ws) == 0);
+    KJ_ASSERT(results2.count.wait(test.ws) == 0);
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    commitFulfiller->fulfill();
+    KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+
+    auto q =
+        test.db.run("SELECT name FROM sqlite_master WHERE type='table' AND name='_cf_METADATA'");
+    KJ_ASSERT(q.isDone());
+  }
 }
 
 KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm state") {
   ActorSqliteTest test;
 
+  KJ_ASSERT(!test.actor.isCommitScheduled());
+
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
 
   ActorCache::DeleteAllResults results = test.actor.deleteAll({});
+  KJ_ASSERT(test.actor.isCommitScheduled());
   KJ_ASSERT(results.backpressure == kj::none);
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 

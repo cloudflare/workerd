@@ -346,7 +346,17 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
   inAlarmHandler = false;
 
   if (haveDeferredDelete) {
-    metadata.setAlarm(kj::none);
+    // If we have reached this point, the client is destroying its DeferredAlarmDeleter at the end
+    // of an alarm handler run, and deletion hasn't been cancelled, indicating that the handler
+    // returned success.
+    //
+    // If the output gate has somehow broken in the interim, attempting to write the deletion here
+    // will cause the DeferredAlarmDeleter destructor to throw, which the caller probably isn't
+    // expecting.  So we'll skip the deletion attempt, and let the caller detect the gate
+    // brokenness through other means.
+    if (broken == kj::none) {
+      metadata.setAlarm(kj::none);
+    }
     haveDeferredDelete = false;
   }
 }
@@ -513,15 +523,22 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
     }
   }
 
-  if (localAlarmState == kj::none && !deleteAllCommitScheduled) {
-    // If we're not going to perform a write to restore alarm state, we'll want to make sure the
-    // commit callback is called for the deleteAll().
+  if (!deleteAllCommitScheduled) {
+    // Make sure a commit callback is queued for the deleteAll().
     commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
       deleteAllCommitScheduled = false;
-      return commitCallback();
+      if (currentTxn.is<ImplicitTxn*>()) {
+        // An implicit transaction is already scheduled, so we'll count on it to perform a commit when it's
+        // done. This is particularly important for the case where deleteAll() was called while an alarm
+        // is outstanding; resetting the alarm state (below) starts an implicit transaction.
+        // We don't want to commit the deletion without that transaction.
+        return kj::READY_NOW;
+      } else {
+        return commitCallback();
+      }
     })));
     deleteAllCommitScheduled = true;
   }
