@@ -69,9 +69,20 @@ struct Rust {
   }
 };
 
+// Create rust objects by making a copy of data.
 struct RustCopy {
   static ::rust::String from(const kj::StringPtr* str) {
     return ::rust::String(str->begin(), str->size());
+  }
+
+  template <typename T>
+  static ::rust::Vec<T> from(kj::ArrayPtr<const T>* arr) {
+    ::rust::Vec<T> result;
+    result.reserve(arr->size());
+    for (auto& t : *arr) {
+      result.push_back(t);
+    }
+    return result;
   }
 };
 

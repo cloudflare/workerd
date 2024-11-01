@@ -1,0 +1,28 @@
+load("@//:build/wd_cc_library.bzl", "wd_cc_library")
+load("@//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+wd_rust_binary(
+    name = "gen-compile-cache",
+    cxx_bridge_src = "main.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cxx-bridge",
+        "@crates_vendor//:clap",
+    ],
+)
+
+wd_cc_library(
+    name = "cxx-bridge",
+    srcs = [
+        "cxx-bridge.c++",
+    ],
+    hdrs = [
+        "cxx-bridge.h",
+    ],
+    linkstatic = True,
+    deps = [
+        "//src/rust/cxx-integration",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)

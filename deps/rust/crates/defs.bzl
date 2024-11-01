@@ -630,6 +630,16 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__clap_derive-4.5.18",
+        sha256 = "4ac6a0c7b1a9e9a5186361f67dfa1b88213572f427fb9ab038efb2bd8c582dab",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/clap_derive/4.5.18/download"],
+        strip_prefix = "clap_derive-4.5.18",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.clap_derive-4.5.18.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__clap_lex-0.7.2",
         sha256 = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97",
         type = "tar.gz",
@@ -826,6 +836,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/hashbrown/0.13.2/download"],
         strip_prefix = "hashbrown-0.13.2",
         build_file = Label("@workerd//deps/rust/crates:BUILD.hashbrown-0.13.2.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__heck-0.5.0",
+        sha256 = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/heck/0.5.0/download"],
+        strip_prefix = "heck-0.5.0",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.heck-0.5.0.bazel"),
     )
 
     maybe(

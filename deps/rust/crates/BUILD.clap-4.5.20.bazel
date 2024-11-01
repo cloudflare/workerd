@@ -35,6 +35,7 @@ rust_library(
     crate_features = [
         "color",
         "default",
+        "derive",
         "error-context",
         "help",
         "std",
@@ -43,6 +44,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__clap_derive-4.5.18//:clap_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -80,6 +84,7 @@ rust_binary(
     crate_features = [
         "color",
         "default",
+        "derive",
         "error-context",
         "help",
         "std",
@@ -88,6 +93,9 @@ rust_binary(
     ],
     crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__clap_derive-4.5.18//:clap_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
