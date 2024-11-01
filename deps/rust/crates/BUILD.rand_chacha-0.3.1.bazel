@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "syn",
+    name = "rand_chacha",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,32 +29,23 @@ rust_library(
         ],
     ),
     crate_features = [
-        "clone-impls",
-        "default",
-        "derive",
-        "extra-traits",
-        "fold",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
+        "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=rand_chacha",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.90",
+    version = "0.3.1",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.92//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__unicode-ident-1.0.14//:unicode_ident",
+        "@crates_vendor__ppv-lite86-0.2.20//:ppv_lite86",
+        "@crates_vendor__rand_core-0.6.4//:rand_core",
     ],
 )
