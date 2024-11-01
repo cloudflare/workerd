@@ -1,5 +1,5 @@
-load("@//:build/wd_cc_library.bzl", "wd_cc_library")
-load("@//:build/wd_rust_binary.bzl", "wd_rust_binary")
+load("@workerd//:build/wd_cc_library.bzl", "wd_cc_library")
+load("@workerd//:build/wd_rust_binary.bzl", "wd_rust_binary")
 
 wd_rust_binary(
     name = "gen-compile-cache",

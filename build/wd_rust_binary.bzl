@@ -1,5 +1,5 @@
-load("@//:build/wd_rust_crate.bzl", "rust_cxx_bridge")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge")
 
 def wd_rust_binary(
         name,
