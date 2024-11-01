@@ -3,6 +3,7 @@ load("@workerd//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 wd_ts_bundle(
     name = "node",
     eslintrc_json = "eslint.config.mjs",
+    gen_compile_cache = True,
     import_name = "node",
     internal_modules = glob([
         "internal/*.ts",
