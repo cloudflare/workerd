@@ -616,11 +616,12 @@ public:
     }
   };
 
-  // The func must be a callback with the signature: void(jsg::Lock&)
-  void runInLockScope(auto func) {
-    runInV8Stack([&](V8StackScope& stackScope) {
+  // The func must be a callback with the signature: T(jsg::Lock&)
+  // Be careful not to leak v8 objects outside of the scope.
+  auto runInLockScope(auto func) {
+    return runInV8Stack([&](V8StackScope& stackScope) {
       Lock lock(*this, stackScope);
-      lock.withinHandleScope([&] { func(lock); });
+      return lock.withinHandleScope([&] { return func(lock); });
     });
   }
 

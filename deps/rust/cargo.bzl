@@ -11,7 +11,7 @@ PACKAGES = {
     "capnp": crate.spec(version = "0"),
     "capnpc": crate.spec(version = "0"),
     "clang-ast": crate.spec(version = "0"),
-    "clap": crate.spec(version = "4"),
+    "clap": crate.spec(version = "4", features = ["derive"]),
     "codespan-reporting": crate.spec(version = "0"),
     "cxx": crate.spec(version = "1"),
     "cxxbridge-cmd": crate.spec(version = "1"),
