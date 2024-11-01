@@ -15,7 +15,7 @@ def rust_cxx_include(name, visibility = [], include_prefix = None):
         visibility = visibility,
     )
 
-def _rust_cxx_bridge(
+def rust_cxx_bridge(
         name,
         src,
         hdrs = [],
@@ -79,7 +79,7 @@ def wd_rust_crate(
     if cxx_bridge_src:
         hdrs = native.glob(["**/*.h"], allow_empty = True)
 
-        _rust_cxx_bridge(
+        rust_cxx_bridge(
             name = name + "@cxx",
             src = cxx_bridge_src,
             hdrs = hdrs,
