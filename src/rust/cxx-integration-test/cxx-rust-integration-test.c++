@@ -12,6 +12,15 @@
 
 namespace workerd::rust {
 
+KJ_TEST("init cxx_integration") {
+  // this tests initializes cxx integration for the rest of the tests
+  rust::cxx_integration::init();
+}
+
+KJ_TEST("panic results in abort") {
+  KJ_EXPECT_SIGNAL(SIGABRT, rust::cxx_integration::trigger_panic("foobar"));
+}
+
 KJ_TEST("ok Result") { KJ_EXPECT(42 == rust::test::result_ok()); }
 
 KJ_TEST("err Result") {
@@ -22,28 +31,6 @@ KJ_TEST("err Result") {
   } catch (::rust::Error e) {
     // this is expected
     KJ_EXPECT(e.what() == "test error"_kj);
-  }
-}
-
-KJ_TEST("panic without hook results in exception") {
-  try {
-    rust::cxx_integration::trigger_panic("foobar");
-    KJ_UNREACHABLE;
-  } catch (::rust::Error e) {
-    // this is expected
-    KJ_EXPECT(e.what() == "panic in cxx_integration::ffi::trigger_panic: foobar"_kj);
-  }
-}
-
-KJ_TEST("panic with panic hook installed results in exception") {
-  rust::cxx_integration::init();
-
-  try {
-    rust::cxx_integration::trigger_panic("foobar");
-    KJ_UNREACHABLE;
-  } catch (::rust::Error e) {
-    // this is expected
-    KJ_EXPECT(e.what() == "panic in cxx_integration::ffi::trigger_panic: foobar"_kj);
   }
 }
 
