@@ -27,6 +27,8 @@ build:windows --remote_download_all
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
 
+import %workspace%/build/lint.bazelrc
+
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
