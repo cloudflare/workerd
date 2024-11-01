@@ -18,3 +18,60 @@ build:ci --show_progress_rate_limit=1
 build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
+
+build:ci --config=v8-codegen-opt
+build:ci --remote_download_minimal --disk_cache=~/bazel-disk-cache
+test:ci --test_output=errors
+
+# limit storage usage on ci
+# Exclude large benchmarking binaries created in debug and asan configurations to avoid
+# running out of disk space on the runner (nominally 14GB). We typically have two copies
+# of generated artifacts: one under bazel output-base and one in the bazel disk cache.
+# Also only generate limited debug info – these binaries are only used for testing and
+# don't need to run within a debugger, so information needed for symbolication is
+# sufficient. The host configuration compiles in opt mode/without debug info by default, so
+# there's no need to set host_copt here.
+# LLVM produces a bit more debug info on macOS by default to facilitate debugging with
+# LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
+# this is already the default for Linux/Windows.
+build:ci-limit-storage --build_tag_filters=-off-by-default,-slow,-benchmark
+build:ci-limit-storage --copt="-g1"
+build:ci-limit-storage --copt="-fno-standalone-debug"
+
+
+# ci-platform dependent configuration
+
+build:ci-linux-common --copt='-Werror'
+build:ci-linux-common --copt='-Wno-error=#warnings'
+build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
+# keep in sync with .github/workflows/test.yml
+build:ci-linux-common --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++
+build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++
+
+build:ci-linux --config=ci-linux-common
+# Some tests (like Python import tests) take a long time to run and don't benefit much
+# from multi-platform testing. For that reason, we only run them in a single configuration
+# to minimize effect on CI pipeline runtime.
+build:ci-linux --build_tag_filters=-off-by-default
+test:ci-linux --test_tag_filters=-off-by-default --test_size_filters=small,medium,large,enormous
+
+build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
+build:ci-linux-debug --config=debug --config=rust-debug
+
+build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
+# we're really struggling to fit asan build into worker disk size
+# having asan without symbols is better than none
+build:ci-linux-asan --config=asan --copt="-g0" --strip=always
+
+
+# Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
+# default. This is unhelpful for compile speeds and test performance, remove the DEBUG
+# define.
+build:ci-macOS --copt=-UDEBUG
+
+build:ci-macOS-debug --config=debug
+
+build:ci-windows-common --remote_download_all
+
+build:ci-windows --config=windows_no_dbg --config=ci-windows-common
+build:ci-windows-debug --config=debug --config=ci-windows-common
