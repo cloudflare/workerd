@@ -34,20 +34,20 @@ jobs:
         config:
           [
             # Default build: no suffix or additional bazel arguments
-            { suffix: '', bazel-args: '' },
+            { suffix: '' },
             # Debug build
-            { suffix: -debug, bazel-args: --config=debug }
+            { suffix: -debug }
           ]
         include:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
           - os:     { name: linux, image: ubuntu-20.04 }
-            config: { suffix: -asan, bazel-args: --config=asan }
+            config: { suffix: -asan }
           # Windows has a custom non-debug bazel config.
           # As of 7.2.1 support for Bazel remote cache BwoB is broken on Windows, likely due to
           # disk I/O race conditions causing permission denied errors (this also happened in
           # previous versions). Use remote_download_all for now.
           - os:     { name : windows, image : windows-2022 }
-            config: { suffix: '', bazel-args: "--config=windows_no_dbg --remote_download_all" }
+            config: { suffix: '' }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
           # has been resolved we can likely re-enable it and possibly fold up the custom
@@ -57,13 +57,13 @@ jobs:
         exclude:
           # Skip the matrix generated Windows non-debug config to use the one added above.
           - os:     { name : windows, image : windows-2022 }
-            config: { suffix: '', bazel-args: '' }
+            config: { suffix: '' }
           - os:     { name : windows, image : windows-2022 }
-            config: { suffix: -debug, bazel-args: --config=debug }
+            config: { suffix: -debug }
           # due to resource constraints, exclude the macOS-debug runner for now. linux-debug and
           # linux-asan should provide sufficient coverage for building in the debug configuration.
           - os:     { name : macOS, image : macos-15 }
-            config: { suffix: -debug, bazel-args: --config=debug }
+            config: { suffix: -debug }
       fail-fast: false
     runs-on: ${{ matrix.os.image }}
     name: test (${{ matrix.os.name }}${{ matrix.config.suffix }})
@@ -94,25 +94,9 @@ jobs:
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
+          # keep in sync with build/ci.bazelrc
           sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev llvm-16
-          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
-          echo "build:linux --copt='-Werror'" >> .bazelrc
-          echo "build:linux --copt='-Wno-error=#warnings'" >> .bazelrc
-          echo "build:linux --copt='-Wno-error=deprecated-declarations'" >> .bazelrc
           sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-16/bin/llvm-symbolizer%" .bazelrc
-      - name: Setup macOS
-        if: matrix.os.name == 'macOS'
-        # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 17
-        # but the macos-15 image has llvm@18 installed:
-        # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md
-        #
-        # Not enabled because symbolication does not work on workerd macOS builds yet and running
-        # llvm-symbolizer in the currently broken state causes some tests to time out on the
-        # runner.
-        run: |
-          # export LLVM_SYMBOLIZER=$(brew --prefix llvm@18)/bin/llvm-symbolizer
-          # sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows
         if: matrix.os.name == 'windows'
         # Set a custom output root directory to avoid long file name issues.
@@ -127,49 +111,6 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
           fi
-      - name: Enable slow tests if applicable
-        # Some tests (like Python import tests) take a long time to run and don't benefit much
-        # from multi-platform testing. For that reason, we only run them in a single configuration
-        # to minimize effect on CI pipeline runtime.
-        if: matrix.os.name == 'linux' && matrix.config.suffix == ''
-        shell: bash
-        run: |
-          cat <<EOF >> .bazelrc
-          build --build_tag_filters=-off-by-default
-          test --test_tag_filters=-off-by-default --test_size_filters=small,medium,large,enormous
-          EOF
-      - name: Generate list of excluded Bazel targets
-        # Exclude large benchmarking binaries created in debug and asan configurations to avoid
-        # running out of disk space on the runner (nominally 14GB). We typically have two copies
-        # of generated artifacts: one under bazel output-base and one in the bazel disk cache.
-        # Also only generate limited debug info – these binaries are only used for testing and
-        # don't need to run within a debugger, so information needed for symbolication is
-        # sufficient. The host configuration compiles in opt mode/without debug info by default, so
-        # there's no need to set host_copt here.
-        # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
-        # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
-        # this is already the default for Linux/Windows.
-        if: contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')
-        shell: bash
-        run: |
-          cat <<EOF >> .bazelrc
-          build:limit-storage --build_tag_filters=-off-by-default,-slow,-benchmark
-          build:limit-storage --copt="-g1"
-          build:limit-storage --copt="-fno-standalone-debug"
-          build:limit-storage --config=rust-debug
-          build:asan --config=limit-storage
-          build:debug --config=limit-storage
-          EOF
-      - name: Fix macOS fastbuild configuration
-        # Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
-        # default. This is unhelpful for compile speeds and test performance, remove the DEBUG
-        # define.
-        if: ${{ !(contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')) }}
-        shell: bash
-        run: |
-          cat <<EOF >> .bazelrc
-          build:macos --copt=-UDEBUG
-          EOF
       - name: Configure git hooks
         # Configure git to quell an irrelevant warning for runners (they never commit / push).
         run: git config core.hooksPath githooks
@@ -177,10 +118,10 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-          bazel build --remote_download_minimal ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=v8-codegen-opt //...
+          bazel build --config=ci --config=ci-${{ matrix.os.name }}${{ matrix.config.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //...
       - name: Bazel test
         run: |
-          bazel test --remote_download_minimal ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --test_output=errors --config=ci --config=v8-codegen-opt //...
+          bazel test --config=ci --config=ci-${{ matrix.os.name }}${{ matrix.config.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //...
       - name: Report disk usage (in MB)
         if: always()
         shell: bash
