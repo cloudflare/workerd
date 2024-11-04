@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
+import json
 import logging
-import os
 import platform
 import subprocess
 import sys
@@ -10,11 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from sys import exit
-from typing import Callable, Optional
-
-PRETTIER = os.environ.get(
-    "PRETTIER", "bazel-bin/node_modules/prettier/bin/prettier.cjs"
-)
+from typing import Optional
 
 
 def parse_args() -> Namespace:
@@ -138,6 +134,8 @@ def clang_format(files: list[Path], check: bool = False) -> bool:
 
 
 def prettier(files: list[Path], check: bool = False) -> bool:
+    PRETTIER = "bazel-bin/node_modules/prettier/bin/prettier.cjs"
+
     if not Path(PRETTIER).exists():
         subprocess.run(["bazel", "build", "//:node_modules/prettier"])
 
@@ -203,26 +201,15 @@ def git_get_all_files() -> list[Path]:
 class FormatConfig:
     directory: str
     globs: tuple[str, ...]
-    formatter: Callable[[list[Path], bool], bool]
+    formatter: str
 
 
-FORMATTERS = [
-    FormatConfig(
-        directory="src/workerd", globs=("*.c++", "*.h"), formatter=clang_format
-    ),
-    FormatConfig(
-        directory="src",
-        globs=("*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"),
-        formatter=prettier,
-    ),
-    FormatConfig(directory="src", globs=("*.json",), formatter=prettier),
-    FormatConfig(directory=".", globs=("*.py",), formatter=ruff),
-    FormatConfig(
-        directory=".",
-        globs=("*.bzl", "WORKSPACE", "BUILD", "BUILD.*"),
-        formatter=buildifier,
-    ),
-]
+FORMATTERS = {
+    "clang-format": clang_format,
+    "prettier": prettier,
+    "ruff": ruff,
+    "buildifier": buildifier,
+}
 
 
 def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, str]:
@@ -234,7 +221,7 @@ def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, 
             f"No matching files for {config.directory} ({', '.join(config.globs)})",
         )
 
-    result = config.formatter(matching_files, check)
+    result = FORMATTERS[config.formatter](matching_files, check)
     message = (
         f"{len(matching_files)} files in {config.directory} ({', '.join(config.globs)})"
     )
@@ -246,17 +233,21 @@ def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, 
 
 def main() -> None:
     options = parse_args()
+
     if options.subcommand == "git":
         files = git_get_modified_files(options.target, options.source, options.staged)
     else:
         files = git_get_all_files()
+
+    with (Path(__file__).parent / "format.json").open() as fp:
+        configs = json.load(fp, object_hook=lambda o: FormatConfig(**o))
 
     all_ok = True
 
     with ThreadPoolExecutor() as executor:
         future_to_config = {
             executor.submit(format, config, files, options.check): config
-            for config in FORMATTERS
+            for config in configs
         }
         for future in as_completed(future_to_config):
             config = future_to_config[future]
