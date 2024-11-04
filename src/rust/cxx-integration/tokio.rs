@@ -17,11 +17,7 @@ pub(crate) fn init(worker_threads: Option<usize>) {
         builder.worker_threads(worker_threads);
     }
 
-    let runtime = builder
-        .enable_time()
-        .enable_io()
-        .build()
-        .unwrap();
+    let runtime = builder.enable_time().enable_io().build().unwrap();
 
     TOKIO_RUNTIME.set(runtime).unwrap();
     spawn(async {

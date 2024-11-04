@@ -13,15 +13,15 @@ fn main() {
     let args = Args::parse();
 
     let file_list = fs::read_to_string(&args.file_list).expect("can't read file list");
-    for line in file_list.split("\n").filter(|l| l.len() > 0) {
+    for line in file_list.split('\n').filter(|l| !l.is_empty()) {
         let [input_path, output_path] = line
-            .split(" ")
+            .split(' ')
             .collect::<Vec<_>>()
             .try_into()
             .expect("incorrect input line");
 
         let input = fs::read_to_string(input_path).expect("error reading input file");
-        let output = ffi::compile(&input_path, &input);
+        let output = ffi::compile(input_path, &input);
 
         fs::write(Path::new(output_path), output).expect("error writing output file");
     }
