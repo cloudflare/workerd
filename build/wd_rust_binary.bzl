@@ -32,7 +32,7 @@ def wd_rust_binary(
             name = name + "@cxx",
             src = cxx_bridge_src,
             hdrs = hdrs,
-            include_prefix = "rust/" + name,
+            include_prefix = "workerd/rust/" + name,
             strip_include_prefix = "",
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.

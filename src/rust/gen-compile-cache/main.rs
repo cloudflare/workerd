@@ -30,7 +30,7 @@ fn main() {
 #[cxx::bridge(namespace = "workerd::rust::gen_compile_cache")]
 mod ffi {
     unsafe extern "C++" {
-        include!("rust/gen-compile-cache/cxx-bridge.h");
+        include!("workerd/rust/gen-compile-cache/cxx-bridge.h");
 
         fn compile(path: &str, source_code: &str) -> Vec<u8>;
     }

@@ -48,6 +48,8 @@
 -isystemexternal/zlib
 -isystemexternal/sqlite3
 -isystemexternal/perfetto-sdk/sdk
+-isystembazel-bin/src/rust/cxx-integration/_virtual_includes/cxx-integration@cxx
+-isystembazel-bin/src/rust/cxx-integration-test/_virtual_includes/cxx-integration-test@cxx
 -D_FORTIFY_SOURCE=1
 -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 -DCAPNP_VERSION=11000

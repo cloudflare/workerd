@@ -7,6 +7,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/rust/cxx-integration/lib.rs.h>
 #include <workerd/server/v8-platform-impl.h>
 #include <workerd/server/workerd-meta.capnp.h>
 #include <workerd/server/workerd.capnp.h>
@@ -15,7 +16,6 @@
 #include <fcntl.h>
 #include <openssl/rand.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
-#include <rust/cxx-integration/lib.rs.h>
 #include <sys/stat.h>
 
 #include <capnp/dynamic.h>
