@@ -3,7 +3,7 @@
 #include <workerd/jsg/compile-cache.h>
 #include <workerd/jsg/setup.h>
 
-#include <rust/cxx-integration/lib.rs.h>
+#include <workerd/rust/cxx-integration/lib.rs.h>
 
 #include <capnp/serialize.h>
 

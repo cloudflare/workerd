@@ -9,7 +9,7 @@ mod ffi {
     }
 
     unsafe extern "C++" {
-        include!("rust/cxx-integration/cxx-bridge.h");
+        include!("workerd/rust/cxx-integration/cxx-bridge.h");
     }
 }
 

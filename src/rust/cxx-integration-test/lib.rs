@@ -24,7 +24,7 @@ mod ffi {
 
         // Include the header with the actual callback type definition.
         // This will be included into cxx generated files.
-        include!("rust/cxx-integration-test/cxx-rust-integration-test.h");
+        include!("workerd/rust/cxx-integration-test/cxx-rust-integration-test.h");
     }
 
     // Structures defined without any extern specifier are visible both to Rust and c++.

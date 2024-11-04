@@ -1,7 +1,7 @@
-#include <rust/cxx-integration-test/lib.rs.h>
-#include <rust/cxx-integration/lib.rs.h>
-#include <rust/cxx.h>
+#include <workerd/rust/cxx-integration-test/lib.rs.h>
+#include <workerd/rust/cxx-integration/lib.rs.h>
 
+#include <rust/cxx.h>
 #include <signal.h>
 
 #include <kj/async.h>
@@ -21,7 +21,9 @@ KJ_TEST("panic results in abort") {
   KJ_EXPECT_SIGNAL(SIGABRT, rust::cxx_integration::trigger_panic("foobar"));
 }
 
-KJ_TEST("ok Result") { KJ_EXPECT(42 == rust::test::result_ok()); }
+KJ_TEST("ok Result") {
+  KJ_EXPECT(42 == rust::test::result_ok());
+}
 
 KJ_TEST("err Result") {
   // if fn returns an error, it is translated into ::rust::Error exception.
@@ -240,4 +242,4 @@ KJ_TEST("array/slice convertions") {
   }
 }
 
-}  // namespace edgeworker::tests
+}  // namespace workerd::rust
