@@ -73,3 +73,11 @@ jobs:
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+  lint:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      extra_bazel_args: "--config=lint"
+      run_tests: false
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
