@@ -1,5 +1,6 @@
-The patches for SQLite are applied against the plain source, not the
-amalgamated source.
+# Patching SQLite
+
+The patches for SQLite are applied against the plain source, not the amalgamated source.
 
 SQLite comes in two forms. First, there's the "plain" form. It looks a
 lot like a typical open-source C project: there's a bunch of .c and .h
@@ -17,21 +18,28 @@ any patches that needed modification with their fixed versions.
 Example, assuming the new SQLite has been downloaded into the current
 directory:
 
-$ unzip sqlite-src-$VERSION.zip
-$ mv sqlite-src-$VERSION sqlite-src-pristine
-$ unzip sqlite-src-$VERSION.zip  # yes, again
-$ mv sqlite-src-$VERSION sqlite-src-modified
+```bash
+export VERSION=3470000
+unzip sqlite-src-$VERSION.zip
+mv sqlite-src-$VERSION sqlite-src-pristine
+unzip sqlite-src-$VERSION.zip  # yes, again
+mv sqlite-src-$VERSION sqlite-src-modified
+```
 
 Now patch:
 
-$ cd sqlite-src-modified
-$ patch -p1 < /path/to/workerd/patches/sqlite/0001-row-counts-plain.patch
-$ ./configure && make test
+```bash
+cd sqlite-src-modified
+patch -p1 < /path/to/workerd/patches/sqlite/0001-row-counts-plain.patch
+./configure && make test
+```
 
 Make sure the tests pass. If the patch needed any modification, regenerate it:
 
-$ diff -u5 -r sqlite-src-pristine sqlite-src-modified \
+```bash
+diff -u5 -r sqlite-src-pristine sqlite-src-modified \
     | grep -v "Only in sqlite-src-modified" \
     > /path/to/workerd/patches/sqlite/0001-row-counts-plain.patch
+```
 
 Repeat for each patch.
