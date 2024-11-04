@@ -1,0 +1,27 @@
+[
+  {
+    "directory": "src/workerd",
+    "globs": ["*.c++", "*.h"],
+    "formatter": "clang-format"
+  },
+  {
+    "directory": "src",
+    "globs": ["*.js", "*.ts", "*.cjs", "*.ejs", "*.mjs"],
+    "formatter": "prettier"
+  },
+  {
+    "directory": "src",
+    "globs": ["*.json"],
+    "formatter": "prettier"
+  },
+  {
+    "directory": ".",
+    "globs": ["*.py"],
+    "formatter": "ruff"
+  },
+  {
+    "directory": ".",
+    "globs": ["*.bzl", "WORKSPACE", "BUILD", "BUILD.*"],
+    "formatter": "buildifier"
+  }
+]
