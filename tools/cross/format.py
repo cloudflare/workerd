@@ -63,13 +63,19 @@ def parse_args() -> Namespace:
 
 
 def filter_files_by_globs(
-    files: list[Path], dir_path: Path, globs: tuple[str, ...]
+    files: list[Path], dir_path: Path, globs: tuple[str, ...], excludes: tuple[str, ...]
 ) -> list[Path]:
     return [
         file
         for file in files
-        if file.is_relative_to(dir_path) and matches_any_glob(globs, file)
+        if file.is_relative_to(dir_path)
+        and matches_any_glob(globs, file)
+        and not relative_to_any(excludes, file)
     ]
+
+
+def relative_to_any(excludes: tuple[str, ...], file: Path) -> bool:
+    return any(file.is_relative_to(exclude) for exclude in excludes)
 
 
 def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
@@ -116,10 +122,10 @@ def run_bazel_tool(
         tool_path = init_external_dir() / tool_target / "file" / "downloaded"
 
     if not tool_path.exists():
-        fetch_target = (
+        build_target = (
             f"@{tool_target}//:file" if is_archive else f"@{tool_target}//file"
         )
-        subprocess.run(["bazel", "fetch", fetch_target])
+        subprocess.run(["bazel", "build", build_target])
 
     return subprocess.run([tool_path, *args])
 
@@ -202,6 +208,7 @@ class FormatConfig:
     directory: str
     globs: tuple[str, ...]
     formatter: str
+    excludes: tuple[str, ...] = ()
 
 
 FORMATTERS = {
@@ -213,7 +220,9 @@ FORMATTERS = {
 
 
 def format(config: FormatConfig, files: list[Path], check: bool) -> tuple[bool, str]:
-    matching_files = filter_files_by_globs(files, Path(config.directory), config.globs)
+    matching_files = filter_files_by_globs(
+        files, Path(config.directory), config.globs, config.excludes
+    )
 
     if not matching_files:
         return (
