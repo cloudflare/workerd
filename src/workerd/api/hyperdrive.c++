@@ -80,7 +80,7 @@ uint16_t Hyperdrive::getPort() {
 
 kj::String Hyperdrive::getConnectionString() {
   return kj::str(getScheme(), "://", getUser(), ":", getPassword(), "@", getHost(), ":", getPort(),
-      "/", getDatabase(), "?sslmode=disable");
+      "/", getDatabase(), "?sslmode=prefer");
 }
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
