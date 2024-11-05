@@ -8,10 +8,16 @@ static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Initialize tokio runtime.
 /// Must be called after all forking and sandbox setup is finished.
-pub(crate) fn init() {
+pub(crate) fn init(worker_threads: Option<usize>) {
     assert!(TOKIO_RUNTIME.get().is_none());
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+
+    if let Some(worker_threads) = worker_threads {
+        builder.worker_threads(worker_threads);
+    }
+
+    let runtime = builder
         .enable_time()
         .enable_io()
         .build()
@@ -58,7 +64,7 @@ mod test {
 
     #[test]
     fn test_tokio_init() {
-        init();
+        init(None);
         let join = spawn(async move {
             tokio::time::sleep(Duration::from_millis(1)).await;
             42
