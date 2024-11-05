@@ -103,7 +103,7 @@ interface VectorizeIndexDetails {
  */
 interface VectorizeIndexInfo {
   /** The number of records containing vectors within the index. */
-  vectorsCount: number;
+  vectorCount: number;
   /** Number of dimensions the index has been configured for. */
   dimensions: number;
   /** ISO 8601 datetime of the last processed mutation on in the index. All changes before this mutation will be reflected in the index state. */
