@@ -434,7 +434,8 @@ http_file(
 
 FILE_GROUP = """filegroup(
 	name="file",
-	srcs=["**/*"])"""
+	srcs=glob(["**"])
+)"""
 
 http_archive(
     name = "ruff-darwin-arm64",
