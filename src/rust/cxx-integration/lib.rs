@@ -14,7 +14,13 @@ mod ffi {
 }
 
 pub fn init() {
-    tokio::init();
+    init_tokio(None);
+}
+
+/// Initialize tokio runtime.
+/// Should not be called directly but as a part of a downstream cxx-integration init.
+pub fn init_tokio(worker_threads: Option<usize>) {
+    tokio::init(worker_threads);
 }
 
 fn trigger_panic(msg: &str) {
