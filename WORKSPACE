@@ -44,9 +44,9 @@ http_archive(
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
     ],
-    sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
-    strip_prefix = "sqlite-src-3440000",
-    url = "https://sqlite.org/2023/sqlite-src-3440000.zip",
+    sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
+    strip_prefix = "sqlite-src-3470000",
+    url = "https://sqlite.org/2024/sqlite-src-3470000.zip",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
