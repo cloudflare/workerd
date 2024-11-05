@@ -151,6 +151,105 @@ private:
 // for the promise, then invoke the destination object.
 kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise);
 
+template <typename Func>
+class LazyWorkerInterface final: public WorkerInterface {
+public:
+  LazyWorkerInterface(Func func): func(kj::mv(func)) {}
+
+  void ensureResolve() {
+    if (promise == kj::none) {
+      promise = KJ_ASSERT_NONNULL(func)()
+                    .then([this](kj::Own<WorkerInterface> result) { worker = kj::mv(result); })
+                    .eagerlyEvaluate(nullptr)
+                    .fork();
+      func = kj::none;
+    }
+  }
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_await w->request(method, url, headers, requestBody, response);
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
+    }
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_await w->connect(host, headers, connection, response, kj::mv(settings));
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_await KJ_ASSERT_NONNULL(worker)->connect(
+          host, headers, connection, response, kj::mv(settings));
+    }
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->prewarm(url);
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->prewarm(url);
+    }
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->runScheduled(scheduledTime, cron);
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
+    }
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->runAlarm(scheduledTime, retryCount);
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime, retryCount);
+    }
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    ensureResolve();
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w->customEvent(kj::mv(event));
+    } else {
+      co_await KJ_ASSERT_NONNULL(promise);
+      co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
+    }
+  }
+
+private:
+  kj::Maybe<Func> func;
+  kj::Maybe<kj::ForkedPromise<void>> promise;
+  kj::Maybe<kj::Own<WorkerInterface>> worker;
+};
+// Similar to newPromisedWorkerInterface but receives a function that returns a Promise for a
+// WorkerInterface. This is useful when you are not sure if the worker will be used or not and
+// you don't want it to be created in case it isn't used. If you just create a
+// PromisedWorkerInterface then the async loop might run the promise before it is eventually
+// destroyed even if it was never used.
+template <typename Func>
+kj::Own<WorkerInterface> newLazyWorkerInterface(Func func) {
+  return kj::heap<LazyWorkerInterface<Func>>(kj::mv(func));
+}
+
 // Adapts WorkerInterface to HttpClient, including taking ownership.
 //
 // (Use kj::newHttpClient() if you don't want to take ownership.)
