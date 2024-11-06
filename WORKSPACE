@@ -179,9 +179,11 @@ git_repository(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
-load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
+load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_analyzer_toolchain_repository", "rust_register_toolchains", "rustfmt_toolchain_repository")
 
 rules_rust_dependencies()
+
+RUST_VERSION = "1.82.0"  # LLVM 19
 
 rust_register_toolchains(
     edition = "2021",
@@ -190,8 +192,19 @@ rust_register_toolchains(
     # also avoids registering support for the wasm32-unknown-unknown and wasm32-wasi targets, which
     # are otherwise added by default.
     extra_target_triples = ["x86_64-apple-darwin"],
-    versions = ["1.82.0"],  # LLVM 19
+    versions = [RUST_VERSION],
 )
+
+register_toolchains(rust_analyzer_toolchain_repository(
+    name = "rust-analyzer",
+    version = RUST_VERSION,
+))
+
+register_toolchains(rustfmt_toolchain_repository(
+    name = "rustfmt",
+    exec_triple = "x86_64-unknown-linux-gnu",
+    version = RUST_VERSION,
+))
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
 
