@@ -37,7 +37,7 @@ jobs:
     name: Tag & Release
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
-    needs: [check-tag, version, miniflare-test]
+    needs: [check-tag, version]
     runs-on: ubuntu-latest
     if: ${{ needs.check-tag.outputs.exists != 'true' }}
     steps:
