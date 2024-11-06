@@ -62,10 +62,12 @@ async function prepareWasmLinearMemory(Module: Module): Promise<void> {
   mountSitePackages(Module, SITE_PACKAGES.rootInfo);
   entropyMountFiles(Module);
   Module.noInitialRun = !SHOULD_RESTORE_SNAPSHOT;
-  preloadDynamicLibs(Module);
-  Module.removeRunDependency('dynlibs');
+  enterJaegerSpan('preload_dynamic_libs', () => preloadDynamicLibs(Module));
+  enterJaegerSpan('remove_run_dependency', () =>
+    Module.removeRunDependency('dynlibs')
+  );
   if (SHOULD_RESTORE_SNAPSHOT) {
-    restoreSnapshot(Module);
+    enterJaegerSpan('restore_snapshot', () => restoreSnapshot(Module));
     // Invalidate caches if we have a snapshot because the contents of site-packages
     // may have changed.
     simpleRunPython(
