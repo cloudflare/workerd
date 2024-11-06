@@ -38,9 +38,8 @@ stream-test args:
 node-test test_name:
   just stream-test //src/workerd/api/node:tests/{{test_name}}-nodejs-test
 
-format:
+format: rustfmt
   python3 tools/cross/format.py
-  bazel run @rules_rust//:rustfmt
 
 internal-pr:
   ./tools/unix/create-internal-pr.sh
@@ -55,6 +54,9 @@ update-rust package="full":
 
 rust-analyzer:
   bazel run @rules_rust//tools/rust_analyzer:gen_rust_project
+
+rustfmt:
+  bazel run @rules_rust//:rustfmt
 
 # example: just bench mimetype
 bench path:
