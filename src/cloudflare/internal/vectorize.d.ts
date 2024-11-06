@@ -34,6 +34,7 @@ interface VectorizeError {
  * This list is expected to grow as support for more operations are released.
  */
 type VectorizeVectorMetadataFilterOp = '$eq' | '$ne';
+type VectorizeVectorMetadataFilterCollectionOp = '$in' | '$nin';
 
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
@@ -47,6 +48,12 @@ type VectorizeVectorMetadataFilter = {
           VectorizeVectorMetadataValue,
           string[]
         > | null;
+      }
+    | {
+        [Op in VectorizeVectorMetadataFilterCollectionOp]?: Exclude<
+          VectorizeVectorMetadataValue,
+          string[]
+        >[];
       };
 };
 

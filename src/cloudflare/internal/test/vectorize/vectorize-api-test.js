@@ -207,6 +207,28 @@ export const test_vector_search_vector_query = {
       };
       assert.deepStrictEqual(results, expected);
     }
+
+    {
+      // with returnValues = unset (false), returnMetadata = unset (none), filter = "Peter Piper picked a peck of pickled peppers"
+      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+        topK: 1,
+        filter: {
+          text: { $in: ['Peter Piper picked a peck of pickled peppers'] },
+        },
+      });
+      assert.equal(true, results.count > 0);
+      /** @type {VectorizeMatches}  */
+      const expected = {
+        matches: [
+          {
+            id: 'a44706aa-a366-48bc-8cc1-3feffd87d548',
+            score: 0.68913,
+          },
+        ],
+        count: 1,
+      };
+      assert.deepStrictEqual(results, expected);
+    }
   },
 };
 
