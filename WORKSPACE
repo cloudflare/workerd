@@ -185,11 +185,12 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    # Add support macOS cross-compilation, the overhead for this is limited with only a few more
-    # targets being generated for the extra triple as part of the toolchain. Setting this explicitly
-    # also avoids registering support for the wasm32-unknown-unknown and wasm32-wasi targets, which
-    # are otherwise added by default.
-    extra_target_triples = ["x86_64-apple-darwin"],
+    extra_target_triples = [
+        # Add support for macOS cross-compilation
+        "x86_64-apple-darwin",
+        # Add support for macOS rosetta
+        "aarch64-unknown-linux-gnu",
+    ],
     versions = ["1.82.0"],  # LLVM 19
 )
 
