@@ -409,6 +409,11 @@ public:
     dropWrappers(kj::mv(wrapper));
   }
 
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& configuration) {
+    wrapper->updateConfiguration(kj::fwd<MetaConfiguration>(configuration));
+  }
+
   kj::Exception unwrapException(
       v8::Local<v8::Context> context, v8::Local<v8::Value> exception) override {
     return wrapper->template unwrap<kj::Exception>(

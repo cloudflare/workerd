@@ -1349,6 +1349,11 @@ public:
   ResourceWrapper(MetaConfiguration&& configuration)
       : configuration(kj::fwd<MetaConfiguration>(configuration)) {}
 
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& config) {
+    configuration = kj::fwd<MetaConfiguration>(config);
+  }
+
   inline void initTypeWrapper() {
     TypeWrapper& wrapper = static_cast<TypeWrapper&>(*this);
     wrapper.resourceTypeMap.insert(typeid(T),

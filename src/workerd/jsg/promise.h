@@ -572,6 +572,11 @@ public:
   // std::nullptr_t). The getConfig allows us to handle any case using reasonable defaults.
   PromiseWrapper(const auto& config): config(getConfig(config)) {}
 
+  template <typename MetaConfiguration>
+  void updateConfiguration(MetaConfiguration&& configuration) {
+    config = getConfig(kj::fwd<MetaConfiguration>(configuration));
+  }
+
   template <typename T>
   static constexpr const char* getName(Promise<T>*) {
     return "Promise";
@@ -668,7 +673,7 @@ public:
   }
 
 private:
-  const JsgConfig config;
+  JsgConfig config;
 
   static bool isThenable(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
     if (handle->IsObject()) {
