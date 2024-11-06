@@ -1,0 +1,120 @@
+name: "Run Bazel"
+on:
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        required: false
+        default: "ubuntu-20.04"
+      os_name:
+        type: string
+        required: false
+        default: "linux"
+      suffix:
+        type: string
+        required: false
+        default: ""
+      run_tests:
+        type: boolean
+        required: false
+        default: true
+      extra_bazel_args:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      BAZEL_CACHE_KEY:
+        required: true
+      WORKERS_MIRROR_URL:
+        required: true
+
+jobs:
+  bazel:
+    runs-on: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/bazel-disk-cache
+          key: bazel-disk-cache-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
+          # ends up with a larger cache at the end when starting with an available cache entry,
+          # resulting in a snowballing cache size and cache download/upload times.
+      - name: Setup Linux
+        if: inputs.os_name == 'linux'
+        # Install dependencies, including clang through the LLVM APT repository. We drop the
+        # install step so we can install just the packages we need.
+        # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
+        # libc++, but this appears to cause errors so they are also being explicitly installed.
+        # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
+        # to use APT much otherwise.
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+          # keep in sync with build/ci.bazelrc
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev llvm-16
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-16/bin/llvm-symbolizer%" .bazelrc
+      - name: Setup Windows
+        if: inputs.os_name == 'windows'
+        # Set a custom output root directory to avoid long file name issues.
+        run: |
+          git config --global core.symlinks true
+          git config --show-scope --show-origin core.symlinks
+          [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
+      - name: Configure download mirrors
+        shell: bash
+        run: |
+          if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
+            # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+          fi
+      - name: Configure git hooks
+        # Configure git to quell an irrelevant warning for runners (they never commit / push).
+        run: git config core.hooksPath githooks
+      - name: Bazel build
+        # timestamps are no longer being added here, the GitHub logs include timestamps (Use
+        # 'Show timestamps' on the web interface)
+        run: |
+          bazel build --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+      - name: Bazel test
+        if: inputs.run_tests
+        run: |
+          bazel test --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+      - name: Report disk usage (in MB)
+        if: always()
+        shell: bash
+        run: |
+          BAZEL_OUTPUT_BASE=$(bazel info output_base)
+          BAZEL_REPOSITORY_CACHE=$(bazel info repository_cache)
+          echo "Bazel cache usage statistics"
+          du -ms -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+          echo "Bazel output usage statistics"
+          du -ms -t 1 $BAZEL_OUTPUT_BASE
+          echo "Workspace usage statistics"
+          du -ms -t 1 $GITHUB_WORKSPACE
+      - name: Drop large Bazel cache files
+        if: always()
+        # Github has a nominal 10GB of storage for all cached builds associated with a project.
+        # Drop large files (>100MB) in our cache to improve shared build cache efficiency. This is
+        # particularly helpful for asan and debug builds that produce larger executables. Also
+        # the process of saving the Bazel disk cache generates a tarball on the runners disk, and
+        # it is possible to run out of storage in that process (does not fail the workflow).
+        shell: bash
+        run: |
+          if [ -d ~/bazel-disk-cache ]; then
+            find ~/bazel-disk-cache -size +100M -type f -exec rm {} \;
+            echo "Trimmed Bazel cache usage statistics"
+            du -ms -t 1 ~/bazel-disk-cache/*
+          else
+            echo "Disk cache does not exist: ~/bazel-disk-cache"
+          fi
+      - name: Bazel shutdown
+        # Check that there are no .bazelrc issues that prevent shutdown.
+        run: bazel shutdown
