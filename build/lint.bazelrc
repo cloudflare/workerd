@@ -1,0 +1,12 @@
+## rust lint configuration
+
+# turn rust warnings into errors
+build:lint --@rules_rust//:extra_rustc_flag=-Dwarnings
+# enable clippy
+build:lint --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:lint --output_groups=+clippy_checks
+# enable relevant clippy checks
+build:lint --@rules_rust//:clippy_flags=-Wclippy::pedantic,-Wclippy::redundant_clone,-Wclippy::str_to_string,-Wclippy::string_to_string,-Wclippy::to_string_in_format_args,-Wclippy::unnecessary_to_owned,-Wclippy::implicit_clone,-Wclippy::suspicious_to_owned,-Wclippy::unnecessary_to_owned,-Dwarnings
+# enable rustfmt checks
+build:lint --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
+build:lint --output_groups=+rustfmt_checks

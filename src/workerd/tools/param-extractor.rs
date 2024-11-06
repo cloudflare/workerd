@@ -83,7 +83,7 @@ fn get_parameter_names(clang_ast: ClangNode) -> Vec<Parameter> {
         .inner
         .into_iter()
         .filter(|node| node.kind == workerd_namespace)
-        .flat_map(|node| traverse_disambiguous(node, vec![]))
+        .flat_map(|node| traverse_disambiguous(node, &[]))
         .collect()
 }
 
@@ -97,7 +97,7 @@ struct Parameter {
 
 fn traverse_disambiguous(
     disambiguous: ClangNode,
-    fully_qualified_parent_name: Vec<String>,
+    fully_qualified_parent_name: &[String],
 ) -> Vec<Parameter> {
     let disambiguous_name = disambiguous
         .kind
@@ -110,13 +110,13 @@ fn traverse_disambiguous(
         .into_iter()
         .flat_map(|node| {
             if node.kind.is_function_like() {
-                let mut qualified = fully_qualified_parent_name.clone();
+                let mut qualified: Vec<_> = fully_qualified_parent_name.to_vec();
                 qualified.push(disambiguous_name.clone());
-                traverse_function_like(node, qualified)
+                traverse_function_like(node, &qualified)
             } else {
-                let mut qualified = fully_qualified_parent_name.clone();
+                let mut qualified: Vec<_> = fully_qualified_parent_name.to_vec();
                 qualified.push(disambiguous_name.clone());
-                traverse_disambiguous(node, qualified)
+                traverse_disambiguous(node, &qualified)
             }
         })
         .collect()
@@ -124,7 +124,7 @@ fn traverse_disambiguous(
 
 fn traverse_function_like(
     node: ClangNode,
-    fully_qualified_parent_name: Vec<String>,
+    fully_qualified_parent_name: &[String],
 ) -> Vec<Parameter> {
     let function_like_name = node.kind.name().unwrap().to_owned();
 
@@ -139,7 +139,7 @@ fn traverse_function_like(
         })
         .enumerate()
         .map(|(i, param_name)| Parameter {
-            fully_qualified_parent_name: fully_qualified_parent_name.clone(),
+            fully_qualified_parent_name: fully_qualified_parent_name.to_vec(),
             function_like_name: function_like_name.clone(),
             index: i,
             name: param_name,
