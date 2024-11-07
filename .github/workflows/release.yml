@@ -61,12 +61,17 @@ jobs:
           - os-name: linux
             os: ubuntu-20.04
             bazel-config: release_linux
+            target-arch: X64
           - os-name: macOS
+            # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
+            # we use it to compile the x64 release.
             os: macos-15
             bazel-config: release_macos
+            target-arch: X64
           - os-name: windows
             os: windows-2022
             bazel-config: release_windows
+            target-arch: X64
     runs-on: ${{ matrix.os }}
     name: build (${{ matrix.os-name }})
     steps:
@@ -126,7 +131,7 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ runner.os }}-${{ runner.arch }}-binary
+          name: ${{ runner.os }}-${{ matrix.target-arch }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
 
   upload-artifacts:
