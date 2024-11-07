@@ -20,8 +20,11 @@ build:ci --color=yes
 build:ci --terminal_columns=100
 
 build:ci --config=v8-codegen-opt
-build:ci --remote_download_minimal --disk_cache=~/bazel-disk-cache
 test:ci --test_output=errors
+build:ci --disk_cache=~/bazel-disk-cache
+
+# test CI jobs don't need any top-level artifacts and just verify things
+build:ci-test --remote_download_outputs=minimal
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid

@@ -67,13 +67,14 @@ jobs:
       image: ${{ matrix.os.image }}
       os_name: ${{ matrix.os.name }}
       suffix: ${{ matrix.config.suffix }}
+      extra_bazel_args: "--config=ci-test"
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
-      extra_bazel_args: "--config=lint"
+      extra_bazel_args: "--config=lint --config=ci-test"
       run_tests: false
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
