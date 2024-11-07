@@ -6,10 +6,6 @@ on:
         type: string
         required: false
         default: "ubuntu-20.04"
-      os_name:
-        type: string
-        required: false
-        default: "linux"
       suffix:
         type: string
         required: false
@@ -22,6 +18,18 @@ on:
         type: string
         required: false
         default: ""
+      cache_prefix:
+        type: string
+        required: false
+        default: "bazel-disk-cache-"
+      target:
+        type: string
+        required: false
+        default: "//..."
+      upload_binary:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -40,12 +48,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: ${{ inputs.cache_prefix }}${{ runner.os }}-${{ runner.arch }}${{ inputs.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
           # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
           # ends up with a larger cache at the end when starting with an available cache entry,
           # resulting in a snowballing cache size and cache download/upload times.
       - name: Setup Linux
-        if: inputs.os_name == 'linux'
+        if: runner.os == 'Linux'
         # Install dependencies, including clang through the LLVM APT repository. We drop the
         # install step so we can install just the packages we need.
         # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
@@ -62,12 +70,20 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev llvm-16
           sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-16/bin/llvm-symbolizer%" .bazelrc
       - name: Setup Windows
-        if: inputs.os_name == 'windows'
+        if: runner.os == 'Windows'
         # Set a custom output root directory to avoid long file name issues.
         run: |
           git config --global core.symlinks true
           git config --show-scope --show-origin core.symlinks
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
+      - name: Setup macOS
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_15.1.app"
+          # Install lld and link it to /usr/local/bin. We overwrite any existing link, which may
+          # exist from an older pre-installed LLVM version on the runner image.
+          brew install lld
+          sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
       - name: Configure download mirrors
         shell: bash
         run: |
@@ -82,11 +98,17 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-          bazel build --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+          bazel build --config=ci --config=ci-${{ runner.os }}${{ inputs.suffix }} ${{ inputs.extra_bazel_args }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.target }}
       - name: Bazel test
         if: inputs.run_tests
         run: |
-          bazel test --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+          bazel test --config=ci --config=ci-${{ runner.os }}${{ inputs.suffix }} ${{ inputs.extra_bazel_args }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.target }}
+      - name: Upload binary
+        if: inputs.upload_binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-${{ runner.arch }}-binary
+          path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
       - name: Report disk usage (in MB)
         if: always()
         shell: bash
