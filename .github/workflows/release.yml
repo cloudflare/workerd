@@ -56,13 +56,13 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-13, windows-2022]
+        os: [ubuntu-20.04, macos-15, windows-2022]
         include:
           - os-name: linux
             os: ubuntu-20.04
             bazel-config: release_linux
           - os-name: macOS
-            os: macos-13
+            os: macos-15
             bazel-config: release_macos
           - os-name: windows
             os: windows-2022
@@ -95,11 +95,12 @@ jobs:
       - name: Setup macOS
         if: runner.os == 'macOS'
         run: |
-          sudo xcode-select -s "/Applications/Xcode_15.1.app"
           # Install lld and link it to /usr/local/bin. We overwrite any existing link, which may
           # exist from an older pre-installed LLVM version on the runner image.
           brew install lld
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
+          # Cross-compile so that we can use the latest Xcode version for the Intel Mac binary
+          echo "build:macos --config=macos-cross-x86_64" >> .bazelrc
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
       - name: Setup Windows
