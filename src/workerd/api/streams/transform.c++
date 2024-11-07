@@ -64,7 +64,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
           .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
               JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
                   (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
-          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>(JSG_VISITABLE_LAMBDA(
+          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
               (controller = controller.addRef()), (controller),
               (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),
           .expectedLength = transformer.expectedLength.map(
@@ -123,9 +123,9 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
   KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
     maybeHighWaterMark = queuingStrategy.highWaterMark;
   }
-
   return jsg::alloc<IdentityTransformStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out), maybeHighWaterMark));
+      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out),
+          ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
 }
 
 jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
@@ -147,7 +147,8 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
   }
 
   return jsg::alloc<FixedLengthStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out), maybeHighWaterMark));
+      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out),
+          ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
 }
 
 OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength) {

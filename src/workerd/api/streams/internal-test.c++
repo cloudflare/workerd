@@ -230,7 +230,8 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
     // allowed to be queued.
 
     jsg::Ref<ReadableStream> source = ReadableStream::constructor(env.js, kj::none, kj::none);
-    jsg::Ref<WritableStream> sink = jsg::alloc<WritableStream>(env.context, kj::heap<MySink>());
+    jsg::Ref<WritableStream> sink =
+        jsg::alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
 
     auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{.preventClose = true});
 
@@ -270,6 +271,85 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
     // Getting a writer at this point does not throw...
     sink->getWriter(env.js);
   });
+}
+
+KJ_TEST("WritableStreamInternalController observability") {
+
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setNodeJsCompat(true);
+  flags.setWorkerdExperimental(true);
+  flags.setStreamsJavaScriptControllers(true);
+
+  TestFixture::SetupParams params;
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  class MySink final: public WritableStreamSink {
+  public:
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+      ++writeCount;
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> end() override {
+      return kj::READY_NOW;
+    }
+    void abort(kj::Exception reason) override {}
+    uint getWriteCount() {
+      return writeCount;
+    }
+
+  private:
+    uint writeCount = 0;
+  };
+
+  class MyObserver final: public ByteStreamObserver {
+  public:
+    virtual void onChunkEnqueued(size_t bytes) {
+      ++queueSize;
+      queueSizeBytes += bytes;
+    };
+    virtual void onChunkDequeued(size_t bytes) {
+      queueSizeBytes -= bytes;
+      --queueSize;
+    };
+    uint64_t queueSize = 0;
+    uint64_t queueSizeBytes = 0;
+  };
+
+  auto myObserver = kj::heap<MyObserver>();
+  auto& observer = *myObserver;
+  kj::Maybe<jsg::Ref<WritableStream>> stream;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    stream = jsg::alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::mv(myObserver));
+
+    auto write = [&](size_t size) {
+      auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));
+      return env.context.awaitJs(env.js,
+          KJ_ASSERT_NONNULL(stream)->getController().write(env.js, buffersource.getHandle(env.js)));
+    };
+
+    KJ_ASSERT(observer.queueSize == 0);
+    KJ_ASSERT(observer.queueSizeBytes == 0);
+
+    auto builder = kj::heapArrayBuilder<kj::Promise<void>>(2);
+    builder.add(write(1));
+
+    KJ_ASSERT(observer.queueSize == 1);
+    KJ_ASSERT(observer.queueSizeBytes == 1);
+
+    builder.add(write(10));
+
+    KJ_ASSERT(observer.queueSize == 2);
+    KJ_ASSERT(observer.queueSizeBytes == 11);
+
+    return kj::joinPromises(builder.finish());
+  });
+
+  KJ_ASSERT(observer.queueSize == 0);
+  KJ_ASSERT(observer.queueSizeBytes == 0);
 }
 
 }  // namespace

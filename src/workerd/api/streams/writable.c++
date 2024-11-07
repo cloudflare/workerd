@@ -216,10 +216,14 @@ void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
 
 WritableStream::WritableStream(IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
+    kj::Maybe<kj::Own<ByteStreamObserver>> maybeObserver,
     kj::Maybe<uint64_t> maybeHighWaterMark,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable)
-    : WritableStream(newWritableStreamInternalController(
-          ioContext, kj::mv(sink), maybeHighWaterMark, kj::mv(maybeClosureWaitable))) {}
+    : WritableStream(newWritableStreamInternalController(ioContext,
+          kj::mv(sink),
+          kj::mv(maybeObserver),
+          maybeHighWaterMark,
+          kj::mv(maybeClosureWaitable))) {}
 
 WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
     : ioContext(tryGetIoContext()),
@@ -611,7 +615,8 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  return jsg::alloc<WritableStream>(ioctx, kj::mv(sink));
+  return jsg::alloc<WritableStream>(
+      ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
 }
 
 void WritableStreamDefaultWriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

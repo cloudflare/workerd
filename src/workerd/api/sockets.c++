@@ -160,6 +160,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
   auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
+      ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
       getWritableHighWaterMark(options), openedPrPair.promise.whenResolved(js));
 
   auto result = jsg::alloc<Socket>(js, ioContext, kj::mv(refcountedConnection),

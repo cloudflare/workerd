@@ -504,7 +504,8 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(kj::String format) {
   auto& ioContext = IoContext::current();
 
   return jsg::alloc<CompressionStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide),
+          ioContext.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj::String format) {
@@ -521,7 +522,8 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
 
   return jsg::alloc<DecompressionStream>(
       jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide),
+          ioContext.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 
 }  // namespace workerd::api

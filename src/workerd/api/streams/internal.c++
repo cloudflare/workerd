@@ -933,6 +933,9 @@ jsg::Promise<void> WritableStreamInternalController::write(
 
       auto prp = js.newPromiseAndResolver<void>();
       increaseCurrentWriteBufferSize(js, byteLength);
+      KJ_IF_SOME(o, observer) {
+        o->onChunkEnqueued(byteLength);
+      }
       auto ptr =
           kj::ArrayPtr<kj::byte>(static_cast<kj::byte*>(store->Data()) + byteOffset, byteLength);
       queue.push_back(
@@ -1598,6 +1601,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         auto& request = check();
         maybeResolvePromise(js, request.promise);
         decreaseCurrentWriteBufferSize(js, amountToWrite);
+        KJ_IF_SOME(o, observer) {
+          o->onChunkDequeued(amountToWrite);
+        }
         queue.pop_front();
         maybeAbort(js, request);
         return writeLoop(js, IoContext::current());
@@ -1610,6 +1616,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         auto& request = check();
         auto& writable = state.get<IoOwn<Writable>>();
         decreaseCurrentWriteBufferSize(js, amountToWrite);
+        KJ_IF_SOME(o, observer) {
+          o->onChunkDequeued(amountToWrite);
+        }
         maybeRejectPromise<void>(js, request.promise, handle);
         queue.pop_front();
         if (!maybeAbort(js, request)) {
@@ -2468,10 +2477,11 @@ kj::Own<ReadableStreamController> newReadableStreamInternalController(
 
 kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
+    kj::Maybe<kj::Own<ByteStreamObserver>> observer,
     kj::Maybe<uint64_t> maybeHighWaterMark,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable) {
   return kj::heap<WritableStreamInternalController>(
-      kj::mv(sink), maybeHighWaterMark, kj::mv(maybeClosureWaitable));
+      kj::mv(sink), kj::mv(observer), maybeHighWaterMark, kj::mv(maybeClosureWaitable));
 }
 
 kj::StringPtr WritableStreamInternalController::jsgGetMemoryName() const {

@@ -480,7 +480,7 @@ public:
   // immediately if any of these happen:
   // - The JS promise is GC'd without resolving.
   // - The JS promise is resolved from the wrong context.
-  // - The system detects that no further process will be made in this context (because there is no
+  // - The system detects that no further progress will be made in this context (because there is no
   //   more JavaScript to run, and there is no outstanding I/O scheduled with awaitIo()).
   //
   // If `T` is `IoOwn<U>`, it will be unwrapped to just `U` in the result. If `U` is in turn

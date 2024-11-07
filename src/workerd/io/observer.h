@@ -24,10 +24,28 @@ class TimerChannel;
 
 class WebSocketObserver: public kj::Refcounted {
 public:
+  virtual ~WebSocketObserver() noexcept(false) = default;
   // Called when a worker sends a message on this WebSocket (includes close messages).
   virtual void sentMessage(size_t bytes) {};
   // Called when a worker receives a message on this WebSocket (includes close messages).
   virtual void receivedMessage(size_t bytes) {};
+};
+
+// Observes a byte stream. Byte streams which use instances of this observer should call enqueue()
+// and dequeue() once for each chunk that passes through the stream. The order of enqueues should
+// match the order of dequeues.
+//
+// Byte observer implementations can then calculate the current number of chunks and the sum of the
+// size of the chunks in the internal queue by incrementing and decrementing each metric in
+// enqueue() and dequeue() respectively.
+class ByteStreamObserver {
+public:
+  virtual ~ByteStreamObserver() noexcept(false) = default;
+  // Called when a chunk of size `bytes` is enqueued on the stream.
+  virtual void onChunkEnqueued(size_t bytes) {};
+  // Called when a chunk of size `bytes` is dequeued from the stream (e.g. when a writable byte
+  // stream writes the chunk to its corresponding sink).
+  virtual void onChunkDequeued(size_t bytes) {};
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -44,6 +62,12 @@ public:
   virtual kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() {
     return kj::none;
   };
+
+  // This is called when a writable byte stream is created whilst processing this request. It will
+  // be destroyed when the corresponding byte stream is destroyed.
+  virtual kj::Maybe<kj::Own<ByteStreamObserver>> tryCreateWritableByteStreamObserver() {
+    return kj::none;
+  }
 
   // Invoked when the request is actually delivered.
   //
