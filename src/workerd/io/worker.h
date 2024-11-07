@@ -153,6 +153,9 @@ public:
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
+  static void setupContext(
+      jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode);
+
 private:
   kj::Own<const Script> script;
 

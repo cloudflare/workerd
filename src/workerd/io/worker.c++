@@ -467,9 +467,6 @@ private:
   kj::MutexGuarded<State> state;
 };
 
-// Defined later in this file.
-void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context);
-
 static thread_local const Worker::Api* currentApi = nullptr;
 
 const Worker::Api& Worker::Api::current() {
@@ -599,40 +596,12 @@ struct Worker::Isolate::Impl {
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
 
     void setupContext(v8::Local<v8::Context> context) {
-      // Set WebAssembly.Module @@HasInstance
-      setWebAssemblyModuleHasInstance(*lock, context);
-
       // The V8Inspector implements the `console` object.
       KJ_IF_SOME(i, impl.inspector) {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-
-      // We replace the default V8 console.log(), etc. methods, to give the worker access to
-      // logged content, and log formatted values to stdout/stderr locally.
-      auto global = context->Global();
-      auto consoleStr = jsg::v8StrIntern(lock->v8Isolate, "console");
-      auto console = jsg::check(global->Get(context, consoleStr)).As<v8::Object>();
-      auto mode = consoleMode;
-
-      auto setHandler = [&](const char* method, LogLevel level) {
-        auto methodStr = jsg::v8StrIntern(lock->v8Isolate, method);
-        v8::Global<v8::Function> original(
-            lock->v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
-
-        auto f = lock->wrapSimpleFunction(context,
-            [mode, level, original = kj::mv(original)](
-                jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-          handleLog(js, mode, level, original, info);
-        });
-        jsg::check(console->Set(context, methodStr, f));
-      };
-
-      setHandler("debug", LogLevel::DEBUG_);
-      setHandler("error", LogLevel::ERROR);
-      setHandler("info", LogLevel::INFO);
-      setHandler("log", LogLevel::LOG);
-      setHandler("warn", LogLevel::WARN);
+      Worker::setupContext(*lock, context, consoleMode);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -1471,6 +1440,36 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
 
+void Worker::setupContext(
+    jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode) {
+  // Set WebAssembly.Module @@HasInstance
+  setWebAssemblyModuleHasInstance(lock, context);
+
+  // We replace the default V8 console.log(), etc. methods, to give the worker access to
+  // logged content, and log formatted values to stdout/stderr locally.
+  auto global = context->Global();
+  auto consoleStr = jsg::v8StrIntern(lock.v8Isolate, "console");
+  auto console = jsg::check(global->Get(context, consoleStr)).As<v8::Object>();
+
+  auto setHandler = [&](const char* method, LogLevel level) {
+    auto methodStr = jsg::v8StrIntern(lock.v8Isolate, method);
+    v8::Global<v8::Function> original(
+        lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
+
+    auto f = lock.wrapSimpleFunction(context,
+        [consoleMode, level, original = kj::mv(original)](
+            jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      handleLog(js, consoleMode, level, original, info);
+    });
+    jsg::check(console->Set(context, methodStr, f));
+  };
+
+  setHandler("debug", LogLevel::DEBUG_);
+  setHandler("error", LogLevel::ERROR);
+  setHandler("info", LogLevel::INFO);
+  setHandler("log", LogLevel::LOG);
+  setHandler("warn", LogLevel::WARN);
+}
 // =======================================================================================
 
 namespace {
