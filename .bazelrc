@@ -211,8 +211,9 @@ build:linux --config=unix
 build:macos --config=unix
 
 # Support macOS 13 as the minimum version. There should be at least a warning when backward
-# compatibility is broken as -Wunguarded-availability-new is enabled by default.
-build:macos --macos_minimum_os=13.5 --host_macos_minimum_os=13.5
+# compatibility is broken as -Wunguarded-availability-new is enabled by default. Only enable for
+# target configuration as host configuration tools are only used during the build process.
+build:macos --macos_minimum_os=13.5
 
 # Avoid emitting duplicate unwind info where compact unwind info can be used. This reduces the
 # object size by ~5% on average, improving disk space usage and link times. The final binary size
