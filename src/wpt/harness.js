@@ -143,7 +143,7 @@ function sanitizeMessage(message) {
 async function validate(options) {
   await Promise.all(globalThis.promises);
 
-  const expectedFailures = options.expectedFailures ?? [];
+  const expectedFailures = new Set(options.expectedFailures ?? []);
   let failed = false;
 
   for (const err of globalThis.errors) {
@@ -151,12 +151,16 @@ async function validate(options) {
       err.errors,
       sanitizeMessage(err.message)
     );
-    if (expectedFailures.includes(err.message)) {
+    if (expectedFailures.delete(err.message)) {
       console.warn('Expected failure: ', sanitizedError);
     } else {
       console.error(sanitizedError);
       failed = true;
     }
+  }
+  if (expectedFailures.size > 0) {
+    console.log('Missing expected failures:', expectedFailures);
+    failed = true;
   }
 
   if (failed) {
@@ -164,12 +168,19 @@ async function validate(options) {
   }
 }
 
-export function run(file, options = {}) {
-  return {
-    async test() {
-      prepare(options);
-      await import(file);
-      await validate(options);
-    },
+export function runner(config) {
+  return function run(file) {
+    const options = config[file] ?? {};
+    if (options.ignore) {
+      return {};
+    }
+
+    return {
+      async test() {
+        prepare(options);
+        await import(file);
+        await validate(options);
+      },
+    };
   };
 }
