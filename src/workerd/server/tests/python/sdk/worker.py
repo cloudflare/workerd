@@ -2,7 +2,8 @@ from http import HTTPMethod, HTTPStatus
 
 import js
 
-from cloudflare.workers import FormData, Response, fetch
+from cloudflare.workers import Blob, File, FormData, Response, fetch
+from pyodide.ffi import to_js
 
 
 # Each path in this handler is its own test. The URLs that are being fetched
@@ -74,10 +75,21 @@ async def on_fetch(request):
         # to Response.
         resp = await fetch("https://example.com/formdata")
         data = await resp.formData()
-        if data["field"] == ["value"]:
+        if data["field"] == "value":
             return Response("success")
         else:
             return Response("fail")
+    elif request.url.endswith("/formdatablob"):
+        # server.py creates a new FormData and verifies that it can be passed
+        # to Response.
+        resp = await fetch("https://example.com/formdatablob")
+        data = await resp.formData()
+        assert data["field"] == "value"
+        assert (await data["blob.py"].text()) == "print(42)"
+        assert data["blob.py"].content_type == "text/python"
+        assert data["metadata"].name == "metadata.json"
+
+        return Response("success")
     else:
         resp = await fetch("https://example.com/sub")
         return resp
@@ -175,7 +187,6 @@ async def can_request_form_data(env):
         "http://example.com/formdata",
     )
     text = await response.text()
-    print(text)
     assert text == "success"
 
 
@@ -186,14 +197,15 @@ async def form_data_unit_tests(env):
     js_data.append("key", "lorem ipsum")
     js_data.append("key", "dolor sit amet")
     data = FormData(js_data)
-    assert data["foobar"] == ["123"]
-    assert data["key"] == ["lorem ipsum", "dolor sit amet"]
+    assert data["foobar"] == "123"
+    assert data["key"] == "lorem ipsum"
+    assert data.get_all("key") == ["lorem ipsum", "dolor sit amet"]
     assert "unknown key" not in data
     assert "key" in data
 
     # Verify that dictionary can instantiate form data.
     data = FormData({"key": "foobar"})
-    assert data["key"] == ["foobar"]
+    assert data["key"] == "foobar"
     assert "key" in data
 
     # Test iterators
@@ -213,6 +225,54 @@ async def form_data_unit_tests(env):
     assert "foobar2" in data_values
 
 
+async def blob_unit_tests(env):
+    # Verify that we can create a FormData and add Blob in there.
+    data = FormData()
+    data["test"] = Blob(["some string"])
+    test_contents = await data["test"].text()
+    assert test_contents == "some string"
+    data["js"] = js.Blob.new(to_js(["another string"]))
+    # Even though we added a JS Blob, we should get a Python Blob.
+    assert isinstance(data["js"], Blob)
+    data.append("blah", js.Blob.new(to_js(["another string"])))
+    # Iterating through the items should give us Python Blobs.
+    for key, val in data.items():
+        assert isinstance(key, str)
+        assert isinstance(val, Blob)
+    # Verify that content type can be set.
+    content_type_blob = Blob(["test"], content_type="application/json")
+    assert content_type_blob.js_object.type == "application/json"
+    # Verify instance properties.
+    assert content_type_blob.size == 4
+    assert content_type_blob.content_type == "application/json"
+    # Verify instance methods.
+    assert (await content_type_blob.bytes()) == b"test"
+    assert (await content_type_blob.slice(1, 3).text()) == "es"
+    # Verify that Blob can be created with a memoryview.
+    memory_data = b"foobar"
+    memory_view_blob = Blob([memoryview(memory_data)])
+    assert await memory_view_blob.text() == "foobar"
+    # Verify that Blob constructor inherits type.
+    inherited = Blob(content_type_blob)
+    not_inherited = Blob(content_type_blob, content_type="other/type")
+    assert inherited.content_type == "application/json"
+    assert not_inherited.content_type == "other/type"
+    not_inherited2 = Blob([content_type_blob])
+    assert not_inherited2.content_type == ""
+    # Verify that we can create Files.
+    file_blob = File("my file", filename="test.txt", content_type="text/plain")
+    assert file_blob.content_type == "text/plain"
+    assert file_blob.name == "test.txt"
+
+
+async def can_request_form_data_blob(env):
+    response = await env.SELF.fetch(
+        "http://example.com/formdatablob",
+    )
+    text = await response.text()
+    assert text == "success"
+
+
 async def test(ctrl, env):
     await can_return_custom_fetch_response(env)
     await can_modify_response(env)
@@ -225,3 +285,5 @@ async def test(ctrl, env):
     await can_use_response_json(env)
     await can_request_form_data(env)
     await form_data_unit_tests(env)
+    await blob_unit_tests(env)
+    await can_request_form_data_blob(env)
