@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker.py", pythonModule = embed "ai-api-test.py")
         ],
         compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat", "python_workers"],
+        compatibilityFlags = ["nodejs_compat", "python_workers_development"],
         bindings = [
         (
           name = "ai",
