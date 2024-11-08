@@ -191,7 +191,14 @@ private:
   v8::Global<v8::UnboundScript> unboundScript;
 };
 
-void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
+enum class InstantiateModuleOptions {
+  DEFAULT,
+  NO_TOP_LEVEL_AWAIT,
+};
+
+void instantiateModule(jsg::Lock& js,
+    v8::Local<v8::Module>& module,
+    InstantiateModuleOptions options = InstantiateModuleOptions::DEFAULT);
 
 enum class ModuleInfoCompileOption {
   // The BUNDLE options tells the compile operation to treat the content as coming

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "module.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api::node {
@@ -84,18 +85,21 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
 
     auto module = info.module.getHandle(js);
 
-    jsg::instantiateModule(js, module);
-    auto handle = jsg::check(module->Evaluate(js.v8Context()));
-    KJ_ASSERT(handle->IsPromise());
-    auto prom = handle.As<v8::Promise>();
-    if (prom->State() == v8::Promise::PromiseState::kPending) {
-      js.runMicrotasks();
+    auto features = FeatureFlags::get(js);
+    jsg::InstantiateModuleOptions options = jsg::InstantiateModuleOptions::DEFAULT;
+    if (features.getNoTopLevelAwaitInRequire()) {
+      options = jsg::InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT;
+
+      // If the module was already evaluated, let's check if it is async.
+      // If it is, we will throw an error. This case can happen if a previous
+      // attempt to require the module failed because the module was async.
+      if (module->GetStatus() == v8::Module::kEvaluated) {
+        JSG_REQUIRE(!module->IsGraphAsync(), Error,
+            "Top-level await in module is not permitted at this time.");
+      }
     }
-    JSG_REQUIRE(prom->State() != v8::Promise::PromiseState::kPending, Error,
-        "Module evaluation did not complete synchronously.");
-    if (module->GetStatus() == v8::Module::kErrored) {
-      jsg::throwTunneledException(js.v8Isolate, module->GetException());
-    }
+
+    jsg::instantiateModule(js, module, options);
 
     if (isEsm) {
       // If the import is an esm module, we will return the namespace object.

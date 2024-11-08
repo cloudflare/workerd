@@ -272,23 +272,31 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
 
-  JSG_REQUIRE_NONNULL(
-      info.maybeSynthetic, TypeError, "Cannot use require() to import an ES Module.");
-
   auto module = info.module.getHandle(js);
 
-  check(module->InstantiateModule(js.v8Context(), &resolveCallback));
-  auto handle = check(module->Evaluate(js.v8Context()));
-  KJ_ASSERT(handle->IsPromise());
-  auto prom = handle.As<v8::Promise>();
+  JSG_REQUIRE(module->GetStatus() != v8::Module::Status::kEvaluating &&
+          module->GetStatus() != v8::Module::Status::kInstantiating,
+      Error,
+      "Module cannot be synchronously required while it is being instantiated or evaluated. "
+      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
+      "dependency on itself, and that a synchronous require() is being called while the module "
+      "is being loaded.");
 
-  // This assert should always pass since evaluateSyntheticModuleCallback() for CommonJS
-  // modules (below) always returns an already-resolved promise.
-  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
+  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  jsg::InstantiateModuleOptions options = jsg::InstantiateModuleOptions::DEFAULT;
+  if (!isolateBase.isTopLevelAwaitEnabled()) {
+    options = jsg::InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT;
 
-  if (module->GetStatus() == v8::Module::kErrored) {
-    throwTunneledException(js.v8Isolate, module->GetException());
+    // If the module was already evaluated, let's check if it is async.
+    // If it is, we will throw an error. This case can happen if a previous
+    // attempt to require the module failed because the module was async.
+    if (module->GetStatus() == v8::Module::kEvaluated) {
+      JSG_REQUIRE(!module->IsGraphAsync(), Error,
+          "Top-level await in module is not permitted at this time.");
+    }
   }
+
+  jsg::instantiateModule(js, module, options);
 
   // Originally, This returned an object like `{default: module.exports}` when we really
   // intended to return the module exports raw. We should be extracting `default` here.
@@ -322,32 +330,47 @@ NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::
   return NonModuleScript(js, check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
 }
 
-void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
+void instantiateModule(
+    jsg::Lock& js, v8::Local<v8::Module>& module, InstantiateModuleOptions options) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;
   auto context = js.v8Context();
 
   auto status = module->GetStatus();
-  // Nothing to do if the module is already instantiated, evaluated, or errored.
-  if (status == v8::Module::Status::kInstantiated || status == v8::Module::Status::kEvaluated ||
-      status == v8::Module::Status::kErrored)
-    return;
 
-  JSG_REQUIRE(status == v8::Module::Status::kUninstantiated, Error,
-      "Module cannot be synchronously required while it is being instantiated or evaluated. "
-      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
-      "dependency on itself, and that a synchronous require() is being called while the module "
-      "is being loaded.");
+  // If the previous instantiation failed, throw the exception.
+  if (status == v8::Module::Status::kErrored) {
+    isolate->ThrowException(module->GetException());
+    throw jsg::JsExceptionThrown();
+  }
 
-  jsg::check(module->InstantiateModule(context, &resolveCallback));
+  // Nothing to do if the module is already instantiated, evaluated.
+  if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
+
+  if (status == v8::Module::Status::kUninstantiated) {
+    jsg::check(module->InstantiateModule(context, &resolveCallback));
+  }
+
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
+
+  if (module->IsGraphAsync() && prom->State() == v8::Promise::kPending) {
+    // Pump the microtasks if there's an unsettled top-level await in the module.
+    // Because we do not support i/o in this scope, this *should* resolve in a
+    // single drain of the microtask queue (tho it's possible that it'll take
+    // multiple tasks). When the runMicrotasks() is complete, the promise should
+    // be settled.
+    JSG_REQUIRE(options != InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT, Error,
+        "Top-level await in module is not permitted at this time.");
+  }
+  // We run microtasks to ensure that any promises that happen to be scheduled
+  // during the evaluation of the top level scope have a chance to be settled,
+  // even if those are not directly awaited.
   js.runMicrotasks();
 
   switch (prom->State()) {
     case v8::Promise::kPending:
       // Let's make sure nobody is depending on pending modules that do not resolve first.
-      KJ_LOG(WARNING, "Async module was not immediately resolved.");
-      break;
+      JSG_FAIL_REQUIRE(Error, "Top-level await in module is unsettled.");
     case v8::Promise::kRejected:
       // Since we don't actually support I/O when instantiating a worker, we don't return the
       // promise from module->Evaluate, which means we lose any errors that happen during
@@ -594,19 +617,29 @@ v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String spec
 
   auto module = info.module.getHandle(js);
 
-  jsg::instantiateModule(js, module);
+  JSG_REQUIRE(module->GetStatus() != v8::Module::Status::kEvaluating &&
+          module->GetStatus() != v8::Module::Status::kInstantiating,
+      Error,
+      "Module cannot be synchronously required while it is being instantiated or evaluated. "
+      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
+      "dependency on itself, and that a synchronous require() is being called while the module "
+      "is being loaded.");
 
-  auto handle = jsg::check(module->Evaluate(js.v8Context()));
-  KJ_ASSERT(handle->IsPromise());
-  auto prom = handle.As<v8::Promise>();
+  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  jsg::InstantiateModuleOptions options = jsg::InstantiateModuleOptions::DEFAULT;
+  if (!isolateBase.isTopLevelAwaitEnabled()) {
+    options = jsg::InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT;
 
-  // This assert should always pass since evaluateSyntheticModuleCallback() for CommonJS
-  // modules (below) always returns an already-resolved promise.
-  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
-
-  if (module->GetStatus() == v8::Module::kErrored) {
-    jsg::throwTunneledException(js.v8Isolate, module->GetException());
+    // If the module was already evaluated, let's check if it is async.
+    // If it is, we will throw an error. This case can happen if a previous
+    // attempt to require the module failed because the module was async.
+    if (module->GetStatus() == v8::Module::kEvaluated) {
+      JSG_REQUIRE(!module->IsGraphAsync(), Error,
+          "Top-level await in module is not permitted at this time.");
+    }
   }
+
+  jsg::instantiateModule(js, module, options);
 
   return js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj);
 }

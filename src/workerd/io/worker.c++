@@ -999,6 +999,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();
     }
+    if (features.getNoTopLevelAwaitInRequire()) {
+      lock->disableTopLevelAwait();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
