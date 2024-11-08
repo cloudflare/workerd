@@ -24,7 +24,14 @@ export const doTheTest = {
     strictEqual(assert, required);
 
     throws(() => require('invalid'), {
-      message: 'Module evaluation did not complete synchronously.',
+      message: 'Top-level await in module is not permitted at this time.',
+    });
+    // Trying to require the module again should throw the same error.
+    throws(() => require('invalid'), {
+      message: 'Top-level await in module is not permitted at this time.',
+    });
+    throws(() => require('invalid2'), {
+      message: 'Top-level await in module is not permitted at this time.',
     });
 
     throws(() => require('does not exist'));

@@ -151,6 +151,14 @@ public:
     setToStringTag = true;
   }
 
+  inline void disableTopLevelAwait() {
+    allowTopLevelAwait = false;
+  }
+
+  inline bool isTopLevelAwaitEnabled() const {
+    return allowTopLevelAwait;
+  }
+
   // The logger will be optionally set by the isolate setup logic if there is anywhere
   // for the log to go (for instance, if debug logging is enabled or the inspector is
   // being used).
@@ -238,6 +246,7 @@ private:
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
   bool setToStringTag = false;
+  bool allowTopLevelAwait = true;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;

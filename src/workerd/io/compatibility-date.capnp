@@ -657,4 +657,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # This is a compat flag so that we can opt in our test workers into it before rolling out to
   # everyone.
+
+  noTopLevelAwaitInRequire @67 :Bool
+      $compatEnableFlag("disable_top_level_await_in_require")
+      $compatDisableFlag("enable_top_level_await_in_require")
+      $compatEnableDate("2024-12-02");
+  # When enabled, use of top-level await syntax in require() calls will be disallowed.
+  # The ecosystem and runtimes are moving to a state where top level await in modules
+  # is being strongly discouraged.
 }
