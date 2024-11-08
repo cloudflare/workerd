@@ -110,6 +110,16 @@ export default {
             (m) => m.metadata?.['text'] === criteria
           );
         }
+        if (
+          body?.filter?.['text'] &&
+          typeof body?.filter?.['text'] === 'object' &&
+          body?.filter?.['text']?.['$in'] !== undefined
+        ) {
+          const criteria = body?.filter?.['text']?.['$in'];
+          returnSet = returnSet.filter((m) =>
+            criteria.includes(m.metadata?.['text'])
+          );
+        }
         if (!body?.returnValues)
           returnSet.forEach((v) => {
             delete v.values;
