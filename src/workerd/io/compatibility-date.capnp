@@ -501,7 +501,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   globalFetchStrictlyPublic @51 :Bool
       $compatEnableFlag("global_fetch_strictly_public")
       $compatDisableFlag("global_fetch_private_origin")
-      $experimental;
   # Controls what happens when a Worker hosted on Cloudflare uses the global `fetch()` function to
   # request a hostname that is within the Worker's own Cloudflare zone (domain).
   #
