@@ -286,11 +286,11 @@ public:
   static const Isolate& from(jsg::Lock& js);
 
   inline IsolateObserver& getMetrics() {
-    return metrics;
+    return *metrics;
   }
 
   inline const IsolateObserver& getMetrics() const {
-    return metrics;
+    return *metrics;
   }
 
   inline kj::StringPtr getId() const {
@@ -402,6 +402,11 @@ private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
 
+  kj::Own<IsolateObserver> metrics;
+  // NOTE: destruction order is important here. The teardown guard should be destroyed after the
+  // `api` since API destruction may perform some aspects of isolate teardown.
+  TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
+
   kj::String id;
   kj::Own<Api> api;
   IsolateLimitEnforcer& limitEnforcer;
@@ -410,9 +415,6 @@ private:
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.
   kj::Maybe<kj::String> featureFlagsForFl;
-
-  IsolateObserver& metrics;
-  TeardownFinishedGuard<IsolateObserver&> teardownGuard{metrics};
 
   struct Impl;
   kj::Own<Impl> impl;
