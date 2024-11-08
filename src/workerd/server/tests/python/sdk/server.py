@@ -1,4 +1,4 @@
-from cloudflare.workers import FormData, Response
+from cloudflare.workers import Blob, FormData, Response
 
 
 async def on_fetch(request):
@@ -13,6 +13,13 @@ async def on_fetch(request):
         return Response.redirect("https://example.com/sub", status=301)
     elif request.url.endswith("/formdata"):
         data = FormData({"field": "value"})
+        return Response(data)
+    elif request.url.endswith("/formdatablob"):
+        data = FormData({"field": "value"})
+        data["blob.py"] = Blob("print(42)", content_type="text/python")
+        data.append(
+            "metadata", Blob("{}", content_type="text/python"), filename="metadata.json"
+        )
         return Response(data)
     else:
         raise ValueError("Unexpected path " + request.url)
