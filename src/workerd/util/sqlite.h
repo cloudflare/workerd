@@ -824,6 +824,10 @@ class SqliteDatabase::Lock {
   static constexpr uint WAL_WRITE_LOCK = 0;
   static constexpr uint WAL_CKPT_LOCK = 1;
   static constexpr uint WAL_RECOVER_LOCK = 2;
+  static constexpr uint WAL_READ_LOCK_BASE = 3;
+
+  // There are exactly this may WAL-mode read-mark locks.
+  static constexpr uint WAL_READ_LOCK_COUNT = WAL_LOCK_COUNT - WAL_READ_LOCK_BASE;
 
   // SQLite sets aside bytes [120, 128) of the first shared memory region for use by the WAL locking
   // implementation. SQLite will never touch these bytes. This may or may not be needed by your
