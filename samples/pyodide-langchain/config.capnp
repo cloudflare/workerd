@@ -22,7 +22,7 @@ const mainWorker :Workerd.Worker = (
     (name = "langchain_openai", pythonRequirement = ""),
   ],
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers", "python_external_bundle"],
+  compatibilityFlags = ["python_workers"],
   # Learn more about compatibility dates at:
   # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );

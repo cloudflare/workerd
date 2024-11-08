@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           ( name = "worker.py", pythonModule = embed "vectorize-api-test.py" )
         ],
         compatibilityDate = "2023-11-21",
-        compatibilityFlags = ["nodejs_compat", "python_workers"],
+        compatibilityFlags = ["nodejs_compat", "python_workers_development"],
         bindings = [
           ( name = "vectorSearch",
             wrapped = (

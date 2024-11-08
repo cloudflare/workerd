@@ -134,7 +134,6 @@ wd_cc_library(
     implementation_deps = ["//src/workerd/util:string-buffer"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/io",
         "//src/workerd/jsg",

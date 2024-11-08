@@ -1,11 +1,12 @@
 load("//:build/wd_test.bzl", "wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
 wd_test(
     src = "vectorize-api-test.wd-test",
     data = glob(["*.js"]),
 )
 
-wd_test(
+py_wd_test(
     size = "large",
     src = "python-vectorize-api-test.wd-test",
     data = glob([

@@ -28,7 +28,7 @@ const mainWorker :Workerd.Worker = (
     ),
   ],
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers", "python_external_bundle"],
+  compatibilityFlags = ["python_workers"],
   # Learn more about compatibility dates at:
   # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );
