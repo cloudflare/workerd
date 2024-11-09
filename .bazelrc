@@ -84,8 +84,13 @@ build:unix --copt="-mno-relax-all" --host_copt="-mno-relax-all"
 # Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
 # errors with downstream projects that implicitly define this already and reduces total include size.
 https://libcxx.llvm.org/DesignDocs/HeaderRemovalPolicy.html
-build:unix --cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
-build:unix --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+build:unix --cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES --host_cxxopt=-D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+# Do not enable libc++ ABI tags. This makes mangled symbol names and thus include overhead and code
+# size slightly smaller and is safe as long as we don't link with several copies of libc++.
+build:unix --cxxopt=-D_LIBCPP_NO_ABI_TAG --host_cxxopt=-D_LIBCPP_NO_ABI_TAG
+# Disable the experimental (and currently incomplete) parallel STL implementation as with
+# downstream, this reduces the include overhead for <algorithm>.
+build:unix --cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL --host_cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL
 
 # V8 redefines the _WIN32_WINNT set by bazel, disable warnings for redefined macros. Since V8 uses
 # a global define for this, we need to apply it for everything.

@@ -52,6 +52,8 @@
 -isystembazel-bin/src/rust/cxx-integration-test/_virtual_includes/cxx-integration-test@cxx
 -D_FORTIFY_SOURCE=1
 -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+-D_LIBCPP_NO_ABI_TAG
+-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL
 -DCAPNP_VERSION=11000
 -DDEBUG
 -DGOOGLE3
