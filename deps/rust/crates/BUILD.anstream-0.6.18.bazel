@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "syn",
+    name = "anstream",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,14 +29,9 @@ rust_library(
         ],
     ),
     crate_features = [
-        "clone-impls",
+        "auto",
         "default",
-        "derive",
-        "extra-traits",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
+        "wincon",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -45,15 +40,23 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=anstream",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.85",
+    version = "0.6.18",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__unicode-ident-1.0.13//:unicode_ident",
-    ],
+        "@crates_vendor__anstyle-1.0.10//:anstyle",
+        "@crates_vendor__anstyle-parse-0.2.6//:anstyle_parse",
+        "@crates_vendor__anstyle-query-1.1.2//:anstyle_query",
+        "@crates_vendor__colorchoice-1.0.3//:colorchoice",
+        "@crates_vendor__is_terminal_polyfill-1.70.1//:is_terminal_polyfill",
+        "@crates_vendor__utf8parse-0.2.2//:utf8parse",
+    ] + select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__anstyle-wincon-3.0.6//:anstyle_wincon",  # x86_64-pc-windows-msvc
+        ],
+        "//conditions:default": [],
+    }),
 )

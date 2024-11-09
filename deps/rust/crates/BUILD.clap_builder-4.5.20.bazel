@@ -50,8 +50,8 @@ rust_library(
     ],
     version = "4.5.20",
     deps = [
-        "@crates_vendor__anstream-0.6.17//:anstream",
-        "@crates_vendor__anstyle-1.0.8//:anstyle",
+        "@crates_vendor__anstream-0.6.18//:anstream",
+        "@crates_vendor__anstyle-1.0.10//:anstyle",
         "@crates_vendor__clap_lex-0.7.2//:clap_lex",
         "@crates_vendor__strsim-0.11.1//:strsim",
     ],

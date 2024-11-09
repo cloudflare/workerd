@@ -33,7 +33,7 @@ filegroup(
 # Workspace Member Dependencies
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.91//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.93//:anyhow",
     tags = ["manual"],
 )
 
@@ -117,7 +117,7 @@ alias(
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.213//:serde",
+    actual = "@crates_vendor__serde-1.0.214//:serde",
     tags = ["manual"],
 )
 
@@ -129,13 +129,13 @@ alias(
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.85//:syn",
+    actual = "@crates_vendor__syn-2.0.87//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.41.0//:tokio",
+    actual = "@crates_vendor__tokio-1.41.1//:tokio",
     tags = ["manual"],
 )
 
