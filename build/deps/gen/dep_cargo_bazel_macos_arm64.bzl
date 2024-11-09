@@ -2,9 +2,9 @@
 
 load("@//:build/http.bzl", "http_file")
 
-TAG_NAME = "0.52.2"
-URL = "https://github.com/bazelbuild/rules_rust/releases/download/0.52.2/cargo-bazel-aarch64-apple-darwin"
-SHA256 = "10ebb420568df159c10b6e5348192b165fc299f54b2bebc4e78412f3d3b67e41"
+TAG_NAME = "0.54.1"
+URL = "https://github.com/bazelbuild/rules_rust/releases/download/0.54.1/cargo-bazel-aarch64-apple-darwin"
+SHA256 = "8204746334a17823bd6a54ce2c3821b0bdca96576700d568e2ca2bd8224dc0ea"
 
 def dep_cargo_bazel_macos_arm64():
     http_file(

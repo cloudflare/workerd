@@ -6,12 +6,12 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "thiserror_impl",
+rust_library(
+    name = "anstyle",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,15 +39,10 @@ rust_proc_macro(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror-impl",
+        "crate-name=anstyle",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.65",
-    deps = [
-        "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__syn-2.0.85//:syn",
-    ],
+    version = "1.0.10",
 )

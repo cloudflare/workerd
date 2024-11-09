@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "anstream",
+    name = "encoding_rs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,34 +29,23 @@ rust_library(
         ],
     ),
     crate_features = [
-        "auto",
+        "alloc",
         "default",
-        "wincon",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anstream",
+        "crate-name=encoding_rs",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.6.17",
+    version = "0.8.35",
     deps = [
-        "@crates_vendor__anstyle-1.0.8//:anstyle",
-        "@crates_vendor__anstyle-parse-0.2.6//:anstyle_parse",
-        "@crates_vendor__anstyle-query-1.1.2//:anstyle_query",
-        "@crates_vendor__colorchoice-1.0.3//:colorchoice",
-        "@crates_vendor__is_terminal_polyfill-1.70.1//:is_terminal_polyfill",
-        "@crates_vendor__utf8parse-0.2.2//:utf8parse",
-    ] + select({
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__anstyle-wincon-3.0.6//:anstyle_wincon",  # x86_64-pc-windows-msvc
-        ],
-        "//conditions:default": [],
-    }),
+        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+    ],
 )

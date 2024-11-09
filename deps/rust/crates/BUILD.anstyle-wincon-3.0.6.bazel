@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "3.0.6",
     deps = [
-        "@crates_vendor__anstyle-1.0.8//:anstyle",
+        "@crates_vendor__anstyle-1.0.10//:anstyle",
     ] + select({
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(windows)
