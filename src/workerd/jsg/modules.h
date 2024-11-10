@@ -88,6 +88,8 @@ private:
 // expected within the global scope of a Node.js compatible module (such as
 // Buffer and process).
 
+// TODO(cleanup): There's a fair amount of duplicated code between the CommonJsModule
+// and NodeJsModule types... should be deduplicated.
 class NodeJsModuleObject: public jsg::Object {
 public:
   NodeJsModuleObject(jsg::Lock& js, kj::String path);
@@ -252,7 +254,7 @@ public:
   };
 
   struct NodeJsModuleInfo {
-    jsg::Ref<jsg::Object> moduleContext;
+    jsg::Ref<NodeJsModuleContext> moduleContext;
     jsg::Function<void()> evalFunc;
 
     NodeJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
@@ -262,7 +264,7 @@ public:
     NodeJsModuleInfo(NodeJsModuleInfo&&) = default;
     NodeJsModuleInfo& operator=(NodeJsModuleInfo&&) = default;
 
-    static jsg::Ref<jsg::Object> initModuleContext(jsg::Lock& js, kj::StringPtr name);
+    static jsg::Ref<NodeJsModuleContext> initModuleContext(jsg::Lock& js, kj::StringPtr name);
 
     static v8::MaybeLocal<v8::Value> evaluate(jsg::Lock& js,
         NodeJsModuleInfo& info,
@@ -270,7 +272,7 @@ public:
         const kj::Maybe<kj::Array<kj::String>>& maybeExports);
 
     jsg::Function<void()> initEvalFunc(auto& lock,
-        jsg::Ref<jsg::Object>& moduleContext,
+        jsg::Ref<jsg::NodeJsModuleContext>& moduleContext,
         kj::StringPtr name,
         kj::StringPtr content) {
       v8::ScriptOrigin origin(v8StrIntern(lock.v8Isolate, name));

@@ -85,6 +85,18 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
 
     auto module = info.module.getHandle(js);
 
+    if (module->GetStatus() == v8::Module::Status::kEvaluating ||
+        module->GetStatus() == v8::Module::Status::kInstantiating) {
+      KJ_IF_SOME(synth, info.maybeSynthetic) {
+        KJ_IF_SOME(cjs, synth.tryGet<jsg::ModuleRegistry::CommonJsModuleInfo>()) {
+          return cjs.moduleContext->getExports(js);
+        }
+        KJ_IF_SOME(cjs, synth.tryGet<jsg::ModuleRegistry::NodeJsModuleInfo>()) {
+          return cjs.moduleContext->getExports(js);
+        }
+      }
+    }
+
     auto features = FeatureFlags::get(js);
     jsg::InstantiateModuleOptions options = jsg::InstantiateModuleOptions::DEFAULT;
     if (features.getNoTopLevelAwaitInRequire()) {

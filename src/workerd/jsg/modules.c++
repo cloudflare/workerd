@@ -274,13 +274,17 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
 
   auto module = info.module.getHandle(js);
 
-  JSG_REQUIRE(module->GetStatus() != v8::Module::Status::kEvaluating &&
-          module->GetStatus() != v8::Module::Status::kInstantiating,
-      Error,
-      "Module cannot be synchronously required while it is being instantiated or evaluated. "
-      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
-      "dependency on itself, and that a synchronous require() is being called while the module "
-      "is being loaded.");
+  if (module->GetStatus() == v8::Module::Status::kEvaluating ||
+      module->GetStatus() == v8::Module::Status::kInstantiating) {
+    KJ_IF_SOME(synth, info.maybeSynthetic) {
+      KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::CommonJsModuleInfo>()) {
+        return cjs.moduleContext->getExports(js);
+      }
+      KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::NodeJsModuleInfo>()) {
+        return cjs.moduleContext->getExports(js);
+      }
+    }
+  }
 
   auto& isolateBase = IsolateBase::from(js.v8Isolate);
   jsg::InstantiateModuleOptions options = jsg::InstantiateModuleOptions::DEFAULT;
@@ -344,7 +348,7 @@ void instantiateModule(
     throw jsg::JsExceptionThrown();
   }
 
-  // Nothing to do if the module is already instantiated, evaluated.
+  // Nothing to do if the module is already evaluated.
   if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
 
   if (status == v8::Module::Status::kUninstantiated) {
@@ -354,11 +358,7 @@ void instantiateModule(
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
 
   if (module->IsGraphAsync() && prom->State() == v8::Promise::kPending) {
-    // Pump the microtasks if there's an unsettled top-level await in the module.
-    // Because we do not support i/o in this scope, this *should* resolve in a
-    // single drain of the microtask queue (tho it's possible that it'll take
-    // multiple tasks). When the runMicrotasks() is complete, the promise should
-    // be settled.
+    // If top level await has been disable, error.
     JSG_REQUIRE(options != InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT, Error,
         "Top-level await in module is not permitted at this time.");
   }
@@ -369,7 +369,7 @@ void instantiateModule(
 
   switch (prom->State()) {
     case v8::Promise::kPending:
-      // Let's make sure nobody is depending on pending modules that do not resolve first.
+      // Let's make sure nobody is depending on modules awaiting on pending promises.
       JSG_FAIL_REQUIRE(Error, "Top-level await in module is unsettled.");
     case v8::Promise::kRejected:
       // Since we don't actually support I/O when instantiating a worker, we don't return the
@@ -507,7 +507,7 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
 
 // ======================================================================================
 
-jsg::Ref<jsg::Object> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
+jsg::Ref<NodeJsModuleContext> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
     jsg::Lock& js, kj::StringPtr name) {
   return jsg::alloc<NodeJsModuleContext>(js, kj::Path::parse(name));
 }
