@@ -205,6 +205,9 @@ export type BaseAiSpeechRecognitionModels =
 export type BaseAiImageClassificationModels = "@cf/microsoft/resnet-50";
 export type BaseAiObjectDetectionModels = "@cf/facebook/detr-resnet-50";
 export type BaseAiTextGenerationModels =
+  | "@cf/meta/llama-3.2-70b-vision-instruct"
+  | "@cf/meta/llama-3.2-1b-instruct"
+  | "@cf/meta/llama-3.2-3b-instruct"
   | "@cf/meta/llama-3.1-70b-instruct"
   | "@cf/meta/llama-3.1-8b-instruct-awq"
   | "@cf/meta/llama-3.1-8b-instruct-fast"
