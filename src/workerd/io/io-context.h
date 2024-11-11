@@ -706,7 +706,7 @@ public:
     kj::LiteralStringConst key;
     kj::LiteralStringConst value;
   };
-  kj::Own<WorkerInterface> getSubrequestChannelSpans(uint channel,
+  kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName,
@@ -725,7 +725,7 @@ public:
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
-  // As above, but with list of span tags to add, analogous to getSubrequestChannelSpans().
+  // As above, but with list of span tags to add, analogous to getSubrequestChannelWithSpans().
   kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
