@@ -398,40 +398,6 @@ new_local_repository(
 )
 
 # Dev tools
-http_file(
-    name = "buildifier-darwin-arm64",
-    executable = True,
-    integrity = "sha256-Wmr8asegn1RVuguJvZnVriO0F03F3J1sDtXOjKrD+BM=",
-    url = "https://github.com/bazelbuild/buildtools/releases/download/v7.3.1/buildifier-darwin-arm64",
-)
-
-http_file(
-    name = "buildifier-darwin-amd64",
-    executable = True,
-    integrity = "sha256-Wmr8asegn1RVuguJvZnVriO0F03F3J1sDtXOjKrD+BM=",
-    url = "https://github.com/bazelbuild/buildtools/releases/download/v7.3.1/buildifier-darwin-arm64",
-)
-
-http_file(
-    name = "buildifier-linux-arm64",
-    executable = True,
-    integrity = "sha256-C/hsS//69PCO7Xe95bIILkrlA5oR4uiwOYTBc8NKVhw=",
-    url = "https://github.com/bazelbuild/buildtools/releases/download/v7.3.1/buildifier-linux-arm64",
-)
-
-http_file(
-    name = "buildifier-linux-amd64",
-    executable = True,
-    integrity = "sha256-VHTMUSinToBng9VAgfWBZixL6K5lAi9VfpKB7V3IgAk=",
-    url = "https://github.com/bazelbuild/buildtools/releases/download/v7.3.1/buildifier-linux-amd64",
-)
-
-http_file(
-    name = "buildifier-windows-amd64",
-    executable = True,
-    integrity = "sha256-NwzVdgda0pkwqC9d4TLxod5AhMeEqCUUvU2oDIWs9Kg=",
-    url = "https://github.com/bazelbuild/buildtools/releases/download/v7.3.1/buildifier-windows-amd64.exe",
-)
 
 FILE_GROUP = """filegroup(
 	name="file",

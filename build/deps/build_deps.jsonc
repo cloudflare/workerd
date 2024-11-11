@@ -119,6 +119,47 @@
       "owner": "aspect-build",
       "repo": "rules_ts",
       "file_regex": "^rules_ts-"
+    },
+    //buildifier
+    {
+      "name": "buildifier-linux-amd64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "buildtools",
+      "file_regex": "^buildifier-linux-amd64$",
+      "file_type": "executable"
+    },
+    {
+      "name": "buildifier-linux-arm64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "buildtools",
+      "file_regex": "^buildifier-linux-arm64$",
+      "file_type": "executable"
+    },
+    {
+      "name": "buildifier-darwin-amd64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "buildtools",
+      "file_regex": "^buildifier-darwin-amd64$",
+      "file_type": "executable"
+    },
+    {
+      "name": "buildifier-darwin-arm64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "buildtools",
+      "file_regex": "^buildifier-darwin-arm64$",
+      "file_type": "executable"
+    },
+    {
+      "name": "buildifier-windows-amd64",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "buildtools",
+      "file_regex": "^buildifier-windows-amd64.exe$",
+      "file_type": "executable"
     }
   ]
 }
