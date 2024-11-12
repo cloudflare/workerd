@@ -37,7 +37,7 @@ build:ci-test --remote_download_outputs=minimal
 # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
 # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
 # this is already the default for Linux/Windows.
-build:ci-limit-storage --build_tag_filters=-off-by-default,-slow,-benchmark
+build:ci-limit-storage --build_tag_filters=-off-by-default,-benchmark
 build:ci-limit-storage --copt="-g1"
 build:ci-limit-storage --copt="-fno-standalone-debug"
 
@@ -55,8 +55,7 @@ build:ci-linux --config=ci-linux-common
 # Some tests (like Python import tests) take a long time to run and don't benefit much
 # from multi-platform testing. For that reason, we only run them in a single configuration
 # to minimize effect on CI pipeline runtime.
-build:ci-linux --build_tag_filters=-off-by-default
-test:ci-linux --test_tag_filters=-off-by-default --test_size_filters=small,medium,large,enormous
+test:ci-linux --test_size_filters=small,medium,large,enormous
 
 build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-debug --config=debug --config=rust-debug
