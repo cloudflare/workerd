@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/actor-storage.capnp.h>
+#include <workerd/jsg/exception.h>
 
 #include <kj/async.h>
 #include <kj/debug.h>
@@ -234,11 +235,30 @@ public:
   virtual kj::Maybe<kj::Promise<void>> onNoPendingFlush() = 0;
 
   // Implements the respective PITR API calls. The default implementations throw JSG errors saying
-  // PITR is not implemented.
-  virtual kj::Promise<kj::String> getCurrentBookmark();
-  virtual kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
-  virtual kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::StringPtr bookmark);
-  virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark);
+  // PITR is not implemented. These methods are meant to be implemented internally.
+  virtual kj::Promise<kj::String> getCurrentBookmark() {
+    JSG_FAIL_REQUIRE(
+        Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
+  }
+
+  virtual kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp) {
+    JSG_FAIL_REQUIRE(
+        Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
+  }
+
+  virtual kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::StringPtr bookmark) {
+    JSG_FAIL_REQUIRE(
+        Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
+  }
+
+  virtual kj::Promise<void> waitForBookmark(kj::StringPtr bookmark) {
+    JSG_FAIL_REQUIRE(
+        Error, "This Durable Object's storage back-end does not implement point-in-time recovery.");
+  }
+
+  virtual void ensureReplicas() {
+    JSG_FAIL_REQUIRE(Error, "This Durable Object's storage back-end does not support replication.");
+  }
 };
 
 // An in-memory caching layer on top of ActorStorage.Stage RPC interface.
