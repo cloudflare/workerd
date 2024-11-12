@@ -510,7 +510,7 @@ public:
   //
   // limit specifies an upper maximum bound on the number of bytes permitted to be read.
   // The promise will reject if the read will produce more bytes than the limit.
-  virtual jsg::Promise<kj::Array<byte>> readAllBytes(jsg::Lock& js, uint64_t limit) = 0;
+  virtual jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit) = 0;
 
   // Fully consumes the ReadableStream. If the stream is already locked to a reader or
   // errored, the returned JS promise will reject. If the stream is already closed, the
