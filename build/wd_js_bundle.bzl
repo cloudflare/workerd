@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 
@@ -45,12 +46,14 @@ def _gen_compile_cache_impl(ctx):
     args = ctx.actions.args()
     args.add(file_list)
 
+    run_under = ctx.attr._run_under[BuildSettingInfo].value
+
     # use run_shell together with cfg = target instead of ctx.actions.run
     # to prevent double-compilation of v8.
     ctx.actions.run_shell(
         outputs = outs,
         inputs = [file_list] + srcs,
-        command = ctx.executable._tool.path + " $@",
+        command = run_under + " " + ctx.executable._tool.path + " $@",
         arguments = [args],
         use_default_shell_env = True,
         tools = [ctx.executable._tool],
@@ -70,6 +73,7 @@ _gen_compile_cache = rule(
             cfg = "target",
             default = "//src/rust/gen-compile-cache",
         ),
+        "_run_under": attr.label(default = "//build/config:target_run_under"),
     },
 )
 
