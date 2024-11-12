@@ -612,7 +612,7 @@ public:
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
-  SpanBuilder newChild(
+  [[nodiscard]] SpanBuilder newChild(
       kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Useful to skip unnecessary code when not observed.
@@ -688,7 +688,7 @@ public:
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
-  SpanBuilder newChild(
+  [[nodiscard]] SpanBuilder newChild(
       kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Change the operation name from what was specified at span creation.
@@ -727,7 +727,7 @@ public:
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
-  virtual kj::Own<SpanObserver> newChild() = 0;
+  [[nodiscard]] virtual kj::Own<SpanObserver> newChild() = 0;
 
   // Report the span data. Called at the end of the span.
   //
