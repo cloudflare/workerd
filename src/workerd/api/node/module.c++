@@ -81,48 +81,13 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
             jsg::ModuleRegistry::ResolveMethod::REQUIRE, spec.asPtr()),
         Error, "No such module \"", targetPath.toString(), "\".");
 
-    bool isEsm = info.maybeSynthetic == kj::none;
-
-    auto module = info.module.getHandle(js);
-
-    if (module->GetStatus() == v8::Module::Status::kEvaluating ||
-        module->GetStatus() == v8::Module::Status::kInstantiating) {
-      KJ_IF_SOME(synth, info.maybeSynthetic) {
-        KJ_IF_SOME(cjs, synth.tryGet<jsg::ModuleRegistry::CommonJsModuleInfo>()) {
-          return cjs.moduleContext->getExports(js);
-        }
-        KJ_IF_SOME(cjs, synth.tryGet<jsg::ModuleRegistry::NodeJsModuleInfo>()) {
-          return cjs.moduleContext->getExports(js);
-        }
-      }
+    jsg::ModuleRegistry::RequireImplOptions options =
+        jsg::ModuleRegistry::RequireImplOptions::DEFAULT;
+    if (info.maybeSynthetic != kj::none) {
+      options = jsg::ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
     }
 
-    auto features = FeatureFlags::get(js);
-    jsg::InstantiateModuleOptions options = jsg::InstantiateModuleOptions::DEFAULT;
-    if (features.getNoTopLevelAwaitInRequire()) {
-      options = jsg::InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT;
-
-      // If the module was already evaluated, let's check if it is async.
-      // If it is, we will throw an error. This case can happen if a previous
-      // attempt to require the module failed because the module was async.
-      if (module->GetStatus() == v8::Module::kEvaluated) {
-        JSG_REQUIRE(!module->IsGraphAsync(), Error,
-            "Top-level await in module is not permitted at this time.");
-      }
-    }
-
-    jsg::instantiateModule(js, module, options);
-
-    if (isEsm) {
-      // If the import is an esm module, we will return the namespace object.
-      jsg::JsObject obj(module->GetModuleNamespace().As<v8::Object>());
-      if (obj.get(js, "__cjsUnwrapDefault"_kj) == js.boolean(true)) {
-        return obj.get(js, "default"_kj);
-      }
-      return obj;
-    }
-
-    return jsg::JsValue(js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj));
+    return jsg::ModuleRegistry::requireImpl(js, info, options);
   }));
 }
 

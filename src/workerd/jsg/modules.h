@@ -194,7 +194,10 @@ private:
 };
 
 enum class InstantiateModuleOptions {
+  // Allows pending top-level await in the module when evaluated. Will cause
+  // the microtask queue to be drained once in an attempt to resolve those.
   DEFAULT,
+  // Throws if the module evaluation results in a pending promise.
   NO_TOP_LEVEL_AWAIT,
 };
 
@@ -403,6 +406,16 @@ public:
   using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
 
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
+
+  enum class RequireImplOptions {
+    // Require returns the module namespace.
+    DEFAULT,
+    // Require returns the default export.
+    EXPORT_DEFAULT,
+  };
+
+  static JsValue requireImpl(
+      Lock& js, ModuleInfo& info, RequireImplOptions options = RequireImplOptions::DEFAULT);
 };
 
 template <typename TypeWrapper>
