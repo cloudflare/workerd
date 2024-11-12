@@ -346,7 +346,7 @@ public:
       return body->isDisturbed();
     }
 
-    jsg::Promise<kj::Array<kj::byte>> arrayBuffer(jsg::Lock& js);
+    jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
     jsg::Promise<kj::String> text(jsg::Lock& js);
     jsg::Promise<jsg::Value> json(jsg::Lock& js);
     jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js);
