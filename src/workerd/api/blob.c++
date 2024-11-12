@@ -200,14 +200,23 @@ jsg::Ref<Blob> Blob::slice(
       JSG_THIS, data.slice(start, end), normalizeType(kj::mv(type).orDefault(nullptr)));
 }
 
-jsg::Promise<kj::Array<kj::byte>> Blob::arrayBuffer(jsg::Lock& js) {
-  // TODO(perf): Find a way to avoid the copy.
+jsg::Promise<jsg::BufferSource> Blob::arrayBuffer(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_ARRAY_BUFFER);
-  return js.resolvedPromise(kj::heapArray<byte>(data));
+  // We use BufferSource here instead of kj::Array<kj::byte> to ensure that the
+  // resulting backing store is associated with the isolate, which is necessary
+  // for when we start making use of v8 sandboxing.
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
+  backing.asArrayPtr().copyFrom(data);
+  return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
 }
 
 jsg::Promise<jsg::BufferSource> Blob::bytes(jsg::Lock& js) {
-  return js.resolvedPromise(js.bytes(kj::heapArray<byte>(data)));
+  // We use BufferSource here instead of kj::Array<kj::byte> to ensure that the
+  // resulting backing store is associated with the isolate, which is necessary
+  // for when we start making use of v8 sandboxing.
+  auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, data.size());
+  backing.asArrayPtr().copyFrom(data);
+  return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
 }
 
 jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
