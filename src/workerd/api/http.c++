@@ -777,7 +777,7 @@ bool Body::getBodyUsed() {
   }
   return false;
 }
-jsg::Promise<kj::Array<byte>> Body::arrayBuffer(jsg::Lock& js) {
+jsg::Promise<jsg::BufferSource> Body::arrayBuffer(jsg::Lock& js) {
   KJ_IF_SOME(i, impl) {
     return js.evalNow([&] {
       JSG_REQUIRE(!i.stream->isDisturbed(), TypeError,
@@ -790,12 +790,13 @@ jsg::Promise<kj::Array<byte>> Body::arrayBuffer(jsg::Lock& js) {
 
   // If there's no body, we just return an empty array.
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
-  return js.resolvedPromise(kj::Array<byte>());
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+  return js.resolvedPromise(jsg::BufferSource(js, kj::mv(backing)));
 }
 
 jsg::Promise<jsg::BufferSource> Body::bytes(jsg::Lock& js) {
-  return arrayBuffer(js).then(
-      js, [](jsg::Lock& js, kj::Array<kj::byte> data) { return js.bytes(kj::mv(data)); });
+  return arrayBuffer(js).then(js,
+      [](jsg::Lock& js, jsg::BufferSource data) { return data.getTypedView<v8::Uint8Array>(js); });
 }
 
 jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
@@ -864,7 +865,7 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, kj::Array<byte> buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
     kj::String contentType = headersRef.get(jsg::ByteString(kj::str("Content-Type")))
                                  .map([](jsg::ByteString&& b) -> kj::String {
       return kj::mv(b);

@@ -142,6 +142,11 @@ Blob::Blob(kj::Array<byte> data, kj::String type)
       data(ownData.get<kj::Array<kj::byte>>()),
       type(kj::mv(type)) {}
 
+Blob::Blob(jsg::Lock& js, jsg::BufferSource data, kj::String type)
+    : ownData(kj::mv(data)),
+      data(getPtr(ownData.get<jsg::BufferSource>())),
+      type(kj::mv(type)) {}
+
 Blob::Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type)
     : ownData(wrap(js, kj::mv(data))),
       data(getPtr(ownData.get<jsg::BufferSource>())),

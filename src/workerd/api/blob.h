@@ -14,6 +14,7 @@ class ReadableStream;
 // An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
 public:
+  Blob(jsg::Lock& js, jsg::BufferSource data, kj::String type);
   Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type);
   Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
