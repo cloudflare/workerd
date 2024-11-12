@@ -45,7 +45,6 @@ wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
     malloc = ":malloc",
-    tags = ["no-arm64"],
     visibility = ["//visibility:public"],
     deps = [
         ":server",
