@@ -7,7 +7,6 @@ default:
   @just --list
 
 pwd := `pwd`
-clang_version := "18"
 
 prepare:
   cargo install gen-compile-commands
@@ -19,20 +18,20 @@ clean:
   rm -f compile_commands.json
 
 build *args="//...":
-  bazel build {{args}}
+  bazel build {{args}} --test_env=LLVM_SYMBOLIZER=llvm-symbolizer
 
 build-asan *args="//...":
   just build {{args}} --config=asan --sandbox_debug
 
 test *args="//...":
-  bazel test {{args}} --test_env=LLVM_SYMBOLIZER=llvm-symbolizer-{{clang_version}}
+  bazel test {{args}} --test_env=LLVM_SYMBOLIZER=llvm-symbolizer
 
 test-asan *args="//...":
   just test {{args}} --config=asan
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test args:
-  bazel test {{args}} --test_output=streamed --test_env=LLVM_SYMBOLIZER=llvm-symbolizer-{{clang_version}}
+  bazel test {{args}} --test_output=streamed --test_env=LLVM_SYMBOLIZER=llvm-symbolizer
 
 # e.g. just node-test zlib
 node-test test_name:
