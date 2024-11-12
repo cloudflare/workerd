@@ -1,0 +1,8 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+
+# Similar to --run_under flag to be able to run cross-compiled target binaries.
+string_flag(
+    name = "target_run_under",
+    build_setting_default = "",
+    visibility = ["//visibility:public"],
+)
