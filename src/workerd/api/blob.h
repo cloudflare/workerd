@@ -44,7 +44,7 @@ public:
   jsg::Ref<Blob> slice(
       jsg::Optional<int> start, jsg::Optional<int> end, jsg::Optional<kj::String> type);
 
-  jsg::Promise<kj::Array<kj::byte>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
   jsg::Ref<ReadableStream> stream();
