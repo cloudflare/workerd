@@ -26,7 +26,8 @@ def wd_ts_bundle(
         internal_json_modules = [],
         lint = True,
         deps = [],
-        js_deps = []):
+        js_deps = [],
+        gen_compile_cache = False):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -41,8 +42,11 @@ def wd_ts_bundle(
       eslintrc_json: eslintrc.json label
       internal_wasm_modules: list of wasm source files
       internal_data_modules: list of data source files
+      internal_json_modules: list of json source files
       lint: enables/disables source linting
       deps: additional typescript dependencies
+      gen_compile_cache: generate compilation cache of every file and include into the bundle
+      js_deps: javascript dependencies
     """
     ts_config(
         name = name + "@tsconfig",
@@ -77,6 +81,7 @@ def wd_ts_bundle(
         declarations = declarations,
         schema_id = schema_id,
         deps = deps + js_deps,
+        gen_compile_cache = gen_compile_cache,
     )
 
     if lint:
