@@ -55,7 +55,7 @@ export function transcode(
   source: ArrayBufferView,
   fromEncoding: Encoding,
   toEncoding: Encoding
-): ArrayBuffer;
+): Uint8Array;
 
 export const ASCII: Encoding;
 export const LATIN1: Encoding;
