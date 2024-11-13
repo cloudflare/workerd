@@ -663,7 +663,7 @@ struct Worker::Isolate::Impl {
   //   because our GlobalScope object needs to have a function called on it, and any attached
   //   inspector needs to be notified. JSG doesn't know about these things.
 
-  Impl(const Api& api,
+  Impl(Api& api,
       IsolateObserver& metrics,
       IsolateLimitEnforcer& limitEnforcer,
       InspectorPolicy inspectorPolicy)
@@ -672,6 +672,8 @@ struct Worker::Isolate::Impl {
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
+
+      limitEnforcer.customizeIsolate(lock->v8Isolate);
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
@@ -970,17 +972,19 @@ const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
 
 Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     kj::StringPtr id,
+    kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
     ConsoleMode consoleMode)
     : metrics(kj::atomicAddRef(apiParam->getMetrics())),
       id(kj::str(id)),
       api(kj::mv(apiParam)),
-      limitEnforcer(api->getLimitEnforcer()),
+      limitEnforcer(kj::mv(limitEnforcerParam)),
       consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
-      impl(kj::heap<Impl>(*api, *metrics, limitEnforcer, inspectorPolicy)),
+      impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+  api->setEnforcer(*limitEnforcer);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -1387,7 +1391,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
 
   // Update the isolate stats one last time to make sure we're accurate for cleanup in
   // `evicted()`.
-  limitEnforcer.reportMetrics(*metrics);
+  limitEnforcer->reportMetrics(*metrics);
 
   metrics->evicted();
   weakIsolateRef->invalidate();
@@ -1402,6 +1406,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
   });
+  api->invalidateEnforcer();
 }
 
 Worker::Script::~Script() noexcept(false) {
@@ -3808,7 +3813,7 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
 }
 
 void Worker::Isolate::completedRequest() const {
-  limitEnforcer.completedRequest(id);
+  limitEnforcer->completedRequest(id);
 }
 
 bool Worker::Isolate::isInspectorEnabled() const {

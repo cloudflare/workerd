@@ -276,6 +276,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // inspector session to stay open across them).
   explicit Isolate(kj::Own<Api> api,
       kj::StringPtr id,
+      kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
       ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
 
@@ -305,11 +306,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
   inline IsolateLimitEnforcer& getLimitEnforcer() {
-    return limitEnforcer;
+    return *limitEnforcer;
   }
 
   inline const IsolateLimitEnforcer& getLimitEnforcer() const {
-    return limitEnforcer;
+    return *limitEnforcer;
   }
 
   inline Api& getApi() {
@@ -409,7 +410,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::String id;
   kj::Own<Api> api;
-  IsolateLimitEnforcer& limitEnforcer;
+  // TODO: should this be before or after api?
+  kj::Own<IsolateLimitEnforcer> limitEnforcer;
   ConsoleMode consoleMode;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
@@ -532,10 +534,10 @@ class Worker::Api {
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
-  virtual IsolateLimitEnforcer& getLimitEnforcer() = 0;
-  virtual const IsolateLimitEnforcer& getLimitEnforcer() const = 0;
   virtual IsolateObserver& getMetrics() = 0;
   virtual const IsolateObserver& getMetrics() const = 0;
+  virtual void setEnforcer(IsolateLimitEnforcer&) = 0;
+  virtual void invalidateEnforcer() = 0;
 
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback = kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
