@@ -103,11 +103,12 @@ kj::Maybe<jsg::BufferSource> CryptoImpl::exportChallenge(
   return workerd::api::exportChallenge(js, input);
 }
 
-kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size,
+jsg::BufferSource CryptoImpl::randomPrime(jsg::Lock& js,
+    uint32_t size,
     bool safe,
     jsg::Optional<kj::Array<kj::byte>> add_buf,
     jsg::Optional<kj::Array<kj::byte>> rem_buf) {
-  return workerd::api::randomPrime(size, safe,
+  return workerd::api::randomPrime(js, size, safe,
       add_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }),
       rem_buf.map([](kj::Array<kj::byte>& buf) { return buf.asPtr(); }));
 }
