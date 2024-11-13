@@ -208,8 +208,8 @@ public:
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
   bool verifySpkac(kj::Array<const kj::byte> input);
-  kj::Maybe<kj::Array<kj::byte>> exportPublicKey(kj::Array<const kj::byte> input);
-  kj::Maybe<kj::Array<kj::byte>> exportChallenge(kj::Array<const kj::byte> input);
+  kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
+  kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
 
   JSG_RESOURCE_TYPE(CryptoImpl) {
     // DH
