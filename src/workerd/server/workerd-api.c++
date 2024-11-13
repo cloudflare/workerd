@@ -398,8 +398,9 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
               lock, Impl::compileJsonGlobal(lock, module.getJson())));
     }
     case config::Worker::Module::ES_MODULE: {
+      // TODO(soon): Make sure passing nullptr to compile cache is desired.
       return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), module.getEsModule(),
-          jsg::ModuleInfoCompileOption::BUNDLE, observer);
+          nullptr /* compile cache */, jsg::ModuleInfoCompileOption::BUNDLE, observer);
     }
     case config::Worker::Module::COMMON_JS_MODULE: {
       kj::Maybe<kj::Array<kj::StringPtr>> named = kj::none;
