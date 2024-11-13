@@ -275,6 +275,23 @@ kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& n, size_t padde
   return kj::mv(result);
 }
 
+kj::Maybe<jsg::BufferSource> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& n) {
+  auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, BN_num_bytes(&n));
+  if (BN_bn2binpad(&n, result.asArrayPtr().begin(), result.size()) != result.size()) {
+    return kj::none;
+  }
+  return jsg::BufferSource(js, kj::mv(result));
+}
+
+kj::Maybe<jsg::BufferSource> bignumToArrayPadded(
+    jsg::Lock& js, const BIGNUM& n, size_t paddedLength) {
+  auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, paddedLength);
+  if (BN_bn2bin_padded(result.asArrayPtr().begin(), paddedLength, &n) == 0) {
+    return kj::none;
+  }
+  return jsg::BufferSource(js, kj::mv(result));
+}
+
 kj::Own<BIGNUM> newBignum() {
   return kj::Own<BIGNUM>(BN_new(), workerd::api::SslDisposer<BIGNUM, &BIGNUM_free>::INSTANCE);
 }

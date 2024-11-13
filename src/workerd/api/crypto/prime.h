@@ -4,10 +4,16 @@
 
 #include <cstdint>
 
+namespace workerd::jsg {
+class Lock;
+class BufferSource;
+}  // namespace workerd::jsg
+
 namespace workerd::api {
 
 // Generate a random prime number
-kj::Array<kj::byte> randomPrime(uint32_t size,
+jsg::BufferSource randomPrime(jsg::Lock& js,
+    uint32_t size,
     bool safe,
     kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,
     kj::Maybe<kj::ArrayPtr<kj::byte>> rem_buf);

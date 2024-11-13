@@ -325,6 +325,9 @@ BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data);
 kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum, size_t paddedLength);
+kj::Maybe<jsg::BufferSource> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& bignum);
+kj::Maybe<jsg::BufferSource> bignumToArrayPadded(
+    jsg::Lock& js, const BIGNUM& bignum, size_t paddedLength);
 kj::Own<BIGNUM> newBignum();
 
 #define OSSL_BIO_MEM()                                                                             \

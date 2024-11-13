@@ -24,12 +24,12 @@ public:
 
     void setPrivateKey(kj::Array<kj::byte> key);
     void setPublicKey(kj::Array<kj::byte> key);
-    kj::Array<kj::byte> getPublicKey();
-    kj::Array<kj::byte> getPrivateKey();
-    kj::Array<kj::byte> getGenerator();
-    kj::Array<kj::byte> getPrime();
-    kj::Array<kj::byte> computeSecret(kj::Array<kj::byte> key);
-    kj::Array<kj::byte> generateKeys();
+    jsg::BufferSource getPublicKey(jsg::Lock& js);
+    jsg::BufferSource getPrivateKey(jsg::Lock& js);
+    jsg::BufferSource getGenerator(jsg::Lock& js);
+    jsg::BufferSource getPrime(jsg::Lock& js);
+    jsg::BufferSource computeSecret(jsg::Lock& js, kj::Array<kj::byte> key);
+    jsg::BufferSource generateKeys(jsg::Lock& js);
     int getVerifyError();
 
     JSG_RESOURCE_TYPE(DiffieHellmanHandle) {
@@ -52,7 +52,8 @@ public:
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
 
   // Primes
-  kj::Array<kj::byte> randomPrime(uint32_t size,
+  jsg::BufferSource randomPrime(jsg::Lock& js,
+      uint32_t size,
       bool safe,
       jsg::Optional<kj::Array<kj::byte>> add,
       jsg::Optional<kj::Array<kj::byte>> rem);

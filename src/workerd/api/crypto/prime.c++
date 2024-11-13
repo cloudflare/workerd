@@ -1,12 +1,14 @@
 #include "prime.h"
 
 #include <workerd/api/crypto/impl.h>
+#include <workerd/jsg/jsg.h>
 
 #include <openssl/bn.h>
 
 namespace workerd::api {
 
-kj::Array<kj::byte> randomPrime(uint32_t size,
+jsg::BufferSource randomPrime(jsg::Lock& js,
+    uint32_t size,
     bool safe,
     kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,
     kj::Maybe<kj::ArrayPtr<kj::byte>> rem_buf) {
@@ -85,7 +87,8 @@ kj::Array<kj::byte> randomPrime(uint32_t size,
   int ret = BN_generate_prime_ex(prime.get(), bits, safe ? 1 : 0, add, rem, nullptr);
   JSG_REQUIRE(ret == 1, Error, "Error while generating prime");
 
-  return JSG_REQUIRE_NONNULL(bignumToArrayPadded(*prime), Error, "Error while generating prime");
+  return JSG_REQUIRE_NONNULL(
+      bignumToArrayPadded(js, *prime), Error, "Error while generating prime");
 }
 
 bool checkPrime(kj::ArrayPtr<kj::byte> bufferView, uint32_t num_checks) {
