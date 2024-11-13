@@ -52,7 +52,8 @@ public:
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
 
   // Primes
-  kj::Array<kj::byte> randomPrime(uint32_t size,
+  jsg::BufferSource randomPrime(jsg::Lock& js,
+      uint32_t size,
       bool safe,
       jsg::Optional<kj::Array<kj::byte>> add,
       jsg::Optional<kj::Array<kj::byte>> rem);
