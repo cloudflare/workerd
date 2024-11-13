@@ -23,7 +23,7 @@ public:
   kj::Maybe<kj::String> getValidTo();
   kj::Maybe<kj::Array<kj::String>> getKeyUsage();
   kj::Maybe<kj::Array<const char>> getSerialNumber();
-  kj::Array<kj::byte> getRaw();
+  jsg::BufferSource getRaw(jsg::Lock& js);
   kj::Maybe<jsg::Ref<CryptoKey>> getPublicKey();
   kj::Maybe<kj::String> getPem();
   kj::Maybe<kj::String> getFingerprint();

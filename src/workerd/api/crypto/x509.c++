@@ -382,15 +382,15 @@ kj::String getExponentString(BIO* bio, const BIGNUM* e) {
   return toString(bio);
 }
 
-kj::Array<kj::byte> getRsaPubKey(RSA* rsa) {
+jsg::BufferSource getRsaPubKey(jsg::Lock& js, RSA* rsa) {
   int size = i2d_RSA_PUBKEY(rsa, nullptr);
   KJ_ASSERT(size >= 0);
 
-  auto buf = kj::heapArray<kj::byte>(size);
-  auto data = buf.begin();
+  auto buf = jsg::BackingStore::alloc<v8::Uint8Array>(js, size);
+  auto data = buf.asArrayPtr().begin();
   KJ_ASSERT(i2d_RSA_PUBKEY(rsa, &data) >= 0);
 
-  return kj::mv(buf);
+  return jsg::BufferSource(js, kj::mv(buf));
 }
 
 kj::Maybe<int32_t> getECGroupBits(const EC_GROUP* group) {
@@ -402,21 +402,21 @@ kj::Maybe<int32_t> getECGroupBits(const EC_GROUP* group) {
   return bits;
 }
 
-kj::Maybe<kj::Array<kj::byte>> eCPointToBuffer(
-    const EC_GROUP* group, const EC_POINT* point, point_conversion_form_t form) {
+kj::Maybe<jsg::BufferSource> eCPointToBuffer(
+    jsg::Lock& js, const EC_GROUP* group, const EC_POINT* point, point_conversion_form_t form) {
   size_t len = EC_POINT_point2oct(group, point, form, nullptr, 0, nullptr);
   if (len == 0) {
     return kj::none;
   }
 
-  auto buffer = kj::heapArray<kj::byte>(len);
+  auto buffer = jsg::BackingStore::alloc<v8::Uint8Array>(js, len);
 
-  len = EC_POINT_point2oct(group, point, form, buffer.begin(), buffer.size(), nullptr);
+  len = EC_POINT_point2oct(group, point, form, buffer.asArrayPtr().begin(), buffer.size(), nullptr);
   if (len == 0) {
     return kj::none;
   }
 
-  return kj::mv(buffer);
+  return jsg::BufferSource(js, kj::mv(buffer));
 }
 
 template <const char* (*nid2string)(int nid)>
@@ -428,11 +428,11 @@ kj::Maybe<kj::String> getCurveName(const int nid) {
   return kj::str(name);
 }
 
-kj::Maybe<kj::Array<kj::byte>> getECPubKey(const EC_GROUP* group, EC_KEY* ec) {
+kj::Maybe<jsg::BufferSource> getECPubKey(jsg::Lock& js, const EC_GROUP* group, EC_KEY* ec) {
   const EC_POINT* pubkey = EC_KEY_get0_public_key(ec);
   if (pubkey == nullptr) return kj::none;
 
-  return eCPointToBuffer(group, pubkey, EC_KEY_get_conv_form(ec));
+  return eCPointToBuffer(js, group, pubkey, EC_KEY_get_conv_form(ec));
 }
 
 template <X509_NAME* get_name(const X509*)>
@@ -645,13 +645,13 @@ kj::Maybe<kj::Array<const char>> X509Certificate::getSerialNumber() {
   return kj::none;
 }
 
-kj::Array<kj::byte> X509Certificate::getRaw() {
+jsg::BufferSource X509Certificate::getRaw(jsg::Lock& js) {
   ClearErrorOnReturn clearErrorOnReturn;
   int size = i2d_X509(cert_.get(), nullptr);
-  auto buf = kj::heapArray<kj::byte>(size);
-  auto data = buf.begin();
+  auto buf = jsg::BackingStore::alloc<v8::Uint8Array>(js, size);
+  auto data = buf.asArrayPtr().begin();
   KJ_REQUIRE(i2d_X509(cert_.get(), &data) >= 0);
-  return kj::mv(buf);
+  return jsg::BufferSource(js, kj::mv(buf));
 }
 
 kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey() {
@@ -786,7 +786,7 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
         obj.set(js, "modulus", js.str(getModulusString(bio.get(), RSA_get0_n(rsa))));
         obj.set(js, "bits", js.num(RSA_bits(rsa)));
         obj.set(js, "exponent", js.str(getExponentString(bio.get(), RSA_get0_e(rsa))));
-        obj.set(js, "pubkey", jsg::JsValue(js.bytes(getRsaPubKey(rsa)).getHandle(js)));
+        obj.set(js, "pubkey", jsg::JsValue(getRsaPubKey(js, rsa).getHandle(js)));
         break;
       }
       case EVP_PKEY_EC: {
@@ -797,8 +797,8 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
         KJ_IF_SOME(bits, getECGroupBits(group)) {
           obj.set(js, "bits", js.num(bits));
         }
-        KJ_IF_SOME(pubkey, getECPubKey(group, ec)) {
-          obj.set(js, "pubkey", jsg::JsValue(js.bytes(kj::mv(pubkey)).getHandle(js)));
+        KJ_IF_SOME(pubkey, getECPubKey(js, group, ec)) {
+          obj.set(js, "pubkey", jsg::JsValue(pubkey.getHandle(js)));
         }
 
         const int nid = EC_GROUP_get_curve_name(group);
@@ -843,7 +843,7 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
   KJ_IF_SOME(serialNumber, getSerialNumber()) {
     obj.set(js, "serialNumber", js.str(serialNumber));
   }
-  obj.set(js, "raw", jsg::JsValue(js.bytes(getRaw()).getHandle(js)));
+  obj.set(js, "raw", jsg::JsValue(getRaw(js).getHandle(js)));
 
   return obj;
 }
