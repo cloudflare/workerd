@@ -10,6 +10,7 @@
 
 #include <v8-context.h>
 #include <v8-object.h>
+#include <v8-version.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -223,7 +224,10 @@ public:
   void clearFreelistedShims();
 
   // implements EmbedderRootsHandler -------------------------------------------
+  // todo: cleanup after 13.2 upgrade
+#if V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION < 2
   bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
+#endif
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
 
