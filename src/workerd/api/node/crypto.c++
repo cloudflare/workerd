@@ -216,28 +216,29 @@ void CryptoImpl::DiffieHellmanHandle::setPublicKey(kj::Array<kj::byte> key) {
   dh.setPublicKey(key);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPublicKey() {
-  return dh.getPublicKey();
+jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getPublicKey(jsg::Lock& js) {
+  return dh.getPublicKey(js);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrivateKey() {
-  return dh.getPrivateKey();
+jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getPrivateKey(jsg::Lock& js) {
+  return dh.getPrivateKey(js);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getGenerator() {
-  return dh.getGenerator();
+jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getGenerator(jsg::Lock& js) {
+  return dh.getGenerator(js);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::getPrime() {
-  return dh.getPrime();
+jsg::BufferSource CryptoImpl::DiffieHellmanHandle::getPrime(jsg::Lock& js) {
+  return dh.getPrime(js);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::computeSecret(kj::Array<kj::byte> key) {
-  return dh.computeSecret(key);
+jsg::BufferSource CryptoImpl::DiffieHellmanHandle::computeSecret(
+    jsg::Lock& js, kj::Array<kj::byte> key) {
+  return dh.computeSecret(js, key);
 }
 
-kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
-  return dh.generateKeys();
+jsg::BufferSource CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
+  return dh.generateKeys(js);
 }
 
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
