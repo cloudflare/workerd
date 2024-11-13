@@ -934,9 +934,6 @@ class ArrayBufferWrapper {
       //   impossible to support unifying Array<T> and Vector<T> in the future (i.e. making all
       //   Array<T>s growable). So it may be best to stick with allocating an Array<byte> on the
       //   heap after all...
-
-      fprintf(stderr, "begin is %p\n", begin);
-
       auto ownerPtr = new kj::Array<byte>(kj::mv(value));
 
       std::unique_ptr<v8::BackingStore> backing =
