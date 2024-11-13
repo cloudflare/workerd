@@ -197,6 +197,13 @@ public:
     byteLength -= bytes;
   }
 
+  // Similar to trim except that it explicitly sets the byte length to a value
+  // equal to or less than the current byte length.
+  inline void limit(size_t bytes) {
+    KJ_ASSERT(bytes <= byteLength);
+    byteLength = bytes;
+  }
+
   inline BackingStore clone() {
     return BackingStore(backingStore, byteLength, byteOffset, elementSize, ctor, integerType);
   }

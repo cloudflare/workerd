@@ -2688,9 +2688,13 @@ export function transcode(
   if (normalizedToEncoding === undefined) {
     throw new ERR_UNKNOWN_ENCODING(toEncoding);
   }
-  return Buffer.from(
-    bufferUtil.transcode(source, normalizedFromEncoding, normalizedToEncoding)
+
+  const u8: Uint8Array = bufferUtil.transcode(
+    source,
+    normalizedFromEncoding,
+    normalizedToEncoding
   );
+  return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
 }
 
 export function resolveObjectURL(_id: string): unknown {

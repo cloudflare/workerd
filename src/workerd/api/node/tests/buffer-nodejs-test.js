@@ -5972,7 +5972,11 @@ export const transcodeTest = {
 
     for (const test in tests) {
       const dest = transcode(orig, 'utf8', test);
-      strictEqual(dest.length, tests[test].length, `utf8->${test} length`);
+      strictEqual(
+        dest.length,
+        tests[test].length,
+        `utf8->${test} length (${dest.length}, ${tests[test].length})`
+      );
       for (let n = 0; n < tests[test].length; n++) {
         strictEqual(dest[n], tests[test][n], `utf8->${test} char ${n}`);
       }
