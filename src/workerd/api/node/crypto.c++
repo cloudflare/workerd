@@ -93,12 +93,14 @@ bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
   return workerd::api::verifySpkac(input);
 }
 
-kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportPublicKey(kj::Array<const kj::byte> input) {
-  return workerd::api::exportPublicKey(input);
+kj::Maybe<jsg::BufferSource> CryptoImpl::exportPublicKey(
+    jsg::Lock& js, kj::Array<const kj::byte> input) {
+  return workerd::api::exportPublicKey(js, input);
 }
 
-kj::Maybe<kj::Array<kj::byte>> CryptoImpl::exportChallenge(kj::Array<const kj::byte> input) {
-  return workerd::api::exportChallenge(input);
+kj::Maybe<jsg::BufferSource> CryptoImpl::exportChallenge(
+    jsg::Lock& js, kj::Array<const kj::byte> input) {
+  return workerd::api::exportChallenge(js, input);
 }
 
 kj::Array<kj::byte> CryptoImpl::randomPrime(uint32_t size,
