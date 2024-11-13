@@ -49,6 +49,14 @@ inline kj::ArrayPtr<const char> fromRust(const ::rust::Str& str) {
   return kj::ArrayPtr<const char>(str.data(), str.size());
 }
 
+inline kj::Array<kj::String> fromRust(::rust::Vec<::rust::String> vec) {
+  auto res = kj::heapArrayBuilder<kj::String>(vec.size());
+  for (auto& entry: vec) {
+    res.add(kj::str(entry.c_str()));
+  }
+  return res.finish();
+}
+
 struct Rust {
   template <typename T>
   static ::rust::Slice<const T> from(const kj::ArrayPtr<T>* arr) {
