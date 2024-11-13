@@ -48,7 +48,7 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
   }
 
   BufferSource makeBufferSource(jsg::Lock& js) {
-    return BufferSource(js, BackingStore::from(kj::arr<kj::byte>(1, 2, 3)));
+    return BufferSource(js, BackingStore::from(js, kj::arr<kj::byte>(1, 2, 3)));
   }
 
   BufferSource makeArrayBuffer(jsg::Lock& js) {
