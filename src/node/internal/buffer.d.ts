@@ -17,8 +17,8 @@ export function compare(
   b: Uint8Array,
   options?: CompareOptions
 ): number;
-export function concat(list: Uint8Array[], length: number): ArrayBuffer;
-export function decodeString(value: string, encoding: Encoding): ArrayBuffer;
+export function concat(list: Uint8Array[], length: number): Uint8Array;
+export function decodeString(value: string, encoding: Encoding): Uint8Array;
 export function fillImpl(
   buffer: Uint8Array,
   value: string | BufferSource,
