@@ -135,22 +135,24 @@ int CryptoImpl::HmacHandle::update(kj::Array<kj::byte> data) {
   return 1;  // This just always returns 1 no matter what.
 }
 
-kj::ArrayPtr<kj::byte> CryptoImpl::HmacHandle::digest() {
-  return ctx.digest();
+jsg::BufferSource CryptoImpl::HmacHandle::digest(jsg::Lock& js) {
+  return ctx.digest(js);
 }
 
-kj::Array<kj::byte> CryptoImpl::HmacHandle::oneshot(
-    kj::String algorithm, CryptoImpl::HmacHandle::KeyParam key, kj::Array<kj::byte> data) {
+jsg::BufferSource CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
+    kj::String algorithm,
+    CryptoImpl::HmacHandle::KeyParam key,
+    kj::Array<kj::byte> data) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
       HmacContext ctx(algorithm, key_data.asPtr());
       ctx.update(data);
-      return kj::heapArray(ctx.digest());
+      return ctx.digest(js);
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
       HmacContext ctx(algorithm, key->impl.get());
       ctx.update(data);
-      return kj::heapArray(ctx.digest());
+      return ctx.digest(js);
     }
   }
   KJ_UNREACHABLE;
@@ -171,23 +173,24 @@ int CryptoImpl::HashHandle::update(kj::Array<kj::byte> data) {
   return 1;
 }
 
-kj::ArrayPtr<kj::byte> CryptoImpl::HashHandle::digest() {
-  return ctx.digest();
+jsg::BufferSource CryptoImpl::HashHandle::digest(jsg::Lock& js) {
+  return ctx.digest(js);
 }
 
-jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(kj::Maybe<uint32_t> xofLen) {
-  return jsg::alloc<HashHandle>(ctx.clone(kj::mv(xofLen)));
+jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(
+    jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
+  return jsg::alloc<HashHandle>(ctx.clone(js, kj::mv(xofLen)));
 }
 
 void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackFieldWithSize("digest", ctx.size());
 }
 
-kj::Array<kj::byte> CryptoImpl::HashHandle::oneshot(
-    kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen) {
+jsg::BufferSource CryptoImpl::HashHandle::oneshot(
+    jsg::Lock& js, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen) {
   HashContext ctx(algorithm, xofLen);
   ctx.update(data);
-  return kj::heapArray(ctx.digest());
+  return ctx.digest(js);
 }
 
 // ======================================================================================

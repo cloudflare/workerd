@@ -64,12 +64,12 @@ public:
     HashHandle(HashContext ctx): ctx(kj::mv(ctx)) {}
 
     static jsg::Ref<HashHandle> constructor(kj::String algorithm, kj::Maybe<uint32_t> xofLen);
-    static kj::Array<kj::byte> oneshot(
-        kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen);
+    static jsg::BufferSource oneshot(
+        jsg::Lock&, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen);
 
-    jsg::Ref<HashHandle> copy(kj::Maybe<uint32_t> xofLen);
+    jsg::Ref<HashHandle> copy(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
     int update(kj::Array<kj::byte> data);
-    kj::ArrayPtr<kj::byte> digest();
+    jsg::BufferSource digest(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(HashHandle) {
       JSG_METHOD(update);
@@ -95,11 +95,11 @@ public:
 
     // Efficiently implement one-shot hmac that avoids multiple calls
     // across the C++/JS boundary.
-    static kj::Array<kj::byte> oneshot(
-        kj::String algorithm, KeyParam key, kj::Array<kj::byte> data);
+    static jsg::BufferSource oneshot(
+        jsg::Lock& js, kj::String algorithm, KeyParam key, kj::Array<kj::byte> data);
 
     int update(kj::Array<kj::byte> data);
-    kj::ArrayPtr<kj::byte> digest();
+    jsg::BufferSource digest(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(HmacHandle) {
       JSG_METHOD(update);
