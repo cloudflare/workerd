@@ -23,9 +23,9 @@ namespace i18n {
 namespace {
 
 // An isolate has a 128mb memory limit.
-const int ISOLATE_LIMIT = 134217728;
+constexpr int ISOLATE_LIMIT = 134217728;
 
-const char* getEncodingName(Encoding input) {
+constexpr const char* getEncodingName(Encoding input) {
   switch (input) {
     case Encoding::ASCII:
       return "us-ascii";
@@ -40,88 +40,118 @@ const char* getEncodingName(Encoding input) {
   }
 }
 
-typedef kj::Maybe<kj::Array<kj::byte>> (*TranscodeImpl)(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding);
+using TranscodeImpl = kj::Function<kj::Maybe<jsg::BufferSource>(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding)>;
 
-kj::Maybe<kj::Array<kj::byte>> TranscodeDefault(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+kj::Maybe<jsg::BufferSource> TranscodeDefault(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
   Converter to(toEncoding);
   auto substitute = kj::str(kj::repeat('?', to.minCharSize()));
   to.setSubstituteChars(substitute);
   Converter from(fromEncoding);
 
   size_t limit = source.size() * to.maxCharSize();
+  if (limit == 0) {
+    auto empty = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+    return jsg::BufferSource(js, kj::mv(empty));
+  }
   // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
   JSG_REQUIRE(limit <= ISOLATE_LIMIT, Error, "Source buffer is too large to transcode");
-  auto out = kj::heapArray<kj::byte>(limit);
-  char* target = out.asChars().begin();
+
+  auto out = jsg::BackingStore::alloc<v8::Uint8Array>(js, limit);
+  auto outPtr = out.asArrayPtr().asChars();
+  char* target = outPtr.begin();
   const char* source_ = source.asChars().begin();
   UErrorCode status{};
   ucnv_convertEx(to.conv(), from.conv(), &target, target + limit, &source_, source_ + source.size(),
       nullptr, nullptr, nullptr, nullptr, true, true, &status);
   if (U_SUCCESS(status)) {
-    return out.first(target - out.asChars().begin()).attach(kj::mv(out));
+    out.limit(target - outPtr.begin());
+    return jsg::BufferSource(js, kj::mv(out));
   }
 
   return kj::none;
 }
 
-kj::Maybe<kj::Array<kj::byte>> TranscodeLatin1ToUTF16(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
-  auto length_in_chars = source.size() * sizeof(UChar);
+kj::Maybe<jsg::BufferSource> TranscodeLatin1ToUTF16(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+  auto length_in_chars = source.size() * sizeof(char16_t);
   // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
   JSG_REQUIRE(length_in_chars <= ISOLATE_LIMIT, Error, "Source buffer is too large to transcode");
 
+  if (length_in_chars == 0) {
+    auto empty = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+    return jsg::BufferSource(js, kj::mv(empty));
+  }
+
   Converter from(fromEncoding);
-  auto destbuf = kj::heapArray<UChar>(length_in_chars);
+  auto destBuf = jsg::BackingStore::alloc<v8::Uint8Array>(js, length_in_chars);
+  auto destPtr = destBuf.asArrayPtr<char16_t>();
   auto actual_length =
-      simdutf::convert_latin1_to_utf16(source.asChars().begin(), source.size(), destbuf.begin());
+      simdutf::convert_latin1_to_utf16(source.asChars().begin(), source.size(), destPtr.begin());
 
   // simdutf returns 0 for invalid value.
   if (actual_length == 0) {
     return kj::none;
   }
 
-  return destbuf.first(actual_length).asBytes().attach(kj::mv(destbuf));
+  destBuf.limit(actual_length * sizeof(char16_t));
+  return jsg::BufferSource(js, kj::mv(destBuf));
 }
 
-kj::Maybe<kj::Array<kj::byte>> TranscodeFromUTF16(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+kj::Maybe<jsg::BufferSource> TranscodeFromUTF16(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
   Converter to(toEncoding);
   auto substitute = kj::str(kj::repeat('?', to.minCharSize()));
   to.setSubstituteChars(substitute);
 
   auto utf16_input = kj::arrayPtr<char16_t>(
-      reinterpret_cast<char16_t*>(source.begin()), source.size() / sizeof(UChar));
+      reinterpret_cast<char16_t*>(source.begin()), source.size() / sizeof(char16_t));
 
   const auto limit = utf16_input.size() * to.maxCharSize();
 
   // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
   JSG_REQUIRE(limit <= ISOLATE_LIMIT, Error, "Buffer is too large to transcode");
 
-  auto destbuf = kj::heapArray<UChar>(limit);
+  auto length_in_chars = limit * sizeof(char16_t);
+  if (length_in_chars == 0) {
+    auto empty = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+    return jsg::BufferSource(js, kj::mv(empty));
+  }
+
+  auto destBuf = jsg::BackingStore::alloc<v8::Uint8Array>(js, length_in_chars);
+  auto destPtr = destBuf.asArrayPtr<char16_t>();
   UErrorCode status{};
-  auto len = ucnv_fromUChars(to.conv(), destbuf.asChars().begin(), destbuf.size(),
+  auto len = ucnv_fromUChars(to.conv(), destPtr.asChars().begin(), destPtr.size(),
       utf16_input.begin(), utf16_input.size(), &status);
 
   if (U_SUCCESS(status)) {
-    return destbuf.first(len).asBytes().attach(kj::mv(destbuf));
+    destBuf.limit(len * sizeof(char16_t));
+    return jsg::BufferSource(js, kj::mv(destBuf));
   }
 
   return kj::none;
 }
 
-kj::Maybe<kj::Array<kj::byte>> TranscodeUTF16FromUTF8(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+kj::Maybe<jsg::BufferSource> TranscodeUTF16FromUTF8(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
   size_t expected_utf16_length =
       simdutf::utf16_length_from_utf8(source.asChars().begin(), source.size());
   // Workers are limited to 128MB so this isn't actually a realistic concern, but sanity check.
   JSG_REQUIRE(expected_utf16_length <= ISOLATE_LIMIT, Error,
       "Expected UTF-16le length is too large to transcode");
-  auto destbuf = kj::heapArray<UChar>(expected_utf16_length);
+
+  auto length_in_chars = expected_utf16_length * sizeof(char16_t);
+  if (length_in_chars == 0) {
+    auto empty = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+    return jsg::BufferSource(js, kj::mv(empty));
+  }
+
+  auto destBuf = jsg::BackingStore::alloc<v8::Uint8Array>(js, length_in_chars);
+  auto destPtr = destBuf.asArrayPtr<char16_t>();
 
   size_t actual_length =
-      simdutf::convert_utf8_to_utf16le(source.asChars().begin(), source.size(), destbuf.begin());
+      simdutf::convert_utf8_to_utf16le(source.asChars().begin(), source.size(), destPtr.begin());
   JSG_REQUIRE(actual_length == expected_utf16_length, Error, "Expected UTF16 length mismatch");
 
   // simdutf returns 0 for invalid UTF-8 value.
@@ -129,11 +159,11 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeUTF16FromUTF8(
     return kj::none;
   }
 
-  return destbuf.asBytes().attach(kj::mv(destbuf));
+  return jsg::BufferSource(js, kj::mv(destBuf));
 }
 
-kj::Maybe<kj::Array<kj::byte>> TranscodeUTF8FromUTF16(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+kj::Maybe<jsg::BufferSource> TranscodeUTF8FromUTF16(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
   JSG_REQUIRE(source.size() % 2 == 0, Error, "UTF-16le input size should be multiple of 2");
   auto utf16_input =
       kj::arrayPtr<char16_t>(reinterpret_cast<char16_t*>(source.begin()), source.size() / 2);
@@ -144,10 +174,16 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeUTF8FromUTF16(
   JSG_REQUIRE(expected_utf8_length <= ISOLATE_LIMIT, Error,
       "Expected UTF-8 length is too large to transcode");
 
-  auto destbuf = kj::heapArray<kj::byte>(expected_utf8_length);
+  if (expected_utf8_length == 0) {
+    auto empty = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+    return jsg::BufferSource(js, kj::mv(empty));
+  }
 
-  size_t actual_length = simdutf::convert_utf16le_to_utf8(
-      utf16_input.begin(), utf16_input.size(), destbuf.asChars().begin());
+  auto destBuf = jsg::BackingStore::alloc<v8::Uint8Array>(js, expected_utf8_length);
+  auto destPtr = destBuf.asArrayPtr().asChars();
+
+  size_t actual_length =
+      simdutf::convert_utf16le_to_utf8(utf16_input.begin(), utf16_input.size(), destPtr.begin());
   JSG_REQUIRE(actual_length == expected_utf8_length, Error, "Expected UTF8 length mismatch");
 
   // simdutf returns 0 for invalid UTF-8 value.
@@ -155,7 +191,7 @@ kj::Maybe<kj::Array<kj::byte>> TranscodeUTF8FromUTF16(
     return kj::none;
   }
 
-  return destbuf.asBytes().attach(kj::mv(destbuf));
+  return jsg::BufferSource(js, kj::mv(destBuf));
 }
 
 }  // namespace
@@ -197,8 +233,8 @@ void Converter::setSubstituteChars(kj::StringPtr sub) {
   }
 }
 
-kj::Array<kj::byte> transcode(
-    kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
+jsg::BufferSource transcode(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding) {
   TranscodeImpl transcode_function = &TranscodeDefault;
   switch (fromEncoding) {
     case Encoding::ASCII:
@@ -228,8 +264,8 @@ kj::Array<kj::byte> transcode(
       JSG_FAIL_REQUIRE(Error, "Invalid encoding passed to transcode");
   }
 
-  return JSG_REQUIRE_NONNULL(
-      transcode_function(source, fromEncoding, toEncoding), Error, "Unable to transcode buffer");
+  return JSG_REQUIRE_NONNULL(transcode_function(js, source, fromEncoding, toEncoding), Error,
+      "Unable to transcode buffer");
 }
 
 }  // namespace i18n

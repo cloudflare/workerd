@@ -756,15 +756,17 @@ bool BufferUtil::isUtf8(kj::Array<kj::byte> buffer) {
   return simdutf::validate_utf8(buffer.asChars().begin(), buffer.size());
 }
 
-kj::Array<kj::byte> BufferUtil::transcode(
-    kj::Array<kj::byte> source, EncodingValue rawFromEncoding, EncodingValue rawToEncoding) {
+jsg::BufferSource BufferUtil::transcode(jsg::Lock& js,
+    kj::Array<kj::byte> source,
+    EncodingValue rawFromEncoding,
+    EncodingValue rawToEncoding) {
   auto fromEncoding = static_cast<Encoding>(rawFromEncoding);
   auto toEncoding = static_cast<Encoding>(rawToEncoding);
 
   JSG_REQUIRE(i18n::canBeTranscoded(fromEncoding) && i18n::canBeTranscoded(toEncoding), Error,
       "Unable to transcode buffer due to unsupported encoding");
 
-  return i18n::transcode(source, fromEncoding, toEncoding);
+  return i18n::transcode(js, source, fromEncoding, toEncoding);
 }
 
 }  // namespace workerd::api::node
