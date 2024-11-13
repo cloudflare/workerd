@@ -129,7 +129,7 @@ jsg::BufferSource wrap(jsg::Lock& js, kj::Array<byte> data) {
   // the underlying v8::BackingStore is supposed to free the buffer when
   // it is done with it. Unfortunately ASAN complains about a leak that
   // will require more investigation.
-  // return jsg::BufferSource(js, jsg::BackingStore::from(kj::mv(data)));
+  // return jsg::BufferSource(js, jsg::BackingStore::from(js, kj::mv(data)));
 }
 
 kj::ArrayPtr<const kj::byte> getPtr(jsg::BufferSource& source) {
