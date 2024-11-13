@@ -31,9 +31,9 @@ public:
       kj::Array<kj::byte> two,
       jsg::Optional<CompareOptions> maybeOptions);
 
-  kj::Array<kj::byte> concat(jsg::Lock& js, kj::Array<kj::Array<kj::byte>> list, uint32_t length);
+  jsg::BufferSource concat(jsg::Lock& js, kj::Array<kj::Array<kj::byte>> list, uint32_t length);
 
-  kj::Array<kj::byte> decodeString(jsg::Lock& js, jsg::JsString string, EncodingValue encoding);
+  jsg::BufferSource decodeString(jsg::Lock& js, jsg::JsString string, EncodingValue encoding);
 
   void fillImpl(jsg::Lock& js,
       kj::Array<kj::byte> buffer,

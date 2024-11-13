@@ -31,7 +31,8 @@ kj::Maybe<uint> tryFromHexDigit(char c) {
   return kj::none;
 }
 
-kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = false) {
+jsg::BackingStore decodeHexTruncated(
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> text, bool strict = false) {
   // We do not use kj::decodeHex because we need to match Node.js'
   // behavior of truncating the response at the first invalid hex
   // pair as opposed to just marking that an error happened and
@@ -42,10 +43,12 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
     }
     text = text.first(text.size() - 1);
   }
-  auto vec = kj::Vector<kj::byte>(text.size() / 2);
+  auto vec = jsg::BackingStore::alloc<v8::Uint8Array>(js, text.size() / 2);
+  auto ptr = vec.asArrayPtr();
+  size_t len = 0;
 
   for (size_t i = 0; i < text.size(); i += 2) {
-    byte b = 0;
+    kj::byte b = 0;
     KJ_IF_SOME(d1, tryFromHexDigit(text[i])) {
       b = d1 << 4;
     } else {
@@ -62,10 +65,11 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
       }
       break;
     }
-    vec.add(b);
+    ptr[len++] = b;
   }
 
-  return vec.releaseAsArray();
+  vec.limit(len);
+  return kj::mv(vec);
 }
 
 uint32_t writeInto(jsg::Lock& js,
@@ -112,7 +116,8 @@ uint32_t writeInto(jsg::Lock& js,
           static_cast<jsg::JsString::WriteOptions>(
               jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
       string.writeInto(js, buf, options);
-      auto bytes = decodeHexTruncated(buf, false);
+      auto backing = decodeHexTruncated(js, buf, false);
+      auto bytes = backing.asArrayPtr();
       auto amountToCopy = kj::min(bytes.size(), dest.size());
       dest.first(amountToCopy).copyFrom(bytes.first(amountToCopy));
       return amountToCopy;
@@ -122,10 +127,10 @@ uint32_t writeInto(jsg::Lock& js,
   }
 }
 
-kj::Array<kj::byte> decodeStringImpl(
+jsg::BackingStore decodeStringImpl(
     jsg::Lock& js, const jsg::JsString& string, Encoding encoding, bool strict = false) {
   auto length = string.length(js);
-  if (length == 0) return kj::Array<kj::byte>();
+  if (length == 0) return jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
 
   static constexpr jsg::JsString::WriteOptions options = static_cast<jsg::JsString::WriteOptions>(
       jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
@@ -134,17 +139,17 @@ kj::Array<kj::byte> decodeStringImpl(
     case Encoding::ASCII:
       // Fall-through
     case Encoding::LATIN1: {
-      auto dest = kj::heapArray<kj::byte>(length);
+      auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, length);
       writeInto(js, dest, string, 0, dest.size(), Encoding::LATIN1);
       return kj::mv(dest);
     }
     case Encoding::UTF8: {
-      auto dest = kj::heapArray<kj::byte>(string.utf8Length(js));
+      auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, string.utf8Length(js));
       writeInto(js, dest, string, 0, dest.size(), Encoding::UTF8);
       return kj::mv(dest);
     }
     case Encoding::UTF16LE: {
-      auto dest = kj::heapArray<kj::byte>(length * sizeof(uint16_t));
+      auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, length * sizeof(uint16_t));
       writeInto(js, dest, string, 0, dest.size(), Encoding::UTF16LE);
       return kj::mv(dest);
     }
@@ -157,14 +162,17 @@ kj::Array<kj::byte> decodeStringImpl(
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       auto result = string.writeInto(js, buf, options);
       auto len = result.written;
-      auto dest = kj::heapArray<kj::byte>(nbytes::Base64DecodedSize(buf.begin(), len));
-      len = nbytes::Base64Decode(dest.asChars().begin(), dest.size(), buf.begin(), buf.size());
-      return dest.first(len).attach(kj::mv(dest));
+      auto dest =
+          jsg::BackingStore::alloc<v8::Uint8Array>(js, nbytes::Base64DecodedSize(buf.begin(), len));
+      len = nbytes::Base64Decode(
+          dest.asArrayPtr<char>().begin(), dest.size(), buf.begin(), buf.size());
+      dest.limit(len);
+      return kj::mv(dest);
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       string.writeInto(js, buf, options);
-      return decodeHexTruncated(buf, strict);
+      return decodeHexTruncated(js, buf, strict);
     }
     default:
       KJ_UNREACHABLE;
@@ -208,9 +216,12 @@ int BufferUtil::compare(jsg::Lock& js,
   return result > 0 ? 1 : -1;
 }
 
-kj::Array<kj::byte> BufferUtil::concat(
+jsg::BufferSource BufferUtil::concat(
     jsg::Lock& js, kj::Array<kj::Array<kj::byte>> list, uint32_t length) {
-  if (length == 0) return kj::Array<kj::byte>();
+  if (length == 0) {
+    auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
 
   // The Node.js Buffer.concat is interesting in that it doesn't just append
   // the buffers together as is. The length parameter is used to determine the
@@ -220,8 +231,8 @@ kj::Array<kj::byte> BufferUtil::concat(
   // the result will be the combined buffers with the remaining space filled
   // with zeroes.
 
-  auto dest = kj::heapArray<kj::byte>(length);
-  auto view = dest.asPtr();
+  auto dest = jsg::BackingStore::alloc<v8::Uint8Array>(js, length);
+  auto view = dest.asArrayPtr();
 
   for (auto& src: list) {
     if (src.size() == 0) continue;
@@ -231,16 +242,19 @@ kj::Array<kj::byte> BufferUtil::concat(
     view.first(amountToCopy).copyFrom(src.first(amountToCopy));
     view = view.slice(amountToCopy);
     // If there's no more space in the destination, we're done.
-    if (view == nullptr) return kj::mv(dest);
+    if (view == nullptr) {
+      return jsg::BufferSource(js, kj::mv(dest));
+    }
   }
+
   // Fill any remaining space in the destination with zeroes.
   view.fill(0);
-  return kj::mv(dest);
+  return jsg::BufferSource(js, kj::mv(dest));
 }
 
-kj::Array<kj::byte> BufferUtil::decodeString(
+jsg::BufferSource BufferUtil::decodeString(
     jsg::Lock& js, jsg::JsString string, EncodingValue encoding) {
-  return decodeStringImpl(js, string, static_cast<Encoding>(encoding));
+  return jsg::BufferSource(js, decodeStringImpl(js, string, static_cast<Encoding>(encoding)));
 }
 
 void BufferUtil::fillImpl(jsg::Lock& js,
@@ -376,12 +390,13 @@ jsg::Optional<uint32_t> indexOfString(jsg::Lock& js,
       return kj::none;
     }
     result = SearchString(reinterpret_cast<const uint16_t*>(hayStack.asChars().begin()),
-        hayStack.size() / 2, reinterpret_cast<const uint16_t*>(decodedNeedle.asChars().begin()),
+        hayStack.size() / 2,
+        reinterpret_cast<const uint16_t*>(decodedNeedle.asArrayPtr<char>().begin()),
         decodedNeedle.size() / 2, optOffset / 2, isForward);
     result *= 2;
   } else {
     result = SearchString(hayStack.asBytes().begin(), hayStack.size(),
-        decodedNeedle.asBytes().begin(), decodedNeedle.size(), optOffset, isForward);
+        decodedNeedle.asArrayPtr().begin(), decodedNeedle.size(), optOffset, isForward);
   }
 
   if (result == hayStackLength) return kj::none;
