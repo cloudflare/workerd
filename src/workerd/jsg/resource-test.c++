@@ -5,6 +5,7 @@
 #include "jsg-test.h"
 
 #include <workerd/jsg/resource-test.capnp.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::jsg::test {
 namespace {
@@ -590,6 +591,7 @@ struct JsBundleContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(JsBundleIsolate, JsBundleContext);
 
 KJ_TEST("expectEvalModule function works") {
+  util::Autogate::initAutogate({});
   Evaluator<JsBundleContext, JsBundleIsolate, decltype(nullptr), JsBundleIsolate_TypeWrapper> e(
       v8System);
   e.expectEvalModule("export function run() { return 123; }", "number", "123");

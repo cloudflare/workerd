@@ -6,6 +6,8 @@
 #include "jsg.h"
 #include "setup.h"
 
+#include <workerd/util/autogate.h>
+
 #include <kj/mutex.h>
 
 #include <set>
@@ -365,6 +367,7 @@ static CompilationObserver::Option convertOption(ModuleInfoCompileOption option)
 v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
+    kj::ArrayPtr<const kj::byte> compileCache,
     ModuleInfoCompileOption option,
     const CompilationObserver& observer) {
   // destroy the observer after compilation finished to indicate the end of the process.
@@ -372,46 +375,38 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
       observer.onEsmCompilationStart(js.v8Isolate, name, convertOption(option));
 
   // Must pass true for `is_module`, but we can skip everything else.
-  const int resourceLineOffset = 0;
-  const int resourceColumnOffset = 0;
-  const bool resourceIsSharedCrossOrigin = false;
-  const int scriptId = -1;
-  const bool resourceIsOpaque = false;
-  const bool isWasm = false;
-  const bool isModule = true;
+  constexpr int resourceLineOffset = 0;
+  constexpr int resourceColumnOffset = 0;
+  constexpr bool resourceIsSharedCrossOrigin = false;
+  constexpr int scriptId = -1;
+  constexpr bool resourceIsOpaque = false;
+  constexpr bool isWasm = false;
+  constexpr bool isModule = true;
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
   v8::Local<v8::String> contentStr;
-  v8::ScriptCompiler::CachedData* existingCacheData = nullptr;
-  auto compileOptions = v8::ScriptCompiler::kNoCompileOptions;
-  const auto& compileCache = CompileCache::get();
 
   if (option == ModuleInfoCompileOption::BUILTIN) {
     // TODO(later): Use of newExternalOneByteString here limits our built-in source
     // modules (for which this path is used) to only the latin1 character set. We
     // may need to revisit that to import built-ins as UTF-16 (two-byte).
     contentStr = jsg::newExternalOneByteString(js, content);
-
-    // We only enable compile cache for built-in modules for now.
-    KJ_IF_SOME(cached, compileCache.find(name)) {
-      compileOptions = v8::ScriptCompiler::kConsumeCodeCache;
-      existingCacheData = cached.AsCachedData().release();
-    }
   } else {
     contentStr = jsg::v8Str(js.v8Isolate, content);
   }
 
-  v8::ScriptCompiler::Source source(contentStr, origin, existingCacheData);
-  auto module =
-      jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));
-
-  if (existingCacheData == nullptr) {
-    auto cachedData = std::shared_ptr<v8::ScriptCompiler::CachedData>(
-        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
-    compileCache.add(name, kj::mv(cachedData));
+  if (util::Autogate::isEnabled(util::AutogateKey::COMPILE_CACHE_FOR_BUILTINS)) {
+    if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
+      auto cached = std::make_unique<v8::ScriptCompiler::CachedData>(
+          compileCache.begin(), compileCache.size());
+      v8::ScriptCompiler::Source source(contentStr, origin, cached.release());
+      return jsg::check(v8::ScriptCompiler::CompileModule(
+          js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache));
+    }
   }
 
-  return module;
+  v8::ScriptCompiler::Source source(contentStr, origin);
+  return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 }
 
 v8::Local<v8::Module> createSyntheticModule(
@@ -438,9 +433,10 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
+    kj::ArrayPtr<const kj::byte> compileCache,
     ModuleInfoCompileOption flags,
     const CompilationObserver& observer)
-    : ModuleInfo(js, compileEsmModule(js, name, content, flags, observer)) {}
+    : ModuleInfo(js, compileEsmModule(js, name, content, compileCache, flags, observer)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
