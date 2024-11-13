@@ -54,8 +54,11 @@ private:
 
     auto derivedLengthBytes = length / 8;
 
-    return JSG_REQUIRE_NONNULL(hkdf(derivedLengthBytes, hashType, keyData, salt, info),
+    auto bs = JSG_REQUIRE_NONNULL(hkdf(js, derivedLengthBytes, hashType, keyData, salt, info),
         DOMOperationError, "HKDF deriveBits failed.");
+
+    // TODO(cleanup): deriveBits should return a BufferSource and will do so soon.
+    return bs.asArrayPtr().attach(kj::mv(bs));
   }
 
   kj::StringPtr getAlgorithmName() const override {
@@ -80,17 +83,18 @@ private:
 
 }  // namespace
 
-kj::Maybe<kj::Array<kj::byte>> hkdf(size_t length,
+kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
+    size_t length,
     const EVP_MD* digest,
     kj::ArrayPtr<const kj::byte> key,
     kj::ArrayPtr<const kj::byte> salt,
     kj::ArrayPtr<const kj::byte> info) {
-  auto buf = kj::heapArray<kj::byte>(length);
-  if (HKDF(buf.begin(), length, digest, key.begin(), key.size(), salt.begin(), salt.size(),
-          info.begin(), info.size()) != 1) {
+  auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
+  if (HKDF(buf.asArrayPtr().begin(), length, digest, key.begin(), key.size(), salt.begin(),
+          salt.size(), info.begin(), info.size()) != 1) {
     return kj::none;
   }
-  return kj::mv(buf);
+  return jsg::BufferSource(js, kj::mv(buf));
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(jsg::Lock& js,

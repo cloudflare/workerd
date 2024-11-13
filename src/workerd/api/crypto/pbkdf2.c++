@@ -63,8 +63,11 @@ private:
     // wisest.
     checkPbkdfLimits(js, iterations);
 
-    return JSG_REQUIRE_NONNULL(pbkdf2(length / 8, iterations, hashType, keyData, salt), Error,
-        "PBKDF2 deriveBits failed.");
+    auto buf = JSG_REQUIRE_NONNULL(pbkdf2(js, length / 8, iterations, hashType, keyData, salt),
+        Error, "PBKDF2 deriveBits failed.");
+    // TODO(cleanup): This is a bit of a hack. deriveBits should return a BufferSource and
+    // will do so soon.
+    return buf.asArrayPtr().attach(kj::mv(buf));
   }
 
   // TODO(bug): Possibly by mistake, PBKDF2 was historically not on the allow list of
@@ -101,17 +104,18 @@ private:
 
 }  // namespace
 
-kj::Maybe<kj::Array<kj::byte>> pbkdf2(size_t length,
+kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
+    size_t length,
     size_t iterations,
     const EVP_MD* digest,
     kj::ArrayPtr<const kj::byte> password,
     kj::ArrayPtr<const kj::byte> salt) {
-  auto buf = kj::heapArray<kj::byte>(length);
+  auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
   if (PKCS5_PBKDF2_HMAC(password.asChars().begin(), password.size(), salt.begin(), salt.size(),
-          iterations, digest, length, buf.begin()) != 1) {
+          iterations, digest, length, buf.asArrayPtr().begin()) != 1) {
     return kj::none;
   }
-  return kj::mv(buf);
+  return jsg::BufferSource(js, kj::mv(buf));
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(jsg::Lock& js,
