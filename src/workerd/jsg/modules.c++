@@ -272,34 +272,12 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
 
-  JSG_REQUIRE_NONNULL(
-      info.maybeSynthetic, TypeError, "Cannot use require() to import an ES Module.");
-
-  auto module = info.module.getHandle(js);
-
-  check(module->InstantiateModule(js.v8Context(), &resolveCallback));
-  auto handle = check(module->Evaluate(js.v8Context()));
-  KJ_ASSERT(handle->IsPromise());
-  auto prom = handle.As<v8::Promise>();
-
-  // This assert should always pass since evaluateSyntheticModuleCallback() for CommonJS
-  // modules (below) always returns an already-resolved promise.
-  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
-
-  if (module->GetStatus() == v8::Module::kErrored) {
-    throwTunneledException(js.v8Isolate, module->GetException());
-  }
-
-  // Originally, This returned an object like `{default: module.exports}` when we really
-  // intended to return the module exports raw. We should be extracting `default` here.
-  // Unfortunately, there is a user depending on the wrong behavior in production, so we
-  // needed a compatibility flag to fix.
+  ModuleRegistry::RequireImplOptions options = ModuleRegistry::RequireImplOptions::DEFAULT;
   if (getCommonJsExportDefault(js.v8Isolate)) {
-    return check(module->GetModuleNamespace().As<v8::Object>()->Get(
-        js.v8Context(), v8StrIntern(js.v8Isolate, "default")));
-  } else {
-    return module->GetModuleNamespace();
+    options = ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
   }
+
+  return ModuleRegistry::requireImpl(js, info, options);
 }
 
 v8::Local<v8::Value> NonModuleScript::runAndReturn(v8::Local<v8::Context> context) const {
@@ -322,32 +300,43 @@ NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::
   return NonModuleScript(js, check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
 }
 
-void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
+void instantiateModule(
+    jsg::Lock& js, v8::Local<v8::Module>& module, InstantiateModuleOptions options) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;
   auto context = js.v8Context();
 
   auto status = module->GetStatus();
-  // Nothing to do if the module is already instantiated, evaluated, or errored.
-  if (status == v8::Module::Status::kInstantiated || status == v8::Module::Status::kEvaluated ||
-      status == v8::Module::Status::kErrored)
-    return;
 
-  JSG_REQUIRE(status == v8::Module::Status::kUninstantiated, Error,
-      "Module cannot be synchronously required while it is being instantiated or evaluated. "
-      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
-      "dependency on itself, and that a synchronous require() is being called while the module "
-      "is being loaded.");
+  // If the previous instantiation failed, throw the exception.
+  if (status == v8::Module::Status::kErrored) {
+    isolate->ThrowException(module->GetException());
+    throw jsg::JsExceptionThrown();
+  }
 
-  jsg::check(module->InstantiateModule(context, &resolveCallback));
+  // Nothing to do if the module is already evaluated.
+  if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
+
+  if (status == v8::Module::Status::kUninstantiated) {
+    jsg::check(module->InstantiateModule(context, &resolveCallback));
+  }
+
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
+
+  if (module->IsGraphAsync() && prom->State() == v8::Promise::kPending) {
+    // If top level await has been disable, error.
+    JSG_REQUIRE(options != InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT, Error,
+        "Top-level await in module is not permitted at this time.");
+  }
+  // We run microtasks to ensure that any promises that happen to be scheduled
+  // during the evaluation of the top level scope have a chance to be settled,
+  // even if those are not directly awaited.
   js.runMicrotasks();
 
   switch (prom->State()) {
     case v8::Promise::kPending:
-      // Let's make sure nobody is depending on pending modules that do not resolve first.
-      KJ_LOG(WARNING, "Async module was not immediately resolved.");
-      break;
+      // Let's make sure nobody is depending on modules awaiting on pending promises.
+      JSG_FAIL_REQUIRE(Error, "Top-level await in module is unsettled.");
     case v8::Promise::kRejected:
       // Since we don't actually support I/O when instantiating a worker, we don't return the
       // promise from module->Evaluate, which means we lose any errors that happen during
@@ -484,7 +473,7 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
 
 // ======================================================================================
 
-jsg::Ref<jsg::Object> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
+jsg::Ref<NodeJsModuleContext> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
     jsg::Lock& js, kj::StringPtr name) {
   return jsg::alloc<NodeJsModuleContext>(js, kj::Path::parse(name));
 }
@@ -592,23 +581,7 @@ v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String spec
         info.maybeSynthetic, TypeError, "Cannot use require() to import an ES Module.");
   }
 
-  auto module = info.module.getHandle(js);
-
-  jsg::instantiateModule(js, module);
-
-  auto handle = jsg::check(module->Evaluate(js.v8Context()));
-  KJ_ASSERT(handle->IsPromise());
-  auto prom = handle.As<v8::Promise>();
-
-  // This assert should always pass since evaluateSyntheticModuleCallback() for CommonJS
-  // modules (below) always returns an already-resolved promise.
-  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
-
-  if (module->GetStatus() == v8::Module::kErrored) {
-    jsg::throwTunneledException(js.v8Isolate, module->GetException());
-  }
-
-  return js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj);
+  return ModuleRegistry::requireImpl(js, info, ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT);
 }
 
 v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
@@ -677,6 +650,81 @@ kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallb
     return fallback(js, specifier.toString(true), kj::mv(maybeRef), observer, method, rawSpecifier);
   }
   return kj::none;
+}
+
+JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptions options) {
+  auto module = info.module.getHandle(js);
+
+  // If the module status is evaluating or instantiating then the module is likely
+  // has a circular dependency on itself. If the module is a CommonJS or NodeJS
+  // module, we can return the exports object directly here.
+  if (module->GetStatus() == v8::Module::Status::kEvaluating ||
+      module->GetStatus() == v8::Module::Status::kInstantiating) {
+    KJ_IF_SOME(synth, info.maybeSynthetic) {
+      KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::CommonJsModuleInfo>()) {
+        return JsValue(cjs.moduleContext->getExports(js));
+      }
+      KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::NodeJsModuleInfo>()) {
+        return JsValue(cjs.moduleContext->getExports(js));
+      }
+    }
+  }
+
+  // When using require(...) we previously allowed the required modules to use
+  // top-level await. With a compat flag we disable use of top-level await but
+  // ONLY when the module is synchronously required. The same module being imported
+  // either statically or dynamically can still use TLA. This aligns with behavior
+  // being implemented in other JS runtimes.
+  auto& isolateBase = IsolateBase::from(js.v8Isolate);
+  jsg::InstantiateModuleOptions opts = jsg::InstantiateModuleOptions::DEFAULT;
+  if (!isolateBase.isTopLevelAwaitEnabled()) {
+    opts = jsg::InstantiateModuleOptions::NO_TOP_LEVEL_AWAIT;
+
+    // If the module was already evaluated, let's check if it is async.
+    // If it is, we will throw an error. This case can happen if a previous
+    // attempt to require the module failed because the module was async.
+    if (module->GetStatus() == v8::Module::kEvaluated) {
+      JSG_REQUIRE(!module->IsGraphAsync(), Error,
+          "Top-level await in module is not permitted at this time.");
+    }
+  }
+
+  jsg::instantiateModule(js, module, opts);
+
+  if (info.maybeSynthetic == kj::none) {
+    // If the module is an ESM and the __cjsUnwrapDefault flag is set to true, we will
+    // always return the default export regardless of the options.
+    // Otherwise fallback to the options. This is an early version of the "module.exports"
+    // convention that Node.js finally adopted for require(esm) that was not officially
+    // adopted but there are a handful of modules in the ecosystem that supported it
+    // early. It's trivial for us to support here so let's just do so.
+    JsObject obj(module->GetModuleNamespace().As<v8::Object>());
+    if (obj.get(js, "__cjsUnwrapDefault"_kj) == js.boolean(true)) {
+      return obj.get(js, "default"_kj);
+    }
+    // If the ES Module namespace exports a "module.exports" key then that will be the
+    // export that is returned by the require(...) call per Node.js' recently added
+    // require(esm) support.
+    // See: https://nodejs.org/docs/latest/api/modules.html#loading-ecmascript-modules-using-require
+    if (obj.has(js, "module.exports"_kj)) {
+      // We only want to return the value if it is explicitly specified, otherwise we'll
+      // always be returning undefined.
+      return obj.get(js, "module.exports"_kj);
+    }
+  }
+
+  // Originally, require returned an object like `{default: module.exports}` when we really
+  // intended to return the module exports raw. We should be extracting `default` here.
+  // When Node.js recently finally adopted require(esm), they adopted the default behavior
+  // of exporting the module namespace, which is fun. We'll stick with our default here for
+  // now but users can get Node.js-like behavior by switching off the
+  // exportCommonJsDefaultNamespace compat flag.
+  if (options == RequireImplOptions::EXPORT_DEFAULT) {
+    return JsValue(check(module->GetModuleNamespace().As<v8::Object>()->Get(
+        js.v8Context(), v8StrIntern(js.v8Isolate, "default"))));
+  }
+
+  return JsValue(module->GetModuleNamespace());
 }
 
 }  // namespace workerd::jsg

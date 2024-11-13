@@ -195,6 +195,10 @@ void Lock::setNodeJsCompatEnabled() {
   IsolateBase::from(v8Isolate).setNodeJsCompatEnabled({}, true);
 }
 
+void Lock::disableTopLevelAwait() {
+  IsolateBase::from(v8Isolate).disableTopLevelAwait();
+}
+
 void Lock::setToStringTag() {
   IsolateBase::from(v8Isolate).enableSetToStringTag();
 }
