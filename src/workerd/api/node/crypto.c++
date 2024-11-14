@@ -12,7 +12,8 @@
 
 namespace workerd::api::node {
 
-kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash,
+jsg::BufferSource CryptoImpl::getHkdf(jsg::Lock& js,
+    kj::String hash,
     kj::Array<const kj::byte> key,
     kj::Array<const kj::byte> salt,
     kj::Array<const kj::byte> info,
@@ -43,10 +44,10 @@ kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash,
   JSG_REQUIRE(
       length <= EVP_MD_size(digest) * kMaxDigestMultiplier, RangeError, "Invalid Hkdf key length");
 
-  return JSG_REQUIRE_NONNULL(hkdf(length, digest, key, salt, info), Error, "Hkdf failed");
+  return JSG_REQUIRE_NONNULL(hkdf(js, length, digest, key, salt, info), Error, "Hkdf failed");
 }
 
-kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
+jsg::BufferSource CryptoImpl::getPbkdf(jsg::Lock& js,
     kj::Array<const kj::byte> password,
     kj::Array<const kj::byte> salt,
     uint32_t num_iterations,
@@ -70,10 +71,10 @@ kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
 
   // Both pass and salt may be zero length here.
   return JSG_REQUIRE_NONNULL(
-      pbkdf2(keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
+      pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
 }
 
-kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
+jsg::BufferSource CryptoImpl::getScrypt(jsg::Lock& js,
     kj::Array<const kj::byte> password,
     kj::Array<const kj::byte> salt,
     uint32_t N,
@@ -86,7 +87,7 @@ kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Scrypt failed: salt is too large");
 
   return JSG_REQUIRE_NONNULL(
-      scrypt(keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
+      scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
 }
 
 bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
