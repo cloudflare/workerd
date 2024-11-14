@@ -278,6 +278,10 @@ bool JsString::operator==(const JsString& other) const {
   return inner->StringEquals(other.inner);
 }
 
+JsString JsString::internalize(Lock& js) const {
+  return JsString(inner->InternalizeString(js.v8Isolate));
+}
+
 JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options) const {
   WriteIntoStatus result = {0, 0};

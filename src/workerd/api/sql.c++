@@ -25,6 +25,11 @@ SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
+  // Internalize the string, so that the cache can be keyed by string identity rather than content.
+  // Any string we put into the cache is expected to live there for a while anyway, so even if it
+  // is a one-off, internalizing it (which moves it to the old generation) shouldn't hurt.
+  querySql = querySql.internalize(js);
+
   auto& db = getDb(js);
   auto& statementCache = *this->statementCache;
 

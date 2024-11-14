@@ -1028,10 +1028,8 @@ async function test(state) {
 
     // Qeury based on computed string is cached.
     assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
-
-    // TODO(now): These should be true.
-    assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
-    assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
+    assert.equal(true, isCached('SELECT "' + 'x'.repeat(4) + '"'));
+    assert.equal(true, isCached('SELECT "' + 'x'.repeat(4) + '"'));
   }
 }
 

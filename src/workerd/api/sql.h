@@ -307,7 +307,9 @@ class SqlStorage::Statement final: public jsg::Object {
 public:
   Statement(jsg::Lock& js, jsg::Ref<SqlStorage> sqlStorage, jsg::JsString query)
       : sqlStorage(kj::mv(sqlStorage)),
-        query(js.v8Isolate, query) {}
+        // Internalize the string before constructing the statement so that it doesn't have to
+        // re-lookup the internalized string for every invocation.
+        query(js.v8Isolate, query.internalize(js)) {}
 
   jsg::Ref<Cursor> run(jsg::Lock& js, jsg::Arguments<BindingValue> bindings);
 
