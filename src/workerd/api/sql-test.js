@@ -1012,6 +1012,27 @@ async function test(state) {
   await state.blockConcurrencyWhile(async () => {
     sql.exec(`PRAGMA foreign_keys = ON;`);
   });
+
+  // Verify caching.
+  {
+    let isCached = (q) => {
+      let cursor = sql.exec(q);
+      cursor.toArray();
+      return cursor.reusedCachedQueryForTest;
+    };
+
+    // Query based on literal string is cached.
+    assert.equal(false, isCached('SELECT 179321'));
+    assert.equal(true, isCached('SELECT 179321'));
+    assert.equal(true, isCached('SELECT 179321'));
+
+    // Qeury based on computed string is cached.
+    assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
+
+    // TODO(now): These should be true.
+    assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
+    assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
+  }
 }
 
 async function testIoStats(storage) {

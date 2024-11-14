@@ -159,6 +159,8 @@ void SqlStorage::Cursor::initColumnNames(jsg::Lock& js, State& stateRef) {
   // TODO(cleanup): Make `js.withinHandleScope` understand `jsg::JsValue` types in addition to
   //   `v8::Local`.
   KJ_IF_SOME(cached, stateRef.cachedStatement) {
+    reusedCachedQuery = cached->useCount++ > 0;
+
     KJ_IF_SOME(names, cached->cachedColumnNames) {
       // Use cached copy.
       columnNames = names.addRef(js);
