@@ -10,8 +10,7 @@
 
 namespace workerd::api {
 
-kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
-    size_t length,
+kj::Maybe<kj::Array<kj::byte>> scrypt(size_t length,
     uint32_t N,
     uint32_t r,
     uint32_t p,
@@ -19,9 +18,9 @@ kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> pass,
     kj::ArrayPtr<const kj::byte> salt) {
   ClearErrorOnReturn clearErrorOnReturn;
-  auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
+  auto buf = kj::heapArray<kj::byte>(length);
   if (!EVP_PBE_scrypt(pass.asChars().begin(), pass.size(), salt.begin(), salt.size(), N, r, p,
-          maxmem, buf.asArrayPtr().begin(), length)) {
+          maxmem, buf.begin(), length)) {
     // This does not currently handle the errors in exactly the same way as
     // the Node.js implementation but that's probably ok? We can update the
     // error thrown to match Node.js more closely later if necessary. There
@@ -31,7 +30,7 @@ kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
     }
     return kj::none;
   }
-  return jsg::BufferSource(js, kj::mv(buf));
+  return kj::mv(buf);
 }
 
 }  // namespace workerd::api
