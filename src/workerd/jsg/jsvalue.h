@@ -240,6 +240,12 @@ public:
 
   bool operator==(const JsString& other) const;
 
+  // "Internalize" the string. Returns a string with the same content but which is identity-equal
+  // to all other internalized strings with the same content. If the string is already
+  // internalized, this returns the same value. Note that strings originating from literals in the
+  // code are always internalized.
+  JsString internalize(Lock& js) const;
+
   static JsString concat(Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
 
   enum WriteOptions {

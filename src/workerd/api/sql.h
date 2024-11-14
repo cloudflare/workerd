@@ -87,6 +87,7 @@ private:
     SqliteDatabase::Statement statement;
     kj::Maybe<jsg::JsRef<jsg::JsArray>> cachedColumnNames;  // initialized on first exec
     kj::ListLink<CachedStatement> lruLink;
+    uint useCount = 0;
 
     CachedStatement(jsg::Lock& js,
         SqlStorage& sqlStorage,
@@ -190,7 +191,7 @@ public:
   double getRowsWritten();
 
   jsg::JsArray getColumnNames(jsg::Lock& js);
-  JSG_RESOURCE_TYPE(Cursor) {
+  JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
     JSG_METHOD(next);
     JSG_METHOD(toArray);
     JSG_METHOD(one);
@@ -210,6 +211,10 @@ public:
       one(): T;
       columnNames: string[];
     });
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(reusedCachedQueryForTest, getReusedCachedQueryForTest);
+    }
   }
 
   JSG_ITERATOR(RowIterator, rows, jsg::JsObject, jsg::Ref<Cursor>, rowIteratorNext);
@@ -224,6 +229,10 @@ public:
       tracker.trackFieldWithSize("IoOwn<State>", sizeof(IoOwn<State>));
     }
     tracker.trackField("columnNames", columnNames);
+  }
+
+  bool getReusedCachedQueryForTest() {
+    return reusedCachedQuery;
   }
 
 private:
@@ -250,6 +259,9 @@ private:
   // True if the cursor was canceled by a new call to the same statement. This is used only to
   // flag an error if the application tries to reuse the cursor.
   bool canceled = false;
+
+  // Did we reuse a query from the query cache? Tracked for testing purposes.
+  bool reusedCachedQuery = false;
 
   // Reference to a weak reference that might point back to this object. If so, null it out at
   // destruction. Used by Statement to invalidate past cursors when the statement is
@@ -295,7 +307,9 @@ class SqlStorage::Statement final: public jsg::Object {
 public:
   Statement(jsg::Lock& js, jsg::Ref<SqlStorage> sqlStorage, jsg::JsString query)
       : sqlStorage(kj::mv(sqlStorage)),
-        query(js.v8Isolate, query) {}
+        // Internalize the string before constructing the statement so that it doesn't have to
+        // re-lookup the internalized string for every invocation.
+        query(js.v8Isolate, query.internalize(js)) {}
 
   jsg::Ref<Cursor> run(jsg::Lock& js, jsg::Arguments<BindingValue> bindings);
 
