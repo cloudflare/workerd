@@ -35,7 +35,7 @@ class WorkerdApi final: public Worker::Api {
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
       v8::Isolate::CreateParams createParams,
-      kj::Own<IsolateObserver> observer,
+      kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
@@ -55,10 +55,8 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
-  IsolateObserver& getMetrics() override;
-  const IsolateObserver& getMetrics() const override;
-  void setEnforcer(IsolateLimitEnforcer&) override;
-  void invalidateEnforcer() override;
+  const jsg::IsolateObserver& getObserver() const override;
+  void setIsolateObserver(IsolateObserver&) override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,

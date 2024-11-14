@@ -663,7 +663,7 @@ struct Worker::Isolate::Impl {
   //   because our GlobalScope object needs to have a function called on it, and any attached
   //   inspector needs to be notified. JSG doesn't know about these things.
 
-  Impl(Api& api,
+  Impl(const Api& api,
       IsolateObserver& metrics,
       IsolateLimitEnforcer& limitEnforcer,
       InspectorPolicy inspectorPolicy)
@@ -971,20 +971,21 @@ const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
 }  // namespace
 
 Worker::Isolate::Isolate(kj::Own<Api> apiParam,
+    kj::Own<IsolateObserver> metricsParam,
     kj::StringPtr id,
     kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
     ConsoleMode consoleMode)
-    : metrics(kj::atomicAddRef(apiParam->getMetrics())),
+    : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
-      api(kj::mv(apiParam)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      api(kj::mv(apiParam)),
       consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
-  api->setEnforcer(*limitEnforcer);
+  api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -1333,7 +1334,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
             KJ_SWITCH_ONEOF(source) {
               KJ_CASE_ONEOF(script, ScriptSource) {
                 impl->globals =
-                    script.compileGlobals(lock, isolate->getApi(), isolate->impl->metrics);
+                    script.compileGlobals(lock, isolate->getApi(), isolate->getApi().getObserver());
 
                 {
                   // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
@@ -1406,7 +1407,6 @@ Worker::Isolate::~Isolate() noexcept(false) {
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
   });
-  api->invalidateEnforcer();
 }
 
 Worker::Script::~Script() noexcept(false) {

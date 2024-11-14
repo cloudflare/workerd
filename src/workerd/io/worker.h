@@ -274,7 +274,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Usually it matches the script ID. An exception is preview isolates: there, each preview
   // session has one isolate which may load many iterations of the script (this allows the
   // inspector session to stay open across them).
+  // The Isolate object owns the Api object and outlives it in order to report teardown timing.
+  // The Api object is created before the Isolate object and does not strictly require
+  // request-specific information.
   explicit Isolate(kj::Own<Api> api,
+      kj::Own<IsolateObserver> metrics,
       kj::StringPtr id,
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
@@ -409,9 +413,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
 
   kj::String id;
-  kj::Own<Api> api;
-  // TODO: should this be before or after api?
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
+  kj::Own<Api> api;
   ConsoleMode consoleMode;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
@@ -534,10 +537,8 @@ class Worker::Api {
   virtual jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const = 0;
 
-  virtual IsolateObserver& getMetrics() = 0;
-  virtual const IsolateObserver& getMetrics() const = 0;
-  virtual void setEnforcer(IsolateLimitEnforcer&) = 0;
-  virtual void invalidateEnforcer() = 0;
+  virtual const jsg::IsolateObserver& getObserver() const = 0;
+  virtual void setIsolateObserver(IsolateObserver&) = 0;
 
   // Set the module fallback service callback, if any.
   using ModuleFallbackCallback = kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(

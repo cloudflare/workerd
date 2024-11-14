@@ -132,7 +132,7 @@ static const PythonConfig defaultConfig{
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
-  kj::Own<IsolateObserver> observer;
+  kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
@@ -160,7 +160,7 @@ struct WorkerdApi::Impl final {
   Impl(jsg::V8System& v8System,
       CompatibilityFlags::Reader featuresParam,
       v8::Isolate::CreateParams createParams,
-      kj::Own<IsolateObserver> observerParam,
+      kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
@@ -169,10 +169,7 @@ struct WorkerdApi::Impl final {
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
-        pythonConfig(pythonConfig) {
-    jsgIsolate.runInLockScope(
-        [&](JsgWorkerdIsolate::Lock& lock) { limitEnforcer->customizeIsolate(lock.v8Isolate); });
-  }
+        pythonConfig(pythonConfig) {}
 
   static v8::Local<v8::String> compileTextGlobal(
       JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
@@ -215,7 +212,7 @@ struct WorkerdApi::Impl final {
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
     v8::Isolate::CreateParams createParams,
-    kj::Own<IsolateObserver> observer,
+    kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
@@ -271,16 +268,11 @@ jsg::JsObject WorkerdApi::wrapExecutionContext(
       kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
 }
 
-IsolateObserver& WorkerdApi::getMetrics() {
+const jsg::IsolateObserver& WorkerdApi::getObserver() const {
   return *impl->observer;
 }
 
-const IsolateObserver& WorkerdApi::getMetrics() const {
-  return *impl->observer;
-}
-
-void WorkerdApi::setEnforcer(IsolateLimitEnforcer&) {}
-void WorkerdApi::invalidateEnforcer() {}
+void WorkerdApi::setIsolateObserver(IsolateObserver&) {};
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
