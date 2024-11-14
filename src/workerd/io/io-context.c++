@@ -833,7 +833,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
       });
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannelSpans(uint channel,
+kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     kj::ConstString operationName,
@@ -896,7 +896,7 @@ kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
     kj::Maybe<kj::String> cfBlobJson,
     kj::ConstString operationName,
     std::initializer_list<SpanTagParams> tags) {
-  return asHttpClient(getSubrequestChannelSpans(
+  return asHttpClient(getSubrequestChannelWithSpans(
       channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
 }
 

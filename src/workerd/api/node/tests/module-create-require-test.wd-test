@@ -10,10 +10,12 @@ const unitTests :Workerd.Config = (
           (name = "bar", esModule = "export default 2; export const __cjsUnwrapDefault = true;"),
           (name = "baz", commonJsModule = "module.exports = 3;"),
           (name = "worker/qux", text = "4"),
-          (name = "invalid", esModule = "const p = new Promise(() => {}); await p;"),
+          (name = "invalid", esModule = "await new Promise(() => {});"),
+          (name = "invalid2", commonJsModule = "require('invalid3');"),
+          (name = "invalid3", esModule = "await new Promise(() => {});"),
         ],
         compatibilityDate = "2024-08-01",
-        compatibilityFlags = ["nodejs_compat_v2"]
+        compatibilityFlags = ["disable_top_level_await_in_require", "nodejs_compat_v2"]
       )
     ),
   ],

@@ -217,13 +217,6 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
           jsg::ModuleRegistry::ResolveMethod::IMPORT, rawSpecifier.asPtr())) {
     auto module = info.module.getHandle(js);
     jsg::instantiateModule(js, module);
-    auto handle = jsg::check(module->Evaluate(js.v8Context()));
-    KJ_ASSERT(handle->IsPromise());
-    auto prom = handle.As<v8::Promise>();
-    KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
-    if (module->GetStatus() == v8::Module::kErrored) {
-      jsg::throwTunneledException(js.v8Isolate, module->GetException());
-    }
 
     // For Node.js modules, we want to grab the default export and return that.
     // For other built-ins, we'll return the module namespace instead. Can be

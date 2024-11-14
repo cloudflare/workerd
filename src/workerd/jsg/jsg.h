@@ -2516,6 +2516,7 @@ public:
 
   void setNodeJsCompatEnabled();
   void setToStringTag();
+  void disableTopLevelAwait();
 
   using Logger = void(Lock&, kj::StringPtr);
   void setLoggerCallback(kj::Function<Logger>&& logger);

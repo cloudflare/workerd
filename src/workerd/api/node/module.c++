@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "module.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api::node {
@@ -80,33 +81,13 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
             jsg::ModuleRegistry::ResolveMethod::REQUIRE, spec.asPtr()),
         Error, "No such module \"", targetPath.toString(), "\".");
 
-    bool isEsm = info.maybeSynthetic == kj::none;
-
-    auto module = info.module.getHandle(js);
-
-    jsg::instantiateModule(js, module);
-    auto handle = jsg::check(module->Evaluate(js.v8Context()));
-    KJ_ASSERT(handle->IsPromise());
-    auto prom = handle.As<v8::Promise>();
-    if (prom->State() == v8::Promise::PromiseState::kPending) {
-      js.runMicrotasks();
-    }
-    JSG_REQUIRE(prom->State() != v8::Promise::PromiseState::kPending, Error,
-        "Module evaluation did not complete synchronously.");
-    if (module->GetStatus() == v8::Module::kErrored) {
-      jsg::throwTunneledException(js.v8Isolate, module->GetException());
+    jsg::ModuleRegistry::RequireImplOptions options =
+        jsg::ModuleRegistry::RequireImplOptions::DEFAULT;
+    if (info.maybeSynthetic != kj::none) {
+      options = jsg::ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
     }
 
-    if (isEsm) {
-      // If the import is an esm module, we will return the namespace object.
-      jsg::JsObject obj(module->GetModuleNamespace().As<v8::Object>());
-      if (obj.get(js, "__cjsUnwrapDefault"_kj) == js.boolean(true)) {
-        return obj.get(js, "default"_kj);
-      }
-      return obj;
-    }
-
-    return jsg::JsValue(js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj));
+    return jsg::ModuleRegistry::requireImpl(js, info, options);
   }));
 }
 

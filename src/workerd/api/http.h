@@ -356,7 +356,7 @@ public:
 
   kj::Maybe<jsg::Ref<ReadableStream>> getBody();
   bool getBodyUsed();
-  jsg::Promise<kj::Array<byte>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
   jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js);
@@ -501,7 +501,7 @@ public:
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
-  using GetResult = kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::Value>;
+  using GetResult = kj::OneOf<jsg::Ref<ReadableStream>, jsg::BufferSource, kj::String, jsg::Value>;
 
   jsg::Promise<GetResult> get(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type);
 

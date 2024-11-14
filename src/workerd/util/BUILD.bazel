@@ -40,7 +40,6 @@ wd_cc_library(
         "batch-queue.h",
         "canceler.h",
         "color-util.h",
-        "duration-exceeded-logger.h",
         "http-util.h",
         "stream-utils.h",
         "uncaught-exception-source.h",
@@ -50,6 +49,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
@@ -199,6 +199,7 @@ wd_cc_library(
     name = "duration-exceeded-logger",
     hdrs = ["duration-exceeded-logger.h"],
     visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 exports_files(["autogate.h"])

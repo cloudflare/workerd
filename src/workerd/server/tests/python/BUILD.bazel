@@ -1,6 +1,5 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
-load("//:build/wd_test.bzl", "wd_test")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 

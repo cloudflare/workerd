@@ -438,10 +438,7 @@ export function generateKey(
   _options: GenerateKeyOptions,
   callback: GenerateKeyCallback
 ) {
-  // We intentionally have not implemented key generation up to this point.
-  // The reason is that generation of cryptographically safe keys is a CPU
-  // intensive operation that can often exceed limits on the amount of CPU
-  // time a worker is allowed.
+  // This API is not implemented yet.
   callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync'));
 }
 
@@ -449,10 +446,7 @@ export function generateKeySync(
   _type: SecretKeyType,
   _options: GenerateKeyOptions
 ) {
-  // We intentionally have not implemented key generation up to this point.
-  // The reason is that generation of cryptographically safe keys is a CPU
-  // intensive operation that can often exceed limits on the amount of CPU
-  // time a worker is allowed.
+  // This API is not implemented yet.
   throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync');
 }
 
@@ -461,10 +455,7 @@ export function generateKeyPair(
   _options: GenerateKeyPairOptions,
   callback: GenerateKeyPairCallback
 ) {
-  // We intentionally have not implemented key generation up to this point.
-  // The reason is that generation of cryptographically safe keys is a CPU
-  // intensive operation that can often exceed limits on the amount of CPU
-  // time a worker is allowed.
+  // This API is not implemented yet.
   callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeyPair'));
 }
 
@@ -472,9 +463,6 @@ export function generateKeyPairSync(
   _type: AsymmetricKeyType,
   _options: GenerateKeyPairOptions
 ): KeyObjectPair {
-  // We intentionally have not implemented key generation up to this point.
-  // The reason is that generation of cryptographically safe keys is a CPU
-  // intensive operation that can often exceed limits on the amount of CPU
-  // time a worker is allowed.
+  // This API is not implemented yet.
   throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeyPairSync');
 }

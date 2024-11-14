@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 
@@ -13,8 +14,6 @@ const {const_name} :Modules.Bundle = (
 ]);
 """
 
-MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {ts_declaration})"""
-
 def _to_name(file_name):
     return file_name.removesuffix(".js")
 
@@ -26,10 +25,85 @@ def _relative_path(file_path, dir_path):
         fail("file_path need to start with dir_path: " + file_path + " vs " + dir_path)
     return file_path.removeprefix(dir_path)
 
+def _gen_compile_cache_impl(ctx):
+    file_list = ctx.actions.declare_file("in")
+
+    srcs = []
+    for src in ctx.attr.srcs:
+        srcs.extend(src.files.to_list())
+
+    outs = [ctx.actions.declare_file(src.basename + "_cache") for src in srcs]
+
+    content = []
+    for i in range(0, len(srcs)):
+        content.append("{} {}".format(srcs[i].path, outs[i].path))
+
+    ctx.actions.write(
+        output = file_list,
+        content = "\n".join(content) + "\n",
+    )
+
+    args = ctx.actions.args()
+    args.add(file_list)
+
+    run_under = ctx.attr._run_under[BuildSettingInfo].value
+
+    # use run_shell together with cfg = target instead of ctx.actions.run
+    # to prevent double-compilation of v8.
+    ctx.actions.run_shell(
+        outputs = outs,
+        inputs = [file_list] + srcs,
+        command = run_under + " " + ctx.executable._tool.path + " $@",
+        arguments = [args],
+        use_default_shell_env = True,
+        tools = [ctx.executable._tool],
+    )
+
+    return [
+        DefaultInfo(files = depset(direct = outs)),
+    ]
+
+_gen_compile_cache = rule(
+    implementation = _gen_compile_cache_impl,
+    attrs = {
+        "srcs": attr.label_list(mandatory = True, allow_files = True),
+        "_tool": attr.label(
+            executable = True,
+            allow_single_file = True,
+            cfg = "target",
+            default = "//src/rust/gen-compile-cache",
+        ),
+        "_run_under": attr.label(default = "//build/config:target_run_under"),
+    },
+)
+
+def _get_compile_cache(compile_cache, m):
+    if not compile_cache:
+        return None
+    files = m.files.to_list()
+
+    if len(files) != 1:
+        fail("only single file expected")
+
+    return compile_cache.get(files[0].path)
+
+MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {extras})"""
+
 def _gen_api_bundle_capnpn_impl(ctx):
     output_dir = ctx.outputs.out.dirname + "/"
 
-    def _render_module(name, label, src_type, type):
+    def _render_module(name, label, src_type, type, cache = None):
+        ts_declaration_extra = (
+            "tsDeclaration = embed \"" + _relative_path(
+                ctx.expand_location("$(location {})".format(ctx.attr.declarations[name]), ctx.attr.data),
+                output_dir,
+            ) + "\", "
+        ) if name in ctx.attr.declarations else ""
+        cache_extra = (
+            "compileCache = embed \"{}\", ".format(_relative_path(cache, output_dir))
+        ) if cache else ""
+        extras = ts_declaration_extra + cache_extra
+
         return MODULE_TEMPLATE.format(
             name = name,
             # capnp doesn't allow ".." dir escape, make paths relative.
@@ -40,20 +114,21 @@ def _gen_api_bundle_capnpn_impl(ctx):
                 output_dir,
             ),
             type = type,
-            ts_declaration = (
-                "tsDeclaration = embed \"" + _relative_path(
-                    ctx.expand_location("$(location {})".format(ctx.attr.declarations[name]), ctx.attr.data),
-                    output_dir,
-                ) + "\", "
-            ) if name in ctx.attr.declarations else "",
+            extras = extras,
         )
 
+    compile_cache = {}
+    if ctx.attr.compile_cache:
+        locations = ctx.expand_location("$(locations {})".format(ctx.attr.compile_cache.label)).split(" ")
+        for loc in locations:
+            compile_cache[loc.removesuffix("_cache")] = loc
+
     modules = [
-        _render_module(ctx.attr.builtin_modules[m], m.label, "src", "builtin")
+        _render_module(ctx.attr.builtin_modules[m], m.label, "src", "builtin", _get_compile_cache(compile_cache, m))
         for m in ctx.attr.builtin_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_modules[m], m.label, "src", "internal")
+        _render_module(ctx.attr.internal_modules[m], m.label, "src", "internal", _get_compile_cache(compile_cache, m))
         for m in ctx.attr.internal_modules
     ]
     modules += [
@@ -90,6 +165,7 @@ gen_api_bundle_capnpn = rule(
         "data": attr.label_list(allow_files = True),
         "const_name": attr.string(mandatory = True),
         "deps": attr.label_list(),
+        "compile_cache": attr.label(),
     },
 )
 
@@ -124,7 +200,8 @@ def wd_js_bundle(
         internal_data_modules = [],
         internal_json_modules = [],
         declarations = [],
-        deps = []):
+        deps = [],
+        gen_compile_cache = False):
     """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
@@ -146,7 +223,7 @@ def wd_js_bundle(
      internal_json_modules: list of json source files
      declarations: d.ts label set
      deps: dependency list
-    Returns: The set of data dependencies
+     gen_compile_cache: generate compilation cache of every file and include into the bundle
     """
     builtin_modules_dict = {
         m: "{}:{}".format(import_name, _to_name(m))
@@ -200,6 +277,16 @@ def wd_js_bundle(
         list(internal_declarations.values())
     )
 
+    compile_cache = None
+    if gen_compile_cache:
+        _gen_compile_cache(
+            name = name + "@compile_cache",
+            srcs = builtin_modules_dict.keys() + internal_modules_dict.keys(),
+        )
+        compile_cache = name + "@compile_cache"
+        deps = deps + [compile_cache]
+        data = data + [compile_cache]
+
     gen_api_bundle_capnpn(
         name = name + "@gen",
         out = name + ".capnp",
@@ -213,6 +300,7 @@ def wd_js_bundle(
         declarations = builtin_declarations | internal_declarations,
         data = data,
         deps = deps,
+        compile_cache = compile_cache,
     )
 
     cc_capnp_library(

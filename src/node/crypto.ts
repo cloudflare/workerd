@@ -285,14 +285,14 @@ export default {
 //   * [x] crypto.createHash(algorithm[, options])
 //   * [x] crypto.createHmac(algorithm, key[, options])
 //   * [x] crypto.getHashes()
-// * Keys
-//   * [ ] crypto.createPrivateKey(key)
-//   * [ ] crypto.createPublicKey(key)
-//   * [x] crypto.createSecretKey(key[, encoding])
-//   * [x] crypto.generateKey(type, options, callback)
-//   * [x] crypto.generateKeyPair(type, options, callback)
-//   * [x] crypto.generateKeyPairSync(type, options)
-//   * [x] crypto.generateKeySync(type, options)
+// * Keys, not implemented yet. Calling the following APIs will throw a ERR_METHOD_NOT_IMPLEMENTED
+//   * [.] crypto.createPrivateKey(key)
+//   * [.] crypto.createPublicKey(key)
+//   * [.] crypto.createSecretKey(key[, encoding])
+//   * [.] crypto.generateKey(type, options, callback)
+//   * [.] crypto.generateKeyPair(type, options, callback)
+//   * [.] crypto.generateKeyPairSync(type, options)
+//   * [.] crypto.generateKeySync(type, options)
 // * Sign/Verify
 //   * [ ] crypto.createSign(algorithm[, options])
 //   * [ ] crypto.createVerify(algorithm[, options])

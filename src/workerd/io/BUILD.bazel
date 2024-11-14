@@ -59,6 +59,7 @@ wd_cc_library(
         "compatibility-date.h",
         "features.h",
         "hibernation-manager.h",
+        "io-channels.h",
         "io-context.h",
         "io-own.h",
         "io-util.h",
@@ -86,7 +87,6 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":cdp_capnp",
-        ":io-channels",
         ":io-gate",
         ":io-helpers",
         ":limit-enforcer",
@@ -228,16 +228,7 @@ wd_cc_library(
     name = "actor-id",
     hdrs = ["actor-id.h"],
     visibility = ["//visibility:public"],
-)
-
-wd_cc_library(
-    name = "io-channels",
-    hdrs = ["io-channels.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":actor-id",
-        ":trace",
-    ],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 genrule(

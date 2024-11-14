@@ -384,6 +384,11 @@ public:
     return BufferSource(js, KJ_ASSERT_NONNULL(maybeBackingStore).getTypedViewSlice<T>(start, end));
   }
 
+  template <BufferSourceType T = v8::Uint8Array>
+  BufferSource getTypedView(jsg::Lock& js) {
+    return BufferSource(js, KJ_ASSERT_NONNULL(maybeBackingStore).getTypedView<T>());
+  }
+
   JSG_MEMORY_INFO(BufferSource) {
     tracker.trackField("handle", handle);
     KJ_IF_SOME(backing, maybeBackingStore) {

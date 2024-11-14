@@ -1054,7 +1054,7 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   }
 }
 
-jsg::Promise<kj::Array<kj::byte>> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
+jsg::Promise<jsg::BufferSource> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
   return js.evalNow([&] {
     JSG_REQUIRE(!body->isDisturbed(), TypeError,
         "Body has already been used. "
@@ -1094,7 +1094,7 @@ jsg::Promise<jsg::Value> R2Bucket::GetResult::json(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
   // Copy-pasted from http.c++
-  return arrayBuffer(js).then(js, [this](jsg::Lock& js, kj::Array<byte> buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
     // httpMetadata can't be null because GetResult always populates it.
     kj::String contentType = KJ_REQUIRE_NONNULL(httpMetadata)
                                  .contentType.map([](const auto& str) {

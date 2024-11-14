@@ -972,16 +972,16 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     kj::StringPtr id,
     InspectorPolicy inspectorPolicy,
     ConsoleMode consoleMode)
-    : id(kj::str(id)),
+    : metrics(kj::atomicAddRef(apiParam->getMetrics())),
+      id(kj::str(id)),
       api(kj::mv(apiParam)),
       limitEnforcer(api->getLimitEnforcer()),
       consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
-      metrics(api->getMetrics()),
-      impl(kj::heap<Impl>(*api, metrics, limitEnforcer, inspectorPolicy)),
+      impl(kj::heap<Impl>(*api, *metrics, limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
-  metrics.created();
+  metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);
@@ -998,6 +998,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     }
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();
+    }
+    if (features.getNoTopLevelAwaitInRequire()) {
+      lock->disableTopLevelAwait();
     }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
@@ -1237,7 +1240,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       modular(source.is<ModulesSource>()),
       impl(kj::heap<Impl>()) {
   this->isPython = false;
-  auto parseMetrics = isolate->metrics.parse(startType);
+  auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
   //   previews, where it doesn't matter. If we ever do co-locate multiple scripts in the same
@@ -1371,13 +1374,13 @@ kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() con
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {
-  metrics.teardownStarted();
+  metrics->teardownStarted();
 
   // Update the isolate stats one last time to make sure we're accurate for cleanup in
   // `evicted()`.
-  limitEnforcer.reportMetrics(metrics);
+  limitEnforcer.reportMetrics(*metrics);
 
-  metrics.evicted();
+  metrics->evicted();
   weakIsolateRef->invalidate();
 
   // Make sure to destroy things under lock. This lock should never be contended since the isolate
@@ -1386,7 +1389,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
   // worker destruction queue.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     Isolate::Impl::Lock recordedLock(*this, Worker::Lock::TakeSynchronously(kj::none), stackScope);
-    metrics.teardownLockAcquired();
+    metrics->teardownLockAcquired();
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
   });

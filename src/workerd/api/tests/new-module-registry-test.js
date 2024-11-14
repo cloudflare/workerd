@@ -8,7 +8,7 @@ import {
 import { foo, default as def } from 'foo';
 import { default as fs } from 'node:fs';
 import { Buffer } from 'buffer';
-const { foo: foo2, default: def2 } = await import('bar');
+import { foo as foo2, default as def2 } from 'bar';
 
 // Verify that import.meta.url is correct here.
 strictEqual(import.meta.url, 'file:///worker');

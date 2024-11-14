@@ -849,15 +849,8 @@ jsg::JsValue resolveFromRegistry(jsg::Lock& js, kj::StringPtr specifier) {
   auto& info = JSG_REQUIRE_NONNULL(
       moduleRegistry->resolve(js, spec), Error, kj::str("No such module: ", specifier));
   auto module = info.module.getHandle(js);
-  jsg::instantiateModule(js, module);
 
-  auto handle = jsg::check(module->Evaluate(js.v8Context()));
-  KJ_ASSERT(handle->IsPromise());
-  auto prom = handle.As<v8::Promise>();
-  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
-  if (module->GetStatus() == v8::Module::kErrored) {
-    jsg::throwTunneledException(js.v8Isolate, module->GetException());
-  }
+  jsg::instantiateModule(js, module);
   return jsg::JsValue(js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj));
 }
 }  // namespace
