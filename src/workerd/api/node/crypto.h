@@ -115,15 +115,14 @@ public:
   };
 
   // Hkdf
-  jsg::BufferSource getHkdf(jsg::Lock& js,
-      kj::String hash,
+  kj::Array<kj::byte> getHkdf(kj::String hash,
       kj::Array<const kj::byte> key,
       kj::Array<const kj::byte> salt,
       kj::Array<const kj::byte> info,
       uint32_t length);
 
   // Pbkdf2
-  jsg::BufferSource getPbkdf(jsg::Lock& js,
+  kj::Array<kj::byte> getPbkdf(jsg::Lock& js,
       kj::Array<const kj::byte> password,
       kj::Array<const kj::byte> salt,
       uint32_t num_iterations,
@@ -131,7 +130,7 @@ public:
       kj::String name);
 
   // Scrypt
-  jsg::BufferSource getScrypt(jsg::Lock& js,
+  kj::Array<kj::byte> getScrypt(jsg::Lock& js,
       kj::Array<const kj::byte> password,
       kj::Array<const kj::byte> salt,
       uint32_t N,
