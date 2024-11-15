@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "syn",
+    name = "compact_str",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,32 +29,30 @@ rust_library(
         ],
     ),
     crate_features = [
-        "clone-impls",
         "default",
-        "derive",
-        "extra-traits",
-        "fold",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__rustversion-1.0.18//:rustversion",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=compact_str",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.87",
+    version = "0.8.0",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__unicode-ident-1.0.13//:unicode_ident",
+        "@crates_vendor__castaway-0.2.3//:castaway",
+        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+        "@crates_vendor__itoa-1.0.11//:itoa",
+        "@crates_vendor__ryu-1.0.18//:ryu",
+        "@crates_vendor__static_assertions-1.1.0//:static_assertions",
     ],
 )
