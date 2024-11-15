@@ -46,8 +46,8 @@ public:
         auto modules = ModuleRegistryImpl<IsolateType_TypeWrapper>::from(js);
         auto p = kj::Path::parse("main");
         modules->add(p,
-            jsg::ModuleRegistry::ModuleInfo(
-                lock, "main", code, ModuleInfoCompileOption::BUNDLE, observer));
+            jsg::ModuleRegistry::ModuleInfo(lock, "main", code, nullptr /* compile cache */,
+                ModuleInfoCompileOption::BUNDLE, observer));
 
         // Instantiate the module
         auto& moduleInfo = KJ_REQUIRE_NONNULL(modules->resolve(js, p));

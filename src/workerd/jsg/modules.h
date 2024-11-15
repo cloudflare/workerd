@@ -352,6 +352,7 @@ public:
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
+        kj::ArrayPtr<const kj::byte> compileCache,
         ModuleInfoCompileOption flags,
         const CompilationObserver& observer);
 
@@ -506,7 +507,8 @@ public:
       }
     }
     // TODO: asChars() might be wrong for wide characters
-    addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType());
+    addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType(),
+        module.getCompileCache().asBytes());
   }
 
   void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
@@ -521,11 +523,13 @@ public:
   // sourceCode has to exist while this ModuleRegistry exists.
   // The expectation is for this method to be called during the assembly of worker global context
   // after registering all user modules.
-  void addBuiltinModule(
-      kj::StringPtr specifier, kj::ArrayPtr<const char> sourceCode, Type type = Type::BUILTIN) {
+  void addBuiltinModule(kj::StringPtr specifier,
+      kj::ArrayPtr<const char> sourceCode,
+      Type type = Type::BUILTIN,
+      kj::ArrayPtr<const kj::byte> compileCache = {}) {
     KJ_ASSERT(type != Type::BUNDLE);
     auto path = kj::Path::parse(specifier);
-    entries.insert(kj::heap<Entry>(path, type, sourceCode));
+    entries.insert(kj::heap<Entry>(path, type, sourceCode, compileCache));
   }
 
   void addBuiltinModule(
@@ -728,15 +732,22 @@ private:
     // Either instantiated module or module source code.
     Info info;
 
+    // Optional compileCache.
+    kj::ArrayPtr<const kj::byte> compileCache;
+
     Entry(const kj::Path& specifier, Type type, ModuleInfo info)
         : specifier(specifier.clone()),
           type(type),
           info(kj::mv(info)) {}
 
-    Entry(const kj::Path& specifier, Type type, kj::ArrayPtr<const char> src)
+    Entry(const kj::Path& specifier,
+        Type type,
+        kj::ArrayPtr<const char> src,
+        kj::ArrayPtr<const kj::byte> compileCache)
         : specifier(specifier.clone()),
           type(type),
-          info(src) {}
+          info(src),
+          compileCache(compileCache) {}
 
     Entry(const kj::Path& specifier, Type type, ModuleCallback factory)
         : specifier(specifier.clone()),
@@ -756,8 +767,8 @@ private:
           return kj::Maybe<ModuleInfo&>(moduleInfo);
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info =
-              ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN, observer);
+          info = ModuleInfo(js, specifier.toString(), src, compileCache,
+              ModuleInfoCompileOption::BUILTIN, observer);
           return info.tryGet<ModuleInfo>();
         }
         KJ_CASE_ONEOF(src, ModuleCallback) {
