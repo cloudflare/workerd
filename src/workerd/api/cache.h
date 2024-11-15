@@ -72,11 +72,10 @@ public:
     JSG_METHOD(keys);
 
     JSG_TS_OVERRIDE({
-      delete(request: RequestInfo, options?: CacheQueryOptions): Promise<boolean>;
-      match(request: RequestInfo, options?: CacheQueryOptions): Promise<Response | undefined>;
-      put(request: RequestInfo, response: Response): Promise<void>;
+      delete(request: RequestInfo | URL, options?: CacheQueryOptions): Promise<boolean>;
+      match(request: RequestInfo | URL, options?: CacheQueryOptions): Promise<Response | undefined>;
+      put(request: RequestInfo | URL, response: Response): Promise<void>;
     });
-    // Use RequestInfo type alias to allow `URL`s as cache keys
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

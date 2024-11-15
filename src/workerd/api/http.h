@@ -598,7 +598,7 @@ public:
           ? Rpc.Provider<T, Reserved | "fetch" | "connect" | "queue" | "scheduled">
           : unknown
       ) & {
-        fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+        fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
         connect(address: SocketAddress | string, options?: SocketOptions): Socket;
         queue(queueName: string, messages: ServiceBindingQueueMessage[]): Promise<FetcherQueueResult>;
         scheduled(options?: FetcherScheduledOptions): Promise<FetcherScheduledResult>;
@@ -612,7 +612,7 @@ public:
           ? Rpc.Provider<T, Reserved | "fetch" | "connect">
           : unknown
       ) & {
-        fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+        fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
         connect(address: SocketAddress | string, options?: SocketOptions): Socket;
       });
     }
@@ -904,7 +904,7 @@ public:
 
     JSG_METHOD(clone);
 
-    JSG_TS_DEFINE(type RequestInfo<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> = Request<CfHostMetadata, Cf> | string | URL);
+    JSG_TS_DEFINE(type RequestInfo<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> = Request<CfHostMetadata, Cf> | string);
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
 
@@ -927,14 +927,14 @@ public:
       if(flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
         JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
-          constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+          constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
           clone(): Request<CfHostMetadata, Cf>;
           cache?: "no-store";
           get cf(): Cf | undefined;
         });
       } else {
         JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
-          constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+          constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
           clone(): Request<CfHostMetadata, Cf>;
           get cf(): Cf | undefined;
         });
@@ -961,7 +961,7 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(keepalive, getKeepalive);
 
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
-        constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+        constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
         clone(): Request<CfHostMetadata, Cf>;
         readonly cf?: Cf;
       });
