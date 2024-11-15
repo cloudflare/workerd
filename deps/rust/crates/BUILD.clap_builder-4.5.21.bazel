@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "lolhtml",
+    name = "clap_builder",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,13 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "error-context",
+        "help",
+        "std",
+        "suggestions",
+        "usage",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,16 +42,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lolhtml",
+        "crate-name=clap_builder",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.1.1",
+    version = "4.5.21",
     deps = [
-        "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
-        "@crates_vendor__libc-0.2.162//:libc",
-        "@crates_vendor__lol_html-2.0.0//:lol_html",
-        "@crates_vendor__thiserror-1.0.68//:thiserror",
+        "@crates_vendor__anstyle-1.0.10//:anstyle",
+        "@crates_vendor__clap_lex-0.7.3//:clap_lex",
+        "@crates_vendor__strsim-0.11.1//:strsim",
     ],
 )

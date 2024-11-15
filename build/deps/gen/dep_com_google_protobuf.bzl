@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v28.2"
-URL = "https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protobuf-28.2.tar.gz"
-STRIP_PREFIX = "protobuf-28.2"
-SHA256 = "b2340aa47faf7ef10a0328190319d3f3bee1b24f426d4ce8f4253b6f27ce16db"
+TAG_NAME = "v28.3"
+URL = "https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protobuf-28.3.tar.gz"
+STRIP_PREFIX = "protobuf-28.3"
+SHA256 = "7c3ebd7aaedd86fa5dc479a0fda803f602caaf78d8aff7ce83b89e1b8ae7442a"
 TYPE = "tgz"
 
 def dep_com_google_protobuf():

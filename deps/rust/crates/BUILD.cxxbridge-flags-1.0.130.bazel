@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "anstyle_parse",
+    name = "cxxbridge_flags",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,7 +30,6 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "utf8",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -39,13 +38,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anstyle-parse",
+        "crate-name=cxxbridge-flags",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.6",
-    deps = [
-        "@crates_vendor__utf8parse-0.2.2//:utf8parse",
-    ],
+    version = "1.0.130",
 )
