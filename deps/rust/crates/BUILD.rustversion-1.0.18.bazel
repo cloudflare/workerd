@@ -7,12 +7,12 @@
 ###############################################################################
 
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "serde",
+rust_proc_macro(
+    name = "rustversion",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,30 +29,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "derive",
-        "serde_derive",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2018",
-    proc_macro_deps = [
-        "@crates_vendor__serde_derive-1.0.214//:serde_derive",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=rustversion",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.214",
+    version = "1.0.18",
     deps = [
-        "@crates_vendor__serde-1.0.214//:build_script_build",
+        "@crates_vendor__rustversion-1.0.18//:build_script_build",
     ],
 )
 
@@ -75,14 +66,8 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "derive",
-        "serde_derive",
-        "std",
-    ],
     crate_name = "build_script_build",
-    crate_root = "build.rs",
+    crate_root = "build/build.rs",
     data = glob(
         include = ["**"],
         allow_empty = True,
@@ -96,18 +81,18 @@ cargo_build_script(
         ],
     ),
     edition = "2018",
-    pkg_name = "serde",
+    pkg_name = "rustversion",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=rustversion",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.214",
+    version = "1.0.18",
     visibility = ["//visibility:private"],
 )
 

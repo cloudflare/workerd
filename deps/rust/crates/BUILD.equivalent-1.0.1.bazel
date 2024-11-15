@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "flate2",
+    name = "equivalent",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,27 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "any_impl",
-        "default",
-        "miniz_oxide",
-        "rust_backend",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2015",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=flate2",
+        "crate-name=equivalent",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.34",
-    deps = [
-        "@crates_vendor__crc32fast-1.4.2//:crc32fast",
-        "@crates_vendor__miniz_oxide-0.8.0//:miniz_oxide",
-    ],
+    version = "1.0.1",
 )
