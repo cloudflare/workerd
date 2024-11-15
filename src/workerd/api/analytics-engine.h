@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/api/analytics-engine-impl.h>
-#include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-util.h>
 #include <workerd/jsg/jsg.h>

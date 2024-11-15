@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <workerd/io/frankenvalue.capnp.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/worker.h>
 
 namespace workerd {

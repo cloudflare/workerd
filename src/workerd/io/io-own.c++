@@ -2,6 +2,8 @@
 
 #include "io-context.h"
 
+#include <workerd/jsg/util.h>
+
 namespace workerd {
 
 #ifdef KJ_DEBUG
