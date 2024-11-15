@@ -1031,6 +1031,30 @@ async function test(state) {
     assert.equal(true, isCached('SELECT "' + 'x'.repeat(4) + '"'));
     assert.equal(true, isCached('SELECT "' + 'x'.repeat(4) + '"'));
   }
+
+  // Verify that if we alter a table, cached statements continue to work.
+  {
+    sql.exec('CREATE TABLE alterTableTest (a INTEGER)');
+    sql.exec('INSERT INTO alterTableTest VALUES (?)', 1);
+    assert.deepStrictEqual(sql.exec('SELECT * FROM alterTableTest').toArray(), [
+      { a: 1 },
+    ]);
+    sql.exec('ALTER TABLE alterTableTest ADD COLUMN b INTEGER').toArray();
+    assert.deepStrictEqual(sql.exec('SELECT * FROM alterTableTest').toArray(), [
+      { a: 1, b: null },
+    ]);
+    sql.exec('INSERT INTO alterTableTest VALUES (?, ?)', 2, 2);
+    assert.deepStrictEqual(sql.exec('SELECT * FROM alterTableTest').toArray(), [
+      { a: 1, b: null },
+      { a: 2, b: 2 },
+    ]);
+    sql.exec('INSERT INTO alterTableTest VALUES (?, ?)', 3, 3);
+    assert.deepStrictEqual(sql.exec('SELECT * FROM alterTableTest').toArray(), [
+      { a: 1, b: null },
+      { a: 2, b: 2 },
+      { a: 3, b: 3 },
+    ]);
+  }
 }
 
 async function testIoStats(storage) {
