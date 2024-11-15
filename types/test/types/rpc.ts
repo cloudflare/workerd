@@ -14,10 +14,13 @@ type TestType = {
   fieldString: string;
   fieldCallback: (p: string) => number;
   fieldBasicMap: Map<string, number>;
-  fieldComplexMap: Map<string, {
-    fieldString: string;
-    fieldCallback: (p: string) => number;
-  }>;
+  fieldComplexMap: Map<
+    string,
+    {
+      fieldString: string;
+      fieldCallback: (p: string) => number;
+    }
+  >;
   fieldSet: Set<string>;
   fieldSubLevel: {
     fieldString: string;
@@ -28,7 +31,7 @@ type TestType = {
 interface ABasicInterface {
   fieldString: string;
   fieldCallback: (p: string) => number;
-};
+}
 
 interface TestInterface extends ABasicInterface {
   fieldBasicMap: Map<string, number>;
@@ -39,11 +42,11 @@ interface TestInterface extends ABasicInterface {
     fieldCallback: (p: string) => number;
   };
   fieldSubLevelInterface: ABasicInterface;
-};
+}
 
 interface NonSerializableInterface {
   field: ReadableStream<string>;
-};
+}
 
 class TestCounter extends RpcTarget {
   constructor(private val = 0) {
@@ -220,10 +223,15 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
       fieldString: "a",
       fieldCallback: (p: string) => 1,
       fieldBasicMap: new Map([["b", 2]]),
-      fieldComplexMap: new Map([["c", {
-        fieldString: "d",
-        fieldCallback: (p: string) => 3,
-      }]]),
+      fieldComplexMap: new Map([
+        [
+          "c",
+          {
+            fieldString: "d",
+            fieldCallback: (p: string) => 3,
+          },
+        ],
+      ]),
       fieldSet: new Set(["e"]),
       fieldSubLevel: {
         fieldString: "f",
@@ -236,10 +244,15 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
       fieldString: "a",
       fieldCallback: (p: string) => 1,
       fieldBasicMap: new Map([["b", 2]]),
-      fieldComplexMap: new Map([["c", {
-        fieldString: "d",
-        fieldCallback: (p: string) => 3,
-      }]]),
+      fieldComplexMap: new Map([
+        [
+          "c",
+          {
+            fieldString: "d",
+            fieldCallback: (p: string) => 3,
+          },
+        ],
+      ]),
       fieldSet: new Set(["e"]),
       fieldSubLevelInline: {
         fieldString: "f",
@@ -374,7 +387,7 @@ export default <ExportedHandler<Env>>{
     // `toEqualTypeOf(...)` will fail if the function signature doesn't match *exactly*)
     {
       expectTypeOf(env.RPC_SERVICE.fetch).toEqualTypeOf<
-        (input: RequestInfo, init?: RequestInit) => Promise<Response>
+        (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
       >();
       expectTypeOf(env.RPC_SERVICE.connect).toEqualTypeOf<
         (address: SocketAddress | string, options?: SocketOptions) => Socket
@@ -391,7 +404,7 @@ export default <ExportedHandler<Env>>{
 
       const stub = env.RPC_OBJECT.get(env.RPC_OBJECT.newUniqueId());
       expectTypeOf(stub.fetch).toEqualTypeOf<
-        (input: RequestInfo, init?: RequestInit) => Promise<Response>
+        (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
       >();
       expectTypeOf(stub.connect).toEqualTypeOf<
         (address: SocketAddress | string, options?: SocketOptions) => Socket
@@ -520,10 +533,15 @@ export default <ExportedHandler<Env>>{
         RpcStub<(p: string) => number>
       >(); // stubified
       expectTypeOf(oType.fieldBasicMap).toEqualTypeOf<Map<string, number>>();
-      expectTypeOf(oType.fieldComplexMap).toEqualTypeOf<Map<string, {
-        fieldString: string;
-        fieldCallback: RpcStub<(p: string) => number>; // stubified
-      }>>();
+      expectTypeOf(oType.fieldComplexMap).toEqualTypeOf<
+        Map<
+          string,
+          {
+            fieldString: string;
+            fieldCallback: RpcStub<(p: string) => number>; // stubified
+          }
+        >
+      >();
       expectTypeOf(oType.fieldSet).toEqualTypeOf<Set<string>>();
       expectTypeOf(oType.fieldSubLevel.fieldString).toEqualTypeOf<string>();
       expectTypeOf(oType.fieldSubLevel.fieldCallback).toEqualTypeOf<
@@ -537,20 +555,31 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(oInterface.fieldCallback).toEqualTypeOf<
         RpcStub<(p: string) => number>
       >(); // stubified
-      expectTypeOf(oInterface.fieldBasicMap).toEqualTypeOf<Map<string, number>>();
-      expectTypeOf(oInterface.fieldComplexMap).toEqualTypeOf<Map<string, {
-        fieldString: string;
-        fieldCallback: RpcStub<(p: string) => number>; // stubified
-      }>>();
+      expectTypeOf(oInterface.fieldBasicMap).toEqualTypeOf<
+        Map<string, number>
+      >();
+      expectTypeOf(oInterface.fieldComplexMap).toEqualTypeOf<
+        Map<
+          string,
+          {
+            fieldString: string;
+            fieldCallback: RpcStub<(p: string) => number>; // stubified
+          }
+        >
+      >();
       expectTypeOf(oInterface.fieldSet).toEqualTypeOf<Set<string>>();
-      expectTypeOf(oInterface.fieldSubLevelInline.fieldString).toEqualTypeOf<string>();
+      expectTypeOf(
+        oInterface.fieldSubLevelInline.fieldString
+      ).toEqualTypeOf<string>();
       expectTypeOf(oInterface.fieldSubLevelInline.fieldCallback).toEqualTypeOf<
         RpcStub<(p: string) => number>
       >(); // stubified
-      expectTypeOf(oInterface.fieldSubLevelInterface.fieldString).toEqualTypeOf<string>();
-      expectTypeOf(oInterface.fieldSubLevelInterface.fieldCallback).toEqualTypeOf<
-        RpcStub<(p: string) => number>
-      >(); // stubified
+      expectTypeOf(
+        oInterface.fieldSubLevelInterface.fieldString
+      ).toEqualTypeOf<string>();
+      expectTypeOf(
+        oInterface.fieldSubLevelInterface.fieldCallback
+      ).toEqualTypeOf<RpcStub<(p: string) => number>>(); // stubified
 
       expectTypeOf(s.nonSerializable1).returns.toBeNever();
       // Note: Since one of the object's members is non-serializable,
