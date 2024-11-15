@@ -40,7 +40,7 @@ public:
         CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
-  SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override final {
+  SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
     JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError, getAlgorithmName(),
         " key only supports exporting \"raw\" & \"jwk\", not \"", format, "\".");
 
@@ -52,7 +52,9 @@ public:
       return jwk;
     }
 
-    return kj::heapArray(keyData.asPtr());
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, keyData.size());
+    backing.asArrayPtr().copyFrom(keyData);
+    return jsg::BufferSource(js, kj::mv(backing));
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -70,7 +72,7 @@ private:
 };
 }  // namespace
 
-kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
+kj::OneOf<kj::String, jsg::BufferSource, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
     jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options) {
   JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
   auto& opts = JSG_REQUIRE_NONNULL(options, TypeError, "Options must be an object");
@@ -78,7 +80,7 @@ kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl:
   kj::StringPtr format = JSG_REQUIRE_NONNULL(opts.format, TypeError, "Missing format option");
   if (format == "jwk"_kj) {
     // When format is jwk, all other options are ignored.
-    return key->impl->exportKey(format);
+    return key->impl->exportKey(js, format);
   }
 
   if (key->getType() == "secret"_kj) {
@@ -86,14 +88,15 @@ kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl:
     // one of either "buffer" or "jwk". The "buffer" option correlates to the "raw"
     // format in Web Crypto. The "jwk" option is handled above.
     JSG_REQUIRE(format == "buffer"_kj, TypeError, "Invalid format for secret key export: ", format);
-    return key->impl->exportKey("raw"_kj);
+    return key->impl->exportKey(js, "raw"_kj);
   }
 
   kj::StringPtr type = JSG_REQUIRE_NONNULL(opts.type, TypeError, "Missing type option");
-  auto data = key->impl->exportKeyExt(format, type, kj::mv(opts.cipher), kj::mv(opts.passphrase));
+  auto data =
+      key->impl->exportKeyExt(js, format, type, kj::mv(opts.cipher), kj::mv(opts.passphrase));
   if (format == "pem"_kj) {
     // TODO(perf): As a later performance optimization, change this so that it doesn't copy.
-    return kj::str(data.asChars());
+    return kj::str(data.asArrayPtr().asChars());
   }
   return kj::mv(data);
 }

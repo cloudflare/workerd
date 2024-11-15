@@ -11,7 +11,7 @@ class HmacContext final {
 public:
   using KeyData = kj::OneOf<kj::ArrayPtr<kj::byte>, CryptoKey::Impl*>;
 
-  HmacContext(kj::StringPtr algorithm, KeyData key);
+  HmacContext(jsg::Lock& js, kj::StringPtr algorithm, KeyData key);
   HmacContext(HmacContext&&) = default;
   HmacContext& operator=(HmacContext&&) = default;
   KJ_DISALLOW_COPY(HmacContext);

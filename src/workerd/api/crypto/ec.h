@@ -36,7 +36,7 @@ public:
   SubtleCrypto::JsonWebKey toJwk(
       KeyType keyType, kj::StringPtr curveName) const KJ_WARN_UNUSED_RESULT;
 
-  kj::Array<kj::byte> getRawPublicKey() const KJ_WARN_UNUSED_RESULT;
+  jsg::BufferSource getRawPublicKey(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const;
 

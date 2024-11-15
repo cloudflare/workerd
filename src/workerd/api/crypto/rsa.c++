@@ -36,27 +36,33 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
   return asUnsigned;
 }
 
-kj::Array<kj::byte> bioToArray(BIO* bio) {
+jsg::BufferSource bioToArray(jsg::Lock& js, BIO* bio) {
   BUF_MEM* bptr;
   BIO_get_mem_ptr(bio, &bptr);
-  auto buf = kj::heapArray<char>(bptr->length);
+  auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, bptr->length);
   auto aptr = kj::arrayPtr(bptr->data, bptr->length);
-  buf.asPtr().copyFrom(aptr);
-  return buf.releaseAsBytes();
+  buf.asArrayPtr().copyFrom(aptr.asBytes());
+  return jsg::BufferSource(js, kj::mv(buf));
 }
 
-kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input) {
+kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input) {
   auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
+  ;
   auto buf = kj::heapArray<kj::byte>(size);
   auto result = simdutf::base64_to_binary(
       input.begin(), input.size(), buf.asChars().begin(), simdutf::base64_url);
   if (result.error != simdutf::SUCCESS) return kj::none;
   KJ_ASSERT(result.count <= size);
-  return buf.first(result.count).attach(kj::mv(buf));
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, result.count);
+  auto src = kj::arrayPtr(buf.begin(), result.count);
+  backing.asArrayPtr().copyFrom(src);
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
-kj::Array<kj::byte> simdutfBase64UrlDecodeChecked(kj::StringPtr input, kj::StringPtr error) {
-  return JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(input), Error, error);
+jsg::BufferSource simdutfBase64UrlDecodeChecked(
+    jsg::Lock& js, kj::StringPtr input, kj::StringPtr error) {
+  return JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(js, input), Error, error);
 }
 }  // namespace
 
@@ -80,8 +86,8 @@ size_t Rsa::getModulusSize() const {
   return RSA_size(rsa);
 }
 
-kj::Array<kj::byte> Rsa::getPublicExponent() {
-  return KJ_REQUIRE_NONNULL(bignumToArray(*e));
+jsg::BufferSource Rsa::getPublicExponent(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(bignumToArray(js, *e));
 }
 
 CryptoKey::AsymmetricKeyDetails Rsa::getAsymmetricKeyDetail() const {
@@ -138,7 +144,7 @@ CryptoKey::AsymmetricKeyDetails Rsa::getAsymmetricKeyDetail() const {
   return kj::mv(details);
 }
 
-kj::Array<kj::byte> Rsa::sign(const kj::ArrayPtr<const kj::byte> data) const {
+jsg::BufferSource Rsa::sign(jsg::Lock& js, const kj::ArrayPtr<const kj::byte> data) const {
   size_t size = getModulusSize();
 
   // RSA encryption/decryption requires the key value to be strictly larger than the value to be
@@ -164,17 +170,15 @@ kj::Array<kj::byte> Rsa::sign(const kj::ArrayPtr<const kj::byte> data) const {
   OSSLCALL(RSA_decrypt(rsa, &signatureSize, signature.begin(), signature.size(), data.begin(),
       data.size(), RSA_NO_PADDING));
   KJ_ASSERT(signatureSize <= signature.size());
-  if (signatureSize < signature.size()) {
-    // We did not fill the entire buffer, let's make sure we zero
-    // out the rest of it so we don't leak any uninitialized data.
-    signature.slice(signatureSize).fill(0);
-    return signature.first(signatureSize).attach(kj::mv(signature));
-  }
 
-  return kj::mv(signature);
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signatureSize);
+  auto src = kj::arrayPtr(signature.begin(), signatureSize);
+  backing.asArrayPtr().copyFrom(src);
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
-kj::Array<kj::byte> Rsa::cipher(EVP_PKEY_CTX* ctx,
+jsg::BufferSource Rsa::cipher(jsg::Lock& js,
+    EVP_PKEY_CTX* ctx,
     SubtleCrypto::EncryptAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> data,
     EncryptDecryptFunction encryptDecrypt,
@@ -225,7 +229,9 @@ kj::Array<kj::byte> Rsa::cipher(EVP_PKEY_CTX* ctx,
       1 == err, DOMOperationError, "RSA-OAEP failed encrypt/decrypt", tryDescribeOpensslErrors());
   result.resize(maxResultLength);
 
-  return result.releaseAsArray();
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, result.size());
+  backing.asArrayPtr().copyFrom(result);
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
 SubtleCrypto::JsonWebKey Rsa::toJwk(
@@ -256,7 +262,8 @@ SubtleCrypto::JsonWebKey Rsa::toJwk(
   return jwk;
 }
 
-kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType, const SubtleCrypto::JsonWebKey& jwk) {
+kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(
+    jsg::Lock& js, KeyType keyType, const SubtleCrypto::JsonWebKey& jwk) {
   ClearErrorOnReturn clearErrorOnReturn;
 
   if (jwk.kty != "RSA"_kj) return kj::none;
@@ -271,8 +278,8 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType, const SubtleCrypto::J
 
   static constexpr auto kInvalidBase64Error = "Invalid RSA key in JSON Web Key; invalid base64."_kj;
 
-  auto nDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(n, kInvalidBase64Error));
-  auto eDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(e, kInvalidBase64Error));
+  auto nDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, n, kInvalidBase64Error));
+  auto eDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, e, kInvalidBase64Error));
   JSG_REQUIRE(RSA_set0_key(rsa.get(), nDecoded, eDecoded, nullptr) == 1, Error,
       "Invalid RSA key in JSON Web Key; failed to set key parameters");
 
@@ -296,12 +303,12 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType, const SubtleCrypto::J
         "Invalid RSA key in JSON Web Key; missing or invalid "
         "First CRT Coefficient parameter (\"qi\").");
     auto dDecoded =
-        toBignumUnowned(simdutfBase64UrlDecodeChecked(d, "Invalid RSA key in JSON Web Key"_kj));
-    auto pDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(p, kInvalidBase64Error));
-    auto qDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(q, kInvalidBase64Error));
-    auto dpDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(dp, kInvalidBase64Error));
-    auto dqDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(dq, kInvalidBase64Error));
-    auto qiDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(qi, kInvalidBase64Error));
+        toBignumUnowned(simdutfBase64UrlDecodeChecked(js, d, "Invalid RSA key in JSON Web Key"_kj));
+    auto pDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, p, kInvalidBase64Error));
+    auto qDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, q, kInvalidBase64Error));
+    auto dpDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, dp, kInvalidBase64Error));
+    auto dqDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, dq, kInvalidBase64Error));
+    auto qiDecoded = toBignumUnowned(simdutfBase64UrlDecodeChecked(js, qi, kInvalidBase64Error));
 
     JSG_REQUIRE(RSA_set0_key(rsa.get(), nullptr, nullptr, dDecoded) == 1, Error,
         "Invalid RSA key in JSON Web Key; failed to set private exponent");
@@ -320,7 +327,7 @@ kj::Maybe<AsymmetricKeyData> Rsa::fromJwk(KeyType keyType, const SubtleCrypto::J
 }
 
 kj::String Rsa::toPem(
-    KeyEncoding encoding, KeyType keyType, kj::Maybe<CipherOptions> options) const {
+    jsg::Lock& js, KeyEncoding encoding, KeyType keyType, kj::Maybe<CipherOptions> options) const {
   ClearErrorOnReturn clearErrorOnReturn;
   auto bio = OSSL_BIO_MEM();
   switch (keyType) {
@@ -375,11 +382,11 @@ kj::String Rsa::toPem(
     default:
       KJ_UNREACHABLE;
   }
-  return kj::String(bioToArray(bio.get()).releaseAsChars());
+  return kj::str(bioToArray(js, bio.get()).asArrayPtr().asChars());
 }
 
-kj::Array<const kj::byte> Rsa::toDer(
-    KeyEncoding encoding, KeyType keyType, kj::Maybe<CipherOptions> options) const {
+jsg::BufferSource Rsa::toDer(
+    jsg::Lock& js, KeyEncoding encoding, KeyType keyType, kj::Maybe<CipherOptions> options) const {
   ClearErrorOnReturn clearErrorOnReturn;
   auto bio = OSSL_BIO_MEM();
   switch (keyType) {
@@ -436,7 +443,7 @@ kj::Array<const kj::byte> Rsa::toDer(
     default:
       KJ_UNREACHABLE;
   }
-  return bioToArray(bio.get());
+  return bioToArray(js, bio.get());
 }
 
 void Rsa::validateRsaParams(
@@ -515,7 +522,7 @@ private:
     return rsa.toJwk(getTypeEnum(), jwkHashAlgorithmName());
   }
 
-  kj::Array<kj::byte> exportRaw() const override final {
+  jsg::BufferSource exportRaw(jsg::Lock& js) const override final {
     JSG_FAIL_REQUIRE(
         DOMInvalidAccessError, "Cannot export \"", getAlgorithmName(), "\" in \"raw\" format.");
   }
@@ -619,24 +626,27 @@ public:
         "The sign and verify operations are not implemented for \"", keyAlgorithm.name, "\".");
   }
 
-  kj::Array<kj::byte> encrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
+  jsg::BufferSource encrypt(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
     JSG_REQUIRE(getTypeEnum() == KeyType::PUBLIC, DOMInvalidAccessError,
         "Encryption/key wrapping only works with public keys, not \"", getType(), "\".");
     return commonEncryptDecrypt(
-        kj::mv(algorithm), plainText, EVP_PKEY_encrypt_init, EVP_PKEY_encrypt);
+        js, kj::mv(algorithm), plainText, EVP_PKEY_encrypt_init, EVP_PKEY_encrypt);
   }
 
-  kj::Array<kj::byte> decrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
+  jsg::BufferSource decrypt(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> cipherText) const override {
     JSG_REQUIRE(getTypeEnum() == KeyType::PRIVATE, DOMInvalidAccessError,
         "Decryption/key unwrapping only works with private keys, not \"", getType(), "\".");
     return commonEncryptDecrypt(
-        kj::mv(algorithm), cipherText, EVP_PKEY_decrypt_init, EVP_PKEY_decrypt);
+        js, kj::mv(algorithm), cipherText, EVP_PKEY_decrypt_init, EVP_PKEY_decrypt);
   }
 
 private:
-  kj::Array<kj::byte> commonEncryptDecrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
+  jsg::BufferSource commonEncryptDecrypt(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data,
       InitFunction init,
       EncryptDecryptFunction encryptDecrypt) const {
@@ -646,7 +656,7 @@ private:
     JSG_REQUIRE(1 == init(ctx.get()), DOMOperationError, "RSA-OAEP failed to initialize",
         tryDescribeOpensslErrors());
     return KJ_ASSERT_NONNULL(Rsa::tryGetRsa(pkey))
-        .cipher(ctx, kj::mv(algorithm), data, encryptDecrypt, digest);
+        .cipher(js, ctx, kj::mv(algorithm), data, encryptDecrypt, digest);
   }
 
   kj::String jwkHashAlgorithmName() const override {
@@ -666,13 +676,15 @@ public:
       AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
 
-  kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const override {
+  jsg::BufferSource sign(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> data) const override {
     auto rsa = JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(getEvpPkey()), DOMDataError, "Missing RSA key");
-    return rsa.sign(data);
+    return rsa.sign(js, data);
   }
 
-  bool verify(SubtleCrypto::SignAlgorithm&& algorithm,
+  bool verify(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> signature,
       kj::ArrayPtr<const kj::byte> data) const override {
     KJ_UNIMPLEMENTED("RawRsa Verification currently unsupported");
@@ -952,7 +964,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(jsg::Lock& js,
   //   interface to extract the hash from the ASN.1. Oh well...
 
   size_t modulusLength = rsa.getModulusBits();
-  auto publicExponent = rsa.getPublicExponent();
+  auto publicExponent = rsa.getPublicExponent(js);
 
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   Rsa::validateRsaParams(js, modulusLength, publicExponent, true);
