@@ -38,35 +38,38 @@ public:
   }
 
 private:
-  kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const override {
-    return computeHmac(kj::mv(algorithm), data);
+  jsg::BufferSource sign(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> data) const override {
+    return computeHmac(js, kj::mv(algorithm), data);
   }
 
-  bool verify(SubtleCrypto::SignAlgorithm&& algorithm,
+  bool verify(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> signature,
       kj::ArrayPtr<const kj::byte> data) const override {
-    auto messageDigest = computeHmac(kj::mv(algorithm), data);
+    auto messageDigest = computeHmac(js, kj::mv(algorithm), data);
     return messageDigest.size() == signature.size() &&
-        CRYPTO_memcmp(messageDigest.begin(), signature.begin(), signature.size()) == 0;
+        CRYPTO_memcmp(messageDigest.asArrayPtr().begin(), signature.begin(), signature.size()) == 0;
   }
 
-  kj::Array<kj::byte> computeHmac(
-      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const {
+  jsg::BufferSource computeHmac(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> data) const {
     // For HMAC, the hash is specified when creating the key, not at call time.
     auto type = lookupDigestAlgorithm(keyAlgorithm.hash.name).second;
-    auto messageDigest = kj::heapArray<kj::byte>(EVP_MD_size(type));
+    auto messageDigest = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, EVP_MD_size(type));
 
     uint messageDigestSize = 0;
     auto ptr = HMAC(type, keyData.begin(), keyData.size(), data.begin(), data.size(),
-        messageDigest.begin(), &messageDigestSize);
+        messageDigest.asArrayPtr().begin(), &messageDigestSize);
     JSG_REQUIRE(ptr != nullptr, DOMOperationError, "HMAC computation failed.");
 
     KJ_ASSERT(messageDigestSize == messageDigest.size());
-    return kj::mv(messageDigest);
+    return jsg::BufferSource(js, kj::mv(messageDigest));
   }
 
-  SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override {
+  SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override {
     JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError,
         "Unimplemented key export format \"", format, "\".");
 
@@ -95,7 +98,9 @@ private:
       return jwk;
     }
 
-    return kj::heapArray(keyData.asPtr());
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, keyData.size());
+    backing.asArrayPtr().copyFrom(keyData);
+    return jsg::BufferSource(js, kj::mv(backing));
   }
 
   kj::StringPtr getAlgorithmName() const override {
@@ -130,7 +135,8 @@ void zeroOutTrailingKeyBits(kj::Array<kj::byte>& keyDataArray, int keyBitLength)
   }
 }
 
-kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData& key) {
+kj::Own<HMAC_CTX> initHmacContext(
+    jsg::Lock& js, kj::StringPtr algorithm, HmacContext::KeyData& key) {
   static constexpr auto handle = [](kj::StringPtr algorithm, kj::ArrayPtr<kj::byte> key) {
     ClearErrorOnReturn clearErrorOnReturn;
     JSG_REQUIRE(key.size() <= INT_MAX, RangeError, "key is too long");
@@ -150,10 +156,10 @@ kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData&
     }
     KJ_CASE_ONEOF(key2, CryptoKey::Impl*) {
       // We already checked that the key is a secret key, so the following should succeed.
-      SubtleCrypto::ExportKeyData keyData = key2->exportKey("raw"_kj);
+      SubtleCrypto::ExportKeyData keyData = key2->exportKey(js, "raw"_kj);
 
       KJ_SWITCH_ONEOF(keyData) {
-        KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
+        KJ_CASE_ONEOF(key_data, jsg::BufferSource) {
           return handle(algorithm, key_data);
         }
         KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
@@ -166,8 +172,8 @@ kj::Own<HMAC_CTX> initHmacContext(kj::StringPtr algorithm, HmacContext::KeyData&
 }
 }  // namespace
 
-HmacContext::HmacContext(kj::StringPtr algorithm, KeyData key)
-    : state(initHmacContext(algorithm, key)) {}
+HmacContext::HmacContext(jsg::Lock& js, kj::StringPtr algorithm, KeyData key)
+    : state(initHmacContext(js, algorithm, key)) {}
 
 void HmacContext::update(kj::ArrayPtr<kj::byte> data) {
   KJ_SWITCH_ONEOF(state) {

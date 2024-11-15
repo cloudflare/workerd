@@ -12,7 +12,8 @@
 
 namespace workerd::api::node {
 
-kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash,
+jsg::BufferSource CryptoImpl::getHkdf(jsg::Lock& js,
+    kj::String hash,
     kj::Array<const kj::byte> key,
     kj::Array<const kj::byte> salt,
     kj::Array<const kj::byte> info,
@@ -43,10 +44,10 @@ kj::Array<kj::byte> CryptoImpl::getHkdf(kj::String hash,
   JSG_REQUIRE(
       length <= EVP_MD_size(digest) * kMaxDigestMultiplier, RangeError, "Invalid Hkdf key length");
 
-  return JSG_REQUIRE_NONNULL(hkdf(length, digest, key, salt, info), Error, "Hkdf failed");
+  return JSG_REQUIRE_NONNULL(hkdf(js, length, digest, key, salt, info), Error, "Hkdf failed");
 }
 
-kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
+jsg::BufferSource CryptoImpl::getPbkdf(jsg::Lock& js,
     kj::Array<const kj::byte> password,
     kj::Array<const kj::byte> salt,
     uint32_t num_iterations,
@@ -70,10 +71,10 @@ kj::Array<kj::byte> CryptoImpl::getPbkdf(jsg::Lock& js,
 
   // Both pass and salt may be zero length here.
   return JSG_REQUIRE_NONNULL(
-      pbkdf2(keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
+      pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
 }
 
-kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
+jsg::BufferSource CryptoImpl::getScrypt(jsg::Lock& js,
     kj::Array<const kj::byte> password,
     kj::Array<const kj::byte> salt,
     uint32_t N,
@@ -86,7 +87,7 @@ kj::Array<kj::byte> CryptoImpl::getScrypt(jsg::Lock& js,
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Scrypt failed: salt is too large");
 
   return JSG_REQUIRE_NONNULL(
-      scrypt(keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
+      scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
 }
 
 bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
@@ -119,13 +120,13 @@ bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_che
 
 // ======================================================================================
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
-    kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
+    jsg::Lock& js, kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      return jsg::alloc<HmacHandle>(HmacContext(algorithm, key_data.asPtr()));
+      return jsg::alloc<HmacHandle>(HmacContext(js, algorithm, key_data.asPtr()));
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
-      return jsg::alloc<HmacHandle>(HmacContext(algorithm, key->impl.get()));
+      return jsg::alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
     }
   }
   KJ_UNREACHABLE;
@@ -146,12 +147,12 @@ jsg::BufferSource CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
     kj::Array<kj::byte> data) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      HmacContext ctx(algorithm, key_data.asPtr());
+      HmacContext ctx(js, algorithm, key_data.asPtr());
       ctx.update(data);
       return ctx.digest(js);
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
-      HmacContext ctx(algorithm, key->impl.get());
+      HmacContext ctx(js, algorithm, key->impl.get());
       ctx.update(data);
       return ctx.digest(js);
     }

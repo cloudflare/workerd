@@ -145,30 +145,34 @@ public:
     return usages;
   }
 
-  virtual kj::Array<kj::byte> encrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> plainText) const {
+  virtual jsg::BufferSource encrypt(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> plainText) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The encrypt operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
-  virtual kj::Array<kj::byte> decrypt(
-      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> cipherText) const {
+  virtual jsg::BufferSource decrypt(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> cipherText) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The decrypt operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
 
-  virtual kj::Array<kj::byte> sign(
-      SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const {
+  virtual jsg::BufferSource sign(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> data) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The sign operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
-  virtual bool verify(SubtleCrypto::SignAlgorithm&& algorithm,
+  virtual bool verify(jsg::Lock& js,
+      SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> signature,
       kj::ArrayPtr<const kj::byte> data) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "The verify operation is not implemented for \"",
         getAlgorithmName(), "\".");
   }
 
-  virtual kj::Array<kj::byte> deriveBits(jsg::Lock& js,
+  virtual jsg::BufferSource deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> length) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
@@ -176,21 +180,23 @@ public:
         "\".");
   }
 
-  virtual kj::Array<kj::byte> wrapKey(
-      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> unwrappedKey) const {
+  virtual jsg::BufferSource wrapKey(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> unwrappedKey) const {
     // For many algorithms, wrapKey() is the same as encrypt(), so as a convenience the default
     // implementation just forwards to it.
-    return encrypt(kj::mv(algorithm), unwrappedKey);
+    return encrypt(js, kj::mv(algorithm), unwrappedKey);
   }
 
-  virtual kj::Array<kj::byte> unwrapKey(
-      SubtleCrypto::EncryptAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> wrappedKey) const {
+  virtual jsg::BufferSource unwrapKey(jsg::Lock& js,
+      SubtleCrypto::EncryptAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> wrappedKey) const {
     // For many algorithms, unwrapKey() is the same as decrypt(), so as a convenience the default
     // implementation just forwards to it.
-    return decrypt(kj::mv(algorithm), wrappedKey);
+    return decrypt(js, kj::mv(algorithm), wrappedKey);
   }
 
-  virtual SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const {
+  virtual SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unrecognized or unsupported export of \"",
         getAlgorithmName(), "\" requested.");
   }
@@ -203,7 +209,8 @@ public:
   // cipher and passphrase.
   // Rather than modify the existing exportKey API, we add this new variant to support the
   // Node.js implementation without risking breaking the Web Crypto impl.
-  virtual kj::Array<kj::byte> exportKeyExt(kj::StringPtr format,
+  virtual jsg::BufferSource exportKeyExt(jsg::Lock& js,
+      kj::StringPtr format,
       kj::StringPtr type,
       jsg::Optional<kj::String> cipher = kj::none,
       jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const {
@@ -228,6 +235,7 @@ public:
 
   virtual bool equals(const Impl& other) const = 0;
   virtual bool equals(const kj::Array<kj::byte>& other) const;
+  virtual bool equals(const jsg::BufferSource& other) const;
 
   virtual kj::StringPtr jsgGetMemoryName() const {
     return "CryptoKey::Impl";
@@ -325,6 +333,7 @@ BIGNUM* toBignumUnowned(kj::ArrayPtr<const kj::byte> data);
 kj::Maybe<kj::Array<kj::byte>> bignumToArray(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum);
 kj::Maybe<kj::Array<kj::byte>> bignumToArrayPadded(const BIGNUM& bignum, size_t paddedLength);
+kj::Maybe<jsg::BufferSource> bignumToArray(jsg::Lock& js, const BIGNUM& bignum);
 kj::Maybe<jsg::BufferSource> bignumToArrayPadded(jsg::Lock& js, const BIGNUM& bignum);
 kj::Maybe<jsg::BufferSource> bignumToArrayPadded(
     jsg::Lock& js, const BIGNUM& bignum, size_t paddedLength);
