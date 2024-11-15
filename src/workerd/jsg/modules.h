@@ -541,11 +541,16 @@ public:
 
   template <typename T>
   void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
+    addBuiltinModule(specifier, alloc<T>(), type);
+  }
+
+  template <typename T>
+  void addBuiltinModule(kj::StringPtr specifier, Ref<T> object, Type type = Type::BUILTIN) {
     addBuiltinModule(specifier,
-        [specifier = kj::str(specifier)](
-            Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) -> kj::Maybe<ModuleInfo> {
+        [specifier = kj::str(specifier), object = kj::mv(object)](
+            Lock& js, ResolveMethod, kj::Maybe<const kj::Path&>&) mutable -> kj::Maybe<ModuleInfo> {
       auto& wrapper = TypeWrapper::from(js.v8Isolate);
-      auto wrap = wrapper.wrap(js.v8Context(), kj::none, alloc<T>());
+      auto wrap = wrapper.wrap(js.v8Context(), kj::none, kj::mv(object));
       return kj::Maybe(ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap)));
     },
         type);
