@@ -45,7 +45,7 @@ alias(
 
 alias(
     name = "capnpc",
-    actual = "@crates_vendor__capnpc-0.20.0//:capnpc",
+    actual = "@crates_vendor__capnpc-0.20.1//:capnpc",
     tags = ["manual"],
 )
 
@@ -57,7 +57,7 @@ alias(
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.20//:clap",
+    actual = "@crates_vendor__clap-4.5.21//:clap",
     tags = ["manual"],
 )
 
@@ -69,25 +69,25 @@ alias(
 
 alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.129//:cxx",
+    actual = "@crates_vendor__cxx-1.0.130//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.129//:cxx_cc",
+    actual = "@crates_vendor__cxx-1.0.130//:cxx_cc",
     tags = ["manual"],
 )
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.0.34//:flate2",
+    actual = "@crates_vendor__flate2-1.0.35//:flate2",
     tags = ["manual"],
 )
 
 alias(
     name = "lolhtml",
-    actual = "@crates_vendor__lolhtml-1.1.1//:lolhtml",
+    actual = "@crates_vendor__lolhtml-1.1.2//:lolhtml",
     tags = ["manual"],
 )
 
@@ -117,7 +117,7 @@ alias(
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.214//:serde",
+    actual = "@crates_vendor__serde-1.0.215//:serde",
     tags = ["manual"],
 )
 
@@ -154,19 +154,19 @@ alias(
 
 alias(
     name = "capnpc__capnpc-rust",
-    actual = "@crates_vendor__capnpc-0.20.0//:capnpc-rust__bin",
+    actual = "@crates_vendor__capnpc-0.20.1//:capnpc-rust__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc__capnpc-rust-bootstrap",
-    actual = "@crates_vendor__capnpc-0.20.0//:capnpc-rust-bootstrap__bin",
+    actual = "@crates_vendor__capnpc-0.20.1//:capnpc-rust-bootstrap__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.20//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.21//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

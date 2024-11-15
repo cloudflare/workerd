@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "anstyle_wincon",
+    name = "foldhash",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,18 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=anstyle-wincon",
+        "crate-name=foldhash",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "3.0.6",
-    deps = [
-        "@crates_vendor__anstyle-1.0.10//:anstyle",
-    ] + select({
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(windows)
-        ],
-        "//conditions:default": [],
-    }),
+    version = "0.1.3",
 )

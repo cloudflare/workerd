@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "link_cplusplus",
+    name = "serde",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -31,22 +31,28 @@ rust_library(
     ),
     crate_features = [
         "default",
+        "derive",
+        "serde_derive",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__serde_derive-1.0.215//:serde_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=link-cplusplus",
+        "crate-name=serde",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.9",
+    version = "1.0.215",
     deps = [
-        "@crates_vendor__link-cplusplus-1.0.9//:build_script_build",
+        "@crates_vendor__serde-1.0.215//:build_script_build",
     ],
 )
 
@@ -71,6 +77,9 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
+        "derive",
+        "serde_derive",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -87,23 +96,19 @@ cargo_build_script(
         ],
     ),
     edition = "2018",
-    links = "cplusplus",
-    pkg_name = "link-cplusplus",
+    pkg_name = "serde",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=link-cplusplus",
+        "crate-name=serde",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.9",
+    version = "1.0.215",
     visibility = ["//visibility:private"],
-    deps = [
-        "@crates_vendor__cc-1.2.1//:cc",
-    ],
 )
 
 alias(
