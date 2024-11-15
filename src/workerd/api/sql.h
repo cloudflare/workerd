@@ -85,7 +85,6 @@ private:
     jsg::HashableV8Ref<v8::String> query;
     size_t statementSize;
     SqliteDatabase::Statement statement;
-    kj::Maybe<jsg::JsRef<jsg::JsArray>> cachedColumnNames;  // initialized on first exec
     kj::ListLink<CachedStatement> lruLink;
     uint useCount = 0;
 

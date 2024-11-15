@@ -165,12 +165,6 @@ void SqlStorage::Cursor::initColumnNames(jsg::Lock& js, State& stateRef) {
   //   `v8::Local`.
   KJ_IF_SOME(cached, stateRef.cachedStatement) {
     reusedCachedQuery = cached->useCount++ > 0;
-
-    KJ_IF_SOME(names, cached->cachedColumnNames) {
-      // Use cached copy.
-      columnNames = names.addRef(js);
-      return;
-    }
   }
 
   js.withinHandleScope([&]() {
@@ -180,11 +174,6 @@ void SqlStorage::Cursor::initColumnNames(jsg::Lock& js, State& stateRef) {
     }
     auto array = jsg::JsArray(v8::Array::New(js.v8Isolate, vec.data(), vec.size()));
     columnNames = jsg::JsRef<jsg::JsArray>(js, array);
-
-    KJ_IF_SOME(cached, stateRef.cachedStatement) {
-      // Cache for the next run.
-      cached->cachedColumnNames = jsg::JsRef<jsg::JsArray>(js, array);
-    }
   });
 }
 
