@@ -1,6 +1,5 @@
 #pragma once
 
-#include <workerd/jsg/util.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/async-io.h>
@@ -13,6 +12,9 @@
 #include <typeinfo>
 
 namespace workerd {
+namespace jsg {
+class Lock;
+}
 
 class IoContext;
 
