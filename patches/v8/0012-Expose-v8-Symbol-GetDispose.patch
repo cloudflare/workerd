@@ -1,4 +1,4 @@
-From 150e0eb44d244861de2cee92fd0aab5f72a415b1 Mon Sep 17 00:00:00 2001
+From 6c5addae986f5eaeb158a6e7dd3d9a5f25cda5d8 Mon Sep 17 00:00:00 2001
 From: Jon Phillips <jphillips@cloudflare.com>
 Date: Tue, 30 Apr 2024 00:06:33 +0100
 Subject: Expose v8::Symbol::GetDispose().
@@ -8,10 +8,10 @@ management spec. Since `Symbol.dispose` has been exposed to JS we need
 to be able to access the native v8::Symbol too.
 
 diff --git a/include/v8-primitive.h b/include/v8-primitive.h
-index 426bb379099e262191dadfd87262f4431bd444c6..7d0f6399a22cb32b19641398b9e858ce563afc4c 100644
+index d3222f6de88d5741ecb6c86dd8b98dea04d75e9d..5257753b9f9f681d013fc7bfecc50e2a70c4fd3f 100644
 --- a/include/v8-primitive.h
 +++ b/include/v8-primitive.h
-@@ -694,6 +694,8 @@ class V8_EXPORT Symbol : public Name {
+@@ -725,6 +725,8 @@ class V8_EXPORT Symbol : public Name {
    static Local<Symbol> GetToPrimitive(Isolate* isolate);
    static Local<Symbol> GetToStringTag(Isolate* isolate);
    static Local<Symbol> GetUnscopables(Isolate* isolate);
@@ -21,10 +21,10 @@ index 426bb379099e262191dadfd87262f4431bd444c6..7d0f6399a22cb32b19641398b9e858ce
    V8_INLINE static Symbol* Cast(Data* data) {
  #ifdef V8_ENABLE_CHECKS
 diff --git a/src/api/api.cc b/src/api/api.cc
-index e34f21cb6082f2a3cf506e4f75a63b1718d8759e..06895d14a0ab93b8a9f16b761744d8d8986bdf97 100644
+index 0eccf5d0cfb954fdd1f0e27a4f1a3d1691479c69..b86dcc01dbb17ea5873f080941e6143638c19c1c 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -9463,7 +9463,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
+@@ -9506,7 +9506,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
    V(Split, split)                             \
    V(ToPrimitive, to_primitive)                \
    V(ToStringTag, to_string_tag)               \

@@ -122,7 +122,7 @@ filegroup(
 #
 git_repository(
     name = "com_google_absl",
-    commit = "ed3733b91e472a1e7a641c1f0c1e6c0ea698e958",
+    commit = "dc257ad54f38739767a6cb26eb57fd51c37bfe3c",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -175,7 +175,7 @@ git_repository(
     name = "zlib",
     build_file = "//:build/BUILD.zlib",
     # Must match the version used by v8
-    commit = "d3aea2341cdeaf7e717bc257a59aa7a9407d318a",
+    commit = "fa9f14143c7938e6a1d18443900efee7a1e5e669",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
@@ -280,32 +280,31 @@ esbuild_register_toolchains(
 
 http_archive(
     name = "v8",
-    integrity = "sha256-2jQHW96t3jpEsjOlv9yyjgUem3kKNnpDAIDR4PPFSnw=",
+    integrity = "sha256-s+oY+fAG0cXTGmKDxbioUudjUciK1dU2reu7lZ+uB1w=",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
-        "//:patches/v8/0003-Add-ArrayBuffer-MaybeNew.patch",
-        "//:patches/v8/0004-Allow-Windows-builds-under-Bazel.patch",
-        "//:patches/v8/0005-Disable-bazel-whole-archive-build.patch",
-        "//:patches/v8/0006-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
-        "//:patches/v8/0007-Implement-Promise-Context-Tagging.patch",
-        "//:patches/v8/0008-Enable-V8-shared-linkage.patch",
-        "//:patches/v8/0009-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
-        "//:patches/v8/0010-increase-visibility-of-virtual-method.patch",
-        "//:patches/v8/0011-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-        "//:patches/v8/0012-Set-torque-generator-path-to-external-v8.-This-allow.patch",
-        "//:patches/v8/0013-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-        "//:patches/v8/0014-Expose-v8-Symbol-GetDispose.patch",
-        "//:patches/v8/0015-Rename-V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE-V8_COMPR.patch",
-        "//:patches/v8/0016-Revert-TracedReference-deref-API-removal.patch",
-        "//:patches/v8/0017-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-        "//:patches/v8/0018-Update-illegal-invocation-error-message-in-v8.patch",
-        "//:patches/v8/0019-Implement-cross-request-context-promise-resolve-hand.patch",
-        "//:patches/v8/0020-Modify-where-to-look-for-fast_float-dependency.patch",
+        "//:patches/v8/0003-Allow-Windows-builds-under-Bazel.patch",
+        "//:patches/v8/0004-Disable-bazel-whole-archive-build.patch",
+        "//:patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
+        "//:patches/v8/0006-Implement-Promise-Context-Tagging.patch",
+        "//:patches/v8/0007-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
+        "//:patches/v8/0008-increase-visibility-of-virtual-method.patch",
+        "//:patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
+        "//:patches/v8/0010-Set-torque-generator-path-to-external-v8.-This-allow.patch",
+        "//:patches/v8/0011-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
+        "//:patches/v8/0012-Expose-v8-Symbol-GetDispose.patch",
+        "//:patches/v8/0013-Revert-TracedReference-deref-API-removal.patch",
+        "//:patches/v8/0014-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+        "//:patches/v8/0015-Update-illegal-invocation-error-message-in-v8.patch",
+        "//:patches/v8/0016-Implement-cross-request-context-promise-resolve-hand.patch",
+        "//:patches/v8/0017-Modify-where-to-look-for-fast_float-dependency.patch",
+        "//:patches/v8/0018-Return-rejected-promise-from-WebAssembly.compile-if-.patch",
+        "//:patches/v8/0019-codegen-Don-t-pass-a-nullptr-in-InitUnwindingRecord-.patch",
     ],
-    strip_prefix = "v8-13.0.245.16",
-    url = "https://github.com/v8/v8/archive/refs/tags/13.0.245.16.tar.gz",
+    strip_prefix = "v8-13.1.201.8",
+    url = "https://github.com/v8/v8/archive/refs/tags/13.1.201.8.tar.gz",
 )
 
 git_repository(

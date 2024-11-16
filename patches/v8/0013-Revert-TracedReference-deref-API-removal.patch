@@ -1,4 +1,4 @@
-From 31ac377576eeee7470b00342543bb8627607d7c4 Mon Sep 17 00:00:00 2001
+From 0479d796e5b6fcb358773eb78a285d3a77a470b8 Mon Sep 17 00:00:00 2001
 From: Harris Hancock <harris@cloudflare.com>
 Date: Fri, 28 Jun 2024 14:19:25 +0100
 Subject: Revert TracedReference deref API removal
