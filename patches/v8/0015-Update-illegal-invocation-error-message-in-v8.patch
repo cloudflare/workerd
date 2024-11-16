@@ -1,11 +1,11 @@
-From d4a346b3e78b297b9b433ef5fd6db12facb1ca3b Mon Sep 17 00:00:00 2001
+From 0aacdd667c6e47b5c1d958e711d0491acd7ff959 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Tue, 9 Jul 2024 08:37:05 -0700
 Subject: Update illegal invocation error message in v8
 
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index 20e4ce1b57d947bc80d10eb1baf05f495b244505..25eec5c469261f655a226782b7bad55892108ff4 100644
+index 364c0b85e1c61d097272ac3fcd73916cc54b2a15..cc2aa0669515e6274fce675075c79264a8d8e3fc 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
 @@ -112,7 +112,9 @@ namespace internal {
@@ -18,4 +18,4 @@ index 20e4ce1b57d947bc80d10eb1baf05f495b244505..25eec5c469261f655a226782b7bad558
 +    "See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details.") \
    T(ImmutablePrototypeSet,                                                     \
      "Immutable prototype object '%' cannot have their prototype set")          \
-   T(ImportAssertDeprecated,                                                    \
+   T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \

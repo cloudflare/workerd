@@ -1,4 +1,4 @@
-From 8f0003ce3b92427d9e3d91457d344bbb894a8134 Mon Sep 17 00:00:00 2001
+From 79db97a32cbf85975f81877361cc01fa98e56f87 Mon Sep 17 00:00:00 2001
 From: Orion Hodson <orion@cloudflare.com>
 Date: Wed, 13 Sep 2023 15:38:15 +0100
 Subject: Randomize the initial ExecutionContextId used by the inspector
@@ -8,10 +8,10 @@ by miniflare. This happens because workerd does not support re-loading
 live workers (https://chat.google.com/room/AAAAnS2bXT4/GX5-pa8O0ts).
 
 diff --git a/src/inspector/v8-inspector-impl.cc b/src/inspector/v8-inspector-impl.cc
-index 8837c6403274152bd36c9c72a76b98093641ae53..b5f400d12f1bd36dfa9077bf076355a3df8fd015 100644
+index 9b2ea79f6397f6d60bfe2ea17deb05343a02228f..9ff65a0932211711dc2659276579dc80240967d1 100644
 --- a/src/inspector/v8-inspector-impl.cc
 +++ b/src/inspector/v8-inspector-impl.cc
-@@ -75,7 +75,7 @@ V8InspectorImpl::V8InspectorImpl(v8::Isolate* isolate,
+@@ -66,7 +66,7 @@ V8InspectorImpl::V8InspectorImpl(v8::Isolate* isolate,
        m_client(client),
        m_debugger(new V8Debugger(isolate, this)),
        m_lastExceptionId(0),
