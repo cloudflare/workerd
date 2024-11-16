@@ -1,4 +1,4 @@
-From cbbad6f00b9cea3e1c75c34b29183171e37edfd6 Mon Sep 17 00:00:00 2001
+From 124e40d871f08b13558689a1e6f2889ef42bc8b2 Mon Sep 17 00:00:00 2001
 From: Garrett Gu <garrett@cloudflare.com>
 Date: Mon, 22 Apr 2024 10:10:21 -0500
 Subject: Modify where to look for fp16 dependency. This dependency is normally
@@ -7,10 +7,10 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 634faf34baceefc8a08f953777eecdabfa9d1b73..349d523252347b5314950228b1ca0b558c2ac4cb 100644
+index 23915096536d7f80e46b7dc33ca2ee56a61487bc..bc095484ea95f3813c8d7e7c77bc308f3bac2c51 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3828,16 +3828,22 @@ v8_library(
+@@ -3851,16 +3851,22 @@ v8_library(
    ],
  )
  
