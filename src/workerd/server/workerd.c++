@@ -786,7 +786,9 @@ public:
         .addOption({"python-save-baseline-snapshot"}, [this]() {
       server->setPythonCreateBaselineSnapshot();
       return true;
-    }, "Save a baseline snapshot to the disk cache");
+    }, "Save a baseline snapshot to the disk cache").addOption({""}, [this]() {
+      
+    }, );
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {

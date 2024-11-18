@@ -55,15 +55,15 @@ struct PythonConfig {
 
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
-class PackagesTarReader: public jsg::Object {
+class ReadOnlyBuffer: public jsg::Object {
   kj::ArrayPtr<const kj::byte> source;
 
 public:
-  PackagesTarReader(kj::ArrayPtr<const kj::byte> src = PYODIDE_PACKAGES_TAR.get()): source(src) {};
+  ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
   int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
 
-  JSG_RESOURCE_TYPE(PackagesTarReader) {
+  JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
   }
 };
@@ -278,10 +278,10 @@ public:
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Maybe<jsg::Ref<PackagesTarReader>> getPackage(kj::String path) {
+  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(kj::String path) {
     KJ_IF_SOME(pacman, packageManager) {
       KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
-        return jsg::alloc<PackagesTarReader>(ptr);
+        return jsg::alloc<ReadOnlyBuffer>(ptr);
       }
     }
 
@@ -429,8 +429,8 @@ void registerPyodideModules(Registry& registry, auto featureFlags) {
       !util::Autogate::isEnabled(util::AutogateKey::PYTHON_EXTERNAL_BUNDLE)) {
     registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
   }
-  registry.template addBuiltinModule<PackagesTarReader>(
-      "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  registry.template addBuiltinModule(
+    "pyodide-internal:packages_tar_reader", ReadOnlyBuffer(PYODIDE_PACKAGES_TAR.get()), workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
