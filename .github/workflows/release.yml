@@ -143,16 +143,17 @@ jobs:
     strategy:
       matrix:
         arch: [linux-64, darwin-64, windows-64]
+        # This variable itself is unused, but allows us to set up two macOS builds. arm64 builds for
+        # other platforms will be supported later, then we'll list both architectures here.
+        cpu: [ X64 ]
         include:
           - arch: linux-64
             name: Linux-X64
           - arch: darwin-64
             name: macOS-X64
-          # TODO(soon): After verifying that Apple Silicon artifacts are being built and uploaded
-          # properly, decommission the internal build and add them to the tagged release instead of
-          # using the internal build.
-          # - arch: darwin-arm64
-          #   name: macOS-ARM64
+          - arch: darwin-arm64
+            name: macOS-ARM64
+            cpu: ARM64
           - arch: windows-64
             name: Windows-X64
     steps:
