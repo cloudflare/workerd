@@ -54,15 +54,15 @@ struct PythonConfig {
 
 // A function to read a segment of the tar file into a buffer
 // Set up this way to avoid copying files that aren't accessed.
-class PackagesTarReader: public jsg::Object {
+class ReadOnlyBuffer: public jsg::Object {
   kj::ArrayPtr<const kj::byte> source;
 
 public:
-  PackagesTarReader(kj::ArrayPtr<const kj::byte> src = PYODIDE_PACKAGES_TAR.get()): source(src) {};
+  ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
   int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
 
-  JSG_RESOURCE_TYPE(PackagesTarReader) {
+  JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
   }
 };
@@ -277,10 +277,10 @@ public:
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Maybe<jsg::Ref<PackagesTarReader>> getPackage(kj::String path) {
+  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(kj::String path) {
     KJ_IF_SOME(pacman, packageManager) {
       KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
-        return jsg::alloc<PackagesTarReader>(ptr);
+        return jsg::alloc<ReadOnlyBuffer>(ptr);
       }
     }
 
@@ -416,28 +416,9 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
-  api::pyodide::PackagesTarReader, api::pyodide::PyodideMetadataReader,                            \
+  api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
       api::pyodide::MemorySnapshotResult
-
-template <class Registry>
-void registerPyodideModules(Registry& registry, auto featureFlags) {
-  // We add `pyodide:` packages here including python-entrypoint-helper.js.
-  registry.template addBuiltinModule<PackagesTarReader>(
-      "pyodide-internal:packages_tar_reader", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-}
-
-kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
-  jsg::modules::ModuleBundle::BuiltinBuilder builder(
-      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-  return builder.finish();
-}
-
-kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
-  jsg::modules::ModuleBundle::BuiltinBuilder builder(
-      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
-  return builder.finish();
-}
 
 }  // namespace workerd::api::pyodide
