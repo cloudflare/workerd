@@ -261,6 +261,22 @@ void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
   }
 }
 
+kj::Maybe<kj::String> buildSsecKey(kj::OneOf<kj::Array<byte>, kj::String> ssecKey) {
+  KJ_SWITCH_ONEOF(ssecKey) {
+    KJ_CASE_ONEOF(keyString, kj::String) {
+      JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
+          Error, "SSE-C Key has invalid format");
+      JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+      return kj::str(keyString);
+    }
+    KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+      JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+      return kj::encodeHex(keyBuff);
+    }
+  }
+  return kj::none;
+}
+
 template <typename Builder, typename Options>
 void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
   initOnlyIf(js, builder, o);
@@ -306,17 +322,9 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
   }
   KJ_IF_SOME(ssecKey, o.ssecKey) {
     auto ssecBuilder = builder.initSsec();
-    KJ_SWITCH_ONEOF(ssecKey) {
-      KJ_CASE_ONEOF(keyString, kj::String) {
-        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-            Error, "SSE-C Key has invalid format");
-        JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
-        ssecBuilder.setKey(kj::str(keyString));
-      }
-      KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
-        JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
-        ssecBuilder.setKey(kj::encodeHex(keyBuff));
-      }
+    kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(ssecKey));
+    KJ_IF_SOME(ssecKey, maybeSsecKey) {
+      ssecBuilder.setKey(ssecKey);
     }
   }
 }
@@ -584,18 +592,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       }
       KJ_IF_SOME(ssecKey, o.ssecKey) {
         auto ssecBuilder = putBuilder.initSsec();
-        KJ_SWITCH_ONEOF(ssecKey) {
-          KJ_CASE_ONEOF(keyString, kj::String) {
-            JSG_REQUIRE(
-                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-                Error, "SSE-C Key has invalid format");
-            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
-            ssecBuilder.setKey(kj::str(keyString));
-          }
-          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
-            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
-            ssecBuilder.setKey(kj::encodeHex(keyBuff));
-          }
+        kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(ssecKey));
+        KJ_IF_SOME(ssecKey, maybeSsecKey) {
+          ssecBuilder.setKey(ssecKey);
         }
       }
     }
@@ -692,18 +691,9 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       }
       KJ_IF_SOME(ssecKey, o.ssecKey) {
         auto ssecBuilder = createMultipartUploadBuilder.initSsec();
-        KJ_SWITCH_ONEOF(ssecKey) {
-          KJ_CASE_ONEOF(keyString, kj::String) {
-            JSG_REQUIRE(
-                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-                Error, "SSE-C Key has invalid format");
-            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
-            ssecBuilder.setKey(kj::str(keyString));
-          }
-          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
-            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
-            ssecBuilder.setKey(kj::encodeHex(keyBuff));
-          }
+        kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(ssecKey));
+        KJ_IF_SOME(ssecKey, maybeSsecKey) {
+          ssecBuilder.setKey(ssecKey);
         }
       }
     }
