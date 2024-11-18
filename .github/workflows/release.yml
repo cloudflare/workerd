@@ -68,7 +68,7 @@ jobs:
             # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
             # we use it to compile the x64 release.
             os: macos-15
-            bazel-config: release_macos
+            bazel-config: release_macos_cross_x86_64
           - os-name: macOS-arm64
             os: macos-15
             bazel-config: release_macos
@@ -110,11 +110,6 @@ jobs:
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
-      - name: Setup macOS (cross)
-        if: ${{ matrix.os-name }} == 'macOS-x64'
-        run: |
-          # Cross-compile so that we can use the latest Xcode version for the Intel Mac binary
-          echo "build:macos --config=macos-cross-x86_64" >> .bazelrc
       - name: Setup Windows
         if: runner.os == 'Windows'
         run: |

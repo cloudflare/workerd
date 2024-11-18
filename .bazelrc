@@ -343,6 +343,10 @@ build:release_macos --config=release_unix
 build:release_macos --linkopt="-Wl,-no_data_in_code_info"
 build:release_macos --linkopt="-Wl,-no_function_starts"
 
+# Cross-compiled release build for x86_64.
+build:release_macos_cross_x86_64 --config=release_macos
+build:release_macos_cross_x86_64 --config=macos-cross-x86_64
+
 # On macOS, optionally compile using LLD (19 or higher is compatible with the default flags added by
 # apple_support). Requires Homebrew's lld package to be installed and symlinked into /usr/local/bin.
 # This is less CPU intensive than the system linker, but also slightly slower in terms of wall time
