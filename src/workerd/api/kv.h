@@ -19,7 +19,7 @@ namespace workerd::api {
 
 // A capability to a KV namespace.
 class KvNamespace: public jsg::Object {
-public:
+ public:
   struct AdditionalHeader {
     kj::String name;
     kj::String value;
@@ -164,7 +164,7 @@ public:
     tracker.trackField("additionalHeaders", additionalHeaders.asPtr());
   }
 
-protected:
+ protected:
   // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
   // the limiter for that op type to be checked. If a string is used, that's used as the operation
   // name for the HttpClient without any limiter enforcement.
@@ -175,7 +175,7 @@ protected:
       kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
       kj::StringPtr urlStr);
 
-private:
+ private:
   kj::Array<AdditionalHeader> additionalHeaders;
   uint subrequestChannel;
 };

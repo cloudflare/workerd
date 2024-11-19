@@ -13,7 +13,7 @@
 namespace workerd::api {
 
 class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
-public:
+ public:
   SqlStorage(jsg::Ref<DurableObjectStorage> storage);
   ~SqlStorage();
 
@@ -60,7 +60,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(storage);
   }
@@ -99,7 +99,7 @@ private:
   };
 
   class StatementCacheCallbacks {
-  public:
+   public:
     inline const jsg::HashableV8Ref<v8::String>& keyForRow(
         const kj::Rc<CachedStatement>& entry) const {
       return entry->query;
@@ -173,7 +173,7 @@ private:
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
-public:
+ public:
   template <typename... Params>
   Cursor(jsg::Lock& js, Params&&... params) {
     auto stateObj = kj::heap<State>(kj::fwd<Params>(params)...);
@@ -234,7 +234,7 @@ public:
     return reusedCachedQuery;
   }
 
-private:
+ private:
   struct State {
     kj::Maybe<kj::Rc<CachedStatement>> cachedStatement;
 
@@ -303,7 +303,7 @@ private:
 // implement automatic prepared statement caching via the simple `exec()` API. Since this is
 // a compatibility shim only, to simplify things, it is acutally just a wrapper around `exec()`.
 class SqlStorage::Statement final: public jsg::Object {
-public:
+ public:
   Statement(jsg::Lock& js, jsg::Ref<SqlStorage> sqlStorage, jsg::JsString query)
       : sqlStorage(kj::mv(sqlStorage)),
         // Internalize the string before constructing the statement so that it doesn't have to
@@ -321,7 +321,7 @@ public:
     tracker.trackField("query", query);
   }
 
-private:
+ private:
   jsg::Ref<SqlStorage> sqlStorage;
   jsg::V8Ref<v8::String> query;
 

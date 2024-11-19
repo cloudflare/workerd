@@ -24,7 +24,7 @@ namespace workerd::api::node {
 // TODO(later): Consider moving out of node.h when needed for other
 // built-ins
 class CompatibilityFlags: public jsg::Object {
-public:
+ public:
   CompatibilityFlags() = default;
   CompatibilityFlags(jsg::Lock&, const jsg::Url&) {}
 

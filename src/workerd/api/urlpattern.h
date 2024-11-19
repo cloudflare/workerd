@@ -25,7 +25,7 @@ namespace workerd::api {
 // More information about the URL Pattern syntax can be found at
 // https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
 class URLPattern final: public jsg::Object {
-public:
+ public:
   // A structure providing matching patterns for individual components
   // of a URL. When a URLPattern is created, or when a URLPattern is
   // used to match or test against a URL, the input can be given as
@@ -107,7 +107,7 @@ public:
     tracker.trackField("inner", inner);
   }
 
-private:
+ private:
   jsg::UrlPattern inner;
 #define V(_, name) jsg::JsRef<jsg::JsRegExp> name##Regex;
   URL_PATTERN_COMPONENTS(V)

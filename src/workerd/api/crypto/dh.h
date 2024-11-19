@@ -11,7 +11,7 @@
 namespace workerd::api {
 
 class DiffieHellman final {
-public:
+ public:
   DiffieHellman(kj::StringPtr group);
   DiffieHellman(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
       kj::OneOf<kj::Array<kj::byte>, int>& generator);
@@ -31,7 +31,7 @@ public:
 
   kj::Maybe<int> check() KJ_WARN_UNUSED_RESULT;
 
-private:
+ private:
   kj::Own<DH> dh;
 };
 

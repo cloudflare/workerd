@@ -23,7 +23,7 @@ using kj::uint;
 
 // Used to collect periodic metrics about queries and size of sqlite db
 class SqliteObserver {
-public:
+ public:
   virtual void addQueryStats(uint64_t rowsRead, uint64_t rowsWritten) {}
   // The method is not used by the SqliteDatabase, it is added here for convenience
   virtual void setSqliteStoredBytes(uint64_t sqliteStoredBytes) {}
@@ -39,7 +39,7 @@ public:
 // representing a true disk directory, the real SQLite disk implementation will be used with
 // all of its features.
 class SqliteDatabase {
-public:
+ public:
   class Vfs;
   class Query;
   class Statement;
@@ -72,7 +72,7 @@ public:
   // of returning false. If they do, this exception will pass through to the caller in place of
   // a generic "not authorized" exception.
   class Regulator {
-  public:
+   public:
     // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
     // accessed. Typically, this is used to deny access to names containing special prefixes
     // indicating that they are privileged, like `_cf_`.
@@ -202,7 +202,7 @@ public:
 
   // Objects that need to be notified when reset() is called may inherit `ResetListener`.
   class ResetListener {
-  public:
+   public:
     ResetListener(SqliteDatabase& db): db(db) {
       db.resetListeners.add(*this);
     }
@@ -218,10 +218,10 @@ public:
     // called before actually resetting the database.
     virtual void beforeSqliteReset() = 0;
 
-  protected:  // so that subclasess don't have to store their own copy of the `db` reference
+   protected:  // so that subclasess don't have to store their own copy of the `db` reference
     SqliteDatabase& db;
 
-  private:
+   private:
     kj::ListLink<ResetListener> link;
 
     friend class SqliteDatabase;
@@ -256,7 +256,7 @@ public:
     }
   }
 
-private:
+ private:
   const Vfs& vfs;
   kj::Path path;
   bool readOnly;
@@ -370,7 +370,7 @@ private:
 
 // Represents a prepared SQL statement, which can be executed many times.
 class SqliteDatabase::Statement final: private ResetListener {
-public:
+ public:
   // Convenience method to start a query. This is equivalent to:
   //
   //     SqliteDatabase::Query(db, statement, bindings...);
@@ -385,7 +385,7 @@ public:
   template <typename... Params>
   Query run(Params&&... bindings);
 
-private:
+ private:
   const Regulator& regulator;
   kj::OneOf<kj::String, StatementAndEffect> stmt;
 
@@ -418,7 +418,7 @@ private:
 // Only one Query can exist at a time, for a given database. It should probably be allocated on
 // the stack.
 class SqliteDatabase::Query final: private ResetListener {
-public:
+ public:
   using ValuePtr =
       kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double, decltype(nullptr)>;
 
@@ -512,7 +512,7 @@ public:
     }
   }
 
-private:
+ private:
   const Regulator& regulator;
   StatementAndEffect ownStatement;                // for one-off queries
   kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
@@ -633,7 +633,7 @@ struct SqliteDatabase::VfsOptions {
 //
 // An instance of `Vfs` can safely be used across multiple threads.
 class SqliteDatabase::Vfs {
-public:
+ public:
   // Pretend `Options` is declared nested here. Due to a C++ quirk, we cannot actually declare it
   // nested while having default-initialized parameters of this type.
   using Options = VfsOptions;
@@ -675,7 +675,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(Vfs);
 
-private:
+ private:
   const kj::Directory& directory;
   kj::Own<LockManager> ownLockManager;
   const LockManager& lockManager;
@@ -720,7 +720,7 @@ private:
 };
 
 class SqliteDatabase::LockManager {
-public:
+ public:
   // Obtain a lock for the given database path. The main database file is also provided in case
   // it is useful. This method only creates the `Lock` object; it's level starts out as UNLOCKED,
   // meaning no actual lock is held yet.
@@ -744,7 +744,7 @@ public:
 // native implementation kicks in, which is based on advisory file locks at the OS level, as well
 // as mmapped shared memory from a file next to the database with suffix `-shm`.
 class SqliteDatabase::Lock {
-public:
+ public:
   // The main database can be locked at one of these levels.
   //
   // See the SQLite documentation for an explanation of lock levels:

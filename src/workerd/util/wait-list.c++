@@ -91,7 +91,7 @@ kj::Promise<void> CrossThreadWaitList::addWaiter() const {
 
 kj::Own<kj::CrossThreadPromiseFulfiller<void>> CrossThreadWaitList::makeSeparateFulfiller() {
   class FulfillerImpl final: public kj::CrossThreadPromiseFulfiller<void> {
-  public:
+   public:
     FulfillerImpl(kj::Own<const State> state): state(kj::mv(state)) {}
     ~FulfillerImpl() noexcept(false) {
       state->lostFulfiller();
@@ -110,7 +110,7 @@ kj::Own<kj::CrossThreadPromiseFulfiller<void>> CrossThreadWaitList::makeSeparate
       return !__atomic_load_n(&state->done, __ATOMIC_ACQUIRE);
     }
 
-  private:
+   private:
     kj::Own<const State> state;
   };
 

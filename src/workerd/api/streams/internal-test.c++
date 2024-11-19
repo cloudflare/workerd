@@ -17,7 +17,7 @@ namespace {
 
 template <int size>
 class FooStream: public ReadableStreamSource {
-public:
+ public:
   FooStream(): ptr(&data[0]), remaining_(size) {
     KJ_ASSERT(RAND_bytes(data, size) == 1);
   }
@@ -50,7 +50,7 @@ public:
     return maxMaxBytesSeen_;
   }
 
-private:
+ private:
   uint8_t data[size];
   uint8_t* ptr;
   size_t remaining_;
@@ -60,7 +60,7 @@ private:
 
 template <int size>
 class BarStream: public FooStream<size> {
-public:
+ public:
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
     return size;
   }
@@ -143,7 +143,7 @@ KJ_TEST("zero-length stream") {
   kj::WaitScope waitScope(loop);
 
   class Zero: public ReadableStreamSource {
-  public:
+   public:
     kj::Promise<size_t> tryRead(void*, size_t, size_t) {
       return (size_t)0;
     }
@@ -163,7 +163,7 @@ KJ_TEST("lying stream") {
   kj::WaitScope waitScope(loop);
 
   class Dishonest: public FooStream<10000> {
-  public:
+   public:
     kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
       return (size_t)10;
     }
@@ -186,7 +186,7 @@ KJ_TEST("honest small stream") {
   kj::WaitScope waitScope(loop);
 
   class HonestSmall: public FooStream<100> {
-  public:
+   public:
     kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
       return (size_t)100;
     }
@@ -212,7 +212,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
   TestFixture fixture({.featureFlags = flags.asReader()});
 
   class MySink final: public WritableStreamSink {
-  public:
+   public:
     kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
       return kj::READY_NOW;
     }
@@ -285,7 +285,7 @@ KJ_TEST("WritableStreamInternalController observability") {
   TestFixture fixture({.featureFlags = flags.asReader()});
 
   class MySink final: public WritableStreamSink {
-  public:
+   public:
     kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
       ++writeCount;
       return kj::READY_NOW;
@@ -301,12 +301,12 @@ KJ_TEST("WritableStreamInternalController observability") {
       return writeCount;
     }
 
-  private:
+   private:
     uint writeCount = 0;
   };
 
   class MyObserver final: public ByteStreamObserver {
-  public:
+   public:
     virtual void onChunkEnqueued(size_t bytes) {
       ++queueSize;
       queueSizeBytes += bytes;

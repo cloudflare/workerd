@@ -10,7 +10,7 @@
 namespace workerd::api {
 
 class Ec final {
-public:
+ public:
   static kj::Maybe<Ec> tryGetEc(const EVP_PKEY* key);
   Ec(EC_KEY* key);
 
@@ -40,7 +40,7 @@ public:
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const;
 
-private:
+ private:
   EC_KEY* key;
   const EC_GROUP* group = nullptr;
   kj::Own<BIGNUM> x;

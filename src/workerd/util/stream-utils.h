@@ -13,12 +13,12 @@ kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::StringPtr);
 
 // An InputStream that can be disconnected.
 class NeuterableInputStream: public kj::AsyncInputStream, public kj::Refcounted {
-public:
+ public:
   virtual void neuter(kj::Exception ex) = 0;
 };
 
 class NeuterableIoStream: public kj::AsyncIoStream {
-public:
+ public:
   virtual void neuter(kj::Exception ex) = 0;
 };
 

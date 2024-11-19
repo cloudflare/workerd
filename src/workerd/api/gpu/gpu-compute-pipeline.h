@@ -14,7 +14,7 @@
 namespace workerd::api::gpu {
 
 class GPUComputePipeline: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::ComputePipeline&() const {
     return pipeline_;
@@ -24,7 +24,7 @@ public:
     JSG_METHOD(getBindGroupLayout);
   }
 
-private:
+ private:
   wgpu::ComputePipeline pipeline_;
   jsg::Ref<GPUBindGroupLayout> getBindGroupLayout(uint32_t index);
 };

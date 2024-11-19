@@ -20,7 +20,7 @@ namespace workerd {
 // Perfetto subsystem on first initialization and writing events to the given
 // file path.
 class PerfettoSession {
-public:
+ public:
   explicit PerfettoSession(kj::StringPtr path, kj::StringPtr categories);
 
   // Create a PerfettoSession on an existing fd (the constructor will handle
@@ -39,7 +39,7 @@ public:
   // Called by embedders at most once to register the workerd track events.
   static void registerWorkerdTracks();
 
-private:
+ private:
   struct Impl;
   kj::Own<Impl> impl;
 

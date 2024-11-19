@@ -17,14 +17,14 @@ namespace workerd::api {
 // instance. Therefore, we lookup the current jsg::Lock instance from the
 // isolate pointer and use that to get the external memory adjustment.
 class CompressionAllocator final {
-public:
+ public:
   void configure(z_stream* stream);
 
   static void* AllocForZlib(void* data, uInt items, uInt size);
   static void* AllocForBrotli(void* data, size_t size);
   static void FreeForZlib(void* data, void* pointer);
 
-private:
+ private:
   struct Allocation {
     kj::Array<kj::byte> data;
     kj::Maybe<jsg::ExternalMemoryAdjustment> memoryAdjustment = kj::none;
@@ -33,7 +33,7 @@ private:
 };
 
 class CompressionStream: public TransformStream {
-public:
+ public:
   using TransformStream::TransformStream;
 
   static jsg::Ref<CompressionStream> constructor(kj::String format);
@@ -48,7 +48,7 @@ public:
 };
 
 class DecompressionStream: public TransformStream {
-public:
+ public:
   using TransformStream::TransformStream;
 
   static jsg::Ref<DecompressionStream> constructor(jsg::Lock& js, kj::String format);

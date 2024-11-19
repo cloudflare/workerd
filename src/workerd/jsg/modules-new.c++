@@ -50,7 +50,7 @@ ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::Type type) 
 }
 
 class EsModule final: public Module {
-public:
+ public:
   explicit EsModule(Url specifier, Type type, Flags flags, kj::Array<const char> source)
       : Module(kj::mv(specifier), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(source)),
@@ -143,7 +143,7 @@ public:
     return module;
   }
 
-private:
+ private:
   v8::MaybeLocal<v8::Value> actuallyEvaluate(
       Lock& js, v8::Local<v8::Module> module, const CompilationObserver& observer) const override {
     return module->Evaluate(js.v8Context());
@@ -178,7 +178,7 @@ private:
 // module namespace (i.e. the exports) and the evaluation steps. This is used for things
 // like CommonJS modules, JSON modules, etc.
 class SyntheticModule final: public Module {
-public:
+ public:
   static constexpr auto DEFAULT = "default"_kjc;
 
   SyntheticModule(Url specifier,
@@ -205,7 +205,7 @@ public:
         evaluationSteps);
   }
 
-private:
+ private:
   static v8::MaybeLocal<v8::Value> evaluationSteps(
       v8::Local<v8::Context> context, v8::Local<v8::Module> module);
 
@@ -256,7 +256,7 @@ private:
 
 // Binds a ModuleRegistry to an Isolate.
 class IsolateModuleRegistry final {
-public:
+ public:
   static IsolateModuleRegistry& from(v8::Isolate* isolate) {
     auto context = isolate->GetCurrentContext();
     void* ptr = context->GetAlignedPointerFromEmbedderData(2);
@@ -446,7 +446,7 @@ public:
         .map([](Entry& entry) -> Entry& { return entry; });
   }
 
-private:
+ private:
   ModuleRegistry& inner;
   const CompilationObserver& observer;
 
@@ -790,7 +790,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
 // The fallback module bundle calls a single resolve callback to resolve all modules
 // it is asked to resolve. Instances must be thread-safe.
 class FallbackModuleBundle final: public ModuleBundle {
-public:
+ public:
   FallbackModuleBundle(Builder::ResolveCallback&& callback)
       : ModuleBundle(Type::FALLBACK),
         callback(kj::mv(callback)) {}
@@ -821,7 +821,7 @@ public:
     return kj::none;
   }
 
-private:
+ private:
   Builder::ResolveCallback callback;
 
   struct Cache final {
@@ -835,7 +835,7 @@ private:
 // The static module bundle maintains an internal table of specifiers to resolve callbacks
 // in memory. Instances must be thread-safe.
 class StaticModuleBundle final: public ModuleBundle {
-public:
+ public:
   StaticModuleBundle(Type type,
       kj::HashMap<Url, ModuleBundle::Builder::ResolveCallback> modules,
       kj::HashMap<Url, Url> aliases)
@@ -874,7 +874,7 @@ public:
     return kj::none;
   }
 
-private:
+ private:
   kj::HashMap<Url, ModuleBundle::Builder::ResolveCallback> modules;
   kj::HashMap<Url, Url> aliases;
   kj::MutexGuarded<kj::HashMap<Url, kj::Own<Module>>> cache;

@@ -46,7 +46,7 @@ struct AsymmetricKeyData {
 };
 
 class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
-public:
+ public:
   explicit AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, bool extractable);
 
   // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ public:
   bool verifyX509Public(const X509* cert) const override;
   bool verifyX509Private(const X509* cert) const override;
 
-private:
+ private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual kj::Array<kj::byte> exportRaw() const = 0;
 

@@ -28,7 +28,7 @@ namespace workerd::api::node {
 //   });
 //   console.log(als.getStore());  // undefined
 class AsyncLocalStorage final: public jsg::Object {
-public:
+ public:
   AsyncLocalStorage(): key(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {}
   ~AsyncLocalStorage() noexcept(false) {
     key->reset();
@@ -86,7 +86,7 @@ public:
 
   kj::Own<jsg::AsyncContextFrame::StorageKey> getKey();
 
-private:
+ private:
   kj::Own<jsg::AsyncContextFrame::StorageKey> key;
 };
 
@@ -126,7 +126,7 @@ private:
 //   target.addEventListener('abc', handler);
 //   target.addEventListener('xyz', handler);
 class AsyncResource final: public jsg::Object {
-public:
+ public:
   struct Options {
     // Node.js' API allows user code to create AsyncResource instances within an
     // explicitly specified parent execution context (what we call an "Async Context
@@ -204,7 +204,7 @@ public:
     tracker.trackField("frame", frame);
   }
 
-private:
+ private:
   kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> frame;
 
   inline void visitForGc(jsg::GcVisitor& visitor) {
@@ -216,7 +216,7 @@ private:
 // We provide this because AsyncLocalStorage is exposed via async_hooks in
 // Node.js.
 class AsyncHooksModule final: public jsg::Object {
-public:
+ public:
   AsyncHooksModule() = default;
   AsyncHooksModule(jsg::Lock&, const jsg::Url&) {}
 

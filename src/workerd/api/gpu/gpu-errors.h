@@ -13,7 +13,7 @@
 namespace workerd::api::gpu {
 
 class GPUError: public jsg::Object {
-public:
+ public:
   explicit GPUError(kj::String m): message_(kj::mv(m)) {};
   JSG_RESOURCE_TYPE(GPUError) {
     JSG_READONLY_PROTOTYPE_PROPERTY(message, getMessage);
@@ -27,12 +27,12 @@ public:
     tracker.trackField("message", message_);
   }
 
-private:
+ private:
   kj::String message_;
 };
 
 class GPUOutOfMemoryError: public GPUError {
-public:
+ public:
   using GPUError::GPUError;
   JSG_RESOURCE_TYPE(GPUOutOfMemoryError) {
     JSG_INHERIT(GPUError);
@@ -40,7 +40,7 @@ public:
 };
 
 class GPUValidationError: public GPUError {
-public:
+ public:
   using GPUError::GPUError;
   JSG_RESOURCE_TYPE(GPUValidationError) {
     JSG_INHERIT(GPUError);
@@ -48,7 +48,7 @@ public:
 };
 
 class GPUInternalError: public GPUError {
-public:
+ public:
   using GPUError::GPUError;
   JSG_RESOURCE_TYPE(GPUInternalError) {
     JSG_INHERIT(GPUError);
@@ -56,7 +56,7 @@ public:
 };
 
 class GPUDeviceLostInfo: public jsg::Object {
-public:
+ public:
   explicit GPUDeviceLostInfo(GPUDeviceLostReason r, kj::String m)
       : reason_(kj::mv(r)),
         message_(kj::mv(m)) {};
@@ -70,7 +70,7 @@ public:
     tracker.trackField("reason", reason_);
   }
 
-private:
+ private:
   GPUDeviceLostReason reason_;
   kj::String message_;
   kj::StringPtr getMessage() {

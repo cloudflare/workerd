@@ -72,7 +72,7 @@ using BufferSourceViewConstructor = v8::Local<v8::Value> (*)(Lock&, BackingStore
 // The BackingStore can be safely used outside of the isolate lock and can even be passed
 // into another isolate if necessary.
 class BackingStore {
-public:
+ public:
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore from(kj::Array<kj::byte> data) {
     // Creates a new BackingStore that takes over ownership of the given kj::Array.
@@ -212,7 +212,7 @@ public:
     tracker.trackFieldWithSize("buffer", size());
   }
 
-private:
+ private:
   std::shared_ptr<v8::BackingStore> backingStore;
   size_t byteLength;
   size_t byteOffset;
@@ -284,7 +284,7 @@ private:
 //     }
 //   };
 class BufferSource {
-public:
+ public:
   static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
   static BufferSource wrap(
       Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx);
@@ -403,7 +403,7 @@ public:
     }
   }
 
-private:
+ private:
   Value handle;
   kj::Maybe<BackingStore> maybeBackingStore;
 
@@ -426,7 +426,7 @@ private:
 // TypeWrapper implementation for the BufferSource type.
 template <typename TypeWrapper>
 class BufferSourceWrapper {
-public:
+ public:
   static constexpr const char* getName(BufferSource*) {
     return "BufferSource";
   }

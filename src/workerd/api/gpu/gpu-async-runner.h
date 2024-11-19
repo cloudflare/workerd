@@ -17,7 +17,7 @@ namespace workerd::api::gpu {
 // AsyncRunner is used to poll a wgpu::Instance with calls to ProcessEvents() while there
 // are asynchronous tasks in flight.
 class AsyncRunner: public kj::Refcounted {
-public:
+ public:
   AsyncRunner(wgpu::Instance instance): instance_(instance) {};
 
   // Begin() should be called when a new asynchronous task is started.
@@ -31,7 +31,7 @@ public:
   // Every call to Begin() should eventually result in a call to End().
   void End();
 
-private:
+ private:
   void QueueTick();
   wgpu::Instance const instance_;
   uint64_t count_ = 0;
@@ -44,7 +44,7 @@ private:
 // associated with any async task.
 template <typename T>
 class AsyncContext: public kj::Refcounted {
-public:
+ public:
   inline AsyncContext(AsyncContext&&) = default;
 
   // Constructor.
@@ -69,7 +69,7 @@ public:
   kj::Own<kj::PromiseFulfiller<T>> fulfiller_;
   jsg::Promise<T> promise_;
 
-private:
+ private:
   KJ_DISALLOW_COPY(AsyncContext);
   kj::Own<AsyncRunner> runner_;
 };

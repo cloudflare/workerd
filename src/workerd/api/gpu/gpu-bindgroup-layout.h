@@ -13,7 +13,7 @@
 namespace workerd::api::gpu {
 
 class GPUBindGroupLayout: public jsg::Object {
-public:
+ public:
   explicit GPUBindGroupLayout(wgpu::BindGroupLayout l): layout_(kj::mv(l)) {};
 
   // Implicit cast operator to Dawn GPU object
@@ -23,7 +23,7 @@ public:
 
   JSG_RESOURCE_TYPE(GPUBindGroupLayout) {}
 
-private:
+ private:
   wgpu::BindGroupLayout layout_;
 };
 

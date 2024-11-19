@@ -44,7 +44,7 @@ inline uint KJ_HASHCODE(const ActorKey& k) {
 // Allows scheduling alarm executions at specific times, returning a promise representing
 // the completion of the alarm event.
 class AlarmScheduler final: kj::TaskSet::ErrorHandler {
-public:
+ public:
   static constexpr auto RETRY_START_SECONDS = WorkerInterface::ALARM_RETRY_START_SECONDS;
 
   // Max number of "valid" retry attempts, i.e the worker returned an error
@@ -70,7 +70,7 @@ public:
 
   void registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor);
 
-private:
+ private:
   enum class AlarmStatus { WAITING, STARTED, FINISHED };
   const kj::Clock& clock;
   kj::Timer& timer;

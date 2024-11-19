@@ -621,7 +621,7 @@ class ExternString: public Type {
   // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
   // IN THE SOFTWARE.
 
-public:
+ public:
   inline const Data* data() const override {
     return buf.begin();
   }
@@ -665,7 +665,7 @@ public:
     return str;
   }
 
-private:
+ private:
   v8::Isolate* isolate;
   kj::ArrayPtr<const Data> buf;
 

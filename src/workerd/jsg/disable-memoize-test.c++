@@ -94,13 +94,13 @@ struct TestContext: public BaseTestContext {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, BaseTestContext, TestApi1, TestApi2);
 
 class Configuration {
-public:
+ public:
   Configuration(workerd::CompatibilityFlags::Reader& flags): flags(flags) {}
   operator const workerd::CompatibilityFlags::Reader() const {
     return flags;
   }
 
-private:
+ private:
   workerd::CompatibilityFlags::Reader& flags;
 };
 

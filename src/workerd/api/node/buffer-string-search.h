@@ -36,7 +36,7 @@ namespace stringsearch {
 
 template <typename T>
 class Vector {
-public:
+ public:
   Vector(T* data, size_t length, bool isForward)
       : start_(data),
         length_(length),
@@ -64,7 +64,7 @@ public:
     return start_[is_forward_ ? index : (length_ - index - 1)];
   }
 
-private:
+ private:
   T* start_;
   size_t length_;
   bool is_forward_;
@@ -77,7 +77,7 @@ private:
 // Class holding constants and methods that apply to all string search variants,
 // independently of subject and pattern char size.
 class StringSearchBase {
-protected:
+ protected:
   // Cap on the maximal shift in the Boyer-Moore implementation. By setting a
   // limit, we can fix the size of tables. For a needle longer than this limit,
   // search will not be optimal, since we only build tables for a suffix
@@ -110,7 +110,7 @@ protected:
 
 template <typename Char>
 class StringSearch: private StringSearchBase {
-public:
+ public:
   typedef stringsearch::Vector<const Char> Vector;
 
   explicit StringSearch(Vector pattern): pattern_(pattern), start_(0) {
@@ -159,7 +159,7 @@ public:
         "sizeof(Char) == sizeof(uint16_t) || sizeof(uint8_t)");
   }
 
-private:
+ private:
   typedef size_t (StringSearch::*SearchFunction)(Vector, size_t);
   size_t SingleCharSearch(Vector subject, size_t start_index);
   size_t LinearSearch(Vector subject, size_t start_index);

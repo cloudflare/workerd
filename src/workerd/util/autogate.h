@@ -32,7 +32,7 @@ enum class AutogateKey {
 // When making structural changes here, ensure you align them with autogate.h in the internal repo.
 class Autogate {
 
-public:
+ public:
   static bool isEnabled(AutogateKey key);
 
   // Creates a global Autogate and seeds it with gates that are specified in the config.
@@ -47,7 +47,7 @@ public:
   // Destroys an initialised global Autogate instance. Used only for testing.
   static void deinitAutogate();
 
-private:
+ private:
   bool gates[(unsigned long)AutogateKey::NumOfKeys];
 
   Autogate(capnp::List<capnp::Text>::Reader autogates);

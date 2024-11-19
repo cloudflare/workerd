@@ -165,7 +165,7 @@ concept V8Value = requires(T a) { std::is_assignable_v<v8::Value, T>; };
 // jsg::MemoryTracker is used to construct the embedder graph for v8 heap
 // snapshot construction.
 class MemoryTracker final {
-public:
+ public:
   inline void trackFieldWithSize(
       kj::StringPtr edgeName, size_t size, kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
@@ -296,7 +296,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(MemoryTracker);
 
-private:
+ private:
   v8::Isolate* isolate_;
   v8::EmbedderGraph* graph_;
   std::stack<MemoryRetainerNode*> nodeStack_;
@@ -589,7 +589,7 @@ inline void visitSubclassForMemoryInfo(const T* obj, MemoryTracker& tracker) {
 // ======================================================================================
 
 class HeapSnapshotActivity final: public v8::ActivityControl {
-public:
+ public:
   using Callback = kj::Function<bool(uint32_t done, uint32_t total)>;
 
   HeapSnapshotActivity(Callback callback);
@@ -597,12 +597,12 @@ public:
 
   ControlOption ReportProgressValue(uint32_t done, uint32_t total) override;
 
-private:
+ private:
   Callback callback;
 };
 
 class HeapSnapshotWriter final: public v8::OutputStream {
-public:
+ public:
   using Callback = kj::Function<bool(kj::Maybe<kj::ArrayPtr<char>>)>;
 
   HeapSnapshotWriter(Callback callback, size_t chunkSize = 65536);
@@ -614,7 +614,7 @@ public:
 
   v8::OutputStream::WriteResult WriteAsciiChunk(char* data, int size) override;
 
-private:
+ private:
   Callback callback;
   size_t chunkSize;
 };

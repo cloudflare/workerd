@@ -27,7 +27,7 @@ class Evaluator {
   // TODO(cleanup): `ConfigurationType` currently can optionally be specified to fix the build
   //   in cases that the isolate includes types that require configuration, but currently the
   //   type is always default-constructed. What if you want to specify a test config?
-public:
+ public:
   explicit Evaluator(V8System& v8System): v8System(v8System) {}
 
   IsolateType& getIsolate() {
@@ -135,7 +135,7 @@ public:
     lock.runMicrotasks();
   }
 
-private:
+ private:
   V8System& v8System;
 };
 
@@ -213,7 +213,7 @@ struct NumberBox: public Object {
 };
 
 class BoxBox: public Object {
-public:
+ public:
   explicit BoxBox(Ref<NumberBox> inner): inner(kj::mv(inner)) {}
 
   Ref<NumberBox> inner;
@@ -230,7 +230,7 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(inner, getInner);
   }
 
-private:
+ private:
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(inner);
   }

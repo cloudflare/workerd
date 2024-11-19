@@ -813,7 +813,7 @@ v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate);
 
 // A configuration type that can be derived from any input type, because it contains nothing.
 class NullConfiguration {
-public:
+ public:
   template <typename T>
   NullConfiguration(T&&) {}
 };
@@ -822,7 +822,7 @@ public:
 // subclasses will then be able to register themselves in the map.
 template <typename TypeWrapper>
 class DynamicResourceTypeMap {
-private:
+ private:
   typedef void ReflectionInitializer(jsg::Object& object, TypeWrapper& wrapper);
   struct DynamicTypeInfo {
     v8::Local<v8::FunctionTemplate> tmpl;
@@ -1211,7 +1211,7 @@ struct ResourceTypeBuilder {
 
   inline void registerJsBundle(Bundle::Reader bundle) { /* handled at the second stage */ }
 
-private:
+ private:
   TypeWrapper& typeWrapper;
   v8::Isolate* isolate;
   v8::Local<v8::FunctionTemplate> constructor;
@@ -1320,13 +1320,13 @@ struct JsSetup {
   template <const char* tsDefine>
   inline void registerTypeScriptDefine() {}
 
-private:
+ private:
   jsg::Lock& js;
   v8::Local<v8::Context> context;
 };
 
 class ModuleRegistryBase {
-public:
+ public:
   virtual ~ModuleRegistryBase() noexcept(false) {}
   virtual kj::Own<void> attachToIsolate(
       Lock& js, const CompilationObserver& observer) KJ_WARN_UNUSED_RESULT = 0;
@@ -1340,7 +1340,7 @@ struct NewContextOptions {
 // JSG_RESOURCE_TYPE block).
 template <typename TypeWrapper, typename T>
 class ResourceWrapper {
-public:
+ public:
   // If the JSG_RESOURCE_TYPE macro declared a configuration parameter, then `Configuration` will
   // be that type, otherwise NullConfiguration which accepts any configuration.
   using Configuration = DetectedOr<NullConfiguration, GetConfiguration, T>;
@@ -1563,7 +1563,7 @@ public:
     }
   }
 
-private:
+ private:
   Configuration configuration;
   v8::Global<v8::FunctionTemplate> memoizedConstructor;
   v8::Global<v8::FunctionTemplate> contextConstructor;
@@ -1646,7 +1646,7 @@ private:
 // Like ResourceWrapper for T = jsg::Object. We need some special-casing for this type.
 template <typename TypeWrapper>
 class ObjectWrapper {
-public:
+ public:
   static constexpr const std::type_info& getName(Object*) {
     return typeid(Object);
   }

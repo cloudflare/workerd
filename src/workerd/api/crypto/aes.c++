@@ -108,7 +108,7 @@ int decryptFinalHelper(kj::StringPtr algorithm,
 // The base key is used to avoid repeating the JWK export logic. It also happens to simplify the
 // concrete implementations to only define encrypt/decrypt.
 class AesKeyBase: public CryptoKey::Impl {
-public:
+ public:
   explicit AesKeyBase(kj::Array<kj::byte> keyData,
       CryptoKey::AesKeyAlgorithm keyAlgorithm,
       bool extractable,
@@ -117,7 +117,7 @@ public:
         keyData(kj::mv(keyData)),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
-protected:
+ protected:
   kj::StringPtr getAlgorithmName() const override final {
     // AesKeyAlgorithm is constructed from normalizedName which points into the static constant
     // defined in crypto.c++ for lookup.
@@ -144,7 +144,7 @@ protected:
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
-private:
+ private:
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override final {
     return keyAlgorithm;
   }
@@ -187,20 +187,20 @@ private:
     return kj::heapArray(keyData.asPtr());
   }
 
-protected:
+ protected:
   ZeroOnFree keyData;
   CryptoKey::AesKeyAlgorithm keyAlgorithm;
 };
 
 class AesGcmKey final: public AesKeyBase {
-public:
+ public:
   explicit AesGcmKey(kj::Array<kj::byte> keyData,
       CryptoKey::AesKeyAlgorithm keyAlgorithm,
       bool extractable,
       CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
-private:
+ private:
   kj::Array<kj::byte> encrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
     kj::ArrayPtr<kj::byte> iv =
@@ -330,14 +330,14 @@ private:
 };
 
 class AesCbcKey final: public AesKeyBase {
-public:
+ public:
   explicit AesCbcKey(kj::Array<kj::byte> keyData,
       CryptoKey::AesKeyAlgorithm keyAlgorithm,
       bool extractable,
       CryptoKeyUsageSet usages)
       : AesKeyBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable, usages) {}
 
-private:
+ private:
   kj::Array<kj::byte> encrypt(SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> plainText) const override {
     kj::ArrayPtr<kj::byte> iv =
@@ -415,7 +415,7 @@ private:
 class AesCtrKey final: public AesKeyBase {
   static constexpr size_t expectedCounterByteSize = 16;
 
-public:
+ public:
   explicit AesCtrKey(kj::Array<kj::byte> keyData,
       CryptoKey::AesKeyAlgorithm keyAlgorithm,
       bool extractable,
@@ -432,7 +432,7 @@ public:
     return encryptOrDecrypt(kj::mv(algorithm), cipherText);
   }
 
-protected:
+ protected:
   static const EVP_CIPHER& lookupAesType(size_t keyLengthBytes) {
     switch (keyLengthBytes) {
       case 16:
@@ -533,7 +533,7 @@ protected:
     return result.releaseAsArray();
   }
 
-private:
+ private:
   kj::Own<BIGNUM> getCounter(
       kj::ArrayPtr<kj::byte> counterBlock, const unsigned counterBitLength) const {
     // See GetCounter from https://chromium.googlesource.com/chromium/src/+/refs/tags/91.0.4458.2/components/webcrypto/algorithms/aes_ctr.cc#86
@@ -613,7 +613,7 @@ private:
 };
 
 class AesKwKey final: public AesKeyBase {
-public:
+ public:
   explicit AesKwKey(kj::Array<kj::byte> keyData,
       CryptoKey::AesKeyAlgorithm keyAlgorithm,
       bool extractable,

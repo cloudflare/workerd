@@ -11,7 +11,7 @@
 namespace workerd::api {
 
 class ScheduledEvent final: public ExtendableEvent {
-public:
+ public:
   explicit ScheduledEvent(double scheduledTime, kj::StringPtr cron);
 
   static jsg::Ref<ScheduledEvent> constructor(kj::String type) = delete;
@@ -36,14 +36,14 @@ public:
     tracker.trackField("cron", cron);
   }
 
-private:
+ private:
   double scheduledTime;
   kj::String cron;
 };
 
 // Type used when calling a module-exported scheduled event handler.
 class ScheduledController final: public jsg::Object {
-public:
+ public:
   ScheduledController(jsg::Ref<ScheduledEvent> event): event(kj::mv(event)) {}
 
   double getScheduledTime() {
@@ -66,7 +66,7 @@ public:
     tracker.trackField("event", event);
   }
 
-private:
+ private:
   jsg::Ref<ScheduledEvent> event;
 
   void visitForGc(jsg::GcVisitor& visitor) {

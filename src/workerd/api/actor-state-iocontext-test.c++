@@ -22,7 +22,7 @@ bool contains(kj::StringPtr haystack, kj::StringPtr needle) {
 }
 
 class MockActorId: public ActorIdFactory::ActorId {
-public:
+ public:
   MockActorId(kj::String id): id(kj::mv(id)) {}
   kj::String toString() const override {
     return kj::str("MockActorId<", id, ">");
@@ -42,7 +42,7 @@ public:
 
   virtual ~MockActorId() {};
 
-private:
+ private:
   kj::String id;
 };
 

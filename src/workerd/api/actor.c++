@@ -16,7 +16,7 @@
 namespace workerd::api {
 
 class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
-public:
+ public:
   LocalActorOutgoingFactory(uint channelId, kj::String actorId)
       : channelId(channelId),
         actorId(kj::mv(actorId)) {}
@@ -43,14 +43,14 @@ public:
           .operationName = kj::ConstString("actor_subrequest"_kjc)}));
   }
 
-private:
+ private:
   uint channelId;
   kj::String actorId;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
 class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
-public:
+ public:
   GlobalActorOutgoingFactory(uint channelId,
       jsg::Ref<DurableObjectId> id,
       kj::Maybe<kj::String> locationHint,
@@ -85,7 +85,7 @@ public:
           .operationName = kj::ConstString("actor_subrequest"_kjc)}));
   }
 
-private:
+ private:
   uint channelId;
   jsg::Ref<DurableObjectId> id;
   kj::Maybe<kj::String> locationHint;

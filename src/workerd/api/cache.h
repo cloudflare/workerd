@@ -35,7 +35,7 @@ struct CacheQueryOptions {
 };
 
 class Cache: public jsg::Object {
-public:
+ public:
   explicit Cache(kj::Maybe<kj::String> cacheName);
 
   jsg::Unimplemented add(Request::Info request);
@@ -82,7 +82,7 @@ public:
     tracker.trackField("cacheName", cacheName);
   }
 
-private:
+ private:
   kj::Maybe<kj::String> cacheName;
 
   kj::Own<kj::HttpClient> getHttpClient(
@@ -93,7 +93,7 @@ private:
 // CacheStorage
 
 class CacheStorage: public jsg::Object {
-public:
+ public:
   CacheStorage();
 
   jsg::Promise<jsg::Ref<Cache>> open(jsg::Lock& js, kj::String cacheName);
@@ -131,7 +131,7 @@ public:
     tracker.trackField("default", default_);
   }
 
-private:
+ private:
   jsg::Ref<Cache> default_;
 };
 

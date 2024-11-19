@@ -19,7 +19,7 @@ class Socket;
 // Provides the same interface as Hyperdrive while sending connection
 // traffic directly to postgres
 class Hyperdrive: public jsg::Object {
-public:
+ public:
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
   explicit Hyperdrive(uint clientIndex,
@@ -57,7 +57,7 @@ public:
     tracker.trackField("scheme", scheme);
   }
 
-private:
+ private:
   uint clientIndex;
   kj::String randomHost;
   kj::String database;

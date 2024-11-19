@@ -34,7 +34,7 @@ struct UncapturedErrorContext {
 };
 
 class GPUDevice: public EventTarget {
-public:
+ public:
   explicit GPUDevice(jsg::Lock& js,
       wgpu::Device d,
       kj::Own<AsyncRunner> async,
@@ -67,7 +67,7 @@ public:
   // illegal for user code to create an GPUDevice directly.
   static jsg::Ref<GPUDevice> constructor() = delete;
 
-private:
+ private:
   wgpu::Device device_;
   kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> dlc_;
   jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>> lost_promise_;
@@ -118,7 +118,7 @@ struct GPUUncapturedErrorEventInit {
 };
 
 class GPUUncapturedErrorEvent: public Event {
-public:
+ public:
   GPUUncapturedErrorEvent(
       kj::StringPtr type, GPUUncapturedErrorEventInit gpuUncapturedErrorEventInitDict)
       : Event(kj::mv(type)),
@@ -135,7 +135,7 @@ public:
     tracker.trackField("error", error_);
   }
 
-private:
+ private:
   jsg::Ref<GPUError> error_;
 
   jsg::Ref<GPUError> getError() {

@@ -10,7 +10,7 @@
 namespace workerd::api::node {
 
 class UrlUtil final: public jsg::Object {
-public:
+ public:
   UrlUtil() = default;
   UrlUtil(jsg::Lock&, const jsg::Url&) {}
 

@@ -6,10 +6,10 @@
 
 namespace workerd::server {
 class ActorIdFactoryImpl final: public ActorIdFactory {
-public:
+ public:
   ActorIdFactoryImpl(kj::StringPtr uniqueKey);
   class ActorIdImpl final: public ActorId {
-  public:
+   public:
     ActorIdImpl(const kj::byte idParam[SHA256_DIGEST_LENGTH], kj::Maybe<kj::String> name);
 
     kj::String toString() const override;
@@ -17,7 +17,7 @@ public:
     bool equals(const ActorId& other) const override;
     kj::Own<ActorId> clone() const override;
 
-  private:
+   private:
     kj::byte id[SHA256_DIGEST_LENGTH];
     kj::Maybe<kj::String> name;
   };
@@ -28,7 +28,7 @@ public:
   kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) override;
   bool matchesJurisdiction(const ActorId& id) override;
 
-private:
+ private:
   kj::byte key[SHA256_DIGEST_LENGTH];
 
   uint64_t counter = 0;  // only used in predictable mode

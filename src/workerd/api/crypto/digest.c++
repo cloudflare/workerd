@@ -17,7 +17,7 @@ namespace workerd::api {
 namespace {
 
 class HmacKey final: public CryptoKey::Impl {
-public:
+ public:
   explicit HmacKey(kj::Array<kj::byte> keyData,
       CryptoKey::HmacKeyAlgorithm keyAlgorithm,
       bool extractable,
@@ -37,7 +37,7 @@ public:
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
-private:
+ private:
   kj::Array<kj::byte> sign(
       SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const override {
     return computeHmac(kj::mv(algorithm), data);

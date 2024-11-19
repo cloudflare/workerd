@@ -11,7 +11,7 @@ namespace workerd::api::node {
 
 // Implements utilities in support of the Node.js Buffer
 class BufferUtil final: public jsg::Object {
-public:
+ public:
   BufferUtil() = default;
   BufferUtil(jsg::Lock&, const jsg::Url&) {}
 

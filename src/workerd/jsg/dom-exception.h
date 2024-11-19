@@ -42,7 +42,7 @@ namespace workerd::jsg {
 // the same tunneled exception feature by defining their own globally-accessible type named
 // "DOMException".
 class DOMException: public Object {
-public:
+ public:
   DOMException(kj::String message, kj::String name): message(kj::mv(message)), name(kj::mv(name)) {}
 
   // JS API
@@ -103,7 +103,7 @@ public:
   static jsg::Ref<DOMException> deserialize(
       jsg::Lock& js, uint tag, jsg::Deserializer& deserializer);
 
-private:
+ private:
   kj::String message;
   kj::String name;
   PropertyReflection<kj::String> stack;

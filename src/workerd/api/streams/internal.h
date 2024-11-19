@@ -36,7 +36,7 @@ namespace workerd::api {
 class WritableStreamInternalController;
 
 class ReadableStreamInternalController: public ReadableStreamController {
-public:
+ public:
   using Readable = IoOwn<ReadableStreamSource>;
 
   explicit ReadableStreamInternalController(StreamStates::Closed closed): state(closed) {}
@@ -116,13 +116,13 @@ public:
   size_t jsgGetMemorySelfSize() const override;
   void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
-private:
+ private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   class PipeLocked: public PipeController {
-  public:
+   public:
     PipeLocked(ReadableStreamInternalController& inner, jsg::Ref<WritableStream> ref)
         : inner(inner),
           ref(kj::mv(ref)) {}
@@ -151,7 +151,7 @@ private:
     size_t jsgGetMemorySelfSize() const;
     void jsgGetMemoryInfo(jsg::MemoryTracker& info) const;
 
-  private:
+   private:
     ReadableStreamInternalController& inner;
     jsg::Ref<WritableStream> ref;
   };
@@ -172,7 +172,7 @@ private:
 };
 
 class WritableStreamInternalController: public WritableStreamController {
-public:
+ public:
   struct Writable {
     kj::Own<WritableStreamSink> sink;
     kj::Canceler canceler;
@@ -254,7 +254,7 @@ public:
   size_t jsgGetMemorySelfSize() const override;
   void jsgGetMemoryInfo(jsg::MemoryTracker& info) const override;
 
-private:
+ private:
   struct AbortOptions {
     bool reject = false;
     bool handled = false;
@@ -390,7 +390,7 @@ class IdentityTransformStreamImpl: public kj::Refcounted,
                                    public WritableStreamSink {
   // TODO(soon): Reimplement this in terms of kj::OneWayPipe, so we can optimize pumpTo().
 
-public:
+ public:
   explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none): limit(limit) {}
 
   ~IdentityTransformStreamImpl() noexcept(false) {
@@ -425,7 +425,7 @@ public:
 
   void abort(kj::Exception reason) override;
 
-private:
+ private:
   kj::Promise<size_t> readHelper(kj::ArrayPtr<kj::byte> bytes);
 
   kj::Promise<void> writeHelper(kj::ArrayPtr<const kj::byte> bytes);

@@ -138,7 +138,7 @@ struct WorkerdApi::Impl final {
   const PythonConfig& pythonConfig;
 
   class Configuration {
-  public:
+   public:
     Configuration(Impl& impl)
         : features(*impl.features),
           jsgConfig(jsg::JsgConfig{
@@ -152,7 +152,7 @@ struct WorkerdApi::Impl final {
       return jsgConfig;
     }
 
-  private:
+   private:
     CompatibilityFlags::Reader& features;
     jsg::JsgConfig jsgConfig;
   };

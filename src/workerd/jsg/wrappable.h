@@ -52,7 +52,7 @@ class HeapTracer;
 // For resource types, this wrapper refcount counts the number of Ref<T>s that point to the
 // Wrappable and are not visible to GC tracing.
 class Wrappable: public kj::Refcounted {
-public:
+ public:
   enum InternalFields : int {
     // Field must contain a pointer to `WORKERD_WRAPPABLE_TAG`. This is a workerd-specific
     // tag that helps us to identify a v8 API object as one of our own.
@@ -151,7 +151,7 @@ public:
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 
-private:
+ private:
   class CppgcShim;
 
   // If a JS wrapper is currently allocated, this point to the cppgc shim object.
@@ -193,7 +193,7 @@ private:
 
 // For historical reasons, this is actually implemented in setup.c++.
 class HeapTracer: public v8::EmbedderRootsHandler {
-public:
+ public:
   explicit HeapTracer(v8::Isolate* isolate);
 
   ~HeapTracer() noexcept {
@@ -242,7 +242,7 @@ public:
     return false;
   }
 
-private:
+ private:
   v8::Isolate* isolate;
   kj::Vector<Wrappable*> wrappersToTrace;
 

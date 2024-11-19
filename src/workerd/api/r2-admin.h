@@ -24,7 +24,7 @@ class R2Admin: public jsg::Object {
     using R2Bucket::FeatureFlags::FeatureFlags;
   };
 
-public:
+ public:
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
   explicit R2Admin(CompatibilityFlags::Reader featureFlags, uint subrequestChannel)
@@ -46,7 +46,7 @@ public:
   };
 
   class RetrievedBucket: public R2Bucket {
-  public:
+   public:
     RetrievedBucket(R2Bucket::FeatureFlags featureFlags,
         uint subrequestChannel,
         kj::String name,
@@ -67,7 +67,7 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(created, getCreated);
     }
 
-  private:
+   private:
     kj::Date created;
 
     friend class R2Admin;
@@ -103,7 +103,7 @@ public:
     tracker.trackField("jwt", jwt);
   }
 
-private:
+ private:
   R2Bucket::FeatureFlags featureFlags;
   uint subrequestChannel;
   kj::Maybe<kj::String> jwt;

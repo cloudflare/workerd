@@ -16,7 +16,7 @@ template <size_t>
 class StringBuffer;
 
 class MimeType final {
-public:
+ public:
   using MimeParams = kj::HashMap<kj::String, kj::String>;
 
   enum ParseOptions {
@@ -110,7 +110,7 @@ public:
     tracker.trackFieldWithSize("params", params_.size());
   }
 
-private:
+ private:
   kj::String type_;
   kj::String subtype_;
   MimeParams params_;

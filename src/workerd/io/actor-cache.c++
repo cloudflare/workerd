@@ -439,7 +439,7 @@ auto ActorCache::getImpl(
 }
 
 class ActorCache::GetMultiStreamImpl final: public rpc::ActorStorage::ListStream::Server {
-public:
+ public:
   GetMultiStreamImpl(ActorCache& cache,
       kj::Vector<kj::Own<Entry>> cachedEntries,
       kj::Vector<Key> keysToFetchParam,
@@ -743,7 +743,7 @@ inline auto seekOrEnd(auto& map, kj::Maybe<ActorCache::KeyPtr> key) {
 }  // namespace
 
 class ActorCache::ForwardListStreamImpl final: public rpc::ActorStorage::ListStream::Server {
-public:
+ public:
   ForwardListStreamImpl(ActorCache& cache,
       Key beginKey,
       kj::Maybe<Key> endKey,
@@ -1123,7 +1123,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
 // -----------------------------------------------------------------------------
 
 class ActorCache::ReverseListStreamImpl final: public rpc::ActorStorage::ListStream::Server {
-public:
+ public:
   ReverseListStreamImpl(ActorCache& cache,
       Key beginKey,
       kj::Maybe<Key> endKey,

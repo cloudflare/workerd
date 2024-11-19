@@ -25,7 +25,7 @@ class SqliteKvRegulator: public SqliteDatabase::Regulator {
 // (Ideally this class would allow configuring the table name, but this would require a somewhat
 // obnoxious amount of string allocation.)
 class SqliteKv: private SqliteDatabase::ResetListener {
-public:
+ public:
   explicit SqliteKv(SqliteDatabase& db);
 
   typedef kj::StringPtr KeyPtr;
@@ -59,7 +59,7 @@ public:
   //   extension might help here, though it can only support arrays of NUL-terminated strings, not
   //   byte blobs or strings containing NUL bytes.
 
-private:
+ private:
   struct Uninitialized {};
 
   struct Initialized {

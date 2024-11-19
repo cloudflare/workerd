@@ -33,7 +33,7 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 // ExternalHandler used when serializing RPC messages. Serialization functions which whish to
 // handle RPC specially should use this.
 class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler {
-public:
+ public:
   using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
 
   // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
@@ -66,7 +66,7 @@ public:
   void serializeFunction(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
 
-private:
+ private:
   GetStreamSinkFunc getStreamSinkFunc;
 
   kj::Vector<BuilderCallback> externals;
@@ -80,7 +80,7 @@ class StreamSinkImpl;
 // ExternalHandler used when deserializing RPC messages. Deserialization functions which whish to
 // handle RPC specially should use this.
 class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
-public:
+ public:
   // The `streamSink` parameter should be provided if a StreamSink already exists, e.g. when
   // deserializing results. If omitted, it will be constructed on-demand.
   RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals,
@@ -111,7 +111,7 @@ public:
     return kj::mv(streamSinkCap);
   }
 
-private:
+ private:
   capnp::List<rpc::JsValue::External>::Reader externals;
   uint i = 0;
 
@@ -125,7 +125,7 @@ private:
 // Base class for objects which can be sent over RPC, but doing so actually sends a stub which
 // makes RPCs back to the original object.
 class JsRpcTarget: public jsg::Object {
-public:
+ public:
   static jsg::Ref<JsRpcTarget> constructor() {
     return jsg::alloc<JsRpcTarget>();
   }
@@ -143,7 +143,7 @@ public:
 // This class is NOT part of the JavaScript class heirarchy (it has no JSG_RESOURCE_TYPE block),
 // it's only a C++ class used to abstract how to get a capnp client out of the object.
 class JsRpcClientProvider: public jsg::Object {
-public:
+ public:
   // Get a capnp client that can be used to dispatch one call.
   //
   // If this isn't the root object (i.e. this is a JsRpcProperty), the property path starting from
@@ -157,7 +157,7 @@ class JsRpcProperty;
 // Represents the promise returned by calling an RPC method. We don't use a regular Promise object,
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
-public:
+ public:
   // A weak reference to this JsRpcPromise. Unlike the usual WeakRef pattern, though, this ref is
   // allocated before the promise itself is actually created, and filled in later. This is needed
   // to solve cyclic initialization challenges in `callImpl()`.
@@ -218,7 +218,7 @@ public:
     tracker.trackField("inner", inner);
   }
 
-private:
+ private:
   jsg::JsRef<jsg::JsPromise> inner;
   kj::Own<WeakRef> weakRef;
 
@@ -255,7 +255,7 @@ private:
 
 // Represents a property -- possibly, a method -- of a remote RPC object.
 class JsRpcProperty: public JsRpcClientProvider {
-public:
+ public:
   JsRpcProperty(jsg::Ref<JsRpcClientProvider> parent, kj::String name)
       : parent(kj::mv(parent)),
         name(kj::mv(name)) {}
@@ -301,7 +301,7 @@ public:
     tracker.trackField("name", name);
   }
 
-private:
+ private:
   // The parent object from which this property was obtained.
   jsg::Ref<JsRpcClientProvider> parent;
 
@@ -326,7 +326,7 @@ private:
 // `Fetcher`, which has a `getRpcMethod()` call of its own that mostly delegates to
 // `JsRpcStub::sendJsRpc()`.
 class JsRpcStub: public JsRpcClientProvider {
-public:
+ public:
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient): capnpClient(kj::mv(capnpClient)) {}
   JsRpcStub(IoOwn<rpc::JsRpcTarget::Client> capnpClient, RpcStubDisposalGroup& disposalGroup);
   ~JsRpcStub() noexcept(false);
@@ -365,7 +365,7 @@ public:
 
   JSG_SERIALIZABLE(rpc::SerializationTag::JS_RPC_STUB);
 
-private:
+ private:
   // Nulled out upon dispose().
   kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> capnpClient;
 
@@ -376,7 +376,7 @@ private:
 };
 
 class RpcStubDisposalGroup {
-public:
+ public:
   ~RpcStubDisposalGroup() noexcept(false);
 
   // Release all the stubs in the group without disposing them. They will have to be disposed
@@ -397,7 +397,7 @@ public:
     callPipeline = kj::mv(value);
   }
 
-private:
+ private:
   kj::List<JsRpcStub, &JsRpcStub::disposalGroupLink> list;
   kj::Maybe<IoOwn<rpc::JsRpcTarget::Client>> callPipeline;
   friend class JsRpcStub;
@@ -406,7 +406,7 @@ private:
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
 // over RPC. We drain the IncomingRequest after the capability is used to run the relevant JS.
 class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
-public:
+ public:
   JsRpcSessionCustomEventImpl(uint16_t typeId,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
@@ -443,7 +443,7 @@ public:
   // type in -- so we hardcode it here.
   static constexpr uint16_t WORKER_RPC_EVENT_TYPE = 9;
 
-private:
+ private:
   kj::Own<kj::PromiseFulfiller<workerd::rpc::JsRpcTarget::Client>> capFulfiller;
 
   // We need to set the client/server capability on the event itself to get around CustomEvent's
@@ -468,7 +468,7 @@ private:
 // `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
 // define a constructor.
 class WorkerEntrypoint: public jsg::Object {
-public:
+ public:
   static jsg::Ref<WorkerEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<ExecutionContext> ctx,
       jsg::JsObject env);
@@ -487,7 +487,7 @@ public:
 // there were no other kinds of exported classes so this was fine. Going forward, we encourage
 // everyone to be explicit by inheriting this, and we require it if you want to use RPC.
 class DurableObjectBase: public jsg::Object {
-public:
+ public:
   static jsg::Ref<DurableObjectBase> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<DurableObjectState> ctx,
       jsg::JsObject env);
@@ -508,7 +508,7 @@ public:
 // `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
 // define a constructor.
 class WorkflowEntrypoint: public jsg::Object {
-public:
+ public:
   static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<ExecutionContext> ctx,
       jsg::JsObject env);
@@ -519,7 +519,7 @@ public:
 // The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
 // for extending.
 class EntrypointsModule: public jsg::Object {
-public:
+ public:
   EntrypointsModule() = default;
   EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
 

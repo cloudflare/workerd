@@ -18,7 +18,7 @@
 namespace workerd::api::gpu {
 
 class GPUAdapter: public jsg::Object {
-public:
+ public:
   explicit GPUAdapter(dawn::native::Adapter a, kj::Own<AsyncRunner> async)
       : adapter_(a),
         async_(kj::mv(async)) {};
@@ -29,7 +29,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(limits, getLimits);
   }
 
-private:
+ private:
   jsg::Promise<jsg::Ref<GPUDevice>> requestDevice(jsg::Lock&, jsg::Optional<GPUDeviceDescriptor>);
   dawn::native::Adapter adapter_;
   kj::Own<AsyncRunner> async_;

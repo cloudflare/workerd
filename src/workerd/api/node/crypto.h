@@ -12,10 +12,10 @@
 namespace workerd::api::node {
 
 class CryptoImpl final: public jsg::Object {
-public:
+ public:
   // DH
   class DiffieHellmanHandle final: public jsg::Object {
-  public:
+   public:
     DiffieHellmanHandle(DiffieHellman dh);
 
     static jsg::Ref<DiffieHellmanHandle> constructor(jsg::Lock& js,
@@ -44,7 +44,7 @@ public:
       JSG_METHOD(getVerifyError);
     };
 
-  private:
+   private:
     DiffieHellman dh;
     int verifyError;
   };
@@ -61,7 +61,7 @@ public:
 
   // Hash
   class HashHandle final: public jsg::Object {
-  public:
+   public:
     HashHandle(HashContext ctx): ctx(kj::mv(ctx)) {}
 
     static jsg::Ref<HashHandle> constructor(kj::String algorithm, kj::Maybe<uint32_t> xofLen);
@@ -81,13 +81,13 @@ public:
 
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-  private:
+   private:
     HashContext ctx;
   };
 
   // Hmac
   class HmacHandle final: public jsg::Object {
-  public:
+   public:
     using KeyParam = kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>>;
 
     HmacHandle(HmacContext ctx): ctx(kj::mv(ctx)) {};
@@ -110,7 +110,7 @@ public:
 
     void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-  private:
+   private:
     HmacContext ctx;
   };
 

@@ -14,7 +14,7 @@
 namespace workerd::api::gpu {
 
 class GPUQueue: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Queue&() const {
     return queue_;
@@ -25,7 +25,7 @@ public:
     JSG_METHOD(writeBuffer);
   }
 
-private:
+ private:
   wgpu::Queue queue_;
   void submit(kj::Array<jsg::Ref<GPUCommandBuffer>> commandBuffers);
   void writeBuffer(jsg::Ref<GPUBuffer> buffer,

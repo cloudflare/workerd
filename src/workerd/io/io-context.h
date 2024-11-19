@@ -47,10 +47,10 @@ class IoContext;
 // those will be emitted all at once with a single header message followed by contextual
 // information for each individual collected instance.
 class WarningAggregator final: public kj::AtomicRefcounted {
-public:
+ public:
   // The IoContext will maintain a map of WarningAggregators based on an opaque key.
   class Key final {
-  public:
+   public:
     Key(): hash(kj::hashCode(this)) {}
     KJ_DISALLOW_COPY_AND_MOVE(Key);
     inline uint hashCode() const {
@@ -60,13 +60,13 @@ public:
       return this == &other;
     }
 
-  private:
+   private:
     uint hash;
   };
 
   // Captures the contextual information for a specific aggregated warning.
   class WarningContext {
-  public:
+   public:
     virtual ~WarningContext() noexcept(false) = default;
     virtual kj::String toString(jsg::Lock& js) = 0;
   };
@@ -84,7 +84,7 @@ public:
 
   using Map = kj::HashMap<const Key&, kj::Own<WarningAggregator>>;
 
-private:
+ private:
   kj::Own<const Worker> worker;
   kj::Own<RequestObserver> requestMetrics;
   EmitCallback emitter;
@@ -106,7 +106,7 @@ private:
 // usage) to the "current" incoming request, which is defined as the newest request that hasn't
 // already completed.
 class IoContext_IncomingRequest final {
-public:
+ public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
@@ -160,7 +160,7 @@ public:
     return workerTracer;
   }
 
-private:
+ private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
@@ -205,7 +205,7 @@ private:
 // like this. We don't want people leaking heavy objects or allowing simultaneous requests to
 // interfere with each other.
 class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
-public:
+ public:
   class TimeoutManagerImpl;
 
   // Construct a new IoContext. Before using it, you must also create an IncomingRequest.
@@ -816,7 +816,7 @@ public:
     return *getCurrentIncomingRequest().ioChannelFactory;
   }
 
-private:
+ private:
   ThreadContext& thread;
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
@@ -905,7 +905,7 @@ private:
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
 
   class Runnable {
-  public:
+   public:
     virtual void run(Worker::Lock& lock) = 0;
   };
   void runImpl(Runnable& runnable,
@@ -1262,7 +1262,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
       }
     }
 
-  private:
+   private:
     kj::Maybe<kj::StringPtr> finalize() override {
       if (!isDone) {
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));

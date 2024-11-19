@@ -33,7 +33,7 @@ struct GeneratorNext {
 template <typename T>
 class GeneratorContext final {
   // See the documentation in jsg.h
-public:
+ public:
   // Signal early return on the generator. The value given will be returned by the
   // generator's forEach once the generator completes returning.
   void return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
@@ -56,7 +56,7 @@ public:
     return state.template is<Erroring>();
   }
 
-private:
+ private:
   struct Init {};
   struct Erroring {};
   using Returning = kj::Maybe<T>;
@@ -88,7 +88,7 @@ private:
 // Provides underlying state for Generator and AsyncGenerator instances.
 template <typename Generator>
 class GeneratorImpl {
-public:
+ public:
   using T = typename Generator::Type;
   using NextSignature = typename Generator::NextSignature;
   using ReturnSignature = typename Generator::ReturnSignature;
@@ -120,7 +120,7 @@ public:
     }
   }
 
-private:
+ private:
   struct Finished {};
   struct Active {
     kj::Maybe<NextSignature> maybeNext;
@@ -181,7 +181,7 @@ concept AsyncGeneratorCallback = true;
 template <typename T>
 class Generator final {
   // See the documentation in jsg.h
-public:
+ public:
   Generator(Generator&&) = default;
   Generator& operator=(Generator&&) = default;
 
@@ -279,7 +279,7 @@ public:
     }
   }
 
-private:
+ private:
   using Type = T;
   using Next = GeneratorNext<T>;
   using NextSignature = Function<Next()>;
@@ -302,7 +302,7 @@ private:
 template <typename T>
 class AsyncGenerator final {
   // See the documentation in jsg.h
-public:
+ public:
   AsyncGenerator(AsyncGenerator&&) = default;
   AsyncGenerator& operator=(AsyncGenerator&&) = default;
 
@@ -335,7 +335,7 @@ public:
     }
   }
 
-private:
+ private:
   using Type = T;
   using Next = GeneratorNext<T>;
   using NextSignature = Function<Promise<Next>()>;
@@ -535,7 +535,7 @@ Promise<void> AsyncGenerator<T>::throw_(Lock& js, jsg::Value exception) {
 
 template <typename TypeWrapper>
 class GeneratorWrapper {
-public:
+ public:
   template <typename T>
   static constexpr const char* getName(Generator<T>*) {
     return "Generator";
@@ -674,7 +674,7 @@ template <typename TypeWrapper>
 class SequenceWrapper {
   // TypeWrapper mixin for jsg::Sequences.
 
-public:
+ public:
   static auto constexpr MAX_STACK = 64;
 
   template <typename U>
@@ -733,7 +733,7 @@ template <typename SelfType, typename Type, typename State>
 class IteratorBase: public Object {
   // Provides the base implementation of JSG_ITERATOR types. See the documentation
   // for JSG_ITERATOR for details.
-public:
+ public:
   using NextSignature = kj::Maybe<Type>(Lock&, State&);
   explicit IteratorBase(State state): state(kj::mv(state)) {}
   struct Next {
@@ -760,7 +760,7 @@ public:
     }
   }
 
-private:
+ private:
   State state;
 
   Next nextImpl(Lock& js, NextSignature nextFunc) {
@@ -777,7 +777,7 @@ private:
 };
 
 class AsyncIteratorImpl {
-public:
+ public:
   struct Finished {};
 
   kj::Maybe<Promise<void>&> maybeCurrent();
@@ -801,7 +801,7 @@ public:
     // TODO(soon): Implement memory tracking
   }
 
-private:
+ private:
   std::deque<Promise<void>> pendingStack;
 };
 
@@ -856,7 +856,7 @@ private:
 // return an immediately resolved promise indicating that the iterator is done.
 template <typename SelfType, typename Type, typename State>
 class AsyncIteratorBase: public Object {
-public:
+ public:
   using NextSignature = Promise<kj::Maybe<Type>>(Lock&, State&);
   using ReturnSignature = Promise<void>(Lock&, State&, Optional<Value>);
   using Next = AsyncIteratorImpl::Next<Type>;
@@ -888,7 +888,7 @@ public:
     }
   }
 
-private:
+ private:
   struct InnerState {
     State state;
     AsyncIteratorImpl impl;
@@ -1066,7 +1066,7 @@ private:
 // implementation of the entries(Lock&) member function.
 #define JSG_ITERATOR(Name, Label, Type, State, NextFunc)                                           \
   class Name final: public jsg::IteratorBase<Name, Type, State> {                                  \
-  public:                                                                                          \
+   public:                                                                                         \
     using jsg::IteratorBase<Name, Type, State>::IteratorBase;                                      \
     inline Next next(jsg::Lock& js) {                                                              \
       return nextImpl(js, NextFunc);                                                               \
@@ -1081,7 +1081,7 @@ private:
 
 #define JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                           \
   class Name final: public jsg::AsyncIteratorBase<Name, Type, State> {                             \
-  public:                                                                                          \
+   public:                                                                                         \
     using jsg::AsyncIteratorBase<Name, Type, State>::AsyncIteratorBase;                            \
     inline jsg::Promise<Next> next(jsg::Lock& js) {                                                \
       return nextImpl(js, NextFunc);                                                               \

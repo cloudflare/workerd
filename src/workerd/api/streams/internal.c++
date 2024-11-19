@@ -51,7 +51,7 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
 
 // Modified from AllReader in kj/async-io.c++.
 class AllReader final {
-public:
+ public:
   explicit AllReader(ReadableStreamSource& input, uint64_t limit): input(input), limit(limit) {
     JSG_REQUIRE(limit > 0, TypeError, "Memory limit exceeded before EOF.");
     KJ_IF_SOME(length, input.tryGetLength(StreamEncoding::IDENTITY)) {
@@ -70,7 +70,7 @@ public:
     co_return kj::String(kj::mv(data));
   }
 
-private:
+ private:
   ReadableStreamSource& input;
   uint64_t limit;
 
@@ -246,7 +246,7 @@ kj::Exception reasonToException(jsg::Lock& js,
 
 // Adapt ReadableStreamSource to kj::AsyncInputStream's interface for use with `kj::newTee()`.
 class TeeAdapter final: public kj::AsyncInputStream {
-public:
+ public:
   explicit TeeAdapter(kj::Own<ReadableStreamSource> inner): inner(kj::mv(inner)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
@@ -257,12 +257,12 @@ public:
     return inner->tryGetLength(StreamEncoding::IDENTITY);
   }
 
-private:
+ private:
   kj::Own<ReadableStreamSource> inner;
 };
 
 class TeeBranch final: public ReadableStreamSource {
-public:
+ public:
   explicit TeeBranch(kj::Own<kj::AsyncInputStream> inner): inner(kj::mv(inner)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
@@ -321,12 +321,12 @@ public:
     // TODO(someday): What to do?
   }
 
-private:
+ private:
   // Adapt WritableStreamSink to kj::AsyncOutputStream's interface for use in
   // `TeeBranch::pumpTo()`. If you squint, the write logic looks very similar to TeeAdapter's
   // read logic.
   class PumpAdapter final: public kj::AsyncOutputStream {
-  public:
+   public:
     explicit PumpAdapter(WritableStreamSink& inner): inner(inner) {}
 
     kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
@@ -350,9 +350,9 @@ private:
 static const WarningAggregator::Key unusedStreamBranchKey;
 
 class WarnIfUnusedStream final: public ReadableStreamSource {
-public:
+ public:
   class UnusedStreamWarningContext final: public WarningAggregator::WarningContext {
-  public:
+   public:
     UnusedStreamWarningContext(jsg::Lock& js): exception(jsg::JsRef(js, js.error(""_kjc))) {}
 
     kj::String toString(jsg::Lock& js) override {
@@ -362,7 +362,7 @@ public:
       return obj.get(js, "stack"_kjc).toString(js);
     }
 
-  private:
+   private:
     jsg::JsRef<jsg::JsValue> exception;
   };
 
@@ -442,7 +442,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::Own<WarningAggregator> warningAggregator;
   kj::Own<UnusedStreamWarningContext> warningContext;
   kj::Own<ReadableStreamSource> inner;
@@ -779,7 +779,7 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       class NullSource final: public ReadableStreamSource {
-      public:
+       public:
         kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
           return size_t(0);
         }

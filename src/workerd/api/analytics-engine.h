@@ -26,7 +26,7 @@ namespace workerd::api {
 //
 // https://blog.cloudflare.com/workers-analytics-engine/
 class AnalyticsEngine: public jsg::Object {
-public:
+ public:
   explicit AnalyticsEngine(
       uint logfwdrChannel, kj::String dataset, int64_t version, uint32_t ownerId)
       : logfwdrChannel(logfwdrChannel),
@@ -66,7 +66,7 @@ public:
     tracker.trackField("dataset", dataset);
   }
 
-private:
+ private:
   double millisToNanos(double m) {
     return m * 1000000;
   }

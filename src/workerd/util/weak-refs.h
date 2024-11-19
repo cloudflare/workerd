@@ -16,7 +16,7 @@ namespace workerd {
 // T must itself extend from kj::AtomicRefcounted
 template <typename T>
 class AtomicWeakRef final: public kj::AtomicRefcounted {
-public:
+ public:
   inline static kj::Own<const AtomicWeakRef<T>> wrap(T* this_) {
     return kj::atomicRefcounted<AtomicWeakRef<T>>(this_);
   }
@@ -36,7 +36,7 @@ public:
     return kj::atomicAddRef(*this);
   }
 
-private:
+ private:
   kj::MutexGuarded<const T*> this_;
 
   // This is invoked by the owner destructor to clear the pointer. That means that any racing
@@ -66,7 +66,7 @@ private:
 // kj::WeakOwn<T> type with the same basic characteristics.
 template <typename T>
 class WeakRef final: public kj::Refcounted {
-public:
+ public:
   inline WeakRef(kj::Badge<T>, T& thing): maybeThing(thing) {}
 
   // The use of the kj::Badge<T> in the constructor ensures that the initial instances
@@ -100,7 +100,7 @@ public:
     return maybeThing != kj::none;
   }
 
-private:
+ private:
   friend T;
 
   inline void invalidate() {
