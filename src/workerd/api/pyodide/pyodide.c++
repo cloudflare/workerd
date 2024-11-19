@@ -35,10 +35,9 @@ void PyodideBundleManager::setPyodideBundleData(
       kj::mv(version), {.messageReader = kj::mv(messageReader), .bundle = bundle});
 }
 
-const kj::Maybe<kj::ArrayPtr<const unsigned char>> PyodidePackageManager::getPyodidePackage(
+const kj::Maybe<const kj::Array<unsigned char>&> PyodidePackageManager::getPyodidePackage(
     kj::StringPtr id) const {
-  return packages.lockShared()->find(id).map(
-      [](const kj::Array<unsigned char>& t) { return t.asPtr(); });
+  return packages.lockShared()->find(id);
 }
 
 void PyodidePackageManager::setPyodidePackageData(

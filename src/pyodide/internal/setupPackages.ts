@@ -8,6 +8,7 @@ import {
   LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
 } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
+import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -44,6 +45,7 @@ class SitePackagesDir {
       path: '',
       name: '',
       parts: [],
+      reader: null,
     };
     this.soFiles = [];
     this.loadedRequirements = new Set();
@@ -125,9 +127,11 @@ class SitePackagesDir {
  *
  * This also returns the list of soFiles in the resulting site-packages
  * directory so we can preload them.
+ *
+ * TODO(later): This needs to be removed when external package loading is enabled.
  */
 export function buildSitePackages(requirements: Set<string>): SitePackagesDir {
-  const [bigTarInfo, bigTarSoFiles] = parseTarInfo();
+  const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
   let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
 
@@ -171,6 +175,7 @@ function disabledLoadPackage(): never {
 function getTransitiveRequirements(): Set<string> {
   const requirements = REQUIREMENTS.map(canonicalizePackageName);
   // resolve transitive dependencies of requirements and if IN_WORKERD install them from the cdn.
+  // TODO(later): use current package's LOCKFILE instead of the global.
   const packageDatas = recursiveDependencies(LOCKFILE, requirements);
   return new Set(packageDatas.map(({ name }) => canonicalizePackageName(name)));
 }
