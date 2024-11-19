@@ -397,8 +397,15 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
 
   {
     auto armResult = test.actor.armAlarmHandler(oneMs, false);
+    // We expect armAlarmHandler() to tell us to cancel the alarm.
     KJ_ASSERT(armResult.is<ActorCache::CancelAlarmHandler>());
     auto waitPromise = kj::mv(armResult.get<ActorCache::CancelAlarmHandler>().waitBeforeCancel);
+
+    // We also expect the alarm cancellation to contain a scheduling request to delete the alarm,
+    // to handle cases where alarm deletion was durably committed to the database, but a failure
+    // occurred before the alarm deletion was conveyed to the alarm scheduler.
+    KJ_ASSERT(!waitPromise.poll(test.ws));
+    test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
     KJ_ASSERT(waitPromise.poll(test.ws));
     waitPromise.wait(test.ws);
   }
