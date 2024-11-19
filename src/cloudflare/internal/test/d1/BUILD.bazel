@@ -24,4 +24,8 @@ py_wd_test(
         "*.py",
         "*.js",
     ]),
+    tags = [
+        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
+        "no-asan",
+    ],
 )

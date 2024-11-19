@@ -1,6 +1,7 @@
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import {
   SITE_PACKAGES,
+  TRANSITIVE_REQUIREMENTS,
   adjustSysPath,
   mountSitePackages,
   mountWorkerFiles,
@@ -50,6 +51,7 @@ import {
   setUnsafeEval,
   setGetRandomValues,
 } from 'pyodide-internal:generated/emscriptenSetup';
+import { loadPackages } from 'pyodide-internal:loadPackage';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -59,9 +61,8 @@ import {
  */
 async function prepareWasmLinearMemory(Module: Module): Promise<void> {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
-  mountSitePackages(Module, SITE_PACKAGES.rootInfo);
-  entropyMountFiles(Module);
   Module.noInitialRun = !SHOULD_RESTORE_SNAPSHOT;
+
   enterJaegerSpan('preload_dynamic_libs', () => preloadDynamicLibs(Module));
   enterJaegerSpan('remove_run_dependency', () =>
     Module.removeRunDependency('dynlibs')
@@ -100,9 +101,19 @@ export async function loadPyodide(
   }
   setUnsafeEval(UnsafeEval);
   setGetRandomValues(getRandomValues);
+
+  mountSitePackages(Module, SITE_PACKAGES.rootInfo);
+  entropyMountFiles(Module);
+  await enterJaegerSpan('load_packages', () =>
+    // NB. loadPackages adds the packages to the `SITE_PACKAGES` global which then gets used in
+    // preloadDynamicLibs.
+    loadPackages(Module, TRANSITIVE_REQUIREMENTS)
+  );
+
   await enterJaegerSpan('prepare_wasm_linear_memory', () =>
     prepareWasmLinearMemory(Module)
   );
+
   maybeSetupSnapshotUpload(Module);
   // Mount worker files after doing snapshot upload so we ensure that data from the files is never
   // present in snapshot memory.
@@ -111,6 +122,7 @@ export async function loadPyodide(
   // Finish setting up Pyodide's ffi so we can use the nice Python interface
   await enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
   const pyodide = Module.API.public_api;
+
   finishSnapshotSetup(pyodide);
   return pyodide;
 }

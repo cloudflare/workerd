@@ -5,7 +5,7 @@ import {
   SITE_PACKAGES,
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
-import { default as TarReader } from 'pyodide-internal:packages_tar_reader';
+import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
   IS_CREATING_BASELINE_SNAPSHOT,
@@ -136,7 +136,10 @@ export function preloadDynamicLibs(Module: Module): void {
         throw Error('contentsOffset not defined for ' + soFile);
       }
       const wasmModuleData = new Uint8Array(size);
-      TarReader.read(contentsOffset, wasmModuleData);
+      (node.reader ?? EmbeddedPackagesTarReader).read(
+        contentsOffset,
+        wasmModuleData
+      );
       const path = sitePackages + '/' + soFile.join('/');
       PRELOADED_SO_FILES.push(path);
       loadDynlib(Module, path, wasmModuleData);

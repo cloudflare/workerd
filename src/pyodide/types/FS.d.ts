@@ -12,7 +12,7 @@ interface TarFSInfo {
   name: string;
   parts: string[];
   contentsOffset?: number;
-  reader?: Reader;
+  reader: Reader | null;
 }
 
 declare type MetadataDirInfo = Map<string, MetadataDirInfo>;
