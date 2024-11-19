@@ -25,7 +25,7 @@ const mainWorker :Workerd.Worker = (
     (name = "worker.py", pythonModule = embed "./worker.py"),
   ],
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers", "python_external_bundle"],
+  compatibilityFlags = ["python_workers"],
   bindings = [
     (
       name = "secret",

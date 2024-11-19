@@ -11,6 +11,7 @@ copy_file(
     name = "pyodide_dev.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin",
     out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
+    visibility = ["//visibility:public"],
 )
 
 py_wd_test(
