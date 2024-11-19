@@ -625,12 +625,7 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         //
         // TODO(perf): If we already have such a rescheduling request in-flight, might want to
         // coalesce with the existing request?
-        if (localAlarmState == kj::none) {
-          // If clean scheduled time is unset, don't need to reschedule; just cancel the alarm.
-          return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
-        } else {
-          return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
-        }
+        return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
       } else {
         return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       }
