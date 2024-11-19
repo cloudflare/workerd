@@ -28,14 +28,15 @@ public:
     return d;
   }
 
-  kj::Array<kj::byte> getPublicExponent() KJ_WARN_UNUSED_RESULT;
+  jsg::BufferSource getPublicExponent(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const KJ_WARN_UNUSED_RESULT;
 
-  kj::Array<kj::byte> sign(const kj::ArrayPtr<const kj::byte> data) const KJ_WARN_UNUSED_RESULT;
+  jsg::BufferSource sign(
+      jsg::Lock& js, const kj::ArrayPtr<const kj::byte> data) const KJ_WARN_UNUSED_RESULT;
 
   static kj::Maybe<AsymmetricKeyData> fromJwk(
-      KeyType keyType, const SubtleCrypto::JsonWebKey& jwk) KJ_WARN_UNUSED_RESULT;
+      jsg::Lock& js, KeyType keyType, const SubtleCrypto::JsonWebKey& jwk) KJ_WARN_UNUSED_RESULT;
 
   SubtleCrypto::JsonWebKey toJwk(
       KeyType keytype, kj::Maybe<kj::String> maybeHashAlgorithm) const KJ_WARN_UNUSED_RESULT;
@@ -45,16 +46,19 @@ public:
     kj::ArrayPtr<const kj::byte> passphrase;
   };
 
-  kj::String toPem(KeyEncoding encoding,
+  kj::String toPem(jsg::Lock& js,
+      KeyEncoding encoding,
       KeyType keyType,
       kj::Maybe<CipherOptions> options = kj::none) const KJ_WARN_UNUSED_RESULT;
 
-  kj::Array<const kj::byte> toDer(KeyEncoding encoding,
+  jsg::BufferSource toDer(jsg::Lock& js,
+      KeyEncoding encoding,
       KeyType keyType,
       kj::Maybe<CipherOptions> options = kj::none) const KJ_WARN_UNUSED_RESULT;
 
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
-  kj::Array<kj::byte> cipher(EVP_PKEY_CTX* ctx,
+  jsg::BufferSource cipher(jsg::Lock& js,
+      EVP_PKEY_CTX* ctx,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data,
       EncryptDecryptFunction encryptDecrypt,

@@ -317,7 +317,7 @@ bool CryptoKey::verifyX509Private(const X509* cert) const {
   return impl->verifyX509Private(cert);
 }
 
-jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::encrypt(jsg::Lock& js,
+jsg::Promise<jsg::BufferSource> SubtleCrypto::encrypt(jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
     const CryptoKey& key,
     kj::Array<const kj::byte> plainText) {
@@ -327,11 +327,11 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::encrypt(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::encrypt());
-    return key.impl->encrypt(kj::mv(algorithm), plainText);
+    return key.impl->encrypt(js, kj::mv(algorithm), plainText);
   });
 }
 
-jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::decrypt(jsg::Lock& js,
+jsg::Promise<jsg::BufferSource> SubtleCrypto::decrypt(jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,
     const CryptoKey& key,
     kj::Array<const kj::byte> cipherText) {
@@ -341,11 +341,11 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::decrypt(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::decrypt());
-    return key.impl->decrypt(kj::mv(algorithm), cipherText);
+    return key.impl->decrypt(js, kj::mv(algorithm), cipherText);
   });
 }
 
-jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::sign(jsg::Lock& js,
+jsg::Promise<jsg::BufferSource> SubtleCrypto::sign(jsg::Lock& js,
     kj::OneOf<kj::String, SignAlgorithm> algorithmParam,
     const CryptoKey& key,
     kj::Array<const kj::byte> data) {
@@ -355,7 +355,7 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::sign(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::sign());
-    return key.impl->sign(kj::mv(algorithm), data);
+    return key.impl->sign(js, kj::mv(algorithm), data);
   });
 }
 
@@ -370,11 +370,11 @@ jsg::Promise<bool> SubtleCrypto::verify(jsg::Lock& js,
 
   return js.evalNow([&] {
     validateOperation(key, algorithm.name, CryptoKeyUsageSet::verify());
-    return key.impl->verify(kj::mv(algorithm), signature, data);
+    return key.impl->verify(js, kj::mv(algorithm), signature, data);
   });
 }
 
-jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::digest(jsg::Lock& js,
+jsg::Promise<jsg::BufferSource> SubtleCrypto::digest(jsg::Lock& js,
     kj::OneOf<kj::String, HashAlgorithm> algorithmParam,
     kj::Array<const kj::byte> data) {
   auto algorithm = interpretAlgorithmParam(kj::mv(algorithmParam));
@@ -389,12 +389,15 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::digest(jsg::Lock& js,
 
     OSSLCALL(EVP_DigestInit_ex(digestCtx.get(), type, nullptr));
     OSSLCALL(EVP_DigestUpdate(digestCtx.get(), data.begin(), data.size()));
-    auto messageDigest = kj::heapArray<kj::byte>(EVP_MD_CTX_size(digestCtx.get()));
+
+    auto messageDigest =
+        jsg::BackingStore::alloc<v8::ArrayBuffer>(js, EVP_MD_CTX_size(digestCtx.get()));
     uint messageDigestSize = 0;
-    OSSLCALL(EVP_DigestFinal_ex(digestCtx.get(), messageDigest.begin(), &messageDigestSize));
+    OSSLCALL(EVP_DigestFinal_ex(
+        digestCtx.get(), messageDigest.asArrayPtr().begin(), &messageDigestSize));
 
     KJ_ASSERT(messageDigestSize == messageDigest.size());
-    return kj::mv(messageDigest);
+    return jsg::BufferSource(js, kj::mv(messageDigest));
   });
 }
 
@@ -452,12 +455,13 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(jsg::Lock& js,
     // TODO(perf): For conformance, importKey() makes a copy of `secret`. In this case we really
     //   don't need to, but rather we ought to call the appropriate CryptoKey::Impl::import*()
     //   function directly.
+    auto data = kj::heapArray<kj::byte>(secret);
     return importKeySync(
-        js, "raw", kj::mv(secret), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
+        js, "raw", kj::mv(data), kj::mv(derivedKeyAlgorithm), extractable, kj::mv(keyUsages));
   });
 }
 
-jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::deriveBits(jsg::Lock& js,
+jsg::Promise<jsg::BufferSource> SubtleCrypto::deriveBits(jsg::Lock& js,
     kj::OneOf<kj::String, DeriveKeyAlgorithm> algorithmParam,
     const CryptoKey& baseKey,
     jsg::Optional<kj::Maybe<int>> lengthParam) {
@@ -479,7 +483,7 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::deriveBits(jsg::Lock& js,
   });
 }
 
-jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
+jsg::Promise<jsg::BufferSource> SubtleCrypto::wrapKey(jsg::Lock& js,
     kj::String format,
     const CryptoKey& key,
     const CryptoKey& wrappingKey,
@@ -501,15 +505,15 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
     JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
         key.getAlgorithmName(), " key.");
 
-    auto exportedKey = key.impl->exportKey(kj::mv(format));
+    auto exportedKey = key.impl->exportKey(js, kj::mv(format));
 
     KJ_SWITCH_ONEOF(exportedKey) {
-      KJ_CASE_ONEOF(k, kj::Array<kj::byte>) {
-        return wrappingKey.impl->wrapKey(kj::mv(algorithm), k.asPtr().asConst());
+      KJ_CASE_ONEOF(k, jsg::BufferSource) {
+        return wrappingKey.impl->wrapKey(js, kj::mv(algorithm), k.asArrayPtr().asConst());
       }
       KJ_CASE_ONEOF(jwk, JsonWebKey) {
         auto stringified = js.serializeJson(jwkHandler.wrap(js, kj::mv(jwk)));
-        return wrappingKey.impl->wrapKey(kj::mv(algorithm), stringified.asBytes().asConst());
+        return wrappingKey.impl->wrapKey(js, kj::mv(algorithm), stringified.asBytes().asConst());
       }
     }
 
@@ -538,18 +542,17 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js,
 
     validateOperation(unwrappingKey, normalizedAlgorithm.name, CryptoKeyUsageSet::unwrapKey());
 
-    kj::Array<kj::byte> bytes =
-        unwrappingKey.impl->unwrapKey(kj::mv(normalizedAlgorithm), wrappedKey);
+    auto bytes = unwrappingKey.impl->unwrapKey(js, kj::mv(normalizedAlgorithm), wrappedKey);
 
     ImportKeyData importData;
 
     if (format == "jwk") {
-      auto jwkDict = js.parseJson(bytes.asChars());
+      auto jwkDict = js.parseJson(bytes.asArrayPtr().asChars());
 
       importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict.getHandle(js)),
           DOMDataError, "Missing \"kty\" field or corrupt JSON unwrapping key?");
     } else {
-      importData = kj::mv(bytes);
+      importData = kj::heapArray<kj::byte>(bytes);
     }
 
     auto imported = importKeySync(js, format, kj::mv(importData), kj::mv(normalizedUnwrapAlgorithm),
@@ -637,7 +640,7 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
     JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError, "Attempt to export non-extractable ",
         key.getAlgorithmName(), " key.");
 
-    return key.impl->exportKey(format);
+    return key.impl->exportKey(js, format);
   });
 }
 

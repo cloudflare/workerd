@@ -29,9 +29,6 @@ KJ_TEST("AES-KW key wrap") {
   // ASAN/valgrind than using our conformance tests with test-runner.
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
   e.getIsolate().runInLockScope([&](CryptoIsolate::Lock& isolateLock) {
-    auto isolate = isolateLock.v8Isolate;
-    auto& js = jsg::Lock::from(isolate);
-
     auto rawWrappingKeys = std::array<kj::Array<kj::byte>, 3>({
       kj::heapArray<kj::byte>({0xe6, 0x95, 0xea, 0xe3, 0xa8, 0xc0, 0x30, 0xf1, 0x76, 0xe3, 0x0e,
         0x8e, 0x36, 0xf8, 0xf4, 0x31}),
@@ -51,32 +48,35 @@ KJ_TEST("AES-KW key wrap") {
       };
       bool extractable = false;
 
-      return CryptoKey::Impl::importAes(js, "AES-KW", "raw", kj::mv(rawKey), kj::mv(algorithm),
-          extractable, {kj::str("wrapKey"), kj::str("unwrapKey")});
+      return CryptoKey::Impl::importAes(isolateLock, "AES-KW", "raw", kj::mv(rawKey),
+          kj::mv(algorithm), extractable, {kj::str("wrapKey"), kj::str("unwrapKey")});
     };
 
     auto keyMaterial = kj::heapArray<const kj::byte>(
         {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24});
 
-    for (const auto& aesKey: aesKeys) {
-      SubtleCrypto::EncryptAlgorithm params;
-      params.name = kj::str("AES-KW");
+    JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
+        isolateLock.newContext<CryptoContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      for (const auto& aesKey: aesKeys) {
+        SubtleCrypto::EncryptAlgorithm params;
+        params.name = kj::str("AES-KW");
 
-      auto wrapped = aesKey->wrapKey(kj::mv(params), keyMaterial.asPtr());
+        auto wrapped = aesKey->wrapKey(js, kj::mv(params), keyMaterial.asPtr());
 
-      params = {};
-      params.name = kj::str("AES-KW");
+        params = {};
+        params.name = kj::str("AES-KW");
 
-      auto unwrapped = aesKey->unwrapKey(kj::mv(params), wrapped);
+        auto unwrapped = aesKey->unwrapKey(js, kj::mv(params), wrapped);
 
-      KJ_EXPECT(unwrapped == keyMaterial);
+        KJ_EXPECT(unwrapped.asArrayPtr() == keyMaterial);
 
-      // Corruption of wrapped key material should throw.
-      params = {};
-      params.name = kj::str("AES-KW");
-      wrapped[5] += 1;
-      KJ_EXPECT_THROW_MESSAGE("[24 == -1]", aesKey->unwrapKey(kj::mv(params), wrapped));
-    }
+        // Corruption of wrapped key material should throw.
+        params = {};
+        params.name = kj::str("AES-KW");
+        wrapped.asArrayPtr()[5] += 1;
+        KJ_EXPECT_THROW_MESSAGE("[24 == -1]", aesKey->unwrapKey(js, kj::mv(params), wrapped));
+      }
+    });
   });
 }
 
@@ -136,14 +136,15 @@ KJ_TEST("AES-CTR key wrap") {
         return subtle.wrapKey(js, kj::str("raw"), *toWrap, *wrappingKey, getEnc(), *jwkHandler);
       })
           .then(js,
-              [&](jsg::Lock&, kj::Array<kj::byte> wrapped) {
-        return subtle.unwrapKey(js, kj::str("raw"), kj::mv(wrapped), *wrappingKey, getEnc(),
+              [&](jsg::Lock&, jsg::BufferSource wrapped) {
+        auto data = kj::heapArray(wrapped.asArrayPtr());
+        return subtle.unwrapKey(js, kj::str("raw"), kj::mv(data), *wrappingKey, getEnc(),
             getImportKeyAlg(), true, kj::arr(kj::str("encrypt")), *jwkHandler);
       })
           .then(js, [&](jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
         return subtle.exportKey(js, kj::str("raw"), *unwrapped);
       }).then(js, [&](jsg::Lock&, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
-        KJ_ASSERT(roundTrippedKeyMaterial.get<kj::Array<kj::byte>>() == KEY_DATA);
+        KJ_ASSERT(roundTrippedKeyMaterial.get<jsg::BufferSource>() == KEY_DATA);
         completed = true;
       });
 
