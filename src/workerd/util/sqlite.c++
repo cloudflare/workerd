@@ -225,6 +225,7 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   // "sqlite_source_id"_kj,
   // "sqlite_version"_kj,
   "substr"_kj,
+  "substring"_kj,
   "total_changes"_kj,
   "trim"_kj,
   "typeof"_kj,

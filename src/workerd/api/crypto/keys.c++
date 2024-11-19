@@ -30,17 +30,22 @@ AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, 
   KJ_DASSERT(keyType != KeyType::SECRET);
 }
 
-kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
-    kj::Array<kj::byte> signature) const {
-  return kj::mv(signature);
+jsg::BufferSource AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
+    jsg::Lock& js, kj::Array<kj::byte> signature) const {
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signature.size());
+  backing.asArrayPtr().copyFrom(signature);
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
-kj::Array<const kj::byte> AsymmetricKeyCryptoKeyImpl::signatureWebCryptoToSsl(
-    kj::ArrayPtr<const kj::byte> signature) const {
-  return {signature.begin(), signature.size(), kj::NullArrayDisposer::instance};
+jsg::BufferSource AsymmetricKeyCryptoKeyImpl::signatureWebCryptoToSsl(
+    jsg::Lock& js, kj::ArrayPtr<const kj::byte> signature) const {
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signature.size());
+  backing.asArrayPtr().copyFrom(signature);
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
-SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr format) const {
+SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(
+    jsg::Lock& js, kj::StringPtr format) const {
   // EVP_marshal_{public,private}_key() functions are BoringSSL
   // extensions which export asymmetric keys in DER format.
   // DER is the binary format which *should* work to export any EVP_PKEY.
@@ -71,16 +76,20 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(kj::StringPtr 
     jwk.key_ops = getUsages().map([](auto usage) { return kj::str(usage.name()); });
     return jwk;
   } else if (format == "raw"_kj) {
-    return exportRaw();
+    return exportRaw(js);
   } else {
     JSG_FAIL_REQUIRE(DOMInvalidAccessError, "Cannot export \"", getAlgorithmName(), "\" in \"",
         format, "\" format.");
   }
 
-  return kj::heapArray(der, derLen);
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, derLen);
+  auto src = kj::arrayPtr(der, derLen);
+  backing.asArrayPtr().copyFrom(src);
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
-kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(kj::StringPtr format,
+jsg::BufferSource AsymmetricKeyCryptoKeyImpl::exportKeyExt(jsg::Lock& js,
+    kj::StringPtr format,
     kj::StringPtr type,
     jsg::Optional<kj::String> cipher,
     jsg::Optional<kj::Array<kj::byte>> passphrase) const {
@@ -114,9 +123,10 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(kj::StringPtr forma
   const auto fromBio = [&](kj::StringPtr format) {
     BUF_MEM* bptr;
     BIO_get_mem_ptr(bio.get(), &bptr);
-    auto result = kj::heapArray<kj::byte>(bptr->length);
-    memcpy(result.begin(), bptr->data, bptr->length);
-    return kj::mv(result);
+    auto result = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, bptr->length);
+    auto src = kj::arrayPtr(bptr->data, bptr->length);
+    result.asArrayPtr().copyFrom(src.asBytes());
+    return jsg::BufferSource(js, kj::mv(result));
   };
 
   if (getType() == "public"_kj) {
@@ -207,8 +217,9 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::exportKeyExt(kj::StringPtr forma
   JSG_FAIL_REQUIRE(TypeError, "Failed to encode private key");
 }
 
-kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
-    SubtleCrypto::SignAlgorithm&& algorithm, kj::ArrayPtr<const kj::byte> data) const {
+jsg::BufferSource AsymmetricKeyCryptoKeyImpl::sign(jsg::Lock& js,
+    SubtleCrypto::SignAlgorithm&& algorithm,
+    kj::ArrayPtr<const kj::byte> data) const {
   JSG_REQUIRE(keyType == KeyType::PRIVATE, DOMInvalidAccessError,
       "Asymmetric signing requires a private key.");
 
@@ -258,10 +269,11 @@ kj::Array<kj::byte> AsymmetricKeyCryptoKeyImpl::sign(
     signature = kj::heapArray<kj::byte>(signature.first(signatureSize));
   }
 
-  return signatureSslToWebCrypto(kj::mv(signature));
+  return signatureSslToWebCrypto(js, kj::mv(signature));
 }
 
-bool AsymmetricKeyCryptoKeyImpl::verify(SubtleCrypto::SignAlgorithm&& algorithm,
+bool AsymmetricKeyCryptoKeyImpl::verify(jsg::Lock& js,
+    SubtleCrypto::SignAlgorithm&& algorithm,
     kj::ArrayPtr<const kj::byte> signature,
     kj::ArrayPtr<const kj::byte> data) const {
   ClearErrorOnReturn clearErrorOnReturn;
@@ -269,7 +281,7 @@ bool AsymmetricKeyCryptoKeyImpl::verify(SubtleCrypto::SignAlgorithm&& algorithm,
   JSG_REQUIRE(keyType == KeyType::PUBLIC, DOMInvalidAccessError,
       "Asymmetric verification requires a public key.");
 
-  auto sslSignature = signatureWebCryptoToSsl(signature);
+  auto sslSignature = signatureWebCryptoToSsl(js, signature);
 
   auto type = lookupDigestAlgorithm(chooseHash(algorithm.hash)).second;
 
@@ -281,7 +293,8 @@ bool AsymmetricKeyCryptoKeyImpl::verify(SubtleCrypto::SignAlgorithm&& algorithm,
   OSSLCALL(EVP_DigestVerifyUpdate(digestCtx.get(), data.begin(), data.size()));
   // EVP_DigestVerifyFinal() returns 1 on success, 0 on invalid signature, and any other value
   // indicates "a more serious error".
-  auto result = EVP_DigestVerifyFinal(digestCtx.get(), sslSignature.begin(), sslSignature.size());
+  auto result = EVP_DigestVerifyFinal(
+      digestCtx.get(), sslSignature.asArrayPtr().begin(), sslSignature.size());
   JSG_REQUIRE(result == 0 || result == 1, InternalDOMOperationError,
       "Unexpected return code from digest verify", getAlgorithmName());
   return !!result;
