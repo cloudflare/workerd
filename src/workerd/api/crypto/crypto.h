@@ -207,8 +207,9 @@ public:
       KJ_SWITCH_ONEOF(publicExponent) {
         KJ_CASE_ONEOF(array, BigInteger) {
           if (fixPublicExp) {
-            auto expCopy = kj::heapArray<kj::byte>(array.asPtr());
-            jsg::BackingStore expBack = jsg::BackingStore::from(js, kj::mv(expCopy));
+            // alloc will, by default create a Uint8Array
+            auto expBack = jsg::BackingStore::alloc(js, array.size());
+            expBack.asArrayPtr().copyFrom(array);
             return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
           } else {
             auto expBack = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, array.size());
@@ -218,10 +219,16 @@ public:
         }
         KJ_CASE_ONEOF(source, jsg::BufferSource) {
           // Should only happen if the flag is enabled and an algorithm field is cloned twice.
-          KJ_ASSERT(fixPublicExp == true);
-          auto expCopy = kj::heapArray<kj::byte>(source.asArrayPtr());
-          jsg::BackingStore expBack = jsg::BackingStore::from(js, kj::mv(expCopy));
-          return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
+          if (fixPublicExp) {
+            // alloc will, by default create a Uint8Array
+            auto expBack = jsg::BackingStore::alloc(js, source.size());
+            expBack.asArrayPtr().copyFrom(source);
+            return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
+          } else {
+            auto expBack = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, source.size());
+            expBack.asArrayPtr().copyFrom(source);
+            return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
+          }
         }
       }
       KJ_UNREACHABLE;
