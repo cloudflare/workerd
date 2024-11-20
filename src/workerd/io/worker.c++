@@ -1534,7 +1534,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
       // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
       // module, even if subsequent calls pass a different context. Verify that we didn't
       // switch contexts.
-      KJ_ASSERT(jsg::check(ns->GetCreationContext()) == js.v8Context(),
+      KJ_ASSERT(jsg::check(ns->GetCreationContext(js.v8Isolate)) == js.v8Context(),
           "module was originally instantiated in a different context");
 
       return jsg::JsObject(ns);
