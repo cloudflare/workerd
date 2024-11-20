@@ -254,11 +254,11 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       slot.add(value);
     });
     auto traceHeadersArray = KJ_MAP(entry, traceHeaders) {
-      return Trace::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
+      return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
     t.setEventInfo(timestamp,
-        Trace::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
+        tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -478,7 +478,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
   KJ_IF_SOME(t, context.getWorkerTracer()) {
     double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-    t.setEventInfo(context.now(), Trace::ScheduledEventInfo(eventTime, kj::str(cron)));
+    t.setEventInfo(context.now(), tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
   // Scheduled handlers run entirely in waitUntil() tasks.
@@ -536,7 +536,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   incomingRequest->delivered();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), Trace::AlarmEventInfo(scheduledTime));
+    t.setEventInfo(context.now(), tracing::AlarmEventInfo(scheduledTime));
   }
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
