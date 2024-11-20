@@ -60,7 +60,7 @@ static int readToTarget(
   return toCopy;
 }
 
-int PackagesTarReader::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
+int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
 }
 

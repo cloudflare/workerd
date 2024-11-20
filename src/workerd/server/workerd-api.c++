@@ -557,6 +557,11 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
           makePyodideMetadataReader(conf, impl->pythonConfig), jsg::ModuleRegistry::Type::INTERNAL);
 
+      // Inject packages tar file
+      modules->addBuiltinModule("pyodide-internal:packages_tar_reader",
+          jsg::alloc<ReadOnlyBuffer>(PYODIDE_PACKAGES_TAR.get()),
+          workerd::jsg::ModuleRegistry::Type::INTERNAL);
+
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",
           ArtifactBundler::makeDisabledBundler(), jsg::ModuleRegistry::Type::INTERNAL);
