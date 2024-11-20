@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-asgi",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+          (name = "fastapi", pythonRequirement = ""),
+        ],
+        bindings = [
+          ( name = "SELF", service = "python-asgi" ),
+        ],
+        compatibilityDate = "2024-10-01",
+        compatibilityFlags = ["python_workers"],
+      )
+    )
+  ],
+);
