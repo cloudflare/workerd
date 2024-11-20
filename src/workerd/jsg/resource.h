@@ -1435,6 +1435,10 @@ class ResourceWrapper {
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
     context->SetAlignedPointerInEmbedderData(1, ptr.get());
+    // We need to set the highest used index in every context we create to be a nullptr
+    // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
+    // a fatal error if the array is smaller than the given index.
+    context->SetAlignedPointerInEmbedderData(3, nullptr);
 
     // (Note: V8 docs say: "Note that index 0 currently has a special meaning for Chrome's
     // debugger." We aren't Chrome, but it does appear that some versions of V8 will mess with

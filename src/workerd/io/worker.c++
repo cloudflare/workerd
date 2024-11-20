@@ -1279,6 +1279,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         // (Undocumented, as usual.)
         context =
             v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
+        // We need to set the highest used index in every context we create to be a nullptr
+        // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
+        // a fatal error if the array is smaller than the given index.
+        context->SetAlignedPointerInEmbedderData(3, nullptr);
       }
 
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
@@ -2594,6 +2598,10 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
           //   We don't know which contexts exist in this isolate, so I guess we have to
           //   create one. Ugh.
           auto dummyContext = v8::Context::New(lock->v8Isolate);
+          // We need to set the highest used index in every context we create to be a nullptr
+          // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
+          // a fatal error if the array is smaller than the given index.
+          dummyContext->SetAlignedPointerInEmbedderData(3, nullptr);
           auto& inspector = *KJ_ASSERT_NONNULL(isolate.impl->inspector);
           inspector.contextCreated(v8_inspector::V8ContextInfo(dummyContext, 1,
               v8_inspector::StringView(reinterpret_cast<const uint8_t*>("Worker"), 6)));
