@@ -110,7 +110,8 @@ class IoContext_IncomingRequest final {
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+      kj::Rc<tracing::InvocationSpanContext> invocationSpanContext);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -160,11 +161,22 @@ class IoContext_IncomingRequest final {
     return workerTracer;
   }
 
+  // The invocation span context is a unique identifier for a specific
+  // worker invocation.
+  kj::Rc<tracing::InvocationSpanContext>& getInvocationSpanContext() {
+    return invocationSpanContext;
+  }
+
  private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
+
+  // The invocation span context identifies the trace id, invocation id, and root
+  // span for the current request. Every invocation of a worker function always
+  // has a root span, even if it is not explicitly traced.
+  kj::Rc<tracing::InvocationSpanContext> invocationSpanContext;
 
   bool wasDelivered = false;
 
