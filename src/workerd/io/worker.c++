@@ -371,7 +371,7 @@ private:
   kj::Maybe<AsyncWaiter&> next;
   kj::Maybe<AsyncWaiter&>* prev;
 
-  static thread_local AsyncWaiter* threadCurrentWaiter;
+  static const kj::EventLoopLocal<AsyncWaiter*> threadCurrentWaiter;
 
   friend class Worker::Isolate;
   friend class Worker::AsyncLock;
@@ -2228,7 +2228,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
 // =======================================================================================
 // AsyncLock implementation
 
-thread_local Worker::AsyncWaiter* Worker::AsyncWaiter::threadCurrentWaiter = nullptr;
+const kj::EventLoopLocal<Worker::AsyncWaiter*> Worker::AsyncWaiter::threadCurrentWaiter;
 
 Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
   // It should be impossible for this list to be non-empty since each member of the list holds a
@@ -2257,7 +2257,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
   }
 
   for (uint threadWaitingDifferentLockCount = 0;; ++threadWaitingDifferentLockCount) {
-    AsyncWaiter* waiter = AsyncWaiter::threadCurrentWaiter;
+    AsyncWaiter* waiter = *AsyncWaiter::threadCurrentWaiter;
 
     if (waiter == nullptr) {
       // Thread is not currently waiting on a lock.
@@ -2327,7 +2327,7 @@ Worker::AsyncWaiter::AsyncWaiter(kj::Own<const Isolate> isolateParam)
   *lock->tail = this;
   lock->tail = &next;
 
-  threadCurrentWaiter = this;
+  *threadCurrentWaiter = this;
 
   __atomic_add_fetch(&isolate->impl->lockAttemptGauge, 1, __ATOMIC_RELAXED);
 }
@@ -2358,20 +2358,22 @@ Worker::AsyncWaiter::~AsyncWaiter() noexcept {
     }
   }
 
-  KJ_ASSERT(threadCurrentWaiter == this);
-  threadCurrentWaiter = nullptr;
+  auto& w = *threadCurrentWaiter;
+  KJ_ASSERT(w == this);
+  w = nullptr;
 }
 
 kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
+  AsyncWaiter*& currentWaiter = *AsyncWaiter::threadCurrentWaiter;
   for (;;) {
-    if (auto waiter = AsyncWaiter::threadCurrentWaiter; waiter != nullptr) {
-      co_await waiter->releasePromise;
+    if (currentWaiter != nullptr) {
+      co_await currentWaiter->releasePromise;
       continue;
     }
 
     co_await kj::yieldUntilQueueEmpty();
 
-    if (AsyncWaiter::threadCurrentWaiter == nullptr) {
+    if (currentWaiter == nullptr) {
       co_return;
     }
     // Whoops, a new lock attempt appeared, loop.
