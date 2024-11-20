@@ -15,6 +15,16 @@ using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 
+struct InvocationSpanContext {
+  struct TraceId {
+    high @0 :UInt64;
+    low @1 :UInt64;
+  }
+  traceId @0 :TraceId;
+  invocationId @1 :TraceId;
+  spanId @2 :UInt32;
+}
+
 struct Trace @0x8e8d911203762d34 {
   logs @0 :List(Log);
   struct Log {

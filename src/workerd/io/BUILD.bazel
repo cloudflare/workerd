@@ -325,5 +325,6 @@ kj_test(
     src = "trace-test.c++",
     deps = [
         ":trace",
+        "//src/workerd/util:thread-scopes",
     ],
 )

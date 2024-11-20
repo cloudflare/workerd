@@ -109,13 +109,116 @@ public:
     return high;
   }
 
+  static TraceId fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader);
+  void toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const;
+
 private:
   uint64_t low = 0;
   uint64_t high = 0;
 };
 constexpr TraceId TraceId::nullId = nullptr;
 
+// The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
+// The trace id represents a top-level request and should be shared across all
+// invocation spans and events within those spans. The invocation id identifies
+// a specific worker invocation. The span id identifies a specific span within an
+// invocation. Every invocation of every worker should have an InvocationSpanContext.
+// That may or may not have a trigger InvocationSpanContext.
+class InvocationSpanContext final: public kj::Refcounted,
+                                   public kj::EnableAddRefToThis<InvocationSpanContext> {
+public:
+  // Spans within a InvocationSpanContext are identified by a span id that is a
+  // monotically increasing number. Every InvocationSpanContext has a root span
+  // whose ID is zero. Every child span context created within that context will
+  // have a span id that is one greater than the previously created one.
+  class SpanIdCounter final: public kj::Refcounted {
+  public:
+    SpanIdCounter() = default;
+    KJ_DISALLOW_COPY_AND_MOVE(SpanIdCounter);
+
+    inline kj::uint next() {
+#ifdef KJ_DEBUG
+      static constexpr kj::uint kMax = kj::maxValue;
+      KJ_ASSERT(id < kMax, "max number of spans exceeded");
+#endif
+      return id++;
+    }
+
+  private:
+    kj::uint id = 1;
+  };
+
+  // The constructor is public only so kj::rc can see it and create a new instance.
+  // User code should use the static factory methods or the newChild method.
+  InvocationSpanContext(kj::Badge<InvocationSpanContext>,
+      kj::Maybe<kj::Rc<SpanIdCounter>> counter,
+      TraceId traceId,
+      TraceId invocationId,
+      kj::uint spanId = 0,
+      kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext = kj::none);
+  KJ_DISALLOW_COPY_AND_MOVE(InvocationSpanContext);
+
+  inline const TraceId& getTraceId() const {
+    return traceId;
+  }
+
+  inline const TraceId& getInvocationId() const {
+    return invocationId;
+  }
+
+  inline const kj::uint getSpanId() const {
+    return spanId;
+  }
+
+  inline const kj::Maybe<kj::Rc<InvocationSpanContext>>& getParent() const {
+    return parentSpanContext;
+  }
+
+  // Creates a new child span. If the current context does not have a counter,
+  // then this will assert. If isTrigger() is true then it will not have a
+  // counter.
+  kj::Rc<InvocationSpanContext> newChild();
+
+  // An InvocationSpanContext is a trigger context if it has no counter. This
+  // generally means the SpanContext was create from a capnp message and
+  // represents an InvocationSpanContext that was propagated from a parent
+  // or triggering context.
+  bool isTrigger() const {
+    return counter == kj::none;
+  }
+
+  // Creates a new InvocationSpanContext. If the triggerContext is given, then its
+  // traceId is used as the traceId for the newly created context. Otherwise a new
+  // traceId is generated. The invocationId is always generated new and the spanId
+  // will be 0 with no parent span.
+  static kj::Rc<InvocationSpanContext> newForInvocation(
+      kj::Maybe<kj::Rc<InvocationSpanContext>&> triggerContext = kj::none,
+      kj::Maybe<kj::EntropySource&> entropySource = kj::none);
+
+  // Creates a new InvocationSpanContext from a capnp message. The returned
+  // InvocationSpanContext will not be capable of creating child spans and
+  // is considered only a "trigger" span.
+  static kj::Maybe<kj::Rc<InvocationSpanContext>> fromCapnp(
+      rpc::InvocationSpanContext::Reader reader);
+  void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
+
+private:
+  // If there is no counter, then child spans cannot be created from
+  // this InvocationSpanContext.
+  kj::Maybe<kj::Rc<SpanIdCounter>> counter;
+  const TraceId traceId;
+  const TraceId invocationId;
+  const kj::uint spanId;
+
+  // The parentSpanContext can be either a direct parent or a trigger
+  // context. If it is a trigger context, then it should have the same
+  // traceId but a different invocationId (unless predictable mode for
+  // testing is enabled). The isTrigger() should also return true.
+  const kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext;
+};
+
 kj::String KJ_STRINGIFY(const TraceId& id);
+kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context);
 }  // namespace tracing
 
 enum class PipelineLogLevel {
