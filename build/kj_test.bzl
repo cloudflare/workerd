@@ -10,10 +10,7 @@ def kj_test(
         srcs = [src],
         deps = [
             "@capnp-cpp//src/kj:kj-test",
-        ] + select({
-            "@platforms//os:windows": [],
-            "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
-        }) + deps,
+        ] + deps,
         linkopts = select({
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
