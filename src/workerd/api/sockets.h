@@ -56,7 +56,7 @@ struct TlsOptions {
 };
 
 class Socket: public jsg::Object {
-public:
+ public:
   Socket(jsg::Lock& js,
       IoContext& context,
       kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
@@ -155,7 +155,7 @@ public:
     tracker.trackField("openedPromise", openedPromise);
   }
 
-private:
+ private:
   // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
   //   shutdown order clearer.
 
@@ -235,7 +235,7 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     jsg::Optional<SocketOptions> options);
 
 class SocketsModule final: public jsg::Object {
-public:
+ public:
   SocketsModule() = default;
   SocketsModule(jsg::Lock&, const jsg::Url&) {}
 

@@ -34,7 +34,7 @@ struct BuildRtti;
 // interpret all types passed through a given builder.
 template <typename MetaConfiguration>
 class Builder {
-public:
+ public:
   const MetaConfiguration config;
 
   Builder(const MetaConfiguration& config): config(config) {}
@@ -66,7 +66,7 @@ public:
     });
   }
 
-private:
+ private:
   capnp::MallocMessageBuilder builder;
   kj::HashMap<kj::String, kj::Own<capnp::MallocMessageBuilder>> symbols;
 };
@@ -112,7 +112,7 @@ struct TupleRttiBuilder {
     build(std::make_integer_sequence<size_t, std::tuple_size_v<Tuple>>{}, builder, rtti);
   }
 
-private:
+ private:
   template <size_t... Indexes>
   static inline void build(std::integer_sequence<size_t, Indexes...> seq,
       capnp::List<Type>::Builder builder,

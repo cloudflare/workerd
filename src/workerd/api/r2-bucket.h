@@ -23,7 +23,7 @@ class R2MultipartUpload;
 
 // A capability to an R2 Bucket.
 class R2Bucket: public jsg::Object {
-protected:
+ protected:
   struct friend_tag_t {};
 
   struct FeatureFlags {
@@ -32,7 +32,7 @@ protected:
     bool listHonorsIncludes;
   };
 
-public:
+ public:
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
   explicit R2Bucket(CompatibilityFlags::Reader featureFlags, uint clientIndex)
@@ -95,7 +95,7 @@ public:
   };
 
   class Checksums: public jsg::Object {
-  public:
+   public:
     Checksums(jsg::Optional<kj::Array<kj::byte>> md5,
         jsg::Optional<kj::Array<kj::byte>> sha1,
         jsg::Optional<kj::Array<kj::byte>> sha256,
@@ -205,7 +205,7 @@ public:
   };
 
   class HeadResult: public jsg::Object {
-  public:
+   public:
     HeadResult(kj::String name,
         kj::String version,
         double size,
@@ -298,7 +298,7 @@ public:
       tracker.trackField("customMetadata", customMetadata);
     }
 
-  protected:
+   protected:
     kj::String name;
     kj::String version;
     double size;
@@ -314,7 +314,7 @@ public:
   };
 
   class GetResult: public HeadResult {
-  public:
+   public:
     GetResult(kj::String name,
         kj::String version,
         double size,
@@ -368,7 +368,7 @@ public:
       tracker.trackField("body", body);
     }
 
-  private:
+   private:
     jsg::Ref<ReadableStream> body;
   };
 
@@ -505,12 +505,12 @@ public:
     tracker.trackField("jwt", jwt);
   }
 
-protected:
+ protected:
   kj::Maybe<kj::StringPtr> adminBucketName() const {
     return adminBucket;
   }
 
-private:
+ private:
   FeatureFlags featureFlags;
   uint clientIndex;
   kj::Maybe<kj::String> adminBucket;

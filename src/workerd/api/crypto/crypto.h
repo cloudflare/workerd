@@ -26,7 +26,7 @@ class EllipticKey;
 //
 // https://w3c.github.io/webcrypto/#dfn-RecognizedKeyUsage
 class CryptoKeyUsageSet {
-public:
+ public:
   static constexpr CryptoKeyUsageSet encrypt() {
     return 1 << 0;
   }
@@ -125,7 +125,7 @@ public:
     return strings.finish();
   }
 
-private:
+ private:
   constexpr CryptoKeyUsageSet(uint8_t set): set(set) {}
   uint8_t set;
 };
@@ -137,7 +137,7 @@ private:
 // `importKey()`, `generateKey()`, or `deriveKey()` methods. The user can then use the object by
 // passing it as a parameter to other SubtleCrypto methods.
 class CryptoKey: public jsg::Object {
-public:
+ public:
   // KeyAlgorithm dictionaries
   //
   // These dictionaries implement CryptoKey's `algorithm` property. They allow user code to inspect
@@ -331,7 +331,7 @@ public:
   bool verifyX509Public(const X509* x509) const;
   bool verifyX509Private(const X509* x509) const;
 
-private:
+ private:
   kj::Own<Impl> impl;
 
   friend class SubtleCrypto;
@@ -348,7 +348,7 @@ struct CryptoKeyPair {
 };
 
 class SubtleCrypto: public jsg::Object {
-public:
+ public:
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -667,7 +667,7 @@ public:
 // a hash digest from streaming data. It combines Web Crypto concepts into a
 // WritableStream and is compatible with both APIs.
 class DigestStream: public WritableStream {
-public:
+ public:
   using DigestContextPtr = kj::Own<EVP_MD_CTX>;
   using Algorithm = kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>;
 
@@ -701,7 +701,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   static DigestContextPtr initContext(SubtleCrypto::HashAlgorithm& algorithm);
 
   struct Ready {
@@ -731,7 +731,7 @@ private:
 // Implements the Crypto interface as prescribed by:
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
 class Crypto: public jsg::Object {
-public:
+ public:
   jsg::BufferSource getRandomValues(jsg::BufferSource buffer);
 
   kj::String randomUUID();
@@ -774,7 +774,7 @@ public:
     tracker.trackField("subtle", subtle);
   }
 
-private:
+ private:
   jsg::Ref<SubtleCrypto> subtle = jsg::alloc<SubtleCrypto>();
 };
 

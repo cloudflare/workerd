@@ -19,11 +19,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   //   However, that probably requires rewriting `DurableObjectStorageOperations`. For now, hooking
   //   here is easier and not too costly.
 
-public:
+ public:
   // Hooks to configure ActorSqlite behavior, right now only used to allow plugging in a backend
   // for alarm operations.
   class Hooks {
-  public:
+   public:
     // Makes a request to the alarm manager to run the alarm handler at the given time, returning
     // a promise that resolves when the scheduling has succeeded.
     virtual kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime);
@@ -82,7 +82,7 @@ public:
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   // See ActorCacheInterface
 
-private:
+ private:
   kj::Own<SqliteDatabase> db;
   OutputGate& outputGate;
   kj::Function<kj::Promise<void>()> commitCallback;
@@ -93,7 +93,7 @@ private:
   // Define a SqliteDatabase::Regulator that is similar to TRUSTED but turns certain SQLite errors
   // into application errors as appropriate when committing an implicit transaction.
   class TxnCommitRegulator: public SqliteDatabase::Regulator {
-  public:
+   public:
     void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const;
   };
   static constexpr TxnCommitRegulator TRUSTED_TXN_COMMIT;
@@ -106,7 +106,7 @@ private:
   struct NoTxn {};
 
   class ImplicitTxn {
-  public:
+   public:
     explicit ImplicitTxn(ActorSqlite& parent);
     ~ImplicitTxn() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(ImplicitTxn);
@@ -114,14 +114,14 @@ private:
     void commit();
     void rollback();
 
-  private:
+   private:
     ActorSqlite& parent;
 
     bool committed = false;
   };
 
   class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
-  public:
+   public:
     ExplicitTxn(ActorSqlite& actorSqlite);
     ~ExplicitTxn() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(ExplicitTxn);
@@ -151,7 +151,7 @@ private:
         kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
     // Implements ActorCacheOps. These will all forward to the ActorSqlite instance.
 
-  private:
+   private:
     ActorSqlite& actorSqlite;
     kj::Maybe<kj::Own<ExplicitTxn>> parent;
     uint depth = 0;
@@ -177,7 +177,7 @@ private:
 
   // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   class DeferredAlarmDeleter: public kj::Disposer {
-  public:
+   public:
     // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
     // `ActorSqlite` itself, but with an alternate disposer that deletes the alarm rather than
     // the whole object.

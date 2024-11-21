@@ -50,7 +50,7 @@ struct ResolveObserver {
 
   // Used to report the status of a module resolution.
   class ResolveStatus {
-  public:
+   public:
     ResolveStatus() = default;
     KJ_DISALLOW_COPY_AND_MOVE(ResolveStatus);
     virtual ~ResolveStatus() noexcept(false) {}

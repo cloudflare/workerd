@@ -15,7 +15,7 @@ namespace workerd {
 // The table is named `_cf_METADATA`. The naming is designed so that if the application is allowed to
 // perform direct SQL queries, we can block it from accessing any table prefixed with `_cf_`.
 class SqliteMetadata final: private SqliteDatabase::ResetListener {
-public:
+ public:
   explicit SqliteMetadata(SqliteDatabase& db);
 
   // Return currently set alarm time, or none.
@@ -24,7 +24,7 @@ public:
   // Sets current alarm time, or none.
   void setAlarm(kj::Maybe<kj::Date> currentTime);
 
-private:
+ private:
   struct Uninitialized {};
   struct Initialized {
     SqliteDatabase& db;

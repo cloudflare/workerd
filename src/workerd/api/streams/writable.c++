@@ -301,7 +301,7 @@ namespace {
 
 // Wrapper around `WritableStreamSink` that makes it suitable for passing off to capnp RPC.
 class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
-public:
+ public:
   WritableStreamRpcAdapter(kj::Own<WritableStreamSink> inner): inner(kj::mv(inner)) {}
   ~WritableStreamRpcAdapter() noexcept(false) {
     weakRef->invalidate();
@@ -346,7 +346,7 @@ public:
     return canceler.wrap(getInner().end());
   }
 
-private:
+ private:
   kj::Maybe<kj::Own<WritableStreamSink>> inner;
   kj::Canceler canceler;
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
@@ -371,7 +371,7 @@ private:
 // directly on the WritableStreamController. Note that this approach is necessarily
 // a lot slower
 class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
-public:
+ public:
   WritableStreamJsRpcAdapter(IoContext& context, jsg::Ref<WritableStreamDefaultWriter> writer)
       : context(context),
         writer(kj::mv(writer)) {}
@@ -513,7 +513,7 @@ public:
     }));
   }
 
-private:
+ private:
   IoContext& context;
   kj::Maybe<jsg::Ref<WritableStreamDefaultWriter>> writer;
   kj::Canceler canceler;

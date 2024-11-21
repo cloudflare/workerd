@@ -162,7 +162,7 @@ struct ResolveContext final {
 // The Module class itself represents the definition of a module and not
 // it's actual instantiation.
 class Module {
-public:
+ public:
   enum class Type : uint8_t {
     BUNDLE,
     BUILTIN,
@@ -251,7 +251,7 @@ public:
   // A helper interface that is used to make it easier for a synthetic module
   // evaluation callback to set the exports of the module.
   class ModuleNamespace final {
-  public:
+   public:
     explicit ModuleNamespace(
         v8::Local<v8::Module> inner, kj::ArrayPtr<const kj::String> namedExports);
     KJ_DISALLOW_COPY_AND_MOVE(ModuleNamespace);
@@ -263,7 +263,7 @@ public:
     // (should not include the "default")
     kj::ArrayPtr<const kj::StringPtr> getNamedExports() const;
 
-  private:
+   private:
     v8::Local<v8::Module> inner;
     kj::HashSet<kj::StringPtr> namedExports;
   };
@@ -314,13 +314,13 @@ public:
   // EvaluatingScope class makes it possible to guard against that, throwing an
   // error if there's already an active evaluation happening.
   class EvaluatingScope final {
-  public:
+   public:
     EvaluatingScope() = default;
     KJ_DISALLOW_COPY_AND_MOVE(EvaluatingScope);
     ~EvaluatingScope() noexcept(false);
     kj::Own<void> enterEvaluationScope(const Url& specifier) KJ_WARN_UNUSED_RESULT;
 
-  private:
+   private:
     struct Impl;
     KJ_DECLARE_NON_POLYMORPHIC(Impl);
     kj::Maybe<Impl&> maybeEvaluating;
@@ -371,10 +371,10 @@ public:
     };
   }
 
-protected:
+ protected:
   Module(Url specifier, Type type, Flags flags = Flags::NONE);
 
-private:
+ private:
   Url specifier_;
   Type type_;
   Flags flags_;
@@ -393,12 +393,12 @@ constexpr Module::Flags operator|(const Module::Flags& a, const Module::Flags& b
 // any internal caching it may use to optimize resolution. Accesses to the
 // bundle must be thread-safe.
 class ModuleBundle {
-public:
+ public:
   using Type = Module::Type;
 
   // A Builder is used to construct a ModuleBundle.
   class Builder {
-  public:
+   public:
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
 
     using ResolveCallback = kj::Function<kj::Maybe<kj::Own<Module>>(const ResolveContext&)>;
@@ -413,7 +413,7 @@ public:
       return type_;
     }
 
-  protected:
+   protected:
     Builder(Type type);
 
     void ensureIsNotBundleSpecifier(const Url& specifier);
@@ -425,7 +425,7 @@ public:
 
   // Used to build a ModuleBundle representing modules sourced from a worker bundle.
   class BundleBuilder final: public Builder {
-  public:
+   public:
     static const Url BASE;
 
     BundleBuilder();
@@ -446,7 +446,7 @@ public:
 
   // Used to builde a ModuleBundle representing modules sources from the runtime.
   class BuiltinBuilder final: public Builder {
-  public:
+   public:
     enum class Type {
       BUILTIN,
       BUILTIN_ONLY,
@@ -502,10 +502,10 @@ public:
   virtual kj::Maybe<Module&> resolve(
       const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT = 0;
 
-protected:
+ protected:
   ModuleBundle(Type type);
 
-private:
+ private:
   Type type_;
 };
 
@@ -524,14 +524,14 @@ constexpr ModuleBundle::BuiltInBundleOptions operator&(
 // Importantly, the ModuleRegistry is immutable once created and
 // must be thread-safe.
 class ModuleRegistry final: public ModuleRegistryBase {
-private:
+ private:
   enum BundleIndices { kBundle, kBuiltin, kBuiltinOnly, kFallback, kBundleCount };
 
-public:
+ public:
   using EvalCallback = Module::EvalCallback;
 
   class Builder final {
-  public:
+   public:
     enum class Options {
       NONE = 0,
       // When set, allows the ModuleRegistry to use a fallback ModuleBundle to
@@ -555,7 +555,7 @@ public:
 
     Builder& setEvalCallback(EvalCallback callback) KJ_LIFETIMEBOUND;
 
-  private:
+   private:
     bool allowsFallback() const;
 
     // One slot for each of ModuleBundle::Type
@@ -604,7 +604,7 @@ public:
   ModuleRegistry(ModuleRegistry::Builder* builder);
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
 
-private:
+ private:
   const ResolveObserver& observer;
   kj::Maybe<ModuleRegistry&> maybeParent;
   // One slot for each of ModuleBundle::Type

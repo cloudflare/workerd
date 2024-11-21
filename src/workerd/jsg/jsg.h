@@ -760,7 +760,7 @@ class Lock;
 // visitation for them. Moving jsg::Data which are reachable via GC visitation is undefined
 // behavior outside of an isolate lock.
 class Data {
-public:
+ public:
   Data(decltype(nullptr)) {}
   ~Data() noexcept(false) {
     destroy();
@@ -813,7 +813,7 @@ public:
     return handle == other;
   }
 
-private:
+ private:
   // The isolate with which the handles below are associated.
   v8::Isolate* isolate = nullptr;
 
@@ -855,7 +855,7 @@ private:
 // jsg::V8Ref<T> when you need the type-safety of holding a handle to a specific V8 type.
 template <typename T>
 class V8Ref: private Data {
-public:
+ public:
   V8Ref(decltype(nullptr)): Data(nullptr) {}
   V8Ref(v8::Isolate* isolate, v8::Local<T> handle): Data(isolate, handle) {}
   V8Ref(V8Ref&& other): Data(kj::mv(other)) {}
@@ -893,7 +893,7 @@ public:
   template <typename U>
   V8Ref<U> cast(jsg::Lock& js);
 
-private:
+ private:
   friend class GcVisitor;
   friend class MemoryTracker;
 };
@@ -905,7 +905,7 @@ using Value = V8Ref<v8::Value>;
 // T must v8::Object or a subclass (or anything that implements GetIdentityHash()).
 template <typename T>
 class HashableV8Ref: public V8Ref<T> {
-public:
+ public:
   HashableV8Ref(decltype(nullptr)): V8Ref<T>(nullptr), identityHash(0) {}
   HashableV8Ref(v8::Isolate* isolate, v8::Local<T> handle)
       // TODO(perf): It's not clear if V8's `GetIdentityHash()` is intended to return uniform
@@ -928,7 +928,7 @@ public:
     return identityHash;
   }
 
-private:
+ private:
   int identityHash;
 
   HashableV8Ref(v8::Isolate* isolate, v8::Local<T> handle, int identityHash)
@@ -975,7 +975,7 @@ void MemoryTracker::trackField(
 //     void foo(Optional<Data> data);
 template <typename T>
 class Optional: public kj::Maybe<T> {
-public:
+ public:
   // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
   // constructor instead.
   template <typename... Params>
@@ -986,7 +986,7 @@ public:
 //  error, it just results in an unset LenientOptional.
 template <typename T>
 class LenientOptional: public kj::Maybe<T> {
-public:
+ public:
   // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
   // constructor instead.
   template <typename... Params>
@@ -1000,7 +1000,7 @@ public:
 // Another option is to use jsg::Identified<MyStruct>, but sometimes storing the reference
 // into a field of the unwrapped struct is more convenient.
 class SelfRef: public V8Ref<v8::Object> {
-public:
+ public:
   using V8Ref::V8Ref;
 };
 
@@ -1012,7 +1012,7 @@ public:
 //
 //   Move this class to the `api` directory and rename to HeaderString.
 class ByteString: public kj::String {
-public:
+ public:
   // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
   // constructor instead.
   template <typename... Params>
@@ -1067,7 +1067,7 @@ class TypeHandler;
 // unwrapping them all as type T.
 template <typename T>
 class Arguments: public kj::Array<T> {
-public:
+ public:
   Arguments(kj::Array<T>&& value): kj::Array<T>(kj::mv(value)) {}
 
   using ElementType = T;
@@ -1094,7 +1094,7 @@ constexpr bool isArguments() {
 // An array of local values placed on the end of a parameter list to capture all trailing values
 class Varargs {
   // TODO(cleanup): Can all use cases of this be replaced with Arguments<Value>?
-public:
+ public:
   Varargs(size_t index, const v8::FunctionCallbackInfo<v8::Value>& args)
       : startIndex(index),
         args(args) {
@@ -1117,7 +1117,7 @@ public:
 
   class Iterator {
     // TODO(cleanup): This is similar to capnp::_::IndexingIterator. Maybe a common utility class should be added to KJ.
-  public:
+   public:
     inline Iterator(size_t index, const v8::FunctionCallbackInfo<v8::Value>& args)
         : index(index),
           args(args) {}
@@ -1140,7 +1140,7 @@ public:
       return index == other.index && &args == &other.args;
     }
 
-  private:
+   private:
     size_t index;
     const v8::FunctionCallbackInfo<v8::Value>& args;
   };
@@ -1152,7 +1152,7 @@ public:
     return Iterator(startIndex + length, args);
   };
 
-private:
+ private:
   size_t startIndex;
   size_t length;
   const v8::FunctionCallbackInfo<v8::Value>& args;
@@ -1165,7 +1165,7 @@ void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
 // All resource types must inherit from this.
 class Object: private Wrappable {
-public:
+ public:
   using jsgThis = Object;
 
   // Objects that extend from jsg::Object should never be copied or moved
@@ -1205,7 +1205,7 @@ public:
   // own tag.
   static constexpr uint jsgSerializeTag = kj::maxValue;
 
-private:
+ private:
   inline void visitForMemoryInfo(MemoryTracker& tracker) const {}
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
@@ -1254,7 +1254,7 @@ private:
 // behavior outside of an isolate lock.
 template <typename T>
 class Ref {
-public:
+ public:
   Ref(decltype(nullptr)): strong(false) {}
   Ref(Ref&& other): inner(kj::mv(other.inner)), strong(true) {
     if (other.strong) {
@@ -1342,7 +1342,7 @@ public:
     inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
   }
 
-private:
+ private:
   kj::Own<T> inner;
 
   // If this has ever been traced, the parent object from which the trace originated. This is kept
@@ -1402,7 +1402,7 @@ Ref<T> _jsgThis(T* obj) {
 // JavaScript, including types that are otherwise pass-by-value.
 template <typename T>
 class MemoizedIdentity {
-public:
+ public:
   inline MemoizedIdentity(T value): value(kj::mv(value)) {}
 
   inline MemoizedIdentity& operator=(T value) {
@@ -1427,7 +1427,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::OneOf<T, Value> value;
 
   template <typename TypeWrapper>
@@ -1464,7 +1464,7 @@ struct Identified {
 //
 // Name implements hashCode() so it is suitable for use as a key in kj::HashMap, etc.
 class Name final {
-public:
+ public:
   explicit Name(kj::String string);
   explicit Name(kj::StringPtr string);
   explicit Name(Lock& js, v8::Local<v8::Symbol> symbol);
@@ -1491,7 +1491,7 @@ public:
     }
   }
 
-private:
+ private:
   int hash;
   kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
 
@@ -1703,7 +1703,7 @@ class ModuleRegistry;
 // jsg::Object should always be the first inherited class, and jsg::ContextGlobal second.
 // The lifetime of the global object matches the lifetime of the JavaScript context.
 class ContextGlobal {
-public:
+ public:
   ContextGlobal() {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
@@ -1712,7 +1712,7 @@ public:
     return *moduleRegistry;
   }
 
-private:
+ private:
   kj::Own<ModuleRegistry> moduleRegistry;
 
   void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
@@ -1728,7 +1728,7 @@ private:
 // which is more than just the global object.
 template <typename T>
 class JsContext {
-public:
+ public:
   static_assert(
       std::is_base_of_v<ContextGlobal, T>, "context global type must extend jsg::ContextGlobal");
 
@@ -1754,7 +1754,7 @@ public:
   }
   v8::Local<v8::Context> getHandle(Lock& js) const;
 
-private:
+ private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
   kj::Maybe<kj::Own<void>> maybeNewRegistryHandle;
@@ -1807,7 +1807,7 @@ constexpr bool hasPublicVisitForGc() {
 // destroy them. To avoid this situation, make sure your C++ objects have clear ownership, so
 // that the reference graph is a DAG, just like you always would in C++.
 class GcVisitor {
-public:
+ public:
   template <typename T>
   void visit(Ref<T>& ref) {
     ref.inner->visitRef(*this, ref.parent, ref.strong);
@@ -1868,7 +1868,7 @@ public:
     }
   }
 
-private:
+ private:
   Wrappable& parent;
   kj::Maybe<cppgc::Visitor&> cppgcVisitor;
 
@@ -1917,7 +1917,7 @@ constexpr bool isGcVisitable() {
 // For resource types, also need to wrap in Ref, i.e. `TypeHandler<jsg::Ref<T>>`.
 template <typename T>
 class TypeHandler {
-public:
+ public:
   // ---------------------------------------------------------------------------
   // Interface for value types (i.e. types not declared using JSG_RESOURCE_TYPE).
   //
@@ -1960,7 +1960,7 @@ public:
 // handler, you can also do `obj.onfoo = func`.
 template <typename T>
 class PropertyReflection {
-public:
+ public:
   // Read the property of this object called `name`, unwrapping it as type `T`.
   kj::Maybe<T> get(Lock& js, kj::StringPtr name);
 
@@ -1977,7 +1977,7 @@ public:
 
   // TODO(someday): Support for reading Symbols and Privates?
 
-private:
+ private:
   kj::Maybe<Wrappable&> self;
 
   typedef kj::Maybe<T> Unwrapper(v8::Isolate*, v8::Local<v8::Object> object, kj::StringPtr name);
@@ -2202,7 +2202,7 @@ class DOMException;
 // The adjustment will be automatically decremented when the object is destroyed.
 // The allocation amount can be adjusted up or down during the lifetime of an object.
 class ExternalMemoryAdjustment final {
-public:
+ public:
   ExternalMemoryAdjustment() = default;
   ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount);
   ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
@@ -2225,7 +2225,7 @@ public:
     return amount;
   }
 
-private:
+ private:
   size_t amount = 0;
   v8::Isolate* isolate = nullptr;
 
@@ -2256,7 +2256,7 @@ private:
 // passed down to everyone else from there. See setup.h for details.
 
 class Lock {
-public:
+ public:
   // The underlying V8 isolate, useful for directly calling V8 APIs. Hopefully, this is rarely
   // needed outside JSG itself.
   v8::Isolate* const v8Isolate;
@@ -2646,7 +2646,7 @@ public:
   // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
 
-private:
+ private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock
   // in. Types that have the Lock included as a member field won't be caught and
@@ -2687,10 +2687,10 @@ private:
 // The V8StackScope is used only as a marker to prove that we are running in the V8 stack
 // established by calling runInV8Stack(...)
 class V8StackScope final {
-public:
+ public:
   KJ_DISALLOW_COPY_AND_MOVE(V8StackScope);
 
-private:
+ private:
   V8StackScope() = default;
   KJ_DISALLOW_AS_COROUTINE_PARAM;
 

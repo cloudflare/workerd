@@ -122,7 +122,7 @@ static constexpr kj::StringPtr mainModuleName = "main"_kj;
 static constexpr kj::StringPtr scriptId = "script"_kj;
 
 class MockEntropySource final: public kj::EntropySource {
-public:
+ public:
   ~MockEntropySource() {}
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
     for (kj::byte& b: buffer) {
@@ -137,7 +137,7 @@ public:
     return r;
   }
 
-private:
+ private:
   kj::byte counter = 0;
 };
 
@@ -282,7 +282,7 @@ struct MockResponse final: public kj::HttpService::Response {
 };
 
 class MockActorLoopback: public Worker::Actor::Loopback, public kj::Refcounted {
-public:
+ public:
   virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
     return kj::Own<WorkerInterface>();
   };

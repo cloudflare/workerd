@@ -37,7 +37,7 @@ namespace tracing {
 // is used to represent tracing IDs for jaeger traces. For external tracing,
 // this is used for both the trace ID and invocation ID for tail workers.
 class TraceId final {
-public:
+ public:
   // A null trace ID. This is only acceptable for use in tests.
   constexpr TraceId(decltype(nullptr)): low(0), high(0) {}
 
@@ -112,7 +112,7 @@ public:
   static TraceId fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader);
   void toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const;
 
-private:
+ private:
   uint64_t low = 0;
   uint64_t high = 0;
 };
@@ -126,13 +126,13 @@ constexpr TraceId TraceId::nullId = nullptr;
 // That may or may not have a trigger InvocationSpanContext.
 class InvocationSpanContext final: public kj::Refcounted,
                                    public kj::EnableAddRefToThis<InvocationSpanContext> {
-public:
+ public:
   // Spans within a InvocationSpanContext are identified by a span id that is a
   // monotically increasing number. Every InvocationSpanContext has a root span
   // whose ID is zero. Every child span context created within that context will
   // have a span id that is one greater than the previously created one.
   class SpanIdCounter final: public kj::Refcounted {
-  public:
+   public:
     SpanIdCounter() = default;
     KJ_DISALLOW_COPY_AND_MOVE(SpanIdCounter);
 
@@ -144,7 +144,7 @@ public:
       return id++;
     }
 
-  private:
+   private:
     kj::uint id = 1;
   };
 
@@ -202,7 +202,7 @@ public:
       rpc::InvocationSpanContext::Reader reader);
   void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
 
-private:
+ private:
   // If there is no counter, then child spans cannot be created from
   // this InvocationSpanContext.
   kj::Maybe<kj::Rc<SpanIdCounter>> counter;
@@ -245,7 +245,7 @@ struct Span;
 
 // Collects trace information about the handling of a worker/pipeline fetch event.
 class Trace final: public kj::Refcounted {
-public:
+ public:
   explicit Trace(kj::Maybe<kj::String> stableId,
       kj::Maybe<kj::String> scriptName,
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
@@ -259,7 +259,7 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
   class FetchEventInfo {
-  public:
+   public:
     class Header;
 
     explicit FetchEventInfo(
@@ -267,7 +267,7 @@ public:
     FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
 
     class Header {
-    public:
+     public:
       explicit Header(kj::String name, kj::String value);
       Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
 
@@ -292,7 +292,7 @@ public:
   };
 
   class JsRpcEventInfo {
-  public:
+   public:
     explicit JsRpcEventInfo(kj::String methodName);
     JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
 
@@ -302,7 +302,7 @@ public:
   };
 
   class ScheduledEventInfo {
-  public:
+   public:
     explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
     ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
 
@@ -313,7 +313,7 @@ public:
   };
 
   class AlarmEventInfo {
-  public:
+   public:
     explicit AlarmEventInfo(kj::Date scheduledTime);
     AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
 
@@ -323,7 +323,7 @@ public:
   };
 
   class QueueEventInfo {
-  public:
+   public:
     explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
     QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
 
@@ -334,7 +334,7 @@ public:
   };
 
   class EmailEventInfo {
-  public:
+   public:
     explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
     EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
 
@@ -346,14 +346,14 @@ public:
   };
 
   class TraceEventInfo {
-  public:
+   public:
     class TraceItem;
 
     explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
     TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
 
     class TraceItem {
-    public:
+     public:
       explicit TraceItem(kj::Maybe<kj::String> scriptName);
       TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
 
@@ -368,7 +368,7 @@ public:
   };
 
   class HibernatableWebSocketEventInfo {
-  public:
+   public:
     struct Message {};
     struct Close {
       uint16_t code;
@@ -388,13 +388,13 @@ public:
   };
 
   class CustomEventInfo {
-  public:
+   public:
     explicit CustomEventInfo() {};
     CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
   };
 
   class FetchResponseInfo {
-  public:
+   public:
     explicit FetchResponseInfo(uint16_t statusCode);
     FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
 
@@ -404,7 +404,7 @@ public:
   };
 
   class DiagnosticChannelEvent {
-  public:
+   public:
     explicit DiagnosticChannelEvent(
         kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
     DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
@@ -419,7 +419,7 @@ public:
   };
 
   class Log {
-  public:
+   public:
     explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
     Log(rpc::Trace::Log::Reader reader);
     Log(Log&&) = default;
@@ -437,7 +437,7 @@ public:
   };
 
   class Exception {
-  public:
+   public:
     explicit Exception(
         kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
     Exception(rpc::Trace::Exception::Reader reader);
@@ -526,7 +526,7 @@ class WorkerTracer;
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
 class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
-public:
+ public:
   // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer() = default;
   ~PipelineTracer() noexcept(false);
@@ -555,7 +555,7 @@ public:
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
-private:
+ private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
 
@@ -567,7 +567,7 @@ private:
 // write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
 // via extractTrace.
 class WorkerTracer final: public kj::Refcounted {
-public:
+ public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel);
@@ -618,7 +618,7 @@ public:
     return self->addRef();
   }
 
-private:
+ private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
 
@@ -661,7 +661,7 @@ struct Span {
   // Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
   // create a `Span`, use a `SpanBuilder`.
 
-public:
+ public:
   using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
   // TODO(someday): Support binary bytes, too.
   using TagMap = kj::HashMap<kj::ConstString, TagValue>;
@@ -698,7 +698,7 @@ public:
 // spans for itself that show up as children of the caller's span, but the caller does not
 // want to give the callee any other ability to modify the parent span.
 class SpanParent {
-public:
+ public:
   SpanParent(SpanBuilder& builder);
 
   // Make a SpanParent that causes children not to be reported anywhere.
@@ -732,7 +732,7 @@ public:
     return observer;
   }
 
-private:
+ private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
 };
 
@@ -745,7 +745,7 @@ private:
 // SpanBuilder is designed to be write-only -- you cannot read back the content. Only the
 // observer (if there is one) receives the content.
 class SpanBuilder {
-public:
+ public:
   // Create a new top-level span that will report to the given observer. If the observer is null,
   // no data is collected.
   //
@@ -811,7 +811,7 @@ public:
   // duplicate keys.
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
-private:
+ private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
   // The under-construction span, or null if the span has ended.
   kj::Maybe<Span> span;
@@ -826,7 +826,7 @@ private:
 // A new SpanObserver is created at the start of each Span. The observer is used to report the
 // span data at the end of the span, as well as to construct child observers.
 class SpanObserver: public kj::Refcounted {
-public:
+ public:
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
@@ -897,13 +897,13 @@ struct TraceParentContext {
 // given request span using a specified tag name. Ideal for automatically tracking and logging
 // execution times within a scoped block.
 class ScopedDurationTagger {
-public:
+ public:
   explicit ScopedDurationTagger(
       SpanBuilder& span, kj::ConstString key, const kj::MonotonicClock& timer);
   ~ScopedDurationTagger() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(ScopedDurationTagger);
 
-private:
+ private:
   SpanBuilder& span;
   kj::ConstString key;
   const kj::MonotonicClock& timer;

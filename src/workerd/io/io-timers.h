@@ -15,7 +15,7 @@ class IoContext;
 // However, clearTimeout implementations are expected to only have access to timeouts set via that
 // same implementation.
 class TimeoutId {
-public:
+ public:
   // Use a double so that we can exceed the maximum value for uint32_t.
   using NumberType = double;
 
@@ -43,28 +43,28 @@ public:
     return value < id.value;
   }
 
-private:
+ private:
   constexpr explicit TimeoutId(ValueType value): value(value) {}
 
   ValueType value;
 };
 
 class TimeoutId::Generator {
-public:
+ public:
   Generator() = default;
   KJ_DISALLOW_COPY_AND_MOVE(Generator);
 
   // Get the next TimeoutId for this generator. This function will never return a TimeoutId <= 0.
   TimeoutId getNext();
 
-private:
+ private:
   // We always skip 0 per the spec:
   // https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#timers.
   TimeoutId::ValueType nextId = 1;
 };
 
 class TimeoutManager {
-public:
+ public:
   // Upper bound on the number of timeouts a user can *ever* have active.
   constexpr static auto MAX_TIMEOUTS = 10'000;
 

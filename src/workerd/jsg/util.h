@@ -32,12 +32,12 @@ typedef unsigned int uint;
 // case an exception is thrown. Writing code that deals with maybes is cumbersome and error-prone
 // compared to C++ exceptions.
 class JsExceptionThrown: public std::exception {
-public:
+ public:
   JsExceptionThrown();
   ~JsExceptionThrown() noexcept = default;  // We must match `std::exception`'s noexcept.
   const char* what() const noexcept override;
 
-private:
+ private:
   void* trace[16];
   kj::ArrayPtr<void* const> tracePtr;
   mutable kj::String whatBuffer;

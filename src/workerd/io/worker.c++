@@ -341,12 +341,12 @@ uint64_t getCurrentThreadId() {
 // Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
 // `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
 class Worker::AsyncWaiter: public kj::Refcounted {
-public:
+ public:
   AsyncWaiter(kj::Own<const Isolate> isolate);
   ~AsyncWaiter() noexcept;
   KJ_DISALLOW_COPY_AND_MOVE(AsyncWaiter);
 
-private:
+ private:
   // Executor for this waiter's thread.
   const kj::Executor& executor;
 
@@ -378,7 +378,7 @@ private:
 };
 
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
-public:
+ public:
   // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
   // function to implement timers.
   double currentTimeMS() override {
@@ -443,7 +443,7 @@ public:
     runMessageLoop = false;
   }
 
-private:
+ private:
   static bool dispatchOneMessageDuringPause(Worker::Isolate::InspectorChannelImpl& channel);
 
   struct InspectorTimerInfo {
@@ -531,7 +531,7 @@ struct Worker::Isolate::Impl {
   // Always use this wrapper in code which may face lock contention (that's mostly everywhere).
   class Lock {
 
-  public:
+   public:
     explicit Lock(
         const Worker::Isolate& isolate, Worker::LockType lockType, jsg::V8StackScope& stackScope)
         : impl(*isolate.impl),
@@ -627,7 +627,7 @@ struct Worker::Isolate::Impl {
     // believes it has exclusive access.
     bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
 
-  private:
+   private:
     const Impl& impl;
     IsolateObserver::LockRecord metrics;
     ThreadProgressCounter progressCounter;
@@ -638,7 +638,7 @@ struct Worker::Isolate::Impl {
 
     ConsoleMode consoleMode;
 
-  public:
+   public:
     kj::Own<jsg::Lock> lock;
   };
 
@@ -684,7 +684,7 @@ struct Worker::Isolate::Impl {
 namespace {
 
 class CpuProfilerDisposer final: public kj::Disposer {
-public:
+ public:
   virtual void disposeImpl(void* pointer) const override {
     reinterpret_cast<v8::CpuProfiler*>(pointer)->Dispose();
   }
@@ -2389,7 +2389,7 @@ kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
 // but we don't want to keep buffering extremely large ones, so just discard buffered data
 // upon hitting a limit and don't return any body to the devtools frontend afterwards.
 class Worker::Isolate::LimitedBodyWrapper: public kj::OutputStream {
-public:
+ public:
   LimitedBodyWrapper(size_t limit = 1 * 1024 * 1024): limit(limit) {
     if (limit > 0) {
       inner.emplace();
@@ -2425,7 +2425,7 @@ public:
     }
   }
 
-private:
+ private:
   size_t size = 0;
   size_t limit = 0;
   kj::Maybe<kj::VectorOutputStream> inner;
@@ -2438,7 +2438,7 @@ struct MessageQueue {
 };
 
 class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspector::Channel {
-public:
+ public:
   InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam,
       kj::Own<const kj::Executor> isolateThreadExecutor,
       kj::WebSocket& webSocket)
@@ -2683,13 +2683,13 @@ public:
   // debugger statement.
   bool dispatchOneMessageDuringPause();
 
-private:
+ private:
   // Class that manages the I/O for devtools connections. I/O is performed on the
   // thread associated with the InspectorService (the thread that calls attachInspector).
   // Most of the public API is intended for code running on the isolate thread, such as
   // the InspectorChannelImpl and the InspectorClient.
   class WebSocketIoHandler final {
-  public:
+   public:
     WebSocketIoHandler(kj::Own<const kj::Executor> isolateThreadExecutor, kj::WebSocket& webSocket)
         : isolateThreadExecutor(kj::mv(isolateThreadExecutor)),
           webSocket(webSocket) {
@@ -2762,7 +2762,7 @@ private:
       outgoingQueueNotifier->notify();
     }
 
-  private:
+   private:
     static kj::Maybe<kj::String> pollMessage(MessageQueue& messageQueue) {
       if (messageQueue.head < messageQueue.messages.size()) {
         kj::String message = kj::mv(messageQueue.messages[messageQueue.head++]);
@@ -3173,7 +3173,7 @@ struct Worker::Actor::Impl {
       classInstance;
 
   class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks, public ActorCache::Hooks {
-  public:
+   public:
     HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
         : loopback(kj::mv(loopback)),
           timerChannel(timerChannel),
@@ -3230,7 +3230,7 @@ struct Worker::Actor::Impl {
       metrics.storageWriteCompleted(latency);
     }
 
-  private:
+   private:
     kj::Own<Loopback> loopback;  // only for updateAlarmInMemory()
     TimerChannel& timerChannel;  // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
@@ -3824,7 +3824,7 @@ double getWallTimeForProcessSandboxOnly() {
 }  // namespace
 
 class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream {
-public:
+ public:
   ResponseStreamWrapper(kj::Own<const Isolate> isolate,
       kj::String requestId,
       kj::Own<kj::AsyncOutputStream> inner,
@@ -3934,7 +3934,7 @@ public:
     return inner->whenWriteDisconnected();
   }
 
-private:
+ private:
   using InspectorLock = InspectorChannelImpl::InspectorLock;
 
   kj::Own<const Isolate> constIsolate;
@@ -3947,7 +3947,7 @@ private:
 };
 
 class Worker::Isolate::SubrequestClient final: public WorkerInterface {
-public:
+ public:
   explicit SubrequestClient(kj::Own<const Isolate> isolate,
       kj::Own<WorkerInterface> inner,
       kj::HttpHeaderId contentEncodingHeaderId,
@@ -3972,7 +3972,7 @@ public:
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
-private:
+ private:
   kj::Own<const Isolate> constIsolate;
   kj::Own<WorkerInterface> inner;
   kj::HttpHeaderId contentEncodingHeaderId;
@@ -4137,7 +4137,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
   typedef decltype(signalResponse) SignalResponse;
 
   class ResponseWrapper final: public kj::HttpService::Response {
-  public:
+   public:
     ResponseWrapper(
         kj::HttpService::Response& inner, kj::String requestId, SignalResponse signalResponse)
         : inner(inner),
@@ -4160,7 +4160,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
       return kj::mv(webSocket);
     }
 
-  private:
+   private:
     kj::HttpService::Response& inner;
     kj::String requestId;
     SignalResponse signalResponse;

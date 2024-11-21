@@ -147,7 +147,7 @@ class QueueImpl;
 // Provides the underlying implementation shared by ByteQueue and ValueQueue.
 template <typename Self>
 class QueueImpl final {
-public:
+ public:
   using ConsumerImpl = ConsumerImpl<Self>;
   using Entry = typename Self::Entry;
   using State = typename Self::State;
@@ -278,7 +278,7 @@ public:
   inline size_t jsgGetMemorySelfSize() const;
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   struct Closed {};
   using Errored = jsg::Value;
 
@@ -310,7 +310,7 @@ private:
 // Provides the underlying implementation shared by ByteQueue::Consumer and ValueQueue::Consumer
 template <typename Self>
 class ConsumerImpl final {
-public:
+ public:
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
     virtual void onConsumerError(jsg::Lock& js, jsg::Value reason) = 0;
@@ -537,7 +537,7 @@ public:
   inline size_t jsgGetMemorySelfSize() const;
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   // A sentinel used in the buffer to signal that close() has been called.
   struct Close {};
 
@@ -632,7 +632,7 @@ private:
 // Value queue
 
 class ValueQueue final {
-public:
+ public:
   using ConsumerImpl = ConsumerImpl<ValueQueue>;
   using QueueImpl = QueueImpl<ValueQueue>;
 
@@ -655,7 +655,7 @@ public:
   // A value queue entry consists of an arbitrary JavaScript value and a size that is
   // calculated by the size algorithm function provided in the stream constructor.
   class Entry {
-  public:
+   public:
     explicit Entry(jsg::Value value, size_t size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
@@ -671,7 +671,7 @@ public:
       tracker.trackField("value", value);
     }
 
-  private:
+   private:
     jsg::Value value;
     size_t size;
   };
@@ -686,7 +686,7 @@ public:
   };
 
   class Consumer final {
-  public:
+   public:
     Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(Consumer&&) = delete;
@@ -722,7 +722,7 @@ public:
     inline size_t jsgGetMemorySelfSize() const;
     inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-  private:
+   private:
     ConsumerImpl impl;
 
     friend class ValueQueue;
@@ -754,7 +754,7 @@ public:
   inline size_t jsgGetMemorySelfSize() const;
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   QueueImpl impl;
 
   static void handlePush(
@@ -774,7 +774,7 @@ private:
 // Byte queue
 
 class ByteQueue final {
-public:
+ public:
   using ConsumerImpl = ConsumerImpl<ByteQueue>;
   using QueueImpl = QueueImpl<ByteQueue>;
 
@@ -822,7 +822,7 @@ public:
   // the BYOB read request. Once either of those are called, or once invalidate() is called,
   // the ByobRequest is no longer usable and should be discarded.
   class ByobRequest final {
-  public:
+   public:
     ByobRequest(ReadRequest& request, ConsumerImpl& consumer, QueueImpl& queue)
         : request(request),
           consumer(consumer),
@@ -856,7 +856,7 @@ public:
 
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
-  private:
+   private:
     kj::Maybe<ReadRequest&> request;
     ConsumerImpl& consumer;
     QueueImpl& queue;
@@ -875,7 +875,7 @@ public:
   // A byte queue entry consists of a jsg::BufferSource containing a non-zero-length
   // sequence of bytes. The size is determined by the number of bytes in the entry.
   class Entry {
-  public:
+   public:
     explicit Entry(jsg::BufferSource store);
 
     kj::ArrayPtr<kj::byte> toArrayPtr();
@@ -890,7 +890,7 @@ public:
       tracker.trackField("store", store);
     }
 
-  private:
+   private:
     jsg::BufferSource store;
   };
 
@@ -906,7 +906,7 @@ public:
   };
 
   class Consumer {
-  public:
+   public:
     Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(Consumer&&) = delete;
@@ -941,7 +941,7 @@ public:
     inline size_t jsgGetMemorySelfSize() const;
     inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-  private:
+   private:
     ConsumerImpl impl;
   };
 
@@ -981,7 +981,7 @@ public:
   inline size_t jsgGetMemorySelfSize() const;
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   QueueImpl impl;
 
   static void handlePush(

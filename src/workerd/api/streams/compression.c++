@@ -67,7 +67,7 @@ void CompressionAllocator::FreeForZlib(void* opaque, void* pointer) {
 namespace {
 
 class Context {
-public:
+ public:
   enum class Mode {
     COMPRESS,
     DECOMPRESS,
@@ -160,10 +160,10 @@ public:
     };
   }
 
-protected:
+ protected:
   CompressionAllocator allocator;
 
-private:
+ private:
   static int getWindowBits(kj::StringPtr format) {
     // We use a windowBits value of 15 combined with the magic value
     // for the compression format type. For gzip, the magic value is
@@ -195,7 +195,7 @@ private:
 // excessive copying when reading a larger amount of buffered data in small chunks. valid_size_ is
 // used to track the amount of data that has not been read back yet.
 class LazyBuffer {
-public:
+ public:
   LazyBuffer(): valid_size_(0) {}
 
   // Return a chunk of data and mark it as invalid. The returned chunk remains valid until data is
@@ -240,7 +240,7 @@ public:
     return valid_size_ == 0;
   }
 
-private:
+ private:
   std::vector<kj::byte> output;
   size_t valid_size_;
 };
@@ -250,7 +250,7 @@ template <Context::Mode mode>
 class CompressionStreamImpl: public kj::Refcounted,
                              public ReadableStreamSource,
                              public WritableStreamSink {
-public:
+ public:
   explicit CompressionStreamImpl(kj::String format, Context::ContextFlags flags)
       : context(mode, format, flags) {}
 
@@ -326,7 +326,7 @@ public:
     cancelInternal(kj::mv(reason));
   }
 
-private:
+ private:
   struct PendingRead {
     kj::ArrayPtr<kj::byte> buffer;
     size_t minBytes = 1;

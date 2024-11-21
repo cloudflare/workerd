@@ -230,7 +230,7 @@ jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
 }
 
 class Blob::BlobInputStream final: public ReadableStreamSource {
-public:
+ public:
   BlobInputStream(jsg::Ref<Blob> blob): unread(blob->data), blob(kj::mv(blob)) {}
 
   // Attempt to read a maximum of maxBytes from the remaining unread content of the blob
@@ -277,7 +277,7 @@ public:
     co_return;
   }
 
-private:
+ private:
   kj::ArrayPtr<const byte> unread;
   jsg::Ref<Blob> blob;
 };

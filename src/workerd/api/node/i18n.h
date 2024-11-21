@@ -42,7 +42,7 @@ constexpr bool canBeTranscoded(Encoding encoding) noexcept {
 }
 
 class Converter final {
-public:
+ public:
   explicit Converter(Encoding encoding, kj::StringPtr substitude = ""_kj);
   KJ_DISALLOW_COPY_AND_MOVE(Converter);
 
@@ -52,7 +52,7 @@ public:
   void reset();
   void setSubstituteChars(kj::StringPtr sub);
 
-private:
+ private:
   kj::Own<UConverter> conv_;
 };
 

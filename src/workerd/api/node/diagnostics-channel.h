@@ -9,7 +9,7 @@
 namespace workerd::api::node {
 
 class Channel: public jsg::Object {
-public:
+ public:
   using MessageCallback = jsg::Function<void(jsg::Value, jsg::Name)>;
   using TransformCallback = jsg::Function<jsg::Value(jsg::Value)>;
 
@@ -45,7 +45,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   struct StoreEntry {
     kj::Own<jsg::AsyncContextFrame::StorageKey> key;
     TransformCallback transform;
@@ -76,7 +76,7 @@ private:
 };
 
 class DiagnosticsChannelModule: public jsg::Object {
-public:
+ public:
   DiagnosticsChannelModule() = default;
   DiagnosticsChannelModule(jsg::Lock&, const jsg::Url&) {}
 
@@ -99,7 +99,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   kj::HashMap<kj::String, jsg::Ref<Channel>> channels;
 
   void visitForGc(jsg::GcVisitor& visitor);

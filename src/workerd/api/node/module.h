@@ -8,7 +8,7 @@
 namespace workerd::api::node {
 
 class ModuleUtil final: public jsg::Object {
-public:
+ public:
   ModuleUtil() = default;
   ModuleUtil(jsg::Lock&, const jsg::Url&) {}
 

@@ -87,7 +87,7 @@ kj::String operator"" _blockquote(const char* str, size_t n) {
 }
 
 class TestStream {
-public:
+ public:
   TestStream(kj::WaitScope& ws, kj::Own<kj::AsyncIoStream> stream)
       : ws(ws),
         stream(kj::mv(stream)) {}
@@ -202,7 +202,7 @@ public:
         {});
   }
 
-private:
+ private:
   kj::WaitScope& ws;
   kj::Own<kj::AsyncIoStream> stream;
 
@@ -308,7 +308,7 @@ private:
 };
 
 class TestServer final: private kj::Filesystem, private kj::EntropySource, private kj::Clock {
-public:
+ public:
   TestServer(kj::StringPtr configText, kj::SourceLocation loc = {})
       : ws(loop),
         config(parseConfig(configText, loc)),
@@ -425,7 +425,7 @@ public:
 
   kj::Date fakeDate;
 
-private:
+ private:
   kj::UnwindDetector unwindDetector;
 
   // ---------------------------------------------------------------------------
@@ -476,7 +476,7 @@ private:
   }
 
   class MockAddress final: public kj::NetworkAddress {
-  public:
+   public:
     MockAddress(TestServer& test, kj::StringPtr peerFilter, kj::String address)
         : test(test),
           peerFilter(peerFilter),
@@ -510,14 +510,14 @@ private:
       KJ_UNIMPLEMENTED("unused");
     }
 
-  private:
+   private:
     TestServer& test;
     kj::StringPtr peerFilter;
     kj::String address;
   };
 
   class MockNetwork final: public kj::Network {
-  public:
+   public:
     MockNetwork(TestServer& test,
         kj::ArrayPtr<const kj::StringPtr> allow,
         kj::ArrayPtr<const kj::StringPtr> deny)
@@ -537,7 +537,7 @@ private:
       return kj::heap<MockNetwork>(test, allow, deny);
     }
 
-  private:
+   private:
     TestServer& test;
     kj::String filter;
   };

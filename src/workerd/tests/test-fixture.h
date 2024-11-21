@@ -88,7 +88,7 @@ struct TestFixture {
   // Performs HTTP request on the default module handler, and waits for full response.
   Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
 
-private:
+ private:
   kj::Maybe<kj::WaitScope&> waitScope;
   capnp::MallocMessageBuilder configArena;
   workerd::server::config::Worker::Reader config;

@@ -25,7 +25,7 @@ template <typename T>
 struct DeferredProxy;
 
 class MessageEvent: public Event {
-public:
+ public:
   MessageEvent(jsg::Lock& js, const jsg::JsValue& data)
       : Event("message"),
         data(jsg::JsRef(js, data)) {}
@@ -90,7 +90,7 @@ public:
     tracker.trackField("data", data);
   }
 
-private:
+ private:
   jsg::JsRef<jsg::JsValue> data;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -99,7 +99,7 @@ private:
 };
 
 class CloseEvent: public Event {
-public:
+ public:
   CloseEvent(uint code, kj::String reason, bool clean)
       : Event("close"),
         code(code),
@@ -150,7 +150,7 @@ public:
     tracker.trackField("reason", reason);
   }
 
-private:
+ private:
   int code;
   kj::String reason;
   bool clean;
@@ -161,7 +161,7 @@ private:
 class WebSocket;
 
 class WebSocketPair: public jsg::Object {
-private:
+ private:
   struct IteratorState final {
     jsg::Ref<WebSocketPair> pair;
     size_t index = 0;
@@ -175,7 +175,7 @@ private:
     }
   };
 
-public:
+ public:
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
       : sockets{kj::mv(first), kj::mv(second)} {}
 
@@ -224,7 +224,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   jsg::Ref<WebSocket> sockets[2];
 
   static kj::Maybe<jsg::Ref<WebSocket>> iteratorNext(jsg::Lock& js, IteratorState& state) {
@@ -241,12 +241,12 @@ private:
 };
 
 class WebSocket: public EventTarget {
-private:
+ private:
   // Forward declarations.
   struct PackedWebSocket;
   struct Native;
 
-public:
+ public:
   // WebSocket ready states.
   static constexpr int READY_STATE_CONNECTING = 0;
   static constexpr int READY_STATE_OPEN = 1;
@@ -459,7 +459,7 @@ public:
     return weakRef->addRef();
   }
 
-private:
+ private:
   kj::Own<WeakRef<WebSocket>> weakRef;
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
@@ -529,7 +529,7 @@ private:
 
     // A simple wrapper to make it easier to access the underlying kj::WebSocket.
     class WrappedWebSocket {
-    public:
+     public:
       explicit WrappedWebSocket(Hibernatable ws);
       explicit WrappedWebSocket(kj::Own<kj::WebSocket> ws);
 
@@ -551,7 +551,7 @@ private:
       bool isAwaitingRelease();
       bool isAwaitingError();
 
-    private:
+     private:
       kj::OneOf<kj::Own<kj::WebSocket>, Hibernatable> inner;
     };
 

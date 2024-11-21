@@ -518,7 +518,7 @@ namespace {
 // HACK: We need as async pipe, like kj::newOneWayPipe(), except supporting explicit end(). So we
 //   wrap the two ends of the pipe in special adapters that track whether end() was called.
 class ExplicitEndOutputPipeAdapter final: public capnp::ExplicitEndOutputStream {
-public:
+ public:
   ExplicitEndOutputPipeAdapter(
       kj::Own<kj::AsyncOutputStream> inner, kj::Own<kj::RefcountedWrapper<bool>> ended)
       : inner(kj::mv(inner)),
@@ -547,13 +547,13 @@ public:
     return kj::READY_NOW;
   }
 
-private:
+ private:
   kj::Maybe<kj::Own<kj::AsyncOutputStream>> inner;
   kj::Own<kj::RefcountedWrapper<bool>> ended;
 };
 
 class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
-public:
+ public:
   ExplicitEndInputPipeAdapter(kj::Own<kj::AsyncInputStream> inner,
       kj::Own<kj::RefcountedWrapper<bool>> ended,
       kj::Maybe<uint64_t> expectedLength)
@@ -592,7 +592,7 @@ public:
     return inner->pumpTo(output, amount);
   }
 
-private:
+ private:
   kj::Own<kj::AsyncInputStream> inner;
   kj::Own<kj::RefcountedWrapper<bool>> ended;
   kj::Maybe<uint64_t> expectedLength;
@@ -605,7 +605,7 @@ private:
 // TODO(someday): Devise a better way for RPC streams to extend the lifetime of the RPC session
 //   beyond the destruction of the IoContext, if it is being used for deferred proxying.
 class NoDeferredProxyReadableStream final: public ReadableStreamSource {
-public:
+ public:
   NoDeferredProxyReadableStream(kj::Own<ReadableStreamSource> inner, IoContext& ioctx)
       : inner(kj::mv(inner)),
         ioctx(ioctx) {}
@@ -643,7 +643,7 @@ public:
     });
   }
 
-private:
+ private:
   kj::Own<ReadableStreamSource> inner;
   IoContext& ioctx;
 };

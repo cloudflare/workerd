@@ -14,7 +14,7 @@
 namespace workerd::api::gpu {
 
 class GPUTexture: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Texture&() const {
     return texture_;
@@ -32,7 +32,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(usage, getUsage);
   }
 
-private:
+ private:
   wgpu::Texture texture_;
 
   jsg::Ref<GPUTextureView> createView(jsg::Optional<GPUTextureViewDescriptor> descriptor);

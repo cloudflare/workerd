@@ -495,7 +495,7 @@ bool Rsa::isRSAPrivateKey(kj::ArrayPtr<const kj::byte> keyData) {
 
 namespace {
 class RsaBase: public AsymmetricKeyCryptoKeyImpl {
-public:
+ public:
   explicit RsaBase(
       AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
@@ -512,10 +512,10 @@ public:
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
-protected:
+ protected:
   CryptoKey::RsaKeyAlgorithm keyAlgorithm;
 
-private:
+ private:
   SubtleCrypto::JsonWebKey exportJwk() const override final {
     auto rsa = JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(getEvpPkey()), DOMDataError,
         "No RSA data backing key", tryDescribeOpensslErrors());
@@ -535,7 +535,7 @@ private:
 };
 
 class RsassaPkcs1V15Key final: public RsaBase {
-public:
+ public:
   explicit RsassaPkcs1V15Key(
       AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -554,7 +554,7 @@ public:
     return KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
   }
 
-private:
+ private:
   kj::String jwkHashAlgorithmName() const override {
     const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
     JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,
@@ -564,7 +564,7 @@ private:
 };
 
 class RsaPssKey final: public RsaBase {
-public:
+ public:
   explicit RsaPssKey(
       AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -592,7 +592,7 @@ public:
     OSSLCALL(EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, salt));
   }
 
-private:
+ private:
   kj::String jwkHashAlgorithmName() const override {
     const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
     JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,
@@ -605,7 +605,7 @@ class RsaOaepKey final: public RsaBase {
   using InitFunction = decltype(EVP_PKEY_encrypt_init);
   using EncryptDecryptFunction = decltype(EVP_PKEY_encrypt);
 
-public:
+ public:
   explicit RsaOaepKey(
       AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -644,7 +644,7 @@ public:
         js, kj::mv(algorithm), cipherText, EVP_PKEY_decrypt_init, EVP_PKEY_decrypt);
   }
 
-private:
+ private:
   jsg::BufferSource commonEncryptDecrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data,
@@ -671,7 +671,7 @@ private:
 };
 
 class RsaRawKey final: public RsaBase {
-public:
+ public:
   explicit RsaRawKey(
       AsymmetricKeyData keyData, CryptoKey::RsaKeyAlgorithm keyAlgorithm, bool extractable)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), extractable) {}
@@ -704,7 +704,7 @@ public:
     KJ_UNIMPLEMENTED("this should not be called since we overrode sign() and verify()");
   }
 
-private:
+ private:
   kj::String jwkHashAlgorithmName() const override {
     const auto& hashName = KJ_REQUIRE_NONNULL(keyAlgorithm.hash).name;
     JSG_REQUIRE(hashName.startsWith("SHA"), DOMNotSupportedError,

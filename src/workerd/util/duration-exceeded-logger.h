@@ -16,7 +16,7 @@ namespace workerd::util {
 // thereby timing everything after the initialization of the timer, until the end of the scope where it was
 // instantiated.
 class DurationExceededLogger {
-public:
+ public:
   DurationExceededLogger(
       const kj::MonotonicClock& clock, kj::Duration warningDuration, kj::StringPtr logMessage)
       : warningDuration(warningDuration),
@@ -33,7 +33,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::Duration warningDuration;
   kj::StringPtr logMessage;
   kj::TimePoint start;

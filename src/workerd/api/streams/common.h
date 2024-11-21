@@ -189,7 +189,7 @@ struct Transformer {
 // a kj stream, you will implement the WritableStreamSink API.
 
 class WritableStreamSink {
-public:
+ public:
   virtual kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT = 0;
   virtual kj::Promise<void> write(
       kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT = 0;
@@ -215,7 +215,7 @@ public:
 };
 
 class ReadableStreamSource {
-public:
+ public:
   virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
 
   // The ReadableStreamSource version of pumpTo() has no `amount` parameter, since the Streams spec
@@ -320,13 +320,13 @@ struct Erroring {
 // standard dictates that streams can be canceled/aborted/errored using any arbitrary JavaScript
 // value, not just Errors.
 class ReadableStreamController {
-public:
+ public:
   // The ReadableStreamController::Reader interface is a base for all ReadableStream reader
   // implementations and is used solely as a means of attaching a Reader implementation to
   // the internal state of the controller. See the ReadableStream::*Reader classes for the
   // full Reader API.
   class Reader {
-  public:
+   public:
     // True if the reader is a BYOB reader.
     virtual bool isByteOriented() const = 0;
 
@@ -373,11 +373,11 @@ public:
   // the TeeController to interface with the shared underlying source, and the
   // TeeController ensures that each Branch receives the data that is read.
   class TeeController {
-  public:
+   public:
     // Represents an individual ReadableStreamController tee branch registered with
     // a TeeController. One or more branches is registered with the TeeController.
     class Branch {
-    public:
+     public:
       virtual ~Branch() noexcept(false) {}
 
       virtual void doClose(jsg::Lock& js) = 0;
@@ -386,7 +386,7 @@ public:
     };
 
     class BranchPtr {
-    public:
+     public:
       inline BranchPtr(Branch* branch): inner(branch) {
         KJ_ASSERT(inner != nullptr);
       }
@@ -414,7 +414,7 @@ public:
         return inner == other.inner;
       }
 
-    private:
+     private:
       Branch* inner;
     };
 
@@ -437,7 +437,7 @@ public:
   // and WritableStreamController so that the pipeTo/pipeThrough/tryPipeTo can work
   // without caring about what kind of controller it is working with.
   class PipeController {
-  public:
+   public:
     virtual ~PipeController() noexcept(false) {}
     virtual bool isClosed() = 0;
     virtual kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) = 0;
@@ -580,13 +580,13 @@ kj::Own<ReadableStreamController> newReadableStreamInternalController(
 // standard dictates that streams can be canceled/aborted/errored using any arbitrary JavaScript
 // value, not just Errors.
 class WritableStreamController {
-public:
+ public:
   // The WritableStreamController::Writer interface is a base for all WritableStream writer
   // implementations and is used solely as a means of attaching a Writer implementation to
   // the internal state of the controller. See the WritableStream::*Writer classes for the
   // full Writer API.
   class Writer {
-  public:
+   public:
     // When a Writer is locked to a controller, the controller will attach itself to the writer,
     // passing along the closed and ready promises that will be used to communicate state to the
     // user code.
@@ -737,7 +737,7 @@ struct Locked {};
 // When a reader is locked to a ReadableStream, a ReaderLock instance
 // is used internally to represent the locked state in the ReadableStreamController.
 class ReaderLocked {
-public:
+ public:
   ReaderLocked(ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
@@ -780,7 +780,7 @@ public:
     tracker.trackFieldWithSize("IoOwn<kj::Canceler>", sizeof(IoOwn<kj::Canceler>));
   }
 
-private:
+ private:
   kj::Maybe<ReadableStreamController::Reader&> reader;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<IoOwn<kj::Canceler>> canceler;
@@ -789,7 +789,7 @@ private:
 // When a writer is locked to a WritableStream, a WriterLock instance
 // is used internally to represent the locked state in the WritableStreamController.
 class WriterLocked {
-public:
+ public:
   WriterLocked(WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
@@ -838,7 +838,7 @@ public:
     tracker.trackField("readyFulfiller", readyFulfiller);
   }
 
-private:
+ private:
   kj::Maybe<WritableStreamController::Writer&> writer;
   kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
   kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;

@@ -29,10 +29,10 @@ namespace {
 // functions.
 template <typename T, void (*lolhtmlFree)(T*)>
 class LolHtmlDisposer: public kj::Disposer {
-public:
+ public:
   static const LolHtmlDisposer INSTANCE;
 
-protected:
+ protected:
   void disposeImpl(void* pointer) const override {
     lolhtmlFree(reinterpret_cast<T*>(pointer));
   }
@@ -55,7 +55,7 @@ const LolHtmlDisposer<T, lolhtmlFree> LolHtmlDisposer<T, lolhtmlFree>::INSTANCE;
 //
 // Use `kj::str(LolString.asChars())` to allocate your own copy of a LolString.
 class LolString {
-public:
+ public:
   explicit LolString(lol_html_str_t s): chars(s.data, s.len) {}
   ~LolString() noexcept(false) {
     lol_html_str_free({chars.begin(), chars.size()});
@@ -83,7 +83,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::ArrayPtr<const char> chars;
 };
 
@@ -145,7 +145,7 @@ decltype(auto) checkToken(kj::Maybe<T>& impl) {
 // HTMLRewriter::TokenScope
 
 class HTMLRewriter::TokenScope {
-public:
+ public:
   template <typename T>
   explicit TokenScope(jsg::Ref<T>& value): contentToken(value.addRef()) {}
   ~TokenScope() noexcept(false) {
@@ -158,7 +158,7 @@ public:
   }
   KJ_DISALLOW_COPY(TokenScope);
 
-private:
+ private:
   kj::Maybe<jsg::Ref<HTMLRewriter::Token>> contentToken;
 };
 
@@ -218,7 +218,7 @@ using UnregisteredElementOrDocumentHandlers =
 
 // Wrapper around an actual rewriter (streaming parser).
 class Rewriter final: public WritableStreamSink {
-public:
+ public:
   explicit Rewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
       kj::ArrayPtr<const char> encoding,
@@ -234,7 +234,7 @@ public:
   // Implementation for `Element::onEndTag` to avoid exposing private details of Rewriter.
   void onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback);
 
-private:
+ private:
   // Wait for the write promise (if any) produced by our `output()` callback, then, if there is a
   // stored exception, abort the wrapped WritableStreamSink with it, then return the exception.
   // Otherwise, just return.

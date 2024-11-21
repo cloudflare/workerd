@@ -20,7 +20,7 @@ class WrappableFunction;
 
 template <typename Ret, typename... Args>
 class WrappableFunction<Ret(Args...)>: public Wrappable {
-public:
+ public:
   WrappableFunction(bool needsGcTracing): needsGcTracing(needsGcTracing) {}
   virtual Ret operator()(Lock& js, Args&&... args) = 0;
 
@@ -46,7 +46,7 @@ class WrappableFunctionImpl;
 
 template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl, false>: public WrappableFunction<Ret(Args...)> {
-public:
+ public:
   WrappableFunctionImpl(Impl&& func)
       : WrappableFunction<Ret(Args...)>(false),
         func(kj::fwd<Impl>(func)) {}
@@ -55,13 +55,13 @@ public:
     return func(js, kj::fwd<Args>(args)...);
   }
 
-private:
+ private:
   Impl func;
 };
 
 template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl, true>: public WrappableFunction<Ret(Args...)> {
-public:
+ public:
   WrappableFunctionImpl(Impl&& func)
       : WrappableFunction<Ret(Args...)>(true),
         func(kj::fwd<Impl>(func)) {}
@@ -73,7 +73,7 @@ public:
     visitor.visit(func);
   }
 
-private:
+ private:
   Impl func;
 };
 
@@ -137,7 +137,7 @@ template <typename Ret, typename... Args>
 class Function<Ret(Args...)> {
   // (Docs are in jsg.h, the public header.)
 
-public:
+ public:
   using NativeFunction = jsg::WrappableFunction<Ret(Args...)>;
 
   // When holding a JavaScript function, `Wrapper` is a C++ function that will handle converting
@@ -268,7 +268,7 @@ public:
     }
   }
 
-private:
+ private:
   Function(Ref<NativeFunction>&& func): impl(kj::mv(func)) {}
 
   struct JsImpl {
@@ -288,7 +288,7 @@ private:
 
 template <typename T>
 class Constructor: public jsg::Function<T> {
-public:
+ public:
   using jsg::Function<T>::Function;
 };
 
@@ -311,7 +311,7 @@ using MethodSignature = typename MethodSignature_<Method>::Type;
 template <typename TypeWrapper>
 class FunctionWrapper {
 
-public:
+ public:
   template <typename Func, typename = decltype(&kj::Decay<Func>::operator())>
   static constexpr const char* getName(Func*) {
     return "function";
@@ -486,7 +486,7 @@ public:
 
 template <typename Func>
 class VisitableLambda {
-public:
+ public:
   VisitableLambda(Func&& func): func(kj::fwd<Func>(func)) {}
 
   template <typename... Params>
@@ -498,7 +498,7 @@ public:
     func(visitor);
   }
 
-private:
+ private:
   Func func;
 };
 

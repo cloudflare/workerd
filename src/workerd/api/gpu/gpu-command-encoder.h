@@ -40,7 +40,7 @@ struct GPUImageCopyBuffer {
 };
 
 class GPUCommandEncoder: public jsg::Object {
-public:
+ public:
   explicit GPUCommandEncoder(wgpu::CommandEncoder e, kj::String label)
       : encoder_(kj::mv(e)),
         label_(kj::mv(label)) {};
@@ -60,7 +60,7 @@ public:
     tracker.trackField("label", label_);
   }
 
-private:
+ private:
   wgpu::CommandEncoder encoder_;
   kj::String label_;
   kj::StringPtr getLabel() {

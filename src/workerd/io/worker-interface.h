@@ -17,7 +17,7 @@ class IoContext_IncomingRequest;
 // An interface representing the services made available by a worker/pipeline to handle a
 // request.
 class WorkerInterface: public kj::HttpService {
-public:
+ public:
   // Constructs a WorkerInterface where any method called will throw the given exception.
   static kj::Own<WorkerInterface> fromException(kj::Exception&& e);
 
@@ -60,7 +60,7 @@ public:
   };
 
   class AlarmFulfiller {
-  public:
+   public:
     AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller);
     KJ_DISALLOW_COPY(AlarmFulfiller);
     AlarmFulfiller(AlarmFulfiller&&) = default;
@@ -70,7 +70,7 @@ public:
     void reject(const kj::Exception& e);
     void cancel();
 
-  private:
+   private:
     kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmResult>>> maybeFulfiller;
     kj::Maybe<kj::PromiseFulfiller<AlarmResult>&> getFulfiller();
   };
@@ -101,7 +101,7 @@ public:
   static constexpr auto ALARM_RETRY_MAX_TRIES = 6;
 
   class CustomEvent {
-  public:
+   public:
     struct Result {
       // Outcome for logging / metrics purposes.
       EventOutcome outcome;
@@ -143,7 +143,7 @@ public:
   [[nodiscard]] virtual kj::Promise<CustomEvent::Result> customEvent(
       kj::Own<CustomEvent> event) = 0;
 
-private:
+ private:
   kj::Maybe<kj::Own<kj::HttpService>> adapterService;
 };
 
@@ -153,7 +153,7 @@ kj::Own<WorkerInterface> newPromisedWorkerInterface(kj::Promise<kj::Own<WorkerIn
 
 template <typename Func>
 class LazyWorkerInterface final: public WorkerInterface {
-public:
+ public:
   LazyWorkerInterface(Func func): func(kj::mv(func)) {}
 
   void ensureResolve() {
@@ -235,7 +235,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::Maybe<Func> func;
   kj::Maybe<kj::ForkedPromise<void>> promise;
   kj::Maybe<kj::Own<WorkerInterface>> worker;
@@ -264,7 +264,7 @@ kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
 // is intended to be single-use, this class is also inherently single-use (i.e. only one event
 // can be delivered).
 class RpcWorkerInterface: public WorkerInterface {
-public:
+ public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
       rpc::EventDispatcher::Client dispatcher);
@@ -286,7 +286,7 @@ public:
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
-private:
+ private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
   rpc::EventDispatcher::Client dispatcher;

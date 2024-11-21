@@ -18,7 +18,7 @@ namespace workerd::jsg {
 class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {
-public:
+ public:
   CommonJsModuleObject(jsg::Lock& js): exports(js.v8Isolate, v8::Object::New(js.v8Isolate)) {}
 
   v8::Local<v8::Value> getExports(jsg::Lock& js) {
@@ -36,12 +36,12 @@ public:
     tracker.trackField("exports", exports);
   }
 
-private:
+ private:
   jsg::Value exports;
 };
 
 class CommonJsModuleContext: public jsg::Object {
-public:
+ public:
   CommonJsModuleContext(jsg::Lock& js, kj::Path path)
       : module(jsg::alloc<CommonJsModuleObject>(js)),
         path(kj::mv(path)),
@@ -73,7 +73,7 @@ public:
     tracker.trackFieldWithSize("path", path.size());
   }
 
-private:
+ private:
   kj::Path path;
   jsg::Value exports;
 };
@@ -91,7 +91,7 @@ private:
 // TODO(cleanup): There's a fair amount of duplicated code between the CommonJsModule
 // and NodeJsModule types... should be deduplicated.
 class NodeJsModuleObject: public jsg::Object {
-public:
+ public:
   NodeJsModuleObject(jsg::Lock& js, kj::String path);
 
   v8::Local<v8::Value> getExports(jsg::Lock& js);
@@ -119,7 +119,7 @@ public:
     tracker.trackField("path", path);
   }
 
-private:
+ private:
   jsg::Value exports;
   kj::String path;
 };
@@ -132,7 +132,7 @@ private:
 // (b) The common Node.js globals that we implement are exposed. For instance, `process`
 //     and `Buffer` will be found at the global scope.
 class NodeJsModuleContext: public jsg::Object {
-public:
+ public:
   NodeJsModuleContext(jsg::Lock& js, kj::Path path);
 
   v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
@@ -166,14 +166,14 @@ public:
     tracker.trackFieldWithSize("path", path.size());
   }
 
-private:
+ private:
   kj::Path path;
   jsg::Value exports;
 };
 
 // jsg::NonModuleScript wraps a v8::UnboundScript.
 class NonModuleScript {
-public:
+ public:
   NonModuleScript(jsg::Lock& js, v8::Local<v8::UnboundScript> script)
       : unboundScript(js.v8Isolate, script) {}
 
@@ -189,7 +189,7 @@ public:
   static jsg::NonModuleScript compile(
       kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
 
-private:
+ private:
   v8::Global<v8::UnboundScript> unboundScript;
 };
 
@@ -223,7 +223,7 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
 // The ModuleRegistry maintains the collection of modules known to a script that can be
 // required or imported.
 class ModuleRegistry {
-public:
+ public:
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
 
   ModuleRegistry() {}
@@ -435,7 +435,7 @@ kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallb
 
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
-public:
+ public:
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistryImpl);
 
   ModuleRegistryImpl(CompilationObserver& observer): observer(observer) {}
@@ -704,7 +704,7 @@ public:
     return observer;
   }
 
-private:
+ private:
   CompilationObserver& observer;
   kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
 

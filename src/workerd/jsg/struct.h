@@ -23,7 +23,7 @@ template <typename TypeWrapper,
 class FieldWrapper {
   static constexpr inline const char* exportedName = name + namePrefixStripLength;
 
-public:
+ public:
   using Type = T;
 
   explicit FieldWrapper(v8::Isolate* isolate)
@@ -58,7 +58,7 @@ public:
         context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
   }
 
-private:
+ private:
   v8::Global<v8::Name> nameHandle;
 };
 
@@ -77,7 +77,7 @@ class StructWrapper;
 // JSG_STRUCT block).
 template <typename Self, typename T, typename... FieldWrappers, size_t... indices>
 class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices...>> {
-public:
+ public:
   static const JsgKind JSG_KIND = JsgKind::STRUCT;
 
   static constexpr const std::type_info& getName(T*) {
@@ -153,7 +153,7 @@ public:
   void newContext() = delete;
   void getTemplate() = delete;
 
-private:
+ private:
   kj::Maybe<kj::Tuple<FieldWrappers...>> lazyFields;
 
   kj::Tuple<FieldWrappers...>& getFields(v8::Isolate* isolate) {

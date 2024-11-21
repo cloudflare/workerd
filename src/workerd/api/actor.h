@@ -26,7 +26,7 @@ namespace workerd::api {
 
 // A capability to an ephemeral Actor namespace.
 class ColoLocalActorNamespace: public jsg::Object {
-public:
+ public:
   ColoLocalActorNamespace(uint channel): channel(channel) {}
 
   jsg::Ref<Fetcher> get(kj::String actorId);
@@ -35,7 +35,7 @@ public:
     JSG_METHOD(get);
   }
 
-private:
+ private:
   uint channel;
 };
 
@@ -43,7 +43,7 @@ class DurableObjectNamespace;
 
 // DurableObjectId type seen by JavaScript.
 class DurableObjectId: public jsg::Object {
-public:
+ public:
   DurableObjectId(kj::Own<ActorIdFactory::ActorId> id): id(kj::mv(id)) {}
 
   const ActorIdFactory::ActorId& getInner() {
@@ -75,7 +75,7 @@ public:
     tracker.trackFieldWithSize("id", sizeof(ActorIdFactory::ActorId));
   }
 
-private:
+ private:
   kj::Own<ActorIdFactory::ActorId> id;
 
   friend class DurableObjectNamespace;
@@ -84,7 +84,7 @@ private:
 // Stub object used to send messages to a remote durable object.
 class DurableObject final: public Fetcher {
 
-public:
+ public:
   DurableObject(jsg::Ref<DurableObjectId> id,
       IoOwn<OutgoingFactory> outgoingFactory,
       RequiresHostAndProtocol requiresHost)
@@ -127,7 +127,7 @@ public:
     tracker.trackField("id", id);
   }
 
-private:
+ private:
   jsg::Ref<DurableObjectId> id;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -138,7 +138,7 @@ private:
 // Global durable object class binding type.
 class DurableObjectNamespace: public jsg::Object {
 
-public:
+ public:
   DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
       : channel(channel),
         idFactory(kj::mv(idFactory)) {}
@@ -219,7 +219,7 @@ public:
     }
   }
 
-private:
+ private:
   uint channel;
   kj::Own<ActorIdFactory> idFactory;
 

@@ -157,7 +157,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
   // serialize the response (headers + body) in the format needed to serve as the payload of
   // our cache PUT request.
   class ResponseSerializer final: public kj::HttpService::Response {
-  public:
+   public:
     struct Payload {
       // The serialized form of the response to be cached. This stream itself contains a full
       // HTTP response, with headers and body, representing the content of jsResponse to be written
@@ -175,7 +175,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       return KJ_ASSERT_NONNULL(kj::mv(payload));
     }
 
-  private:
+   private:
     kj::Own<kj::AsyncOutputStream> send(uint statusCode,
         kj::StringPtr statusText,
         const kj::HttpHeaders& headers,

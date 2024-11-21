@@ -66,10 +66,10 @@ namespace workerd::jsg {
 // AsyncContextFrame::StorageKey is used to define a storage cell within the storage
 // context.
 class AsyncContextFrame final: public Wrappable {
-public:
+ public:
   // An opaque key that identifies an async-local storage cell within the frame.
   class StorageKey: public kj::Refcounted {
-  public:
+   public:
     StorageKey(): hash(kj::hashCode(this)) {}
     KJ_DISALLOW_COPY_AND_MOVE(StorageKey);
 
@@ -99,7 +99,7 @@ public:
 
     JSG_MEMORY_INFO(StorageKey) {}
 
-  private:
+   private:
     uint hash;
     bool dead = false;
   };
@@ -208,7 +208,7 @@ public:
     tracker.trackField("storage", storage);
   }
 
-private:
+ private:
   struct StorageEntryCallbacks {
     StorageKey& keyForRow(StorageEntry& entry) const {
       return *entry.key;

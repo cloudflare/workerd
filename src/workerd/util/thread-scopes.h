@@ -24,7 +24,7 @@ namespace workerd {
 //
 // In particular this is used when loading Wasm modules, to properly enable Liftoff and Tier-up.
 class AllowV8BackgroundThreadsScope {
-public:
+ public:
   AllowV8BackgroundThreadsScope();
   ~AllowV8BackgroundThreadsScope() noexcept(false);
 
@@ -69,7 +69,7 @@ void setPredictableModeForTest();
 // changes in a uint64_t. Use this in places where your code cannot call Watchdog::checkIn() and
 // may block for longer than the watchdog timeout, but can still observe forward progress.
 class ThreadProgressCounter {
-public:
+ public:
   // When a ProgressCounter is instantiated, it saves the current value of `counter`. When
   // Watchdog::tryHandleSignal() is called with an active ProgressCounter on the thread, the
   // function compares this saved value with the (possibly updated) current value. If they differ,
@@ -92,7 +92,7 @@ public:
   // the counter is updated.
   static void acknowledgeProgress();
 
-private:
+ private:
   uint64_t savedValue;
   uint64_t& counter;
 
@@ -105,7 +105,7 @@ private:
 // Isolate locks can block for a relatively long time, so we especially try to avoid taking
 // them while any other locks are held.
 class WarnAboutIsolateLockScope {
-public:
+ public:
   WarnAboutIsolateLockScope();
   ~WarnAboutIsolateLockScope() noexcept(false);
   KJ_DISALLOW_COPY(WarnAboutIsolateLockScope);
@@ -114,7 +114,7 @@ public:
 
   static void maybeWarn();
 
-private:
+ private:
   bool released = false;
 };
 }  // namespace workerd

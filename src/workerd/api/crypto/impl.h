@@ -100,7 +100,7 @@ kj::StringPtr getAlgorithmName(const kj::OneOf<kj::String, T>& param) {
 }
 
 class CryptoKey::Impl {
-public:
+ public:
   // C++ API
 
   using ImportFunc = kj::Own<Impl>(jsg::Lock& js,
@@ -252,7 +252,7 @@ public:
     return false;
   }
 
-private:
+ private:
   const bool extractable;
   const CryptoKeyUsageSet usages;
 };
@@ -287,7 +287,7 @@ struct CryptoAlgorithm {
 };
 
 class SslArrayDisposer: public kj::ArrayDisposer {
-public:
+ public:
   static const SslArrayDisposer INSTANCE;
 
   void disposeImpl(void* firstElement,
@@ -299,10 +299,10 @@ public:
 
 template <typename T, void (*sslFree)(T*)>
 class SslDisposer: public kj::Disposer {
-public:
+ public:
   static const SslDisposer INSTANCE;
 
-protected:
+ protected:
   void disposeImpl(void* pointer) const override {
     sslFree(reinterpret_cast<T*>(pointer));
   }
@@ -386,7 +386,7 @@ static inline T integerCeilDivision(T a, T b) {
 // A wrapper for kj::Array<kj::byte> that will ensure the memory is overwritten
 // with zeroes when destroyed.
 class ZeroOnFree {
-public:
+ public:
   inline ZeroOnFree(kj::Array<kj::byte>&& inner): inner(kj::mv(inner)) {}
   ~ZeroOnFree() noexcept(false);
 
@@ -409,7 +409,7 @@ public:
     return inner.asPtr();
   }
 
-private:
+ private:
   kj::Array<kj::byte> inner;
 };
 

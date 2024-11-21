@@ -11,7 +11,7 @@ namespace workerd {
 
 template <typename Self>
 class PromiseWrapper {
-public:
+ public:
   template <typename T>
   static constexpr const char* getName(kj::Promise<T>*) {
     return "Promise";

@@ -40,6 +40,11 @@ IndentCaseLabels: true
 PointerAlignment: Left
 DerivePointerAlignment: true
 
+# Move public and private in by a half-indentation.  This makes
+# diffs and Github code reviews more readable by letting you
+# see which class the diff snippet is part of.
+AccessModifierOffset: -1
+
 # Really "Attach" but empty braces aren't split.
 BreakBeforeBraces: Custom
 BraceWrapping:

@@ -7,7 +7,7 @@
 namespace workerd::api {
 
 class ErrorEvent: public Event {
-public:
+ public:
   struct ErrorEventInit {
     jsg::Optional<kj::String> message;
     jsg::Optional<kj::String> filename;
@@ -42,7 +42,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   ErrorEventInit init;
 
   void visitForGc(jsg::GcVisitor& visitor);

@@ -61,7 +61,7 @@ static kj::Maybe<PemData> decodePem(kj::ArrayPtr<const char> text) {
   KJ_DEFER(BIO_free(bio));
 
   class OpenSslDisposer: public kj::ArrayDisposer {
-  public:
+   public:
     void disposeImpl(void* firstElement,
         size_t elementSize,
         size_t elementCount,
@@ -192,7 +192,7 @@ struct Server::GlobalContext {
 };
 
 class Server::Service {
-public:
+ public:
   // Cross-links this service with other services. Must be called once before `startRequest()`.
   virtual void link() {}
 
@@ -288,7 +288,7 @@ class Server::HttpRewriter {
   // TODO(beta): Do we want to automatically add `Date`, `Server` (to outgoing responses),
   //   `User-Agent` (to outgoing requests), etc.?
 
-public:
+ public:
   HttpRewriter(
       config::HttpOptions::Reader httpOptions, kj::HttpHeaderTable::Builder& headerTableBuilder)
       : style(httpOptions.getStyle()),
@@ -394,14 +394,14 @@ public:
     return capnpConnectHost;
   }
 
-private:
+ private:
   config::HttpOptions::Style style;
   kj::Maybe<kj::HttpHeaderId> forwardedProtoHeader;
   kj::Maybe<kj::HttpHeaderId> cfBlobHeader;
   kj::Maybe<kj::StringPtr> capnpConnectHost;
 
   class HeaderInjector {
-  public:
+   public:
     HeaderInjector(capnp::List<config::HttpOptions::Header>::Reader headers,
         kj::HttpHeaderTable::Builder& headerTableBuilder)
         : injectedHeaders(KJ_MAP(header, headers) {
@@ -427,7 +427,7 @@ private:
       }
     }
 
-  private:
+   private:
     struct InjectedHeader {
       kj::HttpHeaderId id;
       kj::Maybe<kj::String> value;
@@ -443,7 +443,7 @@ private:
 
 // Service used when the service's config is invalid.
 class Server::InvalidConfigService final: public Service {
-public:
+ public:
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     JSG_FAIL_REQUIRE(Error, "Service cannot handle requests because its config is invalid.");
   }
@@ -466,7 +466,7 @@ class PromisedNetworkAddress final: public kj::NetworkAddress {
   //   not do DNS lookup immediately, and therefore can return a NetworkAddress synchronously.
   //   In fact, this version should be designed to redo the DNS lookup periodically to see if it
   //   changed, which would be nice for workerd when the remote address may change over time.
-public:
+ public:
   PromisedNetworkAddress(kj::Promise<kj::Own<kj::NetworkAddress>> promise)
       : promise(promise.then([this](kj::Own<kj::NetworkAddress> result) { addr = kj::mv(result); })
                     .fork()) {}
@@ -500,13 +500,13 @@ public:
     KJ_UNIMPLEMENTED("PromisedNetworkAddress::toString() not implemented");
   }
 
-private:
+ private:
   kj::ForkedPromise<void> promise;
   kj::Maybe<kj::Own<kj::NetworkAddress>> addr;
 };
 
 class Server::ExternalTcpService final: public Service, private WorkerInterface {
-public:
+ public:
   ExternalTcpService(kj::Own<kj::NetworkAddress> addrParam): addr(kj::mv(addrParam)) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -517,7 +517,7 @@ public:
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
-private:
+ private:
   kj::Own<kj::NetworkAddress> addr;
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -571,7 +571,7 @@ private:
 
 // Service used when the service is configured as external HTTP service.
 class Server::ExternalHttpService final: public Service, private kj::TaskSet::ErrorHandler {
-public:
+ public:
   ExternalHttpService(kj::Own<kj::NetworkAddress> addrParam,
       kj::Own<HttpRewriter> rewriter,
       kj::HttpHeaderTable& headerTable,
@@ -600,7 +600,7 @@ public:
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
-private:
+ private:
   kj::Own<kj::NetworkAddress> addr;
 
   kj::Own<kj::HttpClient> inner;
@@ -659,7 +659,7 @@ private:
   }
 
   class WorkerInterfaceImpl final: public WorkerInterface, private kj::HttpService::Response {
-  public:
+   public:
     WorkerInterfaceImpl(ExternalHttpService& parent, IoChannelFactory::SubrequestMetadata metadata)
         : parent(parent),
           metadata(kj::mv(metadata)) {}
@@ -710,7 +710,7 @@ private:
           .attach(kj::mv(event));
     }
 
-  private:
+   private:
     ExternalHttpService& parent;
     IoChannelFactory::SubrequestMetadata metadata;
     kj::Maybe<kj::HttpService::Response&> wrappedResponse;
@@ -812,7 +812,7 @@ kj::Own<Server::Service> Server::makeExternalService(kj::StringPtr name,
 
 // Service used when the service is configured as network service.
 class Server::NetworkService final: public Service, private WorkerInterface {
-public:
+ public:
   NetworkService(kj::HttpHeaderTable& headerTable,
       kj::Timer& timer,
       kj::EntropySource& entropySource,
@@ -838,7 +838,7 @@ public:
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
-private:
+ private:
   kj::Own<kj::Network> network;
   kj::Maybe<kj::Own<kj::Network>> tlsNetwork;
   kj::Own<kj::HttpClient> inner;
@@ -904,7 +904,7 @@ kj::Own<Server::Service> Server::makeNetworkService(config::Network::Reader conf
 
 // Service used when the service is configured as disk directory service.
 class Server::DiskDirectoryService final: public Service, private WorkerInterface {
-public:
+ public:
   DiskDirectoryService(config::DiskDirectory::Reader conf,
       kj::Own<const kj::Directory> dir,
       kj::HttpHeaderTable::Builder& headerTableBuilder)
@@ -933,7 +933,7 @@ public:
     return handlerName == "fetch"_kj;
   }
 
-private:
+ private:
   kj::Maybe<const kj::Directory&> writable;
   kj::Own<const kj::ReadableDirectory> readable;
   kj::HttpHeaderTable& headerTable;
@@ -1213,7 +1213,7 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(kj::StringPtr name,
 // additional services that also have code. If using Chrome devtools to inspect a workerd,
 // instance all services are visible and can be debugged.
 class Server::InspectorServiceIsolateRegistrar final {
-public:
+ public:
   InspectorServiceIsolateRegistrar() {}
   ~InspectorServiceIsolateRegistrar() noexcept(true);
 
@@ -1221,7 +1221,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(InspectorServiceIsolateRegistrar);
 
-private:
+ private:
   void attach(const Server::InspectorService* anInspectorService) {
     *inspectorService.lockExclusive() = anInspectorService;
   }
@@ -1239,7 +1239,7 @@ private:
 // The InspectorService is created when workerd serve is called using the -i option
 // to define the inspector socket.
 class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
-public:
+ public:
   InspectorService(kj::Own<const kj::Executor> isolateThreadExecutor,
       kj::Timer& timer,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
@@ -1419,7 +1419,7 @@ public:
     isolates.insert(kj::str(name), isolate->getWeakRef());
   }
 
-private:
+ private:
   kj::Own<const kj::Executor> isolateThreadExecutor;
   kj::Timer& timer;
   kj::HttpHeaderTable& headerTable;
@@ -1448,7 +1448,7 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 // =======================================================================================
 namespace {
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
-public:
+ public:
   RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer): tracer(kj::mv(tracer)) {}
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
@@ -1555,7 +1555,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
   EventOutcome outcome = EventOutcome::OK;
@@ -1568,7 +1568,7 @@ class Server::WorkerService final: public Service,
                                    private IoChannelFactory,
                                    private TimerChannel,
                                    private LimitEnforcer {
-public:
+ public:
   class ActorNamespace;
 
   // I/O channels, delivered when link() is called.
@@ -1714,7 +1714,7 @@ public:
   }
 
   class ActorNamespace final {
-  public:
+   public:
     ActorNamespace(WorkerService& service,
         kj::StringPtr className,
         const ActorConfig& config,
@@ -1766,7 +1766,7 @@ public:
     // initiate the eviction of the Durable Object. If no requests arrive in the next 10 seconds,
     // the DO is evicted, otherwise we cancel the eviction task.
     class ActorContainer final: public RequestTracker::Hooks {
-    public:
+     public:
       ActorContainer(kj::StringPtr key, ActorNamespace& parent, kj::Timer& timer)
           : key(key),
             tracker(kj::refcounted<RequestTracker>(*this)),
@@ -1904,7 +1904,7 @@ public:
       // The actor is constructed after the ActorContainer so it starts off empty.
       kj::Maybe<kj::Own<Worker::Actor>> actor;
 
-    private:
+     private:
       kj::StringPtr key;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
@@ -1925,7 +1925,7 @@ public:
     // `ActorContainer::hasClients()` starts returning false. After 70 seconds, the cleanupLoop
     // will remove the `ActorContainer` from `actors`.
     class ActorContainerRef: public kj::Refcounted {
-    public:
+     public:
       ActorContainerRef(ActorContainer& container): container(container) {
         // Link this ref to the actual ActorContainer.
         container.containerRef = *this;
@@ -1941,7 +1941,7 @@ public:
         return kj::addRef(*this);
       }
 
-    private:
+     private:
       // This is a maybe because the ActorContainer could be destroyed before ActorContainerRef
       // if the actor is broken.
       kj::Maybe<ActorContainer&> container;
@@ -1952,7 +1952,7 @@ public:
       actors.clear();
     }
 
-  private:
+   private:
     WorkerService& service;
     kj::StringPtr className;
     const ActorConfig& config;
@@ -2016,7 +2016,7 @@ public:
     // Implements actor loopback, which is used by websocket hibernation to deliver events to the
     // actor from the websocket's read loop.
     class Loopback: public Worker::Actor::Loopback, public kj::Refcounted {
-    public:
+     public:
       Loopback(ActorNamespace& ns, kj::String id): ns(ns), id(kj::mv(id)) {}
 
       kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
@@ -2027,13 +2027,13 @@ public:
         return kj::addRef(*this);
       }
 
-    private:
+     private:
       ActorNamespace& ns;
       kj::String id;
     };
 
     class ActorSqliteHooks final: public ActorSqlite::Hooks {
-    public:
+     public:
       ActorSqliteHooks(AlarmScheduler& alarmScheduler, ActorKey actor)
           : alarmScheduler(alarmScheduler),
             actor(actor) {}
@@ -2047,7 +2047,7 @@ public:
         return kj::READY_NOW;
       }
 
-    private:
+     private:
       AlarmScheduler& alarmScheduler;
       ActorKey actor;
     };
@@ -2197,9 +2197,9 @@ public:
     }
   };
 
-private:
+ private:
   class EntrypointService final: public Service {
-  public:
+   public:
     EntrypointService(
         WorkerService& worker, kj::StringPtr entrypoint, kj::HashSet<kj::String> handlers)
         : worker(worker),
@@ -2214,7 +2214,7 @@ private:
       return handlers.contains(handlerName);
     }
 
-  private:
+   private:
     WorkerService& worker;
     kj::StringPtr entrypoint;
     kj::HashSet<kj::String> handlers;
@@ -2235,14 +2235,14 @@ private:
   LookupServiceCallback lookupService;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
-  public:
+   public:
     ActorChannelImpl(ActorNamespace& ns, Worker::Actor::Id id): ns(ns), id(kj::mv(id)) {}
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return ns.getActor(Worker::Actor::cloneId(id), kj::mv(metadata));
     }
 
-  private:
+   private:
     ActorNamespace& ns;
     Worker::Actor::Id id;
   };
@@ -2269,7 +2269,7 @@ private:
     KJ_FAIL_REQUIRE("no capability channels");
   }
   class CacheClientImpl final: public CacheClient {
-  public:
+   public:
     CacheClientImpl(Service& cacheService, kj::HttpHeaderId cacheNamespaceHeader)
         : cacheService(cacheService),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
@@ -2288,13 +2288,13 @@ private:
           kj::mv(cfBlobJson), kj::mv(parentSpan));
     }
 
-  private:
+   private:
     Service& cacheService;
     kj::HttpHeaderId cacheNamespaceHeader;
   };
 
   class CacheHttpClientImpl final: public kj::HttpClient {
-  public:
+   public:
     CacheHttpClientImpl(Service& parent,
         kj::HttpHeaderId cacheNamespaceHeader,
         kj::Maybe<kj::String> cacheName,
@@ -2313,7 +2313,7 @@ private:
       return client->request(method, url, addCacheNameHeader(headers, cacheName), expectedBodySize);
     }
 
-  private:
+   private:
     kj::Own<kj::HttpClient> client;
     kj::Maybe<kj::String> cacheName;
     kj::HttpHeaderId cacheNamespaceHeader;
@@ -2880,7 +2880,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
   // IsolateLimitEnforcer that enforces no limits.
   class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
-  public:
+   public:
     v8::Isolate::CreateParams getCreateParams() override {
       return {};
     }
@@ -3334,7 +3334,7 @@ Server::Service& Server::lookupService(
 // =======================================================================================
 
 class Server::HttpListener final: public kj::Refcounted {
-public:
+ public:
   HttpListener(Server& owner,
       kj::Own<kj::ConnectionReceiver> listener,
       Service& service,
@@ -3410,7 +3410,7 @@ public:
     }
   }
 
-private:
+ private:
   Server& owner;
   kj::Own<kj::ConnectionReceiver> listener;
   Service& service;
@@ -3433,7 +3433,7 @@ private:
   }
 
   class WorkerdBootstrapImpl final: public rpc::WorkerdBootstrap::Server {
-  public:
+   public:
     WorkerdBootstrapImpl(HttpListener& parent): parent(parent) {}
 
     kj::Promise<void> startEvent(StartEventContext context) {
@@ -3447,12 +3447,12 @@ private:
       return kj::READY_NOW;
     }
 
-  private:
+   private:
     HttpListener& parent;
   };
 
   class EventDispatcherImpl final: public rpc::EventDispatcher::Server {
-  public:
+   public:
     EventDispatcherImpl(HttpListener& parent, kj::Own<WorkerInterface> worker)
         : parent(parent),
           worker(kj::mv(worker)) {}
@@ -3497,7 +3497,7 @@ private:
       return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
     }
 
-  private:
+   private:
     HttpListener& parent;
     kj::Maybe<kj::Own<WorkerInterface>> worker;
 
@@ -3529,7 +3529,7 @@ private:
     ListedHttpServer listedHttp;
 
     class ResponseWrapper final: public kj::HttpService::Response {
-    public:
+     public:
       ResponseWrapper(kj::HttpService::Response& inner, HttpRewriter& rewriter)
           : inner(inner),
             rewriter(rewriter) {}
@@ -3551,7 +3551,7 @@ private:
         return inner.acceptWebSocket(rewrite);
       }
 
-    private:
+     private:
       kj::HttpService::Response& inner;
       HttpRewriter& rewriter;
     };
@@ -4090,7 +4090,7 @@ namespace {
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
 // and will fail any writes.
 class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
-public:
+ public:
   kj::Promise<void> get(GetContext context) override {
     return kj::READY_NOW;
   }
@@ -4117,9 +4117,9 @@ public:
     return kj::READY_NOW;
   }
 
-private:
+ private:
   class TransactionImpl final: public rpc::ActorStorage::Stage::Transaction::Server {
-  protected:
+   protected:
     kj::Promise<void> get(GetContext context) override {
       return kj::READY_NOW;
     }

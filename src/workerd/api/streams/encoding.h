@@ -13,7 +13,7 @@
 namespace workerd::api {
 
 class TextEncoderStream: public TransformStream {
-public:
+ public:
   using TransformStream::TransformStream;
 
   static jsg::Ref<TextEncoderStream> constructor(jsg::Lock& js);
@@ -32,7 +32,7 @@ public:
 };
 
 class TextDecoderStream: public TransformStream {
-public:
+ public:
   struct TextDecoderStreamInit {
     jsg::Optional<bool> fatal;
     jsg::Optional<bool> ignoreBOM;
@@ -62,7 +62,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   jsg::Ref<TextDecoder> decoder;
 
   void visitForGc(jsg::GcVisitor& visitor);

@@ -68,13 +68,13 @@ typedef kj::OneOf<EntrypointClass, api::ExportedHandler> NamedExport;
 //   "Worker" is ambiguous. I considered naming the class WorkerInstance, but it feels redundant
 //   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
 class Worker: public kj::AtomicRefcounted {
-public:
+ public:
   class Script;
   class Isolate;
   class Api;
 
   class ValidationErrorReporter {
-  public:
+   public:
     virtual void addError(kj::String error) = 0;
     virtual void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) = 0;
 
@@ -156,7 +156,7 @@ public:
   static void setupContext(
       jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode);
 
-private:
+ private:
   kj::Own<const Script> script;
 
   kj::Own<WorkerObserver> metrics;
@@ -184,7 +184,7 @@ private:
 // A compiled script within an Isolate, but which hasn't been instantiated into a particular
 // context (Worker).
 class Worker::Script: public kj::AtomicRefcounted {
-public:
+ public:
   ~Script() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Script);
 
@@ -229,7 +229,7 @@ public:
   bool isPython;
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
-private:
+ private:
   kj::Own<const Isolate> isolate;
   kj::String id;
   bool modular;
@@ -239,7 +239,7 @@ private:
 
   friend class Worker;
 
-public:  // pretend this is private (needs to be public because allocated through template)
+ public:  // pretend this is private (needs to be public because allocated through template)
   explicit Script(kj::Own<const Isolate> isolate,
       kj::StringPtr id,
       Source source,
@@ -262,7 +262,7 @@ public:  // pretend this is private (needs to be public because allocated throug
 // ephemeral. So when the last script is destructed, the isolate can be expected to also be
 // destructed soon.
 class Worker::Isolate: public kj::AtomicRefcounted {
-public:
+ public:
   // Determines whether a devtools inspector client can be attached.
   enum class InspectorPolicy {
     DISALLOW,
@@ -398,7 +398,7 @@ public:
 
   kj::Own<const WeakIsolateRef> getWeakRef() const;
 
-private:
+ private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
 
@@ -468,7 +468,7 @@ private:
 // In contrast, the rest of the classes in `worker.h` are concerned more with lifecycle
 // management.
 class Worker::Api {
-public:
+ public:
   // Get the current `Api` or throw if we're not currently executing JavaScript.
   static const Api& current();
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
@@ -556,19 +556,19 @@ public:
 //
 // A Worker::Lock MUST be allocated on the stack.
 class Worker::Lock {
-public:
+ public:
   // Worker locks should normally be taken asynchronously. The TakeSynchronously type can be used
   // when a synchronous lock is unavoidable. The purpose of this type is to make it easy to find
   // all the places where we take synchronous locks.
   class TakeSynchronously {
-  public:
+   public:
     // We don't provide a default constructor so that call sites need to think about whether they
     // have a Request& available to pass in.
     explicit TakeSynchronously(kj::Maybe<RequestObserver&> request);
 
     kj::Maybe<RequestObserver&> getRequest();
 
-  private:
+   private:
     // Non-null if this lock is being taken on behalf of a request.
     RequestObserver* request = nullptr;
     // HACK: The OneOf<TakeSynchronously, ...> in Worker::LockType doesn't like that
@@ -635,7 +635,7 @@ public:
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
 
-private:
+ private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);
   struct Impl;
 
@@ -648,11 +648,11 @@ private:
 // Can be initialized either from an `AsyncLock` or a `TakeSynchronously`, to indicate whether an
 // async lock is held and help us grep for places in the code that do not support async locks.
 class Worker::LockType {
-public:
+ public:
   LockType(Lock::TakeSynchronously origin): origin(origin) {}
   LockType(AsyncLock& origin): origin(&origin) {}
 
-private:
+ private:
   kj::OneOf<Lock::TakeSynchronously, AsyncLock*> origin;
   friend class Worker::Isolate;
 };
@@ -673,12 +673,12 @@ auto Worker::runInLockScope(LockType lockType, auto func) const {
 // You must never store an `AsyncLock` long-term. Use it in a continuation and then discard it.
 // To put it another way: An `AsyncLock` instance must never outlive an `evalLast()`.
 class Worker::AsyncLock {
-public:
+ public:
   // Waits until the thread has no async locks, is not waiting on any locks, and has finished all
   // pending events (a la `kj::evalLast()`).
   static kj::Promise<void> whenThreadIdle();
 
-private:
+ private:
   kj::Own<AsyncWaiter> waiter;
   kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming;
 
@@ -693,7 +693,7 @@ private:
 // Represents actor state within a Worker instance. This object tracks the JavaScript heap
 // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
 class Worker::Actor final: public kj::Refcounted {
-public:
+ public:
   // Callback which constructs the `ActorCacheInterface` instance (if any) for the Actor. This
   // can be used to customize the storage implementation. This will be called synchronously in
   // the constructor.
@@ -715,7 +715,7 @@ public:
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
   class Loopback {
-  public:
+   public:
     // Send a request to this actor, potentially re-creating it if it is not currently active.
     // The returned kj::Own<WorkerInterface> may be held longer than Loopback, and is assumed
     // to keep the Worker::Actor alive as well.
@@ -728,7 +728,7 @@ public:
   // The manager handles accepting new WebSockets, retrieving existing WebSockets by tag, and
   // removing WebSockets from its collection when they disconnect.
   class HibernationManager: public kj::Refcounted {
-  public:
+   public:
     virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
         jsg::Lock& js, kj::Maybe<kj::StringPtr> tag) = 0;
@@ -849,7 +849,7 @@ public:
 
   kj::Own<Worker::Actor> addRef();
 
-private:
+ private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
 
   kj::Own<const Worker> worker;

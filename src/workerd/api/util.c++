@@ -93,7 +93,7 @@ auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
 
 kj::Own<kj::AsyncInputStream> newTeeErrorAdapter(kj::Own<kj::AsyncInputStream> inner) {
   class Adapter final: public kj::AsyncInputStream {
-  public:
+   public:
     explicit Adapter(kj::Own<AsyncInputStream> inner): inner(kj::mv(inner)) {}
 
     kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
@@ -112,7 +112,7 @@ kj::Own<kj::AsyncInputStream> newTeeErrorAdapter(kj::Own<kj::AsyncInputStream> i
       return inner->tryTee(limit);
     }
 
-  private:
+   private:
     kj::Own<AsyncInputStream> inner;
   };
 

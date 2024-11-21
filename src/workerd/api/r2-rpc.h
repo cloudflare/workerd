@@ -21,7 +21,7 @@ class ReadableStream;
 // TODO(soon): Switch to structured objects and use jsg::Ref<R2Error> instead of kj::Own<R2Error>
 //   to maintain ownership.
 class R2Error: public jsg::Object {
-public:
+ public:
   R2Error(uint v4Code, kj::String message): v4Code(v4Code), message(kj::mv(message)) {}
 
   constexpr kj::StringPtr getName() const {
@@ -52,7 +52,7 @@ public:
     JSG_TS_ROOT();
   }
 
-private:
+ private:
   uint v4Code;
   kj::String message;
   kj::Maybe<kj::String> action;

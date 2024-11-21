@@ -23,11 +23,11 @@
 namespace workerd::api::pyodide {
 
 class PyodideBundleManager {
-public:
+ public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
   const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
 
-private:
+ private:
   struct MessageBundlePair {
     kj::Own<capnp::FlatArrayMessageReader> messageReader;
     jsg::Bundle::Reader bundle;
@@ -36,11 +36,11 @@ private:
 };
 
 class PyodidePackageManager {
-public:
+ public:
   void setPyodidePackageData(kj::String id, kj::Array<unsigned char> data) const;
   const kj::Maybe<kj::ArrayPtr<const unsigned char>> getPyodidePackage(kj::StringPtr id) const;
 
-private:
+ private:
   const kj::MutexGuarded<kj::HashMap<kj::String, kj::Array<unsigned char>>> packages;
 };
 
@@ -57,7 +57,7 @@ struct PythonConfig {
 class ReadOnlyBuffer: public jsg::Object {
   kj::ArrayPtr<const kj::byte> source;
 
-public:
+ public:
   ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
   int read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf);
@@ -73,7 +73,7 @@ public:
 // This is done this way to avoid copying files as much as possible. We set up a Metadata File
 // System which reads the contents as they are needed.
 class PyodideMetadataReader: public jsg::Object {
-private:
+ private:
   kj::String mainModule;
   kj::Array<kj::String> names;
   kj::Array<kj::Array<kj::byte>> contents;
@@ -87,7 +87,7 @@ private:
   bool usePackagesInArtifactBundler;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
-public:
+ public:
   PyodideMetadataReader(kj::String mainModule,
       kj::Array<kj::String> names,
       kj::Array<kj::Array<kj::byte>> contents,
@@ -215,7 +215,7 @@ struct MemorySnapshotResult {
 // A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
-public:
+ public:
   kj::Maybe<const PyodidePackageManager&> packageManager;
   // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
   // In other words:
@@ -322,7 +322,7 @@ public:
     JSG_STATIC_METHOD(getSnapshotImports);
   }
 
-private:
+ private:
   // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
@@ -330,7 +330,7 @@ private:
 };
 
 class DisabledInternalJaeger: public jsg::Object {
-public:
+ public:
   static jsg::Ref<DisabledInternalJaeger> create() {
     return jsg::alloc<DisabledInternalJaeger>();
   }
@@ -339,12 +339,12 @@ public:
 
 // This cache is used by Pyodide to store wheels fetched over the internet across workerd restarts in local dev only
 class DiskCache: public jsg::Object {
-private:
+ private:
   static const kj::Maybe<kj::Own<const kj::Directory>> NULL_CACHE_ROOT;  // always set to kj::none
 
   const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot;
 
-public:
+ public:
   DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
   DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
 
@@ -367,13 +367,13 @@ public:
 //
 // TODO(later): stop execution as soon limit is reached, instead of doing so after the fact.
 class SimplePythonLimiter: public jsg::Object {
-private:
+ private:
   int startupLimitMs;
   kj::Maybe<kj::Function<kj::TimePoint()>> getTimeCb;
 
   kj::Maybe<kj::TimePoint> startTime;
 
-public:
+ public:
   SimplePythonLimiter(): startupLimitMs(0), getTimeCb(kj::none) {}
 
   SimplePythonLimiter(int startupLimitMs, kj::Function<kj::TimePoint()> getTimeCb)

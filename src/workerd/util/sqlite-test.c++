@@ -137,7 +137,7 @@ KJ_TEST("SQLite backed by in-memory directory") {
 }
 
 class TempDirOnDisk {
-public:
+ public:
   TempDirOnDisk() {}
   ~TempDirOnDisk() noexcept(false) {
     dir = nullptr;
@@ -151,7 +151,7 @@ public:
     return *dir;
   }
 
-private:
+ private:
   kj::Own<kj::Filesystem> disk = kj::newDiskFilesystem();
   kj::Path path = makeTmpPath();
   kj::Own<const kj::Directory> dir = disk->getRoot().openSubdir(path, kj::WriteMode::MODIFY);
@@ -395,7 +395,7 @@ KJ_TEST("SQLite Regulator") {
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   class RegulatorImpl: public SqliteDatabase::Regulator {
-  public:
+   public:
     RegulatorImpl(kj::StringPtr blocked): blocked(blocked) {}
 
     bool isAllowedName(kj::StringPtr name) const override {
@@ -405,7 +405,7 @@ KJ_TEST("SQLite Regulator") {
 
     bool alwaysFail = false;
 
-  private:
+   private:
     kj::StringPtr blocked;
   };
 
@@ -708,7 +708,7 @@ KJ_TEST("SQLite row counters with triggers") {
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   class RegulatorImpl: public SqliteDatabase::Regulator {
-  public:
+   public:
     RegulatorImpl() = default;
 
     bool isAllowedTrigger(kj::StringPtr name) const override {
@@ -823,7 +823,7 @@ KJ_TEST("reset database") {
 
 KJ_TEST("SQLite observer addQueryStats") {
   class TestSqliteObserver: public SqliteObserver {
-  public:
+   public:
     void addQueryStats(uint64_t read, uint64_t written) override {
       rowsRead += read;
       rowsWritten += written;
@@ -927,7 +927,7 @@ KJ_TEST("SQLite failed statement reset") {
 }
 
 class MockRollbackCallback {
-public:
+ public:
   kj::Function<void()> create() {
     KJ_ASSERT(!created);
     created = true;
@@ -947,7 +947,7 @@ public:
     return !called && destroyed;
   }
 
-private:
+ private:
   bool created = false;
   bool called = false;
   bool destroyed = false;

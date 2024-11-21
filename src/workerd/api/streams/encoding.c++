@@ -13,8 +13,8 @@ namespace workerd::api {
 
 namespace {
 class TextEncoderStreamController: public kj::Refcounted {
-public:
-private:
+ public:
+ private:
   jsg::Ref<TextEncoder> encoder = jsg::alloc<TextEncoder>();
 };
 }  // namespace

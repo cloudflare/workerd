@@ -11,7 +11,7 @@ namespace workerd {
 
 template <typename T>
 class AbortableImpl final {
-public:
+ public:
   AbortableImpl(kj::Own<T> inner, RefcountedCanceler& canceler)
       : canceler(kj::addRef(canceler)),
         inner(kj::mv(inner)),
@@ -41,7 +41,7 @@ public:
     return inner;
   }
 
-private:
+ private:
   kj::Own<RefcountedCanceler> canceler;
   kj::Maybe<kj::Own<T>> inner;
   RefcountedCanceler::Listener onCancel;
@@ -56,7 +56,7 @@ private:
 // TODO(later): It would be good to see if both this and NeuterableInputStream
 // could be combined into a single utility.
 class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcounted {
-public:
+ public:
   AbortableInputStream(kj::Own<kj::AsyncInputStream> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}
 
@@ -76,7 +76,7 @@ public:
     return impl.wrap(&kj::AsyncInputStream::pumpTo, output, amount);
   }
 
-private:
+ private:
   AbortableImpl<kj::AsyncInputStream> impl;
 };
 
@@ -85,7 +85,7 @@ private:
 // is using an AbortSignal. The AbortableWebSocket is created using the AbortSignal's
 // RefcountedCanceler, which will be triggered when the AbortSignal is triggered.
 class AbortableWebSocket final: public kj::WebSocket, public kj::Refcounted {
-public:
+ public:
   AbortableWebSocket(kj::Own<kj::WebSocket> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}
 
@@ -146,7 +146,7 @@ public:
     return impl.getInner().getPreferredExtensions(ctx);
   };
 
-private:
+ private:
   AbortableImpl<kj::WebSocket> impl;
 };
 

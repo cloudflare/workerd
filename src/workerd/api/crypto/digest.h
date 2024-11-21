@@ -8,7 +8,7 @@ KJ_DECLARE_NON_POLYMORPHIC(HMAC_CTX)
 
 namespace workerd::api {
 class HmacContext final {
-public:
+ public:
   using KeyData = kj::OneOf<kj::ArrayPtr<kj::byte>, CryptoKey::Impl*>;
 
   HmacContext(jsg::Lock& js, kj::StringPtr algorithm, KeyData key);
@@ -21,14 +21,14 @@ public:
 
   size_t size() const;
 
-private:
+ private:
   // Will be kj::Own<HMAC_CTX> while the hmac data is being updated,
   // and kj::Array<kj::byte> after the digest() has been called.
   kj::OneOf<kj::Own<HMAC_CTX>, jsg::BufferSource> state;
 };
 
 class HashContext final {
-public:
+ public:
   HashContext(kj::StringPtr algorithm, kj::Maybe<uint32_t> maybeXof);
   HashContext(HashContext&&) = default;
   HashContext& operator=(HashContext&&) = default;
@@ -40,7 +40,7 @@ public:
 
   size_t size() const;
 
-private:
+ private:
   HashContext(kj::OneOf<kj::Own<EVP_MD_CTX>, jsg::BufferSource>, kj::Maybe<uint32_t> maybeXof);
 
   // Will be kj::Own<EVP_MD_CTX> while the hash data is being updated,

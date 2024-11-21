@@ -12,7 +12,7 @@ namespace workerd::api {
 namespace {
 
 class HkdfKey final: public CryptoKey::Impl {
-public:
+ public:
   explicit HkdfKey(kj::Array<kj::byte> keyData,
       CryptoKey::KeyAlgorithm keyAlgorithm,
       bool extractable,
@@ -32,7 +32,7 @@ public:
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
-private:
+ private:
   jsg::BufferSource deriveBits(jsg::Lock& js,
       SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> maybeLength) const override {

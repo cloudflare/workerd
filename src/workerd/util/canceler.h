@@ -20,9 +20,9 @@ namespace workerd {
 // to various other objects that will use it to wrap their
 // Promises.
 class RefcountedCanceler: public kj::Refcounted {
-public:
+ public:
   class Listener {
-  public:
+   public:
     explicit Listener(RefcountedCanceler& canceler, kj::Function<void()> fn)
         : fn(kj::mv(fn)),
           canceler(canceler) {
@@ -33,7 +33,7 @@ public:
       canceler.removeListener(*this);
     }
 
-  private:
+   private:
     kj::Function<void()> fn;
     RefcountedCanceler& canceler;
     kj::ListLink<Listener> link;
@@ -101,7 +101,7 @@ public:
     listeners.remove(listener);
   }
 
-private:
+ private:
   kj::Canceler canceler;
   kj::Maybe<kj::Exception> reason;
 

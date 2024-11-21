@@ -18,7 +18,7 @@ static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
 //
 // See also LimitEnforcer, which enforces on a per-request level.
 class IsolateLimitEnforcer {
-public:
+ public:
   // Get CreateParams to pass when constructing a new isolate.
   virtual v8::Isolate::CreateParams getCreateParams() = 0;
 
@@ -87,7 +87,7 @@ public:
 
 // Abstract interface that enforces resource limits on a IoContext.
 class LimitEnforcer {
-public:
+ public:
   // Called just after taking the isolate lock, before executing JavaScript code, to enforce
   // limits on that code execution, particularly the CPU limit. The returned `Own<void>` should
   // be dropped when JavaScript is done, before unlocking the isolate.

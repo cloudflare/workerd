@@ -69,7 +69,7 @@ using DOMException = jsg::DOMException;
 
 // A subset of the standard Navigator API.
 class Navigator: public jsg::Object {
-public:
+ public:
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
@@ -89,7 +89,7 @@ public:
 };
 
 class Performance: public jsg::Object {
-public:
+ public:
   // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
   // is no other appropriate time origin to use given that the Worker platform is intended to be
   // treated like one big computer rather than many individual instances. In particular, if and
@@ -118,7 +118,7 @@ public:
 // configuration details. This is not a standard API and great care should
 // be taken when deciding to expose new properties or methods here.
 class Cloudflare: public jsg::Object {
-public:
+ public:
   // Return an object containing the state of all compatibility flags known to the runtime.
   jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
 
@@ -131,7 +131,7 @@ public:
 };
 
 class PromiseRejectionEvent: public Event {
-public:
+ public:
   PromiseRejectionEvent(
       v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
 
@@ -155,7 +155,7 @@ public:
     tracker.trackField("reason", reason);
   }
 
-private:
+ private:
   jsg::V8Ref<v8::Promise> promise;
   jsg::Value reason;
 
@@ -163,7 +163,7 @@ private:
 };
 
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
-public:
+ public:
   jsg::Unimplemented importScripts(kj::String s) {
     return {};
   };
@@ -198,12 +198,12 @@ public:
 // At present, this has no methods. It is defined for consistency with other handlers and on the
 // assumption that we'll probably want to put something here someday.
 class TestController: public jsg::Object {
-public:
+ public:
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
 class ExecutionContext: public jsg::Object {
-public:
+ public:
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
 
@@ -233,7 +233,7 @@ public:
 
 // AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
 class AlarmInvocationInfo: public jsg::Object {
-public:
+ public:
   AlarmInvocationInfo(uint32_t retry): retryCount(retry) {}
 
   bool getIsRetry() {
@@ -248,7 +248,7 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(retryCount, getRetryCount);
   }
 
-private:
+ private:
   uint32_t retryCount = 0;
 };
 
@@ -361,7 +361,7 @@ struct ExportedHandler {
 // An approximation of Node.js setImmediate `Immediate` object.
 // This is used only when the `nodejs_compat_v2` compatibility flag is enabled.
 class Immediate final: public jsg::Object {
-public:
+ public:
   Immediate(IoContext& context, TimeoutId timeoutId);
 
   // In Node.js, the "ref" mechanism refers to whether or not an i/o object
@@ -384,7 +384,7 @@ public:
     JSG_DISPOSE(dispose);
   }
 
-private:
+ private:
   // On the off chance user code holds onto to the Ref<Immediate> longer than
   // the IoContext remains alive, let's maintain just a weak reference to the
   // IoContext here to avoid problems. This reference is used only for handling
@@ -396,7 +396,7 @@ private:
 
 // Global object API exposed to JavaScript.
 class ServiceWorkerGlobalScope: public WorkerGlobalScope {
-public:
+ public:
   ServiceWorkerGlobalScope(v8::Isolate* isolate);
 
   // Drop all references to JavaScript objects so that the context can be garbage-collected. Call
@@ -838,7 +838,7 @@ public:
     tracker.trackField("unhandledRejections", unhandledRejections);
   }
 
-private:
+ private:
   jsg::UnhandledRejectionHandler unhandledRejections;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should

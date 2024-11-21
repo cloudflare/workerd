@@ -9,7 +9,7 @@ namespace workerd::api {
 class CryptoKey;
 
 class X509Certificate: public jsg::Object {
-public:
+ public:
   X509Certificate(X509* cert): cert_(kj::disposeWith<X509_free>(cert)) {}
 
   static kj::Maybe<jsg::Ref<X509Certificate>> parse(kj::Array<const kj::byte> raw);
@@ -80,7 +80,7 @@ public:
     JSG_METHOD(toLegacyObject);
   }
 
-private:
+ private:
   kj::Own<X509> cert_;
   kj::Maybe<jsg::Ref<X509Certificate>> issuerCert_;
 };

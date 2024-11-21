@@ -20,7 +20,7 @@ namespace {
 // A wrapper around a native `kj::AsyncInputStream` which knows the underlying encoding of the
 // stream and whether or not it requires pending event registration.
 class EncodedAsyncInputStream final: public ReadableStreamSource {
-public:
+ public:
   explicit EncodedAsyncInputStream(
       kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context);
 
@@ -47,7 +47,7 @@ public:
   // brotli streams.
   kj::Maybe<Tee> tryTee(uint64_t limit) override;
 
-private:
+ private:
   friend class EncodedAsyncOutputStream;
 
   void ensureIdentityEncoding();
@@ -147,7 +147,7 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
 // probably have a distinct end() method of its own that we can defer to, but until it
 // does, it is important for us to release it as soon as end() or abort() are called.
 class EncodedAsyncOutputStream final: public WritableStreamSink {
-public:
+ public:
   explicit EncodedAsyncOutputStream(
       kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context);
 
@@ -163,7 +163,7 @@ public:
 
   StreamEncoding disownEncodingResponsibility() override;
 
-private:
+ private:
   void ensureIdentityEncoding();
 
   // Unwrap `inner` as a `kj::AsyncOutputStream`.

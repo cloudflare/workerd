@@ -33,7 +33,7 @@ using kj::uint;
 // An InputGate blocks incoming events from being delivered to an actor while the lock is held.
 class InputGate {
 
-public:
+ public:
   // Hooks that can be used to customize InputGate behavior.
   //
   // Technically, everything implemented here could be accomplished by a class that wraps
@@ -43,7 +43,7 @@ public:
   // would kick in when ActorCache tried to use it.
   class Hooks {
 
-  public:
+   public:
     // Optionally track metrics. In practice these are implemented by MetricsCollector::Actor, but
     // we don't want to depend on that class from here.
     virtual void inputGateLocked() {}
@@ -62,7 +62,7 @@ public:
 
   // A lock that blocks all new events from being delivered while it exists.
   class Lock {
-  public:
+   public:
     KJ_DISALLOW_COPY(Lock);
     Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)) {
       other.gate = nullptr;
@@ -95,7 +95,7 @@ public:
       return gate == other.gate;
     }
 
-  private:
+   private:
     // Becomes null on move.
     InputGate* gate;
 
@@ -112,7 +112,7 @@ public:
   // actor should be shut down in this case. This promise never resolves, only rejects.
   kj::Promise<void> onBroken();
 
-private:
+ private:
   Hooks& hooks;
 
   // How many instances of `Lock` currently exist? When this reaches zero, we'll release some
@@ -166,7 +166,7 @@ private:
 // top-level scope. E.g., if a critical section initiates a storage read and a fetch() at the
 // same time, the fetch() is prevented from returning until after the storage read has returned.
 class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
-public:
+ public:
   CriticalSection(InputGate& parent);
   ~CriticalSection() noexcept(false);
 
@@ -188,7 +188,7 @@ public:
   // breaks the InputGate.
   void failed(const kj::Exception& e);
 
-private:
+ private:
   enum State {
     // wait() hasn't been called.
     NOT_STARTED,
@@ -221,7 +221,7 @@ private:
 // An OutputGate blocks outgoing messages from an Actor until writes which they might depend on
 // are confirmed.
 class OutputGate {
-public:
+ public:
   // Hooks that can be used to customize OutputGate behavior.
   //
   // Technically, everything implemented here could be accomplished by a class that wraps
@@ -230,7 +230,7 @@ public:
   // it was more convenient to give Worker::Actor a way to inject behavior into OutputGate which
   // would kick in when ActorCache tried to use it.
   class Hooks {
-  public:
+   public:
     // Optionally make a promise which should be exclusiveJoin()ed with the lock promise to
     // implement a timeout. The returned promise should be something that throws an exception
     // after some timeout has expired.
@@ -271,7 +271,7 @@ public:
 
   bool isBroken();
 
-private:
+ private:
   Hooks& hooks;
 
   kj::ForkedPromise<void> pastLocksPromise;

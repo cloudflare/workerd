@@ -14,7 +14,7 @@
 namespace workerd::api::gpu {
 
 class GPUCompilationMessage: public jsg::Object {
-public:
+ public:
   explicit GPUCompilationMessage(const WGPUCompilationMessage& m): message(m) {}
 
   JSG_RESOURCE_TYPE(GPUCompilationMessage) {
@@ -26,7 +26,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(length, getLength);
   }
 
-private:
+ private:
   WGPUCompilationMessage message;
 
   kj::StringPtr getMessage() {
@@ -59,7 +59,7 @@ private:
 };
 
 class GPUCompilationInfo: public jsg::Object {
-public:
+ public:
   explicit GPUCompilationInfo(kj::Vector<jsg::Ref<GPUCompilationMessage>> messages)
       : messages_(kj::mv(messages)) {};
   JSG_RESOURCE_TYPE(GPUCompilationInfo) {
@@ -72,7 +72,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::Vector<jsg::Ref<GPUCompilationMessage>> messages_;
   kj::ArrayPtr<jsg::Ref<GPUCompilationMessage>> getMessages() {
     return messages_.asPtr();
@@ -83,7 +83,7 @@ private:
 };
 
 class GPUShaderModule: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::ShaderModule&() const {
     return shader_;
@@ -95,7 +95,7 @@ public:
     JSG_METHOD(getCompilationInfo);
   }
 
-private:
+ private:
   wgpu::ShaderModule shader_;
   kj::Own<AsyncRunner> async_;
   jsg::Promise<jsg::Ref<GPUCompilationInfo>> getCompilationInfo(jsg::Lock& js);
