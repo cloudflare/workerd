@@ -410,6 +410,135 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
     CustomEventInfo>;
+
+// An Attribute mark is used to add detail to a span over it's lifetime.
+// The Attribute struct can also be used to provide arbitrary additional
+// properties for some other structs.
+// Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
+struct Attribute final {
+  using Value = kj::OneOf<kj::ConstString, bool, float, uint32_t>;
+
+  explicit Attribute(kj::ConstString name, kj::OneOf<Value, kj::Array<Value>>&& value);
+  Attribute(Attribute&&) = default;
+  Attribute& operator=(Attribute&&) = default;
+  KJ_DISALLOW_COPY(Attribute);
+
+  kj::ConstString name;
+
+  kj::OneOf<Value, kj::Array<Value>> value;
+};
+using CustomInfo = kj::Array<Attribute>;
+
+// A Return mark is used to mark the point at which a span operation returned
+// a value. For instance, when a fetch subrequest response is received, or when
+// the fetch handler returns a Response. Importantly, it does not signal that the
+// span has closed, which may not happen for some period of time after the return
+// mark is recorded (e.g. due to things like waitUntils or waiting to fully ready
+// the response body payload, etc).
+struct Return final {
+  using Info = kj::OneOf<FetchResponseInfo, CustomInfo>;
+
+  explicit Return(kj::Maybe<Info> info = kj::none);
+  Return(Return&&) = default;
+  Return& operator=(Return&&) = default;
+  KJ_DISALLOW_COPY(Return);
+
+  kj::Maybe<Info> info = kj::none;
+};
+
+using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Attribute>;
+
+// Marks the opening of a child span within the streaming tail session.
+struct SpanOpen final {
+  // If the span represents a subrequest, then the info describes the
+  // details of that subrequest.
+  using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
+
+  explicit SpanOpen(
+      kj::Maybe<kj::ConstString> operationName = kj::none, kj::Maybe<Info> info = kj::none);
+  SpanOpen(SpanOpen&&) = default;
+  SpanOpen& operator=(SpanOpen&&) = default;
+  KJ_DISALLOW_COPY(SpanOpen);
+
+  kj::Maybe<kj::ConstString> operationName = kj::none;
+  kj::Maybe<Info> info = kj::none;
+};
+
+// Marks the closing of a child span within the streaming tail session.
+// Once emitted, no further mark events should occur within the closed
+// span.
+struct SpanClose final {
+  explicit SpanClose(EventOutcome outcome = EventOutcome::OK);
+  SpanClose(SpanClose&&) = default;
+  SpanClose& operator=(SpanClose&&) = default;
+  KJ_DISALLOW_COPY(SpanClose);
+
+  EventOutcome outcome = EventOutcome::OK;
+};
+
+// The Onset and Outcome event types are special forms of SpanOpen and
+// SpanClose that explicitly mark the start and end of the root span.
+// A streaming tail session will always begin with an Onset event, and
+// always end with an Outcome event.
+struct Onset final {
+  using Info = EventInfo;
+
+  explicit Onset(Info&& info, ExecutionModel executionModel);
+  Onset(Onset&&) = default;
+  Onset& operator=(Onset&&) = default;
+  KJ_DISALLOW_COPY(Onset);
+
+  Info info;
+  ExecutionModel executionModel;
+};
+
+struct Outcome final {
+  explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+  Outcome(Outcome&&) = default;
+  Outcome& operator=(Outcome&&) = default;
+  KJ_DISALLOW_COPY(Outcome);
+
+  EventOutcome outcome = EventOutcome::OK;
+  kj::Duration cpuTime;
+  kj::Duration wallTime;
+};
+
+// A streaming tail worker receives a series of Tail Events. Tail events always
+// occur within an InvocationSpanContext. The first TailEvent delivered to a
+// streaming tail session is always an Onset. The final TailEvent delivered is
+// always an Outcome. Between those can be any number of SpanOpen, SpanClose,
+// and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
+// the stream was abruptly terminated.
+struct TailEvent final {
+  using Event = kj::OneOf<Onset, Outcome, SpanOpen, SpanClose, Mark>;
+
+  struct Context final {
+    explicit Context(TraceId traceId, TraceId invocationId, kj::uint spanId);
+    Context(Context&&) = default;
+    Context& operator=(Context&&) = default;
+    KJ_DISALLOW_COPY(Context);
+    TraceId traceId;
+    TraceId invocationId;
+    kj::uint spanId;
+  };
+
+  explicit TailEvent(
+      kj::Rc<InvocationSpanContext>& context, kj::Date timestamp, kj::uint sequence, Event&& event);
+  TailEvent(TailEvent&&) = default;
+  TailEvent& operator=(TailEvent&&) = default;
+  KJ_DISALLOW_COPY(TailEvent);
+
+  // The invocation span context this event is associated with.
+  Context context;
+
+  // The parent or trigger span context, if any.
+  kj::Maybe<Context> parentContext = kj::none;
+
+  kj::Date timestamp;  // Unix epoch, spectre-mitigated resolution
+  kj::uint sequence;
+
+  Event event;
+};
 }  // namespace tracing
 
 enum class PipelineLogLevel {
