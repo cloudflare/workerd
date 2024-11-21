@@ -704,6 +704,12 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       contentType = type.toString();
       buffer = searchParams->toString();
     }
+    KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
+      auto type = MimeType::FORM_URLENCODED.clone();
+      type.addParam("charset"_kj, "UTF-8"_kj);
+      contentType = type.toString();
+      buffer = searchParams->toString();
+    }
   }
 
   auto bodyStream = kj::heap<BodyBufferInputStream>(buffer.clone(js));

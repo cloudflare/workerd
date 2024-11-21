@@ -14,6 +14,7 @@
 #include "form-data.h"
 #include "web-socket.h"
 #include <workerd/api/url.h>
+#include <workerd/api/url-standard.h>
 #include "blob.h"
 #include <workerd/io/compatibility-date.capnp.h>
 #include "worker-rpc.h"
@@ -252,7 +253,8 @@ public:
   // from any of the other source types, Body can create a new ReadableStream from the source, and
   // the POST will successfully retransmit.
   using Initializer = kj::OneOf<jsg::Ref<ReadableStream>, kj::String, kj::Array<byte>,
-                                jsg::Ref<Blob>, jsg::Ref<URLSearchParams>, jsg::Ref<FormData>>;
+                                jsg::Ref<Blob>, jsg::Ref<FormData>,
+                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
