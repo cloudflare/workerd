@@ -207,15 +207,22 @@ struct FetchEventInfo final {
   explicit FetchEventInfo(
       kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
   FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
+  FetchEventInfo(FetchEventInfo&&) = default;
+  FetchEventInfo& operator=(FetchEventInfo&&) = default;
+  KJ_DISALLOW_COPY(FetchEventInfo);
 
   struct Header final {
     explicit Header(kj::String name, kj::String value);
     Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
+    Header(Header&&) = default;
+    Header& operator=(Header&&) = default;
+    KJ_DISALLOW_COPY(Header);
 
     kj::String name;
     kj::String value;
 
     void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
+    Header clone();
 
     JSG_MEMORY_INFO(Header) {
       tracker.trackField("name", name);
@@ -230,75 +237,105 @@ struct FetchEventInfo final {
   kj::Array<Header> headers;
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
+  FetchEventInfo clone();
 };
 
 struct JsRpcEventInfo final {
   explicit JsRpcEventInfo(kj::String methodName);
   JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
+  JsRpcEventInfo(JsRpcEventInfo&&) = default;
+  JsRpcEventInfo& operator=(JsRpcEventInfo&&) = default;
+  KJ_DISALLOW_COPY(JsRpcEventInfo);
 
   kj::String methodName;
 
   void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
+  JsRpcEventInfo clone();
 };
 
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
   ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
+  ScheduledEventInfo(ScheduledEventInfo&&) = default;
+  ScheduledEventInfo& operator=(ScheduledEventInfo&&) = default;
+  KJ_DISALLOW_COPY(ScheduledEventInfo);
 
   double scheduledTime;
   kj::String cron;
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
+  ScheduledEventInfo clone();
 };
 
 struct AlarmEventInfo final {
   explicit AlarmEventInfo(kj::Date scheduledTime);
   AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
+  AlarmEventInfo(AlarmEventInfo&&) = default;
+  AlarmEventInfo& operator=(AlarmEventInfo&&) = default;
+  KJ_DISALLOW_COPY(AlarmEventInfo);
 
   kj::Date scheduledTime;
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
+  AlarmEventInfo clone();
 };
 
 struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
   QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
+  QueueEventInfo(QueueEventInfo&&) = default;
+  QueueEventInfo& operator=(QueueEventInfo&&) = default;
+  KJ_DISALLOW_COPY(QueueEventInfo);
 
   kj::String queueName;
   uint32_t batchSize;
 
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
+  QueueEventInfo clone();
 };
 
 struct EmailEventInfo final {
   explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
   EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
+  EmailEventInfo(EmailEventInfo&&) = default;
+  EmailEventInfo& operator=(EmailEventInfo&&) = default;
+  KJ_DISALLOW_COPY(EmailEventInfo);
 
   kj::String mailFrom;
   kj::String rcptTo;
   uint32_t rawSize;
 
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
+  EmailEventInfo clone();
 };
 
 struct TraceEventInfo final {
   struct TraceItem;
 
   explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
+  TraceEventInfo(kj::Array<TraceItem> traces): traces(kj::mv(traces)) {}
   TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
+  TraceEventInfo(TraceEventInfo&&) = default;
+  TraceEventInfo& operator=(TraceEventInfo&&) = default;
+  KJ_DISALLOW_COPY(TraceEventInfo);
 
   struct TraceItem final {
     explicit TraceItem(kj::Maybe<kj::String> scriptName);
     TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
+    TraceItem(TraceItem&&) = default;
+    TraceItem& operator=(TraceItem&&) = default;
+    KJ_DISALLOW_COPY(TraceItem);
 
     kj::Maybe<kj::String> scriptName;
 
     void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
+    TraceItem clone();
   };
 
   kj::Vector<TraceItem> traces;
 
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
+  TraceEventInfo clone();
 };
 
 struct HibernatableWebSocketEventInfo final {
@@ -313,10 +350,14 @@ struct HibernatableWebSocketEventInfo final {
 
   explicit HibernatableWebSocketEventInfo(Type type);
   HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+  HibernatableWebSocketEventInfo(HibernatableWebSocketEventInfo&&) = default;
+  HibernatableWebSocketEventInfo& operator=(HibernatableWebSocketEventInfo&&) = default;
+  KJ_DISALLOW_COPY(HibernatableWebSocketEventInfo);
 
   Type type;
 
   void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
+  HibernatableWebSocketEventInfo clone();
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
 };
 
@@ -328,10 +369,14 @@ struct CustomEventInfo final {
 struct FetchResponseInfo final {
   explicit FetchResponseInfo(uint16_t statusCode);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
+  FetchResponseInfo(FetchResponseInfo&&) = default;
+  FetchResponseInfo& operator=(FetchResponseInfo&&) = default;
+  KJ_DISALLOW_COPY(FetchResponseInfo);
 
   uint16_t statusCode;
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
+  FetchResponseInfo clone();
 };
 
 struct DiagnosticChannelEvent final {
@@ -346,6 +391,7 @@ struct DiagnosticChannelEvent final {
   kj::Array<kj::byte> message;
 
   void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
+  DiagnosticChannelEvent clone();
 };
 
 struct Log final {
@@ -363,6 +409,7 @@ struct Log final {
   kj::String message;
 
   void copyTo(rpc::Trace::Log::Builder builder);
+  Log clone();
 };
 
 struct Exception final {
@@ -382,6 +429,31 @@ struct Exception final {
   kj::Maybe<kj::String> stack;
 
   void copyTo(rpc::Trace::Exception::Builder builder);
+  Exception clone();
+};
+
+struct Resume final {
+  explicit Resume(kj::Maybe<kj::Array<kj::byte>> attachment);
+  Resume(rpc::Trace::Resume::Reader reader);
+  Resume(Resume&&) = default;
+  KJ_DISALLOW_COPY(Resume);
+  ~Resume() noexcept(false) = default;
+
+  kj::Maybe<kj::Array<kj::byte>> attachment;
+
+  void copyTo(rpc::Trace::Resume::Builder builder);
+  Resume clone();
+};
+
+struct Hibernate final {
+  explicit Hibernate();
+  Hibernate(rpc::Trace::Hibernate::Reader reader);
+  Hibernate(Hibernate&&) = default;
+  KJ_DISALLOW_COPY(Hibernate);
+  ~Hibernate() noexcept(false) = default;
+
+  void copyTo(rpc::Trace::Hibernate::Builder builder);
+  Hibernate clone();
 };
 
 // EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
@@ -394,23 +466,28 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
+    Resume,
     CustomEventInfo>;
 
-// An Attribute mark is used to add detail to a span over it's lifetime.
+// An Attribute mark is used to add detail to a span over its lifetime.
 // The Attribute struct can also be used to provide arbitrary additional
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::ConstString, bool, float, uint32_t>;
+  using Value = kj::OneOf<kj::String, bool, double, uint32_t>;
 
-  explicit Attribute(kj::ConstString name, kj::OneOf<Value, kj::Array<Value>>&& value);
+  explicit Attribute(kj::String name, kj::OneOf<Value, kj::Array<Value>>&& value);
+  Attribute(rpc::Trace::Attribute::Reader reader);
   Attribute(Attribute&&) = default;
   Attribute& operator=(Attribute&&) = default;
   KJ_DISALLOW_COPY(Attribute);
 
-  kj::ConstString name;
+  kj::String name;
 
   kj::OneOf<Value, kj::Array<Value>> value;
+
+  void copyTo(rpc::Trace::Attribute::Builder builder);
+  Attribute clone();
 };
 using CustomInfo = kj::Array<Attribute>;
 
@@ -424,11 +501,15 @@ struct Return final {
   using Info = kj::OneOf<FetchResponseInfo, CustomInfo>;
 
   explicit Return(kj::Maybe<Info> info = kj::none);
+  Return(rpc::Trace::Return::Reader reader);
   Return(Return&&) = default;
   Return& operator=(Return&&) = default;
   KJ_DISALLOW_COPY(Return);
 
   kj::Maybe<Info> info = kj::none;
+
+  void copyTo(rpc::Trace::Return::Builder builder);
+  Return clone();
 };
 
 using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Attribute>;
@@ -440,13 +521,17 @@ struct SpanOpen final {
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
   explicit SpanOpen(
-      kj::Maybe<kj::ConstString> operationName = kj::none, kj::Maybe<Info> info = kj::none);
+      kj::Maybe<kj::String> operationName = kj::none, kj::Maybe<Info> info = kj::none);
+  SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::Maybe<kj::ConstString> operationName = kj::none;
+  kj::Maybe<kj::String> operationName = kj::none;
   kj::Maybe<Info> info = kj::none;
+
+  void copyTo(rpc::Trace::SpanOpen::Builder builder);
+  SpanOpen clone();
 };
 
 // Marks the closing of a child span within the streaming tail session.
@@ -454,11 +539,15 @@ struct SpanOpen final {
 // span.
 struct SpanClose final {
   explicit SpanClose(EventOutcome outcome = EventOutcome::OK);
+  SpanClose(rpc::Trace::SpanClose::Reader reader);
   SpanClose(SpanClose&&) = default;
   SpanClose& operator=(SpanClose&&) = default;
   KJ_DISALLOW_COPY(SpanClose);
 
   EventOutcome outcome = EventOutcome::OK;
+
+  void copyTo(rpc::Trace::SpanClose::Builder builder);
+  SpanClose clone();
 };
 
 // The Onset and Outcome event types are special forms of SpanOpen and
@@ -468,17 +557,33 @@ struct SpanClose final {
 struct Onset final {
   using Info = EventInfo;
 
-  explicit Onset(Info&& info, ExecutionModel executionModel);
+  explicit Onset(Info&& info,
+      ExecutionModel executionModel,
+      kj::Maybe<kj::String> scriptName,
+      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
+      kj::Maybe<kj::String> dispatchNamespace,
+      kj::Maybe<kj::Array<kj::String>> scriptTags,
+      kj::Maybe<kj::String> entrypoint);
+  Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
   Info info;
   ExecutionModel executionModel;
+  kj::Maybe<kj::String> scriptName;
+  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
+  kj::Maybe<kj::String> dispatchNamespace;
+  kj::Maybe<kj::Array<kj::String>> scriptTags;
+  kj::Maybe<kj::String> entrypoint;
+
+  void copyTo(rpc::Trace::Onset::Builder builder);
+  Onset clone();
 };
 
 struct Outcome final {
   explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+  Outcome(rpc::Trace::Outcome::Reader reader);
   Outcome(Outcome&&) = default;
   Outcome& operator=(Outcome&&) = default;
   KJ_DISALLOW_COPY(Outcome);
@@ -486,6 +591,9 @@ struct Outcome final {
   EventOutcome outcome = EventOutcome::OK;
   kj::Duration cpuTime;
   kj::Duration wallTime;
+
+  void copyTo(rpc::Trace::Outcome::Builder builder);
+  Outcome clone();
 };
 
 // A streaming tail worker receives a series of Tail Events. Tail events always
@@ -495,20 +603,30 @@ struct Outcome final {
 // and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
 // the stream was abruptly terminated.
 struct TailEvent final {
-  using Event = kj::OneOf<Onset, Outcome, SpanOpen, SpanClose, Mark>;
+  using Event = kj::OneOf<Onset, Outcome, Hibernate, SpanOpen, SpanClose, Mark>;
 
   struct Context final {
     explicit Context(TraceId traceId, TraceId invocationId, kj::uint spanId);
+    Context(rpc::InvocationSpanContext::Reader reader);
     Context(Context&&) = default;
     Context& operator=(Context&&) = default;
     KJ_DISALLOW_COPY(Context);
     TraceId traceId;
     TraceId invocationId;
     kj::uint spanId;
+
+    void copyTo(rpc::InvocationSpanContext::Builder builder);
+    Context clone();
   };
 
   explicit TailEvent(
       kj::Rc<InvocationSpanContext>& context, kj::Date timestamp, kj::uint sequence, Event&& event);
+  TailEvent(Context context,
+      kj::Maybe<Context> parentContext,
+      kj::Date timestamp,
+      kj::uint sequence,
+      Event&& event);
+  TailEvent(rpc::Trace::TailEvent::Reader reader);
   TailEvent(TailEvent&&) = default;
   TailEvent& operator=(TailEvent&&) = default;
   KJ_DISALLOW_COPY(TailEvent);
@@ -523,6 +641,9 @@ struct TailEvent final {
   kj::uint sequence;
 
   Event event;
+
+  void copyTo(rpc::Trace::TailEvent::Builder builder);
+  TailEvent clone();
 };
 }  // namespace tracing
 

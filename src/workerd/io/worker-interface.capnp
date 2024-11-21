@@ -157,6 +157,125 @@ struct Trace @0x8e8d911203762d34 {
   executionModel @25 :ExecutionModel;
   # the execution model of the worker being traced. Can be stateless for a regular worker,
   # durableObject for a DO worker or workflow for the upcoming Workflows feature.
+
+  # =====================================================================================
+  # Additional types for streaming tail workers
+
+  struct Attribute {
+    # An Attribute mark is used to add detail to a span over its lifetime.
+    # The Attribute struct can also be used to provide arbitrary additional
+    # properties for some other structs.
+    # Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
+    struct Value {
+      inner :union {
+        text @0 :Text;
+        bool @1 :Bool;
+        int @2 :Int32;
+        float @3 :Float64;
+      }
+    }
+    name @0 :Text;
+    value @1 :List(Value);
+  }
+
+  struct Return {
+    # A Return mark is used to mark the point at which a span operation returned
+    # a value. For instance, when a fetch subrequest response is received, or when
+    # the fetch handler returns a Response. Importantly, it does not signal that the
+    # span has closed, which may not happen for some period of time after the return
+    # mark is recorded (e.g. due to things like waitUntils or waiting to fully ready
+    # the response body payload, etc).
+    info :union {
+      empty @0 :Void;
+      custom @1 :List(Attribute);
+      fetch @2 :FetchResponseInfo;
+    }
+  }
+
+  struct SpanOpen {
+    # Marks the opening of a child span within the streaming tail session.
+    operationName @0 :Text;
+    info :union {
+      empty @1 :Void;
+      custom @2 :List(Attribute);
+      fetch @3 :FetchEventInfo;
+      jsrpc @4 :JsRpcEventInfo;
+    }
+  }
+
+  struct SpanClose {
+    # Marks the closing of a child span within the streaming tail session.
+    # Once emitted, no further mark events should occur within the closed
+    # span.
+    outcome @0 :EventOutcome;
+  }
+
+  struct Resume {
+    # A resume event indicates that we are resuming a previously hibernated
+    # tail session.
+    attachment @0 :Data;
+  }
+
+  struct Onset {
+    # The Onset and Outcome event types are special forms of SpanOpen and
+    # SpanClose that explicitly mark the start and end of the root span.
+    # A streaming tail session will always begin with an Onset event, and
+    # always end with an Outcome event.
+    executionModel @0 :ExecutionModel;
+    scriptName @1 :Text;
+    scriptVersion @2 :ScriptVersion;
+    dispatchNamespace @3 :Text;
+    scriptTags @4 :List(Text);
+    entryPoint @5 :Text;
+
+    info :union {
+      fetch @6 :FetchEventInfo;
+      jsrpc @7 :JsRpcEventInfo;
+      scheduled @8 :ScheduledEventInfo;
+      alarm @9 :AlarmEventInfo;
+      queue @10 :QueueEventInfo;
+      email @11 :EmailEventInfo;
+      trace @12 :TraceEventInfo;
+      hibernatableWebSocket @13 :HibernatableWebSocketEventInfo;
+      resume @14 :Resume;
+      custom @15 :CustomEventInfo;
+    }
+  }
+
+  struct Outcome {
+    outcome @0 :EventOutcome;
+    cpuTime @1 :UInt64;
+    wallTime @2 :UInt64;
+  }
+
+  struct Hibernate {
+    # A hibernate event indicates that the tail session is being hibernated.
+  }
+
+  struct TailEvent {
+    # A streaming tail worker receives a series of Tail Events. Tail events always
+    # occur within an InvocationSpanContext. The first TailEvent delivered to a
+    # streaming tail session is always an Onset. The final TailEvent delivered is
+    # always an Outcome. Between those can be any number of SpanOpen, SpanClose,
+    # and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
+    # the stream was abruptly terminated.
+    context @0 :InvocationSpanContext;
+    parentContext @1 :InvocationSpanContext;
+    timestampNs @2 :Int64;
+    sequence @3 :UInt32;
+    event :union {
+      onset @4 :Onset;
+      outcome @5 :Outcome;
+      hibernate @6 :Hibernate;
+      spanOpen @7 :SpanOpen;
+      spanClose @8 :SpanClose;
+      attribute @9 :Attribute;
+      return @10 :Return;
+      diagnosticChannelEvent @11 :DiagnosticChannelEvent;
+      exception @12 :Exception;
+      log @13 :Log;
+    }
+  }
 }
 
 struct SendTracesRun @0xde913ebe8e1b82a5 {

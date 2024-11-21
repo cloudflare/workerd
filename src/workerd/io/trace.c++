@@ -272,6 +272,11 @@ void tracing::FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder
   }
 }
 
+tracing::FetchEventInfo tracing::FetchEventInfo::clone() {
+  return FetchEventInfo(
+      method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); });
+}
+
 tracing::FetchEventInfo::Header::Header(kj::String name, kj::String value)
     : name(kj::mv(name)),
       value(kj::mv(value)) {}
@@ -285,6 +290,10 @@ void tracing::FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header:
   builder.setValue(value);
 }
 
+tracing::FetchEventInfo::Header tracing::FetchEventInfo::Header::clone() {
+  return Header(kj::str(name), kj::str(value));
+}
+
 tracing::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
 
 tracing::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
@@ -292,6 +301,10 @@ tracing::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reade
 
 void tracing::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) {
   builder.setMethodName(methodName);
+}
+
+tracing::JsRpcEventInfo tracing::JsRpcEventInfo::clone() {
+  return JsRpcEventInfo(kj::str(methodName));
 }
 
 tracing::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
@@ -307,6 +320,10 @@ void tracing::ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder
   builder.setCron(cron);
 }
 
+tracing::ScheduledEventInfo tracing::ScheduledEventInfo::clone() {
+  return ScheduledEventInfo(scheduledTime, kj::str(cron));
+}
+
 tracing::AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
 
 tracing::AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
@@ -314,6 +331,10 @@ tracing::AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reade
 
 void tracing::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) {
   builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+}
+
+tracing::AlarmEventInfo tracing::AlarmEventInfo::clone() {
+  return AlarmEventInfo(scheduledTime);
 }
 
 tracing::QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
@@ -327,6 +348,10 @@ tracing::QueueEventInfo::QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reade
 void tracing::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) {
   builder.setQueueName(queueName);
   builder.setBatchSize(batchSize);
+}
+
+tracing::QueueEventInfo tracing::QueueEventInfo::clone() {
+  return QueueEventInfo(kj::str(queueName), batchSize);
 }
 
 tracing::EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
@@ -343,6 +368,10 @@ void tracing::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder
   builder.setMailFrom(mailFrom);
   builder.setRcptTo(rcptTo);
   builder.setRawSize(rawSize);
+}
+
+tracing::EmailEventInfo tracing::EmailEventInfo::clone() {
+  return EmailEventInfo(kj::str(mailFrom), kj::str(rcptTo), rawSize);
 }
 
 kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
@@ -373,6 +402,10 @@ void tracing::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder
   }
 }
 
+tracing::TraceEventInfo tracing::TraceEventInfo::clone() {
+  return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
+}
+
 tracing::TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
     : scriptName(kj::mv(scriptName)) {}
 
@@ -384,6 +417,10 @@ void tracing::TraceEventInfo::TraceItem::copyTo(
   KJ_IF_SOME(name, scriptName) {
     builder.setScriptName(name);
   }
+}
+
+tracing::TraceEventInfo::TraceItem tracing::TraceEventInfo::TraceItem::clone() {
+  return TraceItem(scriptName.map([](auto& name) { return kj::str(name); }));
 }
 
 tracing::DiagnosticChannelEvent::DiagnosticChannelEvent(
@@ -402,6 +439,10 @@ void tracing::DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent:
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setChannel(channel);
   builder.setMessage(message);
+}
+
+tracing::DiagnosticChannelEvent tracing::DiagnosticChannelEvent::clone() {
+  return DiagnosticChannelEvent(timestamp, kj::str(channel), kj::heapArray<kj::byte>(message));
 }
 
 tracing::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(Type type): type(type) {}
@@ -426,6 +467,24 @@ void tracing::HibernatableWebSocketEventInfo::copyTo(
       typeBuilder.setError();
     }
   }
+}
+
+tracing::HibernatableWebSocketEventInfo tracing::HibernatableWebSocketEventInfo::clone() {
+  KJ_SWITCH_ONEOF(type) {
+    KJ_CASE_ONEOF(_, Message) {
+      return HibernatableWebSocketEventInfo(Message{});
+    }
+    KJ_CASE_ONEOF(_, Error) {
+      return HibernatableWebSocketEventInfo(Error{});
+    }
+    KJ_CASE_ONEOF(close, Close) {
+      return HibernatableWebSocketEventInfo(Close{
+        .code = close.code,
+        .wasClean = close.wasClean,
+      });
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 tracing::HibernatableWebSocketEventInfo::Type tracing::HibernatableWebSocketEventInfo::readFrom(
@@ -455,6 +514,10 @@ tracing::FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Rea
 
 void tracing::FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) {
   builder.setStatusCode(statusCode);
+}
+
+tracing::FetchResponseInfo tracing::FetchResponseInfo::clone() {
+  return FetchResponseInfo(statusCode);
 }
 
 tracing::Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
@@ -576,6 +639,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto hibWsBuilder = eventInfoBuilder.initHibernatableWebSocket();
         hibWs.copyTo(hibWsBuilder);
       }
+      KJ_CASE_ONEOF(resume, tracing::Resume) {
+        // Resume is not used in legacy trace.
+        KJ_UNREACHABLE;
+      }
       KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -603,6 +670,10 @@ void tracing::Log::copyTo(rpc::Trace::Log::Builder builder) {
   builder.setMessage(message);
 }
 
+tracing::Log tracing::Log::clone() {
+  return Log(timestamp, logLevel, kj::str(message));
+}
+
 void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setName(name);
@@ -610,6 +681,11 @@ void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) {
   KJ_IF_SOME(s, stack) {
     builder.setStack(s);
   }
+}
+
+tracing::Exception tracing::Exception::clone() {
+  return Exception(timestamp, kj::str(name), kj::str(message),
+      stack.map([](auto& stack) { return kj::str(stack); }));
 }
 
 void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel) {
@@ -713,6 +789,711 @@ tracing::Exception::Exception(rpc::Trace::Exception::Reader reader)
     stack = kj::str(reader.getStack());
   }
 }
+
+namespace {
+kj::Maybe<kj::Array<kj::byte>> readResumeAttachment(const auto& reader) {
+  if (reader.hasAttachment()) {
+    return kj::heapArray<kj::byte>(reader.getAttachment());
+  }
+  return kj::none;
+}
+}  // namespace
+
+tracing::Resume::Resume(kj::Maybe<kj::Array<kj::byte>> attachment)
+    : attachment(kj::mv(attachment)) {}
+
+tracing::Resume::Resume(rpc::Trace::Resume::Reader reader)
+    : attachment(readResumeAttachment(reader)) {}
+
+void tracing::Resume::copyTo(rpc::Trace::Resume::Builder builder) {
+  KJ_IF_SOME(attach, attachment) {
+    builder.setAttachment(attach);
+  }
+}
+
+tracing::Resume tracing::Resume::clone() {
+  return Resume(attachment.map([](auto& attach) { return kj::heapArray<kj::byte>(attach); }));
+}
+
+tracing::Hibernate::Hibernate() {}
+
+tracing::Hibernate::Hibernate(rpc::Trace::Hibernate::Reader reader) {}
+
+void tracing::Hibernate::copyTo(rpc::Trace::Hibernate::Builder builder) {}
+
+tracing::Hibernate tracing::Hibernate::clone() {
+  return Hibernate();
+}
+
+tracing::Attribute::Attribute(kj::String name, kj::OneOf<Value, kj::Array<Value>>&& value)
+    : name(kj::mv(name)),
+      value(kj::mv(value)) {}
+
+namespace {
+kj::OneOf<tracing::Attribute::Value, kj::Array<tracing::Attribute::Value>> readValues(
+    rpc::Trace::Attribute::Reader& reader) {
+  static auto readValue =
+      [](rpc::Trace::Attribute::Value::Reader reader) -> tracing::Attribute::Value {
+    auto inner = reader.getInner();
+    switch (inner.which()) {
+      case rpc::Trace::Attribute::Value::Inner::TEXT: {
+        return kj::str(inner.getText());
+      }
+      case rpc::Trace::Attribute::Value::Inner::BOOL: {
+        return inner.getBool();
+      }
+      case rpc::Trace::Attribute::Value::Inner::FLOAT: {
+        return inner.getFloat();
+      }
+      case rpc::Trace::Attribute::Value::Inner::INT: {
+        return static_cast<kj::uint>(inner.getInt());
+      }
+    }
+    KJ_UNREACHABLE;
+  };
+
+  // There should always be a value and it always have at least one entry in the list.
+  KJ_ASSERT(reader.hasValue());
+  auto value = reader.getValue();
+  KJ_ASSERT(value.size() >= 1);
+  if (value.size() == 1) {
+    return readValue(value[0]);
+  }
+  kj::Vector<tracing::Attribute::Value> values(value.size());
+  for (auto v: value) {
+    values.add(readValue(v));
+  }
+  return values.releaseAsArray();
+}
+}  // namespace
+
+tracing::Attribute::Attribute(rpc::Trace::Attribute::Reader reader)
+    : name(kj::str(reader.getName())),
+      value(readValues(reader)) {}
+
+void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) {
+  static auto writeValue = [](auto builder, const auto& value) mutable {
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        builder[0].initInner().setText(str.asPtr());
+      }
+      KJ_CASE_ONEOF(b, bool) {
+        builder[0].initInner().setBool(b);
+      }
+      KJ_CASE_ONEOF(f, double) {
+        builder[0].initInner().setFloat(f);
+      }
+      KJ_CASE_ONEOF(i, uint32_t) {
+        builder[0].initInner().setInt(i);
+      }
+    }
+  };
+  builder.setName(name.asPtr());
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(value, Value) {
+      writeValue(builder.initValue(1), value);
+    }
+    KJ_CASE_ONEOF(values, kj::Array<Value>) {}
+  }
+}
+
+tracing::Attribute tracing::Attribute::clone() {
+  constexpr auto cloneValue = [](const Value& value) -> Value {
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        return kj::str(str);
+      }
+      KJ_CASE_ONEOF(b, bool) {
+        return b;
+      }
+      KJ_CASE_ONEOF(f, double) {
+        return f;
+      }
+      KJ_CASE_ONEOF(i, uint32_t) {
+        return i;
+      }
+    }
+    KJ_UNREACHABLE;
+  };
+
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(value, Value) {
+      return Attribute(kj::str(name), cloneValue(value));
+    }
+    KJ_CASE_ONEOF(values, kj::Array<Value>) {
+      return Attribute(kj::str(name), KJ_MAP(value, values) { return cloneValue(value); });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+tracing::Return::Return(kj::Maybe<tracing::Return::Info> info): info(kj::mv(info)) {}
+
+namespace {
+kj::Maybe<tracing::Return::Info> readReturnInfo(rpc::Trace::Return::Reader& reader) {
+  auto info = reader.getInfo();
+  switch (info.which()) {
+    case rpc::Trace::Return::Info::EMPTY:
+      return kj::none;
+    case rpc::Trace::Return::Info::CUSTOM: {
+      auto list = info.getCustom();
+      kj::Vector<tracing::Attribute> attrs(list.size());
+      for (size_t n = 0; n < list.size(); n++) {
+        attrs.add(tracing::Attribute(list[n]));
+      }
+      return kj::Maybe(attrs.releaseAsArray());
+    }
+    case rpc::Trace::Return::Info::FETCH: {
+      return kj::Maybe(tracing::FetchResponseInfo(info.getFetch()));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+}  // namespace
+
+tracing::Return::Return(rpc::Trace::Return::Reader reader): info(readReturnInfo(reader)) {}
+
+void tracing::Return::copyTo(rpc::Trace::Return::Builder builder) {
+  KJ_IF_SOME(i, info) {
+    auto infoBuilder = builder.initInfo();
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
+        fetch.copyTo(infoBuilder.initFetch());
+      }
+      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
+        auto attributes = infoBuilder.initCustom(custom.size());
+        for (size_t n = 0; n < custom.size(); n++) {
+          custom[n].copyTo(attributes[n]);
+        }
+      }
+    }
+  }
+}
+
+tracing::Return tracing::Return::clone() {
+  KJ_IF_SOME(i, info) {
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
+        return Return(kj::Maybe(fetch.clone()));
+      }
+      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
+        return Return(kj::Maybe(KJ_MAP(i, custom) { return i.clone(); }));
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return Return();
+}
+
+tracing::SpanOpen::SpanOpen(kj::Maybe<kj::String> operationName, kj::Maybe<Info> info)
+    : operationName(kj::mv(operationName)),
+      info(kj::mv(info)) {}
+
+namespace {
+kj::Maybe<kj::String> readSpanOpenOperationName(rpc::Trace::SpanOpen::Reader& reader) {
+  if (!reader.hasOperationName()) return kj::none;
+  return kj::str(reader.getOperationName());
+}
+
+kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader) {
+  auto info = reader.getInfo();
+  switch (info.which()) {
+    case rpc::Trace::SpanOpen::Info::EMPTY:
+      return kj::none;
+    case rpc::Trace::SpanOpen::Info::FETCH: {
+      return kj::Maybe(tracing::FetchEventInfo(info.getFetch()));
+    }
+    case rpc::Trace::SpanOpen::Info::JSRPC: {
+      return kj::Maybe(tracing::JsRpcEventInfo(info.getJsrpc()));
+    }
+    case rpc::Trace::SpanOpen::Info::CUSTOM: {
+      auto custom = info.getCustom();
+      kj::Vector<tracing::Attribute> attrs(custom.size());
+      for (size_t n = 0; n < custom.size(); n++) {
+        attrs.add(tracing::Attribute(custom[n]));
+      }
+      return kj::Maybe(attrs.releaseAsArray());
+    }
+  }
+  KJ_UNREACHABLE;
+}
+}  // namespace
+
+tracing::SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
+    : operationName(readSpanOpenOperationName(reader)),
+      info(readSpanOpenInfo(reader)) {}
+
+void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) {
+  KJ_IF_SOME(name, operationName) {
+    builder.setOperationName(name.asPtr());
+  }
+  KJ_IF_SOME(i, info) {
+    auto infoBuilder = builder.initInfo();
+    KJ_SWITCH_ONEOF(i) {
+      KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+        fetch.copyTo(infoBuilder.initFetch());
+      }
+      KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+        jsrpc.copyTo(infoBuilder.initJsrpc());
+      }
+      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
+        auto customBuilder = infoBuilder.initCustom(custom.size());
+        for (size_t n = 0; n < custom.size(); n++) {
+          custom[n].copyTo(customBuilder[n]);
+        }
+      }
+    }
+  }
+}
+
+tracing::SpanOpen tracing::SpanOpen::clone() {
+  constexpr auto cloneInfo = [](kj::Maybe<Info>& info) -> kj::Maybe<tracing::SpanOpen::Info> {
+    return info.map([](Info& info) -> tracing::SpanOpen::Info {
+      KJ_SWITCH_ONEOF(info) {
+        KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+          return fetch.clone();
+        }
+        KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+          return jsrpc.clone();
+        }
+        KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
+          kj::Vector<tracing::Attribute> attrs(custom.size());
+          for (size_t n = 0; n < custom.size(); n++) {
+            attrs.add(custom[n].clone());
+          }
+          return attrs.releaseAsArray();
+        }
+      }
+      KJ_UNREACHABLE;
+    });
+  };
+  return SpanOpen(operationName.map([](auto& str) { return kj::str(str); }), cloneInfo(info));
+}
+
+tracing::SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
+
+tracing::SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {}
+
+void tracing::SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) {
+  builder.setOutcome(outcome);
+}
+
+tracing::SpanClose tracing::SpanClose::clone() {
+  return SpanClose(outcome);
+}
+
+namespace {
+tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
+  auto info = reader.getInfo();
+  switch (info.which()) {
+    case rpc::Trace::Onset::Info::FETCH: {
+      return tracing::FetchEventInfo(info.getFetch());
+    }
+    case rpc::Trace::Onset::Info::JSRPC: {
+      return tracing::JsRpcEventInfo(info.getJsrpc());
+    }
+    case rpc::Trace::Onset::Info::SCHEDULED: {
+      return tracing::ScheduledEventInfo(info.getScheduled());
+    }
+    case rpc::Trace::Onset::Info::ALARM: {
+      return tracing::AlarmEventInfo(info.getAlarm());
+    }
+    case rpc::Trace::Onset::Info::QUEUE: {
+      return tracing::QueueEventInfo(info.getQueue());
+    }
+    case rpc::Trace::Onset::Info::EMAIL: {
+      return tracing::EmailEventInfo(info.getEmail());
+    }
+    case rpc::Trace::Onset::Info::TRACE: {
+      return tracing::TraceEventInfo(info.getTrace());
+    }
+    case rpc::Trace::Onset::Info::HIBERNATABLE_WEB_SOCKET: {
+      return tracing::HibernatableWebSocketEventInfo(info.getHibernatableWebSocket());
+    }
+    case rpc::Trace::Onset::Info::RESUME: {
+      return tracing::Resume(info.getResume());
+    }
+    case rpc::Trace::Onset::Info::CUSTOM: {
+      return tracing::CustomEventInfo();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+kj::Maybe<kj::String> getScriptNameFromReader(const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasScriptName()) {
+    return kj::str(reader.getScriptName());
+  }
+  return kj::none;
+}
+kj::Maybe<kj::Own<ScriptVersion::Reader>> getScriptVersionFromReader(
+    const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasScriptVersion()) {
+    return capnp::clone(reader.getScriptVersion());
+  }
+  return kj::none;
+}
+kj::Maybe<kj::String> getDispatchNamespaceFromReader(const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasDispatchNamespace()) {
+    return kj::str(reader.getDispatchNamespace());
+  }
+  return kj::none;
+}
+kj::Maybe<kj::Array<kj::String>> getScriptTagsFromReader(const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasScriptTags()) {
+    auto tags = reader.getScriptTags();
+    kj::Vector<kj::String> scriptTags(tags.size());
+    for (size_t i = 0; i < tags.size(); i++) {
+      scriptTags.add(kj::str(tags[i]));
+    }
+    return kj::Maybe(scriptTags.releaseAsArray());
+  }
+  return kj::none;
+}
+kj::Maybe<kj::String> getEntrypointFromReader(const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasEntryPoint()) {
+    return kj::str(reader.getEntryPoint());
+  }
+  return kj::none;
+}
+}  // namespace
+
+tracing::Onset::Onset(tracing::Onset::Info&& info,
+    ExecutionModel executionModel,
+    kj::Maybe<kj::String> scriptName,
+    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
+    kj::Maybe<kj::String> dispatchNamespace,
+    kj::Maybe<kj::Array<kj::String>> scriptTags,
+    kj::Maybe<kj::String> entrypoint)
+    : info(kj::mv(info)),
+      executionModel(executionModel),
+      scriptName(kj::mv(scriptName)),
+      scriptVersion(kj::mv(scriptVersion)),
+      dispatchNamespace(kj::mv(dispatchNamespace)),
+      scriptTags(kj::mv(scriptTags)),
+      entrypoint(kj::mv(entrypoint)) {}
+
+tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
+    : info(getInfoFromReader(reader)),
+      executionModel(reader.getExecutionModel()),
+      scriptName(getScriptNameFromReader(reader)),
+      scriptVersion(getScriptVersionFromReader(reader)),
+      dispatchNamespace(getDispatchNamespaceFromReader(reader)),
+      scriptTags(getScriptTagsFromReader(reader)),
+      entrypoint(getEntrypointFromReader(reader)) {}
+
+void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) {
+  builder.setExecutionModel(executionModel);
+  KJ_IF_SOME(name, scriptName) {
+    builder.setScriptName(name);
+  }
+  KJ_IF_SOME(version, scriptVersion) {
+    builder.setScriptVersion(*version);
+  }
+  KJ_IF_SOME(name, dispatchNamespace) {
+    builder.setDispatchNamespace(name);
+  }
+  KJ_IF_SOME(tags, scriptTags) {
+    auto list = builder.initScriptTags(tags.size());
+    for (size_t i = 0; i < tags.size(); i++) {
+      list.set(i, tags[i]);
+    }
+  }
+  KJ_IF_SOME(e, entrypoint) {
+    builder.setEntryPoint(e);
+  }
+  auto infoBuilder = builder.initInfo();
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+      fetch.copyTo(infoBuilder.initFetch());
+    }
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
+      jsrpc.copyTo(infoBuilder.initJsrpc());
+    }
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+      scheduled.copyTo(infoBuilder.initScheduled());
+    }
+    KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+      alarm.copyTo(infoBuilder.initAlarm());
+    }
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
+      queue.copyTo(infoBuilder.initQueue());
+    }
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
+      email.copyTo(infoBuilder.initEmail());
+    }
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
+      trace.copyTo(infoBuilder.initTrace());
+    }
+    KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
+      hws.copyTo(infoBuilder.initHibernatableWebSocket());
+    }
+    KJ_CASE_ONEOF(resume, Resume) {
+      resume.copyTo(infoBuilder.initResume());
+    }
+    KJ_CASE_ONEOF(custom, CustomEventInfo) {
+      infoBuilder.initCustom();
+    }
+  }
+}
+
+tracing::Onset tracing::Onset::clone() {
+  constexpr auto cloneInfo = [](Info& info) -> tracing::Onset::Info {
+    KJ_SWITCH_ONEOF(info) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+        return fetch.clone();
+      }
+      KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
+        return jsrpc.clone();
+      }
+      KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+        return scheduled.clone();
+      }
+      KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+        return alarm.clone();
+      }
+      KJ_CASE_ONEOF(queue, QueueEventInfo) {
+        return queue.clone();
+      }
+      KJ_CASE_ONEOF(email, EmailEventInfo) {
+        return email.clone();
+      }
+      KJ_CASE_ONEOF(trace, TraceEventInfo) {
+        return trace.clone();
+      }
+      KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
+        return hws.clone();
+      }
+      KJ_CASE_ONEOF(resume, Resume) {
+        return resume.clone();
+      }
+      KJ_CASE_ONEOF(custom, CustomEventInfo) {
+        return CustomEventInfo();
+      }
+    }
+    KJ_UNREACHABLE;
+  };
+  return Onset(cloneInfo(info), executionModel,
+      scriptName.map([](auto& name) { return kj::str(name); }),
+      scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
+      dispatchNamespace.map([](auto& ns) { return kj::str(ns); }),
+      scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
+      entrypoint.map([](auto& e) { return kj::str(e); }));
+}
+
+tracing::Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
+    : outcome(outcome),
+      cpuTime(cpuTime),
+      wallTime(wallTime) {}
+
+tracing::Outcome::Outcome(rpc::Trace::Outcome::Reader reader)
+    : outcome(reader.getOutcome()),
+      cpuTime(reader.getCpuTime() * kj::MILLISECONDS),
+      wallTime(reader.getWallTime() * kj::MILLISECONDS) {}
+
+void tracing::Outcome::copyTo(rpc::Trace::Outcome::Builder builder) {
+  builder.setOutcome(outcome);
+  builder.setCpuTime(cpuTime / kj::MILLISECONDS);
+  builder.setWallTime(wallTime / kj::MILLISECONDS);
+}
+
+tracing::Outcome tracing::Outcome::clone() {
+  return Outcome(outcome, cpuTime, wallTime);
+}
+
+namespace {
+tracing::TailEvent::Context getContextFromSpan(
+    const kj::Rc<tracing::InvocationSpanContext>& context) {
+  return tracing::TailEvent::Context(
+      context->getTraceId(), context->getInvocationId(), context->getSpanId());
+}
+
+kj::Maybe<tracing::TailEvent::Context> getParentContextFromSpan(
+    kj::Rc<tracing::InvocationSpanContext>& context) {
+  return context->getParent().map([](const kj::Rc<tracing::InvocationSpanContext>& context) {
+    return getContextFromSpan(context);
+  });
+}
+}  // namespace
+
+tracing::TailEvent::Context::Context(TraceId traceId, TraceId invocationId, kj::uint spanId)
+    : traceId(traceId),
+      invocationId(invocationId),
+      spanId(spanId) {}
+
+tracing::TailEvent::Context::Context(rpc::InvocationSpanContext::Reader reader)
+    : traceId(TraceId::fromCapnp(reader.getTraceId())),
+      invocationId(TraceId::fromCapnp(reader.getInvocationId())),
+      spanId(reader.getSpanId()) {}
+
+void tracing::TailEvent::Context::copyTo(rpc::InvocationSpanContext::Builder builder) {
+  traceId.toCapnp(builder.initTraceId());
+  invocationId.toCapnp(builder.initInvocationId());
+  builder.setSpanId(spanId);
+}
+
+tracing::TailEvent::Context tracing::TailEvent::Context::clone() {
+  return Context(traceId, invocationId, spanId);
+}
+
+tracing::TailEvent::TailEvent(kj::Rc<tracing::InvocationSpanContext>& context,
+    kj::Date timestamp,
+    kj::uint sequence,
+    Event&& event)
+    : context(getContextFromSpan(context)),
+      parentContext(getParentContextFromSpan(context)),
+      timestamp(timestamp),
+      sequence(sequence),
+      event(kj::mv(event)) {}
+
+tracing::TailEvent::TailEvent(Context context,
+    kj::Maybe<Context> parentContext,
+    kj::Date timestamp,
+    kj::uint sequence,
+    Event&& event)
+    : context(kj::mv(context)),
+      parentContext(kj::mv(parentContext)),
+      timestamp(timestamp),
+      sequence(sequence),
+      event(kj::mv(event)) {}
+
+namespace {
+tracing::TailEvent::Context readContextFromTailEvent(rpc::Trace::TailEvent::Reader& reader) {
+  return tracing::TailEvent::Context(reader.getContext());
+}
+
+kj::Maybe<tracing::TailEvent::Context> readParentContextFromTailEvent(
+    rpc::Trace::TailEvent::Reader& reader) {
+  if (!reader.hasParentContext()) return kj::none;
+  return tracing::TailEvent::Context(reader.getParentContext());
+}
+
+tracing::TailEvent::Event readEventFromTailEvent(rpc::Trace::TailEvent::Reader& reader) {
+  auto event = reader.getEvent();
+  switch (event.which()) {
+    case rpc::Trace::TailEvent::Event::ONSET:
+      return tracing::Onset(event.getOnset());
+    case rpc::Trace::TailEvent::Event::OUTCOME:
+      return tracing::Outcome(event.getOutcome());
+    case rpc::Trace::TailEvent::Event::HIBERNATE:
+      return tracing::Hibernate(event.getHibernate());
+    case rpc::Trace::TailEvent::Event::SPAN_OPEN:
+      return tracing::SpanOpen(event.getSpanOpen());
+    case rpc::Trace::TailEvent::Event::SPAN_CLOSE:
+      return tracing::SpanClose(event.getSpanClose());
+    case rpc::Trace::TailEvent::Event::ATTRIBUTE:
+      return tracing::Mark(tracing::Attribute(event.getAttribute()));
+    case rpc::Trace::TailEvent::Event::RETURN:
+      return tracing::Mark(tracing::Return(event.getReturn()));
+    case rpc::Trace::TailEvent::Event::DIAGNOSTIC_CHANNEL_EVENT:
+      return tracing::Mark(tracing::DiagnosticChannelEvent(event.getDiagnosticChannelEvent()));
+    case rpc::Trace::TailEvent::Event::EXCEPTION:
+      return tracing::Mark(tracing::Exception(event.getException()));
+    case rpc::Trace::TailEvent::Event::LOG:
+      return tracing::Mark(tracing::Log(event.getLog()));
+  }
+  KJ_UNREACHABLE;
+}
+}  // namespace
+
+tracing::TailEvent::TailEvent(rpc::Trace::TailEvent::Reader reader)
+    : context(readContextFromTailEvent(reader)),
+      parentContext(readParentContextFromTailEvent(reader)),
+      timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      sequence(reader.getSequence()),
+      event(readEventFromTailEvent(reader)) {}
+
+void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
+  context.copyTo(builder.initContext());
+  KJ_IF_SOME(parent, parentContext) {
+    parent.copyTo(builder.initParentContext());
+  }
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSequence(sequence);
+  auto eventBuilder = builder.initEvent();
+  KJ_SWITCH_ONEOF(event) {
+    KJ_CASE_ONEOF(onset, Onset) {
+      onset.copyTo(eventBuilder.initOnset());
+    }
+    KJ_CASE_ONEOF(outcome, Outcome) {
+      outcome.copyTo(eventBuilder.initOutcome());
+    }
+    KJ_CASE_ONEOF(hibernate, Hibernate) {
+      hibernate.copyTo(eventBuilder.initHibernate());
+    }
+    KJ_CASE_ONEOF(open, SpanOpen) {
+      open.copyTo(eventBuilder.initSpanOpen());
+    }
+    KJ_CASE_ONEOF(close, SpanClose) {
+      close.copyTo(eventBuilder.initSpanClose());
+    }
+    KJ_CASE_ONEOF(mark, Mark) {
+      KJ_SWITCH_ONEOF(mark) {
+        KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
+          diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
+        }
+        KJ_CASE_ONEOF(ex, Exception) {
+          ex.copyTo(eventBuilder.initException());
+        }
+        KJ_CASE_ONEOF(log, Log) {
+          log.copyTo(eventBuilder.initLog());
+        }
+        KJ_CASE_ONEOF(ret, Return) {
+          ret.copyTo(eventBuilder.initReturn());
+        }
+        KJ_CASE_ONEOF(attr, Attribute) {
+          attr.copyTo(eventBuilder.initAttribute());
+        }
+      }
+    }
+  }
+}
+
+tracing::TailEvent tracing::TailEvent::clone() {
+  constexpr auto cloneEvent = [](Event& event) -> Event {
+    KJ_SWITCH_ONEOF(event) {
+      KJ_CASE_ONEOF(onset, Onset) {
+        return onset.clone();
+      }
+      KJ_CASE_ONEOF(outcome, Outcome) {
+        return outcome.clone();
+      }
+      KJ_CASE_ONEOF(hibernate, Hibernate) {
+        return hibernate.clone();
+      }
+      KJ_CASE_ONEOF(open, SpanOpen) {
+        return open.clone();
+      }
+      KJ_CASE_ONEOF(close, SpanClose) {
+        return close.clone();
+      }
+      KJ_CASE_ONEOF(mark, Mark) {
+        KJ_SWITCH_ONEOF(mark) {
+          KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
+            return Mark(diag.clone());
+          }
+          KJ_CASE_ONEOF(ex, Exception) {
+            return Mark(ex.clone());
+          }
+          KJ_CASE_ONEOF(log, Log) {
+            return Mark(log.clone());
+          }
+          KJ_CASE_ONEOF(ret, Return) {
+            return Mark(ret.clone());
+          }
+          KJ_CASE_ONEOF(attr, Attribute) {
+            return Mark(attr.clone());
+          }
+        }
+      }
+    }
+    KJ_UNREACHABLE;
+  };
+  return TailEvent(context.clone(),
+      parentContext.map([](Context& parent) { return parent.clone(); }), timestamp, sequence,
+      cloneEvent(event));
+}
+
+// ======================================================================================
 
 SpanBuilder& SpanBuilder::operator=(SpanBuilder&& other) {
   end();
