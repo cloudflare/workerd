@@ -36,12 +36,12 @@ kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
 namespace workerd::jsg {
 namespace {
 class StringViewWithScratch: public v8_inspector::StringView {
-public:
+ public:
   StringViewWithScratch(v8_inspector::StringView text, kj::Array<char16_t>&& scratch)
       : v8_inspector::StringView(text),
         scratch(kj::mv(scratch)) {}
 
-private:
+ private:
   kj::Array<char16_t> scratch;
 };
 }  // namespace

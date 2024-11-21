@@ -11,7 +11,7 @@
 namespace workerd::api::gpu {
 
 class GPUCommandBuffer: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::CommandBuffer&() const {
     return cmd_buf_;
@@ -19,7 +19,7 @@ public:
   explicit GPUCommandBuffer(wgpu::CommandBuffer b): cmd_buf_(kj::mv(b)) {};
   JSG_RESOURCE_TYPE(GPUCommandBuffer) {}
 
-private:
+ private:
   wgpu::CommandBuffer cmd_buf_;
 };
 

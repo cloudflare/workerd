@@ -26,7 +26,7 @@ static void* getThreadId() {
 }
 
 class IoContext::TimeoutManagerImpl final: public TimeoutManager {
-public:
+ public:
   class TimeoutState;
   using Map = std::map<TimeoutId, TimeoutState>;
   using Iterator = Map::iterator;
@@ -55,7 +55,7 @@ public:
     }
   }
 
-private:
+ private:
   struct IdAndIterator {
     TimeoutId id;
     Iterator it;
@@ -100,7 +100,7 @@ private:
 };
 
 class IoContext::TimeoutManagerImpl::TimeoutState {
-public:
+ public:
   TimeoutState(TimeoutManagerImpl& manager, TimeoutParameters params);
   ~TimeoutState();
 
@@ -476,7 +476,7 @@ kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::Incomin
 }
 
 class IoContext::PendingEvent: public kj::Refcounted {
-public:
+ public:
   explicit PendingEvent(IoContext& context): maybeContext(context) {}
   ~PendingEvent() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PendingEvent);
@@ -1239,7 +1239,7 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
 namespace {
 
 class CacheSerializedInputStream final: public kj::AsyncInputStream {
-public:
+ public:
   CacheSerializedInputStream(
       kj::Own<kj::AsyncInputStream> inner, kj::Own<kj::PromiseFulfiller<void>> fulfiller)
       : inner(kj::mv(inner)),
@@ -1261,7 +1261,7 @@ public:
     return inner->pumpTo(output, amount);
   }
 
-private:
+ private:
   kj::Own<kj::AsyncInputStream> inner;
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
 };

@@ -14,7 +14,7 @@
 namespace workerd::api::gpu {
 
 class GPURenderPipeline: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::RenderPipeline&() const {
     return pipeline_;
@@ -22,7 +22,7 @@ public:
   explicit GPURenderPipeline(wgpu::RenderPipeline p): pipeline_(kj::mv(p)) {};
   JSG_RESOURCE_TYPE(GPURenderPipeline) {}
 
-private:
+ private:
   wgpu::RenderPipeline pipeline_;
 };
 

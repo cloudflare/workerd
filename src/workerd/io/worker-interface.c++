@@ -15,7 +15,7 @@ namespace {
 // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
 // interface the promise resolved to.
 class PromisedWorkerInterface final: public WorkerInterface {
-public:
+ public:
   PromisedWorkerInterface(kj::Promise<kj::Own<WorkerInterface>> promise)
       : promise(promise.then([this](kj::Own<WorkerInterface> result) { worker = kj::mv(result); })
                     .fork()) {}
@@ -83,7 +83,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::ForkedPromise<void> promise;
   kj::Maybe<kj::Own<WorkerInterface>> worker;
 };
@@ -101,7 +101,7 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
 namespace {
 // A Revocable WebSocket wrapper, revoked when revokeProm rejects
 class RevocableWebSocket final: public kj::WebSocket {
-public:
+ public:
   RevocableWebSocket(kj::Own<WebSocket> ws, kj::Promise<void> revokeProm)
       : ws(kj::mv(ws)),
         revokeProm(revokeProm
@@ -165,7 +165,7 @@ public:
     return 0;
   }
 
-private:
+ private:
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> prom) {
     // just to fix the revocation promise return type, serves no purpose otherwise
@@ -192,7 +192,7 @@ private:
 // A HttpResponse that can revoke long-running websocket connections started as part of the
 // response. Ordinary HTTP requests are not revoked.
 class RevocableWebSocketHttpResponse final: public kj::HttpService::Response {
-public:
+ public:
   RevocableWebSocketHttpResponse(kj::HttpService::Response& inner, kj::Promise<void> revokeProm)
       : inner(inner),
         revokeProm(revokeProm.fork()) {}
@@ -208,7 +208,7 @@ public:
     return kj::heap<RevocableWebSocket>(inner.acceptWebSocket(headers), revokeProm.addBranch());
   }
 
-private:
+ private:
   kj::HttpService::Response& inner;
   kj::ForkedPromise<void> revokeProm;
 };
@@ -216,7 +216,7 @@ private:
 // A WorkerInterface that cancels WebSockets when revokeProm is rejected.
 // Currently only supports cancelling for upgrades.
 class RevocableWebSocketWorkerInterface final: public WorkerInterface {
-public:
+ public:
   RevocableWebSocketWorkerInterface(WorkerInterface& worker, kj::Promise<void> revokeProm);
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -233,7 +233,7 @@ public:
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
-private:
+ private:
   WorkerInterface& worker;
   kj::ForkedPromise<void> revokeProm;
 };
@@ -295,7 +295,7 @@ kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
 namespace {
 
 class ErrorWorkerInterface final: public WorkerInterface {
-public:
+ public:
   ErrorWorkerInterface(kj::Exception&& exception): exception(exception) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -331,7 +331,7 @@ public:
     kj::throwFatalException(kj::mv(exception));
   }
 
-private:
+ private:
   kj::Exception exception;
 };
 

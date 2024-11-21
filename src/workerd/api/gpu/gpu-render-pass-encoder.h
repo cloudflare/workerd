@@ -16,7 +16,7 @@
 namespace workerd::api::gpu {
 
 class GPURenderPassEncoder: public jsg::Object {
-public:
+ public:
   explicit GPURenderPassEncoder(wgpu::RenderPassEncoder e): encoder_(kj::mv(e)) {};
   JSG_RESOURCE_TYPE(GPURenderPassEncoder) {
     JSG_METHOD(setPipeline);
@@ -24,7 +24,7 @@ public:
     JSG_METHOD(end);
   }
 
-private:
+ private:
   wgpu::RenderPassEncoder encoder_;
   void setPipeline(jsg::Ref<GPURenderPipeline> pipeline);
   void draw(GPUSize32 vertexCount,

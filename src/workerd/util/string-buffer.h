@@ -18,7 +18,7 @@ namespace workerd {
 template <size_t StackSize>
 class StringBuffer {
 
-public:
+ public:
   KJ_DISALLOW_COPY_AND_MOVE(StringBuffer);
 
   explicit StringBuffer(size_t heapChunkSize)
@@ -40,7 +40,7 @@ public:
     return result;
   }
 
-private:
+ private:
   // minimum heap chunk size
   const size_t heapChunkSize;
 

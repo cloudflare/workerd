@@ -19,7 +19,7 @@ namespace workerd::api {
 using HibernationReader =
     rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams::Reader;
 class HibernatableWebSocketEvent final: public ExtendableEvent {
-public:
+ public:
   explicit HibernatableWebSocketEvent();
 
   static jsg::Ref<HibernatableWebSocketEvent> constructor(kj::String type) = delete;
@@ -51,13 +51,13 @@ public:
     JSG_INHERIT(ExtendableEvent);
   }
 
-private:
+ private:
   Worker::Actor::HibernationManager& getHibernationManager(jsg::Lock& lock);
 };
 
 class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::CustomEvent,
                                                   public kj::Refcounted {
-public:
+ public:
   HibernatableWebSocketCustomEventImpl(uint16_t typeId,
       kj::Own<HibernationReader> params,
       kj::Maybe<Worker::Actor::HibernationManager&> manager = kj::none);
@@ -80,7 +80,7 @@ public:
     KJ_UNIMPLEMENTED("hibernatable web socket event not supported");
   }
 
-private:
+ private:
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams();

@@ -22,7 +22,7 @@ using kj::uint;
 //   turns out to be most convenient. But if you want a separate fulfiller, you can call the
 //   `makeSeparateFulfiller()` method.
 class CrossThreadWaitList {
-public:
+ public:
   struct Options {
     // Enable this if it is common for there to be multiple waiters in the same thread. This avoids
     // sending multiple cross-thread signals in this case, instead sending one signal that all
@@ -68,15 +68,15 @@ public:
   // explicitly.
   kj::Own<kj::CrossThreadPromiseFulfiller<void>> makeSeparateFulfiller();
 
-private:
+ private:
   // Forward declare our private structs so we can name the Map for public use in the source file.
   struct State;
   struct Waiter;
 
-public:
+ public:
   using WaiterMap = kj::HashMap<const CrossThreadWaitList::State*, Waiter*>;
 
-private:
+ private:
   struct Waiter: public kj::Refcounted {
     Waiter(const State& state, kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller);
     ~Waiter() noexcept(false);

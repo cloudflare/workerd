@@ -11,7 +11,7 @@
 namespace workerd::jsg {
 
 class V8PlatformWrapper: public v8::Platform {
-public:
+ public:
   explicit V8PlatformWrapper(v8::Platform& inner): inner(inner) {}
 
   v8::PageAllocator* GetPageAllocator() override {
@@ -71,11 +71,11 @@ public:
     return inner.GetTracingController();
   }
 
-private:
+ private:
   v8::Platform& inner;
 
   class JobTaskWrapper: public v8::JobTask {
-  public:
+   public:
     JobTaskWrapper(std::unique_ptr<v8::JobTask> inner);
 
     void Run(v8::JobDelegate*) override;
@@ -84,7 +84,7 @@ private:
       return inner->GetMaxConcurrency(worker_count);
     }
 
-  private:
+   private:
     std::unique_ptr<v8::JobTask> inner;
   };
 };

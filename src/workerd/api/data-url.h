@@ -8,7 +8,7 @@
 namespace workerd::api {
 
 class DataUrl final {
-public:
+ public:
   static kj::Maybe<DataUrl> tryParse(kj::StringPtr url);
   static kj::Maybe<DataUrl> from(const jsg::Url& url);
 
@@ -27,7 +27,7 @@ public:
     return data.releaseAsBytes();
   }
 
-private:
+ private:
   DataUrl(MimeType mimeType, kj::Array<kj::byte> data)
       : mimeType(kj::mv(mimeType)),
         data(kj::mv(data)) {}

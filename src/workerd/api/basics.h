@@ -24,7 +24,7 @@ class ActorState;
 
 // An implementation of the Web Platform Standard Event API
 class Event: public jsg::Object {
-public:
+ public:
   struct Init final {
     jsg::Optional<bool> bubbles;
     jsg::Optional<bool> cancelable;
@@ -188,7 +188,7 @@ public:
     tracker.trackField("target", target);
   }
 
-private:
+ private:
   kj::StringPtr type;
   kj::String ownType;
   Init init;
@@ -205,7 +205,7 @@ private:
 };
 
 class ExtendableEvent: public Event {
-public:
+ public:
   using Event::Event;
 
   // While ExtendableEvent is defined by the spec to be constructable, there's really not a
@@ -232,7 +232,7 @@ public:
 
 // An implementation of the Web Platform Standard CustomEvent API
 class CustomEvent: public Event {
-public:
+ public:
   struct CustomEventInit final {
     jsg::Optional<bool> bubbles;
     jsg::Optional<bool> cancelable;
@@ -262,13 +262,13 @@ public:
     tracker.trackField("detail", detail);
   }
 
-private:
+ private:
   jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
 };
 
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
-public:
+ public:
   ~EventTarget() noexcept(false);
 
   size_t getHandlerCount(kj::StringPtr type) const;
@@ -362,10 +362,10 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   // RAII-style listener that can be attached to an EventTarget.
   class NativeHandler {
-  public:
+   public:
     using Signature = void(jsg::Ref<Event>);
     NativeHandler(jsg::Lock& js,
         EventTarget& target,
@@ -381,7 +381,7 @@ private:
 
     void visitForGc(jsg::GcVisitor& visitor);
 
-  private:
+   private:
     void detach();
 
     kj::String type;
@@ -504,7 +504,7 @@ private:
 
 // An implementation of the Web Platform Standard AbortSignal API
 class AbortSignal final: public EventTarget {
-public:
+ public:
   enum class Flag { NONE, NEVER_ABORTS };
 
   AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
@@ -596,7 +596,7 @@ public:
     tracker.trackField("reason", reason);
   }
 
-private:
+ private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
@@ -609,7 +609,7 @@ private:
 
 // An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
-public:
+ public:
   explicit AbortController(): signal(jsg::alloc<AbortSignal>()) {}
 
   static jsg::Ref<AbortController> constructor() {
@@ -635,7 +635,7 @@ public:
     tracker.trackField("signal", signal);
   }
 
-private:
+ private:
   jsg::Ref<AbortSignal> signal;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -649,7 +649,7 @@ private:
 // to be global and provides task scheduling APIs. We currently only implement
 // a subset of the API that is being defined.
 class Scheduler final: public jsg::Object {
-public:
+ public:
   struct WaitOptions {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
     JSG_STRUCT(signal);
@@ -664,7 +664,7 @@ public:
     JSG_METHOD(wait);
   }
 
-private:
+ private:
 };
 
 #define EW_BASICS_ISOLATE_TYPES                                                                    \

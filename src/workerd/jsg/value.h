@@ -31,7 +31,7 @@ namespace workerd::jsg {
 // Note that we can't generally change the wrap(context, ...) functions to wrap(isolate, ...)
 // because ResourceWrapper<TW, T>::wrap() needs the context to create new object instances.
 class PrimitiveWrapper {
-public:
+ public:
   static constexpr const char* getName(double*) {
     return "number";
   }
@@ -361,7 +361,7 @@ public:
 // Name
 template <typename TypeWrapper>
 class NameWrapper {
-public:
+ public:
   static constexpr const char* getName(Name*) {
     return "string or Symbol";
   }
@@ -408,7 +408,7 @@ public:
 // This wrapper has an extra wrap() overload that takes an isolate instead of a context, for the
 // same reason discussed in PrimitiveWrapper.
 class StringWrapper {
-public:
+ public:
   static constexpr const char* getName(kj::String*) {
     return "string";
   }
@@ -506,7 +506,7 @@ constexpr bool isUnionType(T*) {
 // TypeWrapper mixin for optionals.
 template <typename TypeWrapper>
 class OptionalWrapper {
-public:
+ public:
   template <typename U>
   static constexpr decltype(auto) getName(Optional<U>*) {
     return TypeWrapper::getName((kj::Decay<U>*)nullptr);
@@ -540,7 +540,7 @@ public:
 // TypeWrapper mixin for lenient optionals.
 template <typename TypeWrapper>
 class LenientOptionalWrapper {
-public:
+ public:
   template <typename U>
   static constexpr decltype(auto) getName(LenientOptional<U>*) {
     return TypeWrapper::getName((kj::Decay<U>*)nullptr);
@@ -580,7 +580,7 @@ public:
 template <typename TypeWrapper>
 class MaybeWrapper {
 
-public:
+ public:
   // The constructor here is a bit of a hack. The config is optional and might not be a JsgConfig
   // object (or convertible to a JsgConfig) if is provided. However, because of the way TypeWrapper
   // inherits MaybeWrapper, we always end up passing a config option (which might be std::nullptr_t)
@@ -622,7 +622,7 @@ public:
     }
   }
 
-private:
+ private:
   const JsgConfig config;
 };
 
@@ -638,7 +638,7 @@ constexpr bool isOneOf<kj::OneOf<T...>> = true;
 // TypeWrapper mixin for variants.
 template <typename TypeWrapper>
 class OneOfWrapper {
-public:
+ public:
   template <typename... U>
   static kj::String getName(kj::OneOf<U...>*) {
     const auto getNameStr = [](auto u) {
@@ -783,7 +783,7 @@ public:
 // TypeWrapper mixin for arrays.
 template <typename TypeWrapper>
 class ArrayWrapper {
-public:
+ public:
   static auto constexpr MAX_STACK = 64;
   template <typename U>
   static constexpr const char* getName(kj::Array<U>*) {
@@ -899,7 +899,7 @@ public:
 // 3. If a method returns an ArrayBuffer, create and return a `kj::Array<kj::byte>`.
 template <typename TypeWrapper>
 class ArrayBufferWrapper {
-public:
+ public:
   static constexpr const char* getName(kj::ArrayPtr<byte>*) {
     return "ArrayBuffer or ArrayBufferView";
   }
@@ -972,7 +972,7 @@ public:
 // TypeWrapper mixin for dictionaries (objects used as string -> value maps).
 template <typename TypeWrapper>
 class DictWrapper {
-public:
+ public:
   template <typename K, typename V>
   static constexpr const char* getName(Dict<V, K>*) {
     return "object";
@@ -1062,7 +1062,7 @@ public:
 
 template <typename TypeWrapper>
 class DateWrapper {
-public:
+ public:
   static constexpr const char* getName(kj::Date*) {
     return "date";
   }
@@ -1087,7 +1087,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::Date toKjDate(double millis) {
     JSG_REQUIRE(isFinite(millis), TypeError,
         "The value cannot be converted because it is not a valid Date.");
@@ -1114,7 +1114,7 @@ private:
 
 template <typename TypeWrapper>
 class NonCoercibleWrapper {
-public:
+ public:
   template <CoercibleType T>
   static auto getName(NonCoercible<T>*) {
     return TypeWrapper::getName((T*)nullptr);
@@ -1178,7 +1178,7 @@ void MemoizedIdentity<T>::visitForGc(GcVisitor& visitor) {
 
 template <typename TypeWrapper>
 class MemoizedIdentityWrapper {
-public:
+ public:
   template <typename T>
   static auto getName(MemoizedIdentity<T>*) {
     return TypeWrapper::getName((T*)nullptr);
@@ -1214,7 +1214,7 @@ public:
 
 template <typename TypeWrapper>
 class IdentifiedWrapper {
-public:
+ public:
   template <typename T>
   static auto getName(Identified<T>*) {
     return TypeWrapper::getName((T*)nullptr);
@@ -1249,7 +1249,7 @@ public:
 
 template <typename TypeWrapper>
 class SelfRefWrapper {
-public:
+ public:
   static auto getName(SelfRef*) {
     return "SelfRef";
   }
@@ -1282,7 +1282,7 @@ class DOMException;
 
 template <typename TypeWrapper>
 class ExceptionWrapper {
-public:
+ public:
   static constexpr const char* getName(kj::Exception*) {
     return "Exception";
   }

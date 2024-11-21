@@ -31,7 +31,7 @@ using api::pyodide::PythonConfig;
 
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApi final: public Worker::Api {
-public:
+ public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
@@ -252,7 +252,7 @@ public:
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig);
 
-private:
+ private:
   struct Impl;
   kj::Own<Impl> impl;
 

@@ -91,7 +91,7 @@ struct CompressionError {
 };
 
 class ZlibContext final {
-public:
+ public:
   explicit ZlibContext(ZlibMode _mode): mode(_mode) {}
   ZlibContext() = default;
   ~ZlibContext() noexcept(false);
@@ -176,7 +176,7 @@ public:
         maxOutputLength);
   };
 
-private:
+ private:
   bool initializeZlib();
   kj::Maybe<CompressionError> setDictionary();
 
@@ -203,7 +203,7 @@ private:
 using CompressionStreamErrorHandler = jsg::Function<void(int, kj::StringPtr, kj::StringPtr)>;
 
 class BrotliContext {
-public:
+ public:
   explicit BrotliContext(ZlibMode _mode): mode(_mode) {}
   KJ_DISALLOW_COPY(BrotliContext);
   void setBuffers(kj::ArrayPtr<kj::byte> input, kj::ArrayPtr<kj::byte> output);
@@ -225,7 +225,7 @@ public:
     JSG_STRUCT(flush, finishFlush, chunkSize, params, maxOutputLength);
   };
 
-protected:
+ protected:
   ZlibMode mode;
   const uint8_t* nextIn = nullptr;
   uint8_t* nextOut = nullptr;
@@ -242,7 +242,7 @@ protected:
 };
 
 class BrotliEncoderContext final: public BrotliContext {
-public:
+ public:
   static const ZlibMode Mode = ZlibMode::BROTLI_ENCODE;
   explicit BrotliEncoderContext(ZlibMode _mode);
 
@@ -256,13 +256,13 @@ public:
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
 
-private:
+ private:
   bool lastResult = false;
   kj::Own<BrotliEncoderStateStruct> state;
 };
 
 class BrotliDecoderContext final: public BrotliContext {
-public:
+ public:
   static const ZlibMode Mode = ZlibMode::BROTLI_DECODE;
   explicit BrotliDecoderContext(ZlibMode _mode);
 
@@ -276,7 +276,7 @@ public:
   kj::Maybe<CompressionError> setParams(int key, uint32_t value);
   kj::Maybe<CompressionError> getError() const;
 
-private:
+ private:
   BrotliDecoderResult lastResult = BROTLI_DECODER_RESULT_SUCCESS;
   BrotliDecoderErrorCode error = BROTLI_DECODER_NO_ERROR;
   kj::String errorString;
@@ -285,13 +285,13 @@ private:
 
 // Implements utilities in support of the Node.js Zlib
 class ZlibUtil final: public jsg::Object {
-public:
+ public:
   ZlibUtil() = default;
   ZlibUtil(jsg::Lock&, const jsg::Url&) {}
 
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
-  public:
+   public:
     explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
@@ -330,7 +330,7 @@ public:
       JSG_METHOD(setErrorHandler);
     }
 
-  protected:
+   protected:
     CompressionContext* context() {
       return &context_;
     }
@@ -342,7 +342,7 @@ public:
     // context to avoid `heap-use-after-free` ASan error.
     CompressionAllocator allocator;
 
-  private:
+   private:
     CompressionContext context_;
     bool initialized = false;
     bool writing = false;
@@ -356,7 +356,7 @@ public:
   };
 
   class ZlibStream final: public CompressionStream<ZlibContext> {
-  public:
+   public:
     explicit ZlibStream(ZlibMode mode): CompressionStream(mode) {}
     KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
     static jsg::Ref<ZlibStream> constructor(ZlibModeValue mode);
@@ -381,7 +381,7 @@ public:
 
   template <typename CompressionContext>
   class BrotliCompressionStream: public CompressionStream<CompressionContext> {
-  public:
+   public:
     explicit BrotliCompressionStream(ZlibMode _mode)
         : CompressionStream<CompressionContext>(_mode) {}
     KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);

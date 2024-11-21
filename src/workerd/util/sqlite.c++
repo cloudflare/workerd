@@ -143,7 +143,7 @@ void disposeSqlite(sqlite3_stmt* stmt) {
 
 template <typename T>
 class SqliteDisposer: public kj::Disposer {
-public:
+ public:
   void disposeImpl(void* pointer) const override {
     disposeSqlite(reinterpret_cast<T*>(pointer));
   }
@@ -2047,12 +2047,12 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 // -----------------------------------------------------------------------------
 
 class SqliteDatabase::Vfs::DefaultLockManager final: public SqliteDatabase::LockManager {
-public:
+ public:
   kj::Own<Lock> lock(kj::PathPtr path, const kj::ReadableFile& mainDatabaseFile) const override {
     return kj::heap<LockImpl>(*this, path);
   }
 
-private:
+ private:
   class LockImpl;
   struct LockState;
   using LockMap = kj::HashMap<kj::PathPtr, LockState*>;
@@ -2080,7 +2080,7 @@ private:
   };
 
   class LockImpl final: public Lock {
-  public:
+   public:
     LockImpl(const DefaultLockManager& lockManager, kj::PathPtr path): lockManager(lockManager) {
       auto mlock = lockManager.lockMap.lockExclusive();
       auto& slot = mlock->findOrCreate(path, [&]() {
@@ -2259,7 +2259,7 @@ private:
       }
     }
 
-  private:
+   private:
     const DefaultLockManager& lockManager;
     kj::Own<LockState> state;
     Level currentLevel = UNLOCKED;

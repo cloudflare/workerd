@@ -62,7 +62,7 @@ struct ActorSqliteTest final {
   kj::Vector<Call> calls;
 
   struct ActorSqliteTestHooks final: public ActorSqlite::Hooks {
-  public:
+   public:
     explicit ActorSqliteTestHooks(ActorSqliteTest& parent): parent(parent) {}
 
     kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {

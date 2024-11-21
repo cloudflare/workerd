@@ -16,7 +16,7 @@
 namespace workerd::api::gpu {
 
 class GPUComputePassEncoder: public jsg::Object {
-public:
+ public:
   explicit GPUComputePassEncoder(wgpu::ComputePassEncoder e): encoder_(kj::mv(e)) {};
   JSG_RESOURCE_TYPE(GPUComputePassEncoder) {
     JSG_METHOD(setPipeline);
@@ -25,7 +25,7 @@ public:
     JSG_METHOD(end);
   }
 
-private:
+ private:
   wgpu::ComputePassEncoder encoder_;
   void setPipeline(jsg::Ref<GPUComputePipeline> pipeline);
   void dispatchWorkgroups(GPUSize32 workgroupCountX,

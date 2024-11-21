@@ -36,7 +36,7 @@ kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
 // construct one of these per process. This performs process-wide initialization of the V8
 // library.
 class V8System {
-public:
+ public:
   // Use the default v8::Platform implementation, as if by:
   //   auto v8Platform = jsg::defaultPlatform();
   //   auto v8System = V8System(*v8Platform);
@@ -58,7 +58,7 @@ public:
   typedef void FatalErrorCallback(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
-private:
+ private:
   kj::Own<v8::Platform> platformInner;
   V8PlatformWrapper platformWrapper;
   friend class IsolateBase;
@@ -69,7 +69,7 @@ private:
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
 // bloat.
 class IsolateBase {
-public:
+ public:
   static IsolateBase& from(v8::Isolate* isolate);
 
   // Unwraps a JavaScript exception as a kj::Exception.
@@ -198,7 +198,7 @@ public:
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
-private:
+ private:
   template <typename TypeWrapper>
   friend class Isolate;
 
@@ -206,7 +206,7 @@ private:
 
   // The internals of a jsg::Ref<T> to be deleted.
   class RefToDelete {
-  public:
+   public:
     RefToDelete(bool strong, kj::Own<void> ownWrappable, Wrappable* wrappable)
         : strong(strong),
           ownWrappable(kj::mv(ownWrappable)),
@@ -221,7 +221,7 @@ private:
     // Default move ctor okay because ownWrappable.get() will be null if moved-from.
     KJ_DISALLOW_COPY(RefToDelete);
 
-  private:
+   private:
     bool strong;
     // Keeps the `wrappable` pointer below valid.
     kj::Own<void> ownWrappable;
@@ -391,7 +391,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 //
 template <typename TypeWrapper>
 class Isolate: public IsolateBase {
-public:
+ public:
   // Construct an isolate that requires configuration. `configuration` is a value that all
   // individual wrappers' configurations must be able to be constructed from. For example, if all
   // wrappers use the same configuration type, then `MetaConfiguration` should just be that type.
@@ -451,7 +451,7 @@ public:
   // constructing a `Lock` on the stack.
   class Lock final: public jsg::Lock {
 
-  public:
+   public:
     // `V8StackScope` must be provided to prove that one has been created on the stack before
     // taking a lock. Any GC'd pointers stored on the stack must be kept within this scope in
     // order for V8's stack-scanning GC to find them.
@@ -609,7 +609,7 @@ public:
       }
     }
 
-  private:
+   private:
     Isolate& jsgIsolate;
 
     virtual kj::Maybe<Object&> getInstance(
@@ -634,7 +634,7 @@ public:
     });
   }
 
-private:
+ private:
   kj::SpaceFor<TypeWrapper> wrapperSpace;
   kj::Own<TypeWrapper> wrapper;  // Needs to be destroyed under lock...
 };
@@ -651,11 +651,11 @@ private:
   typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>        \
       Type##_TypeWrapperBase;                                                                      \
   class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
-  public:                                                                                          \
+   public:                                                                                         \
     using Type##_TypeWrapperBase::TypeWrapper;                                                     \
   };                                                                                               \
   class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
-  public:                                                                                          \
+   public:                                                                                         \
     using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
   }
 

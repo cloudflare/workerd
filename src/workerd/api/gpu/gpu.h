@@ -44,13 +44,13 @@ struct GPURequestAdapterOptions {
 };
 
 class GPU: public jsg::Object {
-public:
+ public:
   explicit GPU();
   JSG_RESOURCE_TYPE(GPU) {
     JSG_METHOD(requestAdapter);
   }
 
-private:
+ private:
   jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>> requestAdapter(
       jsg::Lock&, jsg::Optional<GPURequestAdapterOptions>);
   dawn::native::Instance instance_;

@@ -18,9 +18,9 @@ class Response;
 // Implements the web standard EventSource API
 // https://developer.mozilla.org/en-US/docs/Web/API/EventSource
 class EventSource: public EventTarget {
-public:
+ public:
   class ErrorEvent final: public Event {
-  public:
+   public:
     ErrorEvent(jsg::Lock& js, const jsg::JsValue& error)
         : Event(kj::str("error")),
           error(js, error) {}
@@ -31,7 +31,7 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(error, getError);
     }
 
-  private:
+   private:
     jsg::JsRef<jsg::JsValue> error;
 
     jsg::JsValue getError(jsg::Lock& js) {
@@ -40,7 +40,7 @@ public:
   };
 
   class OpenEvent final: public Event {
-  public:
+   public:
     OpenEvent(): Event(kj::str("open")) {}
     static jsg::Ref<OpenEvent> constructor() = delete;
     JSG_RESOURCE_TYPE(OpenEvent) {
@@ -49,7 +49,7 @@ public:
   };
 
   class MessageEvent final: public Event {
-  public:
+   public:
     explicit MessageEvent(kj::Maybe<kj::String> type,
         kj::String data,
         kj::String lastEventId,
@@ -67,7 +67,7 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(lastEventId, getLastEventId);
     }
 
-  private:
+   private:
     kj::String data;
     kj::String lastEventId;
     kj::Maybe<kj::Array<const char>> origin;
@@ -208,7 +208,7 @@ public:
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   IoContext& context;
   struct FetchImpl {
     jsg::Url url;

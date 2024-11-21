@@ -11,7 +11,7 @@
 namespace workerd::api {
 
 class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamController::Writer {
-public:
+ public:
   explicit WritableStreamDefaultWriter();
 
   ~WritableStreamDefaultWriter() noexcept(false) override;
@@ -76,7 +76,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   struct Initial {};
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
   // WritableStream to prevent it from being GC'd so long as the Writer is available.
@@ -98,7 +98,7 @@ private:
 };
 
 class WritableStream: public jsg::Object {
-public:
+ public:
   explicit WritableStream(IoContext& ioContext,
       kj::Own<WritableStreamSink> sink,
       kj::Maybe<kj::Own<ByteStreamObserver>> observer,
@@ -172,7 +172,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   kj::Maybe<IoContext&> ioContext;
   kj::Own<WritableStreamController> controller;
   kj::Own<WeakRef<WritableStream>> weakRef =

@@ -197,7 +197,7 @@ struct ActorCacheConvenienceWrappers {
     return target.delete_(KJ_MAP(k, keys) { return kj::str(k); }, options);
   }
 
-private:
+ private:
   ActorCacheOps& target;
 };
 

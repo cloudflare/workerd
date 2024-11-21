@@ -5,7 +5,7 @@
 namespace workerd::jsg {
 
 class MemoryRetainerNode final: public v8::EmbedderGraph::Node {
-public:
+ public:
   static constexpr auto PREFIX = "workerd /";
 
   const char* Name() override {
@@ -43,7 +43,7 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(MemoryRetainerNode);
   ~MemoryRetainerNode() noexcept(true) {}
 
-private:
+ private:
   static v8::EmbedderGraph::Node::Detachedness fromDetachedState(MemoryInfoDetachedState state) {
     switch (state) {
       case MemoryInfoDetachedState::UNKNOWN:

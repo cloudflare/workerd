@@ -29,7 +29,7 @@ namespace {
 //   - Or, falling back to proxying if passThroughOnException() was used.
 // - Finish waitUntil() tasks.
 class WorkerEntrypoint final: public WorkerInterface {
-public:
+ public:
   // Call this instead of the constructor. It actually adds a wrapper object around the
   // `WorkerEntrypoint`, but the wrapper still implements `WorkerInterface`.
   //
@@ -71,7 +71,7 @@ public:
   kj::Promise<bool> test() override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
-private:
+ private:
   class ResponseSentTracker;
 
   // Members initialized at startup.
@@ -106,7 +106,7 @@ private:
       kj::Date scheduledTime,
       uint32_t retryCount);
 
-public:  // For kj::heap() only; pretend this is private.
+ public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       ThreadContext& threadContext,
       kj::TaskSet& waitUntilTasks,
@@ -118,7 +118,7 @@ public:  // For kj::heap() only; pretend this is private.
 // Simple wrapper around `HttpService::Response` to let us know if the response was sent
 // already.
 class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Response {
-public:
+ public:
   ResponseSentTracker(kj::HttpService::Response& inner): inner(inner) {}
   KJ_DISALLOW_COPY_AND_MOVE(ResponseSentTracker);
 
@@ -142,7 +142,7 @@ public:
     return inner.acceptWebSocket(headers);
   }
 
-private:
+ private:
   kj::HttpService::Response& inner;
   bool sent = false;
 };

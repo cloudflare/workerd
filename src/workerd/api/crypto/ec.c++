@@ -134,7 +134,7 @@ kj::Maybe<Ec> Ec::tryGetEc(const EVP_PKEY* key) {
 namespace {
 
 class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
-public:
+ public:
   explicit EllipticKey(AsymmetricKeyData keyData,
       CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
       uint rsSize,
@@ -403,7 +403,7 @@ public:
     tracker.trackField("keyAlgorithm", keyAlgorithm);
   }
 
-private:
+ private:
   SubtleCrypto::JsonWebKey exportJwk() const override final {
     auto ec = JSG_REQUIRE_NONNULL(Ec::tryGetEc(getEvpPkey()), DOMOperationError,
         "No elliptic curve data backing key", tryDescribeOpensslErrors());
@@ -798,7 +798,7 @@ namespace {
 // namedCurve field whereas the algorithms in the Secure Curves spec do not. We handle this by
 // keeping track of the algorithm identifier and returning an algorithm struct based on that.
 class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
-public:
+ public:
   explicit EdDsaKey(AsymmetricKeyData keyData, kj::StringPtr keyAlgorithm, bool extractable)
       : AsymmetricKeyCryptoKeyImpl(kj::mv(keyData), extractable),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
@@ -986,7 +986,7 @@ public:
     AsymmetricKeyCryptoKeyImpl::jsgGetMemoryInfo(tracker);
   }
 
-private:
+ private:
   kj::StringPtr keyAlgorithm;
 
   SubtleCrypto::JsonWebKey exportJwk() const override final {

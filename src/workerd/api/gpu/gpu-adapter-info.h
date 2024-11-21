@@ -11,7 +11,7 @@
 namespace workerd::api::gpu {
 
 class GPUAdapterInfo: public jsg::Object {
-public:
+ public:
   explicit GPUAdapterInfo(wgpu::AdapterInfo);
   JSG_RESOURCE_TYPE(GPUAdapterInfo) {
     JSG_READONLY_PROTOTYPE_PROPERTY(vendor, getVendor);
@@ -27,7 +27,7 @@ public:
     tracker.trackField("description", description_);
   }
 
-private:
+ private:
   kj::String vendor_;
   kj::String architecture_;
   kj::String device_;

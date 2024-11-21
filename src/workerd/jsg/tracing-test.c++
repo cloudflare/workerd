@@ -15,7 +15,7 @@ class NumberBoxHolder: public Object {
   // This differs from BoxBox (in jsg-test.h) in that this just holds the exact object you give
   // it, whereas BoxBox likes to create new objects.
 
-public:
+ public:
   explicit NumberBoxHolder(Ref<NumberBox> inner): inner(kj::mv(inner)) {}
 
   Ref<NumberBox> inner;
@@ -32,7 +32,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(inner, getInner);
   }
 
-private:
+ private:
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(inner);
   }
@@ -42,7 +42,7 @@ class GcDetector: public jsg::Object {
   // Object which comes in pairs where one member of the pair can detect if the other has been
   // collected.
 
-public:
+ public:
   ~GcDetector() noexcept(false) {
     KJ_IF_SOME(s, sibling) s.sibling = kj::none;
   }
@@ -68,7 +68,7 @@ public:
 class GcDetectorBox: public jsg::Object {
   // Contains a GcDetector. Useful for testing tracing scenarios.
 
-public:
+ public:
   jsg::Ref<GcDetector> inner = jsg::alloc<GcDetector>();
 
   jsg::Ref<GcDetector> getInner() {
@@ -79,7 +79,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(inner, getInner);
   }
 
-private:
+ private:
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(inner);
   }
@@ -88,7 +88,7 @@ private:
 class ValueBox: public jsg::Object {
   // Contains an arbitrary value.
 
-public:
+ public:
   ValueBox(jsg::Value inner): inner(kj::mv(inner)) {}
 
   static jsg::Ref<ValueBox> constructor(jsg::Value inner) {
@@ -105,7 +105,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(inner, getInner);
   }
 
-private:
+ private:
   void visitForGc(GcVisitor& visitor) {
     visitor.visit(inner);
   }

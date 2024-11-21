@@ -18,7 +18,7 @@ namespace workerd::server {
 // Everything else gets passed through to the wrapped v8::Platform implementation (presumably
 // from `jsg::defaultPlatform()`).
 class WorkerdPlatform final: public v8::Platform {
-public:
+ public:
   // This takes a reference to its wrapped platform because otherwise we would have to destroy a
   // kj::Own in our noexcept destructor (feasible but ugly).
   explicit WorkerdPlatform(v8::Platform& inner): inner(inner) {}
@@ -75,7 +75,7 @@ public:
     return inner.GetTracingController();
   }
 
-private:
+ private:
   v8::Platform& inner;
 };
 

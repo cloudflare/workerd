@@ -35,7 +35,7 @@ constexpr bool isValueLessParameter<TypeWrapper,
 //
 // This is just a trivial pass-through.
 class V8HandleWrapper {
-public:
+ public:
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
   static constexpr const std::type_info& getName(v8::Local<T>*) {
     return typeid(T);
@@ -143,7 +143,7 @@ public:
 };
 
 class UnimplementedWrapper {
-public:
+ public:
   static constexpr const std::type_info& getName(Unimplemented*) {
     return typeid(Unimplemented);
   }
@@ -204,7 +204,7 @@ public:
 // works the same way as the second parameter to `JSG_RESOURCE_TYPE`.
 template <template <typename TypeWrapper> typename Extension>
 class TypeWrapperExtension {
-public:
+ public:
   static const JsgKind JSG_KIND = JsgKind::EXTENSION;
 };
 
@@ -217,7 +217,7 @@ public:
 // `Configuration` can be a reference type.
 template <typename Configuration>
 class InjectConfiguration {
-public:
+ public:
   static const JsgKind JSG_KIND = JsgKind::EXTENSION;
 };
 
@@ -229,7 +229,7 @@ class TypeWrapperBase;
 // Specialization of TypeWrapperBase for types that have a JSG_RESOURCE_TYPE block.
 template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::RESOURCE>: public ResourceWrapper<Self, T> {
-public:
+ public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config): ResourceWrapper<Self, T>(config) {}
 
@@ -240,7 +240,7 @@ public:
 template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::STRUCT>
     : public StructWrapper<Self, T, typename T::template JsgFieldWrappers<Self, T>> {
-public:
+ public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config) {}
 
@@ -262,7 +262,7 @@ class TypeWrapperBase<Self, TypeWrapperExtension<Extension>, JsgKind::EXTENSION>
     return false;  // extension constructor does not take arguments
   }
 
-public:
+ public:
   template <typename MetaConfiguration,
       typename = kj::EnableIf<!sfinae<MetaConfiguration>((Extension<Self>*)nullptr)>>
   TypeWrapperBase(MetaConfiguration& config) {}
@@ -279,7 +279,7 @@ public:
 // Specialization of TypeWrapperBase for InjectConfiguration.
 template <typename Self, typename Configuration>
 class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSION> {
-public:
+ public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config): configuration(kj::fwd<MetaConfiguration>(config)) {}
 
@@ -298,7 +298,7 @@ public:
 
   inline void initTypeWrapper() {}
 
-private:
+ private:
   Configuration configuration;
 };
 
@@ -397,7 +397,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
 
-public:
+ public:
   template <typename MetaConfiguration>
   TypeWrapper(v8::Isolate* isolate, MetaConfiguration&& configuration)
       : TypeWrapperBase<Self, T>(configuration)...,
@@ -562,7 +562,7 @@ public:
 template <typename Self, typename... Types>
 template <typename T>
 class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> {
-public:
+ public:
   v8::Local<v8::Value> wrap(Lock& js, T value) const override {
     auto isolate = js.v8Isolate;
     auto context = js.v8Context();

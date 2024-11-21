@@ -9,7 +9,7 @@ namespace workerd {
 
 namespace {
 class NullIoStream final: public kj::AsyncIoStream {
-public:
+ public:
   void shutdownWrite() override {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
@@ -36,7 +36,7 @@ public:
 };
 
 class MemoryInputStream final: public kj::AsyncInputStream {
-public:
+ public:
   MemoryInputStream(kj::ArrayPtr<const kj::byte> data): data(data) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
@@ -46,12 +46,12 @@ public:
     return toRead;
   }
 
-private:
+ private:
   kj::ArrayPtr<const kj::byte> data;
 };
 
 class NeuterableInputStreamImpl final: public NeuterableInputStream {
-public:
+ public:
   NeuterableInputStreamImpl(kj::AsyncInputStream& inner): inner(&inner) {}
 
   void neuter(kj::Exception exception) override {
@@ -76,7 +76,7 @@ public:
     return canceler.wrap(getStream().pumpTo(output, amount));
   }
 
-private:
+ private:
   kj::OneOf<kj::AsyncInputStream*, kj::Exception> inner;
   kj::Canceler canceler;
 
@@ -94,7 +94,7 @@ private:
 };
 
 class NeuterableIoStreamImpl final: public NeuterableIoStream {
-public:
+ public:
   NeuterableIoStreamImpl(kj::AsyncIoStream& inner): inner(&inner) {}
 
   void neuter(kj::Exception reason) override {
@@ -163,7 +163,7 @@ public:
     return getStream().getFd();
   }
 
-private:
+ private:
   kj::OneOf<kj::AsyncIoStream*, kj::Exception> inner;
   kj::Canceler canceler;
 

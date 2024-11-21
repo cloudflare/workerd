@@ -9,7 +9,7 @@ namespace workerd::api {
 
 // A special binding object that allows for dynamic evaluation.
 class UnsafeEval: public jsg::Object {
-public:
+ public:
   UnsafeEval() = default;
   UnsafeEval(jsg::Lock&, const jsg::Url&) {}
 
@@ -62,7 +62,7 @@ public:
 };
 
 class UnsafeModule: public jsg::Object {
-public:
+ public:
   UnsafeModule() = default;
   UnsafeModule(jsg::Lock&, const jsg::Url&) {}
   jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);

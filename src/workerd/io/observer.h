@@ -23,7 +23,7 @@ class LimitEnforcer;
 class TimerChannel;
 
 class WebSocketObserver: public kj::Refcounted {
-public:
+ public:
   virtual ~WebSocketObserver() noexcept(false) = default;
   // Called when a worker sends a message on this WebSocket (includes close messages).
   virtual void sentMessage(size_t bytes) {};
@@ -39,7 +39,7 @@ public:
 // size of the chunks in the internal queue by incrementing and decrementing each metric in
 // enqueue() and dequeue() respectively.
 class ByteStreamObserver {
-public:
+ public:
   virtual ~ByteStreamObserver() noexcept(false) = default;
   // Called when a chunk of size `bytes` is enqueued on the stream.
   virtual void onChunkEnqueued(size_t bytes) {};
@@ -52,7 +52,7 @@ public:
 //
 // Observing anything is optional. Default implementations of all methods observe nothing.
 class RequestObserver: public kj::Refcounted {
-public:
+ public:
   // This is called when the request is converted to a WebSocket connection terminating in a worker.
   // An optional WebSocket observer may be returned to observe events on the worker's end of the
   // WebSocket connection.
@@ -142,7 +142,7 @@ public:
 };
 
 class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {
-public:
+ public:
   virtual ~IsolateObserver() noexcept(false) {}
 
   // Called when Worker::Isolate is created.
@@ -170,7 +170,7 @@ public:
 
   // Created while parsing a script, to record related metrics.
   class Parse {
-  public:
+   public:
     // Marks the ScriptReplica as finished parsing, which starts reporting of isolate metrics.
     virtual void done() {}
   };
@@ -181,7 +181,7 @@ public:
   }
 
   class LockTiming {
-  public:
+   public:
     // Called by `Isolate::takeAsyncLock()` when it is blocked by a different isolate lock on the
     // same thread.
     virtual void waitingForOtherIsolate(kj::StringPtr id) {}
@@ -223,7 +223,7 @@ public:
   // This is a thin wrapper around LockTiming which efficiently handles the case where we don't
   // want to track timing.
   class LockRecord {
-  public:
+   public:
     explicit LockRecord(kj::Maybe<kj::Own<LockTiming>> lockTimingParam)
         : lockTiming(kj::mv(lockTimingParam)) {
       KJ_IF_SOME(l, lockTiming) l.get()->start();
@@ -243,7 +243,7 @@ public:
       KJ_IF_SOME(l, lockTiming) l.get()->gcEpilogue();
     }
 
-  private:
+   private:
     // The presence of `lockTiming` determines whether or not we need to record timing data. If
     // we have no `lockTiming`, then this LockRecord wrapper is just a big nothingburger.
     kj::Maybe<kj::Own<LockTiming>> lockTiming;
@@ -251,10 +251,10 @@ public:
 };
 
 class WorkerObserver: public kj::AtomicRefcounted {
-public:
+ public:
   // Created while executing a script's global scope, to record related metrics.
   class Startup {
-  public:
+   public:
     virtual void done() {}
   };
 
@@ -269,7 +269,7 @@ public:
 };
 
 class ActorObserver: public kj::Refcounted, public SqliteObserver {
-public:
+ public:
   // Allows the observer to run in the background, periodically making observations. Owner must
   // call this and store the promise. `limitEnforcer` is used to collect CPU usage metrics, it
   // must remain valid as long as the loop is running.
@@ -308,14 +308,14 @@ public:
 // RAII object to call `teardownFinished()` on an observer for you.
 template <typename Observer>
 class TeardownFinishedGuard {
-public:
+ public:
   TeardownFinishedGuard(Observer& ref): ref(ref) {}
   ~TeardownFinishedGuard() noexcept(false) {
     ref.teardownFinished();
   }
   KJ_DISALLOW_COPY_AND_MOVE(TeardownFinishedGuard);
 
-private:
+ private:
   Observer& ref;
 };
 
@@ -325,7 +325,7 @@ private:
 //
 // There is exactly one instance of this class per worker process.
 class FeatureObserver {
-public:
+ public:
   static kj::Own<FeatureObserver> createDefault();
   static void init(kj::Own<FeatureObserver> instance);
   static kj::Maybe<FeatureObserver&> get();

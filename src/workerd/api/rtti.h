@@ -15,7 +15,7 @@
 namespace workerd::api {
 
 class RTTIModule final: public jsg::Object {
-public:
+ public:
   RTTIModule() = default;
   RTTIModule(jsg::Lock&, const jsg::Url&) {}
 

@@ -27,7 +27,7 @@ using kj::uint;
 // when wrapped as a `kj::MutexGuarded<BatchQueue<T>>`.
 template <typename T>
 class BatchQueue {
-public:
+ public:
   // `initialCapacity` is the number of elements of type T for which we should allocate space in the
   // initial buffers, and any reconstructed buffers. Buffers will be reconstructed if they are
   // observed to grow beyond `maxCapacity` after a completed pop operation.
@@ -43,7 +43,7 @@ public:
   // A Batch can be converted to an ArrayPtr<T>. When a Batch is destroyed, it clears the pop
   // buffer and resets the pop buffer capacity to `initialCapacity` if necessary.
   class Batch {
-  public:
+   public:
     Batch() = default;
     Batch(Batch&&) = default;
     Batch& operator=(Batch&&) = default;
@@ -60,7 +60,7 @@ public:
       return *this;
     }
 
-  private:
+   private:
     explicit Batch(BatchQueue& batchQueue): batchQueue(batchQueue) {}
     friend BatchQueue;
 
@@ -104,7 +104,7 @@ public:
     return pushBuffer.size();
   }
 
-private:
+ private:
   kj::Vector<T> pushBuffer;
   kj::Vector<T> popBuffer;
   uint initialCapacity;

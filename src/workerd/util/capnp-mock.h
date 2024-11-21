@@ -66,13 +66,13 @@ kj::String canonicalizeCapnpText(
     capnp::StructSchema schema, kj::StringPtr text, kj::Maybe<kj::StringPtr> capName = kj::none);
 
 class MockClient: public capnp::DynamicCapability::Client {
-public:
+ public:
   using capnp::DynamicCapability::Client::Client;
   MockClient(capnp::DynamicCapability::Client&& client)
       : capnp::DynamicCapability::Client(kj::mv(client)) {}
 
   class ExpectedCall {
-  public:
+   public:
     ExpectedCall(capnp::RemotePromise<capnp::DynamicStruct> promise): promise(kj::mv(promise)) {}
 
     void expectReturns(
@@ -98,7 +98,7 @@ public:
       }).wait(ws);
     }
 
-  private:
+   private:
     capnp::RemotePromise<capnp::DynamicStruct> promise;
   };
 
@@ -115,7 +115,7 @@ public:
 class MockServer: public kj::Refcounted {
   struct ReceivedCall;
 
-public:
+ public:
   MockServer(capnp::InterfaceSchema schema): schema(schema) {}
 
   template <typename T>
@@ -132,7 +132,7 @@ public:
   }
 
   class ExpectedCall {
-  public:
+   public:
     ExpectedCall(ReceivedCall& received): maybeReceived(received) {
       received.expectedCall = this;
     }
@@ -231,7 +231,7 @@ public:
       KJ_ASSERT_AT(maybeReceived == kj::none, location, "call has not been canceled");
     }
 
-  private:
+   private:
     kj::Maybe<ReceivedCall&> maybeReceived;
     ReceivedCall& getReceived(kj::SourceLocation location) {
       return KJ_REQUIRE_NONNULL_AT(maybeReceived, location, "call was unexpectedly canceled");
@@ -280,7 +280,7 @@ public:
     }
   }
 
-private:
+ private:
   capnp::InterfaceSchema schema;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> waiter;
 
@@ -334,7 +334,7 @@ private:
   }
 
   class Server final: public capnp::DynamicCapability::Server {
-  public:
+   public:
     Server(MockServer& mock)
         : capnp::DynamicCapability::Server(mock.schema, {.allowCancellation = true}),
           mock(kj::addRef(mock)) {}
@@ -350,7 +350,7 @@ private:
       return kj::newAdaptedPromise<void, ReceivedCall>(*mock, method, kj::mv(context));
     }
 
-  private:
+   private:
     kj::Own<MockServer> mock;
   };
 };

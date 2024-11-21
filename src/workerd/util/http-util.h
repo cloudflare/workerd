@@ -43,7 +43,7 @@ kj::Promise<kj::HttpClient::WebSocketResponse> attachToWebSocketResponse(
 // A Response kj::HttpService::Response implementation that records the status
 // code on the response.
 class SimpleResponseObserver final: public kj::HttpService::Response {
-public:
+ public:
   SimpleResponseObserver(kj::uint* statusCode, kj::HttpService::Response& response)
       : inner(response),
         statusCode(statusCode) {}
@@ -61,7 +61,7 @@ public:
     return inner.acceptWebSocket(headers);
   }
 
-private:
+ private:
   kj::HttpService::Response& inner;
   kj::uint* statusCode;
 };

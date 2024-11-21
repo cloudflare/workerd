@@ -11,7 +11,7 @@
 namespace workerd::api::public_beta {
 
 class R2MultipartUpload: public jsg::Object {
-public:
+ public:
   struct UploadedPart {
     int partNumber;
     kj::String etag;
@@ -55,12 +55,12 @@ public:
     tracker.trackField("bucket", bucket);
   }
 
-protected:
+ protected:
   kj::String key;
   kj::String uploadId;
   jsg::Ref<R2Bucket> bucket;
 
-private:
+ private:
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(bucket);
   }

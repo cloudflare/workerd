@@ -13,7 +13,7 @@
 namespace workerd::api::gpu {
 
 class GPUSampler: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Sampler&() const {
     return sampler_;
@@ -22,7 +22,7 @@ public:
   explicit GPUSampler(wgpu::Sampler s): sampler_(kj::mv(s)) {};
   JSG_RESOURCE_TYPE(GPUSampler) {}
 
-private:
+ private:
   wgpu::Sampler sampler_;
 };
 

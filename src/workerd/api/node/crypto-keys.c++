@@ -19,7 +19,7 @@ namespace {
 // single secret key can be used for both AES and HMAC, where as
 // Web Crypto requires a separate key for each algorithm.
 class SecretKey final: public CryptoKey::Impl {
-public:
+ public:
   explicit SecretKey(kj::Array<kj::byte> keyData)
       : Impl(true, CryptoKeyUsageSet::privateKeyMask() | CryptoKeyUsageSet::publicKeyMask()),
         keyData(kj::mv(keyData)) {}
@@ -67,7 +67,7 @@ public:
     tracker.trackFieldWithSize("keyData", keyData.size());
   }
 
-private:
+ private:
   ZeroOnFree keyData;
 };
 }  // namespace

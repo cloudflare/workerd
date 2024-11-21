@@ -8,7 +8,7 @@ namespace workerd {
 // Thread-level stuff needed to construct a IoContext. One of these is created for each
 // request-handling thread.
 class ThreadContext {
-public:
+ public:
   struct HeaderIdBundle {
     HeaderIdBundle(kj::HttpHeaderTable::Builder& builder);
 
@@ -57,7 +57,7 @@ public:
     return fiddle;
   }
 
-private:
+ private:
   // NOTE: This timer only updates when entering the event loop!
   kj::Timer& timer;
   kj::EntropySource& entropySource;

@@ -26,10 +26,10 @@ namespace workerd::jsg {
 
 namespace {
 class AdaOwnedStringDisposer: public kj::ArrayDisposer {
-public:
+ public:
   static const AdaOwnedStringDisposer INSTANCE;
 
-protected:
+ protected:
   void disposeImpl(void* firstElement,
       size_t elementSize,
       size_t elementCount,

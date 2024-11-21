@@ -13,7 +13,7 @@
 namespace workerd::api::gpu {
 
 class GPUSupportedFeatures: public jsg::Object {
-public:
+ public:
   explicit GPUSupportedFeatures(kj::Array<wgpu::FeatureName> features);
   JSG_RESOURCE_TYPE(GPUSupportedFeatures) {
     JSG_METHOD(has);
@@ -26,7 +26,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::HashSet<GPUFeatureName> enabled_;
   bool has(kj::String name);
   kj::Array<kj::StringPtr> keys();

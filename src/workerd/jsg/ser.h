@@ -56,7 +56,7 @@ namespace workerd::jsg {
 //   corresponding type handler. This is useful if the serializer wants to, say, assemble a
 //   JSG_STRUCT, convert it into an actual JS object, and serialize that.
 class Serializer final: v8::ValueSerializer::Delegate {
-public:
+ public:
   // "Externals" are values which can be serialized, but refer to some external resource, rather
   // than being self-contained. The way externals are supported depends on the serialization
   // context: passing externals over RPC, for example, is completely different from storing them
@@ -69,7 +69,7 @@ public:
   // doesn't implement any supported subclass, then serialization is not possible, and an
   // appropriate exception should be thrown.
   class ExternalHandler {
-  public:
+   public:
     // Tries to serialize a function as an external. The default implementation throws
     // DataCloneError.
     virtual void serializeFunction(
@@ -164,7 +164,7 @@ public:
     writeLengthDelimited(text.asBytes());
   }
 
-private:
+ private:
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is
   // similar to ThrowDataCloneError() except that it formats the error message itself, and it
   // is expected to be called from KJ-ish code so it throws JsExceptionThrown rather than
@@ -204,10 +204,10 @@ private:
 // Must be allocated on the stack, and requires that a v8::HandleScope exist in
 // the stack.
 class Deserializer final: v8::ValueDeserializer::Delegate {
-public:
+ public:
   // Exactly like Serializer::ExternalHandler, but for Deserializer.
   class ExternalHandler {
-  public:
+   public:
     virtual ~ExternalHandler() noexcept(false) = 0;
   };
 
@@ -258,7 +258,7 @@ public:
     return deser.GetWireFormatVersion();
   }
 
-private:
+ private:
   void init(Lock& js,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
@@ -276,7 +276,7 @@ private:
 
 // Intended for use with v8::ValueSerializer data released into a kj::Array.
 class SerializedBufferDisposer: public kj::ArrayDisposer {
-protected:
+ protected:
   void disposeImpl(void* firstElement,
       size_t elementSize,
       size_t elementCount,

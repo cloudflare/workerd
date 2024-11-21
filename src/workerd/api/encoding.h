@@ -65,7 +65,7 @@ enum class Encoding {
 
 // A Decoder provides the underlying implementation of a TextDecoder.
 class Decoder {
-public:
+ public:
   virtual ~Decoder() noexcept(true) {}
   virtual Encoding getEncoding() = 0;
   virtual kj::Maybe<jsg::JsString> decode(
@@ -76,7 +76,7 @@ public:
 
 // Decoder implementation that provides a fast-track for US-ASCII.
 class AsciiDecoder final: public Decoder {
-public:
+ public:
   AsciiDecoder() = default;
   AsciiDecoder(AsciiDecoder&&) = default;
   AsciiDecoder& operator=(AsciiDecoder&&) = default;
@@ -94,7 +94,7 @@ public:
 // ICU's decoder is fairly comprehensive, covering the full range
 // of encodings required by the Encoding specification.
 class IcuDecoder final: public Decoder {
-public:
+ public:
   IcuDecoder(Encoding encoding, UConverter* converter, bool ignoreBom)
       : encoding(encoding),
         inner(converter),
@@ -114,7 +114,7 @@ public:
 
   void reset() override;
 
-private:
+ private:
   struct ConverterDeleter {
     void operator()(UConverter* pointer) const {
       ucnv_close(pointer);
@@ -131,7 +131,7 @@ private:
 // Implements the TextDecoder interface as prescribed by:
 // https://encoding.spec.whatwg.org/#interface-textdecoder
 class TextDecoder final: public jsg::Object {
-public:
+ public:
   using DecoderImpl = kj::OneOf<AsciiDecoder, IcuDecoder>;
 
   struct ConstructorOptions {
@@ -185,7 +185,7 @@ public:
   kj::Maybe<jsg::JsString> decodePtr(
       jsg::Lock& js, kj::ArrayPtr<const kj::byte> buffer, bool flush);
 
-private:
+ private:
   Decoder& getImpl();
 
   DecoderImpl decoder;
@@ -199,7 +199,7 @@ private:
 // Implements the TextEncoder interface as prescribed by:
 // https://encoding.spec.whatwg.org/#interface-textencoder
 class TextEncoder final: public jsg::Object {
-public:
+ public:
   struct EncodeIntoResult {
     int read;
     int written;

@@ -17,7 +17,7 @@ namespace workerd {
 
 // Implements the HibernationManager class.
 class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
-public:
+ public:
   HibernationManagerImpl(kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType);
   ~HibernationManagerImpl() noexcept(false);
 
@@ -51,7 +51,7 @@ public:
   // Gets the event timeout if set.
   kj::Maybe<uint32_t> getEventTimeout() override;
 
-private:
+ private:
   class HibernatableWebSocket;
 
   kj::Promise<void> handleReadLoop(HibernatableWebSocket& refToHibernatable);
@@ -75,7 +75,7 @@ private:
   // such as `attachment`, `url`, `extensions`, etc. These properties are only read/modified
   // when initiating, or waking from hibernation.
   class HibernatableWebSocket {
-  public:
+   public:
     HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
         kj::ArrayPtr<kj::String> tags,
         HibernationManagerImpl& manager);
@@ -139,7 +139,7 @@ private:
     friend HibernationManagerImpl;
   };
 
-private:
+ private:
   // Removes a HibernatableWebSocket from the HibernationManager's various collections.
   void dropHibernatableWebSocket(HibernatableWebSocket& hib);
 
@@ -203,7 +203,7 @@ private:
   const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 32;
 
   class DisconnectHandler: public kj::TaskSet::ErrorHandler {
-  public:
+   public:
     // We don't need to do anything here; we already handle disconnects in the callee of readLoop().
     void taskFailed(kj::Exception&& exception) override {};
   };

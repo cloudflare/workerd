@@ -204,7 +204,7 @@ struct ProtoContext: public ContextGlobalObject {
     JSG_INSTANCE_PROPERTY(contextProperty, getContextProperty, setContextProperty);
   }
 
-private:
+ private:
   kj::String contextProperty;
 };
 JSG_DECLARE_ISOLATE_TYPE(ProtoIsolate, ProtoContext, NumberBox, BoxBox, ExtendedNumberBox);
@@ -321,7 +321,7 @@ KJ_TEST("jsg::Lock logWarning") {
 // JSG_CALLABLE Test
 struct CallableContext: public ContextGlobalObject {
   struct MyCallable: public Object {
-  public:
+   public:
     static Ref<MyCallable> constructor() {
       return alloc<MyCallable>();
     }

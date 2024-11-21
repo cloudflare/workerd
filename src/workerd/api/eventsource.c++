@@ -15,7 +15,7 @@ namespace workerd::api {
 
 namespace {
 class EventSourceSink final: public WritableStreamSink {
-public:
+ public:
   EventSourceSink(EventSource& eventSource): eventSource(eventSource) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
@@ -83,7 +83,7 @@ public:
     clear();
   }
 
-private:
+ private:
   kj::Maybe<EventSource&> eventSource;
 
   // Retained bytes to be processed in the next write.

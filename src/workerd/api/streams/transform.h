@@ -21,7 +21,7 @@ namespace workerd::api {
 // non-standard behavior. With the transformstream_enable_standard_constructor flag set, however,
 // the TransformStream implements standardized behavior.
 class TransformStream: public jsg::Object {
-public:
+ public:
   explicit TransformStream(jsg::Ref<ReadableStream> readable, jsg::Ref<WritableStream> writable)
       : readable(kj::mv(readable)),
         writable(kj::mv(writable)) {}
@@ -65,7 +65,7 @@ public:
     tracker.trackField("writable", writable);
   }
 
-private:
+ private:
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
 
@@ -79,7 +79,7 @@ private:
 // Unlike standard the TransformStream, the readable side of an IdentityTransformStream
 // supports BYOB reads.
 class IdentityTransformStream: public TransformStream {
-public:
+ public:
   using TransformStream::TransformStream;
 
   struct QueuingStrategy {
@@ -102,7 +102,7 @@ public:
 // We don't currently enforce this limit -- it just convinces the kj-http layer to
 // emit a Content-Length (assuming it doesn't get gzipped or anything).
 class FixedLengthStream: public IdentityTransformStream {
-public:
+ public:
   using IdentityTransformStream::IdentityTransformStream;
 
   static jsg::Ref<FixedLengthStream> constructor(jsg::Lock& js,

@@ -11,7 +11,7 @@
 namespace workerd::api {
 
 class Rsa final {
-public:
+ public:
   static kj::Maybe<Rsa> tryGetRsa(const EVP_PKEY* key);
   Rsa(RSA* rsa);
 
@@ -75,7 +75,7 @@ public:
 
   static bool isRSAPrivateKey(kj::ArrayPtr<const kj::byte> keyData) KJ_WARN_UNUSED_RESULT;
 
-private:
+ private:
   RSA* rsa;
   const BIGNUM* n = nullptr;
   const BIGNUM* e = nullptr;

@@ -21,9 +21,9 @@ namespace workerd::jsg {
 // or replaced. If things are ever changed such that entries are removed/replaced, then
 // we'd likely need to have find return an atomic refcount or something similar.
 class CompileCache {
-public:
+ public:
   class Data {
-  public:
+   public:
     Data(): data(nullptr), length(0), owningPtr(nullptr) {};
     explicit Data(std::shared_ptr<v8::ScriptCompiler::CachedData> cached_data)
         : data(cached_data->data),
@@ -38,7 +38,7 @@ public:
     const uint8_t* data;
     size_t length;
 
-  private:
+   private:
     std::shared_ptr<void> owningPtr;
   };
 
@@ -50,7 +50,7 @@ public:
     return instance;
   }
 
-private:
+ private:
   // The key is the address of the static global that was compiled to produce the CachedData.
   kj::MutexGuarded<kj::HashMap<kj::String, Data>> cache;
 };

@@ -46,7 +46,7 @@ static void v8DcheckError(const char* file, int line, const char* message) {
 }
 
 class PlatformDisposer final: public kj::Disposer {
-public:
+ public:
   virtual void disposeImpl(void* pointer) const override {
     delete static_cast<v8::Platform*>(pointer);
   }

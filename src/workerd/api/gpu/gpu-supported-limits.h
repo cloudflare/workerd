@@ -13,7 +13,7 @@
 namespace workerd::api::gpu {
 
 class GPUSupportedLimits: public jsg::Object {
-public:
+ public:
   explicit GPUSupportedLimits(wgpu::SupportedLimits limits): limits_(kj::mv(limits)) {};
   JSG_RESOURCE_TYPE(GPUSupportedLimits) {
     JSG_READONLY_PROTOTYPE_PROPERTY(maxTextureDimension1D, getMaxTextureDimension1D);
@@ -62,7 +62,7 @@ public:
         maxComputeWorkgroupsPerDimension, getMaxComputeWorkgroupsPerDimension);
   }
 
-private:
+ private:
   wgpu::SupportedLimits limits_;
   uint32_t getMaxTextureDimension1D() {
     return limits_.limits.maxTextureDimension1D;

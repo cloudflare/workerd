@@ -12,7 +12,7 @@
 namespace workerd::api::gpu {
 
 class GPUBuffer: public jsg::Object {
-public:
+ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Buffer&() const {
     return buffer_;
@@ -37,7 +37,7 @@ public:
     tracker.trackField("detachKey", detachKey_);
   }
 
-private:
+ private:
   // https://www.w3.org/TR/webgpu/#buffer-interface
   enum class State {
     Unmapped,

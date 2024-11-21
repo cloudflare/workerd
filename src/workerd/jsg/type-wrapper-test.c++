@@ -34,7 +34,7 @@ template <typename Self>
 class TestExtension {
   // Test manually extending the TypeWrapper with wrap/unwrap functions for a custom type.
 
-public:
+ public:
   static constexpr const char* getName(TestExtensionType*) {
     return "TestExtensionTypeName";
   }
@@ -204,14 +204,14 @@ KJ_TEST("v8::Value subclass unwrapping") {
 
 struct UnimplementedContext: public ContextGlobalObject {
   class UnimplementedConstructor: public Object {
-  public:
+   public:
     static Unimplemented constructor() {
       return Unimplemented();
     }
     JSG_RESOURCE_TYPE(UnimplementedConstructor) {}
   };
   class UnimplementedConstructorParam: public Object {
-  public:
+   public:
     UnimplementedConstructorParam(int i): i(i) {}
     static Ref<UnimplementedConstructorParam> constructor(int i, Unimplemented) {
       return jsg::alloc<UnimplementedConstructorParam>(i);
@@ -247,7 +247,7 @@ struct UnimplementedContext: public ContextGlobalObject {
   }
 
   class UnimplementedProperties: public Object {
-  public:
+   public:
     static Ref<UnimplementedProperties> constructor() {
       return jsg::alloc<UnimplementedProperties>();
     }

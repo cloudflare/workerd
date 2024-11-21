@@ -26,14 +26,14 @@ static constexpr bool IsWithinBounds(size_t off, size_t len, size_t max) noexcep
 class MIMEType;
 
 class MIMEParams final: public jsg::Object {
-private:
+ private:
   template <typename T>
   struct IteratorState final {
     kj::Array<T> values;
     uint index = 0;
   };
 
-public:
+ public:
   MIMEParams(kj::Maybe<MimeType&> mimeType = kj::none);
 
   static jsg::Ref<MIMEParams> constructor();
@@ -66,7 +66,7 @@ public:
     JSG_ITERABLE(entries);
   }
 
-private:
+ private:
   template <typename T>
   static kj::Maybe<T> iteratorNext(jsg::Lock& js, IteratorState<T>& state) {
     if (state.index >= state.values.size()) {
@@ -87,7 +87,7 @@ private:
 };
 
 class MIMEType final: public jsg::Object {
-public:
+ public:
   explicit MIMEType(MimeType inner);
   ~MIMEType() noexcept(false);
   static jsg::Ref<MIMEType> constructor(kj::String input);
@@ -109,7 +109,7 @@ public:
     JSG_METHOD_NAMED(toJSON, toString);
   }
 
-private:
+ private:
   workerd::MimeType inner;
   jsg::Ref<MIMEParams> params;
 };
@@ -155,7 +155,7 @@ private:
   V(WeakSet)
 
 class UtilModule final: public jsg::Object {
-public:
+ public:
   UtilModule() = default;
   UtilModule(jsg::Lock&, const jsg::Url&) {}
 

@@ -36,7 +36,7 @@ class DocumentEnd;
 // HTMLRewriter
 
 class HTMLRewriter: public jsg::Object {
-public:
+ public:
   class Token;
   class TokenScope;
 
@@ -111,7 +111,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
-private:
+ private:
   void visitForGc(jsg::GcVisitor& visitor);
 
   struct Impl;
@@ -138,7 +138,7 @@ private:
 // collecting definitions.
 
 class HTMLRewriter::Token: public jsg::Object {
-public:
+ public:
   virtual void htmlContentScopeEnd() = 0;
 };
 
@@ -158,7 +158,7 @@ struct ContentOptions {
 class Rewriter;
 
 class Element final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_Element;
 
   explicit Element(CType& element, Rewriter& wrapper);
@@ -227,7 +227,7 @@ public:
     // callback function
   }
 
-private:
+ private:
   struct Impl {
     Impl(CType& element, Rewriter&);
     KJ_DISALLOW_COPY_AND_MOVE(Impl);
@@ -244,7 +244,7 @@ private:
 };
 
 class Element::AttributesIterator final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_AttributesIterator;
 
   // lol_html_AttributesIterator has the distinction of being valid only during a content handler
@@ -268,14 +268,14 @@ public:
     JSG_ITERABLE(self);
   }
 
-private:
+ private:
   kj::Maybe<kj::Own<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
 
 class EndTag final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_EndTag;
 
   explicit EndTag(CType& tag, Rewriter&);
@@ -302,14 +302,14 @@ public:
     // Require content to be a string
   }
 
-private:
+ private:
   kj::Maybe<CType&> impl;
 
   void htmlContentScopeEnd() override;
 };
 
 class Comment final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_Comment;
 
   explicit Comment(CType& comment, Rewriter&);
@@ -342,14 +342,14 @@ public:
     // Require content to be a string
   }
 
-private:
+ private:
   kj::Maybe<CType&> impl;
 
   void htmlContentScopeEnd() override;
 };
 
 class Text final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_TextChunk;
 
   explicit Text(CType& text, Rewriter&);
@@ -384,14 +384,14 @@ public:
     // Require content to be a string
   }
 
-private:
+ private:
   kj::Maybe<CType&> impl;
 
   void htmlContentScopeEnd() override;
 };
 
 class Doctype final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_Doctype;
 
   explicit Doctype(CType& doctype, Rewriter&);
@@ -408,14 +408,14 @@ public:
     JSG_TS_ROOT();
   }
 
-private:
+ private:
   kj::Maybe<CType&> impl;
 
   void htmlContentScopeEnd() override;
 };
 
 class DocumentEnd final: public HTMLRewriter::Token {
-public:
+ public:
   using CType = lol_html_DocumentEnd;
 
   explicit DocumentEnd(CType& documentEnd, Rewriter&);
@@ -432,7 +432,7 @@ public:
     // Require content to be a string
   }
 
-private:
+ private:
   kj::Maybe<CType&> impl;
 
   void htmlContentScopeEnd() override;

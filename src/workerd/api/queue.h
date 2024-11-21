@@ -20,7 +20,7 @@ class ExecutionContext;
 
 // A capability to a Worker Queue.
 class WorkerQueue: public jsg::Object {
-public:
+ public:
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this queue.
   WorkerQueue(uint subrequestChannel): subrequestChannel(subrequestChannel) {}
@@ -85,7 +85,7 @@ public:
     JSG_TS_DEFINE(type QueueContentType = "text" | "bytes" | "json" | "v8");
   }
 
-private:
+ private:
   uint subrequestChannel;
 };
 
@@ -152,7 +152,7 @@ struct QueueRetryOptions {
 };
 
 class QueueMessage final: public jsg::Object {
-public:
+ public:
   QueueMessage(jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result);
   QueueMessage(jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result);
 
@@ -191,7 +191,7 @@ public:
     tracker.trackFieldWithSize("IoPtr<QueueEventResult>", sizeof(IoPtr<QueueEventResult>));
   }
 
-private:
+ private:
   kj::String id;
   kj::Date timestamp;
   jsg::JsRef<jsg::JsValue> body;
@@ -204,7 +204,7 @@ private:
 };
 
 class QueueEvent final: public ExtendableEvent {
-public:
+ public:
   // TODO(cleanup): Should we get around the need for this alternative param type by just having the
   // service worker caller provide us with capnp-serialized params?
   struct Params {
@@ -267,7 +267,7 @@ public:
     return completionStatus;
   }
 
-private:
+ private:
   // TODO(perf): Should we store these in a v8 array directly rather than this intermediate kj
   // array to avoid one intermediate copy?
   kj::Array<jsg::Ref<QueueMessage>> messages;
@@ -282,7 +282,7 @@ private:
 
 // Type used when calling a module-exported queue event handler.
 class QueueController final: public jsg::Object {
-public:
+ public:
   QueueController(jsg::Ref<QueueEvent> event): event(kj::mv(event)) {}
 
   kj::ArrayPtr<jsg::Ref<QueueMessage>> getMessages() {
@@ -315,7 +315,7 @@ public:
     tracker.trackField("event", event);
   }
 
-private:
+ private:
   jsg::Ref<QueueEvent> event;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -334,7 +334,7 @@ struct QueueExportedHandler {
 };
 
 class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj::Refcounted {
-public:
+ public:
   QueueCustomEventImpl(
       kj::OneOf<QueueEvent::Params, rpc::EventDispatcher::QueueParams::Reader> params)
       : params(kj::mv(params)) {}
@@ -365,7 +365,7 @@ public:
     KJ_UNIMPLEMENTED("queue event not supported");
   }
 
-private:
+ private:
   kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params;
   QueueEventResult result;
 };

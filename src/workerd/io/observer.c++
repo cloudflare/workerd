@@ -12,7 +12,7 @@ namespace {
 kj::Maybe<kj::Own<FeatureObserver>> featureObserver;
 
 class FeatureObserverImpl final: public FeatureObserver {
-public:
+ public:
   void use(Feature feature) const override {
     auto lock = counts.lockExclusive();
     lock->upsert(feature, 1, [](uint64_t& count, uint64_t value) { count += value; });
@@ -25,7 +25,7 @@ public:
     }
   }
 
-private:
+ private:
   kj::MutexGuarded<kj::HashMap<Feature, uint64_t>> counts;
 };
 

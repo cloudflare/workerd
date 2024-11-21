@@ -119,7 +119,7 @@ class DeferredProxyCoroutine: public kj::_::PromiseNode,
   using InnerCoroutineAdapter =
       typename kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
 
-public:
+ public:
   using Handle = kj::_::stdcoro::coroutine_handle<DeferredProxyCoroutine>;
 
   DeferredProxyCoroutine(kj::SourceLocation location = {})
@@ -191,7 +191,7 @@ public:
   }
   // Required by Awaiter<T>::await_suspend() to support awaiting Promises.
 
-private:
+ private:
   void fulfillOuterPromise() {
     // Fulfill the outer promise if it hasn't already settled.
 

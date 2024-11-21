@@ -586,7 +586,7 @@ jsg::Ref<Headers> Headers::deserialize(
 namespace {
 
 class BodyBufferInputStream final: public ReadableStreamSource {
-public:
+ public:
   BodyBufferInputStream(Body::Buffer buffer)
       : unread(buffer.view),
         ownBytes(kj::mv(buffer.ownBytes)) {}
@@ -618,7 +618,7 @@ public:
     co_return;
   }
 
-private:
+ private:
   kj::ArrayPtr<const byte> unread;
   kj::OneOf<kj::Own<Body::RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
 };

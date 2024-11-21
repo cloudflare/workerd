@@ -19,7 +19,7 @@ enum class ActorGetMode {
 // This is NOT at I/O type. Each global actor namespace binding holds one instance of this which
 // it may call from any thread.
 class ActorIdFactory {
-public:
+ public:
   // Abstract actor ID.
   //
   // This is NOT an I/O type. An ActorId created in one IoContext can be used in other
@@ -28,7 +28,7 @@ public:
   // worker (by the IoChannelFactory for any IoContext), but will detect if the ID is not valid
   // for the specific namespace.
   class ActorId {
-  public:
+   public:
     // Get the string that could be passed to `idFromString()` to recreate this ID.
     virtual kj::String toString() const = 0;
 
