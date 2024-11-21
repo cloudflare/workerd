@@ -31,6 +31,8 @@ using kj::uint;
 typedef rpc::Trace::Log::Level LogLevel;
 typedef rpc::Trace::ExecutionModel ExecutionModel;
 
+class Trace;
+
 namespace tracing {
 // A 128-bit globally unique trace identifier. This will be used for both
 // external and internal tracing. Specifically, for internal tracing, this
@@ -219,6 +221,216 @@ class InvocationSpanContext final: public kj::Refcounted,
 
 kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context);
+
+class FetchEventInfo final {
+ public:
+  class Header;
+
+  explicit FetchEventInfo(
+      kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
+  FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
+
+  class Header final {
+   public:
+    explicit Header(kj::String name, kj::String value);
+    Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
+
+    kj::String name;
+    kj::String value;
+
+    void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
+
+    JSG_MEMORY_INFO(Header) {
+      tracker.trackField("name", name);
+      tracker.trackField("value", value);
+    }
+  };
+
+  kj::HttpMethod method;
+  kj::String url;
+  // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
+  kj::String cfJson;
+  kj::Array<Header> headers;
+
+  void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
+};
+
+class JsRpcEventInfo final {
+ public:
+  explicit JsRpcEventInfo(kj::String methodName);
+  JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
+
+  kj::String methodName;
+
+  void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
+};
+
+class ScheduledEventInfo final {
+ public:
+  explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
+  ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
+
+  double scheduledTime;
+  kj::String cron;
+
+  void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
+};
+
+class AlarmEventInfo final {
+ public:
+  explicit AlarmEventInfo(kj::Date scheduledTime);
+  AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
+
+  kj::Date scheduledTime;
+
+  void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
+};
+
+class QueueEventInfo final {
+ public:
+  explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
+  QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
+
+  kj::String queueName;
+  uint32_t batchSize;
+
+  void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
+};
+
+class EmailEventInfo final {
+ public:
+  explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
+  EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
+
+  kj::String mailFrom;
+  kj::String rcptTo;
+  uint32_t rawSize;
+
+  void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
+};
+
+class TraceEventInfo final {
+ public:
+  class TraceItem;
+
+  explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
+  TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
+
+  class TraceItem final {
+   public:
+    explicit TraceItem(kj::Maybe<kj::String> scriptName);
+    TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
+
+    kj::Maybe<kj::String> scriptName;
+
+    void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
+  };
+
+  kj::Vector<TraceItem> traces;
+
+  void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
+};
+
+class HibernatableWebSocketEventInfo final {
+ public:
+  struct Message {};
+  struct Close {
+    uint16_t code;
+    bool wasClean;
+  };
+  struct Error {};
+
+  using Type = kj::OneOf<Message, Close, Error>;
+
+  explicit HibernatableWebSocketEventInfo(Type type);
+  HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+
+  Type type;
+
+  void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
+  static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+};
+
+class CustomEventInfo final {
+ public:
+  explicit CustomEventInfo() {};
+  CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
+};
+
+class FetchResponseInfo final {
+ public:
+  explicit FetchResponseInfo(uint16_t statusCode);
+  FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
+
+  uint16_t statusCode;
+
+  void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
+};
+
+class DiagnosticChannelEvent final {
+ public:
+  explicit DiagnosticChannelEvent(
+      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
+  DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
+  DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
+  KJ_DISALLOW_COPY(DiagnosticChannelEvent);
+
+  kj::Date timestamp;
+  kj::String channel;
+  kj::Array<kj::byte> message;
+
+  void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
+};
+
+class Log final {
+ public:
+  explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
+  Log(rpc::Trace::Log::Reader reader);
+  Log(Log&&) = default;
+  KJ_DISALLOW_COPY(Log);
+  ~Log() noexcept(false) = default;
+
+  // Only as accurate as Worker's Date.now(), for Spectre mitigation.
+  kj::Date timestamp;
+
+  LogLevel logLevel;
+  // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
+  kj::String message;
+
+  void copyTo(rpc::Trace::Log::Builder builder);
+};
+
+class Exception final {
+ public:
+  explicit Exception(
+      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+  Exception(rpc::Trace::Exception::Reader reader);
+  Exception(Exception&&) = default;
+  KJ_DISALLOW_COPY(Exception);
+  ~Exception() noexcept(false) = default;
+
+  // Only as accurate as Worker's Date.now(), for Spectre mitigation.
+  kj::Date timestamp;
+
+  kj::String name;
+  kj::String message;
+
+  kj::Maybe<kj::String> stack;
+
+  void copyTo(rpc::Trace::Exception::Builder builder);
+};
+
+// EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
+// can also be used to describe the start of a fetch subrequest.
+using EventInfo = kj::OneOf<FetchEventInfo,
+    JsRpcEventInfo,
+    ScheduledEventInfo,
+    AlarmEventInfo,
+    QueueEventInfo,
+    EmailEventInfo,
+    TraceEventInfo,
+    HibernatableWebSocketEventInfo,
+    CustomEventInfo>;
 }  // namespace tracing
 
 enum class PipelineLogLevel {
@@ -258,203 +470,25 @@ class Trace final: public kj::Refcounted {
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
-  class FetchEventInfo {
-   public:
-    class Header;
+#define DEPRECATED_ALIAS(Name)                                                                     \
+  using Name [[deprecated("Use tracing::" #Name " directly")]] = tracing::Name
 
-    explicit FetchEventInfo(
-        kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
-    FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
+  DEPRECATED_ALIAS(FetchEventInfo);
+  DEPRECATED_ALIAS(FetchResponseInfo);
+  DEPRECATED_ALIAS(JsRpcEventInfo);
+  DEPRECATED_ALIAS(ScheduledEventInfo);
+  DEPRECATED_ALIAS(AlarmEventInfo);
+  DEPRECATED_ALIAS(QueueEventInfo);
+  DEPRECATED_ALIAS(EmailEventInfo);
+  DEPRECATED_ALIAS(TraceEventInfo);
+  DEPRECATED_ALIAS(HibernatableWebSocketEventInfo);
+  DEPRECATED_ALIAS(CustomEventInfo);
+  DEPRECATED_ALIAS(DiagnosticChannelEvent);
+  DEPRECATED_ALIAS(Log);
+  DEPRECATED_ALIAS(Exception);
+  DEPRECATED_ALIAS(EventInfo);
 
-    class Header {
-     public:
-      explicit Header(kj::String name, kj::String value);
-      Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
-
-      kj::String name;
-      kj::String value;
-
-      void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
-
-      JSG_MEMORY_INFO(Header) {
-        tracker.trackField("name", name);
-        tracker.trackField("value", value);
-      }
-    };
-
-    kj::HttpMethod method;
-    kj::String url;
-    // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
-    kj::String cfJson;
-    kj::Array<Header> headers;
-
-    void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
-  };
-
-  class JsRpcEventInfo {
-   public:
-    explicit JsRpcEventInfo(kj::String methodName);
-    JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
-
-    kj::String methodName;
-
-    void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
-  };
-
-  class ScheduledEventInfo {
-   public:
-    explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
-    ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
-
-    double scheduledTime;
-    kj::String cron;
-
-    void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
-  };
-
-  class AlarmEventInfo {
-   public:
-    explicit AlarmEventInfo(kj::Date scheduledTime);
-    AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
-
-    kj::Date scheduledTime;
-
-    void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
-  };
-
-  class QueueEventInfo {
-   public:
-    explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
-    QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
-
-    kj::String queueName;
-    uint32_t batchSize;
-
-    void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
-  };
-
-  class EmailEventInfo {
-   public:
-    explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
-    EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
-
-    kj::String mailFrom;
-    kj::String rcptTo;
-    uint32_t rawSize;
-
-    void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
-  };
-
-  class TraceEventInfo {
-   public:
-    class TraceItem;
-
-    explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
-    TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
-
-    class TraceItem {
-     public:
-      explicit TraceItem(kj::Maybe<kj::String> scriptName);
-      TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
-
-      kj::Maybe<kj::String> scriptName;
-
-      void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
-    };
-
-    kj::Vector<TraceItem> traces;
-
-    void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
-  };
-
-  class HibernatableWebSocketEventInfo {
-   public:
-    struct Message {};
-    struct Close {
-      uint16_t code;
-      bool wasClean;
-    };
-    struct Error {};
-
-    using Type = kj::OneOf<Message, Close, Error>;
-
-    explicit HibernatableWebSocketEventInfo(Type type);
-    HibernatableWebSocketEventInfo(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-
-    Type type;
-
-    void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
-    static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
-  };
-
-  class CustomEventInfo {
-   public:
-    explicit CustomEventInfo() {};
-    CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
-  };
-
-  class FetchResponseInfo {
-   public:
-    explicit FetchResponseInfo(uint16_t statusCode);
-    FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
-
-    uint16_t statusCode;
-
-    void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
-  };
-
-  class DiagnosticChannelEvent {
-   public:
-    explicit DiagnosticChannelEvent(
-        kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
-    DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
-    DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
-    KJ_DISALLOW_COPY(DiagnosticChannelEvent);
-
-    kj::Date timestamp;
-    kj::String channel;
-    kj::Array<kj::byte> message;
-
-    void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
-  };
-
-  class Log {
-   public:
-    explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
-    Log(rpc::Trace::Log::Reader reader);
-    Log(Log&&) = default;
-    KJ_DISALLOW_COPY(Log);
-    ~Log() noexcept(false) = default;
-
-    // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-    kj::Date timestamp;
-
-    LogLevel logLevel;
-    // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
-    kj::String message;
-
-    void copyTo(rpc::Trace::Log::Builder builder);
-  };
-
-  class Exception {
-   public:
-    explicit Exception(
-        kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
-    Exception(rpc::Trace::Exception::Reader reader);
-    Exception(Exception&&) = default;
-    KJ_DISALLOW_COPY(Exception);
-    ~Exception() noexcept(false) = default;
-
-    // Only as accurate as Worker's Date.now(), for Spectre mitigation.
-    kj::Date timestamp;
-
-    kj::String name;
-    kj::String message;
-
-    kj::Maybe<kj::String> stack;
-
-    void copyTo(rpc::Trace::Exception::Builder builder);
-  };
+#undef DEPRECATED_ALIAS
 
   // Empty for toplevel worker.
   kj::Maybe<kj::String> stableId;
@@ -462,18 +496,8 @@ class Trace final: public kj::Refcounted {
   // We treat the origin value as "unset".
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
-  typedef kj::OneOf<FetchEventInfo,
-      JsRpcEventInfo,
-      ScheduledEventInfo,
-      AlarmEventInfo,
-      QueueEventInfo,
-      EmailEventInfo,
-      TraceEventInfo,
-      HibernatableWebSocketEventInfo,
-      CustomEventInfo>
-      EventInfo;
-  kj::Maybe<EventInfo> eventInfo;
-  // TODO(someday): Support more event types.
+  kj::Maybe<tracing::EventInfo> eventInfo;
+
   // TODO(someday): Work out what sort of information we may want to convey about the parent
   // trace, if any.
 
@@ -484,18 +508,18 @@ class Trace final: public kj::Refcounted {
   kj::Array<kj::String> scriptTags;
   kj::Maybe<kj::String> entrypoint;
 
-  kj::Vector<Log> logs;
+  kj::Vector<tracing::Log> logs;
   // TODO(o11y): Convert this to actually store spans.
-  kj::Vector<Log> spans;
+  kj::Vector<tracing::Log> spans;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
-  kj::Vector<Exception> exceptions;
+  kj::Vector<tracing::Exception> exceptions;
 
-  kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
+  kj::Vector<tracing::DiagnosticChannelEvent> diagnosticChannelEvents;
 
   ExecutionModel executionModel;
   EventOutcome outcome = EventOutcome::UNKNOWN;
 
-  kj::Maybe<FetchResponseInfo> fetchResponseInfo;
+  kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo;
 
   kj::Duration cpuTime;
   kj::Duration wallTime;
@@ -594,11 +618,11 @@ class WorkerTracer final: public kj::Refcounted {
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
+  void setEventInfo(kj::Date timestamp, tracing::EventInfo&&);
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
-  void setFetchResponseInfo(Trace::FetchResponseInfo&&);
+  void setFetchResponseInfo(tracing::FetchResponseInfo&&);
 
   void setOutcome(EventOutcome outcome);
 

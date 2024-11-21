@@ -1453,7 +1453,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
       if (fetchStatus != 0) {
-        t->setFetchResponseInfo(Trace::FetchResponseInfo(fetchStatus));
+        t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
       }
       t->setCPUTime(0 * kj::MILLISECONDS);
       t->setWallTime(0 * kj::MILLISECONDS);
