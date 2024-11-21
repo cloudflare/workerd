@@ -1842,7 +1842,7 @@ void Worker::handleLog(jsg::Lock& js,
     auto& ioContext = IoContext::current();
     KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
       auto timestamp = ioContext.now();
-      tracer.log(timestamp, level, message());
+      tracer.addLog(timestamp, level, message(), false);
     }
   }
 
