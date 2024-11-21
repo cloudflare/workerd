@@ -586,11 +586,38 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
   friend class WorkerTracer;
 };
 
+// An abstract class that defines shares functionality for tracers
+// that have different characteristics.
+class BaseTracer {
+ public:
+  // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
+  // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
+  // can be at most MAX_USER_SPANS spans in a trace.
+  virtual void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) = 0;
+  // Add a span, which will be represented as a log.
+  virtual void addSpan(const Span& span, kj::String spanContext) = 0;
+
+  virtual void addException(
+      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) = 0;
+
+  virtual void addDiagnosticChannelEvent(
+      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) = 0;
+
+  // Adds info about the event that triggered the trace.  Must not be called more than once.
+  virtual void setEventInfo(kj::Date timestamp, tracing::EventInfo&&) = 0;
+
+  // Adds info about the response. Must not be called more than once, and only
+  // after passing a FetchEventInfo to setEventInfo().
+  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&&) = 0;
+
+  virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
+};
+
 // Records a worker stage's trace information into a Trace object.  When all references to the
 // Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
 // write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
 // via extractTrace.
-class WorkerTracer final: public kj::Refcounted {
+class WorkerTracer final: public kj::Refcounted, public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
@@ -601,34 +628,18 @@ class WorkerTracer final: public kj::Refcounted {
   }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
-  // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
-  // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
-  // can be at most MAX_USER_SPANS spans in a trace.
-  void log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan = false);
-  // Add a span, which will be represented as a log.
-  void addSpan(const Span& span, kj::String spanContext);
-
-  // TODO(soon): Eventually:
-  //void setMetrics(...) // Or get from MetricsCollector::Request directly?
-
-  void addException(
-      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
-
+  void addLog(
+      kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan = false) override;
+  void addSpan(const Span& span, kj::String spanContext) override;
+  void addException(kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override;
   void addDiagnosticChannelEvent(
-      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
-
-  // Adds info about the event that triggered the trace.  Must not be called more than once.
-  void setEventInfo(kj::Date timestamp, tracing::EventInfo&&);
-
-  // Adds info about the response. Must not be called more than once, and only
-  // after passing a FetchEventInfo to setEventInfo().
-  void setFetchResponseInfo(tracing::FetchResponseInfo&&);
-
-  void setOutcome(EventOutcome outcome);
-
-  void setCPUTime(kj::Duration cpuTime);
-
-  void setWallTime(kj::Duration wallTime);
+      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) override;
+  void setEventInfo(kj::Date timestamp, tracing::EventInfo&&) override;
+  void setFetchResponseInfo(tracing::FetchResponseInfo&&) override;
+  void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
 
   // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
   // builder.

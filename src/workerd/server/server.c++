@@ -1455,9 +1455,8 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       if (fetchStatus != 0) {
         t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
       }
-      t->setCPUTime(0 * kj::MILLISECONDS);
-      t->setWallTime(0 * kj::MILLISECONDS);
-      t->setOutcome(outcome);
+      t->setOutcome(
+          outcome, 0 * kj::MILLISECONDS /* cpu time */, 0 * kj::MILLISECONDS /* wall time */);
     }
   }
 
