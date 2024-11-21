@@ -647,6 +647,7 @@ class RsaOaepKey final: public RsaBase {
  private:
   jsg::BufferSource commonEncryptDecrypt(jsg::Lock& js,
       SubtleCrypto::EncryptAlgorithm&& algorithm,
+      kj::ArrayPtr<const kj::byte> data,
       InitFunction init,
       EncryptDecryptFunction encryptDecrypt) const {
     auto pkey = getEvpPkey();
