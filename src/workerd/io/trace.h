@@ -201,16 +201,14 @@ class InvocationSpanContext final: public kj::Refcounted,
 kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context);
 
-class FetchEventInfo final {
- public:
-  class Header;
+struct FetchEventInfo final {
+  struct Header;
 
   explicit FetchEventInfo(
       kj::HttpMethod method, kj::String url, kj::String cfJson, kj::Array<Header> headers);
   FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader);
 
-  class Header final {
-   public:
+  struct Header final {
     explicit Header(kj::String name, kj::String value);
     Header(rpc::Trace::FetchEventInfo::Header::Reader reader);
 
@@ -234,8 +232,7 @@ class FetchEventInfo final {
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
 };
 
-class JsRpcEventInfo final {
- public:
+struct JsRpcEventInfo final {
   explicit JsRpcEventInfo(kj::String methodName);
   JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
 
@@ -244,8 +241,7 @@ class JsRpcEventInfo final {
   void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
 };
 
-class ScheduledEventInfo final {
- public:
+struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
   ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
 
@@ -255,8 +251,7 @@ class ScheduledEventInfo final {
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
 };
 
-class AlarmEventInfo final {
- public:
+struct AlarmEventInfo final {
   explicit AlarmEventInfo(kj::Date scheduledTime);
   AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
 
@@ -265,8 +260,7 @@ class AlarmEventInfo final {
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
 };
 
-class QueueEventInfo final {
- public:
+struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
   QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
 
@@ -276,8 +270,7 @@ class QueueEventInfo final {
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
 };
 
-class EmailEventInfo final {
- public:
+struct EmailEventInfo final {
   explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
   EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
 
@@ -288,15 +281,13 @@ class EmailEventInfo final {
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
 };
 
-class TraceEventInfo final {
- public:
-  class TraceItem;
+struct TraceEventInfo final {
+  struct TraceItem;
 
   explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
   TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
 
-  class TraceItem final {
-   public:
+  struct TraceItem final {
     explicit TraceItem(kj::Maybe<kj::String> scriptName);
     TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
 
@@ -310,14 +301,13 @@ class TraceEventInfo final {
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
 };
 
-class HibernatableWebSocketEventInfo final {
- public:
-  struct Message {};
-  struct Close {
+struct HibernatableWebSocketEventInfo final {
+  struct Message final {};
+  struct Close final {
     uint16_t code;
     bool wasClean;
   };
-  struct Error {};
+  struct Error final {};
 
   using Type = kj::OneOf<Message, Close, Error>;
 
@@ -330,14 +320,12 @@ class HibernatableWebSocketEventInfo final {
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
 };
 
-class CustomEventInfo final {
- public:
+struct CustomEventInfo final {
   explicit CustomEventInfo() {};
   CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
 };
 
-class FetchResponseInfo final {
- public:
+struct FetchResponseInfo final {
   explicit FetchResponseInfo(uint16_t statusCode);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
 
@@ -346,8 +334,7 @@ class FetchResponseInfo final {
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
 };
 
-class DiagnosticChannelEvent final {
- public:
+struct DiagnosticChannelEvent final {
   explicit DiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
   DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
@@ -361,8 +348,7 @@ class DiagnosticChannelEvent final {
   void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
 };
 
-class Log final {
- public:
+struct Log final {
   explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
   Log(rpc::Trace::Log::Reader reader);
   Log(Log&&) = default;
@@ -379,8 +365,7 @@ class Log final {
   void copyTo(rpc::Trace::Log::Builder builder);
 };
 
-class Exception final {
- public:
+struct Exception final {
   explicit Exception(
       kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
   Exception(rpc::Trace::Exception::Reader reader);
