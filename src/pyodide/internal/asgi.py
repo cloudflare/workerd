@@ -36,9 +36,11 @@ def acquire_js_buffer(pybuffer):
 
 def request_to_scope(req, env, ws=False):
     from js import URL
+
     # @app.get("/example")
     # async def example(request: Request):
-    #     request.headers.get("content-type") # this will error if header is not "bytes" as in ASGI spec.
+    #     request.headers.get("content-type")
+    # - this will error if header is not "bytes" as in ASGI spec.
     headers = [(k.lower().encode(), v.encode()) for k, v in req.headers]
     url = URL.new(req.url)
     assert url.protocol[-1] == ":"
@@ -114,8 +116,13 @@ async def process_request(app, req, env):
     result = Future()
 
     async def response_gen():
-        async for data in req.body:
-            yield {"body": data.to_bytes(), "more_body": True, "type": "http.request"}
+        if req.body:
+            async for data in req.body:
+                yield {
+                    "body": data.to_bytes(),
+                    "more_body": True,
+                    "type": "http.request",
+                }
         yield {"body": b"", "more_body": False, "type": "http.request"}
 
     responses = response_gen()

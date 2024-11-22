@@ -4,9 +4,9 @@ from pyodide.ffi import to_js
 def check_encoding(byte_str, encoding="utf-8"):
     try:
         byte_str.decode(encoding)
-        return True
     except UnicodeDecodeError:
         return False
+    return True
 
 
 class Server:
