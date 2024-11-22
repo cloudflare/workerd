@@ -486,3 +486,28 @@ interface WorkerdBootstrap {
   # TODO(someday): Pass cfBlobJson? Currently doesn't matter since the cf blob is only present for
   #   HTTP requests which can be delivered over regular HTTP instead of capnp.
 }
+
+interface PassthroughTraceWorker {
+  struct EventInfo {
+    union {
+      fetch @0 :Trace.FetchEventInfo;
+      jsRpc @1 :Trace.JsRpcEventInfo;
+      scheduled @2 :Trace.ScheduledEventInfo;
+      alarm @3 :Trace.AlarmEventInfo;
+      queue @4 :Trace.QueueEventInfo;
+      custom @5 :Trace.CustomEventInfo;
+      email @6 :Trace.EmailEventInfo;
+      trace @7 :Trace.TraceEventInfo;
+      hibernatableWebSocket @8 :Trace.HibernatableWebSocketEventInfo;
+    }
+  }
+
+  setEventInfo @0 (timestampNs :Int64, eventInfo :EventInfo);
+  addLog @1 (timestampNs :Int64, logLevel :Trace.Log.Level, message :Text, isSpan :Bool);
+  addException @2 (timestampNs :Int64, name :Text, message :Text, stack :Text = null);
+  addDiagnosticChannelEvent @3 (timestampNs :Int64, channel :Text, message :Data);
+  setFetchResponseInfo @4 (info :Trace.FetchResponseInfo);
+  setOutcome @5 (outcome :EventOutcome, cpuTime :UInt64, wallTime :UInt64);
+  # TODO(soon): Uncomment when Span definitions exist in workerd.
+  # addSpan @2 (span :TraceCollector.Span, spanContext :Text);
+}

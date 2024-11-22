@@ -584,11 +584,11 @@ class BaseTracer {
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) = 0;
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  virtual void setEventInfo(kj::Date timestamp, tracing::EventInfo&&) = 0;
+  virtual void setEventInfo(kj::Date timestamp, tracing::EventInfo&& info) = 0;
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
-  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&&) = 0;
+  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&& info) = 0;
 
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
 };
@@ -617,8 +617,8 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
       kj::Maybe<kj::String> stack) override;
   void addDiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) override;
-  void setEventInfo(kj::Date timestamp, tracing::EventInfo&&) override;
-  void setFetchResponseInfo(tracing::FetchResponseInfo&&) override;
+  void setEventInfo(kj::Date timestamp, tracing::EventInfo&& info) override;
+  void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
 
   // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
