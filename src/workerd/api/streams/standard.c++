@@ -7,6 +7,7 @@
 #include "readable.h"
 #include "writable.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/weak-refs.h>
 
@@ -3634,6 +3635,13 @@ void TransformStreamDefaultController::enqueue(jsg::Lock& js, v8::Local<v8::Valu
   bool newBackpressure = readableController.hasBackpressure();
   if (newBackpressure != backpressure) {
     KJ_ASSERT(newBackpressure);
+    // Unfortunately the original implementation forgot to actually set the backpressure
+    // here so the backpressure signaling failed to work correctly. This is unfortunate
+    // because applying the backpressure here could break existing code, so we need to
+    // put the fix behind a compat flag. Doh!
+    if (FeatureFlags::get(js).getFixupTransformStreamBackpressure()) {
+      setBackpressure(js, true);
+    }
   }
 }
 

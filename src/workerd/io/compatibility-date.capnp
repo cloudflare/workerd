@@ -660,4 +660,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # When enabled, use of top-level await syntax in require() calls will be disallowed.
   # The ecosystem and runtimes are moving to a state where top level await in modules
   # is being strongly discouraged.
+
+  fixupTransformStreamBackpressure @68 :Bool
+      $compatEnableFlag("fixup-transform-stream-backpressure")
+      $compatDisableFlag("original-transform-stream-backpressure")
+      $compatEnableDate("2024-12-16");
+  # A bug in the original implementation of TransformStream failed to apply backpressure
+  # correctly. The fix, however, can break existing implementations that don't account
+  # for the bug so we need to put the fix behind a compat flag.
 }
