@@ -12,7 +12,7 @@ const unitTests :Workerd.Config = (
           ( name = "SELF", service = "python-asgi" ),
         ],
         compatibilityDate = "2024-10-01",
-        compatibilityFlags = ["python_workers"],
+        compatibilityFlags = ["python_workers_development"],
       )
     )
   ],
