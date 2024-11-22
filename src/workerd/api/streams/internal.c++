@@ -1020,8 +1020,7 @@ void WritableStreamInternalController::setHighWaterMark(uint64_t highWaterMark) 
 
 jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bool markAsHandled) {
   if (isClosedOrClosing()) {
-    auto reason = js.v8TypeError("This WritableStream has been closed."_kj);
-    return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
+    return js.resolvedPromise();
   }
   if (isPiping()) {
     auto reason = js.v8TypeError("This WritableStream is currently being piped to."_kj);
