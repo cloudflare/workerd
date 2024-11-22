@@ -470,26 +470,6 @@ class Trace final: public kj::Refcounted {
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
-#define DEPRECATED_ALIAS(Name)                                                                     \
-  using Name [[deprecated("Use tracing::" #Name " directly")]] = tracing::Name
-
-  DEPRECATED_ALIAS(FetchEventInfo);
-  DEPRECATED_ALIAS(FetchResponseInfo);
-  DEPRECATED_ALIAS(JsRpcEventInfo);
-  DEPRECATED_ALIAS(ScheduledEventInfo);
-  DEPRECATED_ALIAS(AlarmEventInfo);
-  DEPRECATED_ALIAS(QueueEventInfo);
-  DEPRECATED_ALIAS(EmailEventInfo);
-  DEPRECATED_ALIAS(TraceEventInfo);
-  DEPRECATED_ALIAS(HibernatableWebSocketEventInfo);
-  DEPRECATED_ALIAS(CustomEventInfo);
-  DEPRECATED_ALIAS(DiagnosticChannelEvent);
-  DEPRECATED_ALIAS(Log);
-  DEPRECATED_ALIAS(Exception);
-  DEPRECATED_ALIAS(EventInfo);
-
-#undef DEPRECATED_ALIAS
-
   // Empty for toplevel worker.
   kj::Maybe<kj::String> stableId;
 
