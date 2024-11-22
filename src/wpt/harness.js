@@ -69,9 +69,11 @@ globalThis.promise_test = (callback, message) => {
   }
 
   try {
-    globalThis.promises.push(callback());
+    globalThis.promises.push(callback.call(this));
   } catch (err) {
-    globalThis.errors.push(new AggregateError([err], message));
+    const agg_err = new AggregateError([err], message);
+    agg_err.stack = err.stack;
+    globalThis.errors.push(agg_err);
   }
 };
 
@@ -184,33 +186,49 @@ globalThis.assert_throws_js = (
   }
 };
 
-globalThis.assert_throws_exactly = (expected, fn, message) => {
+globalThis.assert_throws_exactly = (expected, fn, message, assertion_type) => {
   try {
-    fn();
+    fn.call(this);
+    ok(false, assertion_type, message, `${fn} did not throw`);
   } catch (actual) {
+    if (e instanceof AssertionError) {
+      throw e;
+    }
     deepStrictEqual(actual, expected, message);
   }
 };
 
-globalThis.assert_throws_dom = (name, fn, message) => {
-  throws(
-    fn,
-    (err) => {
-      ok(err instanceof DOMException, message);
-      deepStrictEqual(err.name, name, message);
-      return true;
-    },
-    message
-  );
+globalThis.assert_throws_dom = (
+  type,
+  func,
+  description,
+  assertion_type,
+  constructor
+) => {
+  try {
+    fn.call(this);
+    ok(false, assertion_type, description, `${func} did not throw`);
+  } catch (e) {
+    if (e instanceof AssertionError) {
+      throw e;
+    }
+
+    strictEqual(
+      typeof e,
+      'object',
+      `${func} threw with type ${typeof e}, not an object`
+    );
+    strictEqual(e, null, `${func} threw null, not an object`);
+  }
 };
 
-globalThis.test = (callback, message) => {
+globalThis.test = (fn, message) => {
   if (!shouldRunTest(message)) {
     return;
   }
 
   try {
-    callback();
+    fn.call(this);
   } catch (err) {
     globalThis.errors.push(new AggregateError([err], message));
   }
@@ -253,13 +271,9 @@ async function validate(options) {
   const expectedFailures = new Set(options.expectedFailures ?? []);
 
   for (const err of globalThis.errors) {
-    const sanitizedError = new AggregateError(
-      err.errors,
-      sanitizeMessage(err.message)
-    );
     if (!expectedFailures.delete(err.message)) {
-      console.error(sanitizedError);
-      throw new Error('Test failed');
+      err.message = sanitizeMessage(err.message);
+      throw err;
     }
   }
 
