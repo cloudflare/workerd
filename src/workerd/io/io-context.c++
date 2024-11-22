@@ -201,11 +201,13 @@ IoContext::IoContext(ThreadContext& thread,
 IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> contextParam,
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    kj::Rc<tracing::InvocationSpanContext> invocationSpanContext)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
-      ioChannelFactory(kj::mv(ioChannelFactoryParam)) {}
+      ioChannelFactory(kj::mv(ioChannelFactoryParam)),
+      invocationSpanContext(kj::mv(invocationSpanContext)) {}
 
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to

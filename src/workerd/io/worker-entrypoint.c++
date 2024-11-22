@@ -53,7 +53,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::TaskSet& waitUntilTasks,
       bool tunnelExceptions,
       kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-      kj::Maybe<kj::String> cfBlobJson);
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -96,7 +97,8 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<void> ioContextDependency,
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+      kj::Rc<tracing::InvocationSpanContext> invocationSpanContext);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -158,12 +160,21 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-    kj::Maybe<kj::String> cfBlobJson) {
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
+
+  // Create a new InvocationSpanContext for this worker invocation.
+  auto invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
+      maybeTriggerInvocationSpan.map(
+          [](auto& trigger) -> kj::Rc<tracing::InvocationSpanContext>& { return trigger; }),
+      threadContext.getEntropySource());
+
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(cfBlobJson));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
-      kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer));
+      kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
+      kj::mv(invocationSpanContext));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
 }
@@ -186,7 +197,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<void> ioContextDependency,
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer) {
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    kj::Rc<tracing::InvocationSpanContext> invocationSpanContext) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -211,8 +223,8 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     context = newContext();
   }
 
-  incomingRequest = kj::heap<IoContext::IncomingRequest>(
-      kj::mv(context), kj::mv(ioChannelFactory), kj::mv(metrics), kj::mv(workerTracer))
+  incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::mv(context), kj::mv(ioChannelFactory),
+      kj::mv(metrics), kj::mv(workerTracer), kj::mv(invocationSpanContext))
                         .attach(kj::mv(actor));
 }
 
@@ -716,10 +728,12 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-    kj::Maybe<kj::String> cfBlobJson) {
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency), kj::mv(ioChannelFactory),
-      kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(workerTracer), kj::mv(cfBlobJson));
+      kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(workerTracer), kj::mv(cfBlobJson),
+      kj::mv(maybeTriggerInvocationSpan));
 }
 
 }  // namespace workerd
