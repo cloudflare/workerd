@@ -820,7 +820,7 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
           kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
-void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {
+void WorkerTracer::addLog(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {
   if (trace->exceededLogLimit) {
     return;
   }
@@ -854,14 +854,14 @@ void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
   }
   if (isPredictableModeForTest()) {
     // Do not emit span duration information in predictable mode.
-    log(span.endTime, LogLevel::LOG, kj::str("[\"span: ", span.operationName, "\"]"), true);
+    addLog(span.endTime, LogLevel::LOG, kj::str("[\"span: ", span.operationName, "\"]"), true);
   } else {
     // Time since Unix epoch in seconds, with millisecond precision
     double epochSecondsStart = (span.startTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
     double epochSecondsEnd = (span.endTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
     auto message = kj::str("[\"span: ", span.operationName, " ", kj::mv(spanContext), " ",
         epochSecondsStart, " ", epochSecondsEnd, "\"]");
-    log(span.endTime, LogLevel::LOG, kj::mv(message), true);
+    addLog(span.endTime, LogLevel::LOG, kj::mv(message), true);
   }
 
   // TODO(cleanup): Create a function in kj::OneOf to automatically convert to a given type (i.e
@@ -885,7 +885,7 @@ void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
       KJ_UNREACHABLE;
     }();
     kj::String message = kj::str("[\"tag: "_kj, tag.key, " => "_kj, value, "\"]");
-    log(span.endTime, LogLevel::LOG, kj::mv(message), true);
+    addLog(span.endTime, LogLevel::LOG, kj::mv(message), true);
   }
 }
 
@@ -972,15 +972,9 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, tracing::EventInfo&& info) {
   trace->eventInfo = kj::mv(info);
 }
 
-void WorkerTracer::setOutcome(EventOutcome outcome) {
+void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) {
   trace->outcome = outcome;
-}
-
-void WorkerTracer::setCPUTime(kj::Duration cpuTime) {
   trace->cpuTime = cpuTime;
-}
-
-void WorkerTracer::setWallTime(kj::Duration wallTime) {
   trace->wallTime = wallTime;
 }
 
