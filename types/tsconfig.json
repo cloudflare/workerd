@@ -7,7 +7,6 @@
     "moduleResolution": "node",
     "esModuleInterop": true,
     "types": ["node"],
-    "outDir": "dist",
     "sourceMap": true,
     "baseUrl": ".",
     "rootDir": ".",
