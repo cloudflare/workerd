@@ -156,7 +156,11 @@ export type AiTextToImageInput = {
   strength?: number;
   guidance?: number;
 };
-export type AiTextToImageOutput = ReadableStream<Uint8Array>;
+export type AiTextToImageOutput =
+  | ReadableStream<Uint8Array>
+  | {
+      image: string;
+    };
 export declare abstract class BaseAiTextToImage {
   inputs: AiTextToImageInput;
   postProcessedOutputs: AiTextToImageOutput;
@@ -189,6 +193,7 @@ export type AiOptions = {
 export type BaseAiTextClassificationModels =
   "@cf/huggingface/distilbert-sst-2-int8";
 export type BaseAiTextToImageModels =
+  | "@cf/black-forest-labs/flux-1-schnell"
   | "@cf/stabilityai/stable-diffusion-xl-base-1.0"
   | "@cf/runwayml/stable-diffusion-v1-5-inpainting"
   | "@cf/runwayml/stable-diffusion-v1-5-img2img"
