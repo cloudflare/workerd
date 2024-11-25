@@ -352,6 +352,14 @@ bool UrlSearchParams::operator==(const UrlSearchParams& other) const {
   return toStr() == other.toStr();
 }
 
+void UrlSearchParams::reset(kj::Maybe<kj::ArrayPtr<const char>> input) {
+  KJ_IF_SOME(i, input) {
+    ada_search_params_reset(inner, i.begin(), i.size());
+  } else {
+    ada_search_params_reset(inner, nullptr, 0);
+  }
+}
+
 kj::Maybe<UrlSearchParams> UrlSearchParams::tryParse(kj::ArrayPtr<const char> input) {
   ada_url_search_params result = ada_parse_search_params(input.begin(), input.size());
   if (!result) return kj::none;
