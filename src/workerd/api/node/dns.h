@@ -41,7 +41,7 @@ class DnsUtil final: public jsg::Object {
   struct Resolve4Options {
     bool ttl;
 
-    JSG_STRUCT(Resolve4Options);
+    JSG_STRUCT(ttl);
   };
   using Resolve4Callback = jsg::Function<void(void)>;
   void resolve4(
