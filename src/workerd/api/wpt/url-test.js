@@ -129,7 +129,7 @@ export const urlSearchParamsConstructor = run(
 );
 export const urlSearchParamsDelete = run('urlsearchparams-delete.any.js');
 export const urlSearchParamsForEach = run('urlsearchparams-foreach.any.js', {
-  skippedTests: ['For-of Check'],
+  expectedFailures: ['For-of Check'],
 });
 export const urlSearchParamsGetAny = run('urlsearchparams-get.any.js');
 export const urlSearchParamsGetAll = run('urlsearchparams-getall.any.js');

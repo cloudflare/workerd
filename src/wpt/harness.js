@@ -24,16 +24,13 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
+  AssertionError,
   strictEqual,
   notStrictEqual,
   deepStrictEqual,
-  throws,
   ok,
+  throws,
 } from 'node:assert';
-
-globalThis.AssertionError = function AssertionError(message) {
-  this.message = message;
-};
 
 function OptionalFeatureUnsupportedError(message) {
   AssertionError.call(this, message);
@@ -41,6 +38,8 @@ function OptionalFeatureUnsupportedError(message) {
 OptionalFeatureUnsupportedError.prototype = Object.create(
   AssertionError.prototype
 );
+
+globalThis.Window = Object.getPrototypeOf(globalThis).constructor;
 
 globalThis.fetch = async (url) => {
   const { default: data } = await import(url);
@@ -63,17 +62,21 @@ globalThis.subsetTestByKey = (_key, testType, testCallback, testMessage) => {
   return testType(testCallback, testMessage);
 };
 
-globalThis.promise_test = (callback, message) => {
-  if (!shouldRunTest(message)) {
+globalThis.promise_test = async (func, name, properties) => {
+  if (typeof func !== 'function') {
+    properties = name;
+    name = func;
+    func = null;
+  }
+
+  if (!shouldRunTest(name)) {
     return;
   }
 
   try {
-    globalThis.promises.push(callback.call(this));
+    await func.call(this);
   } catch (err) {
-    const agg_err = new AggregateError([err], message);
-    agg_err.stack = err.stack;
-    globalThis.errors.push(agg_err);
+    globalThis.errors.push(new AggregateError([err], name));
   }
 };
 
@@ -101,136 +104,165 @@ globalThis.assert_object_equals = (a, b, message) => {
   deepStrictEqual(a, b, message);
 };
 
-globalThis.assert_implements = (condition, message) => {
-  ok(!!condition, message);
+/**
+ * Assert that a feature is implemented, based on a 'truthy' condition.
+ *
+ * This function should be used to early-exit from tests in which there is
+ * no point continuing without support for a non-optional spec or spec
+ * feature. For example:
+ *
+ *     assert_implements(window.Foo, 'Foo is not supported');
+ *
+ * @param {object} condition The truthy value to test
+ * @param {string} [description] Error description for the case that the condition is not truthy.
+ */
+globalThis.assert_implements = (condition, description) => {
+  ok(!!condition, description);
 };
 
+/**
+ * Assert that an optional feature is implemented, based on a 'truthy' condition.
+ *
+ * This function should be used to early-exit from tests in which there is
+ * no point continuing without support for an explicitly optional spec or
+ * spec feature. For example:
+ *
+ *     assert_implements_optional(video.canPlayType("video/webm"),
+ *                                "webm video playback not supported");
+ *
+ * @param {object} condition The truthy value to test
+ * @param {string} [description] Error description for the case that the condition is not truthy.
+ */
 globalThis.assert_implements_optional = (condition, description) => {
   if (!condition) {
     throw new OptionalFeatureUnsupportedError(description);
   }
 };
 
-// Implementation is taken from Node.js WPT harness.
-// Ref: https://github.com/nodejs/node/blob/8807549ed9f6eaf6842ae56b8ac55ab385951636/test/fixtures/wpt/resources/testharness.js#L2046
-globalThis.assert_throws_js = (
-  constructor,
-  func,
-  description,
-  assertion_type
-) => {
-  try {
-    func.call(this);
-    ok(false, assertion_type, description, '${func} did not throw', {
-      func: func,
-    });
-  } catch (e) {
-    if (e instanceof AssertionError) {
-      throw e;
-    }
-
-    // Basic sanity-checks on the thrown exception.
-    ok(
-      typeof e === 'object',
-      assertion_type,
-      description,
-      '${func} threw ${e} with type ${type}, not an object',
-      { func: func, e: e, type: typeof e }
-    );
-
-    ok(
-      e !== null,
-      assertion_type,
-      description,
-      '${func} threw null, not an object',
-      { func: func }
-    );
-
-    // Basic sanity-check on the passed-in constructor
-    ok(
-      typeof constructor == 'function',
-      assertion_type,
-      description,
-      '${constructor} is not a constructor',
-      { constructor: constructor }
-    );
-    var obj = constructor;
-    while (obj) {
-      if (typeof obj === 'function' && obj.name === 'Error') {
-        break;
-      }
-      obj = Object.getPrototypeOf(obj);
-    }
-    ok(
-      obj != null,
-      assertion_type,
-      description,
-      '${constructor} is not an Error subtype',
-      { constructor: constructor }
-    );
-
-    // And checking that our exception is reasonable
-    ok(
-      e.constructor === constructor && e.name === constructor.name,
-      assertion_type,
-      description,
-      '${func} threw ${actual} (${actual_name}) expected instance of ${expected} (${expected_name})',
-      {
-        func: func,
-        actual: e,
-        actual_name: e.name,
-        expected: constructor,
-        expected_name: constructor.name,
-      }
-    );
-  }
+/**
+ * Asserts if called. Used to ensure that a specific code path is
+ * not taken e.g. that an error event isn't fired.
+ *
+ * @param {string} [description] - Description of the condition being tested.
+ */
+globalThis.assert_unreached = (description) => {
+  ok(false, `Reached unreachable code: ${description}`);
 };
 
-globalThis.assert_throws_exactly = (expected, fn, message, assertion_type) => {
-  try {
-    fn.call(this);
-    ok(false, assertion_type, message, `${fn} did not throw`);
-  } catch (actual) {
-    if (e instanceof AssertionError) {
-      throw e;
-    }
-    deepStrictEqual(actual, expected, message);
-  }
+/**
+ * Assert a JS Error with the expected constructor is thrown.
+ *
+ * @param {object} constructor The expected exception constructor.
+ * @param {Function} func Function which should throw.
+ * @param {string} [description] Error description for the case that the error is not thrown.
+ */
+globalThis.assert_throws_js = (constructor, func, description) => {
+  throws(
+    () => {
+      func.call(this);
+    },
+    constructor,
+    description
+  );
 };
 
+/**
+ * Assert the provided value is thrown.
+ *
+ * @param {value} exception The expected exception.
+ * @param {Function} fn Function which should throw.
+ * @param {string} [description] Error description for the case that the error is not thrown.
+ */
+globalThis.assert_throws_exactly = (exception, fn, description) => {
+  throws(
+    () => {
+      fn.call(this);
+    },
+    exception,
+    description
+  );
+};
+
+/**
+ * Assert a DOMException with the expected type is thrown.
+ *
+ * There are two ways of calling assert_throws_dom:
+ *
+ * 1) If the DOMException is expected to come from the current global, the
+ * second argument should be the function expected to throw and a third,
+ * optional, argument is the assertion description.
+ *
+ * 2) If the DOMException is expected to come from some other global, the
+ * second argument should be the DOMException constructor from that global,
+ * the third argument the function expected to throw, and the fourth, optional,
+ * argument the assertion description.
+ *
+ * @param {number|string} type - The expected exception name or
+ * code.  See the `table of names and codes
+ * <https://webidl.spec.whatwg.org/#dfn-error-names-table>`_. If a
+ * number is passed it should be one of the numeric code values in
+ * that table (e.g. 3, 4, etc).  If a string is passed it can
+ * either be an exception name (e.g. "HierarchyRequestError",
+ * "WrongDocumentError") or the name of the corresponding error
+ * code (e.g. "``HIERARCHY_REQUEST_ERR``", "``WRONG_DOCUMENT_ERR``").
+ * @param {Function} descriptionOrFunc - The function expected to
+ * throw (if the exception comes from another global), or the
+ * optional description of the condition being tested (if the
+ * exception comes from the current global).
+ * @param {string} [maybeDescription] - Description of the condition
+ * being tested (if the exception comes from another global).
+ *
+ */
 globalThis.assert_throws_dom = (
   type,
-  func,
-  description,
-  assertion_type,
-  constructor
+  funcOrConstructor,
+  descriptionOrFunc,
+  maybeDescription
 ) => {
-  try {
-    fn.call(this);
-    ok(false, assertion_type, description, `${func} did not throw`);
-  } catch (e) {
-    if (e instanceof AssertionError) {
-      throw e;
-    }
-
-    strictEqual(
-      typeof e,
-      'object',
-      `${func} threw with type ${typeof e}, not an object`
+  let constructor, func, description;
+  if (funcOrConstructor.name === 'DOMException') {
+    constructor = funcOrConstructor;
+    func = descriptionOrFunc;
+    description = maybeDescription;
+  } else {
+    constructor = this.DOMException;
+    func = funcOrConstructor;
+    description = descriptionOrFunc;
+    ok(
+      maybeDescription === undefined,
+      'Too many args passed to no-constructor version of assert_throws_dom'
     );
-    strictEqual(e, null, `${func} threw null, not an object`);
   }
+
+  throws(
+    () => {
+      func.call(this);
+    },
+    constructor,
+    description
+  );
 };
 
-globalThis.test = (fn, message) => {
-  if (!shouldRunTest(message)) {
+/**
+ * Create a synchronous test
+ *
+ * @param {TestFunction} func - Test function. This is executed
+ * immediately. If it returns without error, the test status is
+ * set to ``PASS``. If it throws an :js:class:`AssertionError`, or
+ * any other exception, the test status is set to ``FAIL``
+ * (typically from an `assert` function).
+ * @param {String} name - Test name. This must be unique in a
+ * given file and must be invariant between runs.
+ */
+globalThis.test = (func, name) => {
+  if (!shouldRunTest(name)) {
     return;
   }
 
   try {
-    fn.call(this);
+    func.call(this);
   } catch (err) {
-    globalThis.errors.push(new AggregateError([err], message));
+    globalThis.errors.push(new AggregateError([err], name));
   }
 };
 
@@ -250,7 +282,6 @@ function shouldRunTest(message) {
 
 function prepare(options) {
   globalThis.errors = [];
-  globalThis.promises = [];
   globalThis.testOptions = options;
 }
 
@@ -260,14 +291,19 @@ function sanitizeMessage(message) {
   // FFFE, and FFFF".
   // See https://www.w3.org/TR/REC-xml/#NT-Char
   return message.replace(
-    /[\u{D800}-\u{DFFF}\u{FFFE}\u{FFFF}]/gu,
-    (char) => '\\u' + char.charCodeAt().toString(16).padStart(4, '0')
+    /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
+    function (_, low, prefix, high) {
+      let output = prefix || ''; // prefix may be undefined
+      const string = low || high; // only one of these alternates can match
+      for (let i = 0; i < string.length; i++) {
+        output += 'U+' + string[i].charCodeAt(0).toString(16);
+      }
+      return output;
+    }
   );
 }
 
 async function validate(options) {
-  await Promise.all(globalThis.promises);
-
   const expectedFailures = new Set(options.expectedFailures ?? []);
 
   for (const err of globalThis.errors) {
@@ -278,6 +314,7 @@ async function validate(options) {
   }
 
   if (expectedFailures.size > 0) {
+    console.info('Expected failures', expectedFailures);
     throw new Error(
       'Expected failures but test succeeded. Please update the test config file.'
     );
