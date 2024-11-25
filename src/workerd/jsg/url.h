@@ -199,6 +199,8 @@ class UrlSearchParams final {
     tracker.trackField("inner", toStr());
   }
 
+  void reset(kj::Maybe<kj::ArrayPtr<const char>> input);
+
  private:
   UrlSearchParams(kj::Own<void> inner);
   kj::Own<void> inner;
