@@ -9,11 +9,13 @@ wd_cc_library(
         "crypto.c++",
         "crypto-keys.c++",
         "diagnostics-channel.c++",
+        "dns.c++",
         "zlib-util.c++",
     ],
     hdrs = [
         "crypto.h",
         "diagnostics-channel.h",
+        "dns.h",
         "node.h",
         "zlib-util.h",
     ],
@@ -242,4 +244,10 @@ wd_test(
         ":debug_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+)
+
+wd_test(
+    src = "tests/dns-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/dns-nodejs-test.js"],
 )
