@@ -4,7 +4,7 @@
 
 import { run } from 'harness';
 
-export const urlpatternCompare = run('urlpattern-compare-tests.js', {
+export const urlpatternCompareTests = run('urlpattern-compare-tests.js', {
   expectedFailures: [
     // Each of these *ought* to pass. They are included here because we
     // know they currently do not. Each needs to be investigated.
@@ -45,7 +45,7 @@ export const urlpatternHasRegexGroups = run(
     ],
   }
 );
-export const urlpattern = run('urlpatterntests.js', {
+export const urlPatternTests = run('urlpatterntests.js', {
   expectedFailures: [
     // Each of these *ought* to pass. They are included here because we
     // know they currently do not. Each needs to be investigated.

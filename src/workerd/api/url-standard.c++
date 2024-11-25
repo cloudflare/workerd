@@ -225,7 +225,7 @@ void URLSearchParams::update() {
 void URLSearchParams::reset() {
   KJ_IF_SOME(url, maybeUrl) {
     auto search = kj::Maybe(url.inner.getSearch());
-    inner = initFromSearch(search);
+    inner.reset(search);
   }
 }
 
