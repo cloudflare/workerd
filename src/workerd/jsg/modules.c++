@@ -6,8 +6,6 @@
 #include "jsg.h"
 #include "setup.h"
 
-#include <workerd/util/autogate.h>
-
 #include <kj/mutex.h>
 
 #include <set>
@@ -395,14 +393,12 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     contentStr = jsg::v8Str(js.v8Isolate, content);
   }
 
-  if (util::Autogate::isEnabled(util::AutogateKey::COMPILE_CACHE_FOR_BUILTINS)) {
-    if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
-      auto cached = std::make_unique<v8::ScriptCompiler::CachedData>(
-          compileCache.begin(), compileCache.size());
-      v8::ScriptCompiler::Source source(contentStr, origin, cached.release());
-      return jsg::check(v8::ScriptCompiler::CompileModule(
-          js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache));
-    }
+  if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
+    auto cached =
+        std::make_unique<v8::ScriptCompiler::CachedData>(compileCache.begin(), compileCache.size());
+    v8::ScriptCompiler::Source source(contentStr, origin, cached.release());
+    return jsg::check(v8::ScriptCompiler::CompileModule(
+        js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache));
   }
 
   v8::ScriptCompiler::Source source(contentStr, origin);
