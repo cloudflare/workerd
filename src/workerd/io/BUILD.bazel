@@ -264,6 +264,7 @@ wd_capnp_library(
     deps = [
         ":outcome_capnp",
         ":script-version_capnp",
+        ":trace_capnp",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
 )
