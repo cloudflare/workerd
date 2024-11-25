@@ -19,7 +19,7 @@ You might use it:
 
 * **Standard-based:** Built-in APIs are based on web platform standards, such as `fetch()`.
 
-* **Nanoservices:** Split your application into components that are decoupled and independently-deployable like microservices, but with performance of a local function call. When one nanoservice calls another, the callee runs in the same thread and process.
+* **Nanoservices:** Split your application into components that are decoupled and independently-deployable like microservices, but with performance of a local function call. When one nanoservice calls another, the call runs in the same thread and process.
 
 * **Homogeneous deployment:** Instead of deploying different microservices to different machines in your cluster, deploy all your nanoservices to every machine in the cluster, making load balancing much easier.
 
