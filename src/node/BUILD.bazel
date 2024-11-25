@@ -13,6 +13,7 @@ wd_ts_bundle(
         "*.ts",
         "*.js",
         "assert/*.ts",
+        "dns/*.ts",
         "stream/*.js",
         "path/*.ts",
         "util/*.ts",
