@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/outcome.capnp.h>
+#include <workerd/io/trace.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
@@ -94,7 +95,7 @@ class TraceId final {
   // Replicates W3C Serialization
   kj::String toW3C() const;
 
-  // Creates a random Trace Id, optionally usig a given entropy source. If an
+  // Creates a random Trace Id, optionally using a given entropy source. If an
   // entropy source is not given, then we fallback to using BoringSSL's RAND_bytes.
   static TraceId fromEntropy(kj::Maybe<kj::EntropySource&> entropy = kj::none);
 
@@ -977,7 +978,7 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   // before we're finished tracing
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
   // A weak reference for the internal span submitter. We use this so that the span submitter can
-  // add spans while the tracer exists, but does not artifically prolong the lifetime of the tracer
+  // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
   // which would interfere with span submission (traces get submitted when the worker returns its
   // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
   // span submitter may exist for longer than the tracer).
@@ -1043,6 +1044,12 @@ struct Span {
         startTime(startTime),
         endTime(startTime) {}
 };
+
+// Utility functions for handling span tags.
+void serializeTagValue(rpc::TagValue::Builder builder, const Span::TagValue& value);
+Span::TagValue deserializeTagValue(rpc::TagValue::Reader value);
+// Stringifier for span tags, getting this to work with KJ_STRINGIFY() appears exceedingly difficult.
+kj::String spanTagStr(const kj::OneOf<bool, int64_t, double, kj::String>& tag);
 
 // An opaque token which can be used to create child spans of some parent. This is typically
 // passed down from a caller to a callee when the caller wants to allow the callee to create

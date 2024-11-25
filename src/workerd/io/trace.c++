@@ -1729,25 +1729,59 @@ void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
   // TODO(cleanup): Create a function in kj::OneOf to automatically convert to a given type (i.e
   // String) to avoid having to handle each type explicitly here.
   for (const Span::TagMap::Entry& tag: span.tags) {
-    auto value = [&]() {
-      KJ_SWITCH_ONEOF(tag.value) {
-        KJ_CASE_ONEOF(str, kj::String) {
-          return kj::str(str);
-        }
-        KJ_CASE_ONEOF(val, int64_t) {
-          return kj::str(val);
-        }
-        KJ_CASE_ONEOF(val, double) {
-          return kj::str(val);
-        }
-        KJ_CASE_ONEOF(val, bool) {
-          return kj::str(val);
-        }
-      }
-      KJ_UNREACHABLE;
-    }();
-    kj::String message = kj::str("[\"tag: "_kj, tag.key, " => "_kj, value, "\"]");
+    kj::String message = kj::str("[\"tag: "_kj, tag.key, " => "_kj, spanTagStr(tag.value), "\"]");
     addLog(span.endTime, LogLevel::LOG, kj::mv(message), true);
+  }
+}
+
+kj::String spanTagStr(const kj::OneOf<bool, int64_t, double, kj::String>& tag) {
+  KJ_SWITCH_ONEOF(tag) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      return kj::str(str);
+    }
+    KJ_CASE_ONEOF(val, int64_t) {
+      return kj::str(val);
+    }
+    KJ_CASE_ONEOF(val, double) {
+      return kj::str(val);
+    }
+    KJ_CASE_ONEOF(val, bool) {
+      return kj::str(val);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+using RpcValue = rpc::TagValue;
+void serializeTagValue(RpcValue::Builder builder, const Span::TagValue& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(b, bool) {
+      builder.setBool(b);
+    }
+    KJ_CASE_ONEOF(i, int64_t) {
+      builder.setInt64(i);
+    }
+    KJ_CASE_ONEOF(d, double) {
+      builder.setFloat64(d);
+    }
+    KJ_CASE_ONEOF(s, kj::String) {
+      builder.setString(s);
+    }
+  }
+}
+
+Span::TagValue deserializeTagValue(RpcValue::Reader value) {
+  switch (value.which()) {
+    case RpcValue::BOOL:
+      return value.getBool();
+    case RpcValue::FLOAT64:
+      return value.getFloat64();
+    case RpcValue::INT64:
+      return value.getInt64();
+    case RpcValue::STRING:
+      return kj::heapString(value.getString());
+    default:
+      KJ_UNREACHABLE;
   }
 }
 
