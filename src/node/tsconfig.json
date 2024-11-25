@@ -24,6 +24,7 @@
     "paths": {
       "node:*": ["./*"],
       "node:assert/*": ["./*"],
+      "node:dns/*": ["./*"],
       "node:util/*": ["./*"],
       "node:path/*": ["./*"],
       "node:stream/*": ["./*"],

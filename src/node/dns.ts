@@ -1,4 +1,7 @@
 import { default as dnsUtil } from 'node-internal:dns';
+import * as errorCodes from 'node-internal:internal_dns_constants';
+
+export * from 'node-internal:internal_dns_constants';
 
 export const getServers = dnsUtil.getServers.bind(dnsUtil);
 export const lookup = dnsUtil.lookup.bind(dnsUtil);
@@ -44,4 +47,6 @@ export default {
   setDefaultResultOrder,
   getDefaultResultOrder,
   setServers,
+
+  ...errorCodes,
 };
