@@ -14,7 +14,6 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  COMPILE_CACHE_FOR_BUILTINS,
   NumOfKeys  // Reserved for iteration.
 };
 
