@@ -162,7 +162,7 @@ public:
   }
 
   kj::ArrayPtr<const char> getHref();
-  void setHref(kj::String value);
+  void setHref(jsg::Lock& js, kj::String value);
 
   kj::Array<const char> getOrigin();
 
