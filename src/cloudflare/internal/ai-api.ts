@@ -102,7 +102,7 @@ export class Ai {
     };
 
     const res = await this.fetcher.fetch(
-      'http://workers-binding.ai/run?version=3',
+      'https://workers-binding.ai/run?version=3',
       fetchOptions
     );
 
@@ -148,6 +148,139 @@ export class Ai {
       );
     } catch {
       return new InferenceUpstreamError(content);
+    }
+  }
+
+  public gateway(gatewayId: string): AiGateway {
+    return new AiGateway(this.fetcher, gatewayId);
+  }
+}
+
+//
+// Ai Gateway
+//
+
+export type AiGatewayPatchLog = {
+  score?: number | null;
+  feedback?: -1 | 1 | '-1' | '1' | null;
+  metadata?: Record<string, number | string | boolean | null | bigint> | null;
+};
+
+export type AiGatewayLog = {
+  id: string;
+  provider: string;
+  model: string;
+  model_type?: string;
+  path: string;
+  duration: number;
+  request_type?: string;
+  request_content_type?: string;
+  status_code: number;
+  response_content_type?: string;
+  success: boolean;
+  cached: boolean;
+  tokens_in?: number;
+  tokens_out?: number;
+  metadata?: Record<string, number | string | boolean | null | bigint>;
+  step?: number;
+  cost?: number;
+  custom_cost?: boolean;
+  request_size: number;
+  request_head?: string;
+  request_head_complete: boolean;
+  response_size: number;
+  response_head?: string;
+  response_head_complete: boolean;
+  created_at: Date;
+};
+
+export class AiGatewayInternalError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'AiGatewayInternalError';
+  }
+}
+
+export class AiGatewayLogNotFound extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'AiGatewayLogNotFound';
+  }
+}
+
+export class AiGateway {
+  private readonly fetcher: Fetcher;
+  private readonly gatewayId: string;
+
+  public constructor(fetcher: Fetcher, gatewayId: string) {
+    this.fetcher = fetcher;
+    this.gatewayId = gatewayId;
+  }
+
+  public async getLog(logId: string): Promise<AiGatewayLog> {
+    const res = await this.fetcher.fetch(
+      `https://workers-binding.ai/ai-gateway/gateways/${this.gatewayId}/logs/${logId}`,
+      {
+        method: 'GET',
+      }
+    );
+
+    switch (res.status) {
+      case 200: {
+        const data = (await res.json()) as { result: AiGatewayLog };
+
+        return {
+          ...data.result,
+          created_at: new Date(data.result.created_at),
+        };
+      }
+      case 404: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiGatewayLogNotFound(
+          data.errors[0]?.message || 'Log Not Found'
+        );
+      }
+      default: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiGatewayInternalError(
+          data.errors[0]?.message || 'Internal Error'
+        );
+      }
+    }
+  }
+
+  public async patchLog(logId: string, data: AiGatewayPatchLog): Promise<void> {
+    const res = await this.fetcher.fetch(
+      `https://workers-binding.ai/ai-gateway/gateways/${this.gatewayId}/logs/${logId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+        headers: {
+          'content-type': 'application/json',
+        },
+      }
+    );
+
+    switch (res.status) {
+      case 200: {
+        return;
+      }
+      case 404: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiGatewayLogNotFound(
+          data.errors[0]?.message || 'Log Not Found'
+        );
+      }
+      default: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiGatewayInternalError(
+          data.errors[0]?.message || 'Internal Error'
+        );
+      }
     }
   }
 }

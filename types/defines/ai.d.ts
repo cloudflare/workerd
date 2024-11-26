@@ -173,14 +173,6 @@ export declare abstract class BaseAiTranslation {
   inputs: AiTranslationInput;
   postProcessedOutputs: AiTranslationOutput;
 }
-export type GatewayOptions = {
-  id: string;
-  cacheKey?: string;
-  cacheTtl?: number;
-  skipCache?: boolean;
-  metadata?: Record<string, number | string | boolean | null | bigint>;
-  collectLog?: boolean;
-};
 export type AiOptions = {
   gateway?: GatewayOptions;
   prefix?: string;
@@ -247,6 +239,8 @@ export type BaseAiImageToTextModels =
   | "@cf/unum/uform-gen2-qwen-500m"
   | "@cf/llava-hf/llava-1.5-7b-hf";
 export declare abstract class Ai {
+  public aiGatewayLogId: string | null;
+  public gateway(gatewayId: string): AiGateway;
   run(
     model: BaseAiTextClassificationModels,
     inputs: BaseAiTextClassification["inputs"],
