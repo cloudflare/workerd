@@ -79,8 +79,12 @@ kj::ArrayPtr<const char> URL::getHref() {
   return inner.getHref();
 }
 
-void URL::setHref(kj::String value) {
-  inner.setHref(value);
+void URL::setHref(jsg::Lock& js, kj::String value) {
+  // Href setter is the only place in URL parser that is allowed to throw except the constructor.
+  if (!inner.setHref(value)) {
+    auto context = jsg::TypeErrorContext::setterArgument(typeid(URL), "href");
+    jsg::throwTypeError(js.v8Isolate, context, "valid URL string");
+  }
   KJ_IF_SOME(searchParams, maybeSearchParams) {
     searchParams->reset();
   }

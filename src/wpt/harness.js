@@ -50,7 +50,12 @@ globalThis.fetch = async (url) => {
   };
 };
 
-globalThis.GLOBAL = { isWindow: () => false };
+globalThis.self = globalThis;
+globalThis.GLOBAL = {
+  isWindow() {
+    return false;
+  },
+};
 
 globalThis.done = () => undefined;
 
@@ -303,14 +308,20 @@ function sanitizeMessage(message) {
   );
 }
 
-async function validate(options) {
+function validate(testFileName, options) {
   const expectedFailures = new Set(options.expectedFailures ?? []);
 
+  let failing = false;
   for (const err of globalThis.errors) {
     if (!expectedFailures.delete(err.message)) {
       err.message = sanitizeMessage(err.message);
-      throw err;
+      console.error(err);
+      failing = true;
     }
+  }
+
+  if (failing) {
+    throw new Error(`${testFileName} failed`);
   }
 
   if (expectedFailures.size > 0) {
@@ -326,7 +337,7 @@ export function run(file, options = {}) {
     async test() {
       prepare(options);
       await import(file);
-      await validate(options);
+      validate(file, options);
     },
   };
 }

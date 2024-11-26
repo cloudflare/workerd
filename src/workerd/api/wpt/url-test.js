@@ -8,7 +8,6 @@ export const idnaTestV2Window = run('IdnaTestV2.window.js');
 export const historical = run('historical.any.js', {
   expectedFailures: [
     'Constructor only takes strings',
-    "Setting URL's href attribute and base URLs",
     'URL: no structured serialize/deserialize support',
     'URLSearchParams: no structured serialize/deserialize support',
   ],
