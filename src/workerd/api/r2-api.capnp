@@ -60,6 +60,10 @@ struct R2Conditional {
   # timestamp.
 }
 
+struct R2SSECOptions {
+  key @0 :Text;
+}
+
 struct R2Checksums {
   # The JSON name of these fields must comform to the representation of the ChecksumAlgorithm in
   # the R2 gateway worker.
@@ -93,6 +97,7 @@ struct R2GetRequest {
   range @1 :R2Range;
   rangeHeader @3 :Text;
   onlyIf @2 :R2Conditional;
+  ssec @4 :R2SSECOptions;
 }
 
 struct R2PutRequest {
@@ -106,6 +111,7 @@ struct R2PutRequest {
   sha384 @7 :Data $Json.hex;
   sha512 @8 :Data $Json.hex;
   storageClass @9 :Text;
+  ssec @10 :R2SSECOptions;
 }
 
 struct R2CreateMultipartUploadRequest {
@@ -113,12 +119,14 @@ struct R2CreateMultipartUploadRequest {
   customFields @1 :List(Record);
   httpFields @2 :R2HttpFields;
   storageClass @3 :Text;
+  ssec @4 :R2SSECOptions;
 }
 
 struct R2UploadPartRequest {
   object @0 :Text;
   uploadId @1 :Text;
   partNumber @2 :UInt32;
+  ssec @3 :R2SSECOptions;
 }
 
 struct R2CompleteMultipartUploadRequest {
@@ -187,6 +195,11 @@ struct R2ErrorResponse {
   message @2 :Text;
 }
 
+struct R2SSECResponse {
+  algorithm @0 :Text;
+  keyMd5 @1 :Text;
+}
+
 struct R2HeadResponse {
   name @0 :Text;
   # The name of the object.
@@ -220,6 +233,9 @@ struct R2HeadResponse {
   storageClass @9 :Text;
   # The storage class of the object. Standard or Infrequent Access.
   # Provided on object creation to specify which storage tier R2 should use for this object.
+
+  ssec @10 :R2SSECResponse;
+  # The algorithm/key hash used for encryption(if the user used SSE-C)
 }
 
 using R2GetResponse = R2HeadResponse;
@@ -230,6 +246,8 @@ struct R2CreateMultipartUploadResponse {
   uploadId @0 :Text;
   # The unique identifier of this object, required for subsequent operations on
   # this multipart upload.
+  ssec @1 :R2SSECResponse;
+  # The algorithm/key hash used for encryption(if the user used SSE-C)
 }
 
 struct R2UploadPartResponse {

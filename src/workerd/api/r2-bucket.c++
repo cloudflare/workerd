@@ -21,6 +21,7 @@
 
 #include <array>
 #include <cmath>
+#include <regex>
 
 namespace workerd::api::public_beta {
 static bool isWholeNumber(double x) {
@@ -154,10 +155,17 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     }
   }
 
+  jsg::Optional<kj::String> ssecKeyMd5;
+
+  if (responseReader.hasSsec()) {
+    auto ssecBuilder = responseReader.getSsec();
+    ssecKeyMd5 = kj::str(ssecBuilder.getKeyMd5());
+  }
+
   return jsg::alloc<T>(kj::str(responseReader.getName()), kj::str(responseReader.getVersion()),
       responseReader.getSize(), kj::str(responseReader.getEtag()), kj::mv(checksums), uploaded,
       kj::mv(httpMetadata), kj::mv(customMetadata), range,
-      kj::str(responseReader.getStorageClass()), kj::fwd<Args>(args)...);
+      kj::str(responseReader.getStorageClass()), kj::mv(ssecKeyMd5), kj::fwd<Args>(args)...);
 }
 
 template <HeadResultT T, typename... Args>
@@ -253,6 +261,25 @@ void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
   }
 }
 
+kj::Maybe<kj::String> buildSsecKey(
+    kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey) {
+  KJ_IF_SOME(rawSsecKey, maybeRawSsecKey) {
+    KJ_SWITCH_ONEOF(rawSsecKey) {
+      KJ_CASE_ONEOF(keyString, kj::String) {
+        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
+            Error, "SSE-C Key has invalid format");
+        JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+        return kj::str(keyString);
+      }
+      KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+        JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+        return kj::encodeHex(keyBuff);
+      }
+    }
+  }
+  return kj::none;
+}
+
 template <typename Builder, typename Options>
 void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
   initOnlyIf(js, builder, o);
@@ -295,6 +322,11 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
         }
       }
     }
+  }
+  kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
+  KJ_IF_SOME(ssecKey, maybeSsecKey) {
+    auto ssecBuilder = builder.initSsec();
+    ssecBuilder.setKey(ssecKey);
   }
 }
 
@@ -559,6 +591,11 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(s, o.storageClass) {
         putBuilder.setStorageClass(s);
       }
+      kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
+      KJ_IF_SOME(ssecKey, maybeSsecKey) {
+        auto ssecBuilder = putBuilder.initSsec();
+        ssecBuilder.setKey(ssecKey);
+      }
     }
 
     auto requestJson = json.encode(requestBuilder);
@@ -650,6 +687,11 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       }
       KJ_IF_SOME(s, o.storageClass) {
         createMultipartUploadBuilder.setStorageClass(s);
+      }
+      kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
+      KJ_IF_SOME(ssecKey, maybeSsecKey) {
+        auto ssecBuilder = createMultipartUploadBuilder.initSsec();
+        ssecBuilder.setKey(ssecKey);
       }
     }
 

@@ -78,8 +78,9 @@ class R2Bucket: public jsg::Object {
   struct GetOptions {
     jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
     jsg::Optional<kj::OneOf<Range, jsg::Ref<Headers>>> range;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
-    JSG_STRUCT(onlyIf, range);
+    JSG_STRUCT(onlyIf, range, ssecKey);
     JSG_STRUCT_TS_OVERRIDE(R2GetOptions);
   };
 
@@ -189,9 +190,18 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha384;
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha512;
     jsg::Optional<kj::String> storageClass;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
-    JSG_STRUCT(
-        onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512, storageClass);
+    JSG_STRUCT(onlyIf,
+        httpMetadata,
+        customMetadata,
+        md5,
+        sha1,
+        sha256,
+        sha384,
+        sha512,
+        storageClass,
+        ssecKey);
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
@@ -199,8 +209,9 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
     jsg::Optional<kj::String> storageClass;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
-    JSG_STRUCT(httpMetadata, customMetadata, storageClass);
+    JSG_STRUCT(httpMetadata, customMetadata, storageClass, ssecKey);
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
   };
 
@@ -215,7 +226,8 @@ class R2Bucket: public jsg::Object {
         jsg::Optional<HttpMetadata> httpMetadata,
         jsg::Optional<jsg::Dict<kj::String>> customMetadata,
         jsg::Optional<Range> range,
-        kj::String storageClass)
+        kj::String storageClass,
+        jsg::Optional<kj::String> ssecKeyMd5)
         : name(kj::mv(name)),
           version(kj::mv(version)),
           size(size),
@@ -225,7 +237,8 @@ class R2Bucket: public jsg::Object {
           httpMetadata(kj::mv(httpMetadata)),
           customMetadata(kj::mv(customMetadata)),
           range(kj::mv(range)),
-          storageClass(kj::mv(storageClass)) {}
+          storageClass(kj::mv(storageClass)),
+          ssecKeyMd5(kj::mv(ssecKeyMd5)) {}
 
     kj::String getName() const {
       return kj::str(name);
@@ -250,6 +263,9 @@ class R2Bucket: public jsg::Object {
     }
     kj::StringPtr getStorageClass() const {
       return storageClass;
+    }
+    jsg::Optional<kj::StringPtr> getSSECKeyMd5() const {
+      return ssecKeyMd5;
     }
 
     jsg::Optional<HttpMetadata> getHttpMetadata() const {
@@ -285,6 +301,7 @@ class R2Bucket: public jsg::Object {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(customMetadata, getCustomMetadata);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(range, getRange);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(storageClass, getStorageClass);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(ssecKeyMd5, getSSECKeyMd5);
       JSG_METHOD(writeHttpMetadata);
       JSG_TS_OVERRIDE(R2Object);
     }
@@ -296,6 +313,7 @@ class R2Bucket: public jsg::Object {
       tracker.trackField("checksums", checksums);
       tracker.trackField("httpMetadata", httpMetadata);
       tracker.trackField("customMetadata", customMetadata);
+      tracker.trackField("ssecKeyMd5", ssecKeyMd5);
     }
 
    protected:
@@ -310,6 +328,7 @@ class R2Bucket: public jsg::Object {
 
     jsg::Optional<Range> range;
     kj::String storageClass;
+    jsg::Optional<kj::String> ssecKeyMd5;
     friend class R2Bucket;
   };
 
@@ -325,6 +344,7 @@ class R2Bucket: public jsg::Object {
         jsg::Optional<jsg::Dict<kj::String>> customMetadata,
         jsg::Optional<Range> range,
         kj::String storageClass,
+        jsg::Optional<kj::String> ssecKeyMd5,
         jsg::Ref<ReadableStream> body)
         : HeadResult(kj::mv(name),
               kj::mv(version),
@@ -335,7 +355,8 @@ class R2Bucket: public jsg::Object {
               kj::mv(KJ_ASSERT_NONNULL(httpMetadata)),
               kj::mv(KJ_ASSERT_NONNULL(customMetadata)),
               range,
-              kj::mv(storageClass)),
+              kj::mv(storageClass),
+              kj::mv(ssecKeyMd5)),
           body(kj::mv(body)) {}
 
     jsg::Ref<ReadableStream> getBody() {
