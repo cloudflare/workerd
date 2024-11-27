@@ -1,5 +1,3 @@
-import { default as TarReader } from 'pyodide-internal:packages_tar_reader';
-
 // This is based on the info about the tar file format on wikipedia
 // And some trial and error with real tar files.
 // https://en.wikipedia.org/wiki/Tar_(computing)#File_format
@@ -44,7 +42,7 @@ function decodeHeader(buf: Uint8Array, reader: Reader): TarFSInfo {
   };
 }
 
-export function parseTarInfo(reader = TarReader): [TarFSInfo, string[]] {
+export function parseTarInfo(reader: Reader): [TarFSInfo, string[]] {
   const directories: TarFSInfo[] = [];
   const soFiles = [];
   const root: TarFSInfo = {

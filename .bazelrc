@@ -2,6 +2,7 @@ common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default
 test --test_tag_filters=-off-by-default
+test:asan --test_tag_filters=-off-by-default,-no-asan
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 
