@@ -26,9 +26,10 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* eslint-disable */
 import { default as bufferUtil } from 'node-internal:buffer';
 import type { Encoding } from 'node-internal:buffer';
+import { validateFunction } from 'node-internal:validators';
+import { ERR_FALSY_VALUE_REJECTION } from 'node-internal:internal_errors';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 
@@ -49,11 +50,13 @@ export function slowCases(enc: string): Encoding | undefined {
     case 4:
       if (enc === 'UTF8') return UTF8;
       if (enc === 'ucs2' || enc === 'UCS2') return UTF16LE;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       enc = `${enc}`.toLowerCase();
       if (enc === 'utf8') return UTF8;
       if (enc === 'ucs2') return UTF16LE;
       break;
     case 3:
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       if (enc === 'hex' || enc === 'HEX' || `${enc}`.toLowerCase() === 'hex') {
         return HEX;
       }
@@ -64,6 +67,7 @@ export function slowCases(enc: string): Encoding | undefined {
       if (enc === 'UTF-8') return UTF8;
       if (enc === 'ASCII') return ASCII;
       if (enc === 'UCS-2') return UTF16LE;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       enc = `${enc}`.toLowerCase();
       if (enc === 'utf-8') return UTF8;
       if (enc === 'ascii') return ASCII;
@@ -74,6 +78,7 @@ export function slowCases(enc: string): Encoding | undefined {
       if (enc === 'latin1' || enc === 'binary') return LATIN1;
       if (enc === 'BASE64') return BASE64;
       if (enc === 'LATIN1' || enc === 'BINARY') return LATIN1;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       enc = `${enc}`.toLowerCase();
       if (enc === 'base64') return BASE64;
       if (enc === 'latin1' || enc === 'binary') return LATIN1;
@@ -82,6 +87,7 @@ export function slowCases(enc: string): Encoding | undefined {
       if (
         enc === 'utf16le' ||
         enc === 'UTF16LE' ||
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
         `${enc}`.toLowerCase() === 'utf16le'
       ) {
         return UTF16LE;
@@ -91,6 +97,7 @@ export function slowCases(enc: string): Encoding | undefined {
       if (
         enc === 'utf-16le' ||
         enc === 'UTF-16LE' ||
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
         `${enc}`.toLowerCase() === 'utf-16le'
       ) {
         return UTF16LE;
@@ -100,6 +107,7 @@ export function slowCases(enc: string): Encoding | undefined {
       if (
         enc === 'base64url' ||
         enc === 'BASE64URL' ||
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
         `${enc}`.toLowerCase() === 'base64url'
       ) {
         return BASE64URL;
@@ -111,7 +119,7 @@ export function slowCases(enc: string): Encoding | undefined {
   return undefined;
 }
 
-export function spliceOne(list: (string | undefined)[], index: number) {
+export function spliceOne(list: (string | undefined)[], index: number): void {
   for (; index + 1 < list.length; index++) list[index] = list[index + 1];
   list.pop();
 }
@@ -199,4 +207,168 @@ export function getOwnNonIndexProperties(
     result.push(key);
   }
   return result;
+}
+
+function callbackifyOnRejected(
+  reason: unknown,
+  cb: (error?: unknown) => void
+): void {
+  if (!reason) {
+    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+    cb(new ERR_FALSY_VALUE_REJECTION(`${reason}`));
+    return;
+  }
+  cb(reason);
+}
+
+// Types are taken from @types/node package
+// https://github.com/DefinitelyTyped/DefinitelyTyped/blob/dccb0e78c4d3265ae06985789156451bd73312c0/types/node/util.d.ts#L1054
+export function callbackify(
+  fn: () => Promise<void>
+): (callback: (err: Error) => void) => void;
+export function callbackify<TResult>(
+  fn: () => Promise<TResult>
+): (callback: (err: Error, result: TResult) => void) => void;
+export function callbackify<T1>(
+  fn: (arg1: T1) => Promise<void>
+): (arg1: T1, callback: (err: Error) => void) => void;
+export function callbackify<T1, TResult>(
+  fn: (arg1: T1) => Promise<TResult>
+): (arg1: T1, callback: (err: Error, result: TResult) => void) => void;
+export function callbackify<T1, T2>(
+  fn: (arg1: T1, arg2: T2) => Promise<void>
+): (arg1: T1, arg2: T2, callback: (err: Error) => void) => void;
+export function callbackify<T1, T2, TResult>(
+  fn: (arg1: T1, arg2: T2) => Promise<TResult>
+): (
+  arg1: T1,
+  arg2: T2,
+  callback: (err: Error | null, result: TResult) => void
+) => void;
+export function callbackify<T1, T2, T3>(
+  fn: (arg1: T1, arg2: T2, arg3: T3) => Promise<void>
+): (arg1: T1, arg2: T2, arg3: T3, callback: (err: Error) => void) => void;
+export function callbackify<T1, T2, T3, TResult>(
+  fn: (arg1: T1, arg2: T2, arg3: T3) => Promise<TResult>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  callback: (err: Error | null, result: TResult) => void
+) => void;
+export function callbackify<T1, T2, T3, T4>(
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4) => Promise<void>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  arg4: T4,
+  callback: (err: Error) => void
+) => void;
+export function callbackify<T1, T2, T3, T4, TResult>(
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4) => Promise<TResult>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  arg4: T4,
+  callback: (err: Error | null, result: TResult) => void
+) => void;
+export function callbackify<T1, T2, T3, T4, T5>(
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) => Promise<void>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  arg4: T4,
+  arg5: T5,
+  callback: (err: Error) => void
+) => void;
+export function callbackify<T1, T2, T3, T4, T5, TResult>(
+  fn: (arg1: T1, arg2: T2, arg3: T3, arg4: T4, arg5: T5) => Promise<TResult>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  arg4: T4,
+  arg5: T5,
+  callback: (err: Error | null, result: TResult) => void
+) => void;
+export function callbackify<T1, T2, T3, T4, T5, T6>(
+  fn: (
+    arg1: T1,
+    arg2: T2,
+    arg3: T3,
+    arg4: T4,
+    arg5: T5,
+    arg6: T6
+  ) => Promise<void>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  arg4: T4,
+  arg5: T5,
+  arg6: T6,
+  callback: (err: Error) => void
+) => void;
+export function callbackify<T1, T2, T3, T4, T5, T6, TResult>(
+  fn: (
+    arg1: T1,
+    arg2: T2,
+    arg3: T3,
+    arg4: T4,
+    arg5: T5,
+    arg6: T6
+  ) => Promise<TResult>
+): (
+  arg1: T1,
+  arg2: T2,
+  arg3: T3,
+  arg4: T4,
+  arg5: T5,
+  arg6: T6,
+  callback: (err: Error | null, result: TResult) => void
+) => void;
+export function callbackify<T extends (...args: unknown[]) => Promise<unknown>>(
+  original: T
+): T extends (...args: infer TArgs) => Promise<infer TReturn>
+  ? (...params: [...TArgs, (err: Error, ret: TReturn) => unknown]) => void
+  : never {
+  validateFunction(original, 'original');
+
+  function callbackified(
+    this: unknown,
+    ...args: [...unknown[], (err: unknown, ret: unknown) => void]
+  ): void {
+    const maybeCb = args.pop();
+    validateFunction(maybeCb, 'last argument');
+    const cb = maybeCb.bind(this);
+    Reflect.apply(original, this, args).then(
+      (ret: unknown) => {
+        queueMicrotask(() => cb(null, ret));
+      },
+      (rej: unknown) => {
+        queueMicrotask(() => {
+          callbackifyOnRejected(rej, cb);
+        });
+      }
+    );
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(original);
+  if (typeof descriptors['length']?.value === 'number') {
+    descriptors['length'].value++;
+  }
+  if (typeof descriptors['name']?.value === 'string') {
+    descriptors['name'].value += 'Callbackified';
+  }
+  const propertiesValues = Object.values(descriptors);
+  for (let i = 0; i < propertiesValues.length; i++) {
+    Object.setPrototypeOf(propertiesValues[i], null);
+  }
+  Object.defineProperties(callbackified, descriptors);
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-expect-error
+  return callbackified;
 }
