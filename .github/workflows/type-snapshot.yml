@@ -11,7 +11,7 @@ on:
 concurrency:
   # Cancel existing builds for the same PR.
   # Otherwise, all other builds will be allowed to run through.
-  group: test.yml-${{ github.event.pull_request.number || github.run_id }}
+  group: type-snapshot.yml-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
