@@ -61,7 +61,7 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-          bazel build --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //types:types
+          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //types:types
       - name: Check snapshot diff
         run: |
           diff -r bazel-bin/types/definitions/ types/generated-snapshot
