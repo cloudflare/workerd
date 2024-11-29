@@ -8,16 +8,6 @@ interface D1Meta {
   changes: number;
 }
 
-interface D12Meta {
-  duration: number;
-  size_after: number;
-  rows_read: number;
-  rows_written: number;
-  last_row_id: number;
-  changed_db: boolean;
-  changes: number;
-}
-
 interface D1Response {
   success: true;
   meta: D1Meta & Record<string, unknown>;
