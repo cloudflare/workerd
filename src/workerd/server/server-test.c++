@@ -2291,6 +2291,106 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   wsConn.send(kj::str("\x81\x1a", confirmEviction));
   wsConn.recvWebSocket(evicted);
 }
+
+KJ_TEST("Server: tail workers") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(req, env, ctx) {
+                `    console.log("foo", "bar");
+                `    console.log("baz");
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          logging = (
+            toServices = ["tail", "tail2"]
+          ),
+        )
+      ),
+      ( name = "tail",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async tail(req, env, ctx) {
+                `    await fetch("http://tail", {
+                `      method: "POST",
+                `      body: JSON.stringify(req[0].logs.map(log => log.message))
+                `    });
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "tail2",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async tail(req, env, ctx) {
+                `    await fetch("http://tail2/" + req[0].logs.length);
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recvHttp200("OK");
+
+  auto subreq = test.receiveInternetSubrequest("tail");
+  subreq.recv(R"(
+    POST / HTTP/1.1
+    Content-Length: 23
+    Host: tail
+    Content-Type: text/plain;charset=UTF-8
+
+    [["foo","bar"],["baz"]])"_blockquote);
+
+  auto subreq2 = test.receiveInternetSubrequest("tail2");
+  subreq2.recv(R"(
+    GET /2 HTTP/1.1
+    Host: tail2
+
+    )"_blockquote);
+
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 0
+
+  )"_blockquote);
+
+  subreq2.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 0
+
+  )"_blockquote);
+}
+
 // =======================================================================================
 // Test HttpOptions on receive
 
