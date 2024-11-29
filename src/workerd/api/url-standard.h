@@ -96,16 +96,14 @@ public:
     JSG_ITERABLE(entries);
 
     if (!flags.getSpecCompliantUrl()) {
-      // This is a hack. The spec-compliant URLSearchParams type is used in
-      // the Body constructor, see:
-      // https://github.com/balusch/workerd/tree/main/src/workerd/api/http.h#L255
-      // This means that when the TypeScript generation scripts are visiting root types for inclusion,
-      // we'll always visit the spec-compliant type even if we have the
-      // "url-standard" flag disabled. Rather than updating those usages based
-      // on which flags are enabled, we just delete the spec compliant
-      // declaration in an override if "url-standard" is disabled.
-      // We do the same for the non-spec-compliant URLSearchParams, see:
-      // https://github.com/balusch/workerd/tree/main/src/workerd/api/url.h#L219
+      // This is a hack. The spec-compliant URLSearchParams type is used in the Body constructor,
+      // see https://github.com/cloudflare/workerd/blob/v1.20241127.0/src/workerd/api/http.h#L255
+      // This means that when the TypeScript generation scripts are visiting root types for
+      // inclusion, we'll always visit the spec-compliant type even if we have the "url-standard"
+      // flag disabled. Rather than updating those usages based on which flags are enabled, we just
+      // delete the spec compliant declaration in an override if "url-standard" is disabled.
+      // We do the same for the non-spec-compliant URLSearchParams
+      // (https://github.com/cloudflare/workerd/blob/v1.20241127.0/src/workerd/api/url.h#L219).
       JSG_TS_OVERRIDE(type URLSearchParams = never);
     } else if (flags.getUrlSearchParamsDeleteHasValueArg()) {
       JSG_TS_OVERRIDE(URLSearchParams {
