@@ -16,7 +16,7 @@ interface D1Response {
 
 type D1Result<T = unknown> = D1Response & {
   results: T[];
-}
+};
 
 interface D1ExecResult {
   count: number;
@@ -36,6 +36,8 @@ declare abstract class D1PreparedStatement {
   first<T = Record<string, unknown>>(): Promise<T | null>;
   run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
   all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  raw<T = unknown[]>(options: {columnNames: true}): Promise<[string[], ...T[]]>;
-  raw<T = unknown[]>(options?: {columnNames?: false}): Promise<T[]>;
+  raw<T = unknown[]>(options: {
+    columnNames: true;
+  }): Promise<[string[], ...T[]]>;
+  raw<T = unknown[]>(options?: { columnNames?: false }): Promise<T[]>;
 }
