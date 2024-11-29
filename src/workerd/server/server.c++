@@ -1602,7 +1602,7 @@ class Server::WorkerService final: public Service,
   WorkerService(ThreadContext& threadContext,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
-      kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypointsParam,
+      kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback)
@@ -1610,14 +1610,9 @@ class Server::WorkerService final: public Service,
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
+        namedEntrypoints(kj::mv(namedEntrypoints)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)) {
-
-    namedEntrypoints.reserve(namedEntrypointsParam.size());
-    for (auto& ep: namedEntrypointsParam) {
-      kj::StringPtr epPtr = ep.key;
-      namedEntrypoints.insert(kj::mv(ep.key), EntrypointService(*this, epPtr, kj::mv(ep.value)));
-    }
 
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
@@ -1627,8 +1622,9 @@ class Server::WorkerService final: public Service,
     }
   }
 
-  kj::Maybe<Service&> getEntrypoint(kj::StringPtr name) {
-    return namedEntrypoints.find(name);
+  kj::Maybe<kj::Own<Service>> getEntrypoint(kj::StringPtr name) {
+    auto& entry = KJ_UNWRAP_OR_RETURN(namedEntrypoints.findEntry(name), kj::none);
+    return kj::heap<EntrypointService>(*this, entry.key, entry.value);
   }
 
   kj::Array<kj::StringPtr> getEntrypointNames() {
@@ -2221,10 +2217,10 @@ class Server::WorkerService final: public Service,
   class EntrypointService final: public Service {
    public:
     EntrypointService(
-        WorkerService& worker, kj::StringPtr entrypoint, kj::HashSet<kj::String> handlers)
+        WorkerService& worker, kj::StringPtr entrypoint, kj::HashSet<kj::String>& handlers)
         : worker(worker),
           entrypoint(entrypoint),
-          handlers(kj::mv(handlers)) {}
+          handlers(handlers) {}
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return worker.startRequest(kj::mv(metadata), entrypoint);
@@ -2237,7 +2233,7 @@ class Server::WorkerService final: public Service,
    private:
     WorkerService& worker;
     kj::StringPtr entrypoint;
-    kj::HashSet<kj::String> handlers;
+    kj::HashSet<kj::String>& handlers;
   };
 
   ThreadContext& threadContext;
@@ -2247,7 +2243,7 @@ class Server::WorkerService final: public Service,
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
-  kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
+  kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
@@ -3320,7 +3316,7 @@ kj::Own<Server::Service> Server::lookupService(
     kj::StringPtr entrypointName = designator.getEntrypoint();
     if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
       KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName)) {
-        return fakeOwn(ep);
+        return kj::mv(ep);
       } else {
         reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
             "\" with a named entrypoint \"", entrypointName, "\", but \"", targetName,
@@ -4076,9 +4072,9 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       if (WorkerService* worker = dynamic_cast<WorkerService*>(service.value.get())) {
         for (auto& name: worker->getEntrypointNames()) {
           if (entrypointGlob.matches(name)) {
-            Service& ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name));
-            if (ep.hasHandler("test"_kj)) {
-              co_await doTest(ep, kj::str(service.key, ':', name));
+            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name));
+            if (ep->hasHandler("test"_kj)) {
+              co_await doTest(*ep, kj::str(service.key, ':', name));
             }
           }
         }
