@@ -1578,11 +1578,10 @@ public:
     kj::Maybe<Service&> cache;
     kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
     AlarmScheduler& alarmScheduler;
+    kj::Array<Service*> loggingServices;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
   using AbortActorsCallback = kj::Function<void()>;
-  using LookupServiceCallback =
-      kj::Function<Service&(config::ServiceDesignator::Reader, kj::StringPtr)>;
 
   WorkerService(ThreadContext& threadContext,
       kj::Own<const Worker> worker,
@@ -1590,17 +1589,13 @@ public:
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypointsParam,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
-      AbortActorsCallback abortActorsCallback,
-      kj::Array<kj::Own<config::ServiceDesignator::Reader>> loggingServices,
-      LookupServiceCallback lookupService)
+      AbortActorsCallback abortActorsCallback)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         waitUntilTasks(*this),
-        abortActorsCallback(kj::mv(abortActorsCallback)),
-        loggingServices(kj::mv(loggingServices)),
-        lookupService(kj::mv(lookupService)) {
+        abortActorsCallback(kj::mv(abortActorsCallback)) {
 
     namedEntrypoints.reserve(namedEntrypointsParam.size());
     for (auto& ep: namedEntrypointsParam) {
@@ -1668,15 +1663,16 @@ public:
             kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
             kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */);
 
-    auto tailWorkers = KJ_MAP(svc, loggingServices) -> kj::Own<WorkerInterface> {
-      auto& service = lookupService(*svc, "looking logging service");
-      KJ_ASSERT(&service != this, "A worker currently cannot log to itself");
+    auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
+
+    auto tailWorkers = KJ_MAP(service, channels.loggingServices) -> kj::Own<WorkerInterface> {
+      KJ_ASSERT(service != this, "A worker currently cannot log to itself");
       // Caution here... if the tail worker ends up have a cirular dependency
       // on the worker we'll end up with an infinite loop trying to initialize.
       // We can test this directly but it's more difficult to test indirect
       // loops (dependency of dependency, etc). Here we're just going to keep
       // it simple and just check the direct dependency.
-      return service.startRequest({});
+      return service->startRequest({});
     };
 
     // When the tracer is complete, deliver the traces to both the parent
@@ -2231,8 +2227,6 @@ private:
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
-  kj::Array<kj::Own<config::ServiceDesignator::Reader>> loggingServices;
-  LookupServiceCallback lookupService;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
   public:
@@ -3234,34 +3228,33 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       }
     }
 
+    auto logging = conf.getLogging();
+    switch (logging.which()) {
+      case config::Worker::Logging::Which::NONE: {
+        break;
+      }
+      case config::Worker::Logging::Which::TO_SERVICE: {
+        result.loggingServices = kj::arr(&lookupService(logging.getToService(),
+            kj::str("Worker \"", name, "\"'s logging")));
+        break;
+      }
+      case config::Worker::Logging::Which::TO_SERVICES: {
+        auto list = logging.getToServices();
+        auto builder = kj::heapArrayBuilder<Service*>(list.size());
+        for (auto svc: list) {
+          builder.add(&lookupService(svc, kj::str("Worker \"", name, "\"'s logging")));
+        }
+        result.loggingServices = builder.finish();
+        break;
+      }
+    }
+
     return result;
   };
 
-  kj::Vector<kj::Own<config::ServiceDesignator::Reader>> loggingServices;
-  auto logging = conf.getLogging();
-  switch (logging.which()) {
-    case config::Worker::Logging::Which::NONE: {
-      break;
-    }
-    case config::Worker::Logging::Which::TO_SERVICE: {
-      loggingServices.add(capnp::clone(logging.getToService()));
-      break;
-    }
-    case config::Worker::Logging::Which::TO_SERVICES: {
-      for (auto svc: logging.getToServices()) {
-        loggingServices.add(capnp::clone(svc));
-      }
-      break;
-    }
-  }
-
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      localActorConfigs, kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors),
-      loggingServices.releaseAsArray(),
-      [this](const config::ServiceDesignator::Reader& service, kj::StringPtr context) -> Service& {
-    return lookupService(service, kj::str(context));
-  });
+      localActorConfigs, kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors));
 }
 
 // =======================================================================================
