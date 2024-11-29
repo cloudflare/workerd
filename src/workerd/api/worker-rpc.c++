@@ -1666,18 +1666,21 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  public:
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Maybe<kj::StringPtr> entrypointName,
+      Frankenvalue props,
       kj::Maybe<kj::Own<WorkerTracer>> tracer)
       : JsRpcTargetBase(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
+        props(kj::mv(props)),
         tracer(kj::mv(tracer)) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
     jsg::Lock& js = lock;
 
-    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ioCtx.getActor()),
-        "Failed to get handler to worker.");
+    auto handler =
+        KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, kj::mv(props), ioCtx.getActor()),
+            "Failed to get handler to worker.");
 
     if (handler->missingSuperclass) {
       // JS RPC is not enabled on the server side, we cannot call any methods.
@@ -1709,6 +1712,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 
  private:
   kj::Maybe<kj::String> entrypointName;
+  Frankenvalue props;
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
 
   bool isReservedName(kj::StringPtr name) override {
@@ -1781,15 +1785,17 @@ class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::M
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioctx = incomingRequest->getContext();
 
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName,
-                                            mapAddRef(incomingRequest->getWorkerTracer())),
-      kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+  capFulfiller->fulfill(
+      capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName, kj::mv(props),
+                          mapAddRef(incomingRequest->getWorkerTracer())),
+          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client

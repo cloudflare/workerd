@@ -1622,9 +1622,17 @@ class Server::WorkerService final: public Service,
     }
   }
 
-  kj::Maybe<kj::Own<Service>> getEntrypoint(kj::StringPtr name) {
-    auto& entry = KJ_UNWRAP_OR_RETURN(namedEntrypoints.findEntry(name), kj::none);
-    return kj::heap<EntrypointService>(*this, entry.key, entry.value);
+  kj::Maybe<kj::Own<Service>> getEntrypoint(
+      kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
+    kj::HashSet<kj::String>* handlers;
+    KJ_IF_SOME(n, name) {
+      auto& entry = KJ_UNWRAP_OR_RETURN(namedEntrypoints.findEntry(n), kj::none);
+      name = entry.key;  // replace with more-permanent string
+      handlers = &entry.value;
+    } else {
+      handlers = &KJ_UNWRAP_OR_RETURN(defaultEntrypointHandlers, kj::none);
+    }
+    return kj::heap<EntrypointService>(*this, name, propsJson, *handlers);
   }
 
   kj::Array<kj::StringPtr> getEntrypointNames() {
@@ -1658,7 +1666,7 @@ class Server::WorkerService final: public Service,
   }
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    return startRequest(kj::mv(metadata), kj::none);
+    return startRequest(kj::mv(metadata), kj::none, {});
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
@@ -1671,6 +1679,7 @@ class Server::WorkerService final: public Service,
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata,
       kj::Maybe<kj::StringPtr> entrypointName,
+      Frankenvalue props,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
 
@@ -1720,7 +1729,7 @@ class Server::WorkerService final: public Service,
     auto observer = kj::refcounted<RequestObserverWithTracer>(kj::addRef(*workerTracer));
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
-        kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
+        kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},  // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance), kj::mv(observer),
         waitUntilTasks,
@@ -1996,7 +2005,8 @@ class Server::WorkerService final: public Service,
         cleanupTask = cleanupLoop();
       }
 
-      co_return service.startRequest(kj::mv(metadata), className, kj::mv(actor))
+      // Actors always have empty `props`, at least for now.
+      co_return service.startRequest(kj::mv(metadata), className, {}, kj::mv(actor))
           .attach(kj::mv(refTracker));
     }
 
@@ -2216,14 +2226,20 @@ class Server::WorkerService final: public Service,
  private:
   class EntrypointService final: public Service {
    public:
-    EntrypointService(
-        WorkerService& worker, kj::StringPtr entrypoint, kj::HashSet<kj::String>& handlers)
+    EntrypointService(WorkerService& worker,
+        kj::Maybe<kj::StringPtr> entrypoint,
+        kj::Maybe<kj::StringPtr> propsJson,
+        kj::HashSet<kj::String>& handlers)
         : worker(worker),
           entrypoint(entrypoint),
-          handlers(handlers) {}
+          handlers(handlers) {
+      KJ_IF_SOME(m, propsJson) {
+        props = Frankenvalue::fromJson(kj::str(m));
+      }
+    }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      return worker.startRequest(kj::mv(metadata), entrypoint);
+      return worker.startRequest(kj::mv(metadata), entrypoint, props.clone());
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
@@ -2232,8 +2248,9 @@ class Server::WorkerService final: public Service,
 
    private:
     WorkerService& worker;
-    kj::StringPtr entrypoint;
+    kj::Maybe<kj::StringPtr> entrypoint;
     kj::HashSet<kj::String>& handlers;
+    Frankenvalue props;
   };
 
   ThreadContext& threadContext;
@@ -3312,25 +3329,50 @@ kj::Own<Server::Service> Server::lookupService(
     return fakeOwn(*invalidConfigServiceSingleton);
   });
 
+  kj::Maybe<kj::StringPtr> entrypointName;
   if (designator.hasEntrypoint()) {
-    kj::StringPtr entrypointName = designator.getEntrypoint();
-    if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-      KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName)) {
-        return kj::mv(ep);
-      } else {
-        reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
-            "\" with a named entrypoint \"", entrypointName, "\", but \"", targetName,
-            "\" has no such named entrypoint."));
-        return fakeOwn(*invalidConfigServiceSingleton);
-      }
+    entrypointName = designator.getEntrypoint();
+  }
+
+  auto propsJson = [&]() -> kj::Maybe<kj::StringPtr> {
+    auto props = designator.getProps();
+    switch (props.which()) {
+      case config::ServiceDesignator::Props::EMPTY:
+        return kj::none;
+      case config::ServiceDesignator::Props::JSON:
+        return props.getJson();
+    }
+    reportConfigError(kj::str(errorContext,
+        " has unrecognized props type. Was the config compiled with a "
+        "newer version of the schema?"));
+    return kj::none;
+  }();
+
+  if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
+    KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName, propsJson)) {
+      return kj::mv(ep);
+    } else KJ_IF_SOME(ep, entrypointName) {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\" with a named entrypoint \"", ep, "\", but \"", targetName,
+          "\" has no such named entrypoint."));
+      return fakeOwn(*invalidConfigServiceSingleton);
     } else {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
-          "\" with a named entrypoint \"", entrypointName, "\", but \"", targetName,
-          "\" is not a Worker, so does not have any "
-          "named entrypoints."));
+          "\", but does not specify an entrypoint, and the service does not have a "
+          "default entrypoint."));
       return fakeOwn(*invalidConfigServiceSingleton);
     }
   } else {
+    KJ_IF_SOME(ep, entrypointName) {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\" with a named entrypoint \"", ep, "\", but \"", targetName,
+          "\" is not a Worker, so does not have any named entrypoints."));
+    } else if (propsJson != kj::none) {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\" and provides a `props` value, but \"", targetName,
+          "\" is not a Worker, so cannot accept `props`"));
+    }
+
     return fakeOwn(*service);
   }
 }
@@ -4072,7 +4114,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       if (WorkerService* worker = dynamic_cast<WorkerService*>(service.value.get())) {
         for (auto& name: worker->getEntrypointNames()) {
           if (entrypointGlob.matches(name)) {
-            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name));
+            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name, kj::none));
             if (ep->hasHandler("test"_kj)) {
               co_await doTest(*ep, kj::str(service.key, ':', name));
             }

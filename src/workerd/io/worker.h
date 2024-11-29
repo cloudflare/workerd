@@ -8,6 +8,7 @@
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/outcome.capnp.h>
@@ -627,10 +628,12 @@ class Worker::Lock {
   // default handler. Returns null if this is not a modules-syntax worker (but `entrypointName`
   // must be null in that case).
   //
-  // If running in an actor, the name is ignored and the entrypoint originally used to construct
-  // the actor is returned.
+  // `props` is the value to place in `ctx.props`.
+  //
+  // If running in an actor, the name and props are ignored and the entrypoint originally used to
+  // construct the actor is returned.
   kj::Maybe<kj::Own<api::ExportedHandler>> getExportedHandler(
-      kj::Maybe<kj::StringPtr> entrypointName, kj::Maybe<Worker::Actor&> actor);
+      kj::Maybe<kj::StringPtr> entrypointName, Frankenvalue props, kj::Maybe<Worker::Actor&> actor);
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();

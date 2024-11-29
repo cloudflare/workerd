@@ -220,6 +220,7 @@ wd_cc_library(
     hdrs = ["worker-interface.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":frankenvalue_capnp",
         ":worker-interface_capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
