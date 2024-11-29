@@ -357,7 +357,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 
 // Set the location of the pointer cage base for the current isolate.  This is only
 // used by getJsCageBase().
-void setJsCageBase(void* cage_base);
+void setJsCageBase(void* cageBase);
 
 // Get the location previously set by setJsCageBase() for the current isolate.  Returns
 // a null pointer if there is no current isolate.

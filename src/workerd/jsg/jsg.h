@@ -735,6 +735,15 @@ consteval size_t prefixLengthToStrip(const char (&s)[N]) {
   registry.template registerStructProperty<name##_JSG_NAME_DO_NOT_USE_DIRECTLY,                    \
       decltype(::kj::instance<Self>().name), &Self::name>()
 
+enum SetDataIndex {
+  SET_DATA_ISOLATE_BASE,
+  SET_DATA_TYPE_WRAPPER,
+  SET_DATA_ISOLATE,
+  SET_DATA_LOCK,
+  SET_DATA_CAGE_BASE,
+  SET_DATA_SLOTS_IN_USE,
+};
+
 // =======================================================================================
 // Special types
 //
@@ -2272,7 +2281,7 @@ class Lock {
   // This method is intended to be used in callbacks from V8 that pass an isolate pointer but
   // don't provide any further context. Most code should rely on the caller passing in a `Lock&`.
   static Lock& from(v8::Isolate* v8Isolate) {
-    return *reinterpret_cast<Lock*>(v8Isolate->GetData(2));
+    return *reinterpret_cast<Lock*>(v8Isolate->GetData(SET_DATA_ISOLATE));
   }
 
   // RAII construct that reports amount of external memory to be manually attributed to

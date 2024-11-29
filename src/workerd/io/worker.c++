@@ -987,9 +987,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     auto lock = api->lock(stackScope);
     auto features = api->getFeatureFlags();
 
-    KJ_DASSERT(lock->v8Isolate->GetNumberOfDataSlots() >= 3);
-    KJ_DASSERT(lock->v8Isolate->GetData(3) == nullptr);
-    lock->v8Isolate->SetData(3, this);
+    KJ_DASSERT(lock->v8Isolate->GetNumberOfDataSlots() >= SET_DATA_SLOTS_IN_USE);
+    KJ_DASSERT(lock->v8Isolate->GetData(SET_DATA_LOCK) == nullptr);
+    lock->v8Isolate->SetData(SET_DATA_LOCK, this);
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
     lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
@@ -1412,7 +1412,7 @@ Worker::Script::~Script() noexcept(false) {
 }
 
 const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {
-  auto ptr = js.v8Isolate->GetData(3);
+  auto ptr = js.v8Isolate->GetData(SET_DATA_LOCK);
   KJ_ASSERT(ptr != nullptr);
   return *static_cast<const Worker::Isolate*>(ptr);
 }
