@@ -382,6 +382,7 @@ class R2Bucket: public jsg::Object {
       JSG_METHOD(blob);
       JSG_TS_OVERRIDE(R2ObjectBody {
         json<T>(): Promise<T>;
+        arrayBuffer(): Promise<ArrayBuffer>;
       });
     }
 

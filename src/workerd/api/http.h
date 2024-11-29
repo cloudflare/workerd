@@ -384,6 +384,7 @@ public:
     JSG_TS_OVERRIDE({
       json<T>(): Promise<T>;
       bytes(): Promise<Uint8Array>;
+      arrayBuffer(): Promise<ArrayBuffer>;
     });
     // Allow JSON body type to be specified
   }
