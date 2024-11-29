@@ -8,6 +8,16 @@ interface D1Meta {
   changes: number;
 }
 
+interface D12Meta {
+  duration: number;
+  size_after: number;
+  rows_read: number;
+  rows_written: number;
+  last_row_id: number;
+  changed_db: boolean;
+  changes: number;
+}
+
 interface D1Response {
   success: true;
   meta: D1Meta & Record<string, unknown>;
@@ -16,7 +26,7 @@ interface D1Response {
 
 type D1Result<T = unknown> = D1Response & {
   results: T[];
-}
+};
 
 interface D1ExecResult {
   count: number;
@@ -36,6 +46,8 @@ declare abstract class D1PreparedStatement {
   first<T = Record<string, unknown>>(): Promise<T | null>;
   run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
   all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  raw<T = unknown[]>(options: {columnNames: true}): Promise<[string[], ...T[]]>;
-  raw<T = unknown[]>(options?: {columnNames?: false}): Promise<T[]>;
+  raw<T = unknown[]>(options: {
+    columnNames: true;
+  }): Promise<[string[], ...T[]]>;
+  raw<T = unknown[]>(options?: { columnNames?: false }): Promise<T[]>;
 }
