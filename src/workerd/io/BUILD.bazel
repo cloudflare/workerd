@@ -46,6 +46,7 @@ wd_cc_library(
     srcs = [
         "compatibility-date.c++",
         "features.c++",
+        "frankenvalue.c++",
         "hibernation-manager.c++",
         "io-context.c++",
         "io-own.c++",
@@ -58,6 +59,7 @@ wd_cc_library(
     hdrs = [
         "compatibility-date.h",
         "features.h",
+        "frankenvalue.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -87,6 +89,7 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":cdp_capnp",
+        ":frankenvalue_capnp",
         ":io-gate",
         ":io-helpers",
         ":limit-enforcer",
@@ -273,6 +276,8 @@ wd_capnp_library(src = "compatibility-date.capnp")
 
 wd_capnp_library(src = "features.capnp")
 
+wd_capnp_library(src = "frankenvalue.capnp")
+
 kj_test(
     src = "io-gate-test.c++",
     deps = [
@@ -326,5 +331,12 @@ kj_test(
     deps = [
         ":trace",
         "//src/workerd/util:thread-scopes",
+    ],
+)
+
+kj_test(
+    src = "frankenvalue-test.c++",
+    deps = [
+        ":io",
     ],
 )
