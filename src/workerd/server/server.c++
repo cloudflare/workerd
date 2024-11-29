@@ -3232,35 +3232,6 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       return &lookupService(tail, kj::str("Worker \"", name, "\"'s tails"));
     };
 
-    // Also check deprecated `logging` field.
-    if (conf.hasTails()) {
-      if (!conf.getLogging().isNone()) {
-        reportConfigError(kj::str("service ", name,
-            ": Config specifies both `logging` and `tails`. Please use only `tails`."));
-      }
-    } else {
-      auto logging = conf.getLogging();
-      switch (logging.which()) {
-        case config::Worker::Logging::Which::NONE: {
-          break;
-        }
-        case config::Worker::Logging::Which::TO_SERVICE: {
-          result.loggingServices = kj::arr(
-              &lookupService(logging.getToService(), kj::str("Worker \"", name, "\"'s logging")));
-          break;
-        }
-        case config::Worker::Logging::Which::TO_SERVICES: {
-          auto list = logging.getToServices();
-          auto builder = kj::heapArrayBuilder<Service*>(list.size());
-          for (auto svc: list) {
-            builder.add(&lookupService(svc, kj::str("Worker \"", name, "\"'s logging")));
-          }
-          result.loggingServices = builder.finish();
-          break;
-        }
-      }
-    }
-
     return result;
   };
 
