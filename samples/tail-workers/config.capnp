@@ -13,7 +13,7 @@ const helloWorld :Workerd.Worker = (
     (name = "worker", esModule = embed "worker.js")
   ],
   compatibilityDate = "2024-10-14",
-  logging = ( toService = "log" ),
+  tails = ["log"],
 );
 
 const logWorker :Workerd.Worker = (

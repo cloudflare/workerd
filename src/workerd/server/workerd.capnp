@@ -630,16 +630,9 @@ struct Worker {
 
   moduleFallback @13 :Text;
 
-  tails @17 :List(ServiceDesignator);
+  tails @14 :List(ServiceDesignator);
   # List of tail worker services that should receive tail events for this worker.
   # See: https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-
-  logging :union {
-    # DEPRECATED: Use `tails` instead. `logging` does exactly the same thing.
-    none @14 :Void;
-    toService @15 :ServiceDesignator;
-    toServices @16 :List(ServiceDesignator);
-  }
 }
 
 struct ExternalServer {
