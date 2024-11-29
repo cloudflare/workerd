@@ -562,6 +562,22 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   }
 }
 
+void* getJsCageBase() {
+  if (!v8Initialized) return nullptr;
+  v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
+  if (isolate == nullptr) return nullptr;
+  // Returns null if we are not using pointer cages.
+  return isolate->GetData(4);
+}
+
+void setJsCageBase(void* base) {
+  if (!v8Initialized) return;
+  v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
+  if (isolate == nullptr) return;
+  // Returns null if we are not using pointer cages.
+  isolate->SetData(4, base);
+}
+
 #if _WIN32
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch) {
   // This function is only called by the internal build which just targets Linux.
