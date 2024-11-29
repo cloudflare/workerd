@@ -14,6 +14,7 @@ filegroup(
             "html-rewriter.c++",
             "hyperdrive.c++",
             "pyodide/pyodide.c++",
+            "pyodide/setup-emscripten.c++",
             "memory-cache.c++",
             "r2*.c++",
             "rtti.c++",
@@ -37,6 +38,7 @@ filegroup(
             "hyperdrive.h",
             "memory-cache.h",
             "pyodide/pyodide.h",
+            "pyodide/setup-emscripten.h",
             "modules.h",
             "r2*.h",
             "rtti.h",
@@ -126,9 +128,11 @@ wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide/pyodide.c++",
+        "pyodide/setup-emscripten.c++",
     ],
     hdrs = [
         "pyodide/pyodide.h",
+        "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
     implementation_deps = ["//src/workerd/util:string-buffer"],

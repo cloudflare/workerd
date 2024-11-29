@@ -5,6 +5,7 @@
 
 #include "workerd/util/wait-list.h"
 
+#include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -408,6 +409,22 @@ class SimplePythonLimiter: public jsg::Object {
   }
 };
 
+class SetupEmscripten: public jsg::Object {
+ public:
+  SetupEmscripten(EmscriptenRuntime emscriptenRuntime)
+      : emscriptenRuntime(kj::mv(emscriptenRuntime)) {};
+
+  jsg::JsValue getModule(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(SetupEmscripten) {
+    JSG_METHOD(getModule);
+  }
+
+ private:
+  EmscriptenRuntime emscriptenRuntime;
+  void visitForGc(jsg::GcVisitor& visitor);
+};
+
 using Worker = server::config::Worker;
 
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
@@ -419,6 +436,6 @@ bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader module
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
       api::pyodide::DisabledInternalJaeger, api::pyodide::SimplePythonLimiter,                     \
-      api::pyodide::MemorySnapshotResult
+      api::pyodide::MemorySnapshotResult, api::pyodide::SetupEmscripten
 
 }  // namespace workerd::api::pyodide
