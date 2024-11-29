@@ -67,6 +67,7 @@ class Blob: public jsg::Object {
 
     JSG_TS_OVERRIDE({
       bytes(): Promise<Uint8Array>;
+      arrayBuffer(): Promise<ArrayBuffer>;
     });
   }
 
