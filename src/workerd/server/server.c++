@@ -1578,7 +1578,7 @@ public:
     kj::Maybe<Service&> cache;
     kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
     AlarmScheduler& alarmScheduler;
-    kj::Array<Service*> loggingServices;
+    kj::Array<Service*> tails;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
   using AbortActorsCallback = kj::Function<void()>;
@@ -1665,7 +1665,7 @@ public:
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
-    auto tailWorkers = KJ_MAP(service, channels.loggingServices) -> kj::Own<WorkerInterface> {
+    auto tailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
       KJ_ASSERT(service != this, "A worker currently cannot log to itself");
       // Caution here... if the tail worker ends up have a cirular dependency
       // on the worker we'll end up with an infinite loop trying to initialize.
@@ -3228,7 +3228,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       }
     }
 
-    result.loggingServices = KJ_MAP(tail, conf.getTails()) {
+    result.tails = KJ_MAP(tail, conf.getTails()) {
       return &lookupService(tail, kj::str("Worker \"", name, "\"'s tails"));
     };
 
