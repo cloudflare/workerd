@@ -2310,9 +2310,7 @@ KJ_TEST("Server: tail workers") {
                 `}
             )
           ],
-          logging = (
-            toServices = ["tail", "tail2"]
-          ),
+          tails = ["tail", "tail2"],
         )
       ),
       ( name = "tail",
