@@ -673,4 +673,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   tailWorkerUserSpans @69 :Bool
       $compatEnableFlag("tail_worker_user_spans")
       $experimental;
+
+  cacheNoCache @70 :Bool
+      $compatEnableFlag("cache_no_cache_enabled")
+      $compatDisableFlag("cache_no_cache_disabled")
+      $experimental;
+  # Enables the use of cache: no-cache in the fetch api.
 }
