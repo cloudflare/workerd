@@ -935,7 +935,7 @@ declare class Blob {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/slice) */
   slice(start?: number, end?: number, type?: string): Blob;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer) */
-  arrayBuffer(): Promise<ArrayBuffer | ArrayBufferView>;
+  arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text) */
   text(): Promise<string>;
@@ -1511,7 +1511,7 @@ declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bodyUsed) */
   get bodyUsed(): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
-  arrayBuffer(): Promise<ArrayBuffer | ArrayBufferView>;
+  arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/text) */
   text(): Promise<string>;
@@ -1905,7 +1905,7 @@ declare abstract class R2Object {
 interface R2ObjectBody extends R2Object {
   get body(): ReadableStream;
   get bodyUsed(): boolean;
-  arrayBuffer(): Promise<ArrayBuffer | ArrayBufferView>;
+  arrayBuffer(): Promise<ArrayBuffer>;
   text(): Promise<string>;
   json<T>(): Promise<T>;
   blob(): Promise<Blob>;
@@ -5316,14 +5316,16 @@ declare module "cloudflare:workers" {
   export type WorkflowSleepDuration =
     | `${number} ${WorkflowDurationLabel}${"s" | ""}`
     | number;
+  export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowTimeoutDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
-      delay: string | number;
+      delay: WorkflowDelayDuration | number;
       backoff?: WorkflowBackoff;
     };
-    timeout?: string | number;
+    timeout?: WorkflowTimeoutDuration | number;
   };
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
@@ -5676,7 +5678,7 @@ declare module "cloudflare:workflows" {
     public constructor(message: string, name?: string);
   }
 }
-declare abstract class Workflow {
+declare abstract class Workflow<PARAMS = unknown> {
   /**
    * Get a handle to an existing instance of the Workflow.
    * @param id Id for the instance of this Workflow
@@ -5689,10 +5691,10 @@ declare abstract class Workflow {
    * @returns A promise that resolves with a handle for the Instance
    */
   public create(
-    options?: WorkflowInstanceCreateOptions,
+    options?: WorkflowInstanceCreateOptions<PARAMS>,
   ): Promise<WorkflowInstance>;
 }
-interface WorkflowInstanceCreateOptions {
+interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
    */
@@ -5700,7 +5702,7 @@ interface WorkflowInstanceCreateOptions {
   /**
    * The event payload the Workflow instance is triggered with
    */
-  params?: unknown;
+  params?: PARAMS;
 }
 type InstanceStatus = {
   status:
