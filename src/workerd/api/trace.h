@@ -413,7 +413,7 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
   Type getEvent();
 
   JSG_RESOURCE_TYPE(HibernatableWebSocketEventInfo) {
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(getWebSocketEvent, getEvent);
+    JSG_READONLY_INSTANCE_PROPERTY(getWebSocketEvent, getEvent);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
