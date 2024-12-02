@@ -572,10 +572,14 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           makePyodideMetadataReader(conf, impl->pythonConfig), jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
-      // TODO(later): This shouldn't exist once featureFlags.getPythonExternalPackages() is true.
-      modules->addBuiltinModule("pyodide-internal:packages_tar_reader",
-          jsg::alloc<ReadOnlyBuffer>(PYODIDE_PACKAGES_TAR.get()),
-          workerd::jsg::ModuleRegistry::Type::INTERNAL);
+      if (featureFlags.getPythonExternalPackages()) {
+        modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
+            workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
+      } else {
+        modules->addBuiltinModule("pyodide-internal:packages_tar_reader",
+            jsg::alloc<ReadOnlyBuffer>(PYODIDE_PACKAGES_TAR.get()),
+            workerd::jsg::ModuleRegistry::Type::INTERNAL);
+      }
 
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",

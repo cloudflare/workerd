@@ -131,6 +131,11 @@ class SitePackagesDir {
  * TODO(later): This needs to be removed when external package loading is enabled.
  */
 export function buildSitePackages(requirements: Set<string>): SitePackagesDir {
+  if (EmbeddedPackagesTarReader.read === undefined) {
+    // Package retrieval is enabled, so the embedded tar reader isn't initialised.
+    return new SitePackagesDir();
+  }
+
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
   let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
