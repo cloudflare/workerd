@@ -120,7 +120,7 @@ Lock::Lock(v8::Isolate* v8Isolate)
     : v8Isolate(v8Isolate),
       locker(v8Isolate),
       isolateScope(v8Isolate),
-      previousData(v8Isolate->GetData(SET_DATA_ISOLATE)),
+      previousData(v8Isolate->GetData(SET_DATA_LOCK)),
       warningsLogged(IsolateBase::from(v8Isolate).areWarningsLogged()) {
   if (previousData != nullptr) {
     // Hmm, there's already a current lock. It must be a recursive lock (i.e. a second lock taken
@@ -139,10 +139,10 @@ Lock::Lock(v8::Isolate* v8Isolate)
     KJ_LOG(ERROR, "took recursive isolate lock", kj::getStackTrace());
 #endif
   }
-  v8Isolate->SetData(SET_DATA_ISOLATE, this);
+  v8Isolate->SetData(SET_DATA_LOCK, this);
 }
 Lock::~Lock() noexcept(false) {
-  v8Isolate->SetData(SET_DATA_ISOLATE, previousData);
+  v8Isolate->SetData(SET_DATA_LOCK, previousData);
 }
 
 Value Lock::parseJson(kj::ArrayPtr<const char> data) {
