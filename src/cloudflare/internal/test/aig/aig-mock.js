@@ -101,6 +101,12 @@ export default {
       return Response.json({ success: true });
     }
 
+    if (request.method === 'POST') {
+      const body = await request.json();
+
+      return Response.json({ success: true, result: body });
+    }
+
     return Response.json({ success: false }, { status: 500 });
   },
 };

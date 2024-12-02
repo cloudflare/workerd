@@ -3790,7 +3790,7 @@ type GatewayOptions = {
 };
 type AiGatewayPatchLog = {
   score?: number | null;
-  feedback?: -1 | 1 | "-1" | "1" | null;
+  feedback?: -1 | 1 | null;
   metadata?: Record<string, number | string | boolean | null | bigint> | null;
 };
 type AiGatewayLog = {
@@ -3820,11 +3820,57 @@ type AiGatewayLog = {
   response_head_complete: boolean;
   created_at: Date;
 };
+type AIGatewayProviders =
+  | "workers-ai"
+  | "anthropic"
+  | "aws-bedrock"
+  | "azure-openai"
+  | "google-vertex-ai"
+  | "huggingface"
+  | "openai"
+  | "perplexity-ai"
+  | "replicate"
+  | "groq"
+  | "cohere"
+  | "google-ai-studio"
+  | "mistral"
+  | "grok"
+  | "openrouter";
+type AIGatewayHeaders = {
+  "cf-aig-metadata":
+    | Record<string, number | string | boolean | null | bigint>
+    | string;
+  "cf-aig-custom-cost":
+    | {
+        per_token_in?: number;
+        per_token_out?: number;
+      }
+    | {
+        total_cost?: number;
+      }
+    | string;
+  "cf-aig-cache-ttl": number | string;
+  "cf-aig-skip-cache": boolean | string;
+  "cf-aig-cache-key": string;
+  "cf-aig-collect-log": boolean | string;
+  Authorization: string;
+  "Content-Type": string;
+  [key: string]: string | number | boolean | object;
+};
+type AIGatewayUniversalRequest = {
+  provider: AIGatewayProviders | string; // eslint-disable-line
+  endpoint: string;
+  headers: Partial<AIGatewayHeaders>;
+  query: unknown;
+};
 interface AiGatewayInternalError extends Error {}
 interface AiGatewayLogNotFound extends Error {}
 declare abstract class AiGateway {
   patchLog(logId: string, data: AiGatewayPatchLog): Promise<void>;
   getLog(logId: string): Promise<AiGatewayLog>;
+  run(
+    data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
+  ): Promise<Response>;
 }
 interface BasicImageTransformations {
   /**
