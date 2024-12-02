@@ -217,15 +217,19 @@ declare module "cloudflare:workers" {
     | `${number} ${WorkflowDurationLabel}${"s" | ""}`
     | number;
 
+  export type WorkflowDelayDuration = WorkflowSleepDuration;
+
+  export type WorkflowTimeoutDuration = WorkflowSleepDuration;
+
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
 
   export type WorkflowStepConfig = {
     retries?: {
       limit: number;
-      delay: string | number;
+      delay: WorkflowDelayDuration | number;
       backoff?: WorkflowBackoff;
     };
-    timeout?: string | number;
+    timeout?: WorkflowTimeoutDuration | number;
   };
 
   export type WorkflowEvent<T> = {

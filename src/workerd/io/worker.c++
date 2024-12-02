@@ -1343,8 +1343,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 this->isPython = modulesSource.isPython;
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
-                  auto limitScope =
-                      isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
+                  kj::Own<void> limitScope;
+                  if (isPython) {
+                    limitScope =
+                        isolate->getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
+                  } else {
+                    limitScope = isolate->getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
+                  }
                   auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
                   impl->configureDynamicImports(lock, modules);
                   modulesSource.compileModules(lock, isolate->getApi());

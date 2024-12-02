@@ -22,7 +22,7 @@ declare abstract class NonRetryableError extends Error {
   public constructor(message: string, name?: string);
 }
 
-declare abstract class Workflow {
+declare abstract class Workflow<PARAMS = unknown> {
   /**
    * Get a handle to an existing instance of the Workflow.
    * @param id Id for the instance of this Workflow
@@ -36,11 +36,11 @@ declare abstract class Workflow {
    * @returns A promise that resolves with a handle for the Instance
    */
   public create(
-    options?: WorkflowInstanceCreateOptions
+    options?: WorkflowInstanceCreateOptions<PARAMS>
   ): Promise<WorkflowInstance>;
 }
 
-interface WorkflowInstanceCreateOptions {
+interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
    * This is automatically generated if not passed in.
@@ -49,7 +49,7 @@ interface WorkflowInstanceCreateOptions {
   /**
    * The event payload the Workflow instance is triggered with
    */
-  params?: unknown;
+  params?: PARAMS;
 }
 
 type InstanceStatus = {
