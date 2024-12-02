@@ -50,6 +50,7 @@
 -isystembazel-bin/src/rust/cxx-integration/_virtual_includes/cxx-include/
 -isystembazel-bin/src/rust/cxx-integration/_virtual_includes/cxx-integration@cxx
 -isystembazel-bin/src/rust/cxx-integration-test/_virtual_includes/cxx-integration-test@cxx
+-isystembazel-bin/src/rust/dns/_virtual_includes/dns@cxx
 -D_FORTIFY_SOURCE=1
 -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 -D_LIBCPP_NO_ABI_TAG
