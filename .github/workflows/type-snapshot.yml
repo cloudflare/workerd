@@ -45,3 +45,8 @@ jobs:
       - name: Check snapshot diff
         run: |
           diff -r bazel-bin/types/definitions/ types/generated-snapshot
+      - name: How to fix
+        if: failure()
+        run: |
+          echo "The generated output of @cloudflare/workers-types has been changed by this PR"
+          echo "If this is intentional, run 'rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot' to update the snapshot"

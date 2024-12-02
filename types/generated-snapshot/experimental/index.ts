@@ -969,7 +969,7 @@ export declare class Blob {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/slice) */
   slice(start?: number, end?: number, type?: string): Blob;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer) */
-  arrayBuffer(): Promise<ArrayBuffer | ArrayBufferView>;
+  arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text) */
   text(): Promise<string>;
@@ -1547,7 +1547,7 @@ export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bodyUsed) */
   get bodyUsed(): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
-  arrayBuffer(): Promise<ArrayBuffer | ArrayBufferView>;
+  arrayBuffer(): Promise<ArrayBuffer>;
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/text) */
   text(): Promise<string>;
@@ -1990,7 +1990,7 @@ export declare abstract class R2Object {
 export interface R2ObjectBody extends R2Object {
   get body(): ReadableStream;
   get bodyUsed(): boolean;
-  arrayBuffer(): Promise<ArrayBuffer | ArrayBufferView>;
+  arrayBuffer(): Promise<ArrayBuffer>;
   text(): Promise<string>;
   json<T>(): Promise<T>;
   blob(): Promise<Blob>;
@@ -5680,7 +5680,7 @@ export interface DispatchNamespace {
     options?: DynamicDispatchOptions,
   ): Fetcher;
 }
-export declare abstract class Workflow {
+export declare abstract class Workflow<PARAMS = unknown> {
   /**
    * Get a handle to an existing instance of the Workflow.
    * @param id Id for the instance of this Workflow
@@ -5693,10 +5693,10 @@ export declare abstract class Workflow {
    * @returns A promise that resolves with a handle for the Instance
    */
   public create(
-    options?: WorkflowInstanceCreateOptions,
+    options?: WorkflowInstanceCreateOptions<PARAMS>,
   ): Promise<WorkflowInstance>;
 }
-export interface WorkflowInstanceCreateOptions {
+export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
    */
@@ -5704,7 +5704,7 @@ export interface WorkflowInstanceCreateOptions {
   /**
    * The event payload the Workflow instance is triggered with
    */
-  params?: unknown;
+  params?: PARAMS;
 }
 export type InstanceStatus = {
   status:
