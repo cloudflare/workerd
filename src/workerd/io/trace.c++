@@ -126,29 +126,32 @@ kj::String TraceId::toW3C() const {
   return kj::str(s.releaseAsArray());
 }
 
-TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
-  if (isPredictableModeForTest()) {
-    return TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
-  }
-
-  uint64_t low = 0;
-  uint64_t high = 0;
+namespace {
+uint64_t getRandom64Bit(kj::Maybe<kj::EntropySource&>& entropySource) {
+  uint64_t ret = 0;
   uint8_t tries = 0;
 
   do {
     tries++;
     KJ_IF_SOME(entropy, entropySource) {
-      entropy.generate(kj::arrayPtr(&low, 1).asBytes());
-      entropy.generate(kj::arrayPtr(&high, 1).asBytes());
+      entropy.generate(kj::arrayPtr(&ret, 1).asBytes());
     } else {
-      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&low), sizeof(low)) == 1);
-      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&high), sizeof(high)) == 1);
+      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&ret), sizeof(ret)) == 1);
     }
-    // On the extreme off chance that we ended with with zeroes for both,
+    // On the extreme off chance that we ended with with zeroes
     // let's try again, but only up to three times.
-  } while (low == 0 && high == 0 && tries < 3);
+  } while (ret == 0 && tries < 3);
 
-  return TraceId(low, high);
+  return ret;
+}
+}  // namespace
+
+TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
+  if (isPredictableModeForTest()) {
+    return TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
+  }
+
+  return TraceId(getRandom64Bit(entropySource), getRandom64Bit(entropySource));
 }
 
 kj::String KJ_STRINGIFY(const TraceId& id) {
@@ -156,21 +159,21 @@ kj::String KJ_STRINGIFY(const TraceId& id) {
 }
 
 InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
-    kj::Maybe<kj::Rc<SpanIdCounter>> counter,
+    kj::Maybe<kj::EntropySource&> entropySource,
     TraceId traceId,
     TraceId invocationId,
-    kj::uint spanId,
+    uint64_t spanId,
     kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext)
-    : counter(kj::mv(counter)),
+    : entropySource(entropySource),
       traceId(kj::mv(traceId)),
       invocationId(kj::mv(invocationId)),
       spanId(spanId),
       parentSpanContext(kj::mv(parentSpanContext)) {}
 
 kj::Rc<InvocationSpanContext> InvocationSpanContext::newChild() {
-  auto& c = KJ_ASSERT_NONNULL(counter, "unable to create child spans on this context");
-  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), c.addRef(), traceId,
-      invocationId, c->next(), addRefToThis());
+  KJ_ASSERT(!isTrigger(), "unable to create child spans on this context");
+  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), entropySource, traceId,
+      invocationId, getRandom64Bit(entropySource), addRefToThis());
 }
 
 kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
@@ -182,7 +185,7 @@ kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
     parent = ctx.addRef();
     return ctx->traceId;
   }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
-  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), kj::rc<SpanIdCounter>(),
+  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), entropySource,
       kj::mv(traceId), TraceId::fromEntropy(entropySource), 0, kj::mv(parent));
 }
 
