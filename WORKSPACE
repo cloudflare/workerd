@@ -14,7 +14,7 @@ deps_gen()
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 
-NODE_VERSION = "20.14.0"
+NODE_VERSION = "22.11.0"
 
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
