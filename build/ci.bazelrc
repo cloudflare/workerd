@@ -24,7 +24,7 @@ test:ci --test_output=errors
 build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
-build:ci-test --remote_download_outputs=minimal
+build:ci-test --remote_download_outputs=minimal --test_size_filters=small,medium,large,enormous
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid
@@ -52,10 +52,6 @@ build:ci-linux-common --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CX
 build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++
 
 build:ci-linux --config=ci-linux-common
-# Some tests (like Python import tests) take a long time to run and don't benefit much
-# from multi-platform testing. For that reason, we only run them in a single configuration
-# to minimize effect on CI pipeline runtime.
-test:ci-linux --test_size_filters=small,medium,large,enormous
 
 build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-debug --config=debug --config=rust-debug
