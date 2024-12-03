@@ -57,21 +57,25 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-15, windows-2022]
+        target-arch: [ X64 ]
         include:
           - os-name: linux
             os: ubuntu-20.04
             bazel-config: release_linux
-            target-arch: X64
-          - os-name: macOS
+          # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
+          # release binaries on the macos-15 runner.
+          - os-name: macOS-x64
             # This configuration is used for cross-compiling – macos-15 is Apple Silicon-based but
             # we use it to compile the x64 release.
             os: macos-15
+            bazel-config: release_macos_cross_x86_64
+          - os-name: macOS-arm64
+            os: macos-15
             bazel-config: release_macos
-            target-arch: X64
+            target-arch: ARM64
           - os-name: windows
             os: windows-2022
             bazel-config: release_windows
-            target-arch: X64
     runs-on: ${{ matrix.os }}
     name: build (${{ matrix.os-name }})
     steps:
@@ -104,8 +108,6 @@ jobs:
           # exist from an older pre-installed LLVM version on the runner image.
           brew install lld
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
-          # Cross-compile so that we can use the latest Xcode version for the Intel Mac binary
-          echo "build:macos --config=macos-cross-x86_64" >> .bazelrc
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
       - name: Setup Windows
@@ -141,11 +143,17 @@ jobs:
     strategy:
       matrix:
         arch: [linux-64, darwin-64, windows-64]
+        # This variable itself is unused, but allows us to set up two macOS builds. arm64 builds for
+        # other platforms will be supported later, then we'll list both architectures here.
+        cpu: [ X64 ]
         include:
           - arch: linux-64
             name: Linux-X64
           - arch: darwin-64
             name: macOS-X64
+          - arch: darwin-arm64
+            name: macOS-ARM64
+            cpu: ARM64
           - arch: windows-64
             name: Windows-X64
     steps:
