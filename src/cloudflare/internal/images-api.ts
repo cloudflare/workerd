@@ -53,14 +53,6 @@ class TransformationResultImpl implements ImageTransformationResult {
   }
 }
 
-// Read input into memory for now, as it's difficult to stream multipart
-// requests and this is what the backend uses.
-//
-// The interface takes streams to allow streaming later.
-async function streamToBlob(stream: ReadableStream<Uint8Array>): Promise<Blob> {
-  return new Response(stream).blob();
-}
-
 class DrawTransformer {
   public constructor(
     public readonly child: ImageTransformerImpl,
@@ -110,27 +102,30 @@ class ImageTransformerImpl implements ImageTransformer {
   public async output(
     options: ImageOutputOptions
   ): Promise<ImageTransformationResult> {
-    const body = new FormData();
+    const formData = new StreamableFormData();
 
     this.consume();
-    body.append('image', await streamToBlob(this.stream));
+    formData.append('image', this.stream, { type: 'file' });
 
-    await this.serializeTransforms(body);
+    this.serializeTransforms(formData);
 
-    body.append('output_format', options.format);
+    formData.append('output_format', options.format);
     if (options.quality !== undefined) {
-      body.append('output_quality', options.quality.toString());
+      formData.append('output_quality', options.quality.toString());
     }
 
     if (options.background !== undefined) {
-      body.append('background', options.background);
+      formData.append('background', options.background);
     }
 
     const response = await this.fetcher.fetch(
       'https://js.images.cloudflare.com/transform',
       {
         method: 'POST',
-        body,
+        headers: {
+          'content-type': formData.contentType(),
+        },
+        body: formData.stream(),
       }
     );
 
@@ -150,20 +145,20 @@ class ImageTransformerImpl implements ImageTransformer {
     this.consumed = true;
   }
 
-  private async serializeTransforms(body: FormData): Promise<void> {
+  private serializeTransforms(formData: StreamableFormData): void {
     const transforms: (TargetedTransform | DrawCommand)[] = [];
 
     // image 0 is the canvas, so the first draw_image has index 1
     let drawImageIndex = 1;
-    function appendDrawImage(blob: Blob): number {
-      body.append('draw_image', blob);
+    function appendDrawImage(stream: ReadableStream): number {
+      formData.append('draw_image', stream, { type: 'file' });
       return drawImageIndex++;
     }
 
-    async function walkTransforms(
+    function walkTransforms(
       targetImageIndex: number,
       imageTransforms: (ImageTransform | DrawTransformer)[]
-    ): Promise<void> {
+    ): void {
       for (const transform of imageTransforms) {
         if (!isDrawTransformer(transform)) {
           // Simple transformation - we just have to tell the backend to run it
@@ -175,13 +170,11 @@ class ImageTransformerImpl implements ImageTransformer {
         } else {
           // Drawn child image
           // Set the input for the drawn image on the form
-          const drawImageIndex = appendDrawImage(
-            await streamToBlob(transform.child.stream)
-          );
+          const drawImageIndex = appendDrawImage(transform.child.stream);
 
           // Tell the backend to run any transforms (possibly involving more draws)
           // required to build this child
-          await walkTransforms(drawImageIndex, transform.child.transforms);
+          walkTransforms(drawImageIndex, transform.child.transforms);
 
           // Draw the child image on to the canvas
           transforms.push({
@@ -193,8 +186,8 @@ class ImageTransformerImpl implements ImageTransformer {
       }
     }
 
-    await walkTransforms(0, this.transforms);
-    body.append('transforms', JSON.stringify(transforms));
+    walkTransforms(0, this.transforms);
+    formData.append('transforms', JSON.stringify(transforms));
   }
 }
 
@@ -212,14 +205,17 @@ class ImagesBindingImpl implements ImagesBinding {
   public async info(
     stream: ReadableStream<Uint8Array>
   ): Promise<ImageInfoResponse> {
-    const body = new FormData();
-    body.append('image', await streamToBlob(stream));
+    const body = new StreamableFormData();
+    body.append('image', stream, { type: 'file' });
 
     const response = await this.fetcher.fetch(
       'https://js.images.cloudflare.com/info',
       {
         method: 'POST',
-        body,
+        headers: {
+          'content-type': body.contentType(),
+        },
+        body: body.stream(),
       }
     );
 
@@ -280,4 +276,135 @@ async function throwErrorIfErrorResponse(
 
 export default function makeBinding(env: { fetcher: Fetcher }): ImagesBinding {
   return new ImagesBindingImpl(env.fetcher);
+}
+
+function chainStreams<T>(streams: ReadableStream<T>[]): ReadableStream<T> {
+  const outputStream = new ReadableStream<T>({
+    async start(controller): Promise<void> {
+      for (const stream of streams) {
+        const reader = stream.getReader();
+
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value !== undefined) controller.enqueue(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+
+      controller.close();
+    },
+  });
+
+  return outputStream;
+}
+
+const CRLF = '\r\n';
+
+function isReadableStream(obj: unknown): obj is ReadableStream {
+  return !!(
+    obj &&
+    typeof obj === 'object' &&
+    'getReader' in obj &&
+    typeof obj.getReader === 'function'
+  );
+}
+
+type EntryOptions = { type: 'file' | 'string' };
+class StreamableFormData {
+  private entries: {
+    field: string;
+    value: ReadableStream;
+    options: EntryOptions;
+  }[];
+  private boundary: string;
+
+  public constructor() {
+    this.entries = [];
+
+    this.boundary = '--------------------------';
+    for (let i = 0; i < 24; i++) {
+      this.boundary += Math.floor(Math.random() * 10).toString(16);
+    }
+  }
+
+  public append(
+    field: string,
+    value: ReadableStream | string,
+    options?: EntryOptions
+  ): void {
+    let valueStream: ReadableStream;
+    if (isReadableStream(value)) {
+      valueStream = value;
+    } else {
+      valueStream = new Blob([value]).stream();
+    }
+
+    this.entries.push({
+      field,
+      value: valueStream,
+      options: options || { type: 'string' },
+    });
+  }
+
+  private multipartBoundary(): ReadableStream {
+    return new Blob(['--', this.boundary, CRLF]).stream();
+  }
+
+  private multipartHeader(
+    name: string,
+    type: 'file' | 'string'
+  ): ReadableStream {
+    let filenamePart;
+
+    if (type === 'file') {
+      filenamePart = `; filename="${name}"`;
+    } else {
+      filenamePart = '';
+    }
+
+    return new Blob([
+      `content-disposition: form-data; name="${name}"${filenamePart}`,
+      CRLF,
+      CRLF,
+    ]).stream();
+  }
+
+  private multipartBody(stream: ReadableStream): ReadableStream {
+    return chainStreams([stream, new Blob([CRLF]).stream()]);
+  }
+
+  private multipartFooter(): ReadableStream {
+    return new Blob(['--', this.boundary, '--', CRLF]).stream();
+  }
+
+  public contentType(): string {
+    return `multipart/form-data; boundary=${this.boundary}`;
+  }
+
+  public stream(): ReadableStream {
+    const streams: ReadableStream[] = [this.multipartBoundary()];
+
+    const valueStreams = [];
+    for (const { field, value, options } of this.entries) {
+      valueStreams.push(this.multipartHeader(field, options.type));
+      valueStreams.push(this.multipartBody(value));
+      valueStreams.push(this.multipartBoundary());
+    }
+
+    if (valueStreams.length) {
+      // Remove last boundary as we want a footer instead
+      valueStreams.pop();
+    }
+
+    streams.push(...valueStreams);
+
+    streams.push(this.multipartFooter());
+
+    return chainStreams(streams);
+  }
 }
