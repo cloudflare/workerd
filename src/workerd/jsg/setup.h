@@ -355,6 +355,14 @@ class IsolateBase {
 // intended to be invoked from a signal handler.
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
+// Set the location of the pointer cage base for the current isolate.  This is only
+// used by getJsCageBase().
+void setJsCageBase(void* cageBase);
+
+// Get the location previously set by setJsCageBase() for the current isolate.  Returns
+// a null pointer if there is no current isolate.
+void* getJsCageBase();
+
 // Class representing a JavaScript execution engine, with the ability to wrap some set of API
 // classes which you specify.
 //

@@ -20,17 +20,17 @@
 namespace workerd::jsg {
 
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate) {
-  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.getCaptureThrowsAsRejections();
 }
 
 bool getCommonJsExportDefault(v8::Isolate* isolate) {
-  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.getCommonJsExportDefault();
 }
 
 bool getShouldSetToStringTag(v8::Isolate* isolate) {
-  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.shouldSetToStringTag();
 }
 
@@ -474,7 +474,7 @@ void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception
 }
 
 kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
-  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.unwrapException(isolate->GetCurrentContext(), exception);
 }
 

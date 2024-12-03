@@ -302,6 +302,7 @@ http_archive(
         "//:patches/v8/0017-Modify-where-to-look-for-fast_float-dependency.patch",
         "//:patches/v8/0018-Return-rejected-promise-from-WebAssembly.compile-if-.patch",
         "//:patches/v8/0019-codegen-Don-t-pass-a-nullptr-in-InitUnwindingRecord-.patch",
+        "//:patches/v8/0020-Add-another-slot-in-the-isolate-for-embedder.patch",
     ],
     strip_prefix = "v8-13.1.201.8",
     url = "https://github.com/v8/v8/archive/refs/tags/13.1.201.8.tar.gz",

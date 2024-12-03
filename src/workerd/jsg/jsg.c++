@@ -72,7 +72,7 @@ void Data::destroy() {
       //
       // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
       // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
-      auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+      auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
       jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
     }
     isolate = nullptr;
@@ -120,7 +120,7 @@ Lock::Lock(v8::Isolate* v8Isolate)
     : v8Isolate(v8Isolate),
       locker(v8Isolate),
       isolateScope(v8Isolate),
-      previousData(v8Isolate->GetData(2)),
+      previousData(v8Isolate->GetData(SET_DATA_LOCK)),
       warningsLogged(IsolateBase::from(v8Isolate).areWarningsLogged()) {
   if (previousData != nullptr) {
     // Hmm, there's already a current lock. It must be a recursive lock (i.e. a second lock taken
@@ -139,10 +139,10 @@ Lock::Lock(v8::Isolate* v8Isolate)
     KJ_LOG(ERROR, "took recursive isolate lock", kj::getStackTrace());
 #endif
   }
-  v8Isolate->SetData(2, this);
+  v8Isolate->SetData(SET_DATA_LOCK, this);
 }
 Lock::~Lock() noexcept(false) {
-  v8Isolate->SetData(2, previousData);
+  v8Isolate->SetData(SET_DATA_LOCK, previousData);
 }
 
 Value Lock::parseJson(kj::ArrayPtr<const char> data) {
@@ -290,7 +290,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(v8::Isolate* isolate, size_t
   } else {
     // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
     // time that we do.
-    auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+    auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
     jsgIsolate.deferExternalMemoryDecrement(static_cast<int64_t>(amount));
   }
 }
