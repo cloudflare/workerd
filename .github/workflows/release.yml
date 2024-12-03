@@ -3,7 +3,13 @@ name: Build & Release
 on:
   push:
     branches:
-    - main
+      - main
+  workflow_dispatch:
+    inputs:
+      patch:
+        description: 'Patch Version'
+        required: true
+        default: '0'
 
 jobs:
   version:
@@ -16,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: echo
         run: |
-          echo "::set-output name=version::1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0"
+          echo "::set-output name=version::1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}"
   check-tag:
     name: Check tag is new
     outputs:
