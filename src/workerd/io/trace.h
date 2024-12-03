@@ -129,34 +129,13 @@ constexpr TraceId TraceId::nullId = nullptr;
 class InvocationSpanContext final: public kj::Refcounted,
                                    public kj::EnableAddRefToThis<InvocationSpanContext> {
  public:
-  // Spans within a InvocationSpanContext are identified by a span id that is a
-  // monotically increasing number. Every InvocationSpanContext has a root span
-  // whose ID is zero. Every child span context created within that context will
-  // have a span id that is one greater than the previously created one.
-  class SpanIdCounter final: public kj::Refcounted {
-   public:
-    SpanIdCounter() = default;
-    KJ_DISALLOW_COPY_AND_MOVE(SpanIdCounter);
-
-    inline kj::uint next() {
-#ifdef KJ_DEBUG
-      static constexpr kj::uint kMax = kj::maxValue;
-      KJ_ASSERT(id < kMax, "max number of spans exceeded");
-#endif
-      return id++;
-    }
-
-   private:
-    kj::uint id = 1;
-  };
-
   // The constructor is public only so kj::rc can see it and create a new instance.
   // User code should use the static factory methods or the newChild method.
   InvocationSpanContext(kj::Badge<InvocationSpanContext>,
-      kj::Maybe<kj::Rc<SpanIdCounter>> counter,
+      kj::Maybe<kj::EntropySource&> entropySource,
       TraceId traceId,
       TraceId invocationId,
-      kj::uint spanId = 0,
+      uint64_t spanId = 0ULL,
       kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(InvocationSpanContext);
 
@@ -168,7 +147,7 @@ class InvocationSpanContext final: public kj::Refcounted,
     return invocationId;
   }
 
-  inline const kj::uint getSpanId() const {
+  inline const uint64_t getSpanId() const {
     return spanId;
   }
 
@@ -176,17 +155,17 @@ class InvocationSpanContext final: public kj::Refcounted,
     return parentSpanContext;
   }
 
-  // Creates a new child span. If the current context does not have a counter,
-  // then this will assert. If isTrigger() is true then it will not have a
-  // counter.
+  // Creates a new child span. If the current context does not have an entropy
+  // source this will assert. If isTrigger() is true then it will not have an
+  // entropy source.
   kj::Rc<InvocationSpanContext> newChild();
 
-  // An InvocationSpanContext is a trigger context if it has no counter. This
-  // generally means the SpanContext was create from a capnp message and
+  // An InvocationSpanContext is a trigger context if it has no entropy source.
+  // This generally means the SpanContext was create from a capnp message and
   // represents an InvocationSpanContext that was propagated from a parent
   // or triggering context.
   bool isTrigger() const {
-    return counter == kj::none;
+    return entropySource == kj::none;
   }
 
   // Creates a new InvocationSpanContext. If the triggerContext is given, then its
@@ -205,12 +184,12 @@ class InvocationSpanContext final: public kj::Refcounted,
   void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
 
  private:
-  // If there is no counter, then child spans cannot be created from
+  // If there is no entropy source, then child spans cannot be created from
   // this InvocationSpanContext.
-  kj::Maybe<kj::Rc<SpanIdCounter>> counter;
+  kj::Maybe<kj::EntropySource&> entropySource;
   const TraceId traceId;
   const TraceId invocationId;
-  const kj::uint spanId;
+  const uint64_t spanId;
 
   // The parentSpanContext can be either a direct parent or a trigger
   // context. If it is a trigger context, then it should have the same

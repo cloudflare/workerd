@@ -22,7 +22,7 @@ struct InvocationSpanContext {
   }
   traceId @0 :TraceId;
   invocationId @1 :TraceId;
-  spanId @2 :UInt32;
+  spanId @2 :UInt64;
 }
 
 struct Trace @0x8e8d911203762d34 {
