@@ -26,7 +26,7 @@ jobs:
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
           echo "version=${{ inputs.prerelease == false && '1' || '0'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
-          echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
+          echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
   publish-arch-specific:
     # if: github.repository_owner == 'cloudflare'
     name: Publish arch-specific packages to npm
