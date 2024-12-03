@@ -94,6 +94,15 @@
       "file_regex": "\\.tar\\.gz$"
     },
     {
+      // Needed for running the latest Node.js due to aspect_rules_js using older
+      // version by default
+      "name": "rules_nodejs",
+      "type": "github_release",
+      "owner": "bazel-contrib",
+      "repo": "rules_nodejs",
+      "file_regex": "\\.tar\\.gz$"
+    },
+    {
       // Needed for aspect_rules_js, build fails on Windows if it is not fetched explicitly.
       // rules_js 2.1.0 uses a fixed version, once we update to that version this can be dropped.
       "name": "aspect_bazel_lib",
