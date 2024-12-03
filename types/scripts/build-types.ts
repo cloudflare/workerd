@@ -1,8 +1,7 @@
 import assert from "node:assert";
 import childProcess from "node:child_process";
 import events from "node:events";
-import { readFileSync, readdirSync } from "node:fs";
-import fs from "node:fs/promises";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import prettier from "prettier";
 import ts from "typescript";
@@ -71,7 +70,7 @@ function checkDiagnostics(sources: SourcesMap) {
     .getPreEmitDiagnostics(program)
     .concat(emitResult.diagnostics);
 
-  allDiagnostics.forEach((diagnostic) => {
+  for (const diagnostic of allDiagnostics) {
     if (diagnostic.file) {
       const { line, character } = ts.getLineAndCharacterOfPosition(
         diagnostic.file,
@@ -89,34 +88,39 @@ function checkDiagnostics(sources: SourcesMap) {
         ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
       );
     }
-  });
+  }
 
-  assert(allDiagnostics.length === 0, "TypeScript failed to compile!");
+  assert.strictEqual(allDiagnostics.length, 0, "TypeScript failed to compile!");
 }
 
-function spawnWorkerd(
-  configPath: string
-): Promise<{ url: URL; kill: () => Promise<void> }> {
-  return new Promise((resolve) => {
-    const workerdProcess = childProcess.spawn(
-      "./src/workerd/server/workerd",
-      ["serve", "--verbose", "--experimental", "--control-fd=3", configPath],
-      { stdio: ["inherit", "inherit", "inherit", "pipe"] }
-    );
-    const exitPromise = events.once(workerdProcess, "exit");
-    workerdProcess.stdio?.[3]?.on("data", (chunk) => {
-      const message = JSON.parse(chunk.toString().trim());
-      assert.strictEqual(message.event, "listen");
-      resolve({
-        url: new URL(`http://127.0.0.1:${message.port}`),
-        async kill() {
-          workerdProcess.kill("SIGINT");
-          await exitPromise;
-        },
-      });
+type Worker = {
+  url: URL;
+  kill: () => Promise<void>;
+};
+
+function spawnWorkerd(configPath: string): Promise<Worker> {
+  const { promise, resolve } = Promise.withResolvers<Worker>();
+  const workerdProcess = childProcess.spawn(
+    "./src/workerd/server/workerd",
+    ["serve", "--verbose", "--experimental", "--control-fd=3", configPath],
+    { stdio: ["inherit", "inherit", "inherit", "pipe"] }
+  );
+  const exitPromise = events.once(workerdProcess, "exit");
+  workerdProcess.stdio[3]?.on("data", (chunk) => {
+    const message = JSON.parse(chunk.toString().trim());
+    assert.strictEqual(message.event, "listen");
+    resolve({
+      url: new URL(`http://127.0.0.1:${message.port}`),
+      async kill() {
+        workerdProcess.kill("SIGTERM");
+        await exitPromise;
+      },
     });
   });
+  return promise;
 }
+
+const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
 
 async function buildEntrypoint(
   entrypoint: (typeof ENTRYPOINTS)[number],
@@ -129,19 +133,19 @@ async function buildEntrypoint(
 
   const name = entrypoint.name ?? entrypoint.compatDate;
   const entrypointPath = path.join(OUTPUT_PATH, name);
-  await fs.mkdir(entrypointPath, { recursive: true });
+  mkdirSync(entrypointPath, { recursive: true });
   for (const [name, definitions] of bundle) {
     assert(typeof definitions === "string");
-    const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
-    let typings = definitions.replaceAll(prettierIgnoreRegexp, "");
-
-    typings = await prettier.format(typings, {
-      parser: "typescript",
-    });
+    const typings = await prettier.format(
+      definitions.replaceAll(prettierIgnoreRegexp, ""),
+      {
+        parser: "typescript",
+      }
+    );
 
     checkDiagnostics(new SourcesMap([["/$virtual/source.ts", typings]]));
 
-    await fs.writeFile(path.join(entrypointPath, name), typings);
+    writeFileSync(path.join(entrypointPath, name), typings);
   }
 }
 
