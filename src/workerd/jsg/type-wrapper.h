@@ -403,7 +403,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       : TypeWrapperBase<Self, T>(configuration)...,
         MaybeWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration) {
-    isolate->SetData(1, this);
+    isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
@@ -412,7 +412,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   static TypeWrapper& from(v8::Isolate* isolate) {
-    return *reinterpret_cast<TypeWrapper*>(isolate->GetData(1));
+    return *reinterpret_cast<TypeWrapper*>(isolate->GetData(SET_DATA_TYPE_WRAPPER));
   }
 
   using TypeWrapperBase<Self, T>::getName...;
