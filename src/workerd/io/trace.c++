@@ -126,6 +126,14 @@ kj::String TraceId::toW3C() const {
   return kj::str(s.releaseAsArray());
 }
 
+// Return ID represented as a network-order/big endian hex string.
+kj::String TraceId::toNEHex() const {
+  kj::Vector<char> s(32);
+  addHex(s, __builtin_bswap64(low));
+  addHex(s, __builtin_bswap64(high));
+  return kj::str(s.releaseAsArray());
+}
+
 TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
   if (isPredictableModeForTest()) {
     return TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
@@ -186,11 +194,11 @@ kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
       kj::mv(traceId), TraceId::fromEntropy(entropySource), 0, kj::mv(parent));
 }
 
-TraceId TraceId::fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader) {
+TraceId TraceId::fromCapnp(rpc::TraceId::Reader reader) {
   return TraceId(reader.getLow(), reader.getHigh());
 }
 
-void TraceId::toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const {
+void TraceId::toCapnp(rpc::TraceId::Builder writer) const {
   writer.setLow(low);
   writer.setHigh(high);
 }
@@ -503,6 +511,11 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
       spans[i].copyTo(list[i]);
     }
   }
+  // Add trace ID, if available.
+  KJ_IF_SOME(t, traceId) {
+    auto traceIdBuilder = builder.initTraceId();
+    t.toCapnp(traceIdBuilder);
+  }
 
   {
     auto list = builder.initExceptions(exceptions.size());
@@ -619,6 +632,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   if (pipelineLogLevel != PipelineLogLevel::NONE) {
     logs.addAll(reader.getLogs());
     spans.addAll(reader.getSpans());
+    // Set traceId, if not set already
+    if (reader.hasSpans() && traceId == kj::none) {
+      traceId = tracing::TraceId::fromCapnp(reader.getTraceId());
+    }
     exceptions.addAll(reader.getExceptions());
     diagnosticChannelEvents.addAll(reader.getDiagnosticChannelEvents());
   }
@@ -890,6 +907,12 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
   trace->bytesUsed = newSize;
   trace->spans.add(kj::mv(span));
   trace->numSpans++;
+}
+
+void WorkerTracer::setTraceId(tracing::TraceId traceId) {
+  if (trace->traceId == kj::none) {
+    trace->traceId = traceId;
+  }
 }
 
 Span::TagValue spanTagClone(const Span::TagValue& tag) {

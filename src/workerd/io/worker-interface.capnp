@@ -16,11 +16,12 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
+struct TraceId {
+  high @0 :UInt64;
+  low @1 :UInt64;
+}
+
 struct InvocationSpanContext {
-  struct TraceId {
-    high @0 :UInt64;
-    low @1 :UInt64;
-  }
   traceId @0 :TraceId;
   invocationId @1 :TraceId;
   spanId @2 :UInt32;
@@ -44,6 +45,7 @@ struct Trace @0x8e8d911203762d34 {
   }
 
   spans @26 :List(UserSpanData);
+  traceId @27 :TraceId;
 
   exceptions @1 :List(Exception);
   struct Exception {

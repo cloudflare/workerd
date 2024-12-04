@@ -92,6 +92,9 @@ class TraceId final {
   // Replicates W3C Serialization
   kj::String toW3C() const;
 
+  // Return network order hex representation
+  kj::String toNEHex() const;
+
   // Creates a random Trace Id, optionally usig a given entropy source. If an
   // entropy source is not given, then we fallback to using BoringSSL's RAND_bytes.
   static TraceId fromEntropy(kj::Maybe<kj::EntropySource&> entropy = kj::none);
@@ -112,8 +115,8 @@ class TraceId final {
     return high;
   }
 
-  static TraceId fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader);
-  void toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const;
+  static TraceId fromCapnp(rpc::TraceId::Reader reader);
+  void toCapnp(rpc::TraceId::Builder writer) const;
 
  private:
   uint64_t low = 0;
@@ -491,7 +494,11 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> entrypoint;
 
   kj::Vector<tracing::Log> logs;
+
+  // trace ID, if user spans are being recorded.
+  kj::Maybe<tracing::TraceId> traceId;
   kj::Vector<CompleteSpan> spans;
+
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
   kj::Vector<tracing::Exception> exceptions;
 
@@ -609,6 +616,7 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
 
   void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) override;
   void addSpan(CompleteSpan&& span) override;
+  void setTraceId(tracing::TraceId traceId);
   void addException(kj::Date timestamp,
       kj::String name,
       kj::String message,
