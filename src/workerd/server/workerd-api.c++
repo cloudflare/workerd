@@ -468,8 +468,8 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  KJ_IF_SOME(version, pyConfig.pyodideBundleManager.getPyodideBundle(version)) {
-    return version;
+  if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
+    return pyConfig.pyodideBundleManager.getPyodideBundle(version);
   }
 
   auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
