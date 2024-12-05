@@ -152,8 +152,39 @@ export function resolveSoa(): void {
   throw new Error('Not implemented');
 }
 
-export function resolveSrv(): void {
-  throw new Error('Not implemented');
+export function resolveSrv(name: string): Promise<
+  {
+    name: string;
+    port: number;
+    priority: number;
+    weight: number;
+  }[]
+> {
+  validateString(name, 'name');
+
+  // Validation errors needs to be sync.
+  // Return a promise rather than using async qualifier.
+  return sendDnsRequest(name, 'SRV').then((json) => {
+    if (!('Answer' in json)) {
+      // DNS request should contain an "Answer" attribute, but it didn't.
+      throw new DnsError(name, errorCodes.NOTFOUND, 'querySrv');
+    }
+
+    // Cloudflare DNS returns "5 0 80 calendar.google.com"
+    return json.Answer.map((a) => {
+      const [priority, weight, port, name] = a.data.split(' ');
+      validateString(priority, 'priority');
+      validateString(weight, 'weight');
+      validateString(port, 'port');
+      validateString(name, 'name');
+      return {
+        priority: parseInt(priority, 10),
+        weight: parseInt(weight, 10),
+        port: parseInt(port, 10),
+        name,
+      };
+    });
+  });
 }
 
 export function resolveTxt(name: string): Promise<string[][]> {

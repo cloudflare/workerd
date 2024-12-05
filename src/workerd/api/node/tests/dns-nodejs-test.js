@@ -200,3 +200,24 @@ export const resolvePtr = {
     validateResult(await dnsPromises.resolvePtr(addresses.PTR_HOST));
   },
 };
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d7fdbb994cda8b2e1da4240eb97270c6abbaa9dd/test/internet/test-dns.js#L224
+export const resolveSrv = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        strictEqual(typeof item, 'object');
+        ok(item.name);
+        strictEqual(typeof item.name, 'string');
+        strictEqual(typeof item.port, 'number');
+        strictEqual(typeof item.priority, 'number');
+        strictEqual(typeof item.weight, 'number');
+      }
+    }
+
+    validateResult(await dnsPromises.resolveSrv(addresses.SRV_HOST));
+  },
+};

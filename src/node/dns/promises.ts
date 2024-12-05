@@ -7,6 +7,7 @@ import {
   resolveCname,
   resolveNs,
   resolvePtr,
+  resolveSrv,
 } from 'node-internal:internal_dns';
 
 export * from 'node-internal:internal_dns_constants';
@@ -18,6 +19,7 @@ export {
   resolveCname,
   resolveNs,
   resolvePtr,
+  resolveSrv,
 } from 'node-internal:internal_dns';
 
 export default {
@@ -28,5 +30,6 @@ export default {
   resolveCname,
   resolveNs,
   resolvePtr,
+  resolveSrv,
   ...errorCodes,
 };

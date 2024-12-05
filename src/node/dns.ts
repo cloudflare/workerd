@@ -14,7 +14,6 @@ import {
   resolveAny,
   resolveNaptr,
   resolveSoa,
-  resolveSrv,
   setDefaultResultOrder,
   getDefaultResultOrder,
   setServers,
@@ -33,7 +32,6 @@ export {
   resolveAny,
   resolveNaptr,
   resolveSoa,
-  resolveSrv,
   setDefaultResultOrder,
   getDefaultResultOrder,
   setServers,
@@ -46,6 +44,7 @@ export const resolveMx = callbackify(dns.resolveMx.bind(dns));
 export const resolveCname = callbackify(dns.resolveCname.bind(dns));
 export const resolveNs = callbackify(dns.resolveNs.bind(dns));
 export const resolvePtr = callbackify(dns.resolvePtr.bind(dns));
+export const resolveSrv = callbackify(dns.resolveSrv.bind(dns));
 
 export default {
   getServers,
