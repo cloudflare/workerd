@@ -118,6 +118,21 @@ class HTMLRewriter: public jsg::Object {
   kj::Own<Impl> impl;
 };
 
+// A chunk of text or HTML which can be passed to content token mutation functions.
+using Content = kj::OneOf<kj::String, jsg::Ref<ReadableStream>, jsg::Ref<Response>>;
+// TODO(soon): Support ReadableStream/Response types. Requires fibers or lol-html saveable state.
+
+// Options bag which can be passed to content token mutation functions.
+struct ContentOptions {
+  // True if the Content being passed to the mutation function is HTML. If false, the content will
+  // be escaped (HTML entity-encoded).
+  jsg::Optional<bool> html;
+
+  JSG_STRUCT(html);
+};
+
+class Rewriter;
+
 // =======================================================================================
 // HTML Content Tokens
 //
@@ -140,22 +155,24 @@ class HTMLRewriter: public jsg::Object {
 class HTMLRewriter::Token: public jsg::Object {
  public:
   virtual void htmlContentScopeEnd() = 0;
+
+  // Each Token subclass has an inner ImplBase subclass which holds a reference
+  // to the rewriter, and the actual underlying lol-html C API handle for the token.
+  template <typename CType>
+  struct ImplBase {
+    ImplBase(CType& element, Rewriter& rewriter);
+    KJ_DISALLOW_COPY_AND_MOVE(ImplBase);
+    ~ImplBase() noexcept(false);
+
+    // Dispatches calls to the underlying lol_html methods for each event (e.g. before, after, replace).
+    // Handles replacements of each supported type (string, ReadableStream, Body).
+    template <auto Func, auto StreamingFunc>
+    void rewriteContentGeneric(Content content, jsg::Optional<ContentOptions> options);
+
+    CType& element;
+    Rewriter& rewriter;
+  };
 };
-
-// A chunk of text or HTML which can be passed to content token mutation functions.
-using Content = kj::OneOf<kj::String, jsg::Ref<ReadableStream>, jsg::Ref<Response>>;
-// TODO(soon): Support ReadableStream/Response types. Requires fibers or lol-html saveable state.
-
-// Options bag which can be passed to content token mutation functions.
-struct ContentOptions {
-  // True if the Content being passed to the mutation function is HTML. If false, the content will
-  // be escaped (HTML entity-encoded).
-  jsg::Optional<bool> html;
-
-  JSG_STRUCT(html);
-};
-
-class Rewriter;
 
 class Element final: public HTMLRewriter::Token {
  public:
@@ -214,28 +231,16 @@ class Element final: public HTMLRewriter::Token {
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
-      before(content: string, options?: ContentOptions): Element;
-      after(content: string, options?: ContentOptions): Element;
-      prepend(content: string, options?: ContentOptions): Element;
-      append(content: string, options?: ContentOptions): Element;
-      replace(content: string, options?: ContentOptions): Element;
-      setInnerContent(content: string, options?: ContentOptions): Element;
-
-      onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
+         onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
     });
-    // Require content to be a string, and specify parameter type for onEndTag
-    // callback function
+    // Specify parameter type for onEndTag callback function
   }
 
  private:
-  struct Impl {
-    Impl(CType& element, Rewriter&);
-    KJ_DISALLOW_COPY_AND_MOVE(Impl);
+  struct Impl: public HTMLRewriter::Token::ImplBase<CType> {
+    using HTMLRewriter::Token::ImplBase<CType>::ImplBase;
     ~Impl() noexcept(false);
-
-    CType& element;
     kj::Vector<jsg::Ref<AttributesIterator>> attributesIterators;
-    Rewriter& rewriter;
   };
 
   kj::Maybe<Impl> impl;
@@ -278,7 +283,7 @@ class EndTag final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_EndTag;
 
-  explicit EndTag(CType& tag, Rewriter&);
+  explicit EndTag(CType& tag, Rewriter& rewriter);
 
   kj::String getName();
   void setName(kj::String);
@@ -295,15 +300,10 @@ class EndTag final: public HTMLRewriter::Token {
     JSG_METHOD(remove);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      before(content: string, options?: ContentOptions): EndTag;
-      after(content: string, options?: ContentOptions): EndTag;
-    });
-    // Require content to be a string
   }
 
  private:
-  kj::Maybe<CType&> impl;
+  kj::Maybe<HTMLRewriter::Token::ImplBase<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
@@ -352,7 +352,7 @@ class Text final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_TextChunk;
 
-  explicit Text(CType& text, Rewriter&);
+  explicit Text(CType& text, Rewriter& rewriter);
 
   kj::String getText();
 
@@ -376,16 +376,10 @@ class Text final: public HTMLRewriter::Token {
     JSG_METHOD(remove);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
-      before(content: string, options?: ContentOptions): Text;
-      after(content: string, options?: ContentOptions): Text;
-      replace(content: string, options?: ContentOptions): Text;
-    });
-    // Require content to be a string
   }
 
  private:
-  kj::Maybe<CType&> impl;
+  kj::Maybe<HTMLRewriter::Token::ImplBase<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
