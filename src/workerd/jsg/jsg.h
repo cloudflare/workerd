@@ -2574,6 +2574,13 @@ class Lock {
   virtual Ref<DOMException> domException(
       kj::String name, kj::String message, kj::Maybe<kj::String> stackValue = kj::none) = 0;
 
+  // Get the prototype object for the given C++ type (which must be a JSG_RESOURCE_TYPE).
+  //
+  // WARNING: A malicious script can tamper with this by overwriting the `prototype` property
+  // of the class object.
+  template <typename T>
+  JsObject getPrototypeFor();
+
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;
   JsValue undefined() KJ_WARN_UNUSED_RESULT;
@@ -2688,6 +2695,7 @@ class Lock {
 
   friend class JsObject;
   virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
+  virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) = 0;
 };
 
 // Ensures that the given fn is run within both a handlescope and the context scope.

@@ -74,6 +74,19 @@ class Serializer final: v8::ValueSerializer::Delegate {
     // DataCloneError.
     virtual void serializeFunction(
         jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func);
+
+    // Tries to serialize a proxy as an external. The default implementation throws
+    // DataCloneError.
+    //
+    // TODO(cleanup): This is a bit of a hack to support an RpcTarget that is wrapped in a Proxy.
+    //   For RpcTarget specifically, this works because inheriting RpcTarget is just a marker that
+    //   opts into serializing by creating a stub pointing at the object -- we can create a stub
+    //   pointing at the proxy instead. For any other type, serializing a Proxy probably isn't
+    //   possible, since the serialization wouldn't actually capture the Proxy logic? But I'm
+    //   not 100% certain of that. If we find other use cases in the future it may turn out that
+    //   they call for a different design.
+    virtual void serializeProxy(
+        jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy);
   };
 
   struct Options {
