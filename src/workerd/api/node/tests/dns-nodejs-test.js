@@ -221,3 +221,29 @@ export const resolveSrv = {
     validateResult(await dnsPromises.resolveSrv(addresses.SRV_HOST));
   },
 };
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d7fdbb994cda8b2e1da4240eb97270c6abbaa9dd/test/internet/test-dns.js#L353
+export const resolveSoa = {
+  async test() {
+    function validateResult(result) {
+      strictEqual(typeof result, 'object');
+      strictEqual(typeof result.nsname, 'string');
+      ok(result.nsname.length > 0);
+      strictEqual(typeof result.hostmaster, 'string');
+      ok(result.hostmaster.length > 0);
+      strictEqual(typeof result.serial, 'number');
+      ok(result.serial > 0 && result.serial < 4294967295);
+      strictEqual(typeof result.refresh, 'number');
+      ok(result.refresh > 0 && result.refresh < 2147483647);
+      strictEqual(typeof result.retry, 'number');
+      ok(result.retry > 0 && result.retry < 2147483647);
+      strictEqual(typeof result.expire, 'number');
+      ok(result.expire > 0 && result.expire < 2147483647);
+      strictEqual(typeof result.minttl, 'number');
+      ok(result.minttl >= 0 && result.minttl < 2147483647);
+    }
+
+    validateResult(await dnsPromises.resolveSoa(addresses.SOA_HOST));
+  },
+};

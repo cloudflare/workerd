@@ -148,8 +148,45 @@ export function resolvePtr(name: string): Promise<string[]> {
   });
 }
 
-export function resolveSoa(): void {
-  throw new Error('Not implemented');
+export function resolveSoa(name: string): Promise<{
+  nsname: string;
+  hostmaster: string;
+  serial: number;
+  refresh: number;
+  retry: number;
+  expire: number;
+  minttl: number;
+}> {
+  validateString(name, 'name');
+
+  // Validation errors needs to be sync.
+  // Return a promise rather than using async qualifier.
+  return sendDnsRequest(name, 'SOA').then((json) => {
+    if (!('Answer' in json) || json.Answer.length === 0) {
+      // DNS request should contain an "Answer" attribute, but it didn't.
+      throw new DnsError(name, errorCodes.NOTFOUND, 'querySoa');
+    }
+
+    // Cloudflare DNS returns ""meera.ns.cloudflare.com. dns.cloudflare.com. 2357999196 10000 2400 604800 1800""
+    const [nsname, hostmaster, serial, refresh, retry, expire, minttl] =
+      json.Answer.at(0)?.data.split(' ') ?? [];
+    validateString(nsname, 'nsname');
+    validateString(hostmaster, 'hostmaster');
+    validateString(serial, 'serial');
+    validateString(refresh, 'refresh');
+    validateString(retry, 'retry');
+    validateString(expire, 'expire');
+    validateString(minttl, 'minttl');
+    return {
+      nsname,
+      hostmaster,
+      serial: parseInt(serial, 10),
+      refresh: parseInt(refresh, 10),
+      retry: parseInt(retry, 10),
+      expire: parseInt(expire, 10),
+      minttl: parseInt(minttl, 10),
+    };
+  });
 }
 
 export function resolveSrv(name: string): Promise<
