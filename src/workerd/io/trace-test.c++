@@ -409,14 +409,14 @@ KJ_TEST("Read/Write Attribute works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Attribute>();
 
-  tracing::Attribute info(kj::str("foo"), tracing::Attribute::Value((double)123.0));
-  info.copyTo(infoBuilder);
+  tracing::Attribute::Builder("foo", 1).add(123.0).add(true).finish().copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
   tracing::Attribute info2(reader);
   KJ_ASSERT(info2.name == "foo"_kj);
-  auto& val = KJ_ASSERT_NONNULL(info2.value.tryGet<tracing::Attribute::Value>());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(val.tryGet<double>()) == 123.0);
+  auto& vals = KJ_ASSERT_NONNULL(info2.value.tryGet<tracing::Attribute::Values>());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(vals[0].tryGet<double>()) == 123.0);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(vals[1].tryGet<bool>()));
 }
 
 KJ_TEST("Read/Write Return works") {

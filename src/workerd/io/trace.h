@@ -526,8 +526,10 @@ using EventInfo = kj::OneOf<FetchEventInfo,
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
   using Value = kj::OneOf<kj::String, bool, double, uint32_t>;
+  using Values = kj::Array<Value>;
 
-  explicit Attribute(kj::String name, kj::OneOf<Value, kj::Array<Value>>&& value);
+  explicit Attribute(kj::String name, Value&& value);
+  explicit Attribute(kj::String name, Values&& values);
   Attribute(rpc::Trace::Attribute::Reader reader);
   Attribute(Attribute&&) = default;
   Attribute& operator=(Attribute&&) = default;
@@ -535,10 +537,58 @@ struct Attribute final {
 
   kj::String name;
 
-  kj::OneOf<Value, kj::Array<Value>> value;
+  kj::OneOf<Value, Values> value;
 
   void copyTo(rpc::Trace::Attribute::Builder builder);
   Attribute clone();
+
+  class Builder final {
+   public:
+    Builder(kj::String name): name(kj::mv(name)) {}
+    Builder(kj::String name, size_t n): name(kj::mv(name)), vec(n) {}
+    Builder(kj::StringPtr name): Builder(kj::str(name)) {}
+    Builder(kj::StringPtr name, size_t n): name(kj::str(name)), vec(n) {}
+    KJ_DISALLOW_COPY_AND_MOVE(Builder);
+
+    Builder& add(kj::String value) KJ_LIFETIMEBOUND {
+      vec.add(kj::mv(value));
+      return *this;
+    }
+
+    Builder& add(kj::StringPtr value) KJ_LIFETIMEBOUND {
+      vec.add(kj::str(value));
+      return *this;
+    }
+
+    Builder& add(bool value) KJ_LIFETIMEBOUND {
+      vec.add(value);
+      return *this;
+    }
+
+    Builder& add(double value) KJ_LIFETIMEBOUND {
+      vec.add(value);
+      return *this;
+    }
+
+    Builder& add(uint32_t value) KJ_LIFETIMEBOUND {
+      vec.add(value);
+      return *this;
+    }
+
+    Attribute finish() {
+      KJ_ASSERT(vec.size() >= 1);
+      if (vec.size() == 1) {
+        auto val = kj::mv(vec[0]);
+        vec.clear();
+        return Attribute(kj::mv(name), kj::mv(val));
+      }
+      return Attribute(kj::mv(name), vec.releaseAsArray());
+    }
+
+   private:
+    kj::String name;
+    kj::Vector<Value> vec;
+  };
 };
 using CustomInfo = kj::Array<Attribute>;
 

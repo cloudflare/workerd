@@ -841,7 +841,11 @@ tracing::Hibernate tracing::Hibernate::clone() {
   return Hibernate();
 }
 
-tracing::Attribute::Attribute(kj::String name, kj::OneOf<Value, kj::Array<Value>>&& value)
+tracing::Attribute::Attribute(kj::String name, Value&& value)
+    : name(kj::mv(name)),
+      value(kj::mv(value)) {}
+
+tracing::Attribute::Attribute(kj::String name, kj::Array<Value>&& value)
     : name(kj::mv(name)),
       value(kj::mv(value)) {}
 
@@ -891,25 +895,30 @@ void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) {
   static auto writeValue = [](auto builder, const auto& value) mutable {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(str, kj::String) {
-        builder[0].initInner().setText(str.asPtr());
+        builder.initInner().setText(str.asPtr());
       }
       KJ_CASE_ONEOF(b, bool) {
-        builder[0].initInner().setBool(b);
+        builder.initInner().setBool(b);
       }
       KJ_CASE_ONEOF(f, double) {
-        builder[0].initInner().setFloat(f);
+        builder.initInner().setFloat(f);
       }
       KJ_CASE_ONEOF(i, uint32_t) {
-        builder[0].initInner().setInt(i);
+        builder.initInner().setInt(i);
       }
     }
   };
   builder.setName(name.asPtr());
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(value, Value) {
-      writeValue(builder.initValue(1), value);
+      writeValue(builder.initValue(1)[0], value);
     }
-    KJ_CASE_ONEOF(values, kj::Array<Value>) {}
+    KJ_CASE_ONEOF(values, kj::Array<Value>) {
+      auto vec = builder.initValue(values.size());
+      for (size_t n = 0; n < values.size(); n++) {
+        writeValue(vec[n], values[n]);
+      }
+    }
   }
 }
 
