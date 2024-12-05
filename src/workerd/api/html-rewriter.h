@@ -157,6 +157,23 @@ struct ContentOptions {
 
 class Rewriter;
 
+// Each Token subclass has an inner BaseImpl subclass which holds a reference
+// to the rewriter, and the actual underlying lol-html C API handle for the token.
+template <typename CType>
+struct BaseImpl {
+  BaseImpl(CType& element, Rewriter& rewriter);
+  KJ_DISALLOW_COPY_AND_MOVE(BaseImpl);
+  ~BaseImpl() noexcept(false);
+
+  // Dispatches calls to the underlying lol_html methods for each event (e.g. before, after, replace).
+  // Handles replacements of each supported type (string, ReadableStream, Body).
+  template <auto Func, auto StreamingFunc>
+  void rewriteContentGeneric(Content content, jsg::Optional<ContentOptions> options);
+
+  CType& element;
+  Rewriter& rewriter;
+};
+
 class Element final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_Element;
@@ -228,14 +245,10 @@ class Element final: public HTMLRewriter::Token {
   }
 
  private:
-  struct Impl {
-    Impl(CType& element, Rewriter&);
-    KJ_DISALLOW_COPY_AND_MOVE(Impl);
+  struct Impl: public BaseImpl<CType> {
+    using BaseImpl<CType>::BaseImpl;
     ~Impl() noexcept(false);
-
-    CType& element;
     kj::Vector<jsg::Ref<AttributesIterator>> attributesIterators;
-    Rewriter& rewriter;
   };
 
   kj::Maybe<Impl> impl;
@@ -278,7 +291,7 @@ class EndTag final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_EndTag;
 
-  explicit EndTag(CType& tag, Rewriter&);
+  explicit EndTag(CType& tag, Rewriter& rewriter);
 
   kj::String getName();
   void setName(kj::String);
@@ -303,7 +316,7 @@ class EndTag final: public HTMLRewriter::Token {
   }
 
  private:
-  kj::Maybe<CType&> impl;
+  kj::Maybe<BaseImpl<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
@@ -352,7 +365,7 @@ class Text final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_TextChunk;
 
-  explicit Text(CType& text, Rewriter&);
+  explicit Text(CType& text, Rewriter& rewriter);
 
   kj::String getText();
 
@@ -385,7 +398,7 @@ class Text final: public HTMLRewriter::Token {
   }
 
  private:
-  kj::Maybe<CType&> impl;
+  kj::Maybe<BaseImpl<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
