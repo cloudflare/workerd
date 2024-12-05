@@ -110,7 +110,7 @@ function spawnWorkerd(
       resolve({
         url: new URL(`http://127.0.0.1:${message.port}`),
         async kill() {
-          workerdProcess.kill("SIGINT");
+          workerdProcess.kill("SIGTERM");
           await exitPromise;
         },
       });
