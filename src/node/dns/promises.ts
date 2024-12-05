@@ -5,6 +5,7 @@ import {
   resolveCaa,
   resolveMx,
   resolveCname,
+  resolveNs,
 } from 'node-internal:internal_dns';
 
 export * from 'node-internal:internal_dns_constants';
@@ -14,6 +15,7 @@ export {
   resolveCaa,
   resolveMx,
   resolveCname,
+  resolveNs,
 } from 'node-internal:internal_dns';
 
 export default {
@@ -22,5 +24,6 @@ export default {
   resolveCaa,
   resolveMx,
   resolveCname,
+  resolveNs,
   ...errorCodes,
 };

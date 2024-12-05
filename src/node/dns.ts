@@ -13,7 +13,6 @@ import {
   resolve6,
   resolveAny,
   resolveNaptr,
-  resolveNs,
   resolvePtr,
   resolveSoa,
   resolveSrv,
@@ -34,7 +33,6 @@ export {
   resolve6,
   resolveAny,
   resolveNaptr,
-  resolveNs,
   resolvePtr,
   resolveSoa,
   resolveSrv,
@@ -48,6 +46,7 @@ export const resolveTxt = callbackify(dns.resolveTxt.bind(dns));
 export const resolveCaa = callbackify(dns.resolveCaa.bind(dns));
 export const resolveMx = callbackify(dns.resolveMx.bind(dns));
 export const resolveCname = callbackify(dns.resolveCname.bind(dns));
+export const resolveNs = callbackify(dns.resolveNs.bind(dns));
 
 export default {
   getServers,

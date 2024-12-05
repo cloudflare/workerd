@@ -116,8 +116,20 @@ export function resolveNaptr(): void {
   throw new Error('Not implemented');
 }
 
-export function resolveNs(): void {
-  throw new Error('Not implemented');
+export function resolveNs(name: string): Promise<string[]> {
+  validateString(name, 'name');
+
+  // Validation errors needs to be sync.
+  // Return a promise rather than using async qualifier.
+  return sendDnsRequest(name, 'NS').then((json) => {
+    if (!('Answer' in json)) {
+      // DNS request should contain an "Answer" attribute, but it didn't.
+      throw new DnsError(name, errorCodes.NOTFOUND, 'queryMx');
+    }
+
+    // Cloudflare DNS appends "." at the end whereas Node.js doesn't.
+    return json.Answer.map((a) => a.data.slice(0, -1));
+  });
 }
 
 export function resolvePtr(): void {

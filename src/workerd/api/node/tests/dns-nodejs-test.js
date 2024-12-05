@@ -151,7 +151,7 @@ export const resolveMx = {
 };
 
 // Tests are taken from
-// https://github.com/nodejs/node/blob/main/test/internet/test-dns.js#L442
+// https://github.com/nodejs/node/blob/d7fdbb994cda8b2e1da4240eb97270c6abbaa9dd/test/internet/test-dns.js#L442
 export const resolveCname = {
   async test() {
     function validateResult(result) {
@@ -164,5 +164,22 @@ export const resolveCname = {
     }
 
     validateResult(await dnsPromises.resolveCname(addresses.CNAME_HOST));
+  },
+};
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d7fdbb994cda8b2e1da4240eb97270c6abbaa9dd/test/internet/test-dns.js#L184
+export const resolveNs = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        ok(item);
+        strictEqual(typeof item, 'string');
+      }
+    }
+
+    validateResult(await dnsPromises.resolveNs(addresses.NS_HOST));
   },
 };
