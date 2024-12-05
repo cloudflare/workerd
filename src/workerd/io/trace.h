@@ -120,6 +120,56 @@ class TraceId final {
 };
 constexpr TraceId TraceId::nullId = nullptr;
 
+// A 64-bit span identifier.
+class SpanId final {
+ public:
+  // A null span ID. This is only acceptable for use in tests.
+  constexpr SpanId(decltype(nullptr)): id(0) {}
+
+  constexpr SpanId(uint64_t id): id(id) {}
+  constexpr SpanId(const SpanId& other) = default;
+  constexpr SpanId& operator=(const SpanId& other) = default;
+  constexpr SpanId(SpanId&& other): id(other.id) {
+    other.id = 0;
+  }
+  constexpr SpanId& operator=(SpanId&& other) {
+    id = other.id;
+    other.id = 0;
+    return *this;
+  }
+  constexpr operator bool() const {
+    return id != 0;
+  }
+  constexpr bool operator==(const SpanId& other) const {
+    return id == other.id;
+  }
+  constexpr bool operator==(decltype(nullptr)) const {
+    return id == 0;
+  }
+
+  inline operator kj::String() const {
+    return toGoString();
+  }
+
+  inline operator uint64_t() const {
+    return id;
+  }
+
+  kj::String toGoString() const;
+
+  static const SpanId nullId;
+
+  constexpr uint64_t getId() const {
+    return id;
+  }
+
+  static SpanId fromEntropy(kj::Maybe<kj::EntropySource&> entropy = kj::none);
+
+ private:
+  uint64_t id;
+};
+constexpr SpanId SpanId::nullId = nullptr;
+
 // The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
 // The trace id represents a top-level request and should be shared across all
 // invocation spans and events within those spans. The invocation id identifies
@@ -135,7 +185,7 @@ class InvocationSpanContext final: public kj::Refcounted,
       kj::Maybe<kj::EntropySource&> entropySource,
       TraceId traceId,
       TraceId invocationId,
-      uint64_t spanId = 0ULL,
+      SpanId spanId,
       kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(InvocationSpanContext);
 
@@ -147,7 +197,7 @@ class InvocationSpanContext final: public kj::Refcounted,
     return invocationId;
   }
 
-  inline const uint64_t getSpanId() const {
+  inline const SpanId& getSpanId() const {
     return spanId;
   }
 
@@ -189,7 +239,7 @@ class InvocationSpanContext final: public kj::Refcounted,
   kj::Maybe<kj::EntropySource&> entropySource;
   const TraceId traceId;
   const TraceId invocationId;
-  const uint64_t spanId;
+  const SpanId spanId;
 
   // The parentSpanContext can be either a direct parent or a trigger
   // context. If it is a trigger context, then it should have the same
@@ -198,6 +248,7 @@ class InvocationSpanContext final: public kj::Refcounted,
   const kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext;
 };
 
+kj::String KJ_STRINGIFY(const SpanId& id);
 kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context);
 
@@ -606,14 +657,14 @@ struct TailEvent final {
   using Event = kj::OneOf<Onset, Outcome, Hibernate, SpanOpen, SpanClose, Mark>;
 
   struct Context final {
-    explicit Context(TraceId traceId, TraceId invocationId, kj::uint spanId);
+    explicit Context(TraceId traceId, TraceId invocationId, SpanId spanId);
     Context(rpc::InvocationSpanContext::Reader reader);
     Context(Context&&) = default;
     Context& operator=(Context&&) = default;
     KJ_DISALLOW_COPY(Context);
     TraceId traceId;
     TraceId invocationId;
-    kj::uint spanId;
+    SpanId spanId;
 
     void copyTo(rpc::InvocationSpanContext::Builder builder);
     Context clone();

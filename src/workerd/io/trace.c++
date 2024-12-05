@@ -154,6 +154,21 @@ TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
   return TraceId(getRandom64Bit(entropySource), getRandom64Bit(entropySource));
 }
 
+kj::String SpanId::toGoString() const {
+  kj::Vector<char> s(16);
+  addHex(s, id);
+  s.add('\0');
+  return kj::String(s.releaseAsArray());
+}
+
+SpanId SpanId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
+  return SpanId(getRandom64Bit(entropySource));
+}
+
+kj::String KJ_STRINGIFY(const SpanId& id) {
+  return id;
+}
+
 kj::String KJ_STRINGIFY(const TraceId& id) {
   return id;
 }
@@ -162,18 +177,18 @@ InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
     kj::Maybe<kj::EntropySource&> entropySource,
     TraceId traceId,
     TraceId invocationId,
-    uint64_t spanId,
+    SpanId spanId,
     kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext)
     : entropySource(entropySource),
       traceId(kj::mv(traceId)),
       invocationId(kj::mv(invocationId)),
-      spanId(spanId),
+      spanId(kj::mv(spanId)),
       parentSpanContext(kj::mv(parentSpanContext)) {}
 
 kj::Rc<InvocationSpanContext> InvocationSpanContext::newChild() {
   KJ_ASSERT(!isTrigger(), "unable to create child spans on this context");
   return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), entropySource, traceId,
-      invocationId, getRandom64Bit(entropySource), addRefToThis());
+      invocationId, SpanId::fromEntropy(entropySource), addRefToThis());
 }
 
 kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
@@ -186,7 +201,8 @@ kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
     return ctx->traceId;
   }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
   return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), entropySource,
-      kj::mv(traceId), TraceId::fromEntropy(entropySource), 0, kj::mv(parent));
+      kj::mv(traceId), TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource),
+      kj::mv(parent));
 }
 
 TraceId TraceId::fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader) {
@@ -1315,10 +1331,10 @@ kj::Maybe<tracing::TailEvent::Context> getParentContextFromSpan(
 }
 }  // namespace
 
-tracing::TailEvent::Context::Context(TraceId traceId, TraceId invocationId, kj::uint spanId)
-    : traceId(traceId),
-      invocationId(invocationId),
-      spanId(spanId) {}
+tracing::TailEvent::Context::Context(TraceId traceId, TraceId invocationId, SpanId spanId)
+    : traceId(kj::mv(traceId)),
+      invocationId(kj::mv(invocationId)),
+      spanId(kj::mv(spanId)) {}
 
 tracing::TailEvent::Context::Context(rpc::InvocationSpanContext::Reader reader)
     : traceId(TraceId::fromCapnp(reader.getTraceId())),
