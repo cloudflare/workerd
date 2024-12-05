@@ -183,3 +183,20 @@ export const resolveNs = {
     validateResult(await dnsPromises.resolveNs(addresses.NS_HOST));
   },
 };
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d7fdbb994cda8b2e1da4240eb97270c6abbaa9dd/test/internet/test-dns.js#L268
+export const resolvePtr = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        ok(item);
+        strictEqual(typeof item, 'string');
+      }
+    }
+
+    validateResult(await dnsPromises.resolvePtr(addresses.PTR_HOST));
+  },
+};
