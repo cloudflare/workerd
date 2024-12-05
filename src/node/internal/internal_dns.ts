@@ -37,8 +37,23 @@ export function resolveAny(): void {
   throw new Error('Not implemented');
 }
 
-export function resolveCname(): void {
-  throw new Error('Not implemented');
+export function resolveCname(name: string): Promise<string[]> {
+  validateString(name, 'name');
+
+  // Validation errors needs to be sync.
+  // Return a promise rather than using async qualifier.
+  return sendDnsRequest(name, 'CNAME').then((json) => {
+    if (!('Answer' in json)) {
+      // DNS request should contain an "Answer" attribute, but it didn't.
+      throw new DnsError(name, errorCodes.NODATA, 'queryCname');
+    }
+
+    return json.Answer.map((a) => {
+      // Cloudflare DNS returns "nodejs.org." whereas
+      // Node.js returns "nodejs.org" as a CNAME data.
+      return a.data.slice(0, -1);
+    });
+  });
 }
 
 export function resolveCaa(
@@ -53,7 +68,7 @@ export function resolveCaa(
   return sendDnsRequest(name, 'CAA').then((json) => {
     if (!('Answer' in json)) {
       // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryTxt');
+      throw new DnsError(name, errorCodes.NOTFOUND, 'queryCaa');
     }
 
     // CAA API returns "hex", so we need to convert it to UTF-8

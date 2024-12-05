@@ -50,11 +50,15 @@ fn parse_caa_record(record: &str) -> ffi::CaaRecord {
     let critical = u8::from_str_radix(data[0], 10).unwrap();
     let prefix_length = usize::from_str_radix(data[1], 10).unwrap();
 
-    let field = decode_hex(data[1..prefix_length + 2].to_vec()).join("");
+    let field = decode_hex(data[2..prefix_length + 2].to_vec()).join("");
     let value = decode_hex(data[(prefix_length + 2)..].to_vec()).join("");
 
     // Field can be "issuewild", "issue" or "iodef"
-    assert!(field == "issuewild" || field == "issue" || field == "iodef");
+    assert!(
+        field == "issuewild" || field == "issue" || field == "iodef",
+        "received unsupported field {}",
+        field
+    );
 
     ffi::CaaRecord {
         critical,

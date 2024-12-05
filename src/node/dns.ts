@@ -12,7 +12,6 @@ import {
   resolve4,
   resolve6,
   resolveAny,
-  resolveCname,
   resolveNaptr,
   resolveNs,
   resolvePtr,
@@ -34,7 +33,6 @@ export {
   resolve4,
   resolve6,
   resolveAny,
-  resolveCname,
   resolveNaptr,
   resolveNs,
   resolvePtr,
@@ -49,6 +47,7 @@ export const reverse = callbackify(dns.reverse.bind(dns));
 export const resolveTxt = callbackify(dns.resolveTxt.bind(dns));
 export const resolveCaa = callbackify(dns.resolveCaa.bind(dns));
 export const resolveMx = callbackify(dns.resolveMx.bind(dns));
+export const resolveCname = callbackify(dns.resolveCname.bind(dns));
 
 export default {
   getServers,

@@ -149,3 +149,20 @@ export const resolveMx = {
     validateResult(await dnsPromises.resolveMx(addresses.MX_HOST));
   },
 };
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/main/test/internet/test-dns.js#L442
+export const resolveCname = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        ok(item);
+        strictEqual(typeof item, 'string');
+      }
+    }
+
+    validateResult(await dnsPromises.resolveCname(addresses.CNAME_HOST));
+  },
+};
