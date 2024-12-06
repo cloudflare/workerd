@@ -58,14 +58,14 @@ jobs:
         id: artifact-upload-step
         if: failure()
         with:
-          name: Generated Types
+          name: generated-snapshot
           path: bazel-bin/types/definitions/
       - name: 'Comment on PR with error details'
         if: failure()
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           message: |
-            The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `bazel build //types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}'
+            The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `bazel build //types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}
 
             <details>
             <summary>Full Type Diff</summary>
