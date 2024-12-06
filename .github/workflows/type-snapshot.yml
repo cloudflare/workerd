@@ -75,3 +75,10 @@ jobs:
             ```
 
             </details>
+      - name: 'Comment on PR with error details'
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          only_update: true
+          message: |
+            The generated output of `@cloudflare/workers-types` matches the snapshot in `types/generated-snapshot` :tada:
