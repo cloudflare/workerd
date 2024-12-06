@@ -9,8 +9,6 @@ import {
   lookup,
   lookupService,
   resolve,
-  resolve4,
-  resolve6,
   resolveAny,
   setDefaultResultOrder,
   getDefaultResultOrder,
@@ -25,8 +23,6 @@ export {
   lookup,
   lookupService,
   resolve,
-  resolve4,
-  resolve6,
   resolveAny,
   setDefaultResultOrder,
   getDefaultResultOrder,
@@ -43,6 +39,8 @@ export const resolvePtr = callbackify(dns.resolvePtr.bind(dns));
 export const resolveSrv = callbackify(dns.resolveSrv.bind(dns));
 export const resolveSoa = callbackify(dns.resolveSoa.bind(dns));
 export const resolveNaptr = callbackify(dns.resolveNaptr.bind(dns));
+export const resolve4 = callbackify(dns.resolve4.bind(dns));
+export const resolve6 = callbackify(dns.resolve6.bind(dns));
 
 export default {
   getServers,

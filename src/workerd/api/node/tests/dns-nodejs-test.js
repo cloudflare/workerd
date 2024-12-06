@@ -269,3 +269,85 @@ export const resolveNaptr = {
     validateResult(await dnsPromises.resolveNaptr(addresses.NAPTR_HOST));
   },
 };
+
+export const resolve4 = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        strictEqual(typeof item, 'string');
+        // TODO(soon): Validate IPv4
+        // ok(isIPv4(item));
+      }
+    }
+
+    validateResult(await dnsPromises.resolve4(addresses.INET4_HOST));
+  },
+};
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d5d1e80763202ffa73307213211148571deac27c/test/internet/test-dns.js#L86
+export const resolve4TTL = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        strictEqual(typeof item, 'object');
+        strictEqual(typeof item.ttl, 'number');
+        strictEqual(typeof item.address, 'string');
+        ok(item.ttl >= 0);
+        // TODO(soon): Validate IPv4
+        // ok(isIPv4(item.address));
+      }
+    }
+
+    validateResult(
+      await dnsPromises.resolve4(addresses.INET4_HOST, {
+        ttl: true,
+      })
+    );
+  },
+};
+
+export const resolve6 = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        strictEqual(typeof item, 'string');
+        // TODO(soon): Validate IPv6
+        // ok(isIPv6(item));
+      }
+    }
+
+    validateResult(await dnsPromises.resolve6(addresses.INET6_HOST));
+  },
+};
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d5d1e80763202ffa73307213211148571deac27c/test/internet/test-dns.js#L114
+export const resolve6TTL = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        strictEqual(typeof item, 'object');
+        strictEqual(typeof item.ttl, 'number');
+        strictEqual(typeof item.address, 'string');
+        ok(item.ttl >= 0);
+        // TODO(soon): Validate IPv6
+        // ok(isIPv6(item.address));
+      }
+    }
+
+    validateResult(
+      await dnsPromises.resolve6(addresses.INET6_HOST, {
+        ttl: true,
+      })
+    );
+  },
+};

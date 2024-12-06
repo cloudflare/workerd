@@ -1,6 +1,12 @@
+import { default as dnsUtil } from 'node-internal:dns';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import { DnsError } from 'node-internal:internal_errors';
+import { validateString } from 'node-internal:validators';
 
+export type TTLResponse = {
+  ttl: number;
+  address: string;
+};
 export interface Answer {
   // The record owner.
   name: string;
@@ -85,4 +91,153 @@ export async function sendDnsRequest(
   }
 
   return json;
+}
+
+export function validateAnswer(
+  answer: unknown,
+  name: string,
+  query: string
+): asserts answer is Answer[] {
+  if (answer == null) {
+    throw new DnsError(name, errorCodes.NOTFOUND, query);
+  }
+}
+
+export type MX = {
+  exchange: string;
+  priority: number;
+};
+export function normalizeMx(name: string, answer: Answer): MX {
+  // eslint-disable-next-line prefer-const
+  let [priority, exchange]: string[] = answer.data.split(' ');
+  if (priority == null || exchange == null) {
+    throw new DnsError(name, errorCodes.BADRESP, 'queryMx');
+  }
+
+  // Cloudflare API returns "data": "10 smtp.google.com." hence
+  // we need to parse it. Let's play it safe.
+  if (exchange.endsWith('.')) {
+    exchange = exchange.slice(0, -1);
+  }
+
+  return {
+    exchange,
+    priority: parseInt(priority, 10),
+  };
+}
+
+export function normalizeCname({ data }: Answer): string {
+  // Cloudflare DNS returns "nodejs.org." whereas
+  // Node.js returns "nodejs.org" as a CNAME data.
+  if (data.endsWith('.')) {
+    return data.slice(0, -1);
+  }
+  return data;
+}
+
+export type CAA = {
+  critical: number;
+  issue?: string;
+  iodef?: string;
+  issuewild?: string;
+};
+export function normalizeCaa({ data }: Answer): CAA {
+  // CAA API returns "hex", so we need to convert it to UTF-8
+  const obj = { critical: 0 };
+  const record = dnsUtil.parseCaaRecord(data);
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-expect-error
+  obj[record.field] = record.value;
+  obj.critical = record.critical;
+  return obj;
+}
+
+export type NAPTR = {
+  flags: string;
+  service: string;
+  regexp: string;
+  replacement: string;
+  order: number;
+  preference: number;
+};
+export function normalizeNaptr({ data }: Answer): NAPTR {
+  // Cloudflare DNS appends "." at the end whereas Node.js doesn't.
+  return dnsUtil.parseNaptrRecord(data);
+}
+
+export function normalizePtr({ data }: Answer): string {
+  if (data.endsWith('.')) {
+    return data.slice(0, -1);
+  }
+  return data;
+}
+
+export function normalizeNs({ data }: Answer): string {
+  if (data.endsWith('.')) {
+    return data.slice(0, -1);
+  }
+  return data;
+}
+
+export type SOA = {
+  nsname: string;
+  hostmaster: string;
+  serial: number;
+  refresh: number;
+  retry: number;
+  expire: number;
+  minttl: number;
+};
+export function normalizeSoa({ data }: Answer): SOA {
+  // Cloudflare DNS returns ""meera.ns.cloudflare.com. dns.cloudflare.com. 2357999196 10000 2400 604800 1800""
+  const [nsname, hostmaster, serial, refresh, retry, expire, minttl] =
+    data.split(' ');
+
+  validateString(nsname, 'nsname');
+  validateString(hostmaster, 'hostmaster');
+  validateString(serial, 'serial');
+  validateString(refresh, 'refresh');
+  validateString(retry, 'retry');
+  validateString(expire, 'expire');
+  validateString(minttl, 'minttl');
+
+  return {
+    nsname,
+    hostmaster,
+    serial: parseInt(serial, 10),
+    refresh: parseInt(refresh, 10),
+    retry: parseInt(retry, 10),
+    expire: parseInt(expire, 10),
+    minttl: parseInt(minttl, 10),
+  };
+}
+
+export type SRV = {
+  name: string;
+  port: number;
+  priority: number;
+  weight: number;
+};
+export function normalizeSrv({ data }: Answer): SRV {
+  // Cloudflare DNS returns "5 0 80 calendar.google.com"
+  const [priority, weight, port, name] = data.split(' ');
+  validateString(priority, 'priority');
+  validateString(weight, 'weight');
+  validateString(port, 'port');
+  validateString(name, 'name');
+  return {
+    priority: parseInt(priority, 10),
+    weight: parseInt(weight, 10),
+    port: parseInt(port, 10),
+    name,
+  };
+}
+
+export function normalizeTxt({ data }: Answer): string[] {
+  // Each entry has quotation marks as a prefix and suffix.
+  // Node.js APIs doesn't have them.
+  if (data.startsWith('"') && data.endsWith('"')) {
+    return [data.slice(1, -1)];
+  }
+  return [data];
 }

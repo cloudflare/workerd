@@ -3,11 +3,32 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-import { sendDnsRequest } from 'node-internal:internal_dns_client';
+import {
+  sendDnsRequest,
+  validateAnswer,
+  normalizeMx,
+  normalizeCname,
+  normalizeCaa,
+  normalizePtr,
+  normalizeNaptr,
+  normalizeNs,
+  normalizeSoa,
+  normalizeTxt,
+  normalizeSrv,
+  type MX,
+  type CAA,
+  type NAPTR,
+  type SOA,
+  type SRV,
+  type TTLResponse,
+} from 'node-internal:internal_dns_client';
 import { DnsError } from 'node-internal:internal_errors';
-import { validateString } from 'node-internal:validators';
+import {
+  validateBoolean,
+  validateObject,
+  validateString,
+} from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
-import { default as dnsUtil } from 'node-internal:dns';
 
 export function getServers(): string[] {
   throw new Error('Not implemented');
@@ -25,12 +46,64 @@ export function resolve(): void {
   throw new Error('Not implemented');
 }
 
-export function resolve4(): void {
-  throw new Error('Not implemented');
+export function resolve4(
+  name: string,
+  options?: { ttl?: boolean }
+): Promise<(string | TTLResponse)[]> {
+  validateString(name, 'name');
+  if (options != null) {
+    validateObject(options, 'options');
+    if (options.ttl != null) {
+      validateBoolean(options.ttl, 'options.ttl');
+    }
+  }
+
+  // Validation errors needs to be sync.
+  // Return a promise rather than using async qualifier.
+  return sendDnsRequest(name, 'A').then((json) => {
+    validateAnswer(json.Answer, name, 'queryA');
+
+    return json.Answer.map((a) => {
+      if (options?.ttl) {
+        return {
+          ttl: a.TTL,
+          address: a.data,
+        };
+      }
+
+      return a.data;
+    });
+  });
 }
 
-export function resolve6(): void {
-  throw new Error('Not implemented');
+export function resolve6(
+  name: string,
+  options?: { ttl?: boolean }
+): Promise<(string | TTLResponse)[]> {
+  validateString(name, 'name');
+  if (options != null) {
+    validateObject(options, 'options');
+    if (options.ttl != null) {
+      validateBoolean(options.ttl, 'options.ttl');
+    }
+  }
+
+  // Validation errors needs to be sync.
+  // Return a promise rather than using async qualifier.
+  return sendDnsRequest(name, 'AAAA').then((json) => {
+    validateAnswer(json.Answer, name, 'queryAaaa');
+
+    return json.Answer.map((a) => {
+      if (options?.ttl) {
+        return {
+          ttl: a.TTL,
+          address: a.data,
+        };
+      }
+
+      return a.data;
+    });
+  });
 }
 
 export function resolveAny(): void {
@@ -43,97 +116,45 @@ export function resolveCname(name: string): Promise<string[]> {
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'CNAME').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NODATA, 'queryCname');
-    }
+    validateAnswer(json.Answer, name, 'queryCname');
 
-    return json.Answer.map((a) => {
-      // Cloudflare DNS returns "nodejs.org." whereas
-      // Node.js returns "nodejs.org" as a CNAME data.
-      return a.data.slice(0, -1);
-    });
+    return json.Answer.map(normalizeCname);
   });
 }
 
-export function resolveCaa(
-  name: string
-): Promise<
-  { critical: number; issue?: string; iodef?: string; issuewild?: string }[]
-> {
+export function resolveCaa(name: string): Promise<CAA[]> {
   validateString(name, 'name');
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'CAA').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryCaa');
-    }
+    validateAnswer(json.Answer, name, 'queryCaa');
 
-    // CAA API returns "hex", so we need to convert it to UTF-8
-    return json.Answer.map((a) => {
-      const obj = { critical: 0 };
-      const record = dnsUtil.parseCaaRecord(a.data);
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-expect-error
-      obj[record.field] = record.value;
-      obj.critical = record.critical;
-      return obj;
-    });
+    return json.Answer.map(normalizeCaa);
   });
 }
 
-export function resolveMx(
-  name: string
-): Promise<{ exchange: string; priority: number }[]> {
+export function resolveMx(name: string): Promise<MX[]> {
   validateString(name, 'name');
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'MX').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryMx');
-    }
+    validateAnswer(json.Answer, name, 'queryMx');
 
-    // Cloudflare API returns "data": "10 smtp.google.com." hence
-    // we need to parse it.
-    return json.Answer.map((a) => {
-      const [priority, value]: string[] = a.data.split(' ');
-      if (priority == null || value == null) {
-        throw new DnsError(name, errorCodes.BADRESP, 'queryMx');
-      }
-      return {
-        exchange: value.slice(0, -1),
-        priority: parseInt(priority, 10),
-      };
-    });
+    return json.Answer.map((answer) => normalizeMx(name, answer));
   });
 }
 
-export function resolveNaptr(name: string): Promise<
-  {
-    flags: string;
-    service: string;
-    regexp: string;
-    replacement: string;
-    order: number;
-    preference: number;
-  }[]
-> {
+export function resolveNaptr(name: string): Promise<NAPTR[]> {
   validateString(name, 'name');
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'NAPTR').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryNaptr');
-    }
+    validateAnswer(json.Answer, name, 'queryNaptr');
 
-    // Cloudflare DNS appends "." at the end whereas Node.js doesn't.
-    return json.Answer.map((a) => dnsUtil.parseNaptrRecord(a.data));
+    return json.Answer.map(normalizeNaptr);
   });
 }
 
@@ -143,13 +164,9 @@ export function resolveNs(name: string): Promise<string[]> {
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'NS').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryNs');
-    }
+    validateAnswer(json.Answer, name, 'queryNs');
 
-    // Cloudflare DNS appends "." at the end whereas Node.js doesn't.
-    return json.Answer.map((a) => a.data.slice(0, -1));
+    return json.Answer.map(normalizeNs);
   });
 }
 
@@ -159,89 +176,38 @@ export function resolvePtr(name: string): Promise<string[]> {
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'PTR').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryPtr');
-    }
+    validateAnswer(json.Answer, name, 'queryPtr');
 
-    // Cloudflare DNS appends "." at the end whereas Node.js doesn't.
-    return json.Answer.map((a) => a.data.slice(0, -1));
+    return json.Answer.map(normalizePtr);
   });
 }
 
-export function resolveSoa(name: string): Promise<{
-  nsname: string;
-  hostmaster: string;
-  serial: number;
-  refresh: number;
-  retry: number;
-  expire: number;
-  minttl: number;
-}> {
+export function resolveSoa(name: string): Promise<SOA> {
   validateString(name, 'name');
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'SOA').then((json) => {
-    if (!('Answer' in json) || json.Answer.length === 0) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
+    validateAnswer(json.Answer, name, 'querySoa');
+
+    // This is highly unlikely, but let's assert length just to be safe.
+    if (json.Answer.length === 0) {
       throw new DnsError(name, errorCodes.NOTFOUND, 'querySoa');
     }
 
-    // Cloudflare DNS returns ""meera.ns.cloudflare.com. dns.cloudflare.com. 2357999196 10000 2400 604800 1800""
-    const [nsname, hostmaster, serial, refresh, retry, expire, minttl] =
-      json.Answer.at(0)?.data.split(' ') ?? [];
-    validateString(nsname, 'nsname');
-    validateString(hostmaster, 'hostmaster');
-    validateString(serial, 'serial');
-    validateString(refresh, 'refresh');
-    validateString(retry, 'retry');
-    validateString(expire, 'expire');
-    validateString(minttl, 'minttl');
-    return {
-      nsname,
-      hostmaster,
-      serial: parseInt(serial, 10),
-      refresh: parseInt(refresh, 10),
-      retry: parseInt(retry, 10),
-      expire: parseInt(expire, 10),
-      minttl: parseInt(minttl, 10),
-    };
+    return normalizeSoa(json.Answer[0]!);
   });
 }
 
-export function resolveSrv(name: string): Promise<
-  {
-    name: string;
-    port: number;
-    priority: number;
-    weight: number;
-  }[]
-> {
+export function resolveSrv(name: string): Promise<SRV[]> {
   validateString(name, 'name');
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'SRV').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'querySrv');
-    }
+    validateAnswer(json.Answer, name, 'querySrv');
 
-    // Cloudflare DNS returns "5 0 80 calendar.google.com"
-    return json.Answer.map((a) => {
-      const [priority, weight, port, name] = a.data.split(' ');
-      validateString(priority, 'priority');
-      validateString(weight, 'weight');
-      validateString(port, 'port');
-      validateString(name, 'name');
-      return {
-        priority: parseInt(priority, 10),
-        weight: parseInt(weight, 10),
-        port: parseInt(port, 10),
-        name,
-      };
-    });
+    return json.Answer.map(normalizeSrv);
   });
 }
 
@@ -251,25 +217,27 @@ export function resolveTxt(name: string): Promise<string[][]> {
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'TXT').then((json) => {
-    if (!('Answer' in json)) {
-      // DNS request should contain an "Answer" attribute, but it didn't.
-      throw new DnsError(name, errorCodes.NOTFOUND, 'queryTxt');
-    }
+    validateAnswer(json.Answer, name, 'queryTxt');
 
-    // Each entry has quotation marks as a prefix and suffix.
-    // Node.js APIs doesn't have them.
-    return json.Answer.map((value) => [value.data.slice(1, -1)]);
+    return json.Answer.map(normalizeTxt);
   });
 }
 
-export function reverse(input: string): Promise<string[]> {
-  validateString(input, 'input');
+export function reverse(name: string): Promise<string[]> {
+  validateString(name, 'name');
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
-  return sendDnsRequest(input, 'PTR').then((json) =>
-    json.Authority.map((d) => d.data)
-  );
+  return sendDnsRequest(name, 'PTR').then((json) => {
+    validateAnswer(json.Answer, name, 'queryPtr');
+
+    return json.Answer.map(({ data }) => {
+      if (data.endsWith('.')) {
+        return data.slice(0, -1);
+      }
+      return data;
+    });
+  });
 }
 
 export function setDefaultResultOrder(): void {
