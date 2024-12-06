@@ -7,6 +7,7 @@
 //
 // See actor.h for APIs used by other Workers to talk to Actors.
 
+#include <workerd/api/actor.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -20,6 +21,7 @@ namespace workerd::api {
 class SqlStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
+class DurableObject;
 class DurableObjectId;
 class WebSocket;
 
@@ -177,6 +179,16 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
       : cache(kj::mv(cache)),
         enableSql(enableSql) {}
 
+  // This constructor is only used when we're setting up the `DurableObjectStorage` for a replica
+  // Durable Object instance. Replicas need to retain a reference to their primary so they can
+  // forward write requests, and since we already have a reference to the primary prior to
+  // constructing the `DurableObjectStorage`, we can just pass in the information we need to build
+  // a stub. The stub is then stored in `maybePrimary`.
+  DurableObjectStorage(IoPtr<ActorCacheInterface> cache,
+      bool enableSql,
+      kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
+      kj::Own<ActorIdFactory::ActorId> primaryActorId);
+
   ActorCacheInterface& getActorCacheInterface() {
     return *cache;
   }
@@ -241,6 +253,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // thus it is idempotent.
   void ensureReplicas();
 
+  jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -262,6 +276,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(waitForBookmark);
+      JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
     }
 
     if (flags.getReplicaRouting()) {
@@ -296,6 +311,9 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   IoPtr<ActorCacheInterface> cache;
   bool enableSql;
   uint transactionSyncDepth = 0;
+
+  // Set if this is a replica Durable Object.
+  kj::Maybe<jsg::Ref<DurableObject>> maybePrimary;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
