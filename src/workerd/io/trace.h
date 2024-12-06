@@ -18,6 +18,9 @@
 #include <kj/time.h>
 #include <kj/vector.h>
 
+#include <concepts>
+#include <initializer_list>
+
 namespace kj {
 enum class HttpMethod;
 class EntropySource;
@@ -548,75 +551,42 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     Resume,
     CustomEventInfo>;
 
+template <typename T>
+concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
+    kj::isSameType<double, T>() || kj::isSameType<int32_t, T>();
+
 // An Attribute mark is used to add detail to a span over its lifetime.
 // The Attribute struct can also be used to provide arbitrary additional
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::String, bool, double, uint32_t>;
+  using Value = kj::OneOf<kj::String, bool, double, int32_t>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::String name, Value&& value);
   explicit Attribute(kj::String name, Values&& values);
+
+  template <AttributeValue V>
+  explicit Attribute(kj::String name, V v): Attribute(kj::mv(name), Value(kj::mv(v))) {}
+
+  template <AttributeValue V>
+  explicit Attribute(kj::String name, kj::Array<V> vals)
+      : Attribute(kj::mv(name), KJ_MAP(v, vals) { return Value(kj::mv(v)); }) {}
+
+  template <AttributeValue V>
+  explicit Attribute(kj::String name, std::initializer_list<V> list)
+      : Attribute(kj::mv(name), kj::heapArray<V>(list)) {}
+
   Attribute(rpc::Trace::Attribute::Reader reader);
   Attribute(Attribute&&) = default;
   Attribute& operator=(Attribute&&) = default;
   KJ_DISALLOW_COPY(Attribute);
 
   kj::String name;
-
-  kj::OneOf<Value, Values> value;
+  Values value;
 
   void copyTo(rpc::Trace::Attribute::Builder builder);
   Attribute clone();
-
-  class Builder final {
-   public:
-    Builder(kj::String name): name(kj::mv(name)) {}
-    Builder(kj::String name, size_t n): name(kj::mv(name)), vec(n) {}
-    Builder(kj::StringPtr name): Builder(kj::str(name)) {}
-    Builder(kj::StringPtr name, size_t n): name(kj::str(name)), vec(n) {}
-    KJ_DISALLOW_COPY_AND_MOVE(Builder);
-
-    Builder& add(kj::String value) KJ_LIFETIMEBOUND {
-      vec.add(kj::mv(value));
-      return *this;
-    }
-
-    Builder& add(kj::StringPtr value) KJ_LIFETIMEBOUND {
-      vec.add(kj::str(value));
-      return *this;
-    }
-
-    Builder& add(bool value) KJ_LIFETIMEBOUND {
-      vec.add(value);
-      return *this;
-    }
-
-    Builder& add(double value) KJ_LIFETIMEBOUND {
-      vec.add(value);
-      return *this;
-    }
-
-    Builder& add(uint32_t value) KJ_LIFETIMEBOUND {
-      vec.add(value);
-      return *this;
-    }
-
-    Attribute finish() {
-      KJ_ASSERT(vec.size() >= 1);
-      if (vec.size() == 1) {
-        auto val = kj::mv(vec[0]);
-        vec.clear();
-        return Attribute(kj::mv(name), kj::mv(val));
-      }
-      return Attribute(kj::mv(name), vec.releaseAsArray());
-    }
-
-   private:
-    kj::String name;
-    kj::Vector<Value> vec;
-  };
 };
 using CustomInfo = kj::Array<Attribute>;
 
@@ -641,7 +611,7 @@ struct Return final {
   Return clone();
 };
 
-using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Attribute>;
+using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, kj::Array<Attribute>>;
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -734,36 +704,11 @@ struct Outcome final {
 struct TailEvent final {
   using Event = kj::OneOf<Onset, Outcome, Hibernate, SpanOpen, SpanClose, Mark>;
 
-  struct Context final {
-    explicit Context(TraceId traceId, TraceId invocationId, SpanId spanId);
-    Context(const InvocationSpanContext& context)
-        : Context(context.getTraceId(), context.getInvocationId(), context.getSpanId()) {}
-    Context(rpc::InvocationSpanContext::Reader reader);
-    Context(Context&&) = default;
-    Context& operator=(Context&&) = default;
-    KJ_DISALLOW_COPY(Context);
-    TraceId traceId;
-    TraceId invocationId;
-    SpanId spanId;
-
-    inline bool operator==(const Context& other) {
-      return traceId == other.traceId && invocationId == other.invocationId &&
-          spanId == other.spanId;
-    }
-
-    inline bool operator==(const InvocationSpanContext& other) {
-      return traceId == other.getTraceId() && invocationId == other.getInvocationId() &&
-          spanId == other.getSpanId();
-    }
-
-    void copyTo(rpc::InvocationSpanContext::Builder builder);
-    Context clone();
-  };
-
   explicit TailEvent(
       const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);
-  TailEvent(Context context,
-      kj::Maybe<Context> parentContext,
+  TailEvent(TraceId traceId,
+      TraceId invocationId,
+      SpanId spanId,
       kj::Date timestamp,
       kj::uint sequence,
       Event&& event);
@@ -773,10 +718,9 @@ struct TailEvent final {
   KJ_DISALLOW_COPY(TailEvent);
 
   // The invocation span context this event is associated with.
-  Context context;
-
-  // The parent or trigger span context, if any.
-  kj::Maybe<Context> parentContext = kj::none;
+  TraceId traceId;
+  TraceId invocationId;
+  SpanId spanId;
 
   kj::Date timestamp;  // Unix epoch, spectre-mitigated resolution
   kj::uint sequence;

@@ -853,15 +853,14 @@ tracing::Hibernate tracing::Hibernate::clone() {
 
 tracing::Attribute::Attribute(kj::String name, Value&& value)
     : name(kj::mv(name)),
-      value(kj::mv(value)) {}
+      value(kj::arr(kj::mv(value))) {}
 
-tracing::Attribute::Attribute(kj::String name, kj::Array<Value>&& value)
+tracing::Attribute::Attribute(kj::String name, Values&& value)
     : name(kj::mv(name)),
       value(kj::mv(value)) {}
 
 namespace {
-kj::OneOf<tracing::Attribute::Value, kj::Array<tracing::Attribute::Value>> readValues(
-    const rpc::Trace::Attribute::Reader& reader) {
+kj::Array<tracing::Attribute::Value> readValues(const rpc::Trace::Attribute::Reader& reader) {
   static auto readValue =
       [](rpc::Trace::Attribute::Value::Reader reader) -> tracing::Attribute::Value {
     auto inner = reader.getInner();
@@ -876,7 +875,7 @@ kj::OneOf<tracing::Attribute::Value, kj::Array<tracing::Attribute::Value>> readV
         return inner.getFloat();
       }
       case rpc::Trace::Attribute::Value::Inner::INT: {
-        return static_cast<kj::uint>(inner.getInt());
+        return static_cast<int32_t>(inner.getInt());
       }
     }
     KJ_UNREACHABLE;
@@ -885,10 +884,6 @@ kj::OneOf<tracing::Attribute::Value, kj::Array<tracing::Attribute::Value>> readV
   // There should always be a value and it always have at least one entry in the list.
   KJ_ASSERT(reader.hasValue());
   auto value = reader.getValue();
-  KJ_ASSERT(value.size() >= 1);
-  if (value.size() == 1) {
-    return readValue(value[0]);
-  }
   kj::Vector<tracing::Attribute::Value> values(value.size());
   for (auto v: value) {
     values.add(readValue(v));
@@ -913,22 +908,15 @@ void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) {
       KJ_CASE_ONEOF(f, double) {
         builder.initInner().setFloat(f);
       }
-      KJ_CASE_ONEOF(i, uint32_t) {
+      KJ_CASE_ONEOF(i, int32_t) {
         builder.initInner().setInt(i);
       }
     }
   };
   builder.setName(name.asPtr());
-  KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(value, Value) {
-      writeValue(builder.initValue(1)[0], value);
-    }
-    KJ_CASE_ONEOF(values, kj::Array<Value>) {
-      auto vec = builder.initValue(values.size());
-      for (size_t n = 0; n < values.size(); n++) {
-        writeValue(vec[n], values[n]);
-      }
-    }
+  auto vec = builder.initValue(value.size());
+  for (size_t n = 0; n < value.size(); n++) {
+    writeValue(vec[n], value[n]);
   }
 }
 
@@ -944,22 +932,14 @@ tracing::Attribute tracing::Attribute::clone() {
       KJ_CASE_ONEOF(f, double) {
         return f;
       }
-      KJ_CASE_ONEOF(i, uint32_t) {
+      KJ_CASE_ONEOF(i, int32_t) {
         return i;
       }
     }
     KJ_UNREACHABLE;
   };
 
-  KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(value, Value) {
-      return Attribute(kj::str(name), cloneValue(value));
-    }
-    KJ_CASE_ONEOF(values, kj::Array<Value>) {
-      return Attribute(kj::str(name), KJ_MAP(value, values) { return cloneValue(value); });
-    }
-  }
-  KJ_UNREACHABLE;
+  return Attribute(kj::str(name), KJ_MAP(v, value) { return cloneValue(v); });
 }
 
 tracing::Return::Return(kj::Maybe<tracing::Return::Info> info): info(kj::mv(info)) {}
@@ -1340,111 +1320,87 @@ tracing::Outcome tracing::Outcome::clone() {
   return Outcome(outcome, cpuTime, wallTime);
 }
 
-namespace {
-tracing::TailEvent::Context getContextFromSpan(const tracing::InvocationSpanContext& context) {
-  return tracing::TailEvent::Context(
-      context.getTraceId(), context.getInvocationId(), context.getSpanId());
-}
-
-kj::Maybe<tracing::TailEvent::Context> getParentContextFromSpan(
-    const tracing::InvocationSpanContext& context) {
-  return context.getParent().map(
-      [](const tracing::InvocationSpanContext& context) { return getContextFromSpan(context); });
-}
-}  // namespace
-
-tracing::TailEvent::Context::Context(TraceId traceId, TraceId invocationId, SpanId spanId)
-    : traceId(kj::mv(traceId)),
-      invocationId(kj::mv(invocationId)),
-      spanId(kj::mv(spanId)) {}
-
-tracing::TailEvent::Context::Context(rpc::InvocationSpanContext::Reader reader)
-    : traceId(TraceId::fromCapnp(reader.getTraceId())),
-      invocationId(TraceId::fromCapnp(reader.getInvocationId())),
-      spanId(reader.getSpanId()) {}
-
-void tracing::TailEvent::Context::copyTo(rpc::InvocationSpanContext::Builder builder) {
-  traceId.toCapnp(builder.initTraceId());
-  invocationId.toCapnp(builder.initInvocationId());
-  builder.setSpanId(spanId);
-}
-
-tracing::TailEvent::Context tracing::TailEvent::Context::clone() {
-  return Context(traceId, invocationId, spanId);
-}
-
 tracing::TailEvent::TailEvent(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     kj::uint sequence,
     Event&& event)
-    : context(getContextFromSpan(context)),
-      parentContext(getParentContextFromSpan(context)),
+    : traceId(context.getTraceId()),
+      invocationId(context.getInvocationId()),
+      spanId(context.getSpanId()),
       timestamp(timestamp),
       sequence(sequence),
       event(kj::mv(event)) {}
 
-tracing::TailEvent::TailEvent(Context context,
-    kj::Maybe<Context> parentContext,
+tracing::TailEvent::TailEvent(TraceId traceId,
+    TraceId invocationId,
+    SpanId spanId,
     kj::Date timestamp,
     kj::uint sequence,
     Event&& event)
-    : context(kj::mv(context)),
-      parentContext(kj::mv(parentContext)),
+    : traceId(kj::mv(traceId)),
+      invocationId(kj::mv(invocationId)),
+      spanId(kj::mv(spanId)),
       timestamp(timestamp),
       sequence(sequence),
       event(kj::mv(event)) {}
 
 namespace {
-tracing::TailEvent::Context readContextFromTailEvent(const rpc::Trace::TailEvent::Reader& reader) {
-  return tracing::TailEvent::Context(reader.getContext());
-}
-
-kj::Maybe<tracing::TailEvent::Context> readParentContextFromTailEvent(
-    const rpc::Trace::TailEvent::Reader& reader) {
-  if (!reader.hasParentContext()) return kj::none;
-  return tracing::TailEvent::Context(reader.getParentContext());
-}
-
 tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& reader) {
   const auto event = reader.getEvent();
   switch (event.which()) {
-    case rpc::Trace::TailEvent::Event::ONSET:
+    case rpc::Trace::TailEvent::Event::ONSET: {
       return tracing::Onset(event.getOnset());
-    case rpc::Trace::TailEvent::Event::OUTCOME:
+    }
+    case rpc::Trace::TailEvent::Event::OUTCOME: {
       return tracing::Outcome(event.getOutcome());
-    case rpc::Trace::TailEvent::Event::HIBERNATE:
+    }
+    case rpc::Trace::TailEvent::Event::HIBERNATE: {
       return tracing::Hibernate(event.getHibernate());
-    case rpc::Trace::TailEvent::Event::SPAN_OPEN:
+    }
+    case rpc::Trace::TailEvent::Event::SPAN_OPEN: {
       return tracing::SpanOpen(event.getSpanOpen());
-    case rpc::Trace::TailEvent::Event::SPAN_CLOSE:
+    }
+    case rpc::Trace::TailEvent::Event::SPAN_CLOSE: {
       return tracing::SpanClose(event.getSpanClose());
-    case rpc::Trace::TailEvent::Event::ATTRIBUTE:
-      return tracing::Mark(tracing::Attribute(event.getAttribute()));
-    case rpc::Trace::TailEvent::Event::RETURN:
+    }
+    case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
+      auto listReader = event.getAttribute();
+      kj::Vector<tracing::Attribute> attrs(listReader.size());
+      for (size_t n = 0; n < listReader.size(); n++) {
+        attrs.add(tracing::Attribute(listReader[n]));
+      }
+      return tracing::Mark(attrs.releaseAsArray());
+    }
+    case rpc::Trace::TailEvent::Event::RETURN: {
       return tracing::Mark(tracing::Return(event.getReturn()));
-    case rpc::Trace::TailEvent::Event::DIAGNOSTIC_CHANNEL_EVENT:
+    }
+    case rpc::Trace::TailEvent::Event::DIAGNOSTIC_CHANNEL_EVENT: {
       return tracing::Mark(tracing::DiagnosticChannelEvent(event.getDiagnosticChannelEvent()));
-    case rpc::Trace::TailEvent::Event::EXCEPTION:
+    }
+    case rpc::Trace::TailEvent::Event::EXCEPTION: {
       return tracing::Mark(tracing::Exception(event.getException()));
-    case rpc::Trace::TailEvent::Event::LOG:
+    }
+    case rpc::Trace::TailEvent::Event::LOG: {
       return tracing::Mark(tracing::Log(event.getLog()));
+    }
   }
   KJ_UNREACHABLE;
 }
 }  // namespace
 
 tracing::TailEvent::TailEvent(rpc::Trace::TailEvent::Reader reader)
-    : context(readContextFromTailEvent(reader)),
-      parentContext(readParentContextFromTailEvent(reader)),
+    : traceId(TraceId::fromCapnp(reader.getContext().getTraceId())),
+      invocationId(TraceId::fromCapnp(reader.getContext().getInvocationId())),
+      spanId(SpanId(reader.getContext().getSpanId())),
       timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       sequence(reader.getSequence()),
       event(readEventFromTailEvent(reader)) {}
 
 void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
-  context.copyTo(builder.initContext());
-  KJ_IF_SOME(parent, parentContext) {
-    parent.copyTo(builder.initParentContext());
-  }
+  auto context = builder.initContext();
+  traceId.toCapnp(context.initTraceId());
+  invocationId.toCapnp(context.initInvocationId());
+  context.setSpanId(spanId.getId());
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSequence(sequence);
   auto eventBuilder = builder.initEvent();
@@ -1478,8 +1434,12 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
         KJ_CASE_ONEOF(ret, Return) {
           ret.copyTo(eventBuilder.initReturn());
         }
-        KJ_CASE_ONEOF(attr, Attribute) {
-          attr.copyTo(eventBuilder.initAttribute());
+        KJ_CASE_ONEOF(attrs, kj::Array<Attribute>) {
+          // Mark is a collection of attributes.
+          auto attrBuilder = eventBuilder.initAttribute(attrs.size());
+          for (size_t n = 0; n < attrs.size(); n++) {
+            attrs[n].copyTo(attrBuilder[n]);
+          }
         }
       }
     }
@@ -1518,17 +1478,15 @@ tracing::TailEvent tracing::TailEvent::clone() {
           KJ_CASE_ONEOF(ret, Return) {
             return Mark(ret.clone());
           }
-          KJ_CASE_ONEOF(attr, Attribute) {
-            return Mark(attr.clone());
+          KJ_CASE_ONEOF(attrs, tracing::CustomInfo) {
+            return Mark(KJ_MAP(attr, attrs) { return attr.clone(); });
           }
         }
       }
     }
     KJ_UNREACHABLE;
   };
-  return TailEvent(context.clone(),
-      parentContext.map([](Context& parent) { return parent.clone(); }), timestamp, sequence,
-      cloneEvent(event));
+  return TailEvent(traceId, invocationId, spanId, timestamp, sequence, cloneEvent(event));
 }
 
 // ======================================================================================

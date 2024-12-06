@@ -184,7 +184,7 @@ struct Trace @0x8e8d911203762d34 {
     # the fetch handler returns a Response. Importantly, it does not signal that the
     # span has closed, which may not happen for some period of time after the return
     # mark is recorded (e.g. due to things like waitUntils or waiting to fully ready
-    # the response body payload, etc).
+    # the response body payload, etc). Not all spans will have a Return mark.
     info :union {
       empty @0 :Void;
       custom @1 :List(Attribute);
@@ -213,7 +213,12 @@ struct Trace @0x8e8d911203762d34 {
   struct Resume {
     # A resume event indicates that we are resuming a previously hibernated
     # tail session.
+
     attachment @0 :Data;
+    # When a tail session is hibernated, the tail worker is given the opportunity
+    # to provide some additional data that will be serialized and stored with the
+    # hibernated state. When the stream is resumed, if the tail worker has provided
+    # such data, it will be passed back to the worker in the resume event.
   }
 
   struct Onset {
@@ -256,24 +261,23 @@ struct Trace @0x8e8d911203762d34 {
     # A streaming tail worker receives a series of Tail Events. Tail events always
     # occur within an InvocationSpanContext. The first TailEvent delivered to a
     # streaming tail session is always an Onset. The final TailEvent delivered is
-    # always an Outcome. Between those can be any number of SpanOpen, SpanClose,
-    # and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
-    # the stream was abruptly terminated.
+    # always an Outcome or Hibernate. Between those can be any number of SpanOpen,
+    # SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
+    # unless the stream was abruptly terminated.
     context @0 :InvocationSpanContext;
-    parentContext @1 :InvocationSpanContext;
-    timestampNs @2 :Int64;
-    sequence @3 :UInt32;
+    timestampNs @1 :Int64;
+    sequence @2 :UInt32;
     event :union {
-      onset @4 :Onset;
-      outcome @5 :Outcome;
-      hibernate @6 :Hibernate;
-      spanOpen @7 :SpanOpen;
-      spanClose @8 :SpanClose;
-      attribute @9 :Attribute;
-      return @10 :Return;
-      diagnosticChannelEvent @11 :DiagnosticChannelEvent;
-      exception @12 :Exception;
-      log @13 :Log;
+      onset @3 :Onset;
+      outcome @4 :Outcome;
+      hibernate @5 :Hibernate;
+      spanOpen @6 :SpanOpen;
+      spanClose @7 :SpanClose;
+      attribute @8 :List(Attribute);
+      return @9 :Return;
+      diagnosticChannelEvent @10 :DiagnosticChannelEvent;
+      exception @11 :Exception;
+      log @12 :Log;
     }
   }
 }
