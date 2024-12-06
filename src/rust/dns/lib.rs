@@ -22,8 +22,12 @@ mod ffi {
 }
 
 /// Given a vector of strings, converts each slice to UTF-8 from HEX.
-pub fn decode_hex(s: &Vec<&str>) -> Vec<String> {
-    s.into_iter()
+///
+/// # Panics
+/// Will panic if any substring is not a valid hex.
+#[must_use]
+pub fn decode_hex(s: &[&str]) -> Vec<String> {
+    s.iter()
         .map(|s| {
             u16::from_str_radix(s, 16)
                 .ok()
@@ -35,7 +39,7 @@ pub fn decode_hex(s: &Vec<&str>) -> Vec<String> {
 
 /// Parses an unknown RR format returned from Cloudflare DNS.
 /// Specification is available at
-/// https://datatracker.ietf.org/doc/html/rfc3597
+/// `<https://datatracker.ietf.org/doc/html/rfc3597>`
 ///
 /// The format of the record is as follows:
 ///   \# <length-in-bytes> <bytes-in-hex>
@@ -43,7 +47,7 @@ pub fn decode_hex(s: &Vec<&str>) -> Vec<String> {
 ///       |  |  |  |
 ///       |  |  |  - Starting point of the actual data
 ///       |  |  - Length of the field.
-///       |  - Number representation of "is_critical"
+///       |  - Number representation of "`is_critical`"
 ///       - Length of the data
 ///
 /// Note: Field can be "issuewild", "issue" or "iodef".
@@ -57,17 +61,16 @@ pub fn decode_hex(s: &Vec<&str>) -> Vec<String> {
 fn parse_caa_record(record: &str) -> ffi::CaaRecord {
     // Let's remove "\\#" and the length of data from the beginning of the record
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
-    let critical = u8::from_str_radix(data[0], 10).unwrap();
-    let prefix_length = usize::from_str_radix(data[1], 10).unwrap();
+    let critical = data[0].parse::<u8>().unwrap();
+    let prefix_length = data[1].parse::<usize>().unwrap();
 
-    let field = decode_hex(&data[2..prefix_length + 2].to_vec()).join("");
-    let value = decode_hex(&data[(prefix_length + 2)..].to_vec()).join("");
+    let field = decode_hex(&data[2..prefix_length + 2]).join("");
+    let value = decode_hex(&data[(prefix_length + 2)..]).join("");
 
     // Field can be "issuewild", "issue" or "iodef"
     assert!(
         field == "issuewild" || field == "issue" || field == "iodef",
-        "received unsupported field {}",
-        field
+        "received unsupported field {field}",
     );
 
     ffi::CaaRecord {
@@ -79,7 +82,7 @@ fn parse_caa_record(record: &str) -> ffi::CaaRecord {
 
 /// Parses an unknown RR format returned from Cloudflare DNS.
 /// Specification is available at
-/// https://datatracker.ietf.org/doc/html/rfc3597
+/// `<https://datatracker.ietf.org/doc/html/rfc3597>`
 ///
 /// The format of the record is as follows:
 /// \# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00
@@ -114,18 +117,17 @@ fn parse_naptr_record(record: &str) -> ffi::NaptrRecord {
 
     let flag_length = usize::from_str_radix(data[5], 16).unwrap();
     let flag_offset = 6;
-    let flags = decode_hex(&data[flag_offset..flag_length + flag_offset].to_vec()).join("");
+    let flags = decode_hex(&data[flag_offset..flag_length + flag_offset]).join("");
 
     let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16).unwrap();
     let service_offset = flag_offset + flag_length + 1;
-    let service =
-        decode_hex(&data[service_offset..service_length + service_offset].to_vec()).join("");
+    let service = decode_hex(&data[service_offset..service_length + service_offset]).join("");
 
     let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16).unwrap();
     let regexp_offset = service_offset + service_length + 1;
-    let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset].to_vec()).join("");
+    let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset]).join("");
 
-    let replacement = parse_replacement(data[regexp_offset + regexp_length..].to_vec());
+    let replacement = parse_replacement(&data[regexp_offset + regexp_length..]);
 
     ffi::NaptrRecord {
         flags,
@@ -144,7 +146,7 @@ fn parse_naptr_record(record: &str) -> ffi::NaptrRecord {
 /// are no input left, and later join them using "."
 ///
 /// It is important that the returning value doesn't end with dot (".") character.
-fn parse_replacement(input: Vec<&str>) -> String {
+fn parse_replacement(input: &[&str]) -> String {
     if input.is_empty() {
         return String::new();
     }
