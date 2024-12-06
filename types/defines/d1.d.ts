@@ -17,7 +17,6 @@ interface D1Response {
 type D1Result<T = unknown> = D1Response & {
   results: T[];
 };
-
 interface D1ExecResult {
   count: number;
   duration: number;
