@@ -54,7 +54,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       bool tunnelExceptions,
       kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -98,7 +98,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-      kj::Rc<tracing::InvocationSpanContext> invocationSpanContext);
+      tracing::InvocationSpanContext invocationSpanContext);
 
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
@@ -161,13 +161,13 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan) {
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
 
   // Create a new InvocationSpanContext for this worker invocation.
   auto invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(
       maybeTriggerInvocationSpan.map(
-          [](auto& trigger) -> kj::Rc<tracing::InvocationSpanContext>& { return trigger; }),
+          [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
       threadContext.getEntropySource());
 
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
@@ -198,7 +198,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-    kj::Rc<tracing::InvocationSpanContext> invocationSpanContext) {
+    tracing::InvocationSpanContext invocationSpanContext) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -729,7 +729,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     bool tunnelExceptions,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan) {
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),
       kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency), kj::mv(ioChannelFactory),
       kj::mv(metrics), waitUntilTasks, tunnelExceptions, kj::mv(workerTracer), kj::mv(cfBlobJson),

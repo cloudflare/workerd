@@ -127,7 +127,7 @@ kj::String TraceId::toW3C() const {
 }
 
 namespace {
-uint64_t getRandom64Bit(kj::Maybe<kj::EntropySource&>& entropySource) {
+uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
   uint64_t ret = 0;
   uint8_t tries = 0;
 
@@ -178,31 +178,34 @@ InvocationSpanContext::InvocationSpanContext(kj::Badge<InvocationSpanContext>,
     TraceId traceId,
     TraceId invocationId,
     SpanId spanId,
-    kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext)
+    kj::Maybe<const InvocationSpanContext&> parentSpanContext)
     : entropySource(entropySource),
       traceId(kj::mv(traceId)),
       invocationId(kj::mv(invocationId)),
       spanId(kj::mv(spanId)),
-      parentSpanContext(kj::mv(parentSpanContext)) {}
+      parentSpanContext(parentSpanContext.map([](const InvocationSpanContext& ctx) {
+        return kj::heap<InvocationSpanContext>(ctx.clone());
+      })) {}
 
-kj::Rc<InvocationSpanContext> InvocationSpanContext::newChild() {
+InvocationSpanContext InvocationSpanContext::newChild() const {
   KJ_ASSERT(!isTrigger(), "unable to create child spans on this context");
-  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), entropySource, traceId,
-      invocationId, SpanId::fromEntropy(entropySource), addRefToThis());
+  kj::Maybe<kj::EntropySource&> otherEntropySource = entropySource.map(
+      [](auto& es) -> kj::EntropySource& { return const_cast<kj::EntropySource&>(es); });
+  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), otherEntropySource, traceId,
+      invocationId, SpanId::fromEntropy(otherEntropySource), *this);
 }
 
-kj::Rc<InvocationSpanContext> InvocationSpanContext::newForInvocation(
-    kj::Maybe<kj::Rc<InvocationSpanContext>&> triggerContext,
+InvocationSpanContext InvocationSpanContext::newForInvocation(
+    kj::Maybe<const InvocationSpanContext&> triggerContext,
     kj::Maybe<kj::EntropySource&> entropySource) {
-  kj::Maybe<kj::Rc<InvocationSpanContext>> parent;
+  kj::Maybe<const InvocationSpanContext&> parent;
   auto traceId = triggerContext
-                     .map([&](kj::Rc<InvocationSpanContext>& ctx) {
-    parent = ctx.addRef();
-    return ctx->traceId;
+                     .map([&](auto& ctx) mutable -> TraceId {
+    parent = ctx;
+    return ctx.traceId;
   }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
-  return kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), entropySource,
-      kj::mv(traceId), TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource),
-      kj::mv(parent));
+  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource, kj::mv(traceId),
+      TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), kj::mv(parent));
 }
 
 TraceId TraceId::fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader) {
@@ -214,7 +217,7 @@ void TraceId::toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const
   writer.setHigh(high);
 }
 
-kj::Maybe<kj::Rc<InvocationSpanContext>> InvocationSpanContext::fromCapnp(
+kj::Maybe<InvocationSpanContext> InvocationSpanContext::fromCapnp(
     rpc::InvocationSpanContext::Reader reader) {
   if (!reader.hasTraceId() || !reader.hasInvocationId()) {
     // If the reader does not have a traceId or invocationId field then it is
@@ -222,11 +225,11 @@ kj::Maybe<kj::Rc<InvocationSpanContext>> InvocationSpanContext::fromCapnp(
     return kj::none;
   }
 
-  auto sc = kj::rc<InvocationSpanContext>(kj::Badge<InvocationSpanContext>(), kj::none,
+  auto sc = InvocationSpanContext(kj::Badge<InvocationSpanContext>(), kj::none,
       TraceId::fromCapnp(reader.getTraceId()), TraceId::fromCapnp(reader.getInvocationId()),
       reader.getSpanId());
   // If the traceId or invocationId are invalid, then we'll ignore them.
-  if (!sc->getTraceId() || !sc->getInvocationId()) return kj::none;
+  if (!sc.getTraceId() || !sc.getInvocationId()) return kj::none;
   return kj::mv(sc);
 }
 
@@ -234,11 +237,18 @@ void InvocationSpanContext::toCapnp(rpc::InvocationSpanContext::Builder writer) 
   traceId.toCapnp(writer.initTraceId());
   invocationId.toCapnp(writer.initInvocationId());
   writer.setSpanId(spanId);
-  kj::mv(getParent());  // Just invalidating the parent. Not moving it anywhere.
 }
 
-kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context) {
-  return kj::str(context->getTraceId(), "-", context->getInvocationId(), "-", context->getSpanId());
+InvocationSpanContext InvocationSpanContext::clone() const {
+  kj::Maybe<kj::EntropySource&> otherEntropySource = entropySource.map(
+      [](auto& es) -> kj::EntropySource& { return const_cast<kj::EntropySource&>(es); });
+  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), otherEntropySource, traceId,
+      invocationId, spanId,
+      parentSpanContext.map([](auto& ctx) -> const InvocationSpanContext& { return *ctx.get(); }));
+}
+
+kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
+  return kj::str(context.getTraceId(), "-", context.getInvocationId(), "-", context.getSpanId());
 }
 
 }  // namespace tracing
@@ -851,7 +861,7 @@ tracing::Attribute::Attribute(kj::String name, kj::Array<Value>&& value)
 
 namespace {
 kj::OneOf<tracing::Attribute::Value, kj::Array<tracing::Attribute::Value>> readValues(
-    rpc::Trace::Attribute::Reader& reader) {
+    const rpc::Trace::Attribute::Reader& reader) {
   static auto readValue =
       [](rpc::Trace::Attribute::Value::Reader reader) -> tracing::Attribute::Value {
     auto inner = reader.getInner();
@@ -955,7 +965,7 @@ tracing::Attribute tracing::Attribute::clone() {
 tracing::Return::Return(kj::Maybe<tracing::Return::Info> info): info(kj::mv(info)) {}
 
 namespace {
-kj::Maybe<tracing::Return::Info> readReturnInfo(rpc::Trace::Return::Reader& reader) {
+kj::Maybe<tracing::Return::Info> readReturnInfo(const rpc::Trace::Return::Reader& reader) {
   auto info = reader.getInfo();
   switch (info.which()) {
     case rpc::Trace::Return::Info::EMPTY:
@@ -1015,7 +1025,7 @@ tracing::SpanOpen::SpanOpen(kj::Maybe<kj::String> operationName, kj::Maybe<Info>
       info(kj::mv(info)) {}
 
 namespace {
-kj::Maybe<kj::String> readSpanOpenOperationName(rpc::Trace::SpanOpen::Reader& reader) {
+kj::Maybe<kj::String> readSpanOpenOperationName(const rpc::Trace::SpanOpen::Reader& reader) {
   if (!reader.hasOperationName()) return kj::none;
   return kj::str(reader.getOperationName());
 }
@@ -1144,12 +1154,14 @@ tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) 
   }
   KJ_UNREACHABLE;
 }
+
 kj::Maybe<kj::String> getScriptNameFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasScriptName()) {
     return kj::str(reader.getScriptName());
   }
   return kj::none;
 }
+
 kj::Maybe<kj::Own<ScriptVersion::Reader>> getScriptVersionFromReader(
     const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasScriptVersion()) {
@@ -1157,12 +1169,14 @@ kj::Maybe<kj::Own<ScriptVersion::Reader>> getScriptVersionFromReader(
   }
   return kj::none;
 }
+
 kj::Maybe<kj::String> getDispatchNamespaceFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasDispatchNamespace()) {
     return kj::str(reader.getDispatchNamespace());
   }
   return kj::none;
 }
+
 kj::Maybe<kj::Array<kj::String>> getScriptTagsFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasScriptTags()) {
     auto tags = reader.getScriptTags();
@@ -1174,6 +1188,7 @@ kj::Maybe<kj::Array<kj::String>> getScriptTagsFromReader(const rpc::Trace::Onset
   }
   return kj::none;
 }
+
 kj::Maybe<kj::String> getEntrypointFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasEntryPoint()) {
     return kj::str(reader.getEntryPoint());
@@ -1326,17 +1341,15 @@ tracing::Outcome tracing::Outcome::clone() {
 }
 
 namespace {
-tracing::TailEvent::Context getContextFromSpan(
-    const kj::Rc<tracing::InvocationSpanContext>& context) {
+tracing::TailEvent::Context getContextFromSpan(const tracing::InvocationSpanContext& context) {
   return tracing::TailEvent::Context(
-      context->getTraceId(), context->getInvocationId(), context->getSpanId());
+      context.getTraceId(), context.getInvocationId(), context.getSpanId());
 }
 
 kj::Maybe<tracing::TailEvent::Context> getParentContextFromSpan(
-    kj::Rc<tracing::InvocationSpanContext>& context) {
-  return context->getParent().map([](const kj::Rc<tracing::InvocationSpanContext>& context) {
-    return getContextFromSpan(context);
-  });
+    const tracing::InvocationSpanContext& context) {
+  return context.getParent().map(
+      [](const tracing::InvocationSpanContext& context) { return getContextFromSpan(context); });
 }
 }  // namespace
 
@@ -1360,7 +1373,7 @@ tracing::TailEvent::Context tracing::TailEvent::Context::clone() {
   return Context(traceId, invocationId, spanId);
 }
 
-tracing::TailEvent::TailEvent(kj::Rc<tracing::InvocationSpanContext>& context,
+tracing::TailEvent::TailEvent(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     kj::uint sequence,
     Event&& event)
@@ -1382,18 +1395,18 @@ tracing::TailEvent::TailEvent(Context context,
       event(kj::mv(event)) {}
 
 namespace {
-tracing::TailEvent::Context readContextFromTailEvent(rpc::Trace::TailEvent::Reader& reader) {
+tracing::TailEvent::Context readContextFromTailEvent(const rpc::Trace::TailEvent::Reader& reader) {
   return tracing::TailEvent::Context(reader.getContext());
 }
 
 kj::Maybe<tracing::TailEvent::Context> readParentContextFromTailEvent(
-    rpc::Trace::TailEvent::Reader& reader) {
+    const rpc::Trace::TailEvent::Reader& reader) {
   if (!reader.hasParentContext()) return kj::none;
   return tracing::TailEvent::Context(reader.getParentContext());
 }
 
-tracing::TailEvent::Event readEventFromTailEvent(rpc::Trace::TailEvent::Reader& reader) {
-  auto event = reader.getEvent();
+tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Reader& reader) {
+  const auto event = reader.getEvent();
   switch (event.which()) {
     case rpc::Trace::TailEvent::Event::ONSET:
       return tracing::Onset(event.getOnset());

@@ -43,6 +43,6 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // the implication is that this worker entrypoint is being created as a subrequest or
     // subtask of another request. If it is kj::none, then this invocation is a top-level
     // invocation.
-    kj::Maybe<kj::Rc<tracing::InvocationSpanContext>> maybeTriggerInvocationSpan = kj::none);
+    kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan = kj::none);
 
 }  // namespace workerd

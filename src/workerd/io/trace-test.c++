@@ -91,46 +91,46 @@ KJ_TEST("InvocationSpanContext") {
 
   // We can create an InvocationSpanContext...
   static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
-  KJ_EXPECT(sc->getTraceId() == kCheck);
-  KJ_EXPECT(sc->getInvocationId() == kCheck);
-  KJ_EXPECT(sc->getSpanId() == SpanId(1));
+  KJ_EXPECT(sc.getTraceId() == kCheck);
+  KJ_EXPECT(sc.getInvocationId() == kCheck);
+  KJ_EXPECT(sc.getSpanId() == SpanId(1));
 
   // And serialize that to a capnp struct...
   capnp::MallocMessageBuilder builder;
   auto root = builder.initRoot<rpc::InvocationSpanContext>();
-  sc->toCapnp(root);
+  sc.toCapnp(root);
 
   // Then back again...
   auto sc2 = KJ_ASSERT_NONNULL(InvocationSpanContext::fromCapnp(root.asReader()));
-  KJ_EXPECT(sc2->getTraceId() == kCheck);
-  KJ_EXPECT(sc2->getInvocationId() == kCheck);
-  KJ_EXPECT(sc2->getSpanId() == SpanId(1));
-  KJ_EXPECT(sc2->isTrigger());
+  KJ_EXPECT(sc2.getTraceId() == kCheck);
+  KJ_EXPECT(sc2.getInvocationId() == kCheck);
+  KJ_EXPECT(sc2.getSpanId() == SpanId(1));
+  KJ_EXPECT(sc2.isTrigger());
 
   // The one that has been deserialized from capnp cannot create children...
   try {
-    sc2->newChild();
+    sc2.newChild();
     KJ_FAIL_ASSERT("should not be able to create child span with SpanContext from capnp");
   } catch (kj::Exception& ex) {
     KJ_EXPECT(ex.getDescription() ==
         "expected !isTrigger(); unable to create child spans on this context"_kj);
   }
 
-  auto sc3 = sc->newChild();
-  KJ_EXPECT(sc3->getTraceId() == kCheck);
-  KJ_EXPECT(sc3->getInvocationId() == kCheck);
-  KJ_EXPECT(sc3->getSpanId() == SpanId(2));
+  auto sc3 = sc.newChild();
+  KJ_EXPECT(sc3.getTraceId() == kCheck);
+  KJ_EXPECT(sc3.getInvocationId() == kCheck);
+  KJ_EXPECT(sc3.getSpanId() == SpanId(2));
 
   auto sc4 = InvocationSpanContext::newForInvocation(sc2, fakeEntropySource);
-  KJ_EXPECT(sc4->getTraceId() == kCheck);
-  KJ_EXPECT(sc4->getInvocationId() == kCheck);
-  KJ_EXPECT(sc4->getSpanId() == SpanId(3));
+  KJ_EXPECT(sc4.getTraceId() == kCheck);
+  KJ_EXPECT(sc4.getInvocationId() == kCheck);
+  KJ_EXPECT(sc4.getSpanId() == SpanId(3));
 
-  auto& sc5 = KJ_ASSERT_NONNULL(sc4->getParent());
-  KJ_EXPECT(sc5->getTraceId() == kCheck);
-  KJ_EXPECT(sc5->getInvocationId() == kCheck);
-  KJ_EXPECT(sc5->getSpanId() == SpanId(1));
-  KJ_EXPECT(sc5->isTrigger());
+  auto& sc5 = KJ_ASSERT_NONNULL(sc4.getParent());
+  KJ_EXPECT(sc5.getTraceId() == kCheck);
+  KJ_EXPECT(sc5.getInvocationId() == kCheck);
+  KJ_EXPECT(sc5.getSpanId() == SpanId(1));
+  KJ_EXPECT(sc5.isTrigger());
 }
 
 KJ_TEST("Read/Write FetchEventInfo works") {
@@ -532,9 +532,9 @@ KJ_TEST("Read/Write TraceEvent works") {
   tracing::TailEvent info2(reader);
   KJ_ASSERT(info2.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info2.sequence == 0);
-  KJ_ASSERT(info2.context.invocationId == context->getInvocationId());
-  KJ_ASSERT(info2.context.traceId == context->getTraceId());
-  KJ_ASSERT(info2.context.spanId == context->getSpanId());
+  KJ_ASSERT(info2.context.invocationId == context.getInvocationId());
+  KJ_ASSERT(info2.context.traceId == context.getTraceId());
+  KJ_ASSERT(info2.context.spanId == context.getSpanId());
 
   auto& event = KJ_ASSERT_NONNULL(info2.event.tryGet<tracing::Mark>());
   auto& log2 = KJ_ASSERT_NONNULL(event.tryGet<tracing::Log>());
@@ -545,9 +545,9 @@ KJ_TEST("Read/Write TraceEvent works") {
   tracing::TailEvent info3 = info.clone();
   KJ_ASSERT(info3.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info3.sequence == 0);
-  KJ_ASSERT(info3.context.invocationId == context->getInvocationId());
-  KJ_ASSERT(info3.context.traceId == context->getTraceId());
-  KJ_ASSERT(info3.context.spanId == context->getSpanId());
+  KJ_ASSERT(info3.context.invocationId == context.getInvocationId());
+  KJ_ASSERT(info3.context.traceId == context.getTraceId());
+  KJ_ASSERT(info3.context.spanId == context.getSpanId());
 
   auto& event2 = KJ_ASSERT_NONNULL(info3.event.tryGet<tracing::Mark>());
   auto& log3 = KJ_ASSERT_NONNULL(event2.tryGet<tracing::Log>());

@@ -176,8 +176,7 @@ constexpr SpanId SpanId::nullId = nullptr;
 // a specific worker invocation. The span id identifies a specific span within an
 // invocation. Every invocation of every worker should have an InvocationSpanContext.
 // That may or may not have a trigger InvocationSpanContext.
-class InvocationSpanContext final: public kj::Refcounted,
-                                   public kj::EnableAddRefToThis<InvocationSpanContext> {
+class InvocationSpanContext final {
  public:
   // The constructor is public only so kj::rc can see it and create a new instance.
   // User code should use the static factory methods or the newChild method.
@@ -186,8 +185,16 @@ class InvocationSpanContext final: public kj::Refcounted,
       TraceId traceId,
       TraceId invocationId,
       SpanId spanId,
-      kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext = kj::none);
-  KJ_DISALLOW_COPY_AND_MOVE(InvocationSpanContext);
+      kj::Maybe<const InvocationSpanContext&> parentSpanContext = kj::none);
+
+  KJ_DISALLOW_COPY(InvocationSpanContext);
+
+  InvocationSpanContext(InvocationSpanContext&& other) = default;
+  InvocationSpanContext& operator=(InvocationSpanContext&& other) = default;
+
+  inline bool operator==(const InvocationSpanContext& other) const {
+    return traceId == other.traceId && invocationId == other.invocationId && spanId == other.spanId;
+  }
 
   inline const TraceId& getTraceId() const {
     return traceId;
@@ -201,14 +208,17 @@ class InvocationSpanContext final: public kj::Refcounted,
     return spanId;
   }
 
-  inline const kj::Maybe<kj::Rc<InvocationSpanContext>>& getParent() const {
-    return parentSpanContext;
+  inline kj::Maybe<const InvocationSpanContext&> getParent() const {
+    KJ_IF_SOME(p, parentSpanContext) {
+      return *p;
+    }
+    return kj::none;
   }
 
   // Creates a new child span. If the current context does not have an entropy
   // source this will assert. If isTrigger() is true then it will not have an
   // entropy source.
-  kj::Rc<InvocationSpanContext> newChild();
+  InvocationSpanContext newChild() const;
 
   // An InvocationSpanContext is a trigger context if it has no entropy source.
   // This generally means the SpanContext was create from a capnp message and
@@ -222,36 +232,40 @@ class InvocationSpanContext final: public kj::Refcounted,
   // traceId is used as the traceId for the newly created context. Otherwise a new
   // traceId is generated. The invocationId is always generated new and the spanId
   // will be 0 with no parent span.
-  static kj::Rc<InvocationSpanContext> newForInvocation(
-      kj::Maybe<kj::Rc<InvocationSpanContext>&> triggerContext = kj::none,
+  static InvocationSpanContext newForInvocation(
+      kj::Maybe<const InvocationSpanContext&> triggerContext = kj::none,
       kj::Maybe<kj::EntropySource&> entropySource = kj::none);
 
   // Creates a new InvocationSpanContext from a capnp message. The returned
   // InvocationSpanContext will not be capable of creating child spans and
   // is considered only a "trigger" span.
-  static kj::Maybe<kj::Rc<InvocationSpanContext>> fromCapnp(
-      rpc::InvocationSpanContext::Reader reader);
+  static kj::Maybe<InvocationSpanContext> fromCapnp(rpc::InvocationSpanContext::Reader reader);
   void toCapnp(rpc::InvocationSpanContext::Builder writer) const;
+  InvocationSpanContext clone() const;
 
  private:
   // If there is no entropy source, then child spans cannot be created from
   // this InvocationSpanContext.
   kj::Maybe<kj::EntropySource&> entropySource;
-  const TraceId traceId;
-  const TraceId invocationId;
-  const SpanId spanId;
+  TraceId traceId;
+  TraceId invocationId;
+  SpanId spanId;
 
   // The parentSpanContext can be either a direct parent or a trigger
   // context. If it is a trigger context, then it should have the same
   // traceId but a different invocationId (unless predictable mode for
   // testing is enabled). The isTrigger() should also return true.
-  const kj::Maybe<kj::Rc<InvocationSpanContext>> parentSpanContext;
+  kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 };
 
 kj::String KJ_STRINGIFY(const SpanId& id);
 kj::String KJ_STRINGIFY(const TraceId& id);
-kj::String KJ_STRINGIFY(const kj::Rc<InvocationSpanContext>& context);
+kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
 
+// The various structs defined below are used in both legacy tail workers
+// and streaming tail workers to report tail events.
+
+// Describes a fetch request
 struct FetchEventInfo final {
   struct Header;
 
@@ -291,6 +305,7 @@ struct FetchEventInfo final {
   FetchEventInfo clone();
 };
 
+// Describes a jsrpc request
 struct JsRpcEventInfo final {
   explicit JsRpcEventInfo(kj::String methodName);
   JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader);
@@ -304,6 +319,7 @@ struct JsRpcEventInfo final {
   JsRpcEventInfo clone();
 };
 
+// Describes a scheduled request
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
   ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
@@ -318,6 +334,7 @@ struct ScheduledEventInfo final {
   ScheduledEventInfo clone();
 };
 
+// Describes a Durable Object alarm request
 struct AlarmEventInfo final {
   explicit AlarmEventInfo(kj::Date scheduledTime);
   AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader);
@@ -331,6 +348,7 @@ struct AlarmEventInfo final {
   AlarmEventInfo clone();
 };
 
+// Describes a queue worker request
 struct QueueEventInfo final {
   explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
   QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
@@ -345,6 +363,7 @@ struct QueueEventInfo final {
   QueueEventInfo clone();
 };
 
+// Describes an email request
 struct EmailEventInfo final {
   explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
   EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
@@ -360,6 +379,7 @@ struct EmailEventInfo final {
   EmailEventInfo clone();
 };
 
+// Describes a legacy tail worker request
 struct TraceEventInfo final {
   struct TraceItem;
 
@@ -389,6 +409,7 @@ struct TraceEventInfo final {
   TraceEventInfo clone();
 };
 
+// Describes a hibernatable web socket event
 struct HibernatableWebSocketEventInfo final {
   struct Message final {};
   struct Close final {
@@ -412,11 +433,13 @@ struct HibernatableWebSocketEventInfo final {
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
 };
 
+// Describes a custom event
 struct CustomEventInfo final {
   explicit CustomEventInfo() {};
   CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
 };
 
+// Describes a fetch response
 struct FetchResponseInfo final {
   explicit FetchResponseInfo(uint16_t statusCode);
   FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader);
@@ -430,6 +453,7 @@ struct FetchResponseInfo final {
   FetchResponseInfo clone();
 };
 
+// Describes an event published using the node:diagnostics_channel API
 struct DiagnosticChannelEvent final {
   explicit DiagnosticChannelEvent(
       kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message);
@@ -445,6 +469,7 @@ struct DiagnosticChannelEvent final {
   DiagnosticChannelEvent clone();
 };
 
+// Describes a log event
 struct Log final {
   explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
   Log(rpc::Trace::Log::Reader reader);
@@ -463,6 +488,7 @@ struct Log final {
   Log clone();
 };
 
+// Describes an exception event
 struct Exception final {
   explicit Exception(
       kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
@@ -483,6 +509,7 @@ struct Exception final {
   Exception clone();
 };
 
+// Used to indicate that a previously hibernated tail stream is being resumed.
 struct Resume final {
   explicit Resume(kj::Maybe<kj::Array<kj::byte>> attachment);
   Resume(rpc::Trace::Resume::Reader reader);
@@ -496,6 +523,7 @@ struct Resume final {
   Resume clone();
 };
 
+// Used to indicate that a tail stream is being hibernated.
 struct Hibernate final {
   explicit Hibernate();
   Hibernate(rpc::Trace::Hibernate::Reader reader);
@@ -708,6 +736,8 @@ struct TailEvent final {
 
   struct Context final {
     explicit Context(TraceId traceId, TraceId invocationId, SpanId spanId);
+    Context(const InvocationSpanContext& context)
+        : Context(context.getTraceId(), context.getInvocationId(), context.getSpanId()) {}
     Context(rpc::InvocationSpanContext::Reader reader);
     Context(Context&&) = default;
     Context& operator=(Context&&) = default;
@@ -716,12 +746,22 @@ struct TailEvent final {
     TraceId invocationId;
     SpanId spanId;
 
+    inline bool operator==(const Context& other) {
+      return traceId == other.traceId && invocationId == other.invocationId &&
+          spanId == other.spanId;
+    }
+
+    inline bool operator==(const InvocationSpanContext& other) {
+      return traceId == other.getTraceId() && invocationId == other.getInvocationId() &&
+          spanId == other.getSpanId();
+    }
+
     void copyTo(rpc::InvocationSpanContext::Builder builder);
     Context clone();
   };
 
   explicit TailEvent(
-      kj::Rc<InvocationSpanContext>& context, kj::Date timestamp, kj::uint sequence, Event&& event);
+      const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);
   TailEvent(Context context,
       kj::Maybe<Context> parentContext,
       kj::Date timestamp,
