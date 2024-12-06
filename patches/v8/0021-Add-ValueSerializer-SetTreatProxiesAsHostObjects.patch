@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@cloudflare.com>
+Date: Wed, 4 Dec 2024 22:36:05 -0600
+Subject: Add ValueSerializer::SetTreatProxiesAsHostObjects().
+
+Previously, ValueSerializer would always refuse to serialize Proxy objects. This commit gives the embedder the option to handle them as host objects.
+
+Similar to the previous patch adding `SetTreatFunctionsAsHostObjects()`, this is intended for use in an RPC system, where an arbitrary object can be "serialized" by replacing it with a stub which, when invoked, performs an RPC back to the originating isolate in order to access the original object there.
+
+diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
+index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a5076871f05a 100644
+--- a/include/v8-value-serializer.h
++++ b/include/v8-value-serializer.h
+@@ -204,6 +204,15 @@ class V8_EXPORT ValueSerializer {
+    */
+   void SetTreatFunctionsAsHostObjects(bool mode);
+ 
++  /**
++   * Indicate whether to treat Proxies as host objects,
++   * i.e. pass them to Delegate::WriteHostObject. This should not be
++   * called when no Delegate was passed.
++   *
++   * The default is not to treat Proxies as host objects.
++   */
++  void SetTreatProxiesAsHostObjects(bool mode);
++
+   /**
+    * Write raw data in various common formats to the buffer.
+    * Note that integer types are written in base-128 varint format, not with a
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 998b6c91a854b24c01ee58495056dca36a145042..53b8af04828bad7a1f4e18c51648add276644ae9 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -3570,6 +3570,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+   private_->serializer.SetTreatFunctionsAsHostObjects(mode);
+ }
+ 
++void ValueSerializer::SetTreatProxiesAsHostObjects(bool mode) {
++  private_->serializer.SetTreatProxiesAsHostObjects(mode);
++}
++
+ Maybe<bool> ValueSerializer::WriteValue(Local<Context> context,
+                                         Local<Value> value) {
+   auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
+diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
+index 531331ee18bac95e4c6bd13f3e91fb9015765393..f7a126205649dfc991d812bbd1820219de980b32 100644
+--- a/src/objects/value-serializer.cc
++++ b/src/objects/value-serializer.cc
+@@ -332,6 +332,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+   treat_functions_as_host_objects_ = mode;
+ }
+ 
++void ValueSerializer::SetTreatProxiesAsHostObjects(bool mode) {
++  treat_proxies_as_host_objects_ = mode;
++}
++
+ void ValueSerializer::WriteTag(SerializationTag tag) {
+   uint8_t raw_tag = static_cast<uint8_t>(tag);
+   WriteRawBytes(&raw_tag, sizeof(raw_tag));
+@@ -602,7 +606,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(Handle<JSReceiver> receiver) {
+   InstanceType instance_type = receiver->map()->instance_type();
+   if (IsCallable(*receiver)) {
+     if (treat_functions_as_host_objects_) {
+-      return WriteHostObject(Cast<JSObject>(receiver));
++      return WriteHostObject(receiver);
++    }
++    return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
++  } else if (instance_type == JS_PROXY_TYPE) {
++    if (treat_proxies_as_host_objects_) {
++      return WriteHostObject(receiver);
+     }
+     return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
+   } else if (IsSpecialReceiverInstanceType(instance_type) &&
+@@ -1207,7 +1216,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+   return ThrowIfOutOfMemory();
+ }
+ 
+-Maybe<bool> ValueSerializer::WriteHostObject(Handle<JSObject> object) {
++Maybe<bool> ValueSerializer::WriteHostObject(Handle<JSReceiver> object) {
+   WriteTag(SerializationTag::kHostObject);
+   if (!delegate_) {
+     isolate_->Throw(*isolate_->factory()->NewError(
+diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
+index a657bb7f6def9d795d6504eb62f49b5b34c46406..31406f1d3f430b501fe49fa207e2b8fee2ea57da 100644
+--- a/src/objects/value-serializer.h
++++ b/src/objects/value-serializer.h
+@@ -111,6 +111,15 @@ class ValueSerializer {
+    */
+   void SetTreatFunctionsAsHostObjects(bool mode);
+ 
++  /*
++   * Indicate whether to treat Proxies as host objects,
++   * i.e. pass them to Delegate::WriteHostObject. This should not be
++   * called when no Delegate was passed.
++   *
++   * The default is not to treat Proxies as host objects.
++   */
++  void SetTreatProxiesAsHostObjects(bool mode);
++
+  private:
+   // Managing allocations of the internal buffer.
+   Maybe<bool> ExpandBuffer(size_t required_capacity);
+@@ -159,7 +168,7 @@ class ValueSerializer {
+ #endif  // V8_ENABLE_WEBASSEMBLY
+   Maybe<bool> WriteSharedObject(DirectHandle<HeapObject> object)
+       V8_WARN_UNUSED_RESULT;
+-  Maybe<bool> WriteHostObject(Handle<JSObject> object) V8_WARN_UNUSED_RESULT;
++  Maybe<bool> WriteHostObject(Handle<JSReceiver> object) V8_WARN_UNUSED_RESULT;
+ 
+   /*
+    * Reads the specified keys from the object and writes key-value pairs to the
+@@ -192,6 +201,7 @@ class ValueSerializer {
+   bool has_custom_host_objects_ = false;
+   bool treat_array_buffer_views_as_host_objects_ = false;
+   bool treat_functions_as_host_objects_ = false;
++  bool treat_proxies_as_host_objects_ = false;
+   bool out_of_memory_ = false;
+   Zone zone_;
+   uint32_t version_;

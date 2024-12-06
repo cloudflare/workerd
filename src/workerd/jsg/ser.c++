@@ -13,6 +13,11 @@ void Serializer::ExternalHandler::serializeFunction(
   JSG_FAIL_REQUIRE(DOMDataCloneError, func, " could not be cloned.");
 }
 
+void Serializer::ExternalHandler::serializeProxy(
+    jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) {
+  JSG_FAIL_REQUIRE(DOMDataCloneError, proxy, " could not be cloned.");
+}
+
 Serializer::Serializer(Lock& js, Options options)
     : externalHandler(options.externalHandler),
       treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
@@ -26,6 +31,7 @@ Serializer::Serializer(Lock& js, Options options)
   if (externalHandler != kj::none) {
     // If we have an ExternalHandler, we'll ask it to serialize host objects.
     ser.SetTreatFunctionsAsHostObjects(true);
+    ser.SetTreatProxiesAsHostObjects(true);
   }
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
@@ -107,6 +113,9 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
       KJ_IF_SOME(eh, externalHandler) {
         if (object->IsFunction()) {
           eh.serializeFunction(js, *this, object.As<v8::Function>());
+          return v8::Just(true);
+        } else if (object->IsProxy()) {
+          eh.serializeProxy(js, *this, object.As<v8::Proxy>());
           return v8::Just(true);
         }
       }

@@ -390,6 +390,12 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   JsObject jsonClone(Lock&);
 };
 
+// Defined here because `JsObject` is an incomplete type in `jsg.h`.
+template <typename T>
+inline JsObject Lock::getPrototypeFor() {
+  return JsObject(getPrototypeFor(typeid(T)));
+}
+
 class JsMap final: public JsBase<v8::Map, JsMap> {
  public:
   operator JsObject();

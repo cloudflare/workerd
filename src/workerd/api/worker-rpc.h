@@ -66,6 +66,10 @@ class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler
   void serializeFunction(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
 
+  // We can serialize a Proxy if it happens to wrap RpcTarget.
+  void serializeProxy(
+      jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) override;
+
  private:
   GetStreamSinkFunc getStreamSinkFunc;
 

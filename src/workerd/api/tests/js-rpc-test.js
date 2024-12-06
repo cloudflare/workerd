@@ -55,6 +55,11 @@ class NonRpcClass {
       },
     };
   }
+
+  i = 0;
+  increment(i) {
+    this.i += i;
+  }
 }
 
 export let nonClass = {
@@ -1548,5 +1553,116 @@ export let domExceptionClone = {
     assert.notStrictEqual(de1, de2);
     assert.notStrictEqual(de1.foo, de2.foo);
     assert.strictEqual(de2.foo, undefined);
+  },
+};
+
+export let proxiedRpcTarget = {
+  async test(controller, env, ctx) {
+    // Proxy RPC target.
+    {
+      let counter = new MyCounter(0);
+      let proxy = new Proxy(counter, {
+        get(target, prop, receiver) {
+          if (prop == 'increment') {
+            return (i) => target.increment(i + 123);
+          } else {
+            let result = target[prop];
+            if (result instanceof Function) {
+              result = result.bind(target);
+            }
+            return result;
+          }
+        },
+      });
+
+      await env.MyService.incrementCounter(proxy, 1);
+
+      assert.strictEqual(counter.i, 124);
+    }
+
+    // Proxy plain object.
+    {
+      let counter = {
+        i: 0,
+        increment(i) {
+          this.i += i;
+        },
+      };
+
+      let proxy = new Proxy(counter, {
+        get(target, prop, receiver) {
+          if (prop == 'increment') {
+            return (i) => target.increment(i + 123);
+          } else {
+            let result = target[prop];
+            if (result instanceof Function) {
+              result = result.bind(target);
+            }
+            return result;
+          }
+        },
+      });
+
+      await env.MyService.incrementCounter(proxy, 1);
+
+      assert.strictEqual(counter.i, 124);
+    }
+
+    // Can't proxy a class that doesn't extend `RpcTarget`.
+    {
+      let nonRpc = new NonRpcClass();
+      let proxy = new Proxy(nonRpc, {
+        get(target, prop, receiver) {
+          if (prop == 'increment') {
+            return (i) => target.increment(i + 123);
+          } else {
+            let result = target[prop];
+            if (result instanceof Function) {
+              result = result.bind(target);
+            }
+            return result;
+          }
+        },
+      });
+
+      await assert.rejects(() => env.MyService.incrementCounter(proxy, 1), {
+        name: 'DataCloneError',
+        message:
+          'Proxy could not be serialized because it is not a valid RPC receiver type. The ' +
+          'Proxy must emulate either a plain object or an RpcTarget, as indicated by the ' +
+          "Proxy's prototype chain.",
+      });
+    }
+
+    // Can't proxy an RpcTarget if we've overridden the prototype to say it's something else.
+    {
+      let counter = new MyCounter(0);
+      let proxy = new Proxy(counter, {
+        getPrototypeOf(target) {
+          return NonRpcClass.prototype;
+        },
+      });
+
+      await assert.rejects(() => env.MyService.incrementCounter(proxy, 1), {
+        name: 'DataCloneError',
+        message:
+          'Proxy could not be serialized because it is not a valid RPC receiver type. The ' +
+          'Proxy must emulate either a plain object or an RpcTarget, as indicated by the ' +
+          "Proxy's prototype chain.",
+      });
+    }
+
+    // CAN proxy a class that doesn't extend `RpcTarget` if we fake the prototype.
+    {
+      let nonRpc = new NonRpcClass();
+      let proxy = new Proxy(nonRpc, {
+        getPrototypeOf(target) {
+          return RpcTarget.prototype;
+        },
+      });
+
+      await env.MyService.incrementCounter(proxy, 321);
+      assert.strictEqual(nonRpc.i, 321);
+    }
   },
 };
