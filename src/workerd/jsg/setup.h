@@ -631,6 +631,20 @@ class Isolate: public IsolateBase {
             instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
       }
     }
+
+    virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) override {
+      v8::EscapableHandleScope scope(v8Isolate);
+      auto tmpl = jsgIsolate.wrapper->getDynamicTypeInfo(v8Isolate, type).tmpl;
+      auto constructor = JsObject(check(tmpl->GetFunction(v8Context())));
+
+      // Note that `constructor.getPrototype()` returns the prototype of the constructor itself,
+      // which is NOT the same as the prototype of the object it constructs. For the latter we
+      // need to access the `prototype` property.
+      auto proto = constructor.get(*this, "prototype");
+
+      KJ_ASSERT(proto.isObject());
+      return scope.Escape(v8::Local<v8::Value>(proto).As<v8::Object>());
+    }
   };
 
   // The func must be a callback with the signature: T(jsg::Lock&)
