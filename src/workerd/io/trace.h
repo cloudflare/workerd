@@ -611,7 +611,26 @@ struct Return final {
   Return clone();
 };
 
-using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, kj::Array<Attribute>>;
+// A Link mark is used to establish a link from one span to another.
+// The optional label can be used to identify the link.
+struct Link final {
+  explicit Link(const InvocationSpanContext& other, kj::Maybe<kj::String> label = kj::none);
+  explicit Link(kj::Maybe<kj::String> label, TraceId traceId, TraceId invocationId, SpanId spanId);
+  Link(rpc::Trace::Link::Reader reader);
+  Link(Link&&) = default;
+  Link& operator=(Link&&) = default;
+  KJ_DISALLOW_COPY(Link);
+
+  kj::Maybe<kj::String> label;
+  TraceId traceId;
+  TraceId invocationId;
+  SpanId spanId;
+
+  void copyTo(rpc::Trace::Link::Builder builder);
+  Link clone();
+};
+
+using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, kj::Array<Attribute>>;
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -656,25 +675,43 @@ struct SpanClose final {
 struct Onset final {
   using Info = EventInfo;
 
-  explicit Onset(Info&& info,
-      ExecutionModel executionModel,
-      kj::Maybe<kj::String> scriptName,
-      kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-      kj::Maybe<kj::String> dispatchNamespace,
-      kj::Maybe<kj::Array<kj::String>> scriptTags,
-      kj::Maybe<kj::String> entrypoint);
+  // Information about the worker that is being tailed.
+  struct WorkerInfo final {
+    ExecutionModel executionModel = ExecutionModel::STATELESS;
+    kj::Maybe<kj::String> scriptName;
+    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
+    kj::Maybe<kj::String> dispatchNamespace;
+    kj::Maybe<kj::Array<kj::String>> scriptTags;
+    kj::Maybe<kj::String> entrypoint;
+
+    WorkerInfo clone() const;
+  };
+
+  struct TriggerContext final {
+    TraceId traceId;
+    TraceId invocationId;
+    SpanId spanId;
+
+    TriggerContext(TraceId traceId, TraceId invocationId, SpanId spanId)
+        : traceId(kj::mv(traceId)),
+          invocationId(kj::mv(invocationId)),
+          spanId(kj::mv(spanId)) {}
+
+    TriggerContext(const InvocationSpanContext& ctx)
+        : TriggerContext(ctx.getTraceId(), ctx.getInvocationId(), ctx.getSpanId()) {}
+  };
+
+  explicit Onset(
+      Info&& info, WorkerInfo&& workerInfo, kj::Maybe<TriggerContext> maybeTrigger = kj::none);
+
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
   Info info;
-  ExecutionModel executionModel;
-  kj::Maybe<kj::String> scriptName;
-  kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
-  kj::Maybe<kj::String> dispatchNamespace;
-  kj::Maybe<kj::Array<kj::String>> scriptTags;
-  kj::Maybe<kj::String> entrypoint;
+  WorkerInfo workerInfo;
+  kj::Maybe<TriggerContext> trigger;
 
   void copyTo(rpc::Trace::Onset::Builder builder);
   Onset clone();

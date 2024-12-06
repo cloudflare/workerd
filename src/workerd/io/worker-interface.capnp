@@ -233,17 +233,23 @@ struct Trace @0x8e8d911203762d34 {
     scriptTags @4 :List(Text);
     entryPoint @5 :Text;
 
+    trigger @6 :InvocationSpanContext;
+    # If this invocation was triggered by a different invocation that
+    # is being traced, the trigger will identify the triggering span.
+    # Propagation of the trigger context is not required, and in some
+    # cases is not desirable.
+
     info :union {
-      fetch @6 :FetchEventInfo;
-      jsrpc @7 :JsRpcEventInfo;
-      scheduled @8 :ScheduledEventInfo;
-      alarm @9 :AlarmEventInfo;
-      queue @10 :QueueEventInfo;
-      email @11 :EmailEventInfo;
-      trace @12 :TraceEventInfo;
-      hibernatableWebSocket @13 :HibernatableWebSocketEventInfo;
-      resume @14 :Resume;
-      custom @15 :CustomEventInfo;
+      fetch @7 :FetchEventInfo;
+      jsrpc @8 :JsRpcEventInfo;
+      scheduled @9 :ScheduledEventInfo;
+      alarm @10 :AlarmEventInfo;
+      queue @11 :QueueEventInfo;
+      email @12 :EmailEventInfo;
+      trace @13 :TraceEventInfo;
+      hibernatableWebSocket @14 :HibernatableWebSocketEventInfo;
+      resume @15 :Resume;
+      custom @16 :CustomEventInfo;
     }
   }
 
@@ -255,6 +261,12 @@ struct Trace @0x8e8d911203762d34 {
 
   struct Hibernate {
     # A hibernate event indicates that the tail session is being hibernated.
+  }
+
+  struct Link {
+    # A link to another invocation span context.
+    label @0 :Text;
+    context @1 :InvocationSpanContext;
   }
 
   struct TailEvent {
@@ -278,6 +290,7 @@ struct Trace @0x8e8d911203762d34 {
       diagnosticChannelEvent @10 :DiagnosticChannelEvent;
       exception @11 :Exception;
       log @12 :Log;
+      link @13 :Link;
     }
   }
 }

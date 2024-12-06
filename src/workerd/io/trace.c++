@@ -1098,6 +1098,59 @@ tracing::SpanClose tracing::SpanClose::clone() {
 }
 
 namespace {
+kj::Maybe<kj::String> readLabelFromReader(const rpc::Trace::Link::Reader& reader) {
+  if (!reader.hasLabel()) return kj::none;
+  return kj::str(reader.getLabel());
+}
+tracing::TraceId readTraceIdFromReader(const rpc::Trace::Link::Reader& reader) {
+  KJ_ASSERT(reader.hasContext());
+  auto context = reader.getContext();
+  return tracing::TraceId::fromCapnp(context.getTraceId());
+}
+tracing::TraceId readInvocationIdFromReader(const rpc::Trace::Link::Reader& reader) {
+  KJ_ASSERT(reader.hasContext());
+  auto context = reader.getContext();
+  return tracing::TraceId::fromCapnp(context.getInvocationId());
+}
+tracing::SpanId readSpanIdFromReader(const rpc::Trace::Link::Reader& reader) {
+  KJ_ASSERT(reader.hasContext());
+  auto context = reader.getContext();
+  return tracing::SpanId(context.getSpanId());
+}
+}  // namespace
+
+tracing::Link::Link(const InvocationSpanContext& other, kj::Maybe<kj::String> label)
+    : Link(kj::mv(label), other.getTraceId(), other.getInvocationId(), other.getSpanId()) {}
+
+tracing::Link::Link(
+    kj::Maybe<kj::String> label, TraceId traceId, TraceId invocationId, SpanId spanId)
+    : label(kj::mv(label)),
+      traceId(kj::mv(traceId)),
+      invocationId(kj::mv(invocationId)),
+      spanId(kj::mv(spanId)) {}
+
+tracing::Link::Link(rpc::Trace::Link::Reader reader)
+    : label(readLabelFromReader(reader)),
+      traceId(readTraceIdFromReader(reader)),
+      invocationId(readInvocationIdFromReader(reader)),
+      spanId(readSpanIdFromReader(reader)) {}
+
+void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) {
+  KJ_IF_SOME(l, label) {
+    builder.setLabel(l);
+  }
+  auto ctx = builder.initContext();
+  traceId.toCapnp(ctx.initTraceId());
+  invocationId.toCapnp(ctx.initInvocationId());
+  ctx.setSpanId(spanId.getId());
+}
+
+tracing::Link tracing::Link::clone() {
+  return Link(
+      label.map([](kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
+}
+
+namespace {
 tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
   auto info = reader.getInfo();
   switch (info.which()) {
@@ -1175,51 +1228,62 @@ kj::Maybe<kj::String> getEntrypointFromReader(const rpc::Trace::Onset::Reader& r
   }
   return kj::none;
 }
+kj::Maybe<tracing::Onset::TriggerContext> getTriggerContextFromReader(
+    const rpc::Trace::Onset::Reader& reader) {
+  if (!reader.hasTrigger()) return kj::none;
+  auto trigger = reader.getTrigger();
+  return tracing::Onset::TriggerContext(tracing::TraceId::fromCapnp(trigger.getTraceId()),
+      tracing::TraceId::fromCapnp(trigger.getInvocationId()), tracing::SpanId(trigger.getSpanId()));
+}
+tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
+  return tracing::Onset::WorkerInfo{
+    .executionModel = reader.getExecutionModel(),
+    .scriptName = getScriptNameFromReader(reader),
+    .scriptVersion = getScriptVersionFromReader(reader),
+    .dispatchNamespace = getDispatchNamespaceFromReader(reader),
+    .scriptTags = getScriptTagsFromReader(reader),
+    .entrypoint = getEntrypointFromReader(reader),
+  };
+}
 }  // namespace
 
 tracing::Onset::Onset(tracing::Onset::Info&& info,
-    ExecutionModel executionModel,
-    kj::Maybe<kj::String> scriptName,
-    kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
-    kj::Maybe<kj::String> dispatchNamespace,
-    kj::Maybe<kj::Array<kj::String>> scriptTags,
-    kj::Maybe<kj::String> entrypoint)
+    tracing::Onset::WorkerInfo&& workerInfo,
+    kj::Maybe<TriggerContext> maybeTrigger)
     : info(kj::mv(info)),
-      executionModel(executionModel),
-      scriptName(kj::mv(scriptName)),
-      scriptVersion(kj::mv(scriptVersion)),
-      dispatchNamespace(kj::mv(dispatchNamespace)),
-      scriptTags(kj::mv(scriptTags)),
-      entrypoint(kj::mv(entrypoint)) {}
+      workerInfo(kj::mv(workerInfo)),
+      trigger(kj::mv(maybeTrigger)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
     : info(getInfoFromReader(reader)),
-      executionModel(reader.getExecutionModel()),
-      scriptName(getScriptNameFromReader(reader)),
-      scriptVersion(getScriptVersionFromReader(reader)),
-      dispatchNamespace(getDispatchNamespaceFromReader(reader)),
-      scriptTags(getScriptTagsFromReader(reader)),
-      entrypoint(getEntrypointFromReader(reader)) {}
+      workerInfo(getWorkerInfoFromReader(reader)),
+      trigger(getTriggerContextFromReader(reader)) {}
 
 void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) {
-  builder.setExecutionModel(executionModel);
-  KJ_IF_SOME(name, scriptName) {
+  builder.setExecutionModel(workerInfo.executionModel);
+  KJ_IF_SOME(name, workerInfo.scriptName) {
     builder.setScriptName(name);
   }
-  KJ_IF_SOME(version, scriptVersion) {
+  KJ_IF_SOME(version, workerInfo.scriptVersion) {
     builder.setScriptVersion(*version);
   }
-  KJ_IF_SOME(name, dispatchNamespace) {
+  KJ_IF_SOME(name, workerInfo.dispatchNamespace) {
     builder.setDispatchNamespace(name);
   }
-  KJ_IF_SOME(tags, scriptTags) {
+  KJ_IF_SOME(tags, workerInfo.scriptTags) {
     auto list = builder.initScriptTags(tags.size());
     for (size_t i = 0; i < tags.size(); i++) {
       list.set(i, tags[i]);
     }
   }
-  KJ_IF_SOME(e, entrypoint) {
+  KJ_IF_SOME(e, workerInfo.entrypoint) {
     builder.setEntryPoint(e);
+  }
+  KJ_IF_SOME(t, trigger) {
+    auto ctx = builder.initTrigger();
+    t.traceId.toCapnp(ctx.initTraceId());
+    t.invocationId.toCapnp(ctx.getInvocationId());
+    ctx.setSpanId(t.spanId.getId());
   }
   auto infoBuilder = builder.initInfo();
   KJ_SWITCH_ONEOF(info) {
@@ -1254,6 +1318,18 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) {
       infoBuilder.initCustom();
     }
   }
+}
+
+tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
+  return WorkerInfo{
+    .executionModel = executionModel,
+    .scriptName = scriptName.map([](auto& str) { return kj::str(str); }),
+    .scriptVersion = scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
+    .dispatchNamespace = dispatchNamespace.map([](auto& str) { return kj::str(str); }),
+    .scriptTags =
+        scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
+    .entrypoint = entrypoint.map([](auto& str) { return kj::str(str); }),
+  };
 }
 
 tracing::Onset tracing::Onset::clone() {
@@ -1292,12 +1368,9 @@ tracing::Onset tracing::Onset::clone() {
     }
     KJ_UNREACHABLE;
   };
-  return Onset(cloneInfo(info), executionModel,
-      scriptName.map([](auto& name) { return kj::str(name); }),
-      scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
-      dispatchNamespace.map([](auto& ns) { return kj::str(ns); }),
-      scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
-      entrypoint.map([](auto& e) { return kj::str(e); }));
+  return Onset(cloneInfo(info), workerInfo.clone(), trigger.map([](TriggerContext& ctx) {
+    return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
+  }));
 }
 
 tracing::Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
@@ -1383,6 +1456,9 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
     case rpc::Trace::TailEvent::Event::LOG: {
       return tracing::Mark(tracing::Log(event.getLog()));
     }
+    case rpc::Trace::TailEvent::Event::LINK: {
+      return tracing::Mark(tracing::Link(event.getLink()));
+    }
   }
   KJ_UNREACHABLE;
 }
@@ -1434,6 +1510,9 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
         KJ_CASE_ONEOF(ret, Return) {
           ret.copyTo(eventBuilder.initReturn());
         }
+        KJ_CASE_ONEOF(link, Link) {
+          link.copyTo(eventBuilder.initLink());
+        }
         KJ_CASE_ONEOF(attrs, kj::Array<Attribute>) {
           // Mark is a collection of attributes.
           auto attrBuilder = eventBuilder.initAttribute(attrs.size());
@@ -1477,6 +1556,9 @@ tracing::TailEvent tracing::TailEvent::clone() {
           }
           KJ_CASE_ONEOF(ret, Return) {
             return Mark(ret.clone());
+          }
+          KJ_CASE_ONEOF(link, Link) {
+            return Mark(link.clone());
           }
           KJ_CASE_ONEOF(attrs, tracing::CustomInfo) {
             return Mark(KJ_MAP(attr, attrs) { return attr.clone(); });

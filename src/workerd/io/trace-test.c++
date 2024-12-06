@@ -478,8 +478,15 @@ KJ_TEST("Read/Write Onset works") {
 
   tracing::FetchEventInfo fetchInfo(
       kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr);
-  tracing::Onset info(tracing::Onset::Info(kj::mv(fetchInfo)), ExecutionModel::STATELESS,
-      kj::str("foo"), kj::none, kj::none, kj::none, kj::none);
+
+  FakeEntropySource entropy;
+  auto trigger = InvocationSpanContext::newForInvocation(kj::none, entropy);
+
+  tracing::Onset info(tracing::Onset::Info(kj::mv(fetchInfo)),
+      {
+        .scriptName = kj::str("foo"),
+      },
+      tracing::Onset::TriggerContext(trigger));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -488,14 +495,19 @@ KJ_TEST("Read/Write Onset works") {
       KJ_ASSERT_NONNULL(info2.info.tryGet<tracing::FetchEventInfo>());
   KJ_ASSERT(fetchInfo2.method == kj::HttpMethod::GET);
   KJ_ASSERT(fetchInfo2.url == "https://example.com"_kj);
-  KJ_ASSERT(info2.executionModel == ExecutionModel::STATELESS);
+  KJ_ASSERT(info2.workerInfo.executionModel == ExecutionModel::STATELESS);
+
+  auto& triggerCtx = KJ_ASSERT_NONNULL(info2.trigger);
+  KJ_ASSERT(triggerCtx.traceId == trigger.getTraceId());
+  KJ_ASSERT(triggerCtx.invocationId == trigger.getInvocationId());
+  KJ_ASSERT(triggerCtx.spanId == trigger.getSpanId());
 
   tracing::Onset info3 = info.clone();
   tracing::FetchEventInfo& fetchInfo3 =
       KJ_ASSERT_NONNULL(info3.info.tryGet<tracing::FetchEventInfo>());
   KJ_ASSERT(fetchInfo3.method == kj::HttpMethod::GET);
   KJ_ASSERT(fetchInfo3.url == "https://example.com"_kj);
-  KJ_ASSERT(info3.executionModel == ExecutionModel::STATELESS);
+  KJ_ASSERT(info3.workerInfo.executionModel == ExecutionModel::STATELESS);
 }
 
 KJ_TEST("Read/Write Outcome works") {
@@ -515,6 +527,23 @@ KJ_TEST("Read/Write Outcome works") {
   KJ_ASSERT(info3.outcome == EventOutcome::EXCEPTION);
   KJ_ASSERT(info3.wallTime == 2 * kj::MILLISECONDS);
   KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
+}
+
+KJ_TEST("Read/Write Link works") {
+  capnp::MallocMessageBuilder builder;
+  auto infoBuilder = builder.initRoot<rpc::Trace::Link>();
+
+  FakeEntropySource entropy;
+  auto context = tracing::InvocationSpanContext::newForInvocation(kj::none, entropy);
+
+  tracing::Link link(context, kj::str("foo"));
+  link.copyTo(infoBuilder);
+
+  tracing::Link link2(infoBuilder.asReader());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(link2.label) == "foo"_kj);
+  KJ_ASSERT(link2.traceId == context.getTraceId());
+  KJ_ASSERT(link2.invocationId == context.getInvocationId());
+  KJ_ASSERT(link2.spanId == context.getSpanId());
 }
 
 KJ_TEST("Read/Write TailEvent works") {
