@@ -23,14 +23,6 @@ npm_link_package(
     package = "@workerd/jsg",
 )
 
-# The @workerd/test package provides a small library to manage workerd subprocesses in js_test()
-# targets.
-npm_link_package(
-    name = "node_modules/@workerd/test",
-    src = "//src/workerd/server/tests:test_js",
-    package = "@workerd/test",
-)
-
 capnpc_ts_bin.capnpc_ts_binary(
     name = "capnpc_ts",
     visibility = ["//visibility:public"],

@@ -2,7 +2,7 @@ import { env } from 'node:process';
 import { beforeEach, afterEach, test } from 'node:test';
 import assert from 'node:assert';
 import CDP from 'chrome-remote-interface';
-import { WorkerdServerHarness } from '@workerd/test/server-harness.mjs';
+import { WorkerdServerHarness } from '../server-harness.mjs';
 
 // Global that is reset for each test.
 let workerd;
