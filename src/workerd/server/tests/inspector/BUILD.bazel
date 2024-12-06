@@ -6,9 +6,9 @@ js_test(
     data = [
         ":config.capnp",
         ":index.mjs",
-        "//:node_modules/@workerd/test",
         "//:node_modules/chrome-remote-interface",
         "//src/workerd/server:workerd",
+        "//src/workerd/server/tests:server-harness_js_lib",
     ],
     entry_point = "driver.mjs",
     env = {
