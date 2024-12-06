@@ -3,3 +3,12 @@ export function parseCaaRecord(record: string): {
   field: string;
   value: string;
 };
+
+export function parseNaptrRecord(record: string): {
+  flags: string;
+  service: string;
+  regexp: string;
+  replacement: string;
+  order: number;
+  preference: number;
+};

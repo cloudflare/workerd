@@ -9,6 +9,7 @@ import {
   resolvePtr,
   resolveSrv,
   resolveSoa,
+  resolveNaptr,
 } from 'node-internal:internal_dns';
 
 export * from 'node-internal:internal_dns_constants';
@@ -22,6 +23,7 @@ export {
   resolvePtr,
   resolveSrv,
   resolveSoa,
+  resolveNaptr,
 } from 'node-internal:internal_dns';
 
 export default {
@@ -34,5 +36,6 @@ export default {
   resolvePtr,
   resolveSrv,
   resolveSoa,
+  resolveNaptr,
   ...errorCodes,
 };

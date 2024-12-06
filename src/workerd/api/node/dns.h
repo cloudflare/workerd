@@ -7,6 +7,8 @@
 
 #include <kj/string.h>
 
+#include <cstdint>
+
 namespace workerd::api::node {
 
 class DnsUtil final: public jsg::Object {
@@ -23,13 +25,27 @@ class DnsUtil final: public jsg::Object {
     JSG_STRUCT(critical, field, value);
   };
 
+  struct NaptrRecord {
+    kj::String flags;
+    kj::String service;
+    kj::String regexp;
+    kj::String replacement;
+    uint32_t order;
+    uint32_t preference;
+
+    JSG_STRUCT(flags, service, regexp, replacement, order, preference);
+  };
+
   CaaRecord parseCaaRecord(kj::String record);
+  NaptrRecord parseNaptrRecord(kj::String record);
 
   JSG_RESOURCE_TYPE(DnsUtil) {
     JSG_METHOD(parseCaaRecord);
+    JSG_METHOD(parseNaptrRecord);
   }
 };
 
-#define EW_NODE_DNS_ISOLATE_TYPES api::node::DnsUtil, api::node::DnsUtil::CaaRecord
+#define EW_NODE_DNS_ISOLATE_TYPES                                                                  \
+  api::node::DnsUtil, api::node::DnsUtil::CaaRecord, api::node::DnsUtil::NaptrRecord
 
 }  // namespace workerd::api::node

@@ -15,4 +15,16 @@ DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
     .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
 }
 
+DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
+  auto parsed = rust::dns::parse_naptr_record(::rust::Str(record.begin(), record.size()));
+  return NaptrRecord{
+    .flags = kj::str(parsed.flags),
+    .service = kj::str(parsed.service),
+    .regexp = kj::str(parsed.regexp),
+    .replacement = kj::str(parsed.replacement),
+    .order = parsed.order,
+    .preference = parsed.preference,
+  };
+}
+
 }  // namespace workerd::api::node

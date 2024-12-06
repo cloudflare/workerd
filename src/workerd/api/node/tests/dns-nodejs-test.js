@@ -247,3 +247,25 @@ export const resolveSoa = {
     validateResult(await dnsPromises.resolveSoa(addresses.SOA_HOST));
   },
 };
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/d7fdbb994cda8b2e1da4240eb97270c6abbaa9dd/test/internet/test-dns.js#L308
+export const resolveNaptr = {
+  async test() {
+    function validateResult(result) {
+      ok(result.length > 0);
+
+      for (const item of result) {
+        strictEqual(typeof item, 'object');
+        strictEqual(typeof item.flags, 'string');
+        strictEqual(typeof item.service, 'string');
+        strictEqual(typeof item.regexp, 'string');
+        strictEqual(typeof item.replacement, 'string');
+        strictEqual(typeof item.order, 'number');
+        strictEqual(typeof item.preference, 'number');
+      }
+    }
+
+    validateResult(await dnsPromises.resolveNaptr(addresses.NAPTR_HOST));
+  },
+};
