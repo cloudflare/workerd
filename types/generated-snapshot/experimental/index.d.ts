@@ -641,6 +641,7 @@ interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  readonly primary?: DurableObjectStub;
   ensureReplicas(): void;
 }
 interface DurableObjectListOptions {
