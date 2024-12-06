@@ -23,11 +23,7 @@ import {
   type TTLResponse,
 } from 'node-internal:internal_dns_client';
 import { DnsError } from 'node-internal:internal_errors';
-import {
-  validateBoolean,
-  validateObject,
-  validateString,
-} from 'node-internal:validators';
+import { validateString } from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 
 export function getServers(): string[] {
@@ -51,12 +47,9 @@ export function resolve4(
   options?: { ttl?: boolean }
 ): Promise<(string | TTLResponse)[]> {
   validateString(name, 'name');
-  if (options != null) {
-    validateObject(options, 'options');
-    if (options.ttl != null) {
-      validateBoolean(options.ttl, 'options.ttl');
-    }
-  }
+
+  // The following change is done to comply with Node.js behavior
+  const ttl = !options?.ttl;
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
@@ -64,7 +57,7 @@ export function resolve4(
     validateAnswer(json.Answer, name, 'queryA');
 
     return json.Answer.map((a) => {
-      if (options?.ttl) {
+      if (ttl) {
         return {
           ttl: a.TTL,
           address: a.data,
@@ -81,12 +74,9 @@ export function resolve6(
   options?: { ttl?: boolean }
 ): Promise<(string | TTLResponse)[]> {
   validateString(name, 'name');
-  if (options != null) {
-    validateObject(options, 'options');
-    if (options.ttl != null) {
-      validateBoolean(options.ttl, 'options.ttl');
-    }
-  }
+
+  // The following change is done to comply with Node.js behavior
+  const ttl = !options?.ttl;
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
@@ -94,7 +84,7 @@ export function resolve6(
     validateAnswer(json.Answer, name, 'queryAaaa');
 
     return json.Answer.map((a) => {
-      if (options?.ttl) {
+      if (ttl) {
         return {
           ttl: a.TTL,
           address: a.data,
