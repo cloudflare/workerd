@@ -304,6 +304,7 @@ http_archive(
         "//:patches/v8/0019-codegen-Don-t-pass-a-nullptr-in-InitUnwindingRecord-.patch",
         "//:patches/v8/0020-Add-another-slot-in-the-isolate-for-embedder.patch",
         "//:patches/v8/0021-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+        "//:patches/v8/0022-Disable-memory-leak-assert-when-shutting-down-V8.patch",
     ],
     strip_prefix = "v8-13.1.201.8",
     url = "https://github.com/v8/v8/archive/refs/tags/13.1.201.8.tar.gz",
