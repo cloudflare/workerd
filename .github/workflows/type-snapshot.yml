@@ -55,6 +55,7 @@ jobs:
             echo EOF
           } >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
+        id: artifact-upload-step
         if: failure()
         with:
           name: Generated Types
@@ -64,11 +65,13 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           message: |
-            The generated output of @cloudflare/workers-types has been changed by this PR. If this is intentional, run `bazel build //types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot` to update the snapshot. Alternatively, you can download the full generated types from the failed GitHub Actions run summary page.
+            The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `bazel build //types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}'
 
             <details>
             <summary>Full Type Diff</summary>
+
             ```diff
             ${{ env.TYPES_DIFF }}
             ```
+
             </details>
