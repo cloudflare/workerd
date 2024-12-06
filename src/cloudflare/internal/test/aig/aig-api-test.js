@@ -107,5 +107,45 @@ export const tests = {
         );
       }
     }
+
+    // Universal Run
+    {
+      const resp = await env.ai.gateway('my-gateway').run({
+        provider: 'workers-ai',
+        endpoint: '@cf/meta/llama-3.1-8b-instruct',
+        headers: {
+          Authorization: 'Bearer abcde',
+          'Content-Type': 'application/json',
+          'cf-aig-metadata': { user: 123 },
+          'cf-aig-custom-cost': { total_cost: 1.22 },
+          'cf-aig-skip-cache': false,
+          'cf-aig-cache-ttl': 123,
+        },
+        query: {
+          prompt: 'What is Cloudflare?',
+        },
+      });
+
+      const body = await resp.json();
+
+      assert.deepEqual(body, {
+        result: [
+          {
+            endpoint: '@cf/meta/llama-3.1-8b-instruct',
+            headers: {
+              'Content-Type': 'application/json',
+              'cf-aig-cache-ttl': '123',
+              'cf-aig-custom-cost': '{"total_cost":1.22}',
+              'cf-aig-metadata': '{"user":123}',
+              'cf-aig-skip-cache': 'false',
+              Authorization: 'Bearer abcde',
+            },
+            provider: 'workers-ai',
+            query: { prompt: 'What is Cloudflare?' },
+          },
+        ],
+        success: true,
+      });
+    }
   },
 };

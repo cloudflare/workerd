@@ -6,7 +6,10 @@ export {
   AiOptions,
   InferenceUpstreamError,
   Ai,
+} from 'cloudflare-internal:ai-api';
+
+export {
   AiGateway,
   AiGatewayInternalError,
   AiGatewayLogNotFound,
-} from 'cloudflare-internal:ai-api';
+} from 'cloudflare-internal:aig-api';
