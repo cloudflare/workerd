@@ -400,6 +400,7 @@ interface TestController {}
 interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  props: any;
   abort(reason?: any): void;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
