@@ -184,6 +184,10 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
         }
         KJ_UNREACHABLE;
       }
+      KJ_CASE_ONEOF(resume, tracing::Resume) {
+        // Resume events are not used with legacy trace
+        KJ_UNREACHABLE;
+      }
       KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, custom));
       }

@@ -157,6 +157,142 @@ struct Trace @0x8e8d911203762d34 {
   executionModel @25 :ExecutionModel;
   # the execution model of the worker being traced. Can be stateless for a regular worker,
   # durableObject for a DO worker or workflow for the upcoming Workflows feature.
+
+  # =====================================================================================
+  # Additional types for streaming tail workers
+
+  struct Attribute {
+    # An Attribute mark is used to add detail to a span over its lifetime.
+    # The Attribute struct can also be used to provide arbitrary additional
+    # properties for some other structs.
+    # Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
+    struct Value {
+      inner :union {
+        text @0 :Text;
+        bool @1 :Bool;
+        int @2 :Int32;
+        float @3 :Float64;
+      }
+    }
+    name @0 :Text;
+    value @1 :List(Value);
+  }
+
+  struct Return {
+    # A Return mark is used to mark the point at which a span operation returned
+    # a value. For instance, when a fetch subrequest response is received, or when
+    # the fetch handler returns a Response. Importantly, it does not signal that the
+    # span has closed, which may not happen for some period of time after the return
+    # mark is recorded (e.g. due to things like waitUntils or waiting to fully ready
+    # the response body payload, etc). Not all spans will have a Return mark.
+    info :union {
+      empty @0 :Void;
+      custom @1 :List(Attribute);
+      fetch @2 :FetchResponseInfo;
+    }
+  }
+
+  struct SpanOpen {
+    # Marks the opening of a child span within the streaming tail session.
+    operationName @0 :Text;
+    info :union {
+      empty @1 :Void;
+      custom @2 :List(Attribute);
+      fetch @3 :FetchEventInfo;
+      jsrpc @4 :JsRpcEventInfo;
+    }
+  }
+
+  struct SpanClose {
+    # Marks the closing of a child span within the streaming tail session.
+    # Once emitted, no further mark events should occur within the closed
+    # span.
+    outcome @0 :EventOutcome;
+  }
+
+  struct Resume {
+    # A resume event indicates that we are resuming a previously hibernated
+    # tail session.
+
+    attachment @0 :Data;
+    # When a tail session is hibernated, the tail worker is given the opportunity
+    # to provide some additional data that will be serialized and stored with the
+    # hibernated state. When the stream is resumed, if the tail worker has provided
+    # such data, it will be passed back to the worker in the resume event.
+  }
+
+  struct Onset {
+    # The Onset and Outcome event types are special forms of SpanOpen and
+    # SpanClose that explicitly mark the start and end of the root span.
+    # A streaming tail session will always begin with an Onset event, and
+    # always end with an Outcome event.
+    executionModel @0 :ExecutionModel;
+    scriptName @1 :Text;
+    scriptVersion @2 :ScriptVersion;
+    dispatchNamespace @3 :Text;
+    scriptTags @4 :List(Text);
+    entryPoint @5 :Text;
+
+    trigger @6 :InvocationSpanContext;
+    # If this invocation was triggered by a different invocation that
+    # is being traced, the trigger will identify the triggering span.
+    # Propagation of the trigger context is not required, and in some
+    # cases is not desirable.
+
+    info :union {
+      fetch @7 :FetchEventInfo;
+      jsrpc @8 :JsRpcEventInfo;
+      scheduled @9 :ScheduledEventInfo;
+      alarm @10 :AlarmEventInfo;
+      queue @11 :QueueEventInfo;
+      email @12 :EmailEventInfo;
+      trace @13 :TraceEventInfo;
+      hibernatableWebSocket @14 :HibernatableWebSocketEventInfo;
+      resume @15 :Resume;
+      custom @16 :CustomEventInfo;
+    }
+  }
+
+  struct Outcome {
+    outcome @0 :EventOutcome;
+    cpuTime @1 :UInt64;
+    wallTime @2 :UInt64;
+  }
+
+  struct Hibernate {
+    # A hibernate event indicates that the tail session is being hibernated.
+  }
+
+  struct Link {
+    # A link to another invocation span context.
+    label @0 :Text;
+    context @1 :InvocationSpanContext;
+  }
+
+  struct TailEvent {
+    # A streaming tail worker receives a series of Tail Events. Tail events always
+    # occur within an InvocationSpanContext. The first TailEvent delivered to a
+    # streaming tail session is always an Onset. The final TailEvent delivered is
+    # always an Outcome or Hibernate. Between those can be any number of SpanOpen,
+    # SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
+    # unless the stream was abruptly terminated.
+    context @0 :InvocationSpanContext;
+    timestampNs @1 :Int64;
+    sequence @2 :UInt32;
+    event :union {
+      onset @3 :Onset;
+      outcome @4 :Outcome;
+      hibernate @5 :Hibernate;
+      spanOpen @6 :SpanOpen;
+      spanClose @7 :SpanClose;
+      attribute @8 :List(Attribute);
+      return @9 :Return;
+      diagnosticChannelEvent @10 :DiagnosticChannelEvent;
+      exception @11 :Exception;
+      log @12 :Log;
+      link @13 :Link;
+    }
+  }
 }
 
 struct SendTracesRun @0xde913ebe8e1b82a5 {

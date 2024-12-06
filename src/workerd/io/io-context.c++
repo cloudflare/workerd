@@ -202,7 +202,7 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-    kj::Rc<tracing::InvocationSpanContext> invocationSpanContext)
+    tracing::InvocationSpanContext invocationSpanContext)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
