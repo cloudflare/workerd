@@ -490,7 +490,7 @@ jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
 }
 
 void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(emscriptenRuntime.emscriptenRuntime);
+  visitor.visit(const_cast<EmscriptenRuntime&>(emscriptenRuntime).emscriptenRuntime);
 }
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules) {
