@@ -7,8 +7,9 @@ import path from "node:path";
 import prettier from "prettier";
 import ts from "typescript";
 import { SourcesMap, createMemoryProgram } from "../src/program.js";
+import { getFilePath } from "../src/utils";
 
-const OUTPUT_PATH = "types/definitions";
+const OUTPUT_PATH = getFilePath("types/definitions");
 const ENTRYPOINTS = [
   { compatDate: "2021-01-01", name: "oldest" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#formdata-parsing-supports-file
@@ -99,7 +100,7 @@ function spawnWorkerd(
 ): Promise<{ url: URL; kill: () => Promise<void> }> {
   return new Promise((resolve) => {
     const workerdProcess = childProcess.spawn(
-      "./src/workerd/server/workerd",
+      getFilePath("src/workerd/server/workerd"),
       ["serve", "--verbose", "--experimental", "--control-fd=3", configPath],
       { stdio: ["inherit", "inherit", "inherit", "pipe"] }
     );
@@ -150,7 +151,7 @@ async function buildAllEntrypoints(workerUrl: URL) {
     await buildEntrypoint(entrypoint, workerUrl);
 }
 export async function main() {
-  const worker = await spawnWorkerd("./types/scripts/config.capnp");
+  const worker = await spawnWorkerd(getFilePath("types/scripts/config.capnp"));
   try {
     await buildAllEntrypoints(worker.url);
   } finally {
