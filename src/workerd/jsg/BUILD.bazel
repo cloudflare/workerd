@@ -179,7 +179,6 @@ wd_cc_library(
         "resource-test.c++",
         "rtti-test.c++",
         "url-test.c++",
-        "disable-memoize-test.c++",
     ],
 )]
 
@@ -228,13 +227,5 @@ kj_test(
     deps = [
         ":jsg",
         ":resource_test_capnp",
-    ],
-)
-
-kj_test(
-    src = "disable-memoize-test.c++",
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
     ],
 )

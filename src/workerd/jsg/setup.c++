@@ -405,7 +405,7 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
       ->opaqueTemplate.Get(isolate);
 }
 
-void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
+void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
   // Delete all wrappers.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::Locker lock(ptr);
@@ -425,7 +425,7 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.
-    kj::Own<void> typeWrapperInstanceInner = kj::mv(typeWrapperInstance);
+    drop();
 
     // Destroy all wrappers.
     heapTracer.clearWrappers();
