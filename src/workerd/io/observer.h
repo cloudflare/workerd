@@ -141,7 +141,9 @@ class RequestObserver: public kj::Refcounted {
   }
 };
 
-class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {
+class JsgIsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {};
+
+class IsolateObserver: public kj::AtomicRefcounted {
  public:
   virtual ~IsolateObserver() noexcept(false) {}
 
