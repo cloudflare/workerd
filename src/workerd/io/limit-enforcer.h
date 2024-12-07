@@ -17,7 +17,7 @@ static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
 // Interface for an object that enforces resource limits on an Isolate level.
 //
 // See also LimitEnforcer, which enforces on a per-request level.
-class IsolateLimitEnforcer {
+class IsolateLimitEnforcer: public kj::Refcounted {
  public:
   // Get CreateParams to pass when constructing a new isolate.
   virtual v8::Isolate::CreateParams getCreateParams() = 0;

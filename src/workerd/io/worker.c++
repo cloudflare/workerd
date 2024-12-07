@@ -672,6 +672,8 @@ struct Worker::Isolate::Impl {
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
+
+      limitEnforcer.customizeIsolate(lock->v8Isolate);
       if (inspectorPolicy != InspectorPolicy::DISALLOW) {
         // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
         KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
@@ -969,18 +971,21 @@ const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
 }  // namespace
 
 Worker::Isolate::Isolate(kj::Own<Api> apiParam,
+    kj::Own<IsolateObserver> metricsParam,
     kj::StringPtr id,
+    kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
     ConsoleMode consoleMode)
-    : metrics(kj::atomicAddRef(apiParam->getMetrics())),
+    : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
+      limitEnforcer(kj::mv(limitEnforcerParam)),
       api(kj::mv(apiParam)),
-      limitEnforcer(api->getLimitEnforcer()),
       consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
-      impl(kj::heap<Impl>(*api, *metrics, limitEnforcer, inspectorPolicy)),
+      impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+  api->setIsolateObserver(*metrics);
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -1329,7 +1334,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
             KJ_SWITCH_ONEOF(source) {
               KJ_CASE_ONEOF(script, ScriptSource) {
                 impl->globals =
-                    script.compileGlobals(lock, isolate->getApi(), isolate->impl->metrics);
+                    script.compileGlobals(lock, isolate->getApi(), isolate->getApi().getObserver());
 
                 {
                   // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
@@ -1387,7 +1392,7 @@ Worker::Isolate::~Isolate() noexcept(false) {
 
   // Update the isolate stats one last time to make sure we're accurate for cleanup in
   // `evicted()`.
-  limitEnforcer.reportMetrics(*metrics);
+  limitEnforcer->reportMetrics(*metrics);
 
   metrics->evicted();
   weakIsolateRef->invalidate();
@@ -3808,7 +3813,7 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
 }
 
 void Worker::Isolate::completedRequest() const {
-  limitEnforcer.completedRequest(id);
+  limitEnforcer->completedRequest(id);
 }
 
 bool Worker::Isolate::isInspectorEnabled() const {

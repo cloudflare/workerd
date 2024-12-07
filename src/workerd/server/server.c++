@@ -2921,8 +2921,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     }
   };
 
+  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
-  auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
+  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
 
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (featureFlags.getNewModuleRegistry()) {
@@ -2930,18 +2931,19 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
-        *observer, conf, featureFlags.asReader(), pythonConfig);
+        *jsgobserver, conf, featureFlags.asReader(), pythonConfig);
   }
 
-  auto api =
-      kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), kj::mv(limitEnforcer),
-          kj::mv(observer), *memoryCacheProvider, pythonConfig, kj::mv(newModuleRegistry));
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
+      limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
+      kj::mv(newModuleRegistry));
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
-  auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), name, inspectorPolicy,
+  auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
+      kj::mv(limitEnforcer), inspectorPolicy,
       conf.isServiceWorkerScript() ? Worker::ConsoleMode::INSPECTOR_ONLY : consoleMode);
 
   // If we are using the inspector, we need to register the Worker::Isolate
