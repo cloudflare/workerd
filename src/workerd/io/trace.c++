@@ -558,6 +558,28 @@ tracing::Exception::Exception(
       message(kj::mv(message)),
       stack(kj::mv(stack)) {}
 
+tracing::TailStreamWriter::TailStreamWriter(
+    const InvocationSpanContext& context, Reporter reporter, TimeProvider timeProvider)
+    : state(State(context, kj::mv(reporter), kj::mv(timeProvider))) {}
+
+void tracing::TailStreamWriter::report(TailEvent::Event&& event) {
+  auto& s = KJ_ASSERT_NONNULL(state, "Tail stream writer is already closed");
+  bool ending = event.tryGet<tracing::Outcome>() != kj::none ||
+      event.tryGet<tracing::Hibernate>() != kj::none;
+  KJ_DEFER({
+    if (ending) state = kj::none;
+  });
+  if (event.tryGet<tracing::Onset>() != kj::none) {
+    KJ_ASSERT(!s.onsetSeen, "Tail stream onset already provided");
+    s.onsetSeen = true;
+  }
+  tracing::TailEvent tailEvent(s.context, s.timeProvider(), s.sequence++, kj::mv(event));
+
+  s.reporter(kj::mv(tailEvent));
+}
+
+// ======================================================================================
+
 Trace::Trace(kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName,
     kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,

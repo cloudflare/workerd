@@ -609,5 +609,60 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   KJ_ASSERT(attrs2[1].name == "bar"_kj);
 }
 
+KJ_TEST("TailStreamWriter works") {
+  FakeEntropySource entropy;
+
+  auto context = tracing::InvocationSpanContext::newForInvocation(kj::none, entropy);
+  kj::Vector<tracing::TailEvent> events;
+
+  tracing::TailStreamWriter writer(context, [&](tracing::TailEvent&& event) -> kj::Promise<void> {
+    events.add(kj::mv(event));
+    return kj::READY_NOW;
+  }, [&]() { return kj::UNIX_EPOCH; });
+
+  tracing::Onset onset(tracing::Resume(kj::none), tracing::Onset::WorkerInfo{});
+  writer.report(kj::mv(onset));
+
+  try {
+    // A second onset event should fail.
+    tracing::Onset onset(tracing::Resume(kj::none), tracing::Onset::WorkerInfo{});
+    writer.report(kj::mv(onset));
+    KJ_FAIL_ASSERT("should have thrown");
+  } catch (kj::Exception& ex) {
+    KJ_ASSERT(ex.getDescription() == "expected !s.onsetSeen; Tail stream onset already provided");
+  }
+
+  tracing::Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
+  writer.report(kj::mv(log));
+
+  tracing::Outcome outcome(EventOutcome::OK, 1 * kj::MILLISECONDS, 2 * kj::MILLISECONDS);
+  writer.report(kj::mv(outcome));
+
+  try {
+    // A log after the outcome event should fail
+    tracing::Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("baz"));
+    writer.report(kj::mv(log));
+    KJ_FAIL_ASSERT("should have thrown");
+  } catch (kj::Exception& ex) {
+    KJ_ASSERT(
+        ex.getDescription() == "expected state != nullptr; Tail stream writer is already closed");
+  }
+
+  KJ_ASSERT(events.size() == 3);
+
+  KJ_ASSERT(events[0].event.is<tracing::Onset>());
+  KJ_ASSERT(events[1].event.is<tracing::Mark>());
+  KJ_ASSERT(events[2].event.is<tracing::Outcome>());
+  KJ_ASSERT(events[0].sequence == 0);
+  KJ_ASSERT(events[1].sequence == 1);
+  KJ_ASSERT(events[2].sequence == 2);
+  for (auto& event: events) {
+    KJ_ASSERT(event.traceId == context.getTraceId());
+    KJ_ASSERT(event.invocationId == context.getInvocationId());
+    KJ_ASSERT(event.spanId == context.getSpanId());
+    KJ_ASSERT(event.timestamp == kj::UNIX_EPOCH);
+  }
+}
+
 }  // namespace
 }  // namespace workerd::tracing
