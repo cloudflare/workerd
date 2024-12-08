@@ -601,6 +601,7 @@ jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Ref<TraceItem> item) {
 namespace {
 kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    Frankenvalue props,
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   // Mark the request as delivered because we're about to run some JS.
   incomingRequest->delivered();
@@ -624,11 +625,12 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   // and its members until this task completes.
   auto entrypointName = entrypointNamePtr.map([](auto s) { return kj::str(s); });
   try {
-    co_await context.run([&context, nonEmptyTraces = kj::mv(nonEmptyTraces),
-                             entrypointName = kj::mv(entrypointName)](Worker::Lock& lock) mutable {
+    co_await context.run(
+        [&context, nonEmptyTraces = kj::mv(nonEmptyTraces), entrypointName = kj::mv(entrypointName),
+            props = kj::mv(props)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-      auto handler = lock.getExportedHandler(entrypointName, context.getActor());
+      auto handler = lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor());
       return lock.getGlobalScope().sendTraces(nonEmptyTraces.asPtr(), lock, handler);
     });
   } catch (kj::Exception e) {
@@ -652,10 +654,11 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
 
 auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    Frankenvalue props,
     kj::TaskSet& waitUntilTasks) -> kj::Promise<Result> {
   // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
-  waitUntilTasks.add(
-      sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, traces));
+  waitUntilTasks.add(sendTracesToExportedHandler(
+      kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces));
 
   return Result{
     .outcome = EventOutcome::OK,

@@ -192,6 +192,16 @@ struct ServiceDesignator {
   # `entrypoint` is specified here, it names an alternate entrypoint to use on the target worker,
   # otherwise the default is used.
 
+  props :union {
+    # Value to provide in `ctx.props` in the target worker.
+
+    empty @2 :Void;
+    # Empty object. (This is the default.)
+
+    json @3 :Text;
+    # A JSON-encoded value.
+  }
+
   # TODO(someday): Options to specify which event types are allowed.
   # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
 }

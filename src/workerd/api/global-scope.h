@@ -204,6 +204,9 @@ class TestController: public jsg::Object {
 
 class ExecutionContext: public jsg::Object {
  public:
+  ExecutionContext(jsg::Lock& js): props(js, js.obj()) {}
+  ExecutionContext(jsg::Lock& js, jsg::JsValue props): props(js, props) {}
+
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
 
@@ -211,9 +214,14 @@ class ExecutionContext: public jsg::Object {
   // and throwing an error at the client.
   void abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason);
 
+  jsg::JsValue getProps(jsg::Lock& js) {
+    return props.getHandle(js);
+  }
+
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
+    JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:
@@ -228,6 +236,13 @@ class ExecutionContext: public jsg::Object {
       //   consistent with each other.
       JSG_METHOD(abort);
     }
+  }
+
+ private:
+  jsg::JsRef<jsg::JsValue> props;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(props);
   }
 };
 

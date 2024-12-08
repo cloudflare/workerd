@@ -12,6 +12,7 @@
 
 namespace workerd {
 
+class Frankenvalue;
 class IoContext_IncomingRequest;
 
 // An interface representing the services made available by a worker/pipeline to handle a
@@ -111,6 +112,7 @@ class WorkerInterface: public kj::HttpService {
     // for this event.
     virtual kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName,
+        Frankenvalue props,
         kj::TaskSet& waitUntilTasks) = 0;
 
     // Forward the event over RPC.

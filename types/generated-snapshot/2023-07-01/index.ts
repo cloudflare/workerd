@@ -402,6 +402,7 @@ export interface TestController {}
 export interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  props: any;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,
