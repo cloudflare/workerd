@@ -1,7 +1,47 @@
 import * as errorCodes from 'node-internal:internal_dns_constants';
+import {
+  reverse,
+  resolveTxt,
+  resolveCaa,
+  resolveMx,
+  resolveCname,
+  resolveNs,
+  resolvePtr,
+  resolveSrv,
+  resolveSoa,
+  resolveNaptr,
+  resolve4,
+  resolve6,
+} from 'node-internal:internal_dns';
 
 export * from 'node-internal:internal_dns_constants';
+export {
+  reverse,
+  resolveTxt,
+  resolveCaa,
+  resolveMx,
+  resolveCname,
+  resolveNs,
+  resolvePtr,
+  resolveSrv,
+  resolveSoa,
+  resolveNaptr,
+  resolve4,
+  resolve6,
+} from 'node-internal:internal_dns';
 
 export default {
+  reverse,
+  resolveTxt,
+  resolveCaa,
+  resolveMx,
+  resolveCname,
+  resolveNs,
+  resolvePtr,
+  resolveSrv,
+  resolveSoa,
+  resolveNaptr,
+  resolve4,
+  resolve6,
   ...errorCodes,
 };

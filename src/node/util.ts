@@ -19,10 +19,7 @@ import { debuglog } from 'node-internal:debuglog';
 export const debug = debuglog;
 export { debuglog };
 
-import {
-  ERR_FALSY_VALUE_REJECTION,
-  ERR_INVALID_ARG_TYPE,
-} from 'node-internal:internal_errors';
+import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 
 import {
   inspect,
@@ -30,53 +27,13 @@ import {
   formatWithOptions,
   stripVTControlCharacters,
 } from 'node-internal:internal_inspect';
-export { inspect, format, formatWithOptions, stripVTControlCharacters };
 
+import { callbackify } from 'node-internal:internal_utils';
+export { inspect, format, formatWithOptions, stripVTControlCharacters };
+export { callbackify } from 'node-internal:internal_utils';
 export const types = internalTypes;
 
 export const { MIMEParams, MIMEType } = utilImpl;
-
-const callbackifyOnRejected = (reason: unknown, cb: Function) => {
-  if (!reason) {
-    reason = new ERR_FALSY_VALUE_REJECTION(`${reason}`);
-  }
-  return cb(reason);
-};
-
-export function callbackify<T extends (...args: any[]) => Promise<any>>(
-  original: T
-): T extends (...args: infer TArgs) => Promise<infer TReturn>
-  ? (...params: [...TArgs, (err: Error, ret: TReturn) => any]) => void
-  : never {
-  validateFunction(original, 'original');
-
-  function callbackified(
-    this: unknown,
-    ...args: [...unknown[], (err: unknown, ret: unknown) => void]
-  ): any {
-    const maybeCb = args.pop();
-    validateFunction(maybeCb, 'last argument');
-    const cb = (maybeCb as Function).bind(this);
-    Reflect.apply(original, this, args).then(
-      (ret: any) => queueMicrotask(() => cb(null, ret)),
-      (rej: any) => queueMicrotask(() => callbackifyOnRejected(rej, cb))
-    );
-  }
-
-  const descriptors = Object.getOwnPropertyDescriptors(original);
-  if (typeof descriptors['length']!.value === 'number') {
-    descriptors['length']!.value++;
-  }
-  if (typeof descriptors['name']!.value === 'string') {
-    descriptors['name']!.value += 'Callbackified';
-  }
-  const propertiesValues = Object.values(descriptors);
-  for (let i = 0; i < propertiesValues.length; i++) {
-    Object.setPrototypeOf(propertiesValues[i], null);
-  }
-  Object.defineProperties(callbackified, descriptors);
-  return callbackified as any;
-}
 
 const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
 const kCustomPromisifyArgsSymbol = Symbol('customPromisifyArgs');
