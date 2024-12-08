@@ -1,6 +1,6 @@
 import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
-import { strictEqual } from 'node:assert';
+import { strictEqual, throws } from 'node:assert';
 
 export const functionsExist = {
   async test() {
@@ -27,6 +27,16 @@ export const functionsExist = {
 
     for (const fn of syncFns) {
       strictEqual(typeof dns[fn], 'function');
+    }
+
+    for (const module of [dns, dnsPromises]) {
+      throws(
+        () => {
+          const resolver = new module.Resolver();
+          resolver.cancel();
+        },
+        { message: 'Not implemented' }
+      );
     }
   },
 };
