@@ -40,7 +40,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.0",
+    version = "2.1.0",
     deps = [
         "@crates_vendor__bitflags-2.6.0//:bitflags",
         "@crates_vendor__cfg-if-1.0.0//:cfg_if",

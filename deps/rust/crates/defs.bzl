@@ -304,7 +304,7 @@ _NORMAL_DEPENDENCIES = {
             "codespan-reporting": Label("@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting"),
             "cxx": Label("@crates_vendor__cxx-1.0.130//:cxx"),
             "flate2": Label("@crates_vendor__flate2-1.0.35//:flate2"),
-            "lolhtml": Label("@crates_vendor__lolhtml-1.1.2//:lolhtml"),
+            "lol_html_c_api": Label("@crates_vendor__lol_html_c_api-1.1.2//:lolhtml"),
             "nix": Label("@crates_vendor__nix-0.29.0//:nix"),
             "pico-args": Label("@crates_vendor__pico-args-0.5.0//:pico_args"),
             "proc-macro2": Label("@crates_vendor__proc-macro2-1.0.89//:proc_macro2"),
@@ -889,20 +889,20 @@ def crate_repositories():
 
     maybe(
         new_git_repository,
-        name = "crates_vendor__lol_html-2.0.0",
-        commit = "a161bb319a61ddfb4c66e29153bbf8d6491f28cf",
+        name = "crates_vendor__lol_html-2.1.0",
+        commit = "cac9f2f59aea8ad803286b0aae0d667926f441c7",
         init_submodules = True,
         remote = "https://github.com/cloudflare/lol-html.git",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.lol_html-2.0.0.bazel"),
+        build_file = Label("@workerd//deps/rust/crates:BUILD.lol_html-2.1.0.bazel"),
     )
 
     maybe(
         new_git_repository,
-        name = "crates_vendor__lolhtml-1.1.2",
-        commit = "a161bb319a61ddfb4c66e29153bbf8d6491f28cf",
+        name = "crates_vendor__lol_html_c_api-1.1.2",
+        commit = "cac9f2f59aea8ad803286b0aae0d667926f441c7",
         init_submodules = True,
         remote = "https://github.com/cloudflare/lol-html.git",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.lolhtml-1.1.2.bazel"),
+        build_file = Label("@workerd//deps/rust/crates:BUILD.lol_html_c_api-1.1.2.bazel"),
         strip_prefix = "c-api",
     )
 
@@ -1615,7 +1615,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__codespan-reporting-0.11.1", is_dev_dep = False),
         struct(repo = "crates_vendor__cxx-1.0.130", is_dev_dep = False),
         struct(repo = "crates_vendor__flate2-1.0.35", is_dev_dep = False),
-        struct(repo = "crates_vendor__lolhtml-1.1.2", is_dev_dep = False),
+        struct(repo = "crates_vendor__lol_html_c_api-1.1.2", is_dev_dep = False),
         struct(repo = "crates_vendor__nix-0.29.0", is_dev_dep = False),
         struct(repo = "crates_vendor__pico-args-0.5.0", is_dev_dep = False),
         struct(repo = "crates_vendor__proc-macro2-1.0.89", is_dev_dep = False),

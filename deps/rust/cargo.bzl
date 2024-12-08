@@ -16,7 +16,9 @@ PACKAGES = {
     "cxx": crate.spec(version = "1"),
     "cxxbridge-cmd": crate.spec(version = "1"),
     "flate2": crate.spec(version = "1"),
-    "lolhtml": crate.spec(git = "https://github.com/cloudflare/lol-html.git", rev = "a161bb319a61ddfb4c66e29153bbf8d6491f28cf"),
+    # Commit hash refers to lol-html v2.1.0. We then access the nested lol_html_c_api crate within.
+    # TODO(npaun): Seems like some changes are still ongoing on the lol-html side. Recheck this in a couple weeks.
+    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", rev = "cac9f2f59aea8ad803286b0aae0d667926f441c7"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),
     "proc-macro2": crate.spec(version = "1"),

@@ -36,7 +36,7 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lolhtml",
+        "crate-name=lol_html_c_api",
         "manual",
         "noclippy",
         "norustfmt",
@@ -45,8 +45,8 @@ rust_library(
     deps = [
         "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
         "@crates_vendor__libc-0.2.162//:libc",
-        "@crates_vendor__lol_html-2.0.0//:lol_html",
-        "@crates_vendor__lolhtml-1.1.2//:build_script_build",
+        "@crates_vendor__lol_html-2.1.0//:lol_html",
+        "@crates_vendor__lol_html_c_api-1.1.2//:build_script_build",
         "@crates_vendor__thiserror-1.0.69//:thiserror",
     ],
 )
@@ -86,13 +86,13 @@ cargo_build_script(
     ),
     edition = "2021",
     links = "lolhtml",
-    pkg_name = "lolhtml",
+    pkg_name = "lol_html_c_api",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lolhtml",
+        "crate-name=lol_html_c_api",
         "manual",
         "noclippy",
         "norustfmt",

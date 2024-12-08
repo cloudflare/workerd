@@ -610,6 +610,40 @@ export const manualWriting2 = {
   },
 };
 
+export const streamingReplacement = {
+  async test() {
+    const { readable, writable } = new TransformStream();
+
+    const response = new HTMLRewriter()
+      .on('*', {
+        async element(element) {
+          const rfc2616 = (
+            await fetch('https://www.rfc-editor.org/rfc/rfc2616.txt')
+          ).body;
+          element.prepend(rfc2616, { html: true });
+        },
+      })
+      .transform(new Response(readable));
+
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+
+    await writer.write(encoder.encode('<html>'));
+    await writer.write(encoder.encode('bar'));
+    await writer.write(encoder.encode('</html>'));
+    await writer.close();
+
+    // This variation uses the JavaScript TransformStream, so we can
+    // initiate the read after doing the writes.
+    const promise = response.text();
+
+    const rfc2616 = await (
+      await fetch('https://www.rfc-editor.org/rfc/rfc2616.txt')
+    ).text();
+    strictEqual(await promise, `<html>${rfc2616}bar</html>`);
+  },
+};
+
 export const appendOnEnd = {
   async test() {
     const kInput =
