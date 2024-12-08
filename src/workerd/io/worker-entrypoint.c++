@@ -240,6 +240,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   this->incomingRequest = kj::none;
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
+  SpanParent parentSpan = incomingRequest->getMetrics().getSpan();
 
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
 
@@ -279,16 +280,21 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   TRACE_EVENT_BEGIN("workerd", "WorkerEntrypoint::request() waiting on context",
       PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
 
+  SpanBuilder contextWaitSpan = parentSpan.newChild("context_wait"_kjc);
+
   return context
       .run([this, &context, method, url, &headers, &requestBody,
                &metrics = incomingRequest->getMetrics(), &wrappedResponse = *wrappedResponse,
-               entrypointName = entrypointName](Worker::Lock& lock) mutable {
+               entrypointName = entrypointName, contextWaitSpan = kj::mv(contextWaitSpan), parentSpan = kj::mv(parentSpan)](Worker::Lock& lock) mutable {
+    contextWaitSpan.end();
+    // This span should end when we return from this .run() lambda
+    SpanBuilder runRequestSpan = parentSpan.newChild("run_request"_kjc);
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-        cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
+        cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor())).attach(kj::mv(runRequestSpan));
   })
       .then([this](api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
