@@ -1968,10 +1968,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
-      if (exception.getDescription().startsWith("invalid Content-Length header value")) {
-        return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
-      } else if (exception.getDescription().contains("NOSENTRY script not found")) {
+      if (exception.getDescription().contains("NOSENTRY script not found")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, "Worker not found.");
+      } else if (kj::str(exception.getFile()).startsWith("kj/")) {
+        return JSG_KJ_EXCEPTION(FAILED, Error,
+            kj::str("Internal error processing fetch: ", exception.getDescription()));
       }
       return kj::mv(exception);
     }),

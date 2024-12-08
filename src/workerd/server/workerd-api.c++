@@ -491,12 +491,18 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
       auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
-      auto res = req.response.wait(io.waitScope);
-      auto body = res.body->readAllBytes().wait(io.waitScope);
+      try {
+        auto res = req.response.wait(io.waitScope);
+        auto body = res.body->readAllBytes().wait(io.waitScope);
 
-      writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
+        writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
 
-      pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
+        pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
+      } catch (kj::Exception exc) {
+        // Without this the user would just see "internal error" with no additional info about
+        // what went wrong. Explicitly raising here gives the user a friendlier error message.
+        JSG_FAIL_REQUIRE(Error, kj::str("Failed to fetch Pyodide bundle: ", exc.getDescription()));
+      }
     });
   }
 
