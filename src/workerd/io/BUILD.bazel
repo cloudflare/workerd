@@ -153,6 +153,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":trace_capnp",
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
         "//src/workerd/util",
@@ -268,6 +269,8 @@ wd_capnp_library(src = "actor-storage.capnp")
 wd_capnp_library(src = "outcome.capnp")
 
 wd_capnp_library(src = "script-version.capnp")
+
+wd_capnp_library(src = "trace.capnp")
 
 wd_capnp_library(src = "compatibility-date.capnp")
 
