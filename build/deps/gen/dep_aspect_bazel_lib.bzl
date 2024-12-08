@@ -15,4 +15,6 @@ def dep_aspect_bazel_lib():
         strip_prefix = STRIP_PREFIX,
         type = TYPE,
         sha256 = SHA256,
+        patches = ["//:patches/bazel-lib/0001-Support-Bazel-8.patch"],
+        patch_args = ["-p1"],
     )
