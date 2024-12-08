@@ -16,6 +16,10 @@ def wpt_test(name, wpt_directory, test_js):
         test_name = name,
         wpt_directory = wpt_directory,
         test_js = test_js,
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     wd_test(
@@ -28,6 +32,11 @@ def wpt_test(name, wpt_directory, test_js):
             wpt_directory,
             "//src/workerd/io:trimmed-supported-compatibility-date.txt",
         ],
+        # Even generating WPT tests is prohibitively expensive on Windows, disable it there
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
 def _wpt_test_gen_impl(ctx):

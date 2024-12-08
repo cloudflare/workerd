@@ -36,14 +36,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           show-progress: false
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
-        with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
       - name: Setup Linux
         run: |
             export DEBIAN_FRONTEND=noninteractive
@@ -56,7 +48,7 @@ jobs:
             echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
       - name: build types
         run: |
-            bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
+            bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:
