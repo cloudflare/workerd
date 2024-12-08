@@ -5,6 +5,7 @@ import { build } from "esbuild";
 import { CommentsData } from "src/transforms";
 import cloudflareComments from "../src/cloudflare";
 import { collateStandardComments } from "../src/standards";
+import { getFilePath } from "../src/utils";
 
 async function readPath(rootPath: string): Promise<string> {
   try {
@@ -29,7 +30,7 @@ async function readParamNames() {
     ["DurableObjectStorageOperations", "DurableObjectTransaction"],
   ];
 
-  const data = await fs.readFile("src/workerd/tools/param-names.json", "utf8");
+  const data = await fs.readFile(getFilePath("src/workerd/tools/param-names.json"), "utf8");
   const recordArray = JSON.parse(data) as {
     fully_qualified_parent_name: string[];
     function_like_name: string;
@@ -103,9 +104,9 @@ if (require.main === module)
     external: ["node:*", "workerd:*"],
     bundle: true,
     minify: true,
-    outdir: "types/dist",
+    outdir: getFilePath("types/dist"),
     outExtension: { ".js": ".mjs" },
-    entryPoints: ["types/src/worker/index.ts"],
+    entryPoints: [getFilePath("types/src/worker/index.ts")],
     plugins: [
       {
         name: "raw",
