@@ -1683,50 +1683,80 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
 
-    // Setting up tail workers support.
-    auto tracer = kj::rc<PipelineTracer>();
-    auto executionModel =
-        actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-    auto workerTracer =
-        tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel, kj::none /* scriptId */,
-            kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
-            kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */);
-
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
-    auto tailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
-      KJ_ASSERT(service != this, "A worker currently cannot log to itself");
-      // Caution here... if the tail worker ends up have a cirular dependency
-      // on the worker we'll end up with an infinite loop trying to initialize.
-      // We can test this directly but it's more difficult to test indirect
-      // loops (dependency of dependency, etc). Here we're just going to keep
-      // it simple and just check the direct dependency.
-      return service->startRequest({});
-    };
-
-    // When the tracer is complete, deliver the traces to both the parent
-    // and the tail workers. We do NOT want to attach the tracer to the
-    // tracer->onComplete() promise here because it is the destructor of
-    // the PipelineTracer that resolves the onComplete promise. If we attach
-    // the tracer to the promise the tracer won't be destroyed while the
-    // promise is still pending! Fortunately, the WorkerTracer we created
-    // will hold a strong reference to the worker tracer for as long as it
-    // is needed. As long as the WorkerTracer is still alive, the PipelineTracer
-    // will be. See below, we end up creating two references to the WorkerTracer,
-    // one held by the observer and one that will be passed to the IoContext.
-    // The PipelineTracer will be destroyed once both of those are freed.
-    waitUntilTasks.add(tracer->onComplete().then(
-        kj::coCapture([tailWorkers = kj::mv(tailWorkers)](
-                          kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
-      for (auto& worker: tailWorkers) {
-        auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-            workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
-        co_await worker->customEvent(kj::mv(event)).ignoreResult();
+    kj::Array<kj::Own<WorkerInterface>> legacyTailWorkers = nullptr;
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers = nullptr;
+    // If streaming tail workers is enabled, then we will initialize two lists:
+    // one with services that only export the tail or trace handler (legacy tail
+    // workers) and one that exports the tailStream handler. We'll check tailStreams
+    // first.
+    if (util::Autogate::isEnabled(util::AutogateKey::STREAMING_TAIL_WORKERS)) {
+      kj::Vector<kj::Own<WorkerInterface>> legacyList;
+      kj::Vector<kj::Own<WorkerInterface>> streamingList;
+      for (auto& service: channels.tails) {
+        if (service->hasHandler("tailStream"_kj)) {
+          streamingList.add(service->startRequest({}));
+        } else if (service->hasHandler("tail") || service->hasHandler("trace")) {
+          legacyList.add(service->startRequest({}));
+        }
+        legacyTailWorkers = legacyList.releaseAsArray();
+        streamingTailWorkers = streamingList.releaseAsArray();
       }
-      co_return;
-    })));
+    } else {
+      legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
+        KJ_ASSERT(service != this, "A worker currently cannot log to itself");
+        // Caution here... if the tail worker ends up have a cirular dependency
+        // on the worker we'll end up with an infinite loop trying to initialize.
+        // We can test this directly but it's more difficult to test indirect
+        // loops (dependency of dependency, etc). Here we're just going to keep
+        // it simple and just check the direct dependency.
+        return service->startRequest({});
+      };
+    }
 
-    auto observer = kj::refcounted<RequestObserverWithTracer>(kj::addRef(*workerTracer));
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
+    kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
+
+    // TODO(streaming-tail-workers): If we have streaming tail workers configured, then
+    // we need to grab the RPC client stubs for each but we won't initiate the actual
+    // request yet... at least not until the onset event is reported.
+
+    if (legacyTailWorkers.size() > 0) {
+      // Setting up legacy tail workers support, but only if we actually have tail workers
+      // configured.
+      auto tracer = kj::rc<PipelineTracer>();
+      auto executionModel =
+          actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
+      auto workerTracerImpl = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
+          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
+          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
+          kj::none /* entrypoint */);
+      observer = kj::refcounted<RequestObserverWithTracer>(kj::addRef(*workerTracerImpl));
+      workerTracer = kj::mv(workerTracerImpl);
+
+      // When the tracer is complete, deliver the traces to both the parent
+      // and the legacy tail workers. We do NOT want to attach the tracer to the
+      // tracer->onComplete() promise here because it is the destructor of
+      // the PipelineTracer that resolves the onComplete promise. If we attach
+      // the tracer to the promise the tracer won't be destroyed while the
+      // promise is still pending! Fortunately, the WorkerTracer we created
+      // will hold a strong reference to the worker tracer for as long as it
+      // is needed. As long as the WorkerTracer is still alive, the PipelineTracer
+      // will be. See below, we end up creating two references to the WorkerTracer,
+      // one held by the observer and one that will be passed to the IoContext.
+      // The PipelineTracer will be destroyed once both of those are freed.
+      waitUntilTasks.add(tracer->onComplete().then(
+          kj::coCapture([tailWorkers = kj::mv(legacyTailWorkers)](
+                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
+        for (auto& worker: tailWorkers) {
+          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
+              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
+          co_await worker->customEvent(kj::mv(event)).ignoreResult();
+        }
+        co_return;
+      })));
+    }
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
