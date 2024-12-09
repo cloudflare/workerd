@@ -181,7 +181,6 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
 
   auto& ioContext = IoContext::current();
   JSG_REQUIRE(!ioContext.isFiddle(), TypeError, "Socket API not supported in web preview mode.");
-  auto userSpan = ioContext.makeUserTraceSpan("connect"_kjc);
 
   // Extract the domain/ip we are connecting to from the address.
   kj::String domain;
