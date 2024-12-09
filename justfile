@@ -60,3 +60,7 @@ rustfmt:
 # example: just bench mimetype
 bench path:
   bazel run //src/workerd/tests:bench-{{path}}
+
+# example: just clippy dns
+clippy package="...":
+  bazel build //src/rust/{{package}} --config=lint

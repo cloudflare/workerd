@@ -20,6 +20,8 @@ wd_cc_library(
         "zlib-util.h",
     ],
     implementation_deps = [
+        "//src/rust/cxx-integration",
+        "//src/rust/dns",
         "//src/workerd/io",
         "@capnp-cpp//src/kj/compat:kj-gzip",
     ],

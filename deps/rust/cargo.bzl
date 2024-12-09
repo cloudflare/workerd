@@ -24,6 +24,7 @@ PACKAGES = {
     "serde_json": crate.spec(version = "1"),
     "serde": crate.spec(version = "1", features = ["derive"]),
     "syn": crate.spec(version = "2"),
+    "thiserror": crate.spec(version = "2"),
     # tokio is huge, let's enable only features when we actually need them.
     "tokio": crate.spec(version = "1", default_features = False, features = ["net", "rt", "rt-multi-thread", "time"]),
     "tracing": crate.spec(version = "0", default_features = False, features = ["std"]),

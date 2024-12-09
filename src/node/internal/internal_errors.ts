@@ -587,6 +587,28 @@ export class ERR_INVALID_URI extends NodeError {
   }
 }
 
+// Example:
+//
+// Error: queryTxt ENOTFOUND google.com2
+//     at QueryReqWrap.onresolve [as oncomplete] (node:internal/dns/callback_resolver:45:19)
+//     at QueryReqWrap.callbackTrampoline (node:internal/async_hooks:130:17) {
+//   errno: undefined,
+//   code: 'ENOTFOUND',
+//   syscall: 'queryTxt',
+//   hostname: 'google.com2'
+// }
+export class DnsError extends NodeError {
+  errno = undefined;
+
+  constructor(
+    public hostname: string,
+    code: string,
+    public syscall: string
+  ) {
+    super(code, `${syscall} ${code} ${hostname}`);
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {

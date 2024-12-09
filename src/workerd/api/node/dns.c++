@@ -3,92 +3,28 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "dns.h"
 
+#include <workerd/jsg/exception.h>
+#include <workerd/rust/cxx-integration/cxx-bridge.h>
+#include <workerd/rust/dns/lib.rs.h>
+
 namespace workerd::api::node {
-kj::Array<kj::String> DnsUtil::getServers(jsg::Lock& js) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
+
+DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
+  auto parsed = rust::dns::parse_caa_record(::rust::Str(record.begin(), record.size()));
+  return CaaRecord{
+    .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
 }
 
-void DnsUtil::lookup(jsg::Lock& js,
-    kj::String hostname,
-    jsg::Optional<LookupOptions> options,
-    LookupCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::lookupService(
-    jsg::Lock& js, kj::String address, kj::uint port, LookupServiceCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolve(
-    jsg::Lock& js, kj::String hostname, kj::String rrtype, ResolveCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolve4(
-    jsg::Lock& js, kj::String hostname, Resolve4Options options, Resolve6Callback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolve6(
-    jsg::Lock& js, kj::String hostname, Resolve6Options options, Resolve6Callback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveAny(jsg::Lock& js, kj::String hostname, ResolveAnyCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveCname(jsg::Lock& js, kj::String hostname, ResolveCnameCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveCaa(jsg::Lock& js, kj::String hostname, ResolveCaaCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveMx(jsg::Lock& js, kj::String hostname, ResolveMxCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveNaptr(jsg::Lock& js, kj::String hostname, ResolveNaptrCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveNs(jsg::Lock& js, kj::String hostname, ResolveNsCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolvePtr(jsg::Lock& js, kj::String hostname, ResolvePtrCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveSoa(jsg::Lock& js, kj::String hostname, ResolveSoaCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveSrv(jsg::Lock& js, kj::String hostname, ResolveSrvCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::resolveTxt(jsg::Lock& js, kj::String hostname, ResolveTxtCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::reverse(jsg::Lock& js, kj::String ip, ReverseCallback callback) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::setDefaultResultOrder(jsg::Lock& js, kj::String order) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-kj::StringPtr DnsUtil::getDefaultResultOrder(jsg::Lock& js) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
-}
-
-void DnsUtil::setServers(kj::Array<kj::String> servers) {
-  JSG_FAIL_REQUIRE(Error, "Not implemented"_kj);
+DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
+  auto parsed = rust::dns::parse_naptr_record(::rust::Str(record.begin(), record.size()));
+  return NaptrRecord{
+    .flags = kj::str(parsed.flags),
+    .service = kj::str(parsed.service),
+    .regexp = kj::str(parsed.regexp),
+    .replacement = kj::str(parsed.replacement),
+    .order = parsed.order,
+    .preference = parsed.preference,
+  };
 }
 
 }  // namespace workerd::api::node
