@@ -312,6 +312,7 @@ _NORMAL_DEPENDENCIES = {
             "serde": Label("@crates_vendor__serde-1.0.215//:serde"),
             "serde_json": Label("@crates_vendor__serde_json-1.0.132//:serde_json"),
             "syn": Label("@crates_vendor__syn-2.0.87//:syn"),
+            "thiserror": Label("@crates_vendor__thiserror-2.0.6//:thiserror"),
             "tokio": Label("@crates_vendor__tokio-1.41.1//:tokio"),
             "tracing": Label("@crates_vendor__tracing-0.1.40//:tracing"),
         },
@@ -1388,12 +1389,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__thiserror-2.0.6",
+        sha256 = "8fec2a1820ebd077e2b90c4df007bebf344cd394098a13c563957d0afc83ea47",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/thiserror/2.0.6/download"],
+        strip_prefix = "thiserror-2.0.6",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.thiserror-2.0.6.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__thiserror-impl-1.0.69",
         sha256 = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/thiserror-impl/1.0.69/download"],
         strip_prefix = "thiserror-impl-1.0.69",
         build_file = Label("@workerd//deps/rust/crates:BUILD.thiserror-impl-1.0.69.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__thiserror-impl-2.0.6",
+        sha256 = "d65750cab40f4ff1929fb1ba509e9914eb756131cef4210da8d5d700d26f6312",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/thiserror-impl/2.0.6/download"],
+        strip_prefix = "thiserror-impl-2.0.6",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.thiserror-impl-2.0.6.bazel"),
     )
 
     maybe(
@@ -1623,6 +1644,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__serde-1.0.215", is_dev_dep = False),
         struct(repo = "crates_vendor__serde_json-1.0.132", is_dev_dep = False),
         struct(repo = "crates_vendor__syn-2.0.87", is_dev_dep = False),
+        struct(repo = "crates_vendor__thiserror-2.0.6", is_dev_dep = False),
         struct(repo = "crates_vendor__tokio-1.41.1", is_dev_dep = False),
         struct(repo = "crates_vendor__tracing-0.1.40", is_dev_dep = False),
     ]

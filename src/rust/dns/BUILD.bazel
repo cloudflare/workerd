@@ -8,5 +8,6 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx-integration",
+        "@crates_vendor//:thiserror",
     ],
 )

@@ -1,3 +1,17 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum DnsParserError {
+    #[error("Invalid hex string: {0}")]
+    InvalidHexString(String),
+    #[error("ParseInt error: {0}")]
+    ParseIntError(#[from] std::num::ParseIntError),
+    #[error("Invalid DNS response: {0}")]
+    InvalidDnsResponse(String),
+    #[error("unknown dns parser error")]
+    Unknown,
+}
+
 #[cxx::bridge(namespace = "workerd::rust::dns")]
 mod ffi {
     /// CAA record representation
@@ -16,25 +30,27 @@ mod ffi {
         preference: u32,
     }
     extern "Rust" {
-        fn parse_caa_record(record: &str) -> CaaRecord;
-        fn parse_naptr_record(record: &str) -> NaptrRecord;
+        fn parse_caa_record(record: &str) -> Result<CaaRecord>;
+        fn parse_naptr_record(record: &str) -> Result<NaptrRecord>;
     }
 }
 
 /// Given a vector of strings, converts each slice to UTF-8 from HEX.
 ///
-/// # Panics
-/// Will panic if any substring is not a valid hex.
-#[must_use]
-pub fn decode_hex(s: &[&str]) -> Vec<String> {
-    s.iter()
-        .map(|s| {
-            u16::from_str_radix(s, 16)
-                .ok()
-                .map(|b| String::from_utf16(&[b]).unwrap())
-                .unwrap()
-        })
-        .collect()
+/// # Errors
+/// `DnsParserError::InvalidHexString`
+/// `DnsParserError::ParseIntError`
+pub fn decode_hex(input: &[&str]) -> Result<Vec<String>, DnsParserError> {
+    let mut v = Vec::with_capacity(input.len());
+
+    for slice in input {
+        let num = u16::from_str_radix(slice, 16)?;
+        let ch = String::from_utf16(&[num])
+            .map_err(|_| DnsParserError::InvalidHexString("Invalid UTF-16 sequence".to_owned()))?;
+        v.push(ch);
+    }
+
+    Ok(v)
 }
 
 /// Parses an unknown RR format returned from Cloudflare DNS.
@@ -58,26 +74,30 @@ pub fn decode_hex(s: &[&str]) -> Vec<String> {
 /// assert_eq!(record.field, "issue")
 /// assert_eq!(record.value, "pki.goog")
 /// ```
-fn parse_caa_record(record: &str) -> ffi::CaaRecord {
+/// # Errors
+/// `DnsParserError::InvalidHexString`
+/// `DnsParserError::ParseIntError`
+pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> {
     // Let's remove "\\#" and the length of data from the beginning of the record
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
-    let critical = data[0].parse::<u8>().unwrap();
-    let prefix_length = data[1].parse::<usize>().unwrap();
+    let critical = data[0].parse::<u8>()?;
+    let prefix_length = data[1].parse::<usize>()?;
 
-    let field = decode_hex(&data[2..prefix_length + 2]).join("");
-    let value = decode_hex(&data[(prefix_length + 2)..]).join("");
+    let field = decode_hex(&data[2..prefix_length + 2])?.join("");
+    let value = decode_hex(&data[(prefix_length + 2)..])?.join("");
 
     // Field can be "issuewild", "issue" or "iodef"
-    assert!(
-        field == "issuewild" || field == "issue" || field == "iodef",
-        "received unsupported field {field}",
-    );
+    if field != "issuewild" && field != "issue" && field != "iodef" {
+        return Err(DnsParserError::InvalidDnsResponse(format!(
+            "Received unknown field '{field}'"
+        )));
+    }
 
-    ffi::CaaRecord {
+    Ok(ffi::CaaRecord {
         critical,
         field,
         value,
-    }
+    })
 }
 
 /// Parses an unknown RR format returned from Cloudflare DNS.
@@ -107,36 +127,40 @@ fn parse_caa_record(record: &str) -> ffi::CaaRecord {
 /// assert_eq!(record.order, 5555);
 /// assert_eq!(record.preference, 2222);
 /// ```
-fn parse_naptr_record(record: &str) -> ffi::NaptrRecord {
+///
+/// # Errors
+/// `DnsParserError::InvalidHexString`
+/// `DnsParserError::ParseIntError`
+pub fn parse_naptr_record(record: &str) -> Result<ffi::NaptrRecord, DnsParserError> {
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 
     let order_str = data[1..3].to_vec();
-    let order = u32::from_str_radix(&order_str.join(""), 16).unwrap();
+    let order = u32::from_str_radix(&order_str.join(""), 16)?;
     let preference_str = data[3..5].to_vec();
-    let preference = u32::from_str_radix(&preference_str.join(""), 16).unwrap();
+    let preference = u32::from_str_radix(&preference_str.join(""), 16)?;
 
-    let flag_length = usize::from_str_radix(data[5], 16).unwrap();
+    let flag_length = usize::from_str_radix(data[5], 16)?;
     let flag_offset = 6;
-    let flags = decode_hex(&data[flag_offset..flag_length + flag_offset]).join("");
+    let flags = decode_hex(&data[flag_offset..flag_length + flag_offset])?.join("");
 
-    let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16).unwrap();
+    let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16)?;
     let service_offset = flag_offset + flag_length + 1;
-    let service = decode_hex(&data[service_offset..service_length + service_offset]).join("");
+    let service = decode_hex(&data[service_offset..service_length + service_offset])?.join("");
 
-    let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16).unwrap();
+    let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16)?;
     let regexp_offset = service_offset + service_length + 1;
-    let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset]).join("");
+    let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset])?.join("");
 
-    let replacement = parse_replacement(&data[regexp_offset + regexp_length..]);
+    let replacement = parse_replacement(&data[regexp_offset + regexp_length..])?;
 
-    ffi::NaptrRecord {
+    Ok(ffi::NaptrRecord {
         flags,
         service,
         regexp,
         replacement,
         order,
         preference,
-    }
+    })
 }
 
 /// Replacement values needs to be parsed accordingly.
@@ -146,19 +170,25 @@ fn parse_naptr_record(record: &str) -> ffi::NaptrRecord {
 /// are no input left, and later join them using "."
 ///
 /// It is important that the returning value doesn't end with dot (".") character.
-fn parse_replacement(input: &[&str]) -> String {
+///
+/// # Errors
+/// `DnsParserError::InvalidHexString`
+/// `DnsParserError::ParseIntError`
+pub fn parse_replacement(input: &[&str]) -> Result<String, DnsParserError> {
     if input.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
 
     let mut output: Vec<String> = vec![];
     let mut length_index = 0;
     let mut offset_index = 1;
 
+    // Iterate through each character to parse different frames.
+    // Each frame starts with the length of the remaining frame.
     while length_index < input.len() {
-        let length = usize::from_str_radix(input[length_index], 16).unwrap();
+        let length = usize::from_str_radix(input[length_index], 16)?;
         let subset = input[offset_index..length + offset_index].to_vec();
-        let decoded = decode_hex(&subset).join("");
+        let decoded = decode_hex(&subset)?.join("");
 
         // We omit the trailing "." from replacements.
         // Cloudflare DNS returns "_sip._udp.sip2sip.info." whereas Node.js removes trailing dot
@@ -170,5 +200,5 @@ fn parse_replacement(input: &[&str]) -> String {
         offset_index = length_index + 1;
     }
 
-    output.join(".")
+    Ok(output.join("."))
 }

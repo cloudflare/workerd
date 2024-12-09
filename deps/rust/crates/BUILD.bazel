@@ -134,6 +134,12 @@ alias(
 )
 
 alias(
+    name = "thiserror",
+    actual = "@crates_vendor__thiserror-2.0.6//:thiserror",
+    tags = ["manual"],
+)
+
+alias(
     name = "tokio",
     actual = "@crates_vendor__tokio-1.41.1//:tokio",
     tags = ["manual"],
