@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sat, 23 Nov 2024 22:27:27 -0500
+Subject: Support Bazel 8
+
+
+diff --git a/tcmalloc/internal/BUILD b/tcmalloc/internal/BUILD
+index 3a6c0197d16112d2bc94789c7b9d4ed28f5303b8..66727b3a9fdf38f8b63202ecb550d91cf04100fd 100644
+--- a/tcmalloc/internal/BUILD
++++ b/tcmalloc/internal/BUILD
+@@ -14,8 +14,8 @@
+ #
+ # Internal libraries used for the implementation and testing of TCMalloc.
+ 
+-load("@rules_cc//cc:defs.bzl", "cc_proto_library")
+-load("@rules_proto//proto:defs.bzl", "proto_library")
++load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
++load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+ load("//tcmalloc:copts.bzl", "TCMALLOC_DEFAULT_COPTS")
+ load("//tcmalloc:variants.bzl", "create_tcmalloc_benchmark")
+ 

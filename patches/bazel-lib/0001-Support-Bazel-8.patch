@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sat, 23 Nov 2024 22:07:46 -0500
+Subject: Support Bazel 8
+
+
+diff --git a/lib/private/bats.bzl b/lib/private/bats.bzl
+index 65de719a73114c24f837446d35c7a530adb47e94..c71aef825c5d020566abd800f77ab00fa335e200 100644
+--- a/lib/private/bats.bzl
++++ b/lib/private/bats.bzl
+@@ -102,7 +102,7 @@ bats_test = rule(
+     },
+     toolchains = [
+         "@aspect_bazel_lib//lib:bats_toolchain_type",
+-        "@bazel_tools//tools/sh:toolchain_type",
++        "@rules_shell//shell:toolchain_type",
+     ],
+     test = True,
+ )
+diff --git a/lib/windows_utils.bzl b/lib/windows_utils.bzl
+index 30a81fed92d17d7eff4ddd0e96179f3001923712..f0af1fb8397f83773af8883049f093928323c668 100644
+--- a/lib/windows_utils.bzl
++++ b/lib/windows_utils.bzl
+@@ -70,7 +70,7 @@ exit /b 0
+ def create_windows_native_launcher_script(ctx, shell_script):
+     """Create a Windows Batch file to launch the given shell script.
+ 
+-    The rule should specify @bazel_tools//tools/sh:toolchain_type as a required toolchain.
++    The rule should specify @rules_shell//shell:toolchain_type as a required toolchain.
+ 
+     Args:
+         ctx: Rule context
+@@ -101,7 +101,7 @@ if defined args (
+ )
+ "{bash_bin}" -c "!run_script! !args!"
+ """.format(
+-            bash_bin = ctx.toolchains["@bazel_tools//tools/sh:toolchain_type"].path,
++            bash_bin = ctx.toolchains["@rules_shell//shell:toolchain_type"].path,
+             sh_script = paths.to_rlocation_path(ctx, shell_script),
+             rlocation_function = BATCH_RLOCATION_FUNCTION,
+         ),
