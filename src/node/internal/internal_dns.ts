@@ -26,19 +26,26 @@ import { DnsError } from 'node-internal:internal_errors';
 import { validateString } from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 
-export function getServers(): string[] {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function getServers(): Promise<string[]> {
+  return ['1.1.1.1', '2606:4700:4700::1111', '1.0.0.1', '2606:4700:4700::1001'];
+}
+
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function lookup(): Promise<void> {
+  // TODO(soon): Implement this.
   throw new Error('Not implemented');
 }
 
-export function lookup(): void {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function lookupService(): Promise<void> {
+  // TODO(soon): Implement this.
   throw new Error('Not implemented');
 }
 
-export function lookupService(): void {
-  throw new Error('Not implemented');
-}
-
-export function resolve(): void {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function resolve(): Promise<void> {
+  // TODO(soon): Implement this.
   throw new Error('Not implemented');
 }
 
@@ -82,7 +89,9 @@ export function resolve6(
   });
 }
 
-export function resolveAny(): void {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function resolveAny(): Promise<void> {
+  // TODO(soon): Implement this
   throw new Error('Not implemented');
 }
 
@@ -216,14 +225,22 @@ export function reverse(name: string): Promise<string[]> {
   });
 }
 
-export function setDefaultResultOrder(): void {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function setDefaultResultOrder(): Promise<void> {
+  // Does not apply to workerd
   throw new Error('Not implemented');
 }
 
-export function getDefaultResultOrder(): string {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function getDefaultResultOrder(): Promise<void> {
+  // Does not apply to workerd
   throw new Error('Not implemented');
 }
 
-export function setServers(): void {
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function setServers(): Promise<void> {
+  // This function does not apply to workerd model.
+  // Our implementation always use Cloudflare DNS and does not
+  // allow users to change the underlying DNS server.
   throw new Error('Not implemented');
 }

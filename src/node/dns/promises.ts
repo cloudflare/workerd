@@ -12,6 +12,14 @@ import {
   resolveNaptr,
   resolve4,
   resolve6,
+  getServers,
+  setServers,
+  getDefaultResultOrder,
+  setDefaultResultOrder,
+  lookup,
+  lookupService,
+  resolve,
+  resolveAny,
 } from 'node-internal:internal_dns';
 
 export * from 'node-internal:internal_dns_constants';
@@ -28,6 +36,14 @@ export {
   resolveNaptr,
   resolve4,
   resolve6,
+  getServers,
+  setServers,
+  getDefaultResultOrder,
+  setDefaultResultOrder,
+  lookup,
+  lookupService,
+  resolve,
+  resolveAny,
 } from 'node-internal:internal_dns';
 
 export default {
@@ -43,5 +59,13 @@ export default {
   resolveNaptr,
   resolve4,
   resolve6,
+  getServers,
+  setServers,
+  getDefaultResultOrder,
+  setDefaultResultOrder,
+  lookup,
+  lookupService,
+  resolve,
+  resolveAny,
   ...errorCodes,
 };

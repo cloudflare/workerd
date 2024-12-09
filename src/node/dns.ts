@@ -4,30 +4,10 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import * as errorCodes from 'node-internal:internal_dns_constants';
-import {
-  getServers,
-  lookup,
-  lookupService,
-  resolve,
-  resolveAny,
-  setDefaultResultOrder,
-  getDefaultResultOrder,
-  setServers,
-} from 'node-internal:internal_dns';
 import * as dns from 'node-internal:internal_dns';
 import { callbackify } from 'node-internal:internal_utils';
 
 export * from 'node-internal:internal_dns_constants';
-export {
-  getServers,
-  lookup,
-  lookupService,
-  resolve,
-  resolveAny,
-  setDefaultResultOrder,
-  getDefaultResultOrder,
-  setServers,
-} from 'node-internal:internal_dns';
 
 export const reverse = callbackify(dns.reverse.bind(dns));
 export const resolveTxt = callbackify(dns.resolveTxt.bind(dns));
@@ -41,6 +21,18 @@ export const resolveSoa = callbackify(dns.resolveSoa.bind(dns));
 export const resolveNaptr = callbackify(dns.resolveNaptr.bind(dns));
 export const resolve4 = callbackify(dns.resolve4.bind(dns));
 export const resolve6 = callbackify(dns.resolve6.bind(dns));
+export const getServers = callbackify(dns.getServers.bind(dns));
+export const setServers = callbackify(dns.setServers.bind(dns));
+export const getDefaultResultOrder = callbackify(
+  dns.getDefaultResultOrder.bind(dns)
+);
+export const setDefaultResultOrder = callbackify(
+  dns.setDefaultResultOrder.bind(dns)
+);
+export const lookup = callbackify(dns.lookup.bind(this));
+export const lookupService = callbackify(dns.lookupService.bind(this));
+export const resolve = callbackify(dns.resolve.bind(this));
+export const resolveAny = callbackify(dns.resolveAny.bind(this));
 
 export default {
   getServers,

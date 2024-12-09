@@ -4,7 +4,7 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
-import { strictEqual, ok } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { inspect } from 'node:util';
 
 // Taken from Node.js
@@ -349,5 +349,16 @@ export const resolve6TTL = {
         ttl: true,
       })
     );
+  },
+};
+
+export const getServers = {
+  async test() {
+    deepStrictEqual(await dnsPromises.getServers(), [
+      '1.1.1.1',
+      '2606:4700:4700::1111',
+      '1.0.0.1',
+      '2606:4700:4700::1001',
+    ]);
   },
 };
