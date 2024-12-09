@@ -108,8 +108,7 @@ export type MX = {
   priority: number;
 };
 export function normalizeMx(name: string, answer: Answer): MX {
-  // eslint-disable-next-line prefer-const
-  let [priority, exchange]: string[] = answer.data.split(' ');
+  const [priority, exchange]: string[] = answer.data.split(' ');
   if (priority == null || exchange == null) {
     throw new DnsError(name, errorCodes.BADRESP, 'queryMx');
   }
@@ -117,7 +116,10 @@ export function normalizeMx(name: string, answer: Answer): MX {
   // Cloudflare API returns "data": "10 smtp.google.com." hence
   // we need to parse it. Let's play it safe.
   if (exchange.endsWith('.')) {
-    exchange = exchange.slice(0, -1);
+    return {
+      exchange: exchange.slice(0, -1),
+      priority: parseInt(priority, 10),
+    };
   }
 
   return {
@@ -143,12 +145,9 @@ export type CAA = {
 };
 export function normalizeCaa({ data }: Answer): CAA {
   // CAA API returns "hex", so we need to convert it to UTF-8
-  const obj = { critical: 0 };
   const record = dnsUtil.parseCaaRecord(data);
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error
+  const obj: CAA = { critical: record.critical };
   obj[record.field] = record.value;
-  obj.critical = record.critical;
   return obj;
 }
 

@@ -49,23 +49,16 @@ export function resolve4(
   validateString(name, 'name');
 
   // The following change is done to comply with Node.js behavior
-  const ttl = !options?.ttl;
+  const ttl = !!options?.ttl;
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'A').then((json) => {
     validateAnswer(json.Answer, name, 'queryA');
 
-    return json.Answer.map((a) => {
-      if (ttl) {
-        return {
-          ttl: a.TTL,
-          address: a.data,
-        };
-      }
-
-      return a.data;
-    });
+    return json.Answer.map((a) =>
+      ttl ? { ttl: a.TTL, address: a.data } : a.data
+    );
   });
 }
 
@@ -76,23 +69,16 @@ export function resolve6(
   validateString(name, 'name');
 
   // The following change is done to comply with Node.js behavior
-  const ttl = !options?.ttl;
+  const ttl = !!options?.ttl;
 
   // Validation errors needs to be sync.
   // Return a promise rather than using async qualifier.
   return sendDnsRequest(name, 'AAAA').then((json) => {
     validateAnswer(json.Answer, name, 'queryAaaa');
 
-    return json.Answer.map((a) => {
-      if (ttl) {
-        return {
-          ttl: a.TTL,
-          address: a.data,
-        };
-      }
-
-      return a.data;
-    });
+    return json.Answer.map((a) =>
+      ttl ? { ttl: a.TTL, address: a.data } : a.data
+    );
   });
 }
 

@@ -87,12 +87,12 @@ fn parse_caa_record(record: &str) -> ffi::CaaRecord {
 /// The format of the record is as follows:
 /// \# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00
 ///       |--|  |--|  |  |  |  |--------------------------|  |  |--------------|  |  |--------------------------------|
-///       |     |     |  |  |  |                             |  |              |  |  - Replacement
-///       |     |     |  |  |  |                             |  |              - Replacement length
+///       |     |     |  |  |  |                             |  |                 |  - Replacement
+///       |     |     |  |  |  |                             |  |                 - Length of first part of the replacement
 ///       |     |     |  |  |  |                             |  - Regexp
 ///       |     |     |  |  |  |                             - Regexp length
 ///       |     |     |  |  |  - Service
-///       |     |     |  |  - The length of service
+///       |     |     |  |  - Length of service
 ///       |     |     |  - Flag
 ///       |     |     - Length of flags
 ///       |     - Preference

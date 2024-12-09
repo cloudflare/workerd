@@ -45,18 +45,17 @@ export function normalizeEncoding(enc?: string): Encoding | undefined {
   return slowCases(enc);
 }
 
-export function slowCases(enc: string): Encoding | undefined {
+export function slowCases(enc: unknown): Encoding | undefined {
+  // @ts-expect-error TS18046 TS complains about unknown can not have length.
   switch (enc.length) {
     case 4:
       if (enc === 'UTF8') return UTF8;
       if (enc === 'ucs2' || enc === 'UCS2') return UTF16LE;
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       enc = `${enc}`.toLowerCase();
       if (enc === 'utf8') return UTF8;
       if (enc === 'ucs2') return UTF16LE;
       break;
     case 3:
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       if (enc === 'hex' || enc === 'HEX' || `${enc}`.toLowerCase() === 'hex') {
         return HEX;
       }
@@ -67,7 +66,6 @@ export function slowCases(enc: string): Encoding | undefined {
       if (enc === 'UTF-8') return UTF8;
       if (enc === 'ASCII') return ASCII;
       if (enc === 'UCS-2') return UTF16LE;
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       enc = `${enc}`.toLowerCase();
       if (enc === 'utf-8') return UTF8;
       if (enc === 'ascii') return ASCII;
@@ -78,7 +76,6 @@ export function slowCases(enc: string): Encoding | undefined {
       if (enc === 'latin1' || enc === 'binary') return LATIN1;
       if (enc === 'BASE64') return BASE64;
       if (enc === 'LATIN1' || enc === 'BINARY') return LATIN1;
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
       enc = `${enc}`.toLowerCase();
       if (enc === 'base64') return BASE64;
       if (enc === 'latin1' || enc === 'binary') return LATIN1;
@@ -87,7 +84,6 @@ export function slowCases(enc: string): Encoding | undefined {
       if (
         enc === 'utf16le' ||
         enc === 'UTF16LE' ||
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
         `${enc}`.toLowerCase() === 'utf16le'
       ) {
         return UTF16LE;
@@ -97,7 +93,6 @@ export function slowCases(enc: string): Encoding | undefined {
       if (
         enc === 'utf-16le' ||
         enc === 'UTF-16LE' ||
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
         `${enc}`.toLowerCase() === 'utf-16le'
       ) {
         return UTF16LE;
@@ -107,7 +102,6 @@ export function slowCases(enc: string): Encoding | undefined {
       if (
         enc === 'base64url' ||
         enc === 'BASE64URL' ||
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-template-expression
         `${enc}`.toLowerCase() === 'base64url'
       ) {
         return BASE64URL;
@@ -214,8 +208,7 @@ function callbackifyOnRejected(
   cb: (error?: unknown) => void
 ): void {
   if (!reason) {
-    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-    cb(new ERR_FALSY_VALUE_REJECTION(`${reason}`));
+    cb(new ERR_FALSY_VALUE_REJECTION(String(reason)));
     return;
   }
   cb(reason);
@@ -357,11 +350,11 @@ export function callbackify<T extends (...args: unknown[]) => Promise<unknown>>(
   }
 
   const descriptors = Object.getOwnPropertyDescriptors(original);
-  if (typeof descriptors['length']?.value === 'number') {
-    descriptors['length'].value++;
+  if (typeof descriptors.length?.value === 'number') {
+    descriptors.length.value++;
   }
-  if (typeof descriptors['name']?.value === 'string') {
-    descriptors['name'].value += 'Callbackified';
+  if (typeof descriptors.name?.value === 'string') {
+    descriptors.name.value += 'Callbackified';
   }
   const propertiesValues = Object.values(descriptors);
   for (let i = 0; i < propertiesValues.length; i++) {
