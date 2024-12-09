@@ -513,6 +513,7 @@ jsg::Ref<QueueEvent> startQueueEvent(EventTarget& globalEventTarget,
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
@@ -546,13 +547,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // can't just wait on their addEventListener handler to resolve because it can't be async).
   context.addWaitUntil(context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics()](Worker::Lock& lock) mutable {
+          &metrics = incomingRequest->getMetrics(),
+          props = kj::mv(props)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
-    queueEvent->event =
-        startQueueEvent(lock.getGlobalScope(), kj::mv(params), context.addObject(result), lock,
-            lock.getExportedHandler(entrypointName, context.getActor()), typeHandler);
+    queueEvent->event = startQueueEvent(lock.getGlobalScope(), kj::mv(params),
+        context.addObject(result), lock,
+        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
   }));
 
   // TODO(soon): There's a good chance we'll want a different wall-clock timeout for queue handlers

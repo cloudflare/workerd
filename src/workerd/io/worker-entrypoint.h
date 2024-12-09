@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/frankenvalue.capnp.h>
 #include <workerd/io/worker.h>
 
 namespace workerd {
@@ -30,6 +31,7 @@ class InvocationSpanContext;
 kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<const Worker> worker,
     kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
     kj::Own<LimitEnforcer> limitEnforcer,
     kj::Own<void> ioContextDependency,

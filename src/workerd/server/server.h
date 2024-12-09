@@ -41,7 +41,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::EntropySource& entropySource,
       Worker::ConsoleMode consoleMode,
       kj::Function<void(kj::String)> reportConfigError);
-  ~Server() noexcept(false);
+  ~Server() noexcept;
 
   // Permit experimental features to be used. These features may break backwards compatibility
   // in the future.
@@ -216,10 +216,13 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void abortAllActors();
 
   // Can only be called in the link stage.
-  Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
+  //
+  // May return a new object or may return a fake-own around a long-lived object.
+  kj::Own<Service> lookupService(
+      config::ServiceDesignator::Reader designator, kj::String errorContext);
 
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
-      Service& service,
+      kj::Own<Service> service,
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 

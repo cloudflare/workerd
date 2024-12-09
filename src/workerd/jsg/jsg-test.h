@@ -135,6 +135,28 @@ class Evaluator {
     lock.runMicrotasks();
   }
 
+  // Run some C++ code in a new lock and context.
+  template <typename Func>
+  void run(Func&& func) {
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) {
+      JSG_WITHIN_CONTEXT_SCOPE(lock,
+          lock.template newContext<ContextType>().getHandle(lock.v8Isolate), [&](jsg::Lock& js) {
+        v8::TryCatch tryCatch(js.v8Isolate);
+
+        try {
+          func(js);
+        } catch (JsExceptionThrown&) {
+          if (tryCatch.HasTerminated()) {
+            KJ_FAIL_ASSERT("TerminateExecution() was called");
+          } else {
+            KJ_ASSERT(tryCatch.HasCaught());
+            jsg::throwTunneledException(js.v8Isolate, tryCatch.Exception());
+          }
+        }
+      });
+    });
+  }
+
  private:
   V8System& v8System;
 };

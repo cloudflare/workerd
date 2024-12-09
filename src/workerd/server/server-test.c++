@@ -3697,6 +3697,53 @@ KJ_TEST("Server: JS RPC over HTTP connections") {
   conn.httpGet200("/", "got: 35");
 }
 
+KJ_TEST("Server: Entrypoint binding with props") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-02-23",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env) {
+                `    return new Response("got: " + await env.MyRpc.getProps());
+                `  }
+                `}
+                `export class MyRpc extends WorkerEntrypoint {
+                `  getProps() { return this.ctx.props.foo; }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "MyRpc",
+              service = (
+                name = "hello",
+                entrypoint = "MyRpc",
+                props = (
+                  json = `{"foo": 123}
+                )
+              )
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "got: 123");
+}
+
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)
