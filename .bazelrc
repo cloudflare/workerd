@@ -42,6 +42,8 @@ build --incompatible_disallow_empty_glob
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
 
+build --@rules_rust//rust/toolchain/channel=nightly
+
 # Dawn tint build flags
 build --@dawn//src/tint:tint_build_glsl_writer=False
 build --@dawn//src/tint:tint_build_glsl_validator=False
@@ -68,6 +70,9 @@ build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprec
 build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
 build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma,-Wno-deprecated-this-capture
 build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma,-Wno-deprecated-this-capture
+# TODO: Investigating build failures with protobuf
+build --per_file_copt=external/com_google_protobuf@-U_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+build --host_per_file_copt=external/com_google_protobuf@-U_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests
 # in GitHub Actions. This is an optional performance hack and shouly only be used in CI.
