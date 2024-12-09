@@ -288,6 +288,10 @@ struct ExportedHandler {
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
+  typedef kj::Promise<void> TailStreamHandler(
+      jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
+
   typedef kj::Promise<void> ScheduledHandler(jsg::Ref<ScheduledController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -319,6 +323,7 @@ struct ExportedHandler {
   JSG_STRUCT(fetch,
       tail,
       trace,
+      tailStream,
       scheduled,
       alarm,
       test,
@@ -331,10 +336,13 @@ struct ExportedHandler {
   // ExportedHandler isn't included in the global scope, but we still want to
   // include it in type definitions.
 
+  // TODO(streaming-tail-workers): Update ExportedHandlerTailStreamHandler override to
+  // use the correct type for `event`
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
     type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
+    type ExportedHandlerTailStreamHandler<Env = unknown> = (event : object, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
@@ -344,6 +352,7 @@ struct ExportedHandler {
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
     tail?: ExportedHandlerTailHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
+    tailStream?: ExportedHandlerTailStreamHandler<Env>;
     scheduled?: ExportedHandlerScheduledHandler<Env>;
     alarm: never;
     webSocketMessage: never;
