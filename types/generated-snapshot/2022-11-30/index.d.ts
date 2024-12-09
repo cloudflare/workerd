@@ -490,7 +490,7 @@ interface Cloudflare {
 }
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
-  alarm?(): void | Promise<void>;
+  alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
   webSocketMessage?(
     ws: WebSocket,
     message: string | ArrayBuffer,
@@ -5372,7 +5372,7 @@ declare module "cloudflare:workers" {
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
     fetch?(request: Request): Response | Promise<Response>;
-    alarm?(): void | Promise<void>;
+    alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
     webSocketMessage?(
       ws: WebSocket,
       message: string | ArrayBuffer,
