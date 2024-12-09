@@ -34,6 +34,92 @@ export const lookupService = callbackify(dns.lookupService.bind(this));
 export const resolve = callbackify(dns.resolve.bind(this));
 export const resolveAny = callbackify(dns.resolveAny.bind(this));
 
+export class Resolver {
+  public cancel(): void {
+    // TODO(soon): Implement this.
+    throw new Error('Not implemented');
+  }
+
+  public setLocalAddress(): void {
+    // Does not apply to workerd implementation
+    throw new Error('Not implemented');
+  }
+
+  public getServers(callback: never): void {
+    getServers(callback);
+  }
+
+  public resolve(callback: never): void {
+    resolve(callback);
+  }
+
+  public resolve4(
+    input: string,
+    options?: { ttl?: boolean },
+    callback?: never
+  ): void {
+    // @ts-expect-error TS2554 TODO(soon): Fix callbackify typescript types
+    resolve4(input, options, callback);
+  }
+
+  public resolve6(
+    input: string,
+    options?: { ttl?: boolean },
+    callback?: never
+  ): void {
+    // @ts-expect-error TS2554 TODO(soon): Fix callbackify typescript types
+    resolve6(input, options, callback);
+  }
+
+  public resolveAny(_input: string, callback: never): void {
+    resolveAny(callback);
+  }
+
+  public resolveCaa(name: string, callback: never): void {
+    resolveCaa(name, callback);
+  }
+
+  public resolveCname(name: string, callback: never): void {
+    resolveCname(name, callback);
+  }
+
+  public resolveMx(name: string, callback: never): void {
+    resolveMx(name, callback);
+  }
+
+  public resolveNaptr(name: string, callback: never): void {
+    resolveNaptr(name, callback);
+  }
+
+  public resolveNs(name: string, callback: never): void {
+    resolveNs(name, callback);
+  }
+
+  public resolvePtr(name: string, callback: never): void {
+    resolvePtr(name, callback);
+  }
+
+  public resolveSoa(name: string, callback: never): void {
+    resolveSoa(name, callback);
+  }
+
+  public resolveSrv(name: string, callback: never): void {
+    resolveSrv(name, callback);
+  }
+
+  public resolveTxt(name: string, callback: never): void {
+    resolveTxt(name, callback);
+  }
+
+  public reverse(name: string, callback: never): void {
+    reverse(name, callback);
+  }
+
+  public setServers(callback: never): void {
+    setServers(callback);
+  }
+}
+
 export default {
   getServers,
   lookup,
@@ -55,6 +141,7 @@ export default {
   setDefaultResultOrder,
   getDefaultResultOrder,
   setServers,
+  Resolver,
 
   ...errorCodes,
 };

@@ -21,6 +21,14 @@ import {
   resolve,
   resolveAny,
 } from 'node-internal:internal_dns';
+import {
+  CAA,
+  MX,
+  NAPTR,
+  SOA,
+  SRV,
+  TTLResponse,
+} from 'node:internal/internal_dns_client';
 
 export * from 'node-internal:internal_dns_constants';
 export {
@@ -46,6 +54,90 @@ export {
   resolveAny,
 } from 'node-internal:internal_dns';
 
+export class Resolver {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  public async cancel(): Promise<void> {
+    // TODO(soon): Implement this.
+    throw new Error('Not implemented');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  public async setLocalAddress(): Promise<void> {
+    // Does not apply to workerd implementation
+    throw new Error('Not implemented');
+  }
+
+  public getServers(): Promise<string[]> {
+    return getServers();
+  }
+
+  public resolve(): Promise<void> {
+    return resolve();
+  }
+
+  public resolve4(
+    input: string,
+    options?: { ttl?: boolean }
+  ): Promise<(string | TTLResponse)[]> {
+    return resolve4(input, options);
+  }
+
+  public resolve6(
+    input: string,
+    options?: { ttl?: boolean }
+  ): Promise<(string | TTLResponse)[]> {
+    return resolve6(input, options);
+  }
+
+  public resolveAny(): Promise<void> {
+    return resolveAny();
+  }
+
+  public resolveCaa(name: string): Promise<CAA[]> {
+    return resolveCaa(name);
+  }
+
+  public resolveCname(name: string): Promise<string[]> {
+    return resolveCname(name);
+  }
+
+  public resolveMx(name: string): Promise<MX[]> {
+    return resolveMx(name);
+  }
+
+  public resolveNaptr(name: string): Promise<NAPTR[]> {
+    return resolveNaptr(name);
+  }
+
+  public resolveNs(name: string): Promise<string[]> {
+    return resolveNs(name);
+  }
+
+  public esolvePtr(name: string): Promise<string[]> {
+    return resolvePtr(name);
+  }
+
+  public resolveSoa(name: string): Promise<SOA> {
+    return resolveSoa(name);
+  }
+
+  public resolveSrv(name: string): Promise<SRV[]> {
+    return resolveSrv(name);
+  }
+
+  public resolveTxt(name: string): Promise<string[][]> {
+    return resolveTxt(name);
+  }
+
+  public reverse(name: string): Promise<string[]> {
+    return reverse(name);
+  }
+
+  public setServers(): Promise<void> {
+    return setServers();
+  }
+}
+
 export default {
   reverse,
   resolveTxt,
@@ -67,5 +159,6 @@ export default {
   lookupService,
   resolve,
   resolveAny,
+  Resolver,
   ...errorCodes,
 };
