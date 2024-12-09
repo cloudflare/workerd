@@ -18,6 +18,7 @@
 
 namespace workerd {
 
+class IoContext;
 class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
@@ -126,6 +127,20 @@ class RequestObserver: public kj::Refcounted {
   virtual SpanParent getUserSpan() {
     return nullptr;
   }
+
+  // If the worker is configured to support streaming tail workers, reportTailEvent
+  // will forward the given event on to the collection of streaming tail workers
+  // that are configured with this observer. Otherwise, this is a non-op.
+  virtual void reportTailEvent(IoContext& ioContext, tracing::TailEvent::Event&& event) {
+    reportTailEvent(ioContext, [event = kj::mv(event)]() mutable { return kj::mv(event); });
+  }
+
+  // If the worker is configured to support streaming tail workers, reportTailEvent
+  // will forward the event returned by the callback on to the collection of streaming
+  // fail workers that are configured with this observer. The callback will only be
+  // invoked if there are tail workers.
+  virtual void reportTailEvent(
+      IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) {}
 
   virtual kj::Own<void> addedContextTask() {
     return kj::Own<void>();

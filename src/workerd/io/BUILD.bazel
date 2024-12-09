@@ -51,6 +51,7 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
+        "trace-stream.c++",
         "worker.c++",
     ] + ["//src/workerd/api:srcs"] + select({
         ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:srcs"],
@@ -66,6 +67,7 @@ wd_cc_library(
         "io-own.h",
         "io-util.h",
         "promise-wrapper.h",
+        "trace-stream.h",
         "worker.h",
     ] + ["//src/workerd/api:hdrs"] + select({
         ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:hdrs"],
@@ -106,6 +108,7 @@ wd_cc_library(
         "//src/workerd/api:url",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:completion-membrane",
         "//src/workerd/util:sqlite",
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",

@@ -18,6 +18,7 @@
 #include <workerd/io/hibernation-manager.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
@@ -42,6 +43,7 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <list>
 
 namespace workerd::server {
 
@@ -1464,9 +1466,168 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 
 // =======================================================================================
 namespace {
+
+struct TailStreamWriterState {
+  // The initial state of our tail worker writer is that it is pending the first
+  // onset event. During this time we will only have a collection of WorkerInterface
+  // instances. When our first event is reported (the onset) we will arrange to acquire
+  // tailStream capabilities from each then use those to report the initial onset.
+  using Pending = kj::Array<kj::Own<WorkerInterface>>;
+
+  struct Active {
+    // Reference to keep the worker interface instance alive.
+    kj::Maybe<rpc::TailStreamTarget::Client> capability;
+
+    // Every active tail worker target will have a queue.
+    bool pumping = false;
+    bool onsetSeen = false;
+    std::list<tracing::TailEvent> queue;
+  };
+
+  struct Closed {};
+
+  kj::OneOf<Pending, kj::Array<Active>, Closed> inner;
+  kj::TaskSet& waitUntilTasks;
+
+  TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
+      : inner(kj::mv(pending)),
+        waitUntilTasks(waitUntilTasks) {}
+  KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriterState);
+
+  void reportImpl(tracing::TailEvent&& event) {
+    // In reportImpl, our inner state must be active.
+    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<Active>>());
+
+    // We only care about sessions that are currently active.
+    kj::Vector<Active> alive(actives.size());
+    for (auto& active: actives) {
+      if (active.capability != kj::none) {
+        alive.add(kj::mv(active));
+      }
+    }
+
+    if (alive.size() == 0) {
+      // Oh! We have no active sessions. Well, nevermind then, let's
+      // transition to a closed state and drop everything on the floor.
+      inner = Closed{};
+      return;
+    }
+
+    // Deliver the event to the queue and make sure we are processing.
+    for (Active& active: alive) {
+      active.queue.push_back(event.clone());
+      if (!active.pumping) {
+        waitUntilTasks.add(pump(active));
+      }
+    }
+
+    inner = alive.releaseAsArray();
+  }
+
+  kj::Promise<void> pump(Active& current) {
+    // At the start of the loop we should have an initial capability.
+    auto& cap = KJ_ASSERT_NONNULL(current.capability);
+    current.pumping = true;
+    KJ_DEFER(current.pumping = false);
+
+    if (!current.onsetSeen) {
+      // Our first event... yay
+      current.onsetSeen = true;
+      KJ_ASSERT(!current.queue.empty());
+      auto onsetEvent = kj::mv(current.queue.front());
+      current.queue.pop_front();
+      auto builder = cap.reportRequest();
+      auto eventsBuilder = builder.initEvents(1);
+      onsetEvent.copyTo(eventsBuilder[0]);
+      auto result = co_await builder.send();
+      if (!result.hasPipeline()) {
+        // If we don't have a pipeline result at this point, then the
+        // tail worker is not interested in events. Let's clear the
+        // capability and any events that may have been queued..
+        current.capability = kj::none;
+        current.queue.clear();
+        co_return;
+      }
+      // We have a pipeline! Let's replace our initial then proceed to
+      // deliver all the queued events (if any).
+      current.capability = result.getPipeline();
+
+      // Be sure to grab the new capability before we start delivering events.
+      cap = KJ_ASSERT_NONNULL(current.capability);
+    }
+
+    // Deliver streaming tail events in batches if possible.
+    while (!current.queue.empty()) {
+      auto builder = cap.reportRequest();
+      auto eventsBuilder = builder.initEvents(current.queue.size());
+      size_t n = 0;
+      for (auto& event: current.queue) {
+        event.copyTo(eventsBuilder[n++]);
+      }
+      current.queue.clear();
+      co_await builder.send();
+    }
+  }
+};
+
+kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
+  if (streamingTailWorkers.size() == 0) {
+    return kj::none;
+  }
+  return kj::heap<tracing::TailStreamWriter>(
+      [state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks)](
+          IoContext& ioContext, tracing::TailEvent&& event) mutable {
+    KJ_SWITCH_ONEOF(state->inner) {
+      KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
+        // The tail stream has already been closed because we have received either
+        // an outcome or hibernate event. The writer should have failed and we
+        // actually shouldn't get here. Assert!
+        KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback evoked after close");
+      }
+      KJ_CASE_ONEOF(pending, TailStreamWriterState::Pending) {
+        // This is our first event! It has to be an onset event, which the writer
+        // should have validated for us. Assert if it is not an onset then proceed
+        // to start each of our tail working sessions.
+        KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
+
+        // Transitions into the active state by grabbing the pending client
+        // capability.
+        state->inner = KJ_MAP(wi, pending) {
+          auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+          auto result = customEvent->getCap();
+          ioContext.addTask(
+              wi->customEvent(kj::mv(customEvent)).attach(kj::mv(wi)).then([](auto&&) {
+          }, [](kj::Exception&&) {}));
+          return TailStreamWriterState::Active{
+            .capability = kj::mv(result),
+          };
+        };
+        state->reportImpl(kj::mv(event));
+      }
+      KJ_CASE_ONEOF(active, kj::Array<TailStreamWriterState::Active>) {
+        // Event cannot be a onset, which should have been validated by the writer.
+        KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
+        auto final = event.event.is<tracing::Outcome>() || event.event.is<tracing::Hibernate>();
+        KJ_DEFER({
+          if (final) state->inner = TailStreamWriterState::Closed{};
+        });
+        state->reportImpl(kj::mv(event));
+      }
+    }
+    return !state->inner.is<TailStreamWriterState::Closed>();
+  });
+}
+
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
  public:
-  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer): tracer(kj::mv(tracer)) {}
+  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer,
+      kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+      kj::TaskSet& waitUntilTasks)
+      : tracer(kj::mv(tracer)),
+        maybeTailStreamWriter(
+            initializeTailStreamWriter(kj::mv(streamingTailWorkers), waitUntilTasks)) {}
+
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
       if (fetchStatus != 0) {
@@ -1487,6 +1648,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   void reportFailure(const kj::Exception& exception, FailureSource source) override {
     outcome = EventOutcome::EXCEPTION;
+  }
+
+  void reportTailEvent(
+      IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) override {
+    KJ_IF_SOME(writer, maybeTailStreamWriter) {
+      writer->report(ioContext, fn());
+    }
   }
 
   // WorkerInterface
@@ -1574,6 +1742,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
  private:
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
+  kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
   EventOutcome outcome = EventOutcome::OK;
   kj::uint fetchStatus = 0;
 };
@@ -1718,22 +1887,16 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
     kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
-    // TODO(streaming-tail-workers): If we have streaming tail workers configured, then
-    // we need to grab the RPC client stubs for each but we won't initiate the actual
-    // request yet... at least not until the onset event is reported.
-
     if (legacyTailWorkers.size() > 0) {
       // Setting up legacy tail workers support, but only if we actually have tail workers
       // configured.
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-      auto workerTracerImpl = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
+      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
           kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
           kj::none /* entrypoint */);
-      observer = kj::refcounted<RequestObserverWithTracer>(kj::addRef(*workerTracerImpl));
-      workerTracer = kj::mv(workerTracerImpl);
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
@@ -1757,6 +1920,9 @@ class Server::WorkerService final: public Service,
         co_return;
       })));
     }
+
+    observer = kj::refcounted<RequestObserverWithTracer>(
+        mapAddRef(workerTracer), kj::mv(streamingTailWorkers), waitUntilTasks);
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
@@ -3565,6 +3731,18 @@ class Server::HttpListener final: public kj::Refcounted {
 
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<JsRpcSessionResults> pipelineBuilder;
+      pipelineBuilder.setTopLevel(cap);
+      context.setPipeline(pipelineBuilder.build());
+      context.getResults().setTopLevel(kj::mv(cap));
+
+      auto worker = getWorker();
+      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
+    }
+
+    kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
+      auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+      auto cap = customEvent->getCap();
+      capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
       pipelineBuilder.setTopLevel(cap);
       context.setPipeline(pipelineBuilder.build());
       context.getResults().setTopLevel(kj::mv(cap));

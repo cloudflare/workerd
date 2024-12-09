@@ -769,36 +769,6 @@ struct TailEvent final {
   void copyTo(rpc::Trace::TailEvent::Builder builder);
   TailEvent clone();
 };
-
-// A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
- public:
-  using Reporter = kj::Function<void(TailEvent&&)>;
-  using TimeProvider = kj::Function<kj::Date()>;
-
-  TailStreamWriter(
-      const InvocationSpanContext& context, Reporter reporter, TimeProvider timeProvider);
-  KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
-
-  void report(TailEvent::Event&& event);
-  inline void report(Mark&& event) {
-    report(TailEvent::Event(kj::mv(event)));
-  }
-
- private:
-  struct State {
-    const InvocationSpanContext& context;
-    Reporter reporter;
-    TimeProvider timeProvider;
-    uint32_t sequence = 0;
-    bool onsetSeen = false;
-    State(const InvocationSpanContext& context, Reporter reporter, TimeProvider timeProvider)
-        : context(context),
-          reporter(kj::mv(reporter)),
-          timeProvider(kj::mv(timeProvider)) {}
-  };
-  kj::Maybe<State> state;
-};
 }  // namespace tracing
 
 enum class PipelineLogLevel {
