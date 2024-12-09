@@ -3,6 +3,7 @@ import * as errorCodes from 'node-internal:internal_dns_constants';
 
 export * from 'node-internal:internal_dns_constants';
 
+export const Resolver = dnsUtil.Resolver;
 export const getServers = dnsUtil.getServers.bind(dnsUtil);
 export const lookup = dnsUtil.lookup.bind(dnsUtil);
 export const lookupService = dnsUtil.lookupService.bind(dnsUtil);
@@ -27,6 +28,7 @@ export const getDefaultResultOrder =
 export const setServers = dnsUtil.setServers.bind(dnsUtil);
 
 export default {
+  Resolver,
   getServers,
   lookup,
   lookupService,
