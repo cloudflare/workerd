@@ -30,8 +30,13 @@ import %workspace%/build/ci.bazelrc
 
 import %workspace%/build/lint.bazelrc
 
-# Enable webgpu
-build --//src/workerd/io:enable_experimental_webgpu=True
+# Enable webgpu. Merely fetching the required Dawn library and computing the repo mapping based on
+# it slows down the Windows build significantly, so only enable this on Unix and for Windows release
+# builds. This is mostly motivated by compile time constraints, we hope to lift this limitation
+# again if this Windows performance bottleneck gets fixed within Bazel.
+build:unix --config=webgpu
+build:release_windows --config=webgpu
+build:webgpu --//src/workerd/io:enable_experimental_webgpu=True
 
 # Avoid generating duplicate runfile trees. This will become the default in a future bazel version.
 build --nolegacy_external_runfiles
@@ -42,16 +47,16 @@ build --incompatible_disallow_empty_glob
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
 
-# Dawn tint build flags
-build --@dawn//src/tint:tint_build_glsl_writer=False
-build --@dawn//src/tint:tint_build_glsl_validator=False
-build --@dawn//src/tint:tint_build_hlsl_writer=True
-build --@dawn//src/tint:tint_build_ir=False
-build --@dawn//src/tint:tint_build_msl_writer=True
-build --@dawn//src/tint:tint_build_spv_reader=False
-build --@dawn//src/tint:tint_build_spv_writer=True
-build --@dawn//src/tint:tint_build_wgsl_reader=True
-build --@dawn//src/tint:tint_build_wgsl_writer=True
+# Dawn tint build flags. Only enable when building with webgpu support
+build:webgpu --@dawn//src/tint:tint_build_glsl_writer=False
+build:webgpu --@dawn//src/tint:tint_build_glsl_validator=False
+build:webgpu --@dawn//src/tint:tint_build_hlsl_writer=True
+build:webgpu --@dawn//src/tint:tint_build_ir=False
+build:webgpu --@dawn//src/tint:tint_build_msl_writer=True
+build:webgpu --@dawn//src/tint:tint_build_spv_reader=False
+build:webgpu --@dawn//src/tint:tint_build_spv_writer=True
+build:webgpu --@dawn//src/tint:tint_build_wgsl_reader=True
+build:webgpu --@dawn//src/tint:tint_build_wgsl_writer=True
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
