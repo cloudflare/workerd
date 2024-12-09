@@ -50,40 +50,56 @@ async function assertFetchCacheRejectsError(
 
 export const cacheMode = {
   async test(ctrl: any, env: any, ctx: any) {
-    const allowedCacheModes: RequestCache[] = [
+    const allowedCacheModes: Set<RequestCache> = new Set([
       'default',
       'force-cache',
       'no-cache',
       'no-store',
       'only-if-cached',
       'reload',
-    ];
+    ]);
     assert.strictEqual('cache' in Request.prototype, env.CACHE_ENABLED);
     {
       const req = new Request('https://example.org', {});
       assert.strictEqual(req.cache, undefined);
     }
-    if (!env.CACHE_ENABLED) {
-      for (const cacheMode of allowedCacheModes) {
+
+    var enabledCacheModes: Set<RequestCache> = new Set();
+
+    if (env.CACHE_ENABLED) {
+      enabledCacheModes.add('no-store');
+    }
+    if (env.NO_CACHE_ENABLED) {
+      enabledCacheModes.add('no-cache');
+    }
+
+    const failureCacheModes = allowedCacheModes.difference(enabledCacheModes);
+    for (const cacheMode of failureCacheModes) {
+      if (!env.CACHE_ENABLED) {
         await assertRequestCacheThrowsError(cacheMode);
         await assertFetchCacheRejectsError(cacheMode);
+      } else {
+        await assertRequestCacheThrowsError(
+          cacheMode,
+          'TypeError',
+          'Unsupported cache mode: ' + cacheMode
+        );
+        await assertFetchCacheRejectsError(
+          cacheMode,
+          'TypeError',
+          'Unsupported cache mode: ' + cacheMode
+        );
       }
-    } else {
-      var failureCacheModes: RequestCache[] = [
-        'default',
-        'no-cache',
-        'force-cache',
-        'only-if-cached',
-        'reload',
-      ];
+    }
+    for (const cacheMode of enabledCacheModes) {
       {
-        const req = new Request('https://example.org', { cache: 'no-store' });
-        assert.strictEqual(req.cache, 'no-store');
+        const req = new Request('https://example.org', { cache: cacheMode });
+        assert.strictEqual(req.cache, cacheMode);
       }
       {
         const response = await env.SERVICE.fetch(
           'http://placeholder/not-found',
-          { cache: 'no-store' }
+          { cache: cacheMode }
         );
         assert.strictEqual(
           util.inspect(response),
@@ -104,18 +120,6 @@ export const cacheMode = {
   },
   bodyUsed: false
 }`
-        );
-      }
-      for (const cacheMode of failureCacheModes) {
-        await assertRequestCacheThrowsError(
-          cacheMode,
-          'TypeError',
-          'Unsupported cache mode: ' + cacheMode
-        );
-        await assertFetchCacheRejectsError(
-          cacheMode,
-          'TypeError',
-          'Unsupported cache mode: ' + cacheMode
         );
       }
     }
