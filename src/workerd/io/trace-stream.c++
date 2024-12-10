@@ -10,10 +10,122 @@
 
 namespace workerd::tracing {
 namespace {
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute) {
+
+#define STRS(V)                                                                                    \
+  V(ALARM, "alarm")                                                                                \
+  V(ATTACHMENT, "attachment")                                                                      \
+  V(ATTRIBUTE, "attribute")                                                                        \
+  V(BATCHSIZE, "batchSize")                                                                        \
+  V(CANCELED, "canceled")                                                                          \
+  V(CHANNEL, "channel")                                                                            \
+  V(CFJSON, "cfJson")                                                                              \
+  V(CLOSE, "close")                                                                                \
+  V(CODE, "code")                                                                                  \
+  V(CPUTIME, "cpuTime")                                                                            \
+  V(CRON, "cron")                                                                                  \
+  V(CUSTOM, "custom")                                                                              \
+  V(DAEMONDOWN, "daemonDown")                                                                      \
+  V(DEBUG, "debug")                                                                                \
+  V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
+  V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
+  V(EMAIL, "email")                                                                                \
+  V(ENTRYPOINT, "entrypoint")                                                                      \
+  V(ERROR, "error")                                                                                \
+  V(EVENT, "event")                                                                                \
+  V(EXCEEDEDCPU, "exceededCpu")                                                                    \
+  V(EXCEEDEDMEMORY, "exceededMemory")                                                              \
+  V(EXCEPTION, "exception")                                                                        \
+  V(FETCH, "fetch")                                                                                \
+  V(HEADERS, "headers")                                                                            \
+  V(HIBERNATABLEWEBSOCKET, "hibernatableWebSocket")                                                \
+  V(HIBERNATE, "hibernate")                                                                        \
+  V(ID, "id")                                                                                      \
+  V(INFO, "info")                                                                                  \
+  V(INVOCATIONID, "invocationId")                                                                  \
+  V(JSRPC, "jsrpc")                                                                                \
+  V(KILLSWITCH, "killSwitch")                                                                      \
+  V(LABEL, "label")                                                                                \
+  V(LEVEL, "level")                                                                                \
+  V(LINK, "link")                                                                                  \
+  V(LOADSHED, "loadShed")                                                                          \
+  V(LOG, "log")                                                                                    \
+  V(MAILFROM, "mailFrom")                                                                          \
+  V(MESSAGE, "message")                                                                            \
+  V(METHOD, "method")                                                                              \
+  V(METHODNAME, "methodName")                                                                      \
+  V(NAME, "name")                                                                                  \
+  V(OK, "ok")                                                                                      \
+  V(ONSET, "onset")                                                                                \
+  V(OP, "op")                                                                                      \
+  V(OUTCOME, "outcome")                                                                            \
+  V(QUEUE, "queue")                                                                                \
+  V(QUEUENAME, "queueName")                                                                        \
+  V(RAWSIZE, "rawSize")                                                                            \
+  V(RCPTTO, "rcptTo")                                                                              \
+  V(RESPONSESTREAMDISCONNECTED, "responseStreamDisconnected")                                      \
+  V(RESUME, "resume")                                                                              \
+  V(RETURN, "return")                                                                              \
+  V(SCHEDULED, "scheduled")                                                                        \
+  V(SCHEDULEDTIME, "scheduledTime")                                                                \
+  V(SCRIPTNAME, "scriptName")                                                                      \
+  V(SCRIPTNOTFOUND, "scriptNotFound")                                                              \
+  V(SCRIPTTAGS, "scriptTags")                                                                      \
+  V(SCRIPTVERSION, "scriptVersion")                                                                \
+  V(SEQUENCE, "sequence")                                                                          \
+  V(SPANCLOSE, "spanClose")                                                                        \
+  V(SPANID, "spanId")                                                                              \
+  V(SPANOPEN, "spanOpen")                                                                          \
+  V(STACK, "stack")                                                                                \
+  V(STATUSCODE, "statusCode")                                                                      \
+  V(TAG, "tag")                                                                                    \
+  V(TIMESTAMP, "timestamp")                                                                        \
+  V(TRACEID, "traceId")                                                                            \
+  V(TRACE, "trace")                                                                                \
+  V(TRACES, "traces")                                                                              \
+  V(TRIGGER, "trigger")                                                                            \
+  V(TYPE, "type")                                                                                  \
+  V(UNKNOWN, "unknown")                                                                            \
+  V(URL, "url")                                                                                    \
+  V(VALUE, "value")                                                                                \
+  V(WALLTIME, "wallTime")                                                                          \
+  V(WARN, "warn")                                                                                  \
+  V(WASCLEAN, "wasClean")
+
+#define V(N, L) constexpr kj::StringPtr N##_STR = L##_kj;
+STRS(V)
+#undef STRS
+
+// Utility that prevents creating duplicate JS strings while serializing a tail event.
+class StringCache final {
+ public:
+  StringCache() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(StringCache);
+
+  jsg::JsValue get(jsg::Lock& js, kj::StringPtr value) {
+    return cache
+        .findOrCreate(value, [&]() -> decltype(cache)::Entry {
+      return {value, jsg::JsRef<jsg::JsValue>(js, js.strIntern(value))};
+    }).getHandle(js);
+  }
+
+ private:
+  kj::HashMap<kj::StringPtr, jsg::JsRef<jsg::JsValue>> cache;
+};
+
+// Why ToJS(...) functions and not JSG_STRUCT? Good question. The various tracing:*
+// types are defined in the "trace" bazel target which currently does not depend on
+// jsg in any way. These also represent the internal API of these types which doesn't
+// really match exactly what we want to expose to users. In order to use JSG_STRUCT
+// we would either need to make the "trace" target depend on "jsg", which seems a bit
+// wasteful and unnecessary, or we'd need to define wrapper structs that use JSG_STRUCT
+// which also seems wasteful and unnecessary. We also don't need the type mapping for
+// these structs to be bidirectional. So, instead, let's just do the simple easy thing
+// and define a set of serializers to these types.
+
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("attribute"_kj));
-  obj.set(js, "name"_kj, js.str(attribute.name));
+  obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTE_STR));
+  obj.set(js, NAME_STR, cache.get(js, attribute.name));
 
   auto ToJs = [](jsg::Lock& js, const tracing::Attribute::Value& value) -> jsg::JsValue {
     KJ_SWITCH_ONEOF(value) {
@@ -34,88 +146,89 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute) {
   };
 
   if (attribute.value.size() == 1) {
-    obj.set(js, "value"_kj, ToJs(js, attribute.value[0]));
+    obj.set(js, VALUE_STR, ToJs(js, attribute.value[0]));
   } else {
     auto values = KJ_MAP(val, attribute.value) { return ToJs(js, val); };
-    obj.set(js, "value"_kj, js.arr(values));
+    obj.set(js, VALUE_STR, js.arr(values));
   }
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes) {
-  auto attrs = KJ_MAP(attr, attributes) { return ToJs(js, attr); };
+jsg::JsValue ToJs(
+    jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes, StringCache& cache) {
+  auto attrs = KJ_MAP(attr, attributes) { return ToJs(js, attr, cache); };
   return js.arr(attrs);
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("fetch"_kj));
-  obj.set(js, "statusCode"_kj, js.num(info.statusCode));
+  obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
+  obj.set(js, STATUSCODE_STR, js.num(info.statusCode));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("fetch"_kj));
-  obj.set(js, "method"_kj, js.str(kj::str(info.method)));
-  obj.set(js, "url"_kj, js.str(info.url));
-  obj.set(js, "cfJson"_kj, js.str(info.cfJson));
+  obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
+  obj.set(js, METHOD_STR, cache.get(js, kj::str(info.method)));
+  obj.set(js, URL_STR, js.str(info.url));
+  obj.set(js, CFJSON_STR, js.str(info.cfJson));
 
-  auto ToJs = [](jsg::Lock& js, const tracing::FetchEventInfo::Header& header) {
+  auto ToJs = [](jsg::Lock& js, const tracing::FetchEventInfo::Header& header, StringCache& cache) {
     auto obj = js.obj();
-    obj.set(js, "name"_kj, js.str(header.name));
-    obj.set(js, "value"_kj, js.str(header.value));
+    obj.set(js, NAME_STR, cache.get(js, header.name));
+    obj.set(js, VALUE_STR, js.str(header.value));
     return obj;
   };
 
-  auto headers = KJ_MAP(header, info.headers) -> jsg::JsValue { return ToJs(js, header); };
-  obj.set(js, "headers", js.arr(headers));
+  auto headers = KJ_MAP(header, info.headers) -> jsg::JsValue { return ToJs(js, header, cache); };
+  obj.set(js, HEADERS_STR, js.arr(headers));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("jsrpc"_kj));
-  obj.set(js, "methodName"_kj, js.str(info.methodName));
+  obj.set(js, TYPE_STR, cache.get(js, JSRPC_STR));
+  obj.set(js, METHODNAME_STR, cache.get(js, info.methodName));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("scheduled"_kj));
-  obj.set(js, "scheduledTime"_kj, js.date(info.scheduledTime));
-  obj.set(js, "cron"_kj, js.str(info.cron));
+  obj.set(js, TYPE_STR, cache.get(js, SCHEDULED_STR));
+  obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
+  obj.set(js, CRON_STR, js.str(info.cron));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("alarm"_kj));
-  obj.set(js, "scheduledTime"_kj, js.date(info.scheduledTime));
+  obj.set(js, TYPE_STR, cache.get(js, ALARM_STR));
+  obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::QueueEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::QueueEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("queue"_kj));
-  obj.set(js, "queueName"_kj, js.str(info.queueName));
-  obj.set(js, "batchSize"_kj, js.num(info.batchSize));
+  obj.set(js, TYPE_STR, cache.get(js, QUEUE_STR));
+  obj.set(js, QUEUENAME_STR, js.str(info.queueName));
+  obj.set(js, BATCHSIZE_STR, js.num(info.batchSize));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("email"_kj));
-  obj.set(js, "mailFrom"_kj, js.str(info.mailFrom));
-  obj.set(js, "rcptTo"_kj, js.str(info.rcptTo));
-  obj.set(js, "rawSize"_kj, js.num(info.rawSize));
+  obj.set(js, TYPE_STR, cache.get(js, EMAIL_STR));
+  obj.set(js, MAILFROM_STR, js.str(info.mailFrom));
+  obj.set(js, RCPTTO_STR, js.str(info.rcptTo));
+  obj.set(js, RAWSIZE_STR, js.num(info.rawSize));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("trace"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, TRACE_STR));
 
   auto names = KJ_MAP(trace, info.traces) -> jsg::JsValue {
     KJ_IF_SOME(name, trace.scriptName) {
@@ -123,270 +236,271 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info) {
     }
     return js.null();
   };
-  obj.set(js, "traces"_kj, js.arr(names));
+  obj.set(js, TRACES_STR, js.arr(names));
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::HibernatableWebSocketEventInfo& info) {
+jsg::JsValue ToJs(
+    jsg::Lock& js, const tracing::HibernatableWebSocketEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("hibernatableWebSocket"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, HIBERNATABLEWEBSOCKET_STR));
 
   KJ_SWITCH_ONEOF(info.type) {
     KJ_CASE_ONEOF(message, tracing::HibernatableWebSocketEventInfo::Message) {
       auto mobj = js.obj();
-      mobj.set(js, "type"_kj, js.str("message"_kj));
-      obj.set(js, "info"_kj, mobj);
+      mobj.set(js, TYPE_STR, cache.get(js, MESSAGE_STR));
+      obj.set(js, INFO_STR, mobj);
     }
     KJ_CASE_ONEOF(error, tracing::HibernatableWebSocketEventInfo::Error) {
       auto mobj = js.obj();
-      mobj.set(js, "type"_kj, js.str("error"_kj));
-      obj.set(js, "info"_kj, mobj);
+      mobj.set(js, TYPE_STR, cache.get(js, ERROR_STR));
+      obj.set(js, INFO_STR, mobj);
     }
     KJ_CASE_ONEOF(close, tracing::HibernatableWebSocketEventInfo::Close) {
       auto mobj = js.obj();
-      mobj.set(js, "type"_kj, js.str("close"_kj));
-      mobj.set(js, "code"_kj, js.num(close.code));
-      mobj.set(js, "wasClean"_kj, js.boolean(close.wasClean));
-      obj.set(js, "info"_kj, mobj);
+      mobj.set(js, TYPE_STR, cache.get(js, CLOSE_STR));
+      mobj.set(js, CODE_STR, js.num(close.code));
+      mobj.set(js, WASCLEAN_STR, js.boolean(close.wasClean));
+      obj.set(js, INFO_STR, mobj);
     }
   }
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Resume& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Resume& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("resume"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, RESUME_STR));
 
   KJ_IF_SOME(attachment, info.attachment) {
     jsg::Serializer::Released data{
       .data = kj::heapArray<kj::byte>(attachment),
     };
     jsg::Deserializer deser(js, data);
-    obj.set(js, "attachment"_kj, deser.readValue(js));
+    obj.set(js, ATTACHMENT_STR, deser.readValue(js));
   }
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::CustomEventInfo& info) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::CustomEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("custom"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, CUSTOM_STR));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome) {
+jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache) {
   switch (outcome) {
     case EventOutcome::OK:
-      return js.str("ok"_kj);
+      return cache.get(js, OK_STR);
     case EventOutcome::CANCELED:
-      return js.str("canceled"_kj);
+      return cache.get(js, CANCELED_STR);
     case EventOutcome::EXCEPTION:
-      return js.str("exception"_kj);
+      return cache.get(js, EXCEPTION_STR);
     case EventOutcome::KILL_SWITCH:
-      return js.str("kilSwitch"_kj);
+      return cache.get(js, KILLSWITCH_STR);
     case EventOutcome::DAEMON_DOWN:
-      return js.str("daemonDown"_kj);
+      return cache.get(js, DAEMONDOWN_STR);
     case EventOutcome::EXCEEDED_CPU:
-      return js.str("exceededCpu"_kj);
+      return cache.get(js, EXCEEDEDCPU_STR);
     case EventOutcome::EXCEEDED_MEMORY:
-      return js.str("exceededMemory"_kj);
+      return cache.get(js, EXCEEDEDMEMORY_STR);
     case EventOutcome::LOAD_SHED:
-      return js.str("loadShed"_kj);
+      return cache.get(js, LOADSHED_STR);
     case EventOutcome::RESPONSE_STREAM_DISCONNECTED:
-      return js.str("responseStreamDisconnected"_kj);
+      return cache.get(js, RESPONSESTREAMDISCONNECTED_STR);
     case EventOutcome::SCRIPT_NOT_FOUND:
-      return js.str("scriptNotFound"_kj);
+      return cache.get(js, SCRIPTNOTFOUND_STR);
     case EventOutcome::UNKNOWN:
-      return js.str("unknown"_kj);
+      return cache.get(js, UNKNOWN_STR);
   }
   KJ_UNREACHABLE;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("onset"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
-    obj.set(js, "dispatchNamespace"_kj, js.str(ns));
+    obj.set(js, DISPATCHNAMESPACE_STR, js.str(ns));
   }
   KJ_IF_SOME(entrypoint, onset.workerInfo.entrypoint) {
-    obj.set(js, "entrypoint"_kj, js.str(entrypoint));
+    obj.set(js, ENTRYPOINT_STR, js.str(entrypoint));
   }
   KJ_IF_SOME(name, onset.workerInfo.scriptName) {
-    obj.set(js, "scriptName"_kj, js.str(name));
+    obj.set(js, SCRIPTNAME_STR, js.str(name));
   }
   KJ_IF_SOME(tags, onset.workerInfo.scriptTags) {
     auto vals = KJ_MAP(tag, tags) -> jsg::JsValue { return js.str(tag); };
-    obj.set(js, "scriptTags"_kj, js.arr(vals));
+    obj.set(js, SCRIPTTAGS_STR, js.arr(vals));
   }
   KJ_IF_SOME(version, onset.workerInfo.scriptVersion) {
     auto vobj = js.obj();
     auto id = version->getId();
     KJ_IF_SOME(uuid, UUID::fromUpperLower(id.getUpper(), id.getLower())) {
-      vobj.set(js, "id"_kj, js.str(uuid.toString()));
+      vobj.set(js, ID_STR, js.str(uuid.toString()));
     }
     if (version->hasTag()) {
-      vobj.set(js, "tag"_kj, js.str(version->getTag()));
+      vobj.set(js, TAG_STR, js.str(version->getTag()));
     }
     if (version->hasMessage()) {
-      vobj.set(js, "message"_kj, js.str(version->getMessage()));
+      vobj.set(js, MESSAGE_STR, js.str(version->getMessage()));
     }
-    obj.set(js, "scriptVersion", vobj);
+    obj.set(js, SCRIPTVERSION_STR, vobj);
   }
 
   KJ_IF_SOME(trigger, onset.trigger) {
     auto tobj = js.obj();
-    tobj.set(js, "traceId"_kj, js.str(trigger.traceId.toGoString()));
-    tobj.set(js, "invocationId"_kj, js.str(trigger.invocationId.toGoString()));
-    tobj.set(js, "spanId"_kj, js.str(trigger.spanId.toGoString()));
-    obj.set(js, "trigger", tobj);
+    tobj.set(js, TRACEID_STR, js.str(trigger.traceId.toGoString()));
+    tobj.set(js, INVOCATIONID_STR, js.str(trigger.invocationId.toGoString()));
+    tobj.set(js, SPANID_STR, js.str(trigger.spanId.toGoString()));
+    obj.set(js, TRIGGER_STR, tobj);
   }
 
   KJ_SWITCH_ONEOF(onset.info) {
     KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, fetch));
+      obj.set(js, INFO_STR, ToJs(js, fetch, cache));
     }
     KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, jsrpc));
+      obj.set(js, INFO_STR, ToJs(js, jsrpc, cache));
     }
     KJ_CASE_ONEOF(scheduled, tracing::ScheduledEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, scheduled));
+      obj.set(js, INFO_STR, ToJs(js, scheduled, cache));
     }
     KJ_CASE_ONEOF(alarm, tracing::AlarmEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, alarm));
+      obj.set(js, INFO_STR, ToJs(js, alarm, cache));
     }
     KJ_CASE_ONEOF(queue, tracing::QueueEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, queue));
+      obj.set(js, INFO_STR, ToJs(js, queue, cache));
     }
     KJ_CASE_ONEOF(email, tracing::EmailEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, email));
+      obj.set(js, INFO_STR, ToJs(js, email, cache));
     }
     KJ_CASE_ONEOF(trace, tracing::TraceEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, trace));
+      obj.set(js, INFO_STR, ToJs(js, trace, cache));
     }
     KJ_CASE_ONEOF(hws, tracing::HibernatableWebSocketEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, hws));
+      obj.set(js, INFO_STR, ToJs(js, hws, cache));
     }
     KJ_CASE_ONEOF(resume, tracing::Resume) {
-      obj.set(js, "info"_kj, ToJs(js, resume));
+      obj.set(js, INFO_STR, ToJs(js, resume, cache));
     }
     KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
-      obj.set(js, "info"_kj, ToJs(js, custom));
+      obj.set(js, INFO_STR, ToJs(js, custom, cache));
     }
   }
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("outcome"_kj));
-  obj.set(js, "outcome"_kj, ToJs(js, outcome.outcome));
+  obj.set(js, TYPE_STR, cache.get(js, OUTCOME_STR));
+  obj.set(js, OUTCOME_STR, ToJs(js, outcome.outcome, cache));
 
   double cpuTime = outcome.cpuTime / kj::MILLISECONDS;
   double wallTime = outcome.wallTime / kj::MILLISECONDS;
 
-  obj.set(js, "cpuTime"_kj, js.num(cpuTime));
-  obj.set(js, "wallTime"_kj, js.num(wallTime));
+  obj.set(js, CPUTIME_STR, js.num(cpuTime));
+  obj.set(js, WALLTIME_STR, js.num(wallTime));
 
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("hibernate"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, HIBERNATE_STR));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("spanOpen"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
   KJ_IF_SOME(op, spanOpen.operationName) {
-    obj.set(js, "op"_kj, js.str(op));
+    obj.set(js, OP_STR, js.str(op));
   }
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
-        obj.set(js, "info"_kj, ToJs(js, fetch));
+        obj.set(js, INFO_STR, ToJs(js, fetch, cache));
       }
       KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
-        obj.set(js, "info"_kj, ToJs(js, jsrpc));
+        obj.set(js, INFO_STR, ToJs(js, jsrpc, cache));
       }
       KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        obj.set(js, "info"_kj, ToJs(js, custom.asPtr()));
+        obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
       }
     }
   }
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanClose& spanClose) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanClose& spanClose, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("spanClose"_kj));
-  obj.set(js, "outcome"_kj, ToJs(js, spanClose.outcome));
+  obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
+  obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::DiagnosticChannelEvent& dce) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::DiagnosticChannelEvent& dce, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("diagnosticChannel"_kj));
-  obj.set(js, "channel"_kj, js.str(dce.channel));
+  obj.set(js, TYPE_STR, cache.get(js, DIAGNOSTICCHANNEL_STR));
+  obj.set(js, CHANNEL_STR, cache.get(js, dce.channel));
   jsg::Serializer::Released released{
     .data = kj::heapArray<kj::byte>(dce.message),
   };
   jsg::Deserializer deser(js, released);
-  obj.set(js, "message"_kj, deser.readValue(js));
+  obj.set(js, MESSAGE_STR, deser.readValue(js));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Exception& ex) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Exception& ex, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("exception"_kj));
-  obj.set(js, "name"_kj, js.str(ex.name));
-  obj.set(js, "message"_kj, js.str(ex.message));
+  obj.set(js, TYPE_STR, cache.get(js, EXCEPTION_STR));
+  obj.set(js, NAME_STR, cache.get(js, ex.name));
+  obj.set(js, MESSAGE_STR, js.str(ex.message));
   KJ_IF_SOME(stack, ex.stack) {
-    obj.set(js, "stack"_kj, js.str(stack));
+    obj.set(js, STACK_STR, js.str(stack));
   }
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level) {
+jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
   switch (level) {
     case LogLevel::DEBUG_:
-      return js.str("debug"_kj);
+      return cache.get(js, DEBUG_STR);
     case LogLevel::ERROR:
-      return js.str("error"_kj);
+      return cache.get(js, ERROR_STR);
     case LogLevel::INFO:
-      return js.str("info"_kj);
+      return cache.get(js, INFO_STR);
     case LogLevel::LOG:
-      return js.str("log"_kj);
+      return cache.get(js, LOG_STR);
     case LogLevel::WARN:
-      return js.str("warn"_kj);
+      return cache.get(js, WARN_STR);
   }
   KJ_UNREACHABLE;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("log"_kj));
-  obj.set(js, "level", ToJs(js, log.logLevel));
-  obj.set(js, "message", js.str(log.message));
+  obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
+  obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
+  obj.set(js, MESSAGE_STR, js.str(log.message));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("return"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
 
   KJ_IF_SOME(info, ret.info) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
-        obj.set(js, "info"_kj, ToJs(js, fetch));
+        obj.set(js, INFO_STR, ToJs(js, fetch, cache));
       }
       KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        obj.set(js, "info"_kj, ToJs(js, custom.asPtr()));
+        obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
       }
     }
   }
@@ -394,61 +508,61 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret) {
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Link& link) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Link& link, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "type"_kj, js.str("link"_kj));
+  obj.set(js, TYPE_STR, cache.get(js, LINK_STR));
   KJ_IF_SOME(label, link.label) {
-    obj.set(js, "label"_kj, js.str(label));
+    obj.set(js, LABEL_STR, js.str(label));
   }
-  obj.set(js, "traceId"_kj, js.str(link.traceId.toGoString()));
-  obj.set(js, "invocationId"_kj, js.str(link.invocationId.toGoString()));
-  obj.set(js, "spanId"_kj, js.str(link.spanId.toGoString()));
+  obj.set(js, TRACEID_STR, js.str(link.traceId.toGoString()));
+  obj.set(js, INVOCATIONID_STR, js.str(link.invocationId.toGoString()));
+  obj.set(js, SPANID_STR, js.str(link.spanId.toGoString()));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event) {
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, "traceId"_kj, js.str(event.traceId.toGoString()));
-  obj.set(js, "invocationId"_kj, js.str(event.invocationId.toGoString()));
-  obj.set(js, "spanId"_kj, js.str(event.spanId.toGoString()));
-  obj.set(js, "timestamp"_kj, js.date(event.timestamp));
-  obj.set(js, "sequence"_kj, js.num(event.sequence));
+  obj.set(js, TRACEID_STR, js.str(event.traceId.toGoString()));
+  obj.set(js, INVOCATIONID_STR, js.str(event.invocationId.toGoString()));
+  obj.set(js, SPANID_STR, js.str(event.spanId.toGoString()));
+  obj.set(js, TIMESTAMP_STR, js.date(event.timestamp));
+  obj.set(js, SEQUENCE_STR, js.num(event.sequence));
 
   KJ_SWITCH_ONEOF(event.event) {
     KJ_CASE_ONEOF(onset, tracing::Onset) {
-      obj.set(js, "event"_kj, ToJs(js, onset));
+      obj.set(js, EVENT_STR, ToJs(js, onset, cache));
     }
     KJ_CASE_ONEOF(outcome, tracing::Outcome) {
-      obj.set(js, "event"_kj, ToJs(js, outcome));
+      obj.set(js, EVENT_STR, ToJs(js, outcome, cache));
     }
     KJ_CASE_ONEOF(hibernate, tracing::Hibernate) {
-      obj.set(js, "event"_kj, ToJs(js, hibernate));
+      obj.set(js, EVENT_STR, ToJs(js, hibernate, cache));
     }
     KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
-      obj.set(js, "event"_kj, ToJs(js, spanOpen));
+      obj.set(js, EVENT_STR, ToJs(js, spanOpen, cache));
     }
     KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
-      obj.set(js, "event"_kj, ToJs(js, spanClose));
+      obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
     KJ_CASE_ONEOF(mark, tracing::Mark) {
       KJ_SWITCH_ONEOF(mark) {
         KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
-          obj.set(js, "event"_kj, ToJs(js, de));
+          obj.set(js, EVENT_STR, ToJs(js, de, cache));
         }
         KJ_CASE_ONEOF(ex, tracing::Exception) {
-          obj.set(js, "event"_kj, ToJs(js, ex));
+          obj.set(js, EVENT_STR, ToJs(js, ex, cache));
         }
         KJ_CASE_ONEOF(log, tracing::Log) {
-          obj.set(js, "event"_kj, ToJs(js, log));
+          obj.set(js, EVENT_STR, ToJs(js, log, cache));
         }
         KJ_CASE_ONEOF(ret, tracing::Return) {
-          obj.set(js, "event"_kj, ToJs(js, ret));
+          obj.set(js, EVENT_STR, ToJs(js, ret, cache));
         }
         KJ_CASE_ONEOF(link, tracing::Link) {
-          obj.set(js, "event"_kj, ToJs(js, link));
+          obj.set(js, EVENT_STR, ToJs(js, link, cache));
         }
         KJ_CASE_ONEOF(attrs, kj::Array<tracing::Attribute>) {
-          obj.set(js, "event"_kj, ToJs(js, attrs));
+          obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
         }
       }
     }
@@ -560,39 +674,39 @@ class TailStreamTargetBase: public rpc::TailStreamTarget::Server {
 kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
     KJ_CASE_ONEOF(_, tracing::Onset) {
-      return "onset"_kj;
+      return ONSET_STR;
     }
     KJ_CASE_ONEOF(_, tracing::Outcome) {
-      return "outcome"_kj;
+      return OUTCOME_STR;
     }
     KJ_CASE_ONEOF(_, tracing::Hibernate) {
-      return "hibernate"_kj;
+      return HIBERNATE_STR;
     }
     KJ_CASE_ONEOF(_, tracing::SpanOpen) {
-      return "spanOpen"_kj;
+      return SPANOPEN_STR;
     }
     KJ_CASE_ONEOF(_, tracing::SpanClose) {
-      return "spanClose"_kj;
+      return SPANCLOSE_STR;
     }
     KJ_CASE_ONEOF(mark, tracing::Mark) {
       KJ_SWITCH_ONEOF(mark) {
         KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
-          return "diagnosticChannel"_kj;
+          return DIAGNOSTICCHANNEL_STR;
         }
         KJ_CASE_ONEOF(_, tracing::Exception) {
-          return "exception"_kj;
+          return EXCEPTION_STR;
         }
         KJ_CASE_ONEOF(_, tracing::Log) {
-          return "log"_kj;
+          return LOG_STR;
         }
         KJ_CASE_ONEOF(_, tracing::Return) {
-          return "return"_kj;
+          return RETURN_STR;
         }
         KJ_CASE_ONEOF(_, tracing::Link) {
-          return "link"_kj;
+          return LINK_STR;
         }
         KJ_CASE_ONEOF(_, kj::Array<Attribute>) {
-          return "attribute"_kj;
+          return ATTRIBUTE_STR;
         }
       }
     }
@@ -616,6 +730,7 @@ class TailStreamHandler final: public TailStreamTargetBase {
 
     v8::Local<v8::Value> h = handler.getHandle(js);
     v8::LocalVector<v8::Value> returnValues(js.v8Isolate, events.size());
+    StringCache stringCache;
 
     if (h->IsFunction()) {
       // If the handler is a function, then we'll just pass all of the events to that
@@ -625,7 +740,7 @@ class TailStreamHandler final: public TailStreamTargetBase {
       // kj promise.
       auto fn = h.As<v8::Function>();
       for (auto& event: events) {
-        v8::Local<v8::Value> eventObj = ToJs(js, event);
+        v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
         returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
       }
     } else {
@@ -642,7 +757,7 @@ class TailStreamHandler final: public TailStreamTargetBase {
           // If the value is not a function, we'll ignore it entirely.
           if (val->IsFunction()) {
             auto fn = val.As<v8::Function>();
-            v8::Local<v8::Value> eventObj = ToJs(js, event);
+            v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
             returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
           }
         }
@@ -688,6 +803,7 @@ class TailStreamEntrypoint final: public TailStreamTargetBase {
 
     auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler("default"_kj, ioContext.getActor()),
         "Failed to get handler to worker.");
+    StringCache stringCache;
 
     auto target = jsg::JsObject(handler->self.getHandle(lock));
     v8::Local<v8::Value> maybeFn = target.get(lock, "tailStream"_kj);
@@ -701,7 +817,7 @@ class TailStreamEntrypoint final: public TailStreamTargetBase {
 
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
 
-    v8::Local<v8::Value> obj = ToJs(js, event);
+    v8::Local<v8::Value> obj = ToJs(js, event, stringCache);
     auto result = jsg::check(fn->Call(js.v8Context(), target, 1, &obj));
 
     return ioContext.awaitJs(js,
