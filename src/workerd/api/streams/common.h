@@ -639,7 +639,8 @@ class WritableStreamController {
       visitor.visit(resolver, promise, reason);
     }
 
-    static kj::Maybe<PendingAbort> dequeue(kj::Maybe<PendingAbort>& maybePendingAbort);
+    static kj::Maybe<kj::Own<PendingAbort>> dequeue(
+        kj::Maybe<kj::Own<PendingAbort>>& maybePendingAbort);
 
     JSG_MEMORY_INFO(PendingAbort) {
       tracker.trackField("resolver", resolver);

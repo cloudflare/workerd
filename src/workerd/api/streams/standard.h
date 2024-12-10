@@ -379,7 +379,7 @@ class WritableImpl {
   kj::Maybe<WriteRequest> inFlightWrite;
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;
   kj::Maybe<jsg::Promise<void>::Resolver> closeRequest;
-  kj::Maybe<PendingAbort> maybePendingAbort;
+  kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
 
   friend Self;
 };
