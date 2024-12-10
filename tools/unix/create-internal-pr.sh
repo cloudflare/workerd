@@ -12,6 +12,7 @@ BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 SYNC_BRANCH_NAME=sync/$BRANCH_NAME
 
 cd $EDGEWORKER_HOME
+git submodule update --init --recursive
 git fetch origin master
 
 if git rev-parse --verify $SYNC_BRANCH_NAME; then
