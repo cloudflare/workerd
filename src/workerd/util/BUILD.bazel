@@ -191,7 +191,7 @@ wd_cc_library(
     name = "completion-membrane",
     hdrs = ["completion-membrane.h"],
     visibility = ["//visibility:public"],
-    deps = ["@capnp-cpp//src/kj"],
+    deps = ["@capnp-cpp//src/capnp"],
 )
 
 exports_files(["autogate.h"])

@@ -12,7 +12,6 @@
 #include <workerd/util/weak-refs.h>
 
 #include <kj/async.h>
-#include <kj/function.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>

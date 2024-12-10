@@ -271,7 +271,8 @@ KJ_TEST("Read/Write TraceEventInfo works") {
 
   tracing::TraceEventInfo info2(reader);
   KJ_ASSERT(info2.traces.size() == 1);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.traces[0].scriptName) == "foo");
+  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.traces[0].scriptName) == "foo"_kj);
+
   tracing::TraceEventInfo info3 = info.clone();
   KJ_ASSERT(info2.traces.size() == 1);
   KJ_ASSERT(KJ_ASSERT_NONNULL(info2.traces[0].scriptName) == "foo"_kj);

@@ -558,8 +558,6 @@ tracing::Exception::Exception(
       message(kj::mv(message)),
       stack(kj::mv(stack)) {}
 
-// ======================================================================================
-
 Trace::Trace(kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName,
     kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,

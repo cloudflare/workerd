@@ -6,6 +6,8 @@
 
 namespace workerd::tracing {
 
+// A WorkerInterface::CustomEvent implementation used to deliver streaming tail
+// events to a tail worker.
 class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
  public:
   TailStreamCustomEventImpl(uint16_t typeId = TYPE,
@@ -38,7 +40,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
   rpc::TailStreamTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
     clientCap = kj::none;
-    return result;
+    return result;  // Get the
   }
 
  private:

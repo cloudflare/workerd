@@ -122,28 +122,28 @@ class StringCache final {
 // these structs to be bidirectional. So, instead, let's just do the simple easy thing
 // and define a set of serializers to these types.
 
+jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      return js.str(str);
+    }
+    KJ_CASE_ONEOF(b, bool) {
+      return js.boolean(b);
+    }
+    KJ_CASE_ONEOF(d, double) {
+      return js.num(d);
+    }
+    KJ_CASE_ONEOF(i, int32_t) {
+      return js.num(i);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTE_STR));
   obj.set(js, NAME_STR, cache.get(js, attribute.name));
-
-  auto ToJs = [](jsg::Lock& js, const tracing::Attribute::Value& value) -> jsg::JsValue {
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        return js.str(str);
-      }
-      KJ_CASE_ONEOF(b, bool) {
-        return js.boolean(b);
-      }
-      KJ_CASE_ONEOF(d, double) {
-        return js.num(d);
-      }
-      KJ_CASE_ONEOF(i, int32_t) {
-        return js.num(i);
-      }
-    }
-    KJ_UNREACHABLE;
-  };
 
   if (attribute.value.size() == 1) {
     obj.set(js, VALUE_STR, ToJs(js, attribute.value[0]));
@@ -571,6 +571,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
   return obj;
 }
 
+// See the documentation for the identically named class in worker-rpc.c++ for details.
+// TODO(cleanup): Combine this and the worker-rpc.c++ class into a single utility.
 class ServerTopLevelMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
  public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
@@ -671,6 +673,7 @@ class TailStreamTargetBase: public rpc::TailStreamTarget::Server {
   kj::Own<IoContext::WeakRef> weakIoContext;
 };
 
+// Returns the name of the handler function for this type of event.
 kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
     KJ_CASE_ONEOF(_, tracing::Onset) {
@@ -714,6 +717,10 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   return kj::none;
 }
 
+// The TailStreamEntrypoint class handles the initial onset event and the determination
+// of whether additional events should be handled in this stream. If a handler is
+// returned then a capability to access the TailStreamHandler is returned. This class
+// takes over and handles the remaining events in the stream.
 class TailStreamHandler final: public TailStreamTargetBase {
  public:
   TailStreamHandler(IoContext& ioContext, jsg::JsRef<jsg::JsValue> handler)
@@ -727,6 +734,8 @@ class TailStreamHandler final: public TailStreamTargetBase {
     jsg::Lock& js = lock;
 
     if (events.size() == 0) return kj::READY_NOW;
+
+    // Take the received set of events and dispatch them to the correct handler.
 
     v8::Local<v8::Value> h = handler.getHandle(js);
     v8::LocalVector<v8::Value> returnValues(js.v8Isolate, events.size());
@@ -787,6 +796,8 @@ class TailStreamHandler final: public TailStreamTargetBase {
   jsg::JsRef<jsg::JsValue> handler;
 };
 
+// The TailStreamEndpoint class handles the initial onset event and the determination
+// or whether additional events should be handled in this stream.
 class TailStreamEntrypoint final: public TailStreamTargetBase {
  public:
   TailStreamEntrypoint(IoContext& ioContext): TailStreamTargetBase(ioContext) {}
@@ -796,7 +807,7 @@ class TailStreamEntrypoint final: public TailStreamTargetBase {
       kj::ArrayPtr<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
     jsg::Lock& js = lock;
-    // There should be only a single event in this one.
+    // There should be only a single onset event in this one.
     KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
         "Expected only a single onset event");
     auto& event = events[0];

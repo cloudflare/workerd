@@ -1467,6 +1467,8 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 // =======================================================================================
 namespace {
 
+// The TailStreamWriterState holds the current client-side state for a collection
+// of streaming tail workers that a worker is reporting events to.
 struct TailStreamWriterState {
   // The initial state of our tail worker writer is that it is pending the first
   // onset event. During this time we will only have a collection of WorkerInterface
@@ -1524,6 +1526,7 @@ struct TailStreamWriterState {
     inner = alive.releaseAsArray();
   }
 
+  // Delivers the queued tail events to a streaming tail worker.
   kj::Promise<void> pump(Active& current) {
     // At the start of the loop we should have an initial capability.
     auto& cap = KJ_ASSERT_NONNULL(current.capability);
@@ -1531,7 +1534,14 @@ struct TailStreamWriterState {
     KJ_DEFER(current.pumping = false);
 
     if (!current.onsetSeen) {
-      // Our first event... yay
+      // Our first event... yay! Our first job here will be to dispatch
+      // the onset event to the tail worker. If the tail worker wishes
+      // to handle the remaining events in the strema, then it will return
+      // a new capability to which those would be reported. This is done
+      // via the "result.getPipeline()" API below. If hasPipeline()
+      // returns false then that means the tail worker did not return
+      // a handler for this stream and no further attempts to deliver
+      // events should be made for this stream.
       current.onsetSeen = true;
       KJ_ASSERT(!current.queue.empty());
       auto onsetEvent = kj::mv(current.queue.front());
@@ -1556,6 +1566,7 @@ struct TailStreamWriterState {
       cap = KJ_ASSERT_NONNULL(current.capability);
     }
 
+    // If we got this far then we have a handler for all of our events.
     // Deliver streaming tail events in batches if possible.
     while (!current.queue.empty()) {
       auto builder = cap.reportRequest();
@@ -1570,12 +1581,16 @@ struct TailStreamWriterState {
   }
 };
 
+// If we are using streaming tail workers, initialze the mechanism that will deliver events
+// to that collection of tail workers.
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
   if (streamingTailWorkers.size() == 0) {
     return kj::none;
   }
   return kj::heap<tracing::TailStreamWriter>(
+      // This lambda is called for every streaming tail event that is reported. We use
+      // the TailStreamWriterState for this strema to actually handle the event.
       [state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks)](
           IoContext& ioContext, tracing::TailEvent&& event) mutable {
     KJ_SWITCH_ONEOF(state->inner) {
