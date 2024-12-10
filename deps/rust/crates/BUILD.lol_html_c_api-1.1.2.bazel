@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "proc_macro2",
+    name = "lolhtml",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,11 +29,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "proc-macro",
-        "span-locations",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -41,15 +36,18 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=lol_html_c_api",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.89",
+    version = "1.1.2",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.89//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.13//:unicode_ident",
+        "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
+        "@crates_vendor__libc-0.2.168//:libc",
+        "@crates_vendor__lol_html-2.1.0//:lol_html",
+        "@crates_vendor__lol_html_c_api-1.1.2//:build_script_build",
+        "@crates_vendor__thiserror-1.0.69//:thiserror",
     ],
 )
 
@@ -72,11 +70,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "proc-macro",
-        "span-locations",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -92,18 +85,19 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "proc-macro2",
+    links = "lolhtml",
+    pkg_name = "lol_html_c_api",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=lol_html_c_api",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.89",
+    version = "1.1.2",
     visibility = ["//visibility:private"],
 )
 

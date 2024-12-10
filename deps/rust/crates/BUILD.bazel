@@ -33,7 +33,7 @@ filegroup(
 # Workspace Member Dependencies
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.93//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.94//:anyhow",
     tags = ["manual"],
 )
 
@@ -51,13 +51,13 @@ alias(
 
 alias(
     name = "clang-ast",
-    actual = "@crates_vendor__clang-ast-0.1.26//:clang_ast",
+    actual = "@crates_vendor__clang-ast-0.1.27//:clang_ast",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.21//:clap",
+    actual = "@crates_vendor__clap-4.5.23//:clap",
     tags = ["manual"],
 )
 
@@ -69,13 +69,13 @@ alias(
 
 alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.130//:cxx",
+    actual = "@crates_vendor__cxx-1.0.133//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.130//:cxx_cc",
+    actual = "@crates_vendor__cxx-1.0.133//:cxx_cc",
     tags = ["manual"],
 )
 
@@ -86,8 +86,8 @@ alias(
 )
 
 alias(
-    name = "lolhtml",
-    actual = "@crates_vendor__lolhtml-1.1.2//:lolhtml",
+    name = "lol_html_c_api",
+    actual = "@crates_vendor__lol_html_c_api-1.1.2//:lolhtml",
     tags = ["manual"],
 )
 
@@ -105,7 +105,7 @@ alias(
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.89//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.92//:proc_macro2",
     tags = ["manual"],
 )
 
@@ -123,13 +123,13 @@ alias(
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.132//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.133//:serde_json",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.87//:syn",
+    actual = "@crates_vendor__syn-2.0.90//:syn",
     tags = ["manual"],
 )
 
@@ -141,13 +141,13 @@ alias(
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.41.1//:tokio",
+    actual = "@crates_vendor__tokio-1.42.0//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tracing",
-    actual = "@crates_vendor__tracing-0.1.40//:tracing",
+    actual = "@crates_vendor__tracing-0.1.41//:tracing",
     tags = ["manual"],
 )
 
@@ -172,7 +172,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.21//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.23//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
