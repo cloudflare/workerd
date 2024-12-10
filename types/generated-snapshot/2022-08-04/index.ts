@@ -490,7 +490,7 @@ export interface Cloudflare {
 }
 export interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
-  alarm?(): void | Promise<void>;
+  alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
   webSocketMessage?(
     ws: WebSocket,
     message: string | ArrayBuffer,

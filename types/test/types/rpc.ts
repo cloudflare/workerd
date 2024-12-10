@@ -306,6 +306,27 @@ class TestObject extends DurableObject {
   }
 }
 
+class TestAlarmObject extends DurableObject {
+  // Can declare alarm method consuming optional alarmInfo parameter
+  async alarm(alarmInfo?: AlarmInvocationInfo) {
+    if (alarmInfo !== undefined) {
+      const _isRetry: boolean = alarmInfo.isRetry;
+      const _retryCount: number = alarmInfo.retryCount;
+    }
+  }
+
+  // User code can invoke alarm() directly, if desired.
+  async runAlarmVoid(): Promise<void> {
+    return await this.alarm();
+  }
+  async runAlarmInfo(): Promise<void> {
+    return await this.alarm({
+      isRetry: true,
+      retryCount: 1,
+    });
+  }
+}
+
 class TestNaughtyEntrypoint extends WorkerEntrypoint {
   // Check incorrectly typed methods
   // @ts-expect-error
@@ -351,6 +372,7 @@ interface Env {
 
   REGULAR_OBJECT: DurableObjectNamespace;
   RPC_OBJECT: DurableObjectNamespace<TestObject>;
+  ALARM_OBJECT: DurableObjectNamespace<TestAlarmObject>;
   NAUGHTY_OBJECT: DurableObjectNamespace<TestNaughtyObject>;
   // @ts-expect-error `BoringClass` isn't an RPC capable type
   __INVALID_OBJECT_1: DurableObjectNamespace<BoringClass>;
