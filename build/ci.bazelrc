@@ -9,7 +9,7 @@ build:ci --verbose_failures
 # increasing this closer towards the suggested value of 200. Note the number of maximum build jobs
 # is controlled by the --local_resources=cpu flag and still limited to the number of cores by
 # default.
-build:ci --jobs=32
+build:ci --jobs=48
 # Do not check for changes in external repository files, should speed up bazel invocations after the first one
 build:ci --noexperimental_check_external_repository_files
 # Rate limit progress updates for smaller logs, default is 0.2 which leads to very frequent updates.
@@ -19,9 +19,14 @@ build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
+# Only build runfile trees when needed/lazily, so that they are not built for disabled tests
+build:ci --nobuild_runfile_links
+# Speeds up CI build by making action output uploads non-blocking so Bazel can e.g. run a test
+# before it finishes uploading the test binary. On-by-default in Bazel 8.
+build:ci --experimental_remote_cache_async
+
 build:ci --config=v8-codegen-opt
 test:ci --test_output=errors
-build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
 build:ci-test --remote_download_outputs=minimal --test_size_filters=small,medium,large,enormous
