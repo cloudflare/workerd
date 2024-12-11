@@ -13,6 +13,11 @@ deps_gen()
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
+load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")
+
+rules_shell_dependencies()
+
+rules_shell_toolchains()
 
 NODE_VERSION = "22.11.0"
 
@@ -161,10 +166,14 @@ bind(
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "81f285cb337f445276f37c308cb90120f8ba4311d1be9daf3b93dccf4bfdba7d",
-    strip_prefix = "google-tcmalloc-69c409c",
+    integrity = "sha256-mTDk4ij+KU0px7Mg4NSk15L9lD6RSIWuqZ7ILTkekb8=",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/tcmalloc/0001-Support-Bazel-8.patch",
+    ],
+    strip_prefix = "google-tcmalloc-4e8fcfc",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/69c409c344bdf894fc7aab83e2d9e280b009b2f3",
+    url = "https://github.com/google/tcmalloc/tarball/4e8fcfc697761a2659fde4ecef15ac50cbc20784",
 )
 
 # ========================================================================================
@@ -277,6 +286,8 @@ esbuild_register_toolchains(
 #
 # There is an official mirror for V8 itself on GitHub, but not for dependencies like zlib (Chromium
 # fork), icu (Chromium fork), and trace_event, so we still have to use git for them.
+# TODO: Upstream 0021-bazel-Add-missing-imports-needed-with-Bazel-8.patch (currently unused here) to
+# avoid needing to autoload py_test.
 
 http_archive(
     name = "v8",

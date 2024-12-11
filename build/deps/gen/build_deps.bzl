@@ -17,10 +17,12 @@ load("@//build/deps:gen/dep_cargo_bazel_macos_arm64.bzl", "dep_cargo_bazel_macos
 load("@//build/deps:gen/dep_cargo_bazel_macos_x64.bzl", "dep_cargo_bazel_macos_x64")
 load("@//build/deps:gen/dep_cargo_bazel_win_x64.bzl", "dep_cargo_bazel_win_x64")
 load("@//build/deps:gen/dep_cxxbridge_cmd.bzl", "dep_cxxbridge_cmd")
+load("@//build/deps:gen/dep_rules_cc.bzl", "dep_rules_cc")
 load("@//build/deps:gen/dep_rules_nodejs.bzl", "dep_rules_nodejs")
 load("@//build/deps:gen/dep_rules_pkg.bzl", "dep_rules_pkg")
 load("@//build/deps:gen/dep_rules_python.bzl", "dep_rules_python")
 load("@//build/deps:gen/dep_rules_rust.bzl", "dep_rules_rust")
+load("@//build/deps:gen/dep_rules_shell.bzl", "dep_rules_shell")
 
 def deps_gen():
     dep_bazel_skylib()
@@ -39,6 +41,8 @@ def deps_gen():
     dep_aspect_bazel_lib()
     dep_aspect_rules_js()
     dep_aspect_rules_ts()
+    dep_rules_shell()
+    dep_rules_cc()
     dep_buildifier_linux_amd64()
     dep_buildifier_linux_arm64()
     dep_buildifier_darwin_amd64()
