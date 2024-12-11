@@ -800,7 +800,9 @@ class TailStreamHandler final: public TailStreamTargetBase {
 // or whether additional events should be handled in this stream.
 class TailStreamEntrypoint final: public TailStreamTargetBase {
  public:
-  TailStreamEntrypoint(IoContext& ioContext): TailStreamTargetBase(ioContext) {}
+  TailStreamEntrypoint(IoContext& ioContext, Frankenvalue props)
+      : TailStreamTargetBase(ioContext),
+        props(kj::mv(props)) {}
 
   kj::Promise<void> runImpl(Worker::Lock& lock,
       IoContext& ioContext,
@@ -812,7 +814,8 @@ class TailStreamEntrypoint final: public TailStreamTargetBase {
         "Expected only a single onset event");
     auto& event = events[0];
 
-    auto handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler("default"_kj, ioContext.getActor()),
+    auto handler = KJ_REQUIRE_NONNULL(
+        lock.getExportedHandler("default"_kj, kj::mv(props), ioContext.getActor()),
         "Failed to get handler to worker.");
     StringCache stringCache;
 
@@ -860,18 +863,22 @@ class TailStreamEntrypoint final: public TailStreamTargetBase {
             ioContext.addFunctor(
                 [](jsg::Lock& js, jsg::Value&& error) { js.throwException(kj::mv(error)); })));
   }
+
+ private:
+  Frankenvalue props;
 };
 }  // namespace
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(capnp::membrane(kj::heap<TailStreamEntrypoint>(ioContext),
+  capFulfiller->fulfill(capnp::membrane(kj::heap<TailStreamEntrypoint>(ioContext, kj::mv(props)),
       kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
 
   KJ_DEFER({
