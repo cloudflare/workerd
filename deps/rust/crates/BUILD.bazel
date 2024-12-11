@@ -86,8 +86,8 @@ alias(
 )
 
 alias(
-    name = "lolhtml",
-    actual = "@crates_vendor__lolhtml-1.1.2//:lolhtml",
+    name = "lol_html_c_api",
+    actual = "@crates_vendor__lol_html_c_api-1.1.2//:lolhtml",
     tags = ["manual"],
 )
 

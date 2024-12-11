@@ -157,6 +157,18 @@ struct ContentOptions {
 
 class Rewriter;
 
+template <typename CType>
+struct BaseImpl {
+  BaseImpl(CType& element, Rewriter& rewriter);
+  KJ_DISALLOW_COPY_AND_MOVE(BaseImpl);
+  ~BaseImpl() noexcept(false);
+  template <auto Func, auto StreamingFunc>
+  void rewriteContentGeneric(Content content, jsg::Optional<ContentOptions> options);
+
+  CType& element;
+  Rewriter& rewriter;
+};
+
 class Element final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_Element;
@@ -228,14 +240,10 @@ class Element final: public HTMLRewriter::Token {
   }
 
  private:
-  struct Impl {
-    Impl(CType& element, Rewriter&);
-    KJ_DISALLOW_COPY_AND_MOVE(Impl);
+  struct Impl: public BaseImpl<CType> {
+    using BaseImpl<CType>::BaseImpl;
     ~Impl() noexcept(false);
-
-    CType& element;
     kj::Vector<jsg::Ref<AttributesIterator>> attributesIterators;
-    Rewriter& rewriter;
   };
 
   kj::Maybe<Impl> impl;
@@ -278,7 +286,7 @@ class EndTag final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_EndTag;
 
-  explicit EndTag(CType& tag, Rewriter&);
+  explicit EndTag(CType& tag, Rewriter& rewriter);
 
   kj::String getName();
   void setName(kj::String);
@@ -303,7 +311,7 @@ class EndTag final: public HTMLRewriter::Token {
   }
 
  private:
-  kj::Maybe<CType&> impl;
+  kj::Maybe<BaseImpl<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
@@ -352,7 +360,7 @@ class Text final: public HTMLRewriter::Token {
  public:
   using CType = lol_html_TextChunk;
 
-  explicit Text(CType& text, Rewriter&);
+  explicit Text(CType& text, Rewriter& rewriter);
 
   kj::String getText();
 
@@ -385,7 +393,7 @@ class Text final: public HTMLRewriter::Token {
   }
 
  private:
-  kj::Maybe<CType&> impl;
+  kj::Maybe<BaseImpl<CType>> impl;
 
   void htmlContentScopeEnd() override;
 };
