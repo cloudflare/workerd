@@ -30,8 +30,8 @@ void WritableStreamController::PendingAbort::fail(jsg::Lock& js, v8::Local<v8::V
   maybeRejectPromise<void>(js, resolver, reason);
 }
 
-kj::Maybe<WritableStreamController::PendingAbort> WritableStreamController::PendingAbort::dequeue(
-    kj::Maybe<WritableStreamController::PendingAbort>& maybePendingAbort) {
+kj::Maybe<kj::Own<WritableStreamController::PendingAbort>> WritableStreamController::PendingAbort::
+    dequeue(kj::Maybe<kj::Own<WritableStreamController::PendingAbort>>& maybePendingAbort) {
   return kj::mv(maybePendingAbort);
 }
 
