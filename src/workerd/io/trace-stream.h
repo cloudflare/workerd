@@ -41,7 +41,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
   rpc::TailStreamTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
     clientCap = kj::none;
-    return result;  // Get the
+    return result;
   }
 
  private:

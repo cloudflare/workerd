@@ -37,6 +37,17 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "trace-stream",
+    srcs = ["trace-stream.c++"],
+    hdrs = ["trace-stream.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/workerd/util:completion-membrane",
+    ],
+)
+
+wd_cc_library(
     name = "io",
     # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
     #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
@@ -51,7 +62,6 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
-        "trace-stream.c++",
         "worker.c++",
     ] + ["//src/workerd/api:srcs"] + select({
         ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:srcs"],
@@ -67,7 +77,6 @@ wd_cc_library(
         "io-own.h",
         "io-util.h",
         "promise-wrapper.h",
-        "trace-stream.h",
         "worker.h",
     ] + ["//src/workerd/api:hdrs"] + select({
         ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:hdrs"],
