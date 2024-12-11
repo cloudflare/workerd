@@ -59,6 +59,7 @@ jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   // Mark the request as delivered because we're about to run some JS.
   auto& context = incomingRequest->getContext();
@@ -100,28 +101,28 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   try {
     co_await context.run(
-        [entrypointName = entrypointName, &context, eventParameters = kj::mv(eventParameters)](
-            Worker::Lock& lock) mutable {
+        [entrypointName = entrypointName, &context, eventParameters = kj::mv(eventParameters),
+            props = kj::mv(props)](Worker::Lock& lock) mutable {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(kj::mv(text.message),
               eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
-              lock.getExportedHandler(entrypointName, context.getActor()));
+              lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(kj::mv(data.message),
               eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
-              lock.getExportedHandler(entrypointName, context.getActor()));
+              lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
           return lock.getGlobalScope().sendHibernatableWebSocketClose(kj::mv(close),
               eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
-              lock.getExportedHandler(entrypointName, context.getActor()));
+              lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_CASE_ONEOF(e, HibernatableSocketParams::Error) {
           return lock.getGlobalScope().sendHibernatableWebSocketError(kj::mv(e.error),
               eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
-              lock.getExportedHandler(entrypointName, context.getActor()));
+              lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_UNREACHABLE;
       }

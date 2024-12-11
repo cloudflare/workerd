@@ -11,6 +11,7 @@
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
@@ -1675,7 +1676,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                     KJ_SWITCH_ONEOF(handler.value) {
                       KJ_CASE_ONEOF(obj, api::ExportedHandler) {
                         obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
-                        obj.ctx = jsg::alloc<api::ExecutionContext>();
+                        // TODO(cleanup): Unfortunately, for non-class-based handlers, we have
+                        //   always created only a single `ctx` object and reused it for all
+                        //   requests. This is weird and obviously wrong but changing it probably
+                        //   requires a compat flag. Until then, connection properties will not be
+                        //   available for non-class handlers.
+                        obj.ctx = jsg::alloc<api::ExecutionContext>(lock);
 
                         impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
                       }
@@ -1964,7 +1970,7 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 }
 
 kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
-    kj::Maybe<kj::StringPtr> name, kj::Maybe<Worker::Actor&> actor) {
+    kj::Maybe<kj::StringPtr> name, Frankenvalue props, kj::Maybe<Worker::Actor&> actor) {
   KJ_IF_SOME(a, actor) {
     KJ_IF_SOME(h, a.getHandler()) {
       return fakeOwn(h);
@@ -1976,8 +1982,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     jsg::Lock& js = *this;
-    auto handler = kj::heap(cls(
-        js, jsg::alloc<api::ExecutionContext>(), KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
+    auto handler = kj::heap(cls(js, jsg::alloc<api::ExecutionContext>(js, props.toJs(js)),
+        KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
     // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
     //   env and ctx into the constructor, and we want the handler methods to act like they take

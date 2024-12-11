@@ -66,6 +66,7 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
+      Frankenvalue props,
       kj::TaskSet& waitUntilTasks) override;
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
