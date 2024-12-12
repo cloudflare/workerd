@@ -788,6 +788,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
+  tracing::InvocationSpanContext& getInvocationSpanContext() {
+    return getCurrentIncomingRequest().invocationSpanContext;
+  }
+
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.

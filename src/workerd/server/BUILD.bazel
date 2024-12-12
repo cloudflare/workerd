@@ -122,6 +122,7 @@ wd_cc_library(
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
         "//src/workerd/io",
+        "//src/workerd/io:trace-stream",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",

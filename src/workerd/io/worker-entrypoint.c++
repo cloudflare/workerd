@@ -279,6 +279,12 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
+  // TODO(streaming-tail-workers): Instrument properly
+  context.getMetrics().reportTailEvent(context, [&] {
+    return tracing::Onset(tracing::FetchEventInfo(method, kj::str(url), kj::str("{}"), nullptr),
+        tracing::Onset::WorkerInfo{}, kj::none);
+  });
+
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 

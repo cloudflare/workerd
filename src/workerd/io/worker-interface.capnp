@@ -557,6 +557,24 @@ interface JsRpcTarget $Cxx.allowCancellation {
   # Runs a Worker/DO's RPC method.
 }
 
+interface TailStreamTarget $Cxx.allowCancellation {
+  # Interface used to deliver streaming tail events to a tail worker.
+  struct TailStreamParams {
+    events @0 :List(Trace.TailEvent);
+  }
+
+  struct TailStreamResults {
+    pipeline @0 :TailStreamTarget;
+    # For an initial tailStream call, the pipeline would be expected to return
+    # a TailStreamTarget that would handle all the remaining events. Each of
+    # those subsequent calls to TailStreamTarget would not be expected to
+    # return a pipeline field at all.
+  }
+
+  report @0 TailStreamParams -> TailStreamResults;
+  # Report one or more streaming tail events to a tail worker.
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
@@ -603,6 +621,13 @@ interface EventDispatcher @0xf20697475ec1752d {
   # server, then `jsRpcSession()` won't return until all those capabilities have been dropped.
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
+
+  tailStreamSession @10 () -> (topLevel :TailStreamTarget) $Cxx.allowCancellation;
+  # Opens a streaming tail session. The call does not return until the session is complete.
+  #
+  # `topLevel` is the top-level tail session target, on which exactly one method call can
+  # be made. This call must be made using pipelining since `tailStreamSession()` won't return
+  # until after the call completes.
 
   obsolete5 @5();
   obsolete6 @6();
