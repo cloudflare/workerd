@@ -755,12 +755,21 @@ struct RequestInitializerDict {
              referrer, referrerPolicy, integrity, signal);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if(flags.getCacheOptionEnabled()) {
-      JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
-        headers?: HeadersInit;
-        body?: BodyInit | null;
-        cache?: 'no-store';
-        cf?: Cf;
-      });
+      if(flags.getCacheNoCache()) {
+        JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+          headers?: HeadersInit;
+          body?: BodyInit | null;
+          cache?: 'no-store' | 'no-cache';
+          cf?: Cf;
+        });
+      } else {
+        JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+          headers?: HeadersInit;
+          body?: BodyInit | null;
+          cache?: 'no-store';
+          cf?: Cf;
+        });
+      }
     } else {
       JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
         headers?: HeadersInit;
@@ -929,12 +938,21 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
       if(flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
-        JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
-          constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
-          clone(): Request<CfHostMetadata, Cf>;
-          cache?: "no-store";
-          get cf(): Cf | undefined;
-        });
+        if(flags.getCacheNoCache()) {
+          JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+            constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
+            clone(): Request<CfHostMetadata, Cf>;
+            cache?: "no-store" | "no-cache";
+            get cf(): Cf | undefined;
+          });
+        } else {
+          JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+            constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
+            clone(): Request<CfHostMetadata, Cf>;
+            cache?: "no-store";
+            get cf(): Cf | undefined;
+          });
+        }
       } else {
         JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
           constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
