@@ -1888,9 +1888,9 @@ class Server::WorkerService final: public Service,
         } else if (service->hasHandler("tail") || service->hasHandler("trace")) {
           legacyList.add(service->startRequest({}));
         }
-        legacyTailWorkers = legacyList.releaseAsArray();
-        streamingTailWorkers = streamingList.releaseAsArray();
       }
+      legacyTailWorkers = legacyList.releaseAsArray();
+      streamingTailWorkers = streamingList.releaseAsArray();
     } else {
       legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
         KJ_ASSERT(service != this, "A worker currently cannot log to itself");
