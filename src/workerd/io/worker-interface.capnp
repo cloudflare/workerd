@@ -14,6 +14,7 @@ using import "/capnp/compat/http-over-capnp.capnp".HttpService;
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
+using import "/workerd/io/trace.capnp".UserSpanData;
 
 struct InvocationSpanContext {
   struct TraceId {
@@ -41,6 +42,8 @@ struct Trace @0x8e8d911203762d34 {
 
     message @2 :Text;
   }
+
+  spans @26 :List(UserSpanData);
 
   exceptions @1 :List(Exception);
   struct Exception {

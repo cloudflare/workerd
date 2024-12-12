@@ -28,3 +28,17 @@ struct Tag {
   value @1 :TagValue;
 }
 
+struct UserSpanData {
+  # Representation of a completed user span
+  operationName @0 :Text;
+
+  startTimeNs @1 :Int64;
+  endTimeNs @2 :Int64;
+  # Nanoseconds since Unix epoch
+
+  tags @3 :List(Tag);
+
+  spanId @4 :UInt64;
+  parentSpanId @5 :UInt64;
+}
+

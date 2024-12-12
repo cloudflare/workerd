@@ -778,6 +778,7 @@ enum class PipelineLogLevel {
 };
 
 struct Span;
+struct CompleteSpan;
 
 // TODO(someday): See if we can merge similar code concepts...  Trace fills a role similar to
 // MetricsCollector::Reporter::StageEvent, and Tracer fills a role similar to
@@ -826,8 +827,7 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> entrypoint;
 
   kj::Vector<tracing::Log> logs;
-  // TODO(o11y): Convert this to actually store spans.
-  kj::Vector<tracing::Log> spans;
+  kj::Vector<CompleteSpan> spans;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
   kj::Vector<tracing::Exception> exceptions;
 
@@ -908,11 +908,9 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
 class BaseTracer {
  public:
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
-  // The isSpan parameter allows for logging spans, which will be emitted after regular logs. There
-  // can be at most MAX_USER_SPANS spans in a trace.
-  virtual void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) = 0;
-  // Add a span, which will be represented as a log.
-  virtual void addSpan(const Span& span, kj::String spanContext) = 0;
+  virtual void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) = 0;
+  // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
+  virtual void addSpan(CompleteSpan&& span) = 0;
 
   virtual void addException(
       kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) = 0;
@@ -945,9 +943,8 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
-  void addLog(
-      kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan = false) override;
-  void addSpan(const Span& span, kj::String spanContext) override;
+  void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) override;
+  void addSpan(CompleteSpan&& span) override;
   void addException(kj::Date timestamp,
       kj::String name,
       kj::String message,
@@ -1048,8 +1045,29 @@ struct Span {
 // Utility functions for handling span tags.
 void serializeTagValue(rpc::TagValue::Builder builder, const Span::TagValue& value);
 Span::TagValue deserializeTagValue(rpc::TagValue::Reader value);
-// Stringifier for span tags, getting this to work with KJ_STRINGIFY() appears exceedingly difficult.
-kj::String spanTagStr(const kj::OneOf<bool, int64_t, double, kj::String>& tag);
+
+// Stringify and clone for span tags, getting this to work with KJ_STRINGIFY() appears exceedingly
+// difficult.
+kj::String spanTagStr(const Span::TagValue& tag);
+Span::TagValue spanTagClone(const Span::TagValue& tag);
+
+struct CompleteSpan {
+  // Represents a completed span within user tracing.
+  uint64_t spanId;
+  uint64_t parentSpanId;
+
+  kj::ConstString operationName;
+  kj::Date startTime;
+  kj::Date endTime;
+  Span::TagMap tags;
+
+  CompleteSpan(rpc::UserSpanData::Reader reader);
+  void copyTo(rpc::UserSpanData::Builder builder);
+  explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
+      : operationName(kj::mv(operationName)),
+        startTime(startTime),
+        endTime(startTime) {}
+};
 
 // An opaque token which can be used to create child spans of some parent. This is typically
 // passed down from a caller to a callee when the caller wants to allow the callee to create

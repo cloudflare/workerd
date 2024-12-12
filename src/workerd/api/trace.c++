@@ -15,6 +15,7 @@
 #include <workerd/util/uuid.h>
 
 #include <capnp/schema.h>
+#include <kj/encoding.h>
 
 namespace workerd::api {
 
@@ -74,15 +75,11 @@ jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const tracing::Log& log
 }
 
 kj::Array<jsg::Ref<TraceLog>> getTraceLogs(jsg::Lock& js, const Trace& trace) {
-  auto builder = kj::heapArrayBuilder<jsg::Ref<TraceLog>>(trace.logs.size() + trace.spans.size());
-  for (auto i: kj::indices(trace.logs)) {
-    builder.add(jsg::alloc<TraceLog>(js, trace, trace.logs[i]));
-  }
-  // Add spans represented as logs to the logs object.
-  for (auto i: kj::indices(trace.spans)) {
-    builder.add(jsg::alloc<TraceLog>(js, trace, trace.spans[i]));
-  }
-  return builder.finish();
+  return KJ_MAP(x, trace.logs) -> jsg::Ref<TraceLog> { return jsg::alloc<TraceLog>(js, trace, x); };
+}
+
+kj::Array<jsg::Ref<OTelSpan>> getTraceSpans(const Trace& trace) {
+  return KJ_MAP(x, trace.spans) -> jsg::Ref<OTelSpan> { return jsg::alloc<OTelSpan>(x); };
 }
 
 kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents(
@@ -209,6 +206,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
       executionModel(enumToStr(trace.executionModel)),
+      spans(getTraceSpans(trace)),
       outcome(enumToStr(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
@@ -288,6 +286,10 @@ jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
 
 kj::StringPtr TraceItem::getExecutionModel() {
   return executionModel;
+}
+
+kj::ArrayPtr<jsg::Ref<OTelSpan>> TraceItem::getSpans() {
+  return spans;
 }
 
 kj::StringPtr TraceItem::getOutcome() {
@@ -551,6 +553,47 @@ uint16_t TraceItem::HibernatableWebSocketEventInfo::Close::getCode() {
 
 bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
   return eventInfo.wasClean;
+}
+
+kj::StringPtr OTelSpan::getOperation() {
+  return operation;
+}
+
+kj::Date OTelSpan::getStartTime() {
+  return startTime;
+}
+
+kj::StringPtr OTelSpan::getSpanID() {
+  return spanId;
+}
+kj::StringPtr OTelSpan::getParentSpanID() {
+  return parentSpanId;
+}
+
+kj::Date OTelSpan::getEndTime() {
+  return endTime;
+}
+
+kj::ArrayPtr<OTelSpanTag> OTelSpan::getTags() {
+  return tags;
+}
+
+OTelSpan::OTelSpan(const CompleteSpan& span)
+    : operation(kj::str(span.operationName)),
+      startTime(span.startTime),
+      endTime(span.endTime),
+      tags(kj::heapArray<OTelSpanTag>(span.tags.size())) {
+  // IDs are represented as network-order hex strings.
+  uint64_t netSpanId = __builtin_bswap64(span.spanId);
+  uint64_t netParentSpanId = __builtin_bswap64(span.parentSpanId);
+  spanId = kj::encodeHex(kj::ArrayPtr<byte>((kj::byte*)&netSpanId, sizeof(uint64_t)));
+  parentSpanId = kj::encodeHex(kj::ArrayPtr<byte>((kj::byte*)&netParentSpanId, sizeof(uint64_t)));
+  uint32_t i = 0;
+  for (auto& tag: span.tags) {
+    tags[i].key = kj::str(tag.key);
+    tags[i].value = spanTagClone(tag.value);
+    i++;
+  }
 }
 
 TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log)
