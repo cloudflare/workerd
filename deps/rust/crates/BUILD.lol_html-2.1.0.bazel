@@ -6,13 +6,12 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "cxx",
+    name = "lol_html",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,41 +28,30 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "alloc",
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__cxxbridge-macro-1.0.130//:cxxbridge_macro",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cxx",
+        "crate-name=lol_html",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.130",
+    version = "2.1.0",
     deps = [
-        ":cxx_cc",
-        "@crates_vendor__link-cplusplus-1.0.9//:link_cplusplus",
+        "@crates_vendor__bitflags-2.6.0//:bitflags",
+        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+        "@crates_vendor__cssparser-0.27.2//:cssparser",
+        "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
+        "@crates_vendor__hashbrown-0.15.2//:hashbrown",
+        "@crates_vendor__lazy_static-1.5.0//:lazy_static",
+        "@crates_vendor__lazycell-1.3.0//:lazycell",
+        "@crates_vendor__memchr-2.7.4//:memchr",
+        "@crates_vendor__mime-0.3.17//:mime",
+        "@crates_vendor__selectors-0.22.0//:selectors",
+        "@crates_vendor__thiserror-1.0.69//:thiserror",
     ],
-)
-
-# Additive BUILD file content
-cc_library(
-    name = "cxx_cc",
-    srcs = ["src/cxx.cc"],
-    hdrs = ["include/cxx.h"],
-    include_prefix = "rust",
-    includes = ["include"],
-    linkstatic = True,
-    strip_include_prefix = "include",
-    visibility = ["//visibility:public"],
 )

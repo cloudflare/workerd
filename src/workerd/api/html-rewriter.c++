@@ -4,12 +4,13 @@
 
 #include "html-rewriter.h"
 
-#include "c-api/include/lol_html.h"
 #include "streams.h"
 #include "util.h"
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+
+#include <lol_html.h>
 
 struct lol_html_HtmlRewriter {};
 struct lol_html_HtmlRewriterBuilder {};

@@ -6,16 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap",
+    name = "serde_json",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -33,41 +30,57 @@ rust_library(
         ],
     ),
     crate_features = [
-        "derive",
-        "error-context",
-        "help",
+        "default",
         "std",
-        "suggestions",
-        "usage",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.18//:clap_derive",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.21",
+    version = "1.0.133",
     deps = [
-        "@crates_vendor__clap_builder-4.5.21//:clap_builder",
+        "@crates_vendor__itoa-1.0.14//:itoa",
+        "@crates_vendor__memchr-2.7.4//:memchr",
+        "@crates_vendor__ryu-1.0.18//:ryu",
+        "@crates_vendor__serde-1.0.215//:serde",
+        "@crates_vendor__serde_json-1.0.133//:build_script_build",
     ],
 )
 
-rust_binary(
-    name = "stdio-fixture__bin",
+cargo_build_script(
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
     compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
+    crate_features = [
+        "default",
+        "std",
+    ],
+    crate_name = "build_script_build",
+    crate_root = "build.rs",
+    data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -79,32 +92,24 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
-    ],
-    crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.18//:clap_derive",
-    ],
+    pkg_name = "serde_json",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.21",
-    deps = [
-        ":clap",
-        "@crates_vendor__clap_builder-4.5.21//:clap_builder",
-    ],
+    version = "1.0.133",
+    visibility = ["//visibility:private"],
+)
+
+alias(
+    name = "build_script_build",
+    actual = ":_bs",
+    tags = ["manual"],
 )
