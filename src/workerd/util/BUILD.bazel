@@ -9,6 +9,17 @@ wd_cc_library(
         "perfetto-tracing.h",
         "use-perfetto-categories.h",
     ],
+    # HACK: We do not use the perfetto IPC system backend in any capacity. If perfetto-tracing.c++
+    # is able to inline and optimize its perfetto::Tracing::Initialize() call properly, there are no
+    # references to it anywhere in workerd and the linker can optimize it away, reducing binary
+    # sizes. Enable optimization unconditionally here so that the backend goes away.
+    # See perfetto's include/perfetto/tracing/tracing.h for more context.
+    # Alternatively, we could create an override for perfetto_build_flags.h to disable the
+    # PERFETTO_IPC and PERFETTO_SYSTEM_CONSUMER defines which also exist to facilitate link-time
+    # code elimination, but doing so results in a smaller size improvement than enabling
+    # optimization here, or no additional improvement when doing combined with enabling
+    # optimization.
+    copts = ["-O3"],
     defines = select({
         "@platforms//os:windows": [],
         "//conditions:default": ["WORKERD_USE_PERFETTO"],
