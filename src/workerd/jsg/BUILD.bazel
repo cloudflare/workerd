@@ -179,6 +179,7 @@ wd_cc_library(
         "resource-test.c++",
         "rtti-test.c++",
         "url-test.c++",
+        "multiple-typewrappers-test.c++",
     ],
 )]
 
@@ -227,5 +228,13 @@ kj_test(
     deps = [
         ":jsg",
         ":resource_test_capnp",
+    ],
+)
+
+kj_test(
+    src = "multiple-typewrappers-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
     ],
 )
