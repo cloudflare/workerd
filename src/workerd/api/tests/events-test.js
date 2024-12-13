@@ -285,16 +285,15 @@ export const cancelableListenerAbortPropagation = {
     // signal's abort event propagation is stopped. This is a safety measure to
     // prevent certain kinds of memory leaks. We currently do not implement this
     // protection.
-    // const controller = new AbortController();
-    // const { signal } = controller;
-    // signal.addEventListener('abort', (e) => e.stopImmediatePropagation(), { once: true });
-    // const et = new EventTarget();
-    // et.addEventListener('foo', () => {
-    //   console.log('....')
-    //   throw new Error('should not be called');
-    // }, { signal });
-    // controller.abort();
-    // et.dispatchEvent(new Event('foo'));
+    const controller = new AbortController();
+    const { signal } = controller;
+    signal.addEventListener('abort', (e) => e.stopImmediatePropagation(), { once: true });
+    const et = new EventTarget();
+    et.addEventListener('foo', () => {
+      throw new Error('should not be called');
+    }, { signal });
+    controller.abort();
+    et.dispatchEvent(new Event('foo'));
   },
 };
 

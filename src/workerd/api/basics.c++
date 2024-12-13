@@ -258,9 +258,6 @@ void EventTarget::addEventListener(jsg::Lock& js,
     KJ_IF_SOME(signal, maybeSignal) {
       // If the AbortSignal has already been triggered, then we need to stop here.
       // Return without adding the event listener.
-      if (signal->getAborted()) {
-        return;
-      }
     }
 
     auto& set = getOrCreate(type);
@@ -274,6 +271,14 @@ void EventTarget::addEventListener(jsg::Lock& js,
 
       return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
     });
+
+    KJ_IF_SOME(signal, maybeSignal) {
+      // If the AbortSignal has already been triggered, then we need to stop here.
+      // Return without adding the event listener.
+      if (signal->getAborted()) {
+        return;
+      }
+    }
 
     auto eventHandler = kj::heap<EventHandler>(
         EventHandler::JavaScriptHandler{
