@@ -102,24 +102,34 @@ export default {
         let returnSet = structuredClone(exampleVectorMatches);
         if (
           body?.filter?.['text'] &&
-          typeof body?.filter?.['text'] === 'object' &&
-          body?.filter?.['text']?.['$eq'] !== undefined
+          typeof body?.filter?.['text'] === 'object'
         ) {
-          const criteria = body?.filter?.['text']?.['$eq'];
-          returnSet = returnSet.filter(
-            (m) => m.metadata?.['text'] === criteria
-          );
+          if (body?.filter?.['text']?.['$eq'] !== undefined) {
+            const criteria = body?.filter?.['text']?.['$eq'];
+            returnSet = returnSet.filter(
+              (m) => m.metadata?.['text'] === criteria
+            );
+          }
+          if (body?.filter?.['text']?.['$in'] !== undefined) {
+            const criteria = body?.filter?.['text']?.['$in'];
+            returnSet = returnSet.filter((m) =>
+              criteria.includes(m.metadata?.['text'])
+            );
+          }
+          if (body?.filter?.['text']?.['$gt'] !== undefined) {
+            const criteria = body?.filter?.['text']?.['$gt'];
+            returnSet = returnSet.filter(
+              (m) => m.metadata?.['text'] > criteria
+            );
+          }
+          if (body?.filter?.['text']?.['$lt'] !== undefined) {
+            const criteria = body?.filter?.['text']?.['$lt'];
+            returnSet = returnSet.filter(
+              (m) => m.metadata?.['text'] < criteria
+            );
+          }
         }
-        if (
-          body?.filter?.['text'] &&
-          typeof body?.filter?.['text'] === 'object' &&
-          body?.filter?.['text']?.['$in'] !== undefined
-        ) {
-          const criteria = body?.filter?.['text']?.['$in'];
-          returnSet = returnSet.filter((m) =>
-            criteria.includes(m.metadata?.['text'])
-          );
-        }
+
         if (!body?.returnValues)
           returnSet.forEach((v) => {
             delete v.values;

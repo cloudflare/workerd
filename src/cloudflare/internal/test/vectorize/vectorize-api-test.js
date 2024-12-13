@@ -238,6 +238,30 @@ export const test_vector_search_vector_query = {
       };
       assert.deepStrictEqual(results, expected);
     }
+
+    {
+      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+        topK: 1,
+        filter: {
+          text: {
+            $gt: 'Peter Piper picked a peck of pickled peppers',
+            $lt: 'You know New York, you need New York, you know you need unique New York',
+          },
+        },
+      });
+      assert.equal(true, results.count > 0);
+      /** @type {VectorizeMatches}  */
+      const expected = {
+        matches: [
+          {
+            id: 'b0daca4a-ffd8-4865-926b-e24800af2a2d',
+            score: 0.71151,
+          },
+        ],
+        count: 1,
+      };
+      assert.deepStrictEqual(results, expected);
+    }
   },
 };
 
