@@ -37,6 +37,17 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "trace-stream",
+    srcs = ["trace-stream.c++"],
+    hdrs = ["trace-stream.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/workerd/util:completion-membrane",
+    ],
+)
+
+wd_cc_library(
     name = "io",
     # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
     #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
@@ -106,6 +117,7 @@ wd_cc_library(
         "//src/workerd/api:url",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",
+        "//src/workerd/util:completion-membrane",
         "//src/workerd/util:sqlite",
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",
