@@ -254,6 +254,8 @@ declare module "cloudflare:workers" {
     protected ctx: ExecutionContext;
     protected env: Env;
 
+    constructor(ctx: ExecutionContext, env: Env);
+
     run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
   }
 }
