@@ -1818,7 +1818,19 @@ class Server::WorkerService final: public Service,
       name = entry.key;  // replace with more-permanent string
       handlers = &entry.value;
     } else {
-      handlers = &KJ_UNWRAP_OR_RETURN(defaultEntrypointHandlers, kj::none);
+      KJ_IF_SOME(d, defaultEntrypointHandlers) {
+        handlers = &d;
+      } else {
+        // It would appear that there is no default export, therefore this refers to an entrypoint
+        // that doesn't exist! However, this was historically allowed. For backwards-compatibility,
+        // we preserve this behavior, by returning a reference to the WorkerService itself, whose
+        // startRequest() will fail.
+        //
+        // What will happen if you invoke this entrypoint? Not what you think. Check out the
+        // test case in server-test.c++ entitled "referencing non-extant default entrypoint is not
+        // an error" for the sordid details.
+        return fakeOwn(*this);
+      }
     }
     return kj::heap<EntrypointService>(*this, name, propsJson, *handlers);
   }

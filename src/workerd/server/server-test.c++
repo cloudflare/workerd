@@ -1441,6 +1441,68 @@ KJ_TEST("Server: invalid entrypoint") {
       "has no such named entrypoint.\n");
 }
 
+KJ_TEST("Server: referencing non-extant default entrypoint is not an error") {
+  // For historical reasons, it's not a config error to refer to to the default entrypoint of
+  // a service that has no default export.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export let alt = {
+                `  async fetch(request, env) {
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+  test.start();
+
+  // A request will still fail at runtime, but we shouldn't have seen startup/config errors.
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  // Due to the Deep Magic (bugs) going back to the dawn of Module Workers, if an HTTP request is
+  // delivered to the default entrypoint of a module worker that has no default export, then the
+  // system will fall back to calling event handlers registered with addEventListener("fetch").
+  //
+  // There is a magic deeper still in which, due to mistakes introduced in the stillness and the
+  // darkness before Module Workers dawned, if none of those event listeners call
+  // `event.respondWith()` (perhaps because *there are no event listeners*), then the request falls
+  // back to default handling, in which it simply passes through to fetch() and makes a subrequest.
+  //
+  // So... we expect... a subrequest...
+  {
+    auto subreq = test.receiveSubrequest("foo", {"public"});
+    subreq.recv(R"(
+      GET / HTTP/1.1
+      Host: foo
+
+    )"_blockquote);
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      Content-Length: 3
+
+      wat)"_blockquote);
+  }
+
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 3
+
+    wat)"_blockquote);
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [
