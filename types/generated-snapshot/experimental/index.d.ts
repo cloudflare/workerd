@@ -3592,7 +3592,12 @@ declare abstract class BaseAiTextEmbeddings {
   postProcessedOutputs: AiTextEmbeddingsOutput;
 }
 type RoleScopedChatInput = {
-  role: "user" | "assistant" | "system" | "tool" | string;
+  role:
+    | "user"
+    | "assistant"
+    | "system"
+    | "tool"
+    | (string & NonNullable<unknown>);
   content: string;
   name?: string;
 };
@@ -3600,7 +3605,7 @@ type AiTextGenerationToolLegacyInput = {
   name: string;
   description: string;
   parameters?: {
-    type: "object" | string;
+    type: "object" | (string & NonNullable<unknown>);
     properties: {
       [key: string]: {
         type: string;
@@ -3611,12 +3616,12 @@ type AiTextGenerationToolLegacyInput = {
   };
 };
 type AiTextGenerationToolInput = {
-  type: "function" | string;
+  type: "function" | (string & NonNullable<unknown>);
   function: {
     name: string;
     description: string;
     parameters?: {
-      type: "object" | string;
+      type: "object" | (string & NonNullable<unknown>);
       properties: {
         [key: string]: {
           type: string;
@@ -3634,7 +3639,6 @@ type AiTextGenerationFunctionsInput = {
 type AiTextGenerationInput = {
   prompt?: string;
   raw?: boolean;
-  image?: number[];
   stream?: boolean;
   max_tokens?: number;
   temperature?: number;
@@ -3687,7 +3691,7 @@ type AiTextToImageInput = {
   guidance?: number;
   seed?: number;
 };
-type AiTextToImageOutput = Uint8Array;
+type AiTextToImageOutput = ReadableStream<Uint8Array>;
 declare abstract class BaseAiTextToImage {
   inputs: AiTextToImageInput;
   postProcessedOutputs: AiTextToImageOutput;
