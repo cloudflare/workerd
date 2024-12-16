@@ -1,3 +1,4 @@
+load("@aspect_bazel_lib//lib/private:tar_toolchain.bzl", "tar_toolchain")
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 
 js_library(
@@ -9,4 +10,16 @@ js_library(
         "//:node_modules/eslint-plugin-prettier",
         "//:node_modules/typescript-eslint",
     ],
+)
+
+tar_toolchain(
+    name = "system_tar_exec",
+    binary = "windows/system-tar.bat",
+)
+
+toolchain(
+    name = "windows_tar_system_toolchain",
+    exec_compatible_with = ["@platforms//os:windows"],
+    toolchain = ":system_tar_exec",
+    toolchain_type = "@aspect_bazel_lib//lib:tar_toolchain_type",
 )

@@ -8,6 +8,12 @@ load("@//build/deps:gen/deps.bzl", "deps_gen")
 
 deps_gen()
 
+# Workaround for: https://github.com/bazel-contrib/bazel-lib/issues/968.
+# Override toolchain for tar on windows.
+register_toolchains(
+    "//tools:windows_tar_system_toolchain",
+)
+
 # ========================================================================================
 # Bazel basics
 
