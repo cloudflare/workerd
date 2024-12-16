@@ -240,7 +240,7 @@ export const test_vector_search_vector_query = {
     }
 
     {
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
+      const results = await IDX.query(new Float32Array(5), {
         topK: 1,
         filter: {
           text: {
