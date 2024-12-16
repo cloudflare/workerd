@@ -62,7 +62,7 @@ setx BAZEL_SH "C:\msys64\usr\bin\bash.exe"
 echo.
 echo.* Step 6 Install msys2 tools suggested for bazel, from https://bazel.build/install/windows.
 @rem Invoking pacman like this reports an error updating GNU info files, no idea how to fix.
-C:\msys64\usr\bin\bash -c "/usr/bin/pacman -S --noconfirm zip unzip patch diffutils"
+C:\msys64\usr\bin\bash -c "/usr/bin/pacman -S --noconfirm zip unzip patch diffutils tcl
 call :AddToUserPathInEnvironment C:\msys64\usr\bin
 
 echo.
