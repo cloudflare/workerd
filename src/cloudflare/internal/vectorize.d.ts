@@ -33,7 +33,13 @@ interface VectorizeError {
  *
  * This list is expected to grow as support for more operations are released.
  */
-type VectorizeVectorMetadataFilterOp = '$eq' | '$ne';
+type VectorizeVectorMetadataFilterOp =
+  | '$eq'
+  | '$ne'
+  | '$lt'
+  | '$lte'
+  | '$gt'
+  | '$gte';
 type VectorizeVectorMetadataFilterCollectionOp = '$in' | '$nin';
 
 /**
