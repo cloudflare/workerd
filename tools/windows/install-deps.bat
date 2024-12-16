@@ -30,8 +30,6 @@ echo.
 echo.This script will configure your Windows machine for building workerd with
 echo.bazel on Windows.
 echo.
-echo.Some of the steps will open windows for you to approve.
-echo.
 echo.* Step 1: Enable developer mode features.
 echo.
 rem This is based on https://learn.microsoft.com/en-us/windows/apps/get-started/developer-mode-features-and-debugging
@@ -41,18 +39,14 @@ echo.
 echo.* Step 2: Enable 8.3 name support on this machine.
 fsutil 8dot3name set 0
 
-rem Install Visual Studio Code Community edition with Desktop development with C++ package.
-rem ----------------------------------------------------------------------------------------
+rem Install Visual Studio Code Community edition with C++ package.
 rem
-rem The config in vsconfig.json is the config for "Desktop development with C++".
+rem We add workloads on the command line with `--add` instead of using a vsconfig.json file, because
+rem this allows for unattended installation. (With `--config` you still have to click OK in a dialog
+rem box.) You can find the various workloads available for installation here:
 rem
-rem The config is determined by first installing Visual Studio Community Edition on your
-rem devbox. Then run `c:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe` and click
-rem `More -> Export Configuration Settings`, select an config file to write, then `Review Details`
-rem and select "Desktop development with C++".
-echo.
-echo.* Step 3: Install Visual Studio Code Community edition with Desktop development with C++ package.
-winget install "Microsoft.VisualStudio.2022.Community" --override "install --config %~dp0\vsconfig.json"
+rem https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022&preserve-view=true#desktop-development-with-c
+winget install -e --id Microsoft.VisualStudio.2022.Community --version 17.12.3 --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.ASAN --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --add Microsoft.VisualStudio.Component.Windows11SDK.22000"
 
 echo.
 echo.* Step 4: Install Python 3.
@@ -72,13 +66,7 @@ C:\msys64\usr\bin\bash -c "/usr/bin/pacman -S --noconfirm zip unzip patch diffut
 call :AddToUserPathInEnvironment C:\msys64\usr\bin
 
 echo.
-echo.* Step 7: Install LLVM compiler toolchain.
-@rem The MSVC build frequently breaks in some ways when the LLVM version is updated, we may have to
-@rem manually install a different version again soon.
-@rem winget install "LLVM" --version 18.1.8
-
-echo.
-echo.* Step 8: Install bazelisk as %LOCALAPPDATA%\Programs\bazelisk\bazel.exe.
+echo.* Step 7: Install bazelisk as %LOCALAPPDATA%\Programs\bazelisk\bazel.exe.
 winget install bazelisk -l "%LOCALAPPDATA%\Programs\bazelisk" -r "bazel.exe"
 call :AddToUserPathInEnvironment "%LOCALAPPDATA%\Programs\bazelisk"
 

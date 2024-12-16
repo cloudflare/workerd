@@ -6,10 +6,10 @@
     "files.trimTrailingWhitespace": true,
     "editor.tabSize": 2,
     "terminal.integrated.env.windows": {
-        "BAZEL_LLVM" : "C:\\Program Files\\LLVM",
-        "BAZEL_SH" : "C:\\msys64\\usr\\bin\\bash.exe",
-        "BAZEL_VC" : "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC",
-        "BAZEL_WINSDK_FULL_VERSION" : "10.0.22000.0",
+        "BAZEL_LLVM": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\Llvm\\x64",
+        "BAZEL_SH": "C:\\msys64\\usr\\bin\\bash.exe",
+        "BAZEL_VC": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC",
+        "BAZEL_WINSDK_FULL_VERSION": "10.0.22000.0",
     },
     "clangd.arguments": [
         "--background-index",
