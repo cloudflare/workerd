@@ -5383,6 +5383,7 @@ declare module "cloudflare:workers" {
   export type WorkflowEvent<T> = {
     payload: Readonly<T>;
     timestamp: Date;
+    instanceId: string;
   };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
