@@ -12,15 +12,15 @@
 
 import {
   ERR_BUFFER_OUT_OF_BOUNDS,
-  ERR_OUT_OF_RANGE,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_BUFFER_SIZE,
+  ERR_OUT_OF_RANGE,
   ERR_UNKNOWN_ENCODING,
 } from 'node-internal:internal_errors';
 
-import { default as bufferUtil } from 'node-internal:buffer';
 import type { Encoding } from 'node-internal:buffer';
+import { default as bufferUtil } from 'node-internal:buffer';
 
 import {
   isAnyArrayBuffer,
@@ -32,11 +32,11 @@ import { normalizeEncoding } from 'node-internal:internal_utils';
 
 import { validateString } from 'node-internal:validators';
 
-import internalUtil from 'node-internal:util';
 import {
   InspectOptionsStylized,
   inspect as utilInspect,
 } from 'node-internal:internal_inspect';
+import internalUtil from 'node-internal:util';
 
 const { ASCII, BASE64, BASE64URL, HEX, LATIN1, UTF16LE, UTF8 } = bufferUtil;
 
@@ -648,7 +648,7 @@ Buffer.prototype.toString = function toString(
     return '';
   }
 
-  const normalizedEncoding = normalizeEncoding(`${encoding}`);
+  const normalizedEncoding = normalizeEncoding(encoding);
   if (normalizedEncoding === undefined) {
     throw new ERR_UNKNOWN_ENCODING(`${encoding}`);
   }
