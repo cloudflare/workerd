@@ -1,10 +1,9 @@
 cc_library(
     name = "lolhtml",
-    hdrs = ["@crates_vendor__lol_html-2.0.0//:c-api/include/lol_html.h"],
-    include_prefix = "c-api/include",
-    strip_include_prefix = "c-api/include",
+    hdrs = ["@crates_vendor__lol_html_c_api-1.1.2//:include/lol_html.h"],
+    strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
-        "@crates_vendor//:lolhtml",
+        "@crates_vendor//:lol_html_c_api",
     ],
 )
