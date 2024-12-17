@@ -36,7 +36,6 @@ const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 export function normalizeEncoding(enc?: string): Encoding | undefined {
   if (
     enc == null ||
-    enc === undefined ||
     enc === 'utf8' ||
     enc === 'utf-8' ||
     enc === 'UTF8' ||
