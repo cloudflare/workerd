@@ -169,6 +169,56 @@
       "repo": "buildtools",
       "file_regex": "^buildifier-windows-amd64.exe$",
       "file_type": "executable"
+    },
+    //clang-format
+    {
+      "name": "clang-format-linux-amd64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-linux-amd64-clang-format",
+      "file_type": "executable"
+    },
+    {
+      "name": "clang-format-linux-arm64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-linux-arm64-clang-format",
+      "file_type": "executable"
+    },
+    {
+      "name": "clang-format-darwin-arm64",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "llvm-.*-darwin-arm64-clang-format",
+      "file_type": "executable"
+    },
+    //ruff
+    {
+      "name": "ruff-darwin-arm64",
+      "type": "github_release",
+      "owner": "astral-sh",
+      "repo": "ruff",
+      "file_regex": "^ruff-aarch64-apple-darwin.tar.gz$",
+      "build_file_content": "filegroup(name='file', srcs=glob(['**']))"
+    },
+    {
+      "name": "ruff-linux-arm64",
+      "type": "github_release",
+      "owner": "astral-sh",
+      "repo": "ruff",
+      "file_regex": "^ruff-aarch64-unknown-linux-gnu.tar.gz$",
+      "build_file_content": "filegroup(name='file', srcs=glob(['**']))"
+    },
+    {
+      "name": "ruff-linux-amd64",
+      "type": "github_release",
+      "owner": "astral-sh",
+      "repo": "ruff",
+      "file_regex": "^ruff-x86_64-unknown-linux-gnu.tar.gz$",
+      "build_file_content": "filegroup(name='file', srcs=glob(['**']))"
     }
   ]
 }
