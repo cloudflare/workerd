@@ -26,10 +26,10 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import type { Encoding } from 'node-internal:buffer';
 import { default as bufferUtil } from 'node-internal:buffer';
-import { ERR_FALSY_VALUE_REJECTION } from 'node-internal:internal_errors';
+import type { Encoding } from 'node-internal:buffer';
 import { validateFunction } from 'node-internal:validators';
+import { ERR_FALSY_VALUE_REJECTION } from 'node-internal:internal_errors';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 
