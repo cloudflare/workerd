@@ -1214,7 +1214,7 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
       break;
     case CacheMode::NOCACHE:
       ttl = 0;
-      KJ_FALLTHROUGH;
+      break;
     case CacheMode::NONE:
       KJ_UNREACHABLE;
   }
@@ -1239,8 +1239,11 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
 
     // Validate that the cache type is valid
     auto cacheMode = getCacheModeFromName(c);
-    JSG_REQUIRE(cacheMode != Request::CacheMode::NOCACHE, TypeError,
-        kj::str("Unsupported cache mode: ", c));
+
+    if (!FeatureFlags::get(js).getCacheNoCache()) {
+      JSG_REQUIRE(cacheMode != Request::CacheMode::NOCACHE, TypeError,
+          kj::str("Unsupported cache mode: ", c));
+    }
   }
 }
 
