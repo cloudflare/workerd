@@ -542,16 +542,6 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__castaway-0.2.3",
-        sha256 = "0abae9be0aaf9ea96a3b1b8b1b55c602ca751eba1b1500220cea4ecbafe7c0d5",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/castaway/0.2.3/download"],
-        strip_prefix = "castaway-0.2.3",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.castaway-0.2.3.bazel"),
-    )
-
-    maybe(
-        http_archive,
         name = "crates_vendor__cc-1.2.3",
         sha256 = "27f657647bcff5394bf56c7317665bbf790a137a50eaaa5c6bfbb9e27a518f2d",
         type = "tar.gz",
@@ -638,16 +628,6 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/codespan-reporting/0.11.1/download"],
         strip_prefix = "codespan-reporting-0.11.1",
         build_file = Label("@workerd//deps/rust/crates:BUILD.codespan-reporting-0.11.1.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__compact_str-0.8.0",
-        sha256 = "6050c3a16ddab2e412160b31f2c871015704239bca62f72f6e5f0be631d3f644",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/compact_str/0.8.0/download"],
-        strip_prefix = "compact_str-0.8.0",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.compact_str-0.8.0.bazel"),
     )
 
     maybe(
@@ -1332,7 +1312,7 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_python_ast-0.0.0",
-        commit = "5e6de4e0c69660e8ca8608d1ac965216197756ce",
+        commit = "b54922fd7394c36cdc390fd21aaee99206ebc361",
         init_submodules = True,
         remote = "https://github.com/astral-sh/ruff.git",
         build_file = Label("@workerd//deps/rust/crates:BUILD.ruff_python_ast-0.0.0.bazel"),
@@ -1342,7 +1322,7 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_python_parser-0.0.0",
-        commit = "5e6de4e0c69660e8ca8608d1ac965216197756ce",
+        commit = "b54922fd7394c36cdc390fd21aaee99206ebc361",
         init_submodules = True,
         remote = "https://github.com/astral-sh/ruff.git",
         build_file = Label("@workerd//deps/rust/crates:BUILD.ruff_python_parser-0.0.0.bazel"),
@@ -1352,7 +1332,7 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_python_trivia-0.0.0",
-        commit = "5e6de4e0c69660e8ca8608d1ac965216197756ce",
+        commit = "b54922fd7394c36cdc390fd21aaee99206ebc361",
         init_submodules = True,
         remote = "https://github.com/astral-sh/ruff.git",
         build_file = Label("@workerd//deps/rust/crates:BUILD.ruff_python_trivia-0.0.0.bazel"),
@@ -1362,7 +1342,7 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_source_file-0.0.0",
-        commit = "5e6de4e0c69660e8ca8608d1ac965216197756ce",
+        commit = "b54922fd7394c36cdc390fd21aaee99206ebc361",
         init_submodules = True,
         remote = "https://github.com/astral-sh/ruff.git",
         build_file = Label("@workerd//deps/rust/crates:BUILD.ruff_source_file-0.0.0.bazel"),
@@ -1372,7 +1352,7 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_text_size-0.0.0",
-        commit = "5e6de4e0c69660e8ca8608d1ac965216197756ce",
+        commit = "b54922fd7394c36cdc390fd21aaee99206ebc361",
         init_submodules = True,
         remote = "https://github.com/astral-sh/ruff.git",
         build_file = Label("@workerd//deps/rust/crates:BUILD.ruff_text_size-0.0.0.bazel"),
@@ -1391,12 +1371,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__rustc-hash-2.1.0",
-        sha256 = "c7fb8039b3032c191086b10f11f319a6e99e1e82889c5cc6046f515c9db1d497",
+        name = "crates_vendor__rustc-hash-1.1.0",
+        sha256 = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rustc-hash/2.1.0/download"],
-        strip_prefix = "rustc-hash-2.1.0",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.rustc-hash-2.1.0.bazel"),
+        urls = ["https://static.crates.io/crates/rustc-hash/1.1.0/download"],
+        strip_prefix = "rustc-hash-1.1.0",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.rustc-hash-1.1.0.bazel"),
     )
 
     maybe(
