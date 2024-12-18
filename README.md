@@ -178,7 +178,7 @@ For more details about command-line usage, use `workerd --help`.
 Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these. If you're running a prebuilt binary, you'll need to make sure your system has the right dependencies installed:
 
 * On Linux:
-  * glibc 2.31 or higher (already included on e.g. Ubuntu 20.04, Debian Bullseye)
+  * glibc 2.35 or higher (already included on e.g. Ubuntu 22.04, Debian Bookworm)
 * On macOS:
   * macOS 13.5 or higher
   * The Xcode command line tools, which can be installed with `xcode-select --install`
