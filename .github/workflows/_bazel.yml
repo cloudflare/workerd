@@ -5,7 +5,7 @@ on:
       image:
         type: string
         required: false
-        default: "ubuntu-20.04"
+        default: "ubuntu-22.04"
       os_name:
         type: string
         required: false
