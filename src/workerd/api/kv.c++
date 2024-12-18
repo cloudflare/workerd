@@ -152,7 +152,8 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     headers.add(header.name.asPtr(), header.value.asPtr());
   }
 
-  return client;
+  uint maxConcurrentRequestsPerKVBinding = 6;
+  return kj::newConcurrencyLimitingHttpClient(*client, maxConcurrentRequestsPerKVBinding, [](uint runningCount, uint pendingCount) {}).attach(kj::mv(client));
 }
 
 jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
