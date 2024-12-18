@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "syn",
+    name = "ruff_python_ast",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,33 +28,30 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "clone-impls",
-        "default",
-        "derive",
-        "extra-traits",
-        "fold",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__is-macro-0.3.7//:is_macro",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=ruff_python_ast",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.90",
+    version = "0.0.0",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.92//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__unicode-ident-1.0.14//:unicode_ident",
+        "@crates_vendor__aho-corasick-1.1.3//:aho_corasick",
+        "@crates_vendor__bitflags-2.6.0//:bitflags",
+        "@crates_vendor__itertools-0.13.0//:itertools",
+        "@crates_vendor__once_cell-1.20.2//:once_cell",
+        "@crates_vendor__ruff_python_trivia-0.0.0//:ruff_python_trivia",
+        "@crates_vendor__ruff_source_file-0.0.0//:ruff_source_file",
+        "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
+        "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
     ],
 )
