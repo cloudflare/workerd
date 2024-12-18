@@ -16,6 +16,7 @@ import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
 import {
   setUnsafeEval,
   setGetRandomValues,
+  finishSetup,
 } from 'pyodide-internal:pool/builtin_wrappers';
 
 /**
@@ -168,7 +169,7 @@ function getEmscriptenSettings(
 function* featureDetectionMonkeyPatchesContextManager() {
   const global = globalThis as any;
   // Make Emscripten think we're in the browser main thread
-  global.window = {};
+  global.window = { sessionStorage: {} };
   global.document = { createElement() {} };
   global.sessionStorage = {};
   // Make Emscripten think we're not in a worker
@@ -212,6 +213,7 @@ export async function instantiateEmscriptenModule(
     const emscriptenModule = await emscriptenSettings.readyPromise;
     emscriptenModule.setUnsafeEval = setUnsafeEval;
     emscriptenModule.setGetRandomValues = setGetRandomValues;
+    finishSetup();
     return emscriptenModule;
   } catch (e) {
     console.warn('Error in instantiateEmscriptenModule');
