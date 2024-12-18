@@ -66,6 +66,54 @@ struct ScriptVersion {
   }
 };
 
+struct OTelSpanTag final: public jsg::Object {
+  kj::String key;
+  kj::OneOf<bool, int64_t, double, kj::String> value;
+  JSG_STRUCT(key, value);
+};
+
+// OpenTelemetry-compatible span data exposed as part of the trace. Loosely based on https://github.com/open-telemetry/opentelemetry-js/blob/v1.28.0/experimental/packages/otlp-transformer/src/trace/types.ts#L64
+class OTelSpan final: public jsg::Object {
+ public:
+  OTelSpan(const CompleteSpan& span);
+  kj::StringPtr getSpanID();
+  kj::StringPtr getParentSpanID();
+  kj::StringPtr getOperation();
+  kj::ArrayPtr<OTelSpanTag> getTags();
+  kj::Date getStartTime();
+  kj::Date getEndTime();
+
+  JSG_RESOURCE_TYPE(OTelSpan) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(spanId, getSpanID);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(parentSpanId, getParentSpanID);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(operation, getOperation);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(tags, getTags);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(startTime, getStartTime);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(endTime, getEndTime);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("operation", operation);
+    for (const OTelSpanTag& tag: tags) {
+      tracker.trackField("key", tag.key);
+      KJ_SWITCH_ONEOF(tag.value) {
+        KJ_CASE_ONEOF(str, kj::String) {
+          tracker.trackField("value", str);
+        }
+        KJ_CASE_ONEOF_DEFAULT break;
+      }
+    }
+  }
+
+ private:
+  kj::String spanId;
+  kj::String parentSpanId;
+  kj::String operation;
+  kj::Date startTime;
+  kj::Date endTime;
+  kj::Array<OTelSpanTag> tags;
+};
+
 class TraceItem final: public jsg::Object {
  public:
   class FetchEventInfo;
@@ -102,16 +150,20 @@ class TraceItem final: public jsg::Object {
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
   kj::StringPtr getExecutionModel();
+  kj::ArrayPtr<jsg::Ref<OTelSpan>> getSpans();
   kj::StringPtr getOutcome();
 
   uint getCpuTime();
   uint getWallTime();
   bool getTruncated();
 
-  JSG_RESOURCE_TYPE(TraceItem) {
+  JSG_RESOURCE_TYPE(TraceItem, CompatibilityFlags::Reader flags) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(event, getEvent);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(eventTimestamp, getEventTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(logs, getLogs);
+    if (flags.getTailWorkerUserSpans()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(spans, getSpans);
+    }
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticsChannelEvents, getDiagnosticChannelEvents);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
@@ -138,6 +190,7 @@ class TraceItem final: public jsg::Object {
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
   kj::String executionModel;
+  kj::Array<jsg::Ref<OTelSpan>> spans;
   kj::String outcome;
   uint cpuTime;
   uint wallTime;
@@ -647,8 +700,9 @@ class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
       api::TraceItem::HibernatableWebSocketEventInfo,                                              \
       api::TraceItem::HibernatableWebSocketEventInfo::Message,                                     \
       api::TraceItem::HibernatableWebSocketEventInfo::Close,                                       \
-      api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog, api::TraceException,   \
-      api::TraceDiagnosticChannelEvent, api::TraceMetrics, api::UnsafeTraceMetrics
+      api::TraceItem::HibernatableWebSocketEventInfo::Error, api::TraceLog, api::OTelSpan,         \
+      api::OTelSpanTag, api::TraceException, api::TraceDiagnosticChannelEvent, api::TraceMetrics,  \
+      api::UnsafeTraceMetrics
 // The list of trace.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

@@ -2494,6 +2494,7 @@ export interface TraceItem {
     | null;
   readonly eventTimestamp: number | null;
   readonly logs: TraceLog[];
+  readonly spans: OTelSpan[];
   readonly exceptions: TraceException[];
   readonly diagnosticsChannelEvents: TraceDiagnosticChannelEvent[];
   readonly scriptName: string | null;
@@ -2566,6 +2567,18 @@ export interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
+}
+export interface OTelSpan {
+  readonly spanId: string;
+  readonly parentSpanId: string;
+  readonly operation: string;
+  readonly tags: OTelSpanTag[];
+  readonly startTime: Date;
+  readonly endTime: Date;
+}
+export interface OTelSpanTag {
+  key: string;
+  value: boolean | (number | bigint) | number | string;
 }
 export interface TraceException {
   readonly timestamp: number;

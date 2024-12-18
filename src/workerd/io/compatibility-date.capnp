@@ -668,4 +668,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # A bug in the original implementation of TransformStream failed to apply backpressure
   # correctly. The fix, however, can break existing implementations that don't account
   # for the bug so we need to put the fix behind a compat flag.
+
+  # Experimental support for exporting user spans to tail worker.
+  tailWorkerUserSpans @69 :Bool
+      $compatEnableFlag("tail_worker_user_spans")
+      $experimental;
 }

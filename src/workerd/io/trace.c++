@@ -582,13 +582,17 @@ Trace::~Trace() noexcept(false) {}
 
 void Trace::copyTo(rpc::Trace::Builder builder) {
   {
-    auto list = builder.initLogs(logs.size() + spans.size());
+    auto list = builder.initLogs(logs.size());
     for (auto i: kj::indices(logs)) {
       logs[i].copyTo(list[i]);
     }
-    // Add spans represented as logs to the logs object.
+  }
+
+  {
+    // Add spans to the builder.
+    auto list = builder.initSpans(spans.size());
     for (auto i: kj::indices(spans)) {
-      spans[i].copyTo(list[i + logs.size()]);
+      spans[i].copyTo(list[i]);
     }
   }
 
@@ -719,6 +723,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   // "full", so we may need to filter out the extra data after receiving the traces back.
   if (pipelineLogLevel != PipelineLogLevel::NONE) {
     logs.addAll(reader.getLogs());
+    spans.addAll(reader.getSpans());
     exceptions.addAll(reader.getExceptions());
     diagnosticChannelEvents.addAll(reader.getDiagnosticChannelEvents());
   }
@@ -1682,7 +1687,10 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
           kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
-void WorkerTracer::addLog(kj::Date timestamp, LogLevel logLevel, kj::String message, bool isSpan) {
+kj::LiteralStringConst logSizeExceeded =
+    "[\"Log size limit exceeded: More than 128KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
+
+void WorkerTracer::addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) {
   if (trace->exceededLogLimit) {
     return;
   }
@@ -1694,47 +1702,80 @@ void WorkerTracer::addLog(kj::Date timestamp, LogLevel logLevel, kj::String mess
     trace->exceededLogLimit = true;
     trace->truncated = true;
     // We use a JSON encoded array/string to match other console.log() recordings:
-    trace->logs.add(timestamp, LogLevel::WARN,
-        kj::str(
-            "[\"Log size limit exceeded: More than 128KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"));
+    trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
     return;
   }
   trace->bytesUsed = newSize;
-  if (isSpan) {
-    trace->spans.add(timestamp, logLevel, kj::mv(message));
-    trace->numSpans++;
-    return;
-  }
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
-void WorkerTracer::addSpan(const Span& span, kj::String spanContext) {
-  // This is where we'll actually encode the span for now.
+void WorkerTracer::addSpan(CompleteSpan&& span) {
+  // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
   if (trace->numSpans >= MAX_USER_SPANS) {
     return;
   }
-  if (isPredictableModeForTest()) {
-    // Do not emit span duration information in predictable mode.
-    addLog(span.endTime, LogLevel::LOG, kj::str("[\"span: ", span.operationName, "\"]"), true);
-  } else {
-    // Time since Unix epoch in seconds, with millisecond precision
-    double epochSecondsStart = (span.startTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
-    double epochSecondsEnd = (span.endTime - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1000.0;
-    auto message = kj::str("[\"span: ", span.operationName, " ", kj::mv(spanContext), " ",
-        epochSecondsStart, " ", epochSecondsEnd, "\"]");
-    addLog(span.endTime, LogLevel::LOG, kj::mv(message), true);
+  trace->numSpans++;
+
+  if (trace->exceededLogLimit) {
+    return;
+  }
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
   }
 
-  // TODO(cleanup): Create a function in kj::OneOf to automatically convert to a given type (i.e
-  // String) to avoid having to handle each type explicitly here.
+  // 48B for traceID, spanID, parentSpanID, start & end time.
+  const int fixedSpanOverhead = 48;
+  size_t newSize = trace->bytesUsed + fixedSpanOverhead + span.operationName.size();
   for (const Span::TagMap::Entry& tag: span.tags) {
-    kj::String message = kj::str("[\"tag: "_kj, tag.key, " => "_kj, spanTagStr(tag.value), "\"]");
-    addLog(span.endTime, LogLevel::LOG, kj::mv(message), true);
+    newSize += tag.key.size();
+    KJ_SWITCH_ONEOF(tag.value) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        newSize += str.size();
+      }
+      KJ_CASE_ONEOF(val, bool) {
+        newSize++;
+      }
+      // int64_t and double
+      KJ_CASE_ONEOF_DEFAULT {
+        newSize += sizeof(int64_t);
+      }
+    }
   }
+
+  if (newSize > MAX_TRACE_BYTES) {
+    trace->exceededLogLimit = true;
+    trace->truncated = true;
+    trace->logs.add(span.endTime, LogLevel::WARN, kj::str(logSizeExceeded));
+    return;
+  }
+  trace->bytesUsed = newSize;
+  trace->spans.add(kj::mv(span));
+  trace->numSpans++;
 }
 
-kj::String spanTagStr(const kj::OneOf<bool, int64_t, double, kj::String>& tag) {
+Span::TagValue spanTagClone(const Span::TagValue& tag) {
+  KJ_SWITCH_ONEOF(tag) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      return kj::str(str);
+    }
+    KJ_CASE_ONEOF(val, int64_t) {
+      // TODO(o11y): We can't stringify BigInt, which causes test problems. Export this as hex
+      // instead? Then again OTel assumes that int values can be represented as JS numbers, so
+      // representing this as a double/Number might be fine despite the possible precision loss.
+      return kj::str(val);
+    }
+    KJ_CASE_ONEOF(val, double) {
+      return val;
+    }
+    KJ_CASE_ONEOF(val, bool) {
+      return val;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::String spanTagStr(const Span::TagValue& tag) {
   KJ_SWITCH_ONEOF(tag) {
     KJ_CASE_ONEOF(str, kj::String) {
       return kj::str(str);
@@ -1782,6 +1823,36 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
       return kj::heapString(value.getString());
     default:
       KJ_UNREACHABLE;
+  }
+}
+
+void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) {
+  builder.setOperationName(operationName.asPtr());
+  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+  builder.setParentSpanId(parentSpanId);
+
+  auto tagsParam = builder.initTags(tags.size());
+  auto i = 0;
+  for (auto& tag: tags) {
+    auto tagParam = tagsParam[i++];
+    tagParam.setKey(tag.key.asPtr());
+    serializeTagValue(tagParam.initValue(), tag.value);
+  }
+}
+
+CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
+    : spanId(reader.getSpanId()),
+      parentSpanId(reader.getParentSpanId()),
+      operationName(kj::str(reader.getOperationName())),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
+      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+  auto tagsParam = reader.getTags();
+  tags.reserve(tagsParam.size());
+  for (auto tagParam: tagsParam) {
+    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
+        deserializeTagValue(tagParam.getValue()));
   }
 }
 
