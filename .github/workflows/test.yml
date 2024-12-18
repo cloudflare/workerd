@@ -28,7 +28,7 @@ jobs:
       matrix:
         os:
           [
-            { name : linux, image : ubuntu-20.04 },
+            { name : linux, image : ubuntu-22.04 },
             { name : macOS, image : macos-15 },
             { name : windows, image : windows-2025 }
           ]
@@ -41,7 +41,7 @@ jobs:
           ]
         include:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os:     { name: linux, image: ubuntu-20.04 }
+          - os:     { name: linux, image: ubuntu-22.04 }
             config: { suffix: -asan }
           # Windows has a custom non-debug bazel config.
           - os:     { name : windows, image : windows-2025 }

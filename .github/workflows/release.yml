@@ -10,7 +10,7 @@ jobs:
     outputs:
       version: ${{ steps.echo.outputs.version }}
     # version job uses ubuntu 24.04, this way we don't have to install the updated clang while
-    # the build job uses 20.04 for libc compatibility.
+    # the build job uses 22.04 for libc compatibility.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -56,11 +56,11 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-15, windows-2025]
+        os: [ubuntu-22.04, macos-15, windows-2025]
         target-arch: [ X64 ]
         include:
           - os-name: linux
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             bazel-config: release_linux
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
           # release binaries on the macos-15 runner.

@@ -75,7 +75,7 @@ jobs:
     # if: github.repository_owner == 'cloudflare'
     name: Publish `workerd` to NPM
     needs: [version, publish-arch-specific]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
