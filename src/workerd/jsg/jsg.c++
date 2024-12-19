@@ -187,6 +187,12 @@ void Lock::setAllowEval(bool allow) {
   IsolateBase::from(v8Isolate).setAllowEval({}, allow);
 }
 
+void Lock::installJspi() {
+  IsolateBase::from(v8Isolate).setJspiEnabled({}, true);
+  v8Isolate->InstallConditionalFeatures(v8Context());
+  IsolateBase::from(v8Isolate).setJspiEnabled({}, false);
+}
+
 void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);
 }

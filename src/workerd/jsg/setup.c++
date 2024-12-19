@@ -343,6 +343,7 @@ IsolateBase::IsolateBase(const V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
+    ptr->SetWasmJSPIEnabledCallback(&jspiEnabledCallback);
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -459,6 +460,12 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
   IsolateBase* self =
       static_cast<IsolateBase*>(context->GetIsolate()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
+}
+
+bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
+  IsolateBase* self =
+      static_cast<IsolateBase*>(context->GetIsolate()->GetData(SET_DATA_ISOLATE_BASE));
+  return self->jspiEnabled;
 }
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
