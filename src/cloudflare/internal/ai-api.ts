@@ -49,6 +49,8 @@ export class Ai {
   private options: AiOptions = {};
   public lastRequestId: string | null = null;
   public aiGatewayLogId: string | null = null;
+  public lastRequestHttpStatusCode: number | null = null;
+  public lastRequestInternalStatusCode: number | null = null;
 
   public constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
@@ -101,6 +103,7 @@ export class Ai {
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
+    this.lastRequestHttpStatusCode = res.status;
 
     if (inputs['stream']) {
       if (!res.ok) {
@@ -135,6 +138,7 @@ export class Ai {
 
     try {
       const parsedContent = JSON.parse(content) as AiError;
+      this.lastRequestInternalStatusCode = parsedContent.internalCode;
       return new InferenceUpstreamError(
         `${parsedContent.internalCode}: ${parsedContent.description}`,
         parsedContent.name
