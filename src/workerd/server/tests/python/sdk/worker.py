@@ -51,8 +51,11 @@ async def on_fetch(request):
     elif request.url.endswith("/undefined_opts"):
         # This tests two things:
         #   * `Response.redirect` static method
-        #   * that other options can be passed into `fetch`
-        resp = await fetch("https://example.com/redirect", redirect="manual")
+        #   * that other options can be passed into `fetch` (so that we can support
+        #       new options without updating this code)
+        resp = await fetch(
+            "https://example.com/redirect", redirect="manual", foobarbaz=42
+        )
         return resp
     elif request.url.endswith("/response_inherited"):
         expected = "test123"
@@ -89,6 +92,14 @@ async def on_fetch(request):
         assert data["blob.py"].content_type == "text/python"
         assert data["metadata"].name == "metadata.json"
 
+        return Response("success")
+    elif request.url.endswith("/cf_opts"):
+        resp = await fetch(
+            "http://example.com/redirect",
+            redirect="manual",
+            cf={"cacheTtl": 5, "cacheEverything": True, "cacheKey": "someCustomKey"},
+        )
+        assert resp.status == 301
         return Response("success")
     else:
         resp = await fetch("https://example.com/sub")
@@ -273,6 +284,23 @@ async def can_request_form_data_blob(env):
     assert text == "success"
 
 
+async def response_from_unit_tests(env):
+    response = Response("test", status=201, status_text="Created")
+    cloned = Response.from_response("other", response)
+    assert cloned.status == 201
+    assert cloned.status_text == "Created"
+    t = await cloned.text()
+    assert t == "other"
+
+
+async def can_use_cf_fetch_opts(env):
+    response = await env.SELF.fetch(
+        "http://example.com/cf_opts",
+    )
+    text = await response.text()
+    assert text == "success"
+
+
 async def test(ctrl, env):
     await can_return_custom_fetch_response(env)
     await can_modify_response(env)
@@ -287,3 +315,5 @@ async def test(ctrl, env):
     await form_data_unit_tests(env)
     await blob_unit_tests(env)
     await can_request_form_data_blob(env)
+    await response_from_unit_tests(env)
+    await can_use_cf_fetch_opts(env)
