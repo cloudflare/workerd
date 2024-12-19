@@ -27,7 +27,7 @@ The following is a minimal `tsconfig.json` for use alongside this package:
 
 ### Compatibility dates
 
-![Entrypoints for compatibility dates](./entrypoints.svg)
+![Entrypoints for compatibility dates](https://github.com/cloudflare/workerd/blob/main/npm/workers-types/entrypoints.svg)
 
 The Cloudflare Workers runtime manages backwards compatibility through the use of [Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates/). Using different compatibility dates affects the runtime types available to your Worker, and so it's important you specify the correct entrypoint to the `workers-types` package to match your compatibility date (which is usually set in your `wrangler.toml` configuration file). `workers-types` currently exposes the following entrypoints to choose from:
 
