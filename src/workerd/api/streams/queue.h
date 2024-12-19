@@ -8,7 +8,7 @@
 
 #include <workerd/jsg/jsg.h>
 
-#include <deque>
+#include <list>
 #include <set>
 
 namespace workerd::api {
@@ -544,8 +544,10 @@ class ConsumerImpl final {
   struct Closed {};
   using Errored = jsg::Value;
   struct Ready {
-    std::deque<kj::OneOf<QueueEntry, Close>> buffer;
-    std::deque<ReadRequest> readRequests;
+    // We use std::list to keep memory overhead low when there are many streams with no or few
+    // pending entries/reads.
+    std::list<kj::OneOf<QueueEntry, Close>> buffer;
+    std::list<ReadRequest> readRequests;
     size_t queueTotalSize = 0;
 
     inline kj::StringPtr jsgGetMemoryName() const;
@@ -863,7 +865,9 @@ class ByteQueue final {
   };
 
   struct State {
-    std::deque<kj::Own<ByobRequest>> pendingByobReadRequests;
+    // We use std::list to keep memory overhead low when there are many streams with no or few
+    // pending reads.
+    std::list<kj::Own<ByobRequest>> pendingByobReadRequests;
 
     JSG_MEMORY_INFO(ByteQueue::State) {
       for (auto& request: pendingByobReadRequests) {
