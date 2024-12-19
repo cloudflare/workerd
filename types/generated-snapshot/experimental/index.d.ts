@@ -5521,6 +5521,7 @@ declare module "cloudflare:workers" {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
     protected ctx: ExecutionContext;
     protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
     run(
       event: Readonly<WorkflowEvent<T>>,
       step: WorkflowStep,
