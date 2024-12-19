@@ -679,4 +679,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("cache_no_cache_disabled")
       $experimental;
   # Enables the use of cache: no-cache in the fetch api.
+
+  pythonWorkers20250109 @71 :Bool
+      $compatEnableFlag("python_workers_20250109")
+      $experimental
+      $pythonSnapshotRelease(pyodide = "0.27.0", pyodideRevision = "2025-01-09",
+          packages = "2024-12-18", backport = 1,
+          baselineSnapshotHash = "TODO");
 }
