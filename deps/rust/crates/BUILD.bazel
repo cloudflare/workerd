@@ -116,6 +116,18 @@ alias(
 )
 
 alias(
+    name = "ruff_python_ast",
+    actual = "@crates_vendor__ruff_python_ast-0.0.0//:ruff_python_ast",
+    tags = ["manual"],
+)
+
+alias(
+    name = "ruff_python_parser",
+    actual = "@crates_vendor__ruff_python_parser-0.0.0//:ruff_python_parser",
+    tags = ["manual"],
+)
+
+alias(
     name = "serde",
     actual = "@crates_vendor__serde-1.0.215//:serde",
     tags = ["manual"],
@@ -177,7 +189,13 @@ alias(
 )
 
 alias(
-    name = "phf_generator__gen_hash_test",
+    name = "phf_generator-0.8.0__gen_hash_test",
     actual = "@crates_vendor__phf_generator-0.8.0//:gen_hash_test__bin",
+    tags = ["manual"],
+)
+
+alias(
+    name = "phf_generator-0.11.2__gen_hash_test",
+    actual = "@crates_vendor__phf_generator-0.11.2//:gen_hash_test__bin",
     tags = ["manual"],
 )

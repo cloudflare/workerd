@@ -24,6 +24,8 @@ PACKAGES = {
     "pico-args": crate.spec(version = "0"),
     "proc-macro2": crate.spec(version = "1"),
     "quote": crate.spec(version = "1"),
+    "ruff_python_ast": crate.spec(git = "https://github.com/astral-sh/ruff.git", tag = "v0.4.10"),
+    "ruff_python_parser": crate.spec(git = "https://github.com/astral-sh/ruff.git", tag = "v0.4.10"),
     "serde_json": crate.spec(version = "1"),
     "serde": crate.spec(version = "1", features = ["derive"]),
     "syn": crate.spec(version = "2"),
