@@ -2528,6 +2528,9 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
+  // Install JSPI on the current context. Currently used only for Python workers.
+  void installJspi();
+
   void setCaptureThrowsAsRejections(bool capture);
   void setCommonJsExportDefault(bool exportDefault);
 

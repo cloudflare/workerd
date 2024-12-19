@@ -72,6 +72,7 @@ EmscriptenRuntime EmscriptenRuntime::initialize(
   kj::Maybe<capnp::Data::Reader> emsciptenSetupJsReader;
   kj::Maybe<capnp::Data::Reader> pythonStdlibZipReader;
   kj::Maybe<capnp::Data::Reader> pyodideAsmWasmReader;
+  js.installJspi();
   for (auto module: bundle.getModules()) {
     if (module.getName().endsWith("emscriptenSetup.js")) {
       emsciptenSetupJsReader = module.getData();

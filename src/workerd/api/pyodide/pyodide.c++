@@ -485,6 +485,7 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
 }
 
 jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
+  js.installJspi();
   js.v8Context()->SetSecurityToken(emscriptenRuntime.contextToken.getHandle(js));
   return emscriptenRuntime.emscriptenRuntime.getHandle(js);
 }

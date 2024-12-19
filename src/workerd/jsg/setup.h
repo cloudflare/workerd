@@ -122,6 +122,9 @@ class IsolateBase {
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
     evalAllowed = allow;
   }
+  inline void setJspiEnabled(kj::Badge<Lock>, bool enabled) {
+    jspiEnabled = enabled;
+  }
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
   }
@@ -236,6 +239,7 @@ class IsolateBase {
   v8::Isolate* ptr;
   kj::Maybe<kj::String> uuid;
   bool evalAllowed = false;
+  bool jspiEnabled = false;
 
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
   // should never throw errors synchronously. Rather, they are supposed to capture any synchronous
@@ -320,6 +324,7 @@ class IsolateBase {
   static v8::ModifyCodeGenerationFromStringsResult modifyCodeGenCallback(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
+  static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
