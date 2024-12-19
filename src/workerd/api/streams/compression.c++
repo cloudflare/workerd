@@ -8,8 +8,8 @@
 
 #include <workerd/io/features.h>
 
-#include <deque>
 #include <iterator>
+#include <list>
 #include <vector>
 
 namespace workerd::api {
@@ -489,7 +489,9 @@ class CompressionStreamImpl: public kj::Refcounted,
 
   kj::Canceler canceler;
   LazyBuffer output;
-  std::deque<PendingRead> pendingReads;
+  // We use std::list to keep memory overhead low when there are many streams with no or few pending
+  // reads.
+  std::list<PendingRead> pendingReads;
 };
 }  // namespace
 
