@@ -673,4 +673,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   tailWorkerUserSpans @69 :Bool
       $compatEnableFlag("tail_worker_user_spans")
       $experimental;
+
+  pythonWorkers20241218 @70 :Bool
+      $compatEnableFlag("python_workers_20241218")
+      $experimental
+      $pythonSnapshotRelease(pyodide = "0.26.4", pyodideRevision = "2024-12-18",
+          packages = "2024-12-18", backport = 0,
+          baselineSnapshotHash = "TODO");
 }
