@@ -648,7 +648,7 @@ Buffer.prototype.toString = function toString(
     return '';
   }
 
-  const normalizedEncoding = normalizeEncoding(`${encoding}`);
+  const normalizedEncoding = normalizeEncoding(encoding?.toString());
   if (normalizedEncoding === undefined) {
     throw new ERR_UNKNOWN_ENCODING(`${encoding}`);
   }
