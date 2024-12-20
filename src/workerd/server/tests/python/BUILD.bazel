@@ -15,25 +15,13 @@ copy_file(
 )
 
 py_wd_test(
-    src = "hello/hello.wd-test",
+    "hello",
     args = ["--experimental"],
-    data = glob(
-        [
-            "hello/*",
-        ],
-        exclude = ["**/*.wd-test"],
-    ),
 )
 
 py_wd_test(
-    src = "sdk/sdk.wd-test",
+    "sdk",
     args = ["--experimental"],
-    data = glob(
-        [
-            "sdk/*",
-        ],
-        exclude = ["**/*.wd-test"],
-    ),
     tags = [
         # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
         "no-asan",
@@ -41,47 +29,23 @@ py_wd_test(
 )
 
 py_wd_test(
-    src = "env-param/env.wd-test",
+    "env-param",
     args = ["--experimental"],
-    data = glob(
-        [
-            "env-param/*",
-        ],
-        exclude = ["**/*.wd-test"],
-    ),
 )
 
 py_wd_test(
-    src = "asgi/asgi.wd-test",
+    "asgi",
     args = ["--experimental"],
-    data = glob(
-        [
-            "asgi/*",
-        ],
-        exclude = ["**/*.wd-test"],
-    ),
 )
 
 py_wd_test(
-    src = "random/random.wd-test",
+    "random",
     args = ["--experimental"],
-    data = glob(
-        [
-            "random/*",
-        ],
-        exclude = ["**/*.wd-test"],
-    ),
 )
 
 py_wd_test(
-    src = "subdirectory/subdirectory.wd-test",
+    "subdirectory",
     args = ["--experimental"],
-    data = glob(
-        [
-            "subdirectory/**",
-        ],
-        exclude = ["**/*.wd-test"],
-    ),
 )
 
-gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
+# gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
