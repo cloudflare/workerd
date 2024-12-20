@@ -5693,9 +5693,13 @@ export const toString = {
       strictEqual(Buffer.from('666f6f', encoding).toString(encoding), '666f6f');
     });
 
+    // default utf-8 if undefined
+    strictEqual(Buffer.from('utf-8').toString(), 'utf-8');
+
+
+    const invalidEncodings = new Array(10).fill(0).map((_, i) => String(i + 1).repeat(i + 1));
     // Invalid encodings
-    for (let i = 1; i < 10; i++) {
-      const encoding = String(i).repeat(i);
+    for (const encoding of [...invalidEncodings, null]) {
       const error = {
         code: 'ERR_UNKNOWN_ENCODING',
         name: 'TypeError',
