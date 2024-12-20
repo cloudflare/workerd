@@ -42,10 +42,12 @@ export function normalizeEncoding(enc?: string): Encoding | undefined {
     enc === 'UTF-8'
   )
     return UTF8;
-  return slowCases(enc);
+  return getEncodingOps(enc);
 }
 
-export function slowCases(enc: unknown): Encoding | undefined {
+export function getEncodingOps(enc: unknown): Encoding | undefined {
+  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
+  enc += '';
   // @ts-expect-error TS18046 TS complains about unknown can not have length.
   switch (enc.length) {
     case 4:

@@ -5815,7 +5815,8 @@ export const toStringRange = {
       },
       {
         name: 'TypeError',
-      }
+      },
+      'toString() with 0 and null as the encoding should have thrown'
     );
 
     throws(
@@ -5824,7 +5825,8 @@ export const toStringRange = {
       },
       {
         name: 'TypeError',
-      }
+      },
+      'toString() with null encoding should have thrown'
     );
   },
 };
