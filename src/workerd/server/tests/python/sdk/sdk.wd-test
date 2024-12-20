@@ -8,7 +8,7 @@ const python :Workerd.Worker = (
     ( name = "SELF", service = "python-sdk" ),
   ],
   compatibilityDate = "2024-10-01",
-  compatibilityFlags = ["python_workers_development"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
 );
 
 const server :Workerd.Worker = (
@@ -16,7 +16,7 @@ const server :Workerd.Worker = (
     (name = "server.py", pythonModule = embed "server.py")
   ],
   compatibilityDate = "2024-10-01",
-  compatibilityFlags = ["python_workers_development"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
 );
 
 const unitTests :Workerd.Config = (

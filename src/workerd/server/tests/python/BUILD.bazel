@@ -14,38 +14,26 @@ copy_file(
     visibility = ["//visibility:public"],
 )
 
+py_wd_test("hello")
+
+py_wd_test("env-param")
+
 py_wd_test(
-    "hello",
-    args = ["--experimental"],
+    "asgi",
+    # TODO: update bundle to include asgi fix and test on 0.26.0a2
+    python_flags = ["development"],
 )
+
+py_wd_test("random")
+
+py_wd_test("subdirectory")
 
 py_wd_test(
     "sdk",
-    args = ["--experimental"],
     tags = [
         # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
         "no-asan",
     ],
 )
 
-py_wd_test(
-    "env-param",
-    args = ["--experimental"],
-)
-
-py_wd_test(
-    "asgi",
-    args = ["--experimental"],
-)
-
-py_wd_test(
-    "random",
-    args = ["--experimental"],
-)
-
-py_wd_test(
-    "subdirectory",
-    args = ["--experimental"],
-)
-
-# gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
+gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
