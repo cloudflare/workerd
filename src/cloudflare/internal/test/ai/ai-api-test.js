@@ -16,6 +16,8 @@ export const tests = {
         env.ai.lastRequestId,
         '3a1983d7-1ddd-453a-ab75-c4358c91b582'
       );
+      // Test request http status code is present
+      assert.deepStrictEqual(env.ai.lastRequestHttpStatusCode, 200);
     }
 
     {
@@ -55,6 +57,9 @@ export const tests = {
             message: '1001: prompt and messages are mutually exclusive',
           }
         );
+        // Test request internal status code is present
+        assert.deepEqual;
+        assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
       }
     }
 
