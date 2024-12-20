@@ -1416,20 +1416,44 @@ interface Element {
   hasAttribute(name: string): boolean;
   setAttribute(name: string, value: string): Element;
   removeAttribute(name: string): Element;
-  before(content: string, options?: ContentOptions): Element;
-  after(content: string, options?: ContentOptions): Element;
-  prepend(content: string, options?: ContentOptions): Element;
-  append(content: string, options?: ContentOptions): Element;
-  replace(content: string, options?: ContentOptions): Element;
+  before(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  after(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  prepend(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  append(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
+  replace(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
   remove(): Element;
   removeAndKeepContent(): Element;
-  setInnerContent(content: string, options?: ContentOptions): Element;
+  setInnerContent(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Element;
   onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
 }
 interface EndTag {
   name: string;
-  before(content: string, options?: ContentOptions): EndTag;
-  after(content: string, options?: ContentOptions): EndTag;
+  before(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): EndTag;
+  after(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): EndTag;
   remove(): EndTag;
 }
 interface Comment {
@@ -1444,9 +1468,18 @@ interface Text {
   readonly text: string;
   readonly lastInTextNode: boolean;
   readonly removed: boolean;
-  before(content: string, options?: ContentOptions): Text;
-  after(content: string, options?: ContentOptions): Text;
-  replace(content: string, options?: ContentOptions): Text;
+  before(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Text;
+  after(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Text;
+  replace(
+    content: string | ReadableStream | Response,
+    options?: ContentOptions,
+  ): Text;
   remove(): Text;
 }
 interface DocumentEnd {
