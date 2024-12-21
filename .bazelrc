@@ -14,9 +14,7 @@ build --test_timeout=1,15,60,240
 common --noenable_bzlmod
 
 # bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
-# using the remote cache since less data needs to be fetched. Set remote_cache_eviction_retries
-# which is required to fully support a "dumb" cache. Bazel 8 already sets this value by default.
-build --experimental_remote_cache_eviction_retries=5
+# using the remote cache since less data needs to be fetched.
 # Note that we use remote_download_minimal for test builds, which avoids fetching build outputs
 # where possible. While several previous BwoB bugs have been fixed, this is slower than it could be
 # due to https://github.com/bazelbuild/bazel/issues/20576.
@@ -32,12 +30,6 @@ import %workspace%/build/lint.bazelrc
 
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
-
-# Avoid generating duplicate runfile trees. This will become the default in a future bazel version.
-build --nolegacy_external_runfiles
-
-# Flip this early to avoid breaking compatibility once it becomes the default.
-build --incompatible_disallow_empty_glob
 
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
@@ -383,3 +375,12 @@ build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
 build:clang-coverage --copt="-fcoverage-mapping" --linkopt="-fcoverage-mapping"
+
+build --enable_workspace
+# As part of starlarkification, Bazel 8 removes a number of rules which now need to be imported from
+# other repositories. In the long term, load() statements will be needed to import these rules. For
+# now, we can still autoload the affected repositories when needed. Do this only for a few
+# handpicked rules_python rules_shell, and protobuf components instead of the larger default
+# autoload set – some dependencies aren't importing the required shell rules yet, but we don't want
+# to accidentally rely on autoloading more dependencies.
+build --incompatible_autoload_externally="+py_binary,+py_library,+py_test,+ProtoInfo,+sh_binary,+proto_library,+cc_proto_library"

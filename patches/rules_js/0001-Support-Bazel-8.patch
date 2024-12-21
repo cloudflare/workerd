@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Fri, 22 Nov 2024 19:19:24 -0500
+Subject: Support Bazel 8
+
+
+diff --git a/js/private/coverage/merger.bzl b/js/private/coverage/merger.bzl
+index b41acfa6330e0b9dfcd71e83277275601ecd8a2a..08c82e0fff27014c5552af17a5423a6e8ca8cccf 100644
+--- a/js/private/coverage/merger.bzl
++++ b/js/private/coverage/merger.bzl
+@@ -68,7 +68,7 @@ coverage_merger = rule(
+     attrs = _ATTRS,
+     executable = True,
+     toolchains = [
+-        "@bazel_tools//tools/sh:toolchain_type",
++        "@rules_shell//shell:toolchain_type",
+         "@rules_nodejs//nodejs:toolchain_type",
+     ],
+ )
+diff --git a/js/private/js_binary.bzl b/js/private/js_binary.bzl
+index 33e71d92adbd7d9a41575df815db59a1e97f33c2..72147c622ee95d8447ea4896cbf6fdb58149d3b8 100644
+--- a/js/private/js_binary.bzl
++++ b/js/private/js_binary.bzl
+@@ -614,7 +614,7 @@ js_binary_lib = struct(
+     implementation = _js_binary_impl,
+     toolchains = [
+         # TODO: on Windows this toolchain is never referenced
+-        "@bazel_tools//tools/sh:toolchain_type",
++        "@rules_shell//shell:toolchain_type",
+         "@rules_nodejs//nodejs:toolchain_type",
+     ] + COPY_FILE_TO_BIN_TOOLCHAINS,
+ )

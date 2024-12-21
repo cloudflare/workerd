@@ -109,7 +109,10 @@
       "type": "github_release",
       "owner": "bazel-contrib",
       "repo": "bazel-lib",
-      "file_regex": "^bazel-lib-"
+      "file_regex": "^bazel-lib-",
+      "patches": [
+        "//:patches/bazel-lib/0001-Support-Bazel-8.patch"
+      ]
     },
     {
       "name": "aspect_rules_js",
@@ -120,7 +123,10 @@
       // TODO(cleanup): On latest version, Windows build fails with `tar.exe: Error opening archive:
       // Can't initialize filter; unable to run program "gzip -d"`, likely due to
       // https://github.com/aspect-build/rules_js/pull/1905/files. Develop a workaround.
-      "freeze_version": "v2.0.1"
+      "freeze_version": "v2.0.1",
+      "patches": [
+        "//:patches/rules_js/0001-Support-Bazel-8.patch"
+      ]
     },
     {
       "name": "aspect_rules_ts",
@@ -128,6 +134,20 @@
       "owner": "aspect-build",
       "repo": "rules_ts",
       "file_regex": "^rules_ts-"
+    },
+    {
+      "name": "rules_shell",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_shell",
+      "file_regex": "^rules_shell-"
+    },
+    {
+      "name": "rules_cc",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_cc",
+      "file_regex": "^rules_cc-"
     },
     //buildifier
     {
