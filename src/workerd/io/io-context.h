@@ -744,6 +744,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::ConstString operationName,
       std::initializer_list<SpanTagParams> tags);
 
+  // As above, but with callback to add span tags to the trace context for the operation.
+  kj::Own<kj::HttpClient> getHttpClientWithCallback(uint channel,
+      bool isInHouse,
+      kj::Maybe<kj::String> cfBlobJson,
+      kj::ConstString operationName,
+      kj::FunctionParam<void(TraceContext&)> func);
+
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
   kj::Own<kj::HttpClient> getHttpClientNoChecks(uint channel,
