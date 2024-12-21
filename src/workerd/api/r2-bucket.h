@@ -15,6 +15,19 @@ class Headers;
 
 namespace workerd::api::public_beta {
 
+struct StringTagParams {
+  kj::LiteralStringConst key;
+  kj::StringPtr value;
+};
+// Helper for creating R2 HTTP Client with the right span tags across operations. This is much
+// cleaner than directly using a callback to set span tags.
+kj::Own<kj::HttpClient> r2GetClient(IoContext& context,
+    uint subrequestChannel,
+    kj::LiteralStringConst op,
+    kj::LiteralStringConst method,
+    kj::Maybe<kj::StringPtr> bucket,
+    kj::Maybe<StringTagParams> extraTag = kj::none);
+
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
 kj::ArrayPtr<kj::StringPtr> fillR2Path(
     kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);

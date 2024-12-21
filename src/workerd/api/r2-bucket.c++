@@ -24,6 +24,25 @@
 #include <regex>
 
 namespace workerd::api::public_beta {
+kj::Own<kj::HttpClient> r2GetClient(IoContext& context,
+    uint subrequestChannel,
+    kj::LiteralStringConst op,
+    kj::LiteralStringConst method,
+    kj::Maybe<kj::StringPtr> bucket,
+    kj::Maybe<StringTagParams> extraTag) {
+  return context.getHttpClientWithCallback(
+      subrequestChannel, true, kj::none, op, [&](TraceContext& tracing) {
+    tracing.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kj));
+    tracing.userSpan.setTag("rpc.method"_kjc, kj::str(method));
+    KJ_IF_SOME(b, bucket) {
+      tracing.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    KJ_IF_SOME(tag, extraTag) {
+      tracing.userSpan.setTag(tag.key, kj::str(tag.value));
+    }
+  });
+}
+
 static bool isWholeNumber(double x) {
   double intpart;
   return modf(x, &intpart) == 0;
@@ -341,7 +360,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_get"_kjc);
+    auto client =
+        r2GetClient(context, clientIndex, "r2_get"_kjc, "GetObject"_kjc, this->adminBucketName());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -377,7 +397,9 @@ R2Bucket::get(jsg::Lock& js,
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_get"_kjc);
+    auto client =
+        r2GetClient(context, clientIndex, "r2_get"_kjc, "GetObject"_kjc, this->adminBucketName(),
+            kj::Maybe<StringTagParams>({"cloudflare.r2.key"_kjc, name.asPtr()}));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -439,7 +461,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     });
 
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_put"_kjc);
+    auto client =
+        r2GetClient(context, clientIndex, "r2_put"_kjc, "PutObject"_kjc, this->adminBucketName(),
+            kj::Maybe<StringTagParams>({"cloudflare.r2.key"_kjc, name.asPtr()}));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -630,8 +654,8 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client =
-        context.getHttpClient(clientIndex, true, kj::none, "r2_createMultipartUpload"_kjc);
+    auto client = r2GetClient(context, clientIndex, "r2_createMultipartUpload"_kjc,
+        "CreateMultipartUpload"_kjc, this->adminBucketName());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -729,7 +753,20 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_delete"_kjc);
+    auto deleteKey = [&]() {
+      KJ_SWITCH_ONEOF(keys) {
+        KJ_CASE_ONEOF(ks, kj::Array<kj::String>) {
+          return kj::str(ks);
+        }
+        KJ_CASE_ONEOF(k, kj::String) {
+          return kj::str(k);
+        }
+      }
+      KJ_UNREACHABLE;
+    };
+    auto client = r2GetClient(context, clientIndex, "r2_delete"_kjc, "DeleteObject"_kjc,
+        this->adminBucketName(),
+        kj::Maybe<StringTagParams>({"cloudflare.r2.delete"_kjc, deleteKey().asPtr()}));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -774,7 +811,8 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, kj::none, "r2_list"_kjc);
+    auto client = r2GetClient(
+        context, clientIndex, "r2_list"_kjc, "ListObjects"_kjc, this->adminBucketName());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
