@@ -71,3 +71,7 @@ build:ci-macOS-debug --config=debug
 
 build:ci-windows --config=windows_no_dbg
 build:ci-windows-debug --config=debug
+
+# TODO: WIP. Exploratory change only for now, merits discussion.
+build:ci-macOS --copt='-DNDEBUG'
+build:ci-linux --copt='-DNDEBUG'
