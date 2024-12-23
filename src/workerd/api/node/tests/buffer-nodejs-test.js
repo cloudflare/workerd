@@ -5696,7 +5696,6 @@ export const toString = {
     // default utf-8 if undefined
     strictEqual(Buffer.from('utf-8').toString(), 'utf-8');
 
-
     const invalidEncodings = new Array(10).fill(0).map((_, i) => String(i + 1).repeat(i + 1));
     // Invalid encodings
     for (const encoding of [...invalidEncodings, null]) {
