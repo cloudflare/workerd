@@ -24,7 +24,7 @@ test:ci --test_output=errors
 build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
-build:ci-test --remote_download_outputs=minimal --test_size_filters=small,medium,large,enormous
+build:ci-test --remote_download_outputs=minimal
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid
@@ -71,3 +71,10 @@ build:ci-macOS-debug --config=debug
 
 build:ci-windows --config=windows_no_dbg
 build:ci-windows-debug --config=debug
+
+# Some tests (like Python import tests) take a long time to run, especially when debug is enabled
+# For that reason, we only run them in the default configuration for each platform to minimize
+# effect on CI pipeline runtime.
+test:ci-linux --test_size_filters=
+test:ci-macOS --test_size_filters=
+test:ci-windows --test_size_filters=
