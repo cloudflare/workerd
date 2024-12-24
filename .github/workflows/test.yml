@@ -30,7 +30,7 @@ jobs:
           [
             { name : linux, image : ubuntu-20.04 },
             { name : macOS, image : macos-15 },
-            { name : windows, image : windows-2022 }
+            { name : windows, image : windows-2025 }
           ]
         config:
           [
@@ -44,19 +44,19 @@ jobs:
           - os:     { name: linux, image: ubuntu-20.04 }
             config: { suffix: -asan }
           # Windows has a custom non-debug bazel config.
-          - os:     { name : windows, image : windows-2022 }
+          - os:     { name : windows, image : windows-2025 }
             config: { suffix: '' }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
           # has been resolved we can likely re-enable it and possibly fold up the custom
           # configurations, as we can more easily disable PDB file generation.
-          # - os:     { name : windows, image : windows-2022 }
+          # - os:     { name : windows, image : windows-2025 }
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
         exclude:
           # Skip the matrix generated Windows non-debug config to use the one added above.
-          - os:     { name : windows, image : windows-2022 }
+          - os:     { name : windows, image : windows-2025 }
             config: { suffix: '' }
-          - os:     { name : windows, image : windows-2022 }
+          - os:     { name : windows, image : windows-2025 }
             config: { suffix: -debug }
           # due to resource constraints, exclude the macOS-debug runner for now. linux-debug and
           # linux-asan should provide sufficient coverage for building in the debug configuration.
