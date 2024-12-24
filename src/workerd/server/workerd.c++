@@ -193,13 +193,13 @@ class FileWatcher {
   }
 
  private:
-  kj::AutoCloseFd inotifyFd;
+  kj::OwnFd inotifyFd;
   kj::UnixEventPort::FdObserver observer;
 
   kj::HashMap<kj::String, int> watches;
   kj::HashMap<int, kj::HashSet<kj::String>> filesWatched;
 
-  static kj::AutoCloseFd makeInotify() {
+  static kj::OwnFd makeInotify() {
     return KJ_SYSCALL_FD(inotify_init1(IN_NONBLOCK | IN_CLOEXEC));
   }
 };
@@ -264,17 +264,17 @@ class FileWatcher {
   }
 
  private:
-  kj::AutoCloseFd kqueueFd;
+  kj::OwnFd kqueueFd;
   kj::UnixEventPort::FdObserver observer;
-  kj::Vector<kj::AutoCloseFd> filesWatched;
+  kj::Vector<kj::OwnFd> filesWatched;
 
-  static kj::AutoCloseFd makeKqueue() {
+  static kj::OwnFd makeKqueue() {
     auto fd = KJ_SYSCALL_FD(kqueue());
     KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
     return kj::mv(fd);
   }
 
-  void watchFd(kj::AutoCloseFd fd) {
+  void watchFd(kj::OwnFd fd) {
     KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
 
     struct kevent change;
@@ -1439,7 +1439,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     if (fd < 0) {
       return kj::none;
     }
-    return ExeInfo{kj::str(path), kj::newDiskFile(kj::AutoCloseFd(fd))};
+    return ExeInfo{kj::str(path), kj::newDiskFile(kj::OwnFd(fd))};
   }
 #endif
 

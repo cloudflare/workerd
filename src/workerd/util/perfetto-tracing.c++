@@ -18,10 +18,10 @@ PERFETTO_TRACK_EVENT_STATIC_STORAGE_IN_NAMESPACE(workerd::traces);
 
 namespace workerd {
 namespace {
-kj::AutoCloseFd openTraceFile(kj::StringPtr path) {
+kj::OwnFd openTraceFile(kj::StringPtr path) {
   int fd = open(path.cStr(), O_RDWR | O_CREAT | O_TRUNC, 0600);
   KJ_REQUIRE(fd >= 0, "Unable to open tracing file");
-  return kj::AutoCloseFd(fd);
+  return kj::OwnFd(fd);
 }
 
 void initializePerfettoOnce() {
@@ -79,10 +79,10 @@ kj::Array<kj::ArrayPtr<const char>> PerfettoSession::parseCategories(kj::StringP
 }
 
 struct PerfettoSession::Impl {
-  kj::AutoCloseFd fd;
+  kj::OwnFd fd;
   std::unique_ptr<perfetto::TracingSession> session;
 
-  Impl(kj::AutoCloseFd dest, kj::StringPtr categories)
+  Impl(kj::OwnFd dest, kj::StringPtr categories)
       : fd(kj::mv(dest)),
         session(createTracingSession(fd.get(), categories)) {
     session->StartBlocking();
@@ -93,7 +93,7 @@ PerfettoSession::PerfettoSession(kj::StringPtr path, kj::StringPtr categories)
     : impl(kj::heap<Impl>(openTraceFile(path), categories)) {}
 
 PerfettoSession::PerfettoSession(int fd, kj::StringPtr categories)
-    : impl(kj::heap<Impl>(kj::AutoCloseFd(fd), categories)) {}
+    : impl(kj::heap<Impl>(kj::OwnFd(fd), categories)) {}
 
 PerfettoSession::~PerfettoSession() noexcept(false) {
   if (impl) {
