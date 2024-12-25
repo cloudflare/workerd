@@ -1,0 +1,43 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "async",
+    cxx_bridge_deps = [
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+    cxx_bridge_src = "lib.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+    ],
+)
+
+wd_cc_library(
+    name = "cxx-bridge",
+    srcs = [
+        "await.c++",
+        "future.c++",
+        "promise.c++",
+        "test-promises.c++",
+        "waker.c++",
+    ],
+    # Note: We don't list headers here, because they are provided by our `async@cxx` public
+    # dependency.
+    implementation_deps = [
+        ":async",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":async@cxx",
+        "//src/rust/cxx-integration:cxx-include",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+kj_test(
+    src = "cxx-bridge-test.c++",
+    deps = [
+        ":cxx-bridge",
+    ],
+)
