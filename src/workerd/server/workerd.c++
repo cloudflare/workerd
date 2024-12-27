@@ -193,16 +193,14 @@ class FileWatcher {
   }
 
  private:
-  kj::AutoCloseFd inotifyFd;
+  kj::OwnFd inotifyFd;
   kj::UnixEventPort::FdObserver observer;
 
   kj::HashMap<kj::String, int> watches;
   kj::HashMap<int, kj::HashSet<kj::String>> filesWatched;
 
-  static kj::AutoCloseFd makeInotify() {
-    int fd;
-    KJ_SYSCALL(fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC));
-    return kj::AutoCloseFd(fd);
+  static kj::OwnFd makeInotify() {
+    return KJ_SYSCALL_FD(inotify_init1(IN_NONBLOCK | IN_CLOEXEC));
   }
 };
 
@@ -233,17 +231,13 @@ class FileWatcher {
       KJ_IF_SOME(fd, f.getFd()) {
         // We need to duplicate the FD because the original will probably be closed later and
         // closing the FD unregisters it from kqueue.
-        int duped;
-        KJ_SYSCALL(duped = dup(fd));
-        watchFd(kj::AutoCloseFd(duped));
+        watchFd(KJ_SYSCALL_FD(dup(fd)));
         return;
       }
     }
 
     // No existing file, open from disk.
-    int fd;
-    KJ_SYSCALL(fd = open(path.toNativeString(true).cStr(), O_RDONLY));
-    watchFd(kj::AutoCloseFd(fd));
+    watchFd(KJ_SYSCALL_FD(open(path.toNativeString(true).cStr(), O_RDONLY)));
   }
 
   kj::Promise<void> onChange() {
@@ -270,19 +264,17 @@ class FileWatcher {
   }
 
  private:
-  kj::AutoCloseFd kqueueFd;
+  kj::OwnFd kqueueFd;
   kj::UnixEventPort::FdObserver observer;
-  kj::Vector<kj::AutoCloseFd> filesWatched;
+  kj::Vector<kj::OwnFd> filesWatched;
 
-  static kj::AutoCloseFd makeKqueue() {
-    int fd_;
-    KJ_SYSCALL(fd_ = kqueue());
-    auto fd = kj::AutoCloseFd(fd_);
+  static kj::OwnFd makeKqueue() {
+    auto fd = KJ_SYSCALL_FD(kqueue());
     KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
     return kj::mv(fd);
   }
 
-  void watchFd(kj::AutoCloseFd fd) {
+  void watchFd(kj::OwnFd fd) {
     KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
 
     struct kevent change;
@@ -1447,7 +1439,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     if (fd < 0) {
       return kj::none;
     }
-    return ExeInfo{kj::str(path), kj::newDiskFile(kj::AutoCloseFd(fd))};
+    return ExeInfo{kj::str(path), kj::newDiskFile(kj::OwnFd(fd))};
   }
 #endif
 
