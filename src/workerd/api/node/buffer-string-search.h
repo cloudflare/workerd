@@ -28,8 +28,11 @@
 // found in the LICENSE file.
 #pragma once
 
-#include <algorithm>
-#include <cstring>
+#include <kj/common.h>
+
+#include <cstdint>
+
+using kj::uint;
 
 namespace workerd::api::node {
 namespace stringsearch {
@@ -201,7 +204,7 @@ inline T AlignDown(T value, U alignment) {
 }
 
 inline uint8_t GetHighestValueByte(uint16_t character) {
-  return std::max(static_cast<uint8_t>(character & 0xFF), static_cast<uint8_t>(character >> 8));
+  return kj::max(static_cast<uint8_t>(character & 0xFF), static_cast<uint8_t>(character >> 8));
 }
 
 inline uint8_t GetHighestValueByte(uint8_t character) {

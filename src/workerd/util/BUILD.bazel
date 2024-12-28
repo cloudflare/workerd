@@ -63,6 +63,8 @@ wd_cc_library(
         ":duration-exceeded-logger",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
+        # TODO(cleanup): Only for abortable.h, factor out
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -165,6 +167,9 @@ wd_cc_library(
     name = "sentry",
     hdrs = ["sentry.h"],
     visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(

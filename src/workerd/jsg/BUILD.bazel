@@ -54,6 +54,8 @@ wd_cc_library(
         "web-idl.h",
         "wrappable.h",
     ],
+    # Some JSG headers can't be compiled on their own
+    features = ["-parse_headers"],
     visibility = ["//visibility:public"],
     deps = [
         ":exception",
