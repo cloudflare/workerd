@@ -191,7 +191,7 @@ rust_register_toolchains(
         # Add support for macOS rosetta
         "aarch64-unknown-linux-gnu",
     ],
-    versions = ["1.82.0"],  # LLVM 19
+    versions = ["1.83.0"],  # LLVM 19
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
