@@ -36,4 +36,11 @@ py_wd_test(
     ],
 )
 
-gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
+gen_import_tests(
+    PYODIDE_IMPORTS_TO_TEST,
+    # TODO: Micropip version mismatch for 0.26.4
+    pkg_python_versions = {"micropip": [
+        "0.26.0a2",
+        "development",
+    ]},
+)
