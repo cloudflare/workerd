@@ -6,7 +6,7 @@
       "type": "github_tarball",
       "owner": "capnproto",
       "repo": "capnproto",
-      "branch": "v2",
+      "branch": "harris/decouple-awaiter-coroutines",
       "extra_strip_prefix": "/c++"
     },
     {
