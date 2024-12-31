@@ -89,7 +89,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
     }
 
-    auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_match"_kjc);
+    auto httpClient = getHttpClient(
+        context, jsRequest->serializeCfBlobJson(js), "cache_match"_kjc, jsRequest->getUrl());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     requestHeaders.set(context.getHeaderIds().cacheControl, "only-if-cached");
@@ -249,6 +250,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
         "Cannot cache response to a range request (206 Partial Content).");
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
+    auto cacheControl = responseHeadersRef->get(jsg::ByteString(kj::str("Cache-Control")));
+
     KJ_IF_SOME(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
       JSG_REQUIRE(vary.findFirst('*') == kj::none, TypeError,
           "Cannot cache response with 'Vary: *' header.");
@@ -308,12 +311,13 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
 
     return startStreamPromise.then(js,
         context.addFunctor(
-            [this, &context, jsRequest = kj::mv(jsRequest),
+            [this, &context, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
                 serializePromise = kj::mv(serializePromise),
                 writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise)](jsg::Lock& js,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
       // Make the PUT request to cache.
-      auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_put"_kjc);
+      auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_put"_kjc,
+          jsRequest->getUrl(), kj::mv(cacheControl));
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
       jsRequest->shallowCopyHeadersTo(requestHeaders);
       auto nativeRequest = httpClient->request(kj::HttpMethod::PUT,
@@ -485,8 +489,8 @@ jsg::Promise<bool> Cache::delete_(
 
     // Make the PURGE request to cache.
 
-    auto httpClient =
-        getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_delete"_kjc);
+    auto httpClient = getHttpClient(
+        context, jsRequest->serializeCfBlobJson(js), "cache_delete"_kjc, jsRequest->getUrl());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     // HACK: The cache doesn't permit PURGE requests from the outside world. It does this by
@@ -516,10 +520,19 @@ jsg::Promise<bool> Cache::delete_(
   });
 }
 
-kj::Own<kj::HttpClient> Cache::getHttpClient(
-    IoContext& context, kj::Maybe<kj::String> cfBlobJson, kj::LiteralStringConst operationName) {
+kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::LiteralStringConst operationName,
+    kj::StringPtr url,
+    kj::Maybe<jsg::ByteString> cacheControl) {
   auto span = context.makeTraceSpan(operationName);
   auto userSpan = context.makeUserTraceSpan(operationName);
+
+  span.setTag("url.full"_kjc, kj::str(url));
+  // TODO: Remaining tags
+  /*span.setTag("cache_control.cacheability"_kjc, TagValue value);
+  span.setTag("cache_control.expiration"_kjc, TagValue value);
+  span.setTag("cache_control.revalidation"_kjc, TagValue value);*/
 
   auto cacheClient = context.getCacheClient();
   auto httpClient = cacheName
