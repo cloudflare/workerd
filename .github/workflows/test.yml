@@ -4,6 +4,7 @@ on:
   pull_request:
     paths-ignore:
     - 'doc/**'
+  merge_group:
   push:
     branches:
     - main
