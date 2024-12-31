@@ -1685,7 +1685,7 @@ export interface Request<
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
    */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
 }
 export interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1699,7 +1699,7 @@ export interface RequestInit<Cf = CfProperties> {
   fetcher?: Fetcher | null;
   cf?: Cf;
   /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
