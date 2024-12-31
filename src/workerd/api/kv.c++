@@ -17,6 +17,7 @@
 #include <kj/encoding.h>
 
 namespace workerd::api {
+using KvOpType = LimitEnforcer::KvOpType;
 
 // As documented in Cloudflare's Worker KV limits.
 static constexpr size_t kMaxKeyLength = 512;
@@ -68,31 +69,23 @@ constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
 
 kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     kj::HttpHeaders& headers,
-    kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
+    KvOpType opType,
     kj::StringPtr urlStr,
     kj::Maybe<kj::OneOf<ListOptions, kj::OneOf<kj::String, GetOptions>, PutOptions>> options) {
   const auto operationName = [&] {
-    KJ_SWITCH_ONEOF(opTypeOrUnknown) {
-      KJ_CASE_ONEOF(name, kj::LiteralStringConst) {
-        return name;
-      }
-      KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
-        // Check if we've hit KV usage limits. (This will throw if we have.)
-        context.getLimitEnforcer().newKvRequest(opType);
-
-        switch (opType) {
-          case LimitEnforcer::KvOpType::GET:
-            return "kv_get"_kjc;
-          case LimitEnforcer::KvOpType::GET_WITH:
-            return "kv_getWithMetadata"_kjc;
-          case LimitEnforcer::KvOpType::PUT:
-            return "kv_put"_kjc;
-          case LimitEnforcer::KvOpType::LIST:
-            return "kv_list"_kjc;
-          case LimitEnforcer::KvOpType::DELETE:
-            return "kv_delete"_kjc;
-        }
-      }
+    // Check if we've hit KV usage limits. (This will throw if we have.)
+    context.getLimitEnforcer().newKvRequest(opType);
+    switch (opType) {
+      case KvOpType::GET:
+        return "kv_get"_kjc;
+      case KvOpType::GET_WITH:
+        return "kv_getWithMetadata"_kjc;
+      case KvOpType::PUT:
+        return "kv_put"_kjc;
+      case KvOpType::LIST:
+        return "kv_list"_kjc;
+      case KvOpType::DELETE:
+        return "kv_delete"_kjc;
     }
 
     KJ_UNREACHABLE;
@@ -158,8 +151,7 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
 jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
   return js.evalNow([&] {
-    auto resp =
-        getWithMetadataImpl(js, kj::mv(name), kj::mv(options), LimitEnforcer::KvOpType::GET);
+    auto resp = getWithMetadataImpl(js, kj::mv(name), kj::mv(options), KvOpType::GET);
     return resp.then(js,
         [](jsg::Lock&, KvNamespace::GetWithMetadataResult result) { return kj::mv(result.value); });
   });
@@ -167,13 +159,13 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
 
 jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
-  return getWithMetadataImpl(js, kj::mv(name), kj::mv(options), LimitEnforcer::KvOpType::GET_WITH);
+  return getWithMetadataImpl(js, kj::mv(name), kj::mv(options), KvOpType::GET_WITH);
 }
 
 jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImpl(jsg::Lock& js,
     kj::String name,
     jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
-    LimitEnforcer::KvOpType op) {
+    KvOpType op) {
   validateKeyName("GET", name);
 
   auto& context = IoContext::current();
@@ -316,8 +308,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
-    auto client =
-        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, kj::mv(options));
+    auto client = getHttpClient(context, headers, KvOpType::LIST, urlStr, kj::mv(options));
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.awaitIo(js, kj::mv(request.response),
@@ -420,8 +411,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
-    auto client =
-        getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr, kj::mv(options));
+    auto client = getHttpClient(context, headers, KvOpType::PUT, urlStr, kj::mv(options));
 
     auto promise = context.waitForOutputLocks().then(
         [&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
@@ -477,8 +467,7 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
     kj::HttpHeaders headers(context.getHeaderTable());
 
-    auto client =
-        getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, urlStr, kj::none);
+    auto client = getHttpClient(context, headers, KvOpType::DELETE, urlStr, kj::none);
 
     auto promise = context.waitForOutputLocks().then(
         [headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {

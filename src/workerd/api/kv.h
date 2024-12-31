@@ -174,7 +174,7 @@ class KvNamespace: public jsg::Object {
   // the usage of the headers.
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context,
       kj::HttpHeaders& headers,
-      kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
+      LimitEnforcer::KvOpType opType,
       kj::StringPtr urlStr,
       kj::Maybe<kj::OneOf<ListOptions, kj::OneOf<kj::String, GetOptions>, PutOptions>> options);
 
