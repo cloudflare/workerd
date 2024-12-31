@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "syn",
+    name = "phf_codegen",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,17 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "clone-impls",
-        "default",
-        "derive",
-        "extra-traits",
-        "fold",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -46,15 +35,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=phf_codegen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.90",
+    version = "0.11.2",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.92//:proc_macro2",
-        "@crates_vendor__quote-1.0.37//:quote",
-        "@crates_vendor__unicode-ident-1.0.14//:unicode_ident",
+        "@crates_vendor__phf_generator-0.11.2//:phf_generator",
+        "@crates_vendor__phf_shared-0.11.2//:phf_shared",
     ],
 )
