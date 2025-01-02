@@ -4,37 +4,40 @@
 
 import { run } from 'harness';
 
-export const urlpatternCompareTests = run('urlpattern-compare-tests.js', {
-  expectedFailures: [
-    // Each of these *ought* to pass. They are included here because we
-    // know they currently do not. Each needs to be investigated.
-    'Component: pathname Left: {"pathname":"/foo/a"} Right: {"pathname":"/foo/b"}',
-    'Component: pathname Left: {"pathname":"/foo/b"} Right: {"pathname":"/foo/bar"}',
-    'Component: pathname Left: {"pathname":"/foo/bar"} Right: {"pathname":"/foo/:bar"}',
-    'Component: pathname Left: {"pathname":"/foo/"} Right: {"pathname":"/foo/:bar"}',
-    'Component: pathname Left: {"pathname":"/foo/:bar"} Right: {"pathname":"/foo/*"}',
-    'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/(bar)"}',
-    'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/{bar}+"}',
-    'Component: pathname Left: {"pathname":"/foo/{bar}+"} Right: {"pathname":"/foo/{bar}?"}',
-    'Component: pathname Left: {"pathname":"/foo/{bar}?"} Right: {"pathname":"/foo/{bar}*"}',
-    'Component: pathname Left: {"pathname":"/foo/(123)"} Right: {"pathname":"/foo/(12)"}',
-    'Component: pathname Left: {"pathname":"/foo/:b"} Right: {"pathname":"/foo/:a"}',
-    'Component: pathname Left: {"pathname":"*/foo"} Right: {"pathname":"*"}',
-    'Component: port Left: {"port":"9"} Right: {"port":"100"}',
-    'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo/{:bar}?/baz"}',
-    'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar}?/baz"}',
-    'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"fo{o/:bar}?/baz"}',
-    'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar/}?baz"}',
-    'Component: pathname Left: "https://a.example.com/b?a" Right: "https://b.example.com/a?b"',
-    'Component: pathname Left: {"pathname":"/foo/{bar}/baz"} Right: {"pathname":"/foo/bar/baz"}',
-    'Component: protocol Left: {"protocol":"a"} Right: {"protocol":"b"}',
-    'Component: username Left: {"username":"a"} Right: {"username":"b"}',
-    'Component: password Left: {"password":"a"} Right: {"password":"b"}',
-    'Component: hostname Left: {"hostname":"a"} Right: {"hostname":"b"}',
-    'Component: search Left: {"search":"a"} Right: {"search":"b"}',
-    'Component: hash Left: {"hash":"a"} Right: {"hash":"b"}',
-  ],
-});
+export const urlpatternCompareTests = run(
+  'urlpattern-compare-tests.tentative.js',
+  {
+    expectedFailures: [
+      // Each of these *ought* to pass. They are included here because we
+      // know they currently do not. Each needs to be investigated.
+      'Component: pathname Left: {"pathname":"/foo/a"} Right: {"pathname":"/foo/b"}',
+      'Component: pathname Left: {"pathname":"/foo/b"} Right: {"pathname":"/foo/bar"}',
+      'Component: pathname Left: {"pathname":"/foo/bar"} Right: {"pathname":"/foo/:bar"}',
+      'Component: pathname Left: {"pathname":"/foo/"} Right: {"pathname":"/foo/:bar"}',
+      'Component: pathname Left: {"pathname":"/foo/:bar"} Right: {"pathname":"/foo/*"}',
+      'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/(bar)"}',
+      'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/{bar}+"}',
+      'Component: pathname Left: {"pathname":"/foo/{bar}+"} Right: {"pathname":"/foo/{bar}?"}',
+      'Component: pathname Left: {"pathname":"/foo/{bar}?"} Right: {"pathname":"/foo/{bar}*"}',
+      'Component: pathname Left: {"pathname":"/foo/(123)"} Right: {"pathname":"/foo/(12)"}',
+      'Component: pathname Left: {"pathname":"/foo/:b"} Right: {"pathname":"/foo/:a"}',
+      'Component: pathname Left: {"pathname":"*/foo"} Right: {"pathname":"*"}',
+      'Component: port Left: {"port":"9"} Right: {"port":"100"}',
+      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo/{:bar}?/baz"}',
+      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar}?/baz"}',
+      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"fo{o/:bar}?/baz"}',
+      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar/}?baz"}',
+      'Component: pathname Left: "https://a.example.com/b?a" Right: "https://b.example.com/a?b"',
+      'Component: pathname Left: {"pathname":"/foo/{bar}/baz"} Right: {"pathname":"/foo/bar/baz"}',
+      'Component: protocol Left: {"protocol":"a"} Right: {"protocol":"b"}',
+      'Component: username Left: {"username":"a"} Right: {"username":"b"}',
+      'Component: password Left: {"password":"a"} Right: {"password":"b"}',
+      'Component: hostname Left: {"hostname":"a"} Right: {"hostname":"b"}',
+      'Component: search Left: {"search":"a"} Right: {"search":"b"}',
+      'Component: hash Left: {"hash":"a"} Right: {"hash":"b"}',
+    ],
+  }
+);
 export const urlpatternHasRegexGroups = run(
   'urlpattern-hasregexpgroups-tests.js',
   {

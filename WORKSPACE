@@ -393,14 +393,3 @@ new_local_repository(
     build_file = "@workerd//deps/rust:BUILD.lolhtml",
     path = "empty",
 )
-
-# ========================================================================================
-# Web Platform Tests
-
-http_archive(
-    name = "wpt",
-    build_file = "//:build/BUILD.wpt",
-    integrity = "sha256-Hxn/D6x6lI9ISlCQFq620sb8x9iXplVzXPV6zumX84A=",
-    strip_prefix = "wpt-merge_pr_48695",
-    url = "https://github.com/web-platform-tests/wpt/archive/refs/tags/merge_pr_48695.tar.gz",
-)
