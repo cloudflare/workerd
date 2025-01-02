@@ -219,6 +219,15 @@
       "repo": "ruff",
       "file_regex": "^ruff-x86_64-unknown-linux-gnu.tar.gz$",
       "build_file_content": "filegroup(name='file', srcs=glob(['**']))"
-    }
+    },
+    //wpt
+    {
+      "name": "wpt",
+      "type": "github_release",
+      "owner": "cloudflare",
+      "repo": "workerd-tools",
+      "file_regex": "wpt-.*.tar.gz",
+      "build_file": "//:build/BUILD.wpt"
+     }
   ]
 }

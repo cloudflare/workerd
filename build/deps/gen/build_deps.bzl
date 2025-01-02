@@ -27,6 +27,7 @@ load("@//build/deps:gen/dep_rules_nodejs.bzl", "dep_rules_nodejs")
 load("@//build/deps:gen/dep_rules_pkg.bzl", "dep_rules_pkg")
 load("@//build/deps:gen/dep_rules_python.bzl", "dep_rules_python")
 load("@//build/deps:gen/dep_rules_rust.bzl", "dep_rules_rust")
+load("@//build/deps:gen/dep_wpt.bzl", "dep_wpt")
 
 def deps_gen():
     dep_bazel_skylib()
@@ -56,3 +57,4 @@ def deps_gen():
     dep_ruff_darwin_arm64()
     dep_ruff_linux_arm64()
     dep_ruff_linux_amd64()
+    dep_wpt()
