@@ -1,0 +1,19 @@
+From c9688d31cd8e1e8cbb5624f9cee367029d5a728a Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 27 Oct 2024 16:49:31 +0000
+Subject: [bazel] Add missing imports needed with Bazel 8
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 3fa74551420b48f226553ddaa00eb9926a3b009f..5860920e592b2b22d44bbd6a62783fc472e4dcf7 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ 
+ load("@bazel_skylib//lib:selects.bzl", "selects")
+-load("@rules_python//python:defs.bzl", "py_binary")
++load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+ load("@v8_python_deps//:requirements.bzl", "requirement")
+ load(
+     "@v8//:bazel/defs.bzl",
