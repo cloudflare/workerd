@@ -235,6 +235,12 @@ class Rewriter final: public WritableStreamSink {
   // Implementation for `Element::onEndTag` to avoid exposing private details of Rewriter.
   void onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback);
 
+  lol_html_streaming_handler_t registerReplacer(jsg::Ref<ReadableStream> content, bool isHtml);
+
+  ~Rewriter() {
+    KJ_ASSERT(registeredReplacers.size() == 0, "Some replacers were leaked by lol-html");
+  }
+
  private:
   // Wait for the write promise (if any) produced by our `output()` callback, then, if there is a
   // stored exception, abort the wrapped WritableStreamSink with it, then return the exception.
@@ -266,6 +272,15 @@ class Rewriter final: public WritableStreamSink {
 
   friend class ::workerd::api::HTMLRewriter;
 
+  // Keeps track of streams currently being used as replacement content for tokens.
+  // lol-html will invoke replacerThunk with a pointer to the RegisteredReplacer to be used.
+  class RegisteredReplacer {
+   public:
+    Rewriter& rewriter;
+    bool isHtml;
+    jsg::Ref<ReadableStream> stream;
+  };
+
   struct RegisteredHandler {
     // A back-reference to the rewriter which owns this particular registered handler.
     Rewriter& rewriter;
@@ -294,6 +309,15 @@ class Rewriter final: public WritableStreamSink {
   // Eagerly free this handler. Should only be called if we're confident the handler will never be
   // used again.
   void removeEndTagHandler(RegisteredHandler& registration);
+
+  // Field stores a list of readable streams that are being used by lol-html for replacements
+  kj::HashMap<void*, kj::Own<RegisteredReplacer>> registeredReplacers;
+
+  static int replacerThunk(lol_html_streaming_sink_t* sink, void* userData);
+  kj::Promise<void> replacerThunkPromise(
+      lol_html_streaming_sink_t* sink, RegisteredReplacer& registration);
+  int replacerThunkImpl(lol_html_streaming_sink_t* sink, RegisteredReplacer& registration);
+  static void removeRegisteredReplacer(void* userData);
 
   // Must be constructed AFTER the registered handler vector, since the function which constructs
   // this (buildRewriter()) modifies that vector.
@@ -579,6 +603,122 @@ kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& regi
   });
 }
 
+lol_html_streaming_handler_t Rewriter::registerReplacer(
+    jsg::Ref<ReadableStream> content, bool isHtml) {
+  auto replacer = kj::heap<RegisteredReplacer>(*this, isHtml, kj::mv(content));
+  auto userData = replacer.get();
+  registeredReplacers.insert(userData, kj::mv(replacer));
+
+  return {
+    .user_data = userData,
+    .write_all_callback = Rewriter::replacerThunk,
+    .drop_callback = Rewriter::removeRegisteredReplacer,
+  };
+}
+
+// Adapter that allows pumping a ReadableStream to a pre-established lol_html
+// streaming sink, named `sink`. Writes of arbitrary bytes and sizes are allowed,
+// but the content must be valid UTF-8 or lol_html will reject it.
+class ReplacerStreamSink final: public WritableStreamSink {
+ public:
+  ReplacerStreamSink(lol_html_streaming_sink_t* sink, bool isHtml): sink(sink), isHtml(isHtml) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override KJ_WARN_UNUSED_RESULT {
+    auto err = lol_html_streaming_sink_write_utf8_chunk(
+        sink, buffer.asChars().begin(), buffer.size(), isHtml);
+    if (err != 0) {
+      return getLastError();
+    }
+
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    for (auto bytes: pieces) {
+      auto err = lol_html_streaming_sink_write_utf8_chunk(
+          sink, bytes.asChars().begin(), bytes.size(), isHtml);
+      if (err != 0) {
+        return getLastError();
+      }
+    }
+
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> end() override KJ_WARN_UNUSED_RESULT {
+    // Nothing specific needs to be done to tell lol_html we're done writing the stream
+    return kj::READY_NOW;
+  }
+
+  void abort(kj::Exception reason) override {
+    // Nothing specific needs to be done. The rewriter will be poisoned in replacerThunkImpl,
+    // and lol_html will bubble up the error through to write.
+  }
+
+ private:
+  lol_html_streaming_sink_t* sink;
+  bool isHtml;
+};
+
+int Rewriter::replacerThunk(lol_html_streaming_sink_t* sink, void* userData) {
+  auto& registration = *reinterpret_cast<RegisteredReplacer*>(userData);
+  return registration.rewriter.replacerThunkImpl(sink, registration);
+}
+
+int Rewriter::replacerThunkImpl(
+    lol_html_streaming_sink_t* sink, RegisteredReplacer& registeredHandler) {
+  if (isPoisoned()) {
+    // Handlers disabled due to exception.
+    KJ_LOG(ERROR, "poisoned rewriter should not be able to call handlers");
+    return -1;
+  }
+
+  try {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
+      // V8 has a thread local pointer that points to where the stack limit is on this thread which
+      // is tested for overflows when we enter any JS code. However since we're running in a fiber
+      // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
+      // and may think we've overflowed our stack. evalLater will run thunkPromise on the main stack
+      // to keep V8 from getting confused.
+      auto promise = kj::evalLater([&]() { return replacerThunkPromise(sink, registeredHandler); });
+      promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
+    })) {
+      // Exception in handler. We need to abort the streaming parser, but can't do so just yet: we
+      // need to unwind the stack because we're probably still inside a cool_thing_rewriter_write().
+      // We can't unwind with an exception across the Rust/C++ boundary, so instead we'll keep this
+      // exception around and disable all later handlers
+      maybePoison(kj::mv(exception));
+      return -1;
+    }
+  } catch (kj::CanceledException) {
+    // The fiber is being canceled. Same as runCatchingExceptions, we need to abort the parser,
+    // but can't since we're still inside cool_thing_rewriter_write(). This isn't handled by
+    // runCatchingExceptions since CanceledException isn't a kj exception, and we wouldn't want
+    // runCatchingExceptions to handle it anyway. We set canceled to true and once we leave Rust,
+    // we rethrow it to properly cancel the fiber.
+    canceled = true;
+    return -1;
+  }
+  return 0;
+}
+
+kj::Promise<void> Rewriter::replacerThunkPromise(
+    lol_html_streaming_sink_t* sink, RegisteredReplacer& registration) {
+  return ioContext.run([this, sink, &registration](Worker::Lock& lock) -> kj::Promise<void> {
+    jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
+
+    auto streamSink = kj::heap<ReplacerStreamSink>(sink, registration.isHtml);
+    return ioContext.waitForDeferredProxy(
+        registration.stream->pumpTo(lock, kj::mv(streamSink), true));
+  });
+}
+
+void Rewriter::removeRegisteredReplacer(void* userData) {
+  auto& registration = *reinterpret_cast<RegisteredReplacer*>(userData);
+  KJ_REQUIRE(registration.rewriter.registeredReplacers.erase(userData),
+      "Tried to remove replacer that was not registered");
+}
+
 void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback) {
   auto registeredHandler = Rewriter::RegisteredHandler{*this, kj::mv(callback)};
   // NOTE: this gets freed in `thunkPromise` above.
@@ -608,6 +748,7 @@ void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
   }
 
   auto bufferCopy = kj::heapArray(buffer);
+
   KJ_IF_SOME(wp, writePromise) {
     writePromise = wp.then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
       return inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
@@ -617,6 +758,40 @@ void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
   }
 }
 
+// =======================================================================================
+// HTMLRewriter::Token::ImplBase<CType>
+
+template <typename CType>
+HTMLRewriter::Token::ImplBase<CType>::ImplBase(CType& element, Rewriter& rewriter)
+    : element(element),
+      rewriter(rewriter) {}
+template <typename CType>
+HTMLRewriter::Token::ImplBase<CType>::~ImplBase() noexcept(false) {}
+template <typename CType>
+template <auto Func, auto StreamingFunc>
+void HTMLRewriter::Token::ImplBase<CType>::rewriteContentGeneric(
+    Content content, jsg::Optional<ContentOptions> options) {
+  auto isHtml = options.orDefault({}).html.orDefault(false);
+
+  KJ_SWITCH_ONEOF(content) {
+    KJ_CASE_ONEOF(stringContent, kj::String) {
+      check(Func(&element, stringContent.cStr(), stringContent.size(), isHtml));
+    }
+
+    KJ_CASE_ONEOF(streamContent, jsg::Ref<ReadableStream>) {
+      auto handler = rewriter.registerReplacer(kj::mv(streamContent), isHtml);
+      check(StreamingFunc(&element, &handler));
+    }
+
+    KJ_CASE_ONEOF(responseContent, jsg::Ref<Response>) {
+      KJ_IF_SOME(body, responseContent->getBody()) {
+        auto handler = rewriter.registerReplacer(kj::mv(body), isHtml);
+        check(StreamingFunc(&element, &handler));
+      }
+      // Otherwise if no body, there is no replacement to make
+    }
+  }
+}
 // =======================================================================================
 // Element
 
@@ -690,31 +865,53 @@ jsg::Ref<Element> Element::removeAttribute(kj::String name) {
 }
 
 namespace {
-
 kj::String unwrapContent(Content content) {
   return kj::mv(JSG_REQUIRE_NONNULL(content.tryGet<kj::String>(), TypeError,
-      "Replacing HTML content using a ReadableStream or Response object is not "
+      "Replacing content in HTML comments using a ReadableStream or Response object is not "
       "implemented. You must provide a string."));
 }
-
 }  // namespace
 
-#define DEFINE_CONTENT_REWRITER_FUNCTION(camel, snake)                                             \
-  jsg::Ref<Element> Element::camel(Content content, jsg::Optional<ContentOptions> options) {       \
-    auto stringContent = unwrapContent(kj::mv(content));                                           \
-    check(lol_html_element_##snake(&checkToken(impl).element, stringContent.cStr(),                \
-        stringContent.size(), options.orDefault({}).html.orDefault(false)));                       \
-    return JSG_THIS;                                                                               \
-  }
+jsg::Ref<Element> Element::before(Content content, jsg::Optional<ContentOptions> options) {
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_element_before, lol_html_element_streaming_before>(
+          kj::mv(content), options);
+  return JSG_THIS;
+}
 
-DEFINE_CONTENT_REWRITER_FUNCTION(before, before)
-DEFINE_CONTENT_REWRITER_FUNCTION(after, after)
-DEFINE_CONTENT_REWRITER_FUNCTION(prepend, prepend)
-DEFINE_CONTENT_REWRITER_FUNCTION(append, append)
-DEFINE_CONTENT_REWRITER_FUNCTION(replace, replace)
-DEFINE_CONTENT_REWRITER_FUNCTION(setInnerContent, set_inner_content)
+jsg::Ref<Element> Element::after(Content content, jsg::Optional<ContentOptions> options) {
+  checkToken(impl).rewriteContentGeneric<lol_html_element_after, lol_html_element_streaming_after>(
+      kj::mv(content), options);
+  return JSG_THIS;
+}
 
-#undef DEFINE_CONTENT_REWRITER_FUNCTION
+jsg::Ref<Element> Element::prepend(Content content, jsg::Optional<ContentOptions> options) {
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_element_prepend, lol_html_element_streaming_prepend>(
+          kj::mv(content), options);
+  return JSG_THIS;
+}
+
+jsg::Ref<Element> Element::append(Content content, jsg::Optional<ContentOptions> options) {
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_element_append, lol_html_element_streaming_append>(
+          kj::mv(content), options);
+  return JSG_THIS;
+}
+
+jsg::Ref<Element> Element::replace(Content content, jsg::Optional<ContentOptions> options) {
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_element_replace, lol_html_element_streaming_replace>(
+          kj::mv(content), options);
+  return JSG_THIS;
+}
+
+jsg::Ref<Element> Element::setInnerContent(Content content, jsg::Optional<ContentOptions> options) {
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_element_set_inner_content,
+          lol_html_element_streaming_set_inner_content>(kj::mv(content), options);
+  return JSG_THIS;
+}
 
 jsg::Ref<Element> Element::remove() {
   lol_html_element_remove(&checkToken(impl).element);
@@ -731,47 +928,44 @@ void Element::onEndTag(ElementCallbackFunction&& callback) {
   knownImpl.rewriter.onEndTag(&knownImpl.element, kj::mv(callback));
 }
 
-EndTag::EndTag(CType& endTag, Rewriter&): impl(endTag) {}
+EndTag::EndTag(CType& endTag, Rewriter& rewriter) {
+  impl.emplace(endTag, rewriter);
+}
 
 void EndTag::htmlContentScopeEnd() {
   impl = kj::none;
 }
 
 kj::String EndTag::getName() {
-  auto text = LolString(lol_html_end_tag_name_get(&checkToken(impl)));
+  auto text = LolString(lol_html_end_tag_name_get(&checkToken(impl).element));
   return kj::str(text.asChars());
 }
 
 void EndTag::setName(kj::String text) {
-  check(lol_html_end_tag_name_set(&checkToken(impl), text.cStr(), text.size()));
+  check(lol_html_end_tag_name_set(&checkToken(impl).element, text.cStr(), text.size()));
 }
 
 jsg::Ref<EndTag> EndTag::before(Content content, jsg::Optional<ContentOptions> options) {
-  auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_end_tag_before(&checkToken(impl), stringContent.cStr(), stringContent.size(),
-      options.orDefault({}).html.orDefault(false)));
-
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_end_tag_before, lol_html_end_tag_streaming_before>(
+          kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
 jsg::Ref<EndTag> EndTag::after(Content content, jsg::Optional<ContentOptions> options) {
-  auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_end_tag_after(&checkToken(impl), stringContent.cStr(), stringContent.size(),
-      options.orDefault({}).html.orDefault(false)));
-
+  checkToken(impl).rewriteContentGeneric<lol_html_end_tag_after, lol_html_end_tag_streaming_after>(
+      kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
 jsg::Ref<EndTag> EndTag::remove() {
-  lol_html_end_tag_remove(&checkToken(impl));
+  lol_html_end_tag_remove(&checkToken(impl).element);
   return JSG_THIS;
 }
 
 void Element::htmlContentScopeEnd() {
   impl = kj::none;
 }
-
-Element::Impl::Impl(CType& element, Rewriter& rewriter): element(element), rewriter(rewriter) {}
 
 Element::Impl::~Impl() noexcept(false) {
   for (auto& jsIter: attributesIterators) {
@@ -828,6 +1022,8 @@ bool Comment::getRemoved() {
 }
 
 jsg::Ref<Comment> Comment::before(Content content, jsg::Optional<ContentOptions> options) {
+  // TODO(someday): If lol-html adds support for streaming replacements for comments, this
+  // function will need to be updated.
   auto stringContent = unwrapContent(kj::mv(content));
   check(lol_html_comment_before(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
@@ -836,6 +1032,8 @@ jsg::Ref<Comment> Comment::before(Content content, jsg::Optional<ContentOptions>
 }
 
 jsg::Ref<Comment> Comment::after(Content content, jsg::Optional<ContentOptions> options) {
+  // TODO(someday): If lol-html adds support for streaming replacements for comments, this
+  // function will need to be updated.
   auto stringContent = unwrapContent(kj::mv(content));
   check(lol_html_comment_after(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
@@ -844,6 +1042,8 @@ jsg::Ref<Comment> Comment::after(Content content, jsg::Optional<ContentOptions> 
 }
 
 jsg::Ref<Comment> Comment::replace(Content content, jsg::Optional<ContentOptions> options) {
+  // TODO(someday): If lol-html adds support for streaming replacements for comments, this
+  // function will need to be updated.
   auto stringContent = unwrapContent(kj::mv(content));
   check(lol_html_comment_replace(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
@@ -864,49 +1064,48 @@ void Comment::htmlContentScopeEnd() {
 // =======================================================================================
 // Text
 
-Text::Text(CType& text, Rewriter&): impl(text) {}
+Text::Text(CType& text, Rewriter& rewriter) {
+  impl.emplace(text, rewriter);
+}
 
 kj::String Text::getText() {
-  auto content = lol_html_text_chunk_content_get(&checkToken(impl));
+  auto content = lol_html_text_chunk_content_get(&checkToken(impl).element);
   return kj::heapString(content.data, content.len);
 }
 
 bool Text::getLastInTextNode() {
   // NOTE: No error checking seems required by this function -- it returns a bool directly.
-  return lol_html_text_chunk_is_last_in_text_node(&checkToken(impl));
+  return lol_html_text_chunk_is_last_in_text_node(&checkToken(impl).element);
 }
 
 bool Text::getRemoved() {
   // NOTE: No error checking seems required by this function -- it returns a bool directly.
-  return lol_html_text_chunk_is_removed(&checkToken(impl));
+  return lol_html_text_chunk_is_removed(&checkToken(impl).element);
 }
 
 jsg::Ref<Text> Text::before(Content content, jsg::Optional<ContentOptions> options) {
-  auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_text_chunk_before(&checkToken(impl), stringContent.cStr(), stringContent.size(),
-      options.orDefault({}).html.orDefault(false)));
-
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_text_chunk_before, lol_html_text_chunk_streaming_before>(
+          kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
 jsg::Ref<Text> Text::after(Content content, jsg::Optional<ContentOptions> options) {
-  auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_text_chunk_after(&checkToken(impl), stringContent.cStr(), stringContent.size(),
-      options.orDefault({}).html.orDefault(false)));
-
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_text_chunk_after, lol_html_text_chunk_streaming_after>(
+          kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
 jsg::Ref<Text> Text::replace(Content content, jsg::Optional<ContentOptions> options) {
-  auto stringContent = unwrapContent(kj::mv(content));
-  check(lol_html_text_chunk_replace(&checkToken(impl), stringContent.cStr(), stringContent.size(),
-      options.orDefault({}).html.orDefault(false)));
-
+  checkToken(impl)
+      .rewriteContentGeneric<lol_html_text_chunk_replace, lol_html_text_chunk_streaming_replace>(
+          kj::mv(content), kj::mv(options));
   return JSG_THIS;
 }
 
 jsg::Ref<Text> Text::remove() {
-  lol_html_text_chunk_remove(&checkToken(impl));
+  lol_html_text_chunk_remove(&checkToken(impl).element);
 
   return JSG_THIS;
 }
@@ -945,6 +1144,8 @@ void Doctype::htmlContentScopeEnd() {
 DocumentEnd::DocumentEnd(CType& documentEnd, Rewriter&): impl(documentEnd) {}
 
 jsg::Ref<DocumentEnd> DocumentEnd::append(Content content, jsg::Optional<ContentOptions> options) {
+  // TODO(someday): If lol-html adds support for streaming replacements for the document end,
+  // this function will need to be updated.
   auto stringContent = unwrapContent(kj::mv(content));
   check(lol_html_doc_end_append(&checkToken(impl), stringContent.cStr(), stringContent.size(),
       options.orDefault({}).html.orDefault(false)));
