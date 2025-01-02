@@ -22,9 +22,15 @@ export default {
     }
 
     if (modelName === 'rawInputs') {
-      return Response.json(data, {
-        headers: respHeaders,
-      });
+      return Response.json(
+        {
+          ...data,
+          requestUrl: request.url,
+        },
+        {
+          headers: respHeaders,
+        }
+      );
     }
 
     if (modelName === 'inputErrorModel') {

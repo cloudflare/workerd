@@ -13,6 +13,7 @@ interface AiError {
   message: string;
   name: string;
   description: string;
+  errors?: Array<{ code: number; message: string }>;
 }
 
 export type SessionOptions = {
@@ -96,10 +97,12 @@ export class Ai {
       },
     };
 
-    const res = await this.fetcher.fetch(
-      'https://workers-binding.ai/run?version=3',
-      fetchOptions
-    );
+    let endpointUrl = 'https://workers-binding.ai/run?version=3';
+    if (options.gateway?.id) {
+      endpointUrl = 'https://workers-binding.ai/ai-gateway/run?version=3';
+    }
+
+    const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
@@ -138,11 +141,23 @@ export class Ai {
 
     try {
       const parsedContent = JSON.parse(content) as AiError;
-      this.lastRequestInternalStatusCode = parsedContent.internalCode;
-      return new InferenceUpstreamError(
-        `${parsedContent.internalCode}: ${parsedContent.description}`,
-        parsedContent.name
-      );
+      if (parsedContent.internalCode) {
+        this.lastRequestInternalStatusCode = parsedContent.internalCode;
+        return new InferenceUpstreamError(
+          `${parsedContent.internalCode}: ${parsedContent.description}`,
+          parsedContent.name
+        );
+      } else if (
+        parsedContent.errors &&
+        parsedContent.errors.length > 0 &&
+        parsedContent.errors[0]
+      ) {
+        return new InferenceUpstreamError(
+          `${parsedContent.errors[0].code}: ${parsedContent.errors[0].message}`
+        );
+      } else {
+        return new InferenceUpstreamError(content);
+      }
     } catch {
       return new InferenceUpstreamError(content);
     }
