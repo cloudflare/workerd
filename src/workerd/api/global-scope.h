@@ -74,7 +74,7 @@ class Navigator: public jsg::Object {
     return "Cloudflare-Workers"_kj;
   }
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  jsg::Ref<api::gpu::GPU> getGPU(CompatibilityFlags::Reader flags);
+  jsg::Optional<jsg::Ref<api::gpu::GPU>> getGPU(CompatibilityFlags::Reader flags);
 #endif
 
   bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);

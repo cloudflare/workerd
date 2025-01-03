@@ -2,11 +2,13 @@ import {
   deepStrictEqual,
   strictEqual,
   throws,
+  doesNotThrow,
   notStrictEqual,
   ok,
 } from 'node:assert';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import util from 'node:util';
 
 export const navigatorUserAgent = {
   async test() {
@@ -742,5 +744,10 @@ export const toStringTag = {
     const internalFlag = Symbol.for('cloudflare:internal-class');
     strictEqual(Headers.prototype[internalFlag], internalFlag);
     strictEqual(new Headers()[internalFlag], internalFlag);
+  },
+};
+export const validateGlobalThis = {
+  test() {
+    util.inspect(globalThis);
   },
 };
