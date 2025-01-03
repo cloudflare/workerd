@@ -15,6 +15,24 @@ class Headers;
 
 namespace workerd::api::public_beta {
 
+struct StringTagParams {
+  kj::LiteralStringConst key;
+  kj::StringPtr value;
+};
+
+struct R2UserTracing {
+  kj::LiteralStringConst op;
+  StringTagParams method;
+  // Passing Maybe<kj::StringPtr> instead of Maybe<StringTagParams> here – this avoids a branch on
+  // the caller side when bucket is already a Maybe, which is more convenient.
+  kj::Maybe<kj::StringPtr> bucket;
+  kj::Maybe<StringTagParams> extraTag;
+};
+
+// Helper for creating R2 HTTP Client with the right span tags across operations. This is much
+// cleaner than setting span tags directly in each function.
+kj::Own<kj::HttpClient> r2GetClient(IoContext& context, uint subrequestChannel, R2UserTracing user);
+
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
 kj::ArrayPtr<kj::StringPtr> fillR2Path(
     kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);

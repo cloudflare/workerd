@@ -710,19 +710,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
-  // As above, but with list of span tags to add.
-  // TODO(o11y): For now this only supports literal values based on initializer_list constraints.
-  // Add syntactic sugar to kj::vector so that we can pass in a vector more ergonomically and use
-  // that instead to support other value types.
-  struct SpanTagParams {
-    kj::LiteralStringConst key;
-    kj::LiteralStringConst value;
-  };
   kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName,
-      std::initializer_list<SpanTagParams> tags);
+      kj::Vector<Span::Tag> tags);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
@@ -742,7 +734,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName,
-      std::initializer_list<SpanTagParams> tags);
+      kj::Vector<Span::Tag> tags);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.

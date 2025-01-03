@@ -26,9 +26,8 @@ jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
 jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
     jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
-  // TODO(o11y): Add cloudflare.r2.bucket here.
-  auto client = context.getHttpClientWithSpans(subrequestChannel, true, kj::none, "r2_create"_kjc,
-      {{"rpc.service"_kjc, "r2"_kjc}, {"rpc.method"_kjc, "CreateBucket"_kjc}});
+  auto client = r2GetClient(context, subrequestChannel,
+      {"r2_create"_kjc, {"rpc.method"_kjc, "CreateBucket"_kjc}, name.asPtr()});
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -59,8 +58,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
-  auto client = context.getHttpClientWithSpans(subrequestChannel, true, kj::none, "r2_list"_kjc,
-      {{"rpc.service"_kjc, "r2"_kjc}, {"rpc.method"_kjc, "ListObjects"_kjc}});
+  auto client = r2GetClient(
+      context, subrequestChannel, {"r2_list"_kjc, {"rpc.method"_kjc, "ListObjects"_kjc}});
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -116,9 +115,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
 jsg::Promise<void> R2Admin::delete_(
     jsg::Lock& js, kj::String name, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   auto& context = IoContext::current();
-  // TODO(o11y): Add cloudflare.r2.bucket
-  auto client = context.getHttpClientWithSpans(subrequestChannel, true, kj::none, "r2_delete"_kjc,
-      {{"rpc.service"_kjc, "r2"_kjc}, {"rpc.method"_kjc, "DeleteBucket"_kjc}});
+  auto client = r2GetClient(context, subrequestChannel,
+      {"r2_delete"_kjc, {"rpc.method"_kjc, "DeleteBucket"_kjc}, name.asPtr()});
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();

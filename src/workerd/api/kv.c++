@@ -95,8 +95,10 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     KJ_UNREACHABLE;
   }();
 
+  kj::Vector<Span::Tag> tags;
+  tags.add("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
   auto client = context.getHttpClientWithSpans(
-      subrequestChannel, true, kj::none, operationName, {{"db.system"_kjc, "cloudflare-kv"_kjc}});
+      subrequestChannel, true, kj::none, operationName, kj::mv(tags));
   headers.add(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
     headers.add(header.name.asPtr(), header.value.asPtr());
