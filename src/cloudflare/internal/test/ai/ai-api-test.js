@@ -91,7 +91,11 @@ export const tests = {
       // Test raw input
       const resp = await env.ai.run('rawInputs', { prompt: 'test' });
 
-      assert.deepStrictEqual(resp, { inputs: { prompt: 'test' }, options: {} });
+      assert.deepStrictEqual(resp, {
+        inputs: { prompt: 'test' },
+        options: {},
+        requestUrl: 'https://workers-binding.ai/run?version=3',
+      });
     }
 
     {
@@ -105,6 +109,7 @@ export const tests = {
       assert.deepStrictEqual(resp, {
         inputs: { prompt: 'test' },
         options: { gateway: { id: 'my-gateway', skipCache: true } },
+        requestUrl: 'https://workers-binding.ai/ai-gateway/run?version=3',
       });
     }
 
@@ -126,6 +131,7 @@ export const tests = {
           example: 123,
           gateway: { id: 'my-gateway', metadata: { employee: 1233 } },
         },
+        requestUrl: 'https://workers-binding.ai/ai-gateway/run?version=3',
       });
     }
   },
