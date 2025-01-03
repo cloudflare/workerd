@@ -28,7 +28,10 @@ import {
   isUint8Array,
 } from 'node-internal:internal_types';
 
-import { normalizeEncoding } from 'node-internal:internal_utils';
+import {
+  normalizeEncoding,
+  getEncodingOps,
+} from 'node-internal:internal_utils';
 
 import { validateString } from 'node-internal:validators';
 
@@ -648,7 +651,7 @@ Buffer.prototype.toString = function toString(
     return '';
   }
 
-  const normalizedEncoding = normalizeEncoding(`${encoding}`);
+  const normalizedEncoding = getEncodingOps(encoding);
   if (normalizedEncoding === undefined) {
     throw new ERR_UNKNOWN_ENCODING(`${encoding}`);
   }
