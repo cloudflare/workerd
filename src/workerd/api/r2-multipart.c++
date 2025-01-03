@@ -30,8 +30,9 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    auto client =
-        context.getHttpClient(this->bucket->clientIndex, true, kj::none, "r2_uploadPart"_kjc);
+    auto client = r2GetClient(context, this->bucket->clientIndex,
+        {"r2_uploadPart"_kjc, {"rpc.method"_kjc, "UploadPart"_kjc}, this->bucket->adminBucketName(),
+          {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -95,8 +96,9 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(
-        this->bucket->clientIndex, true, kj::none, "r2_completeMultipartUpload"_kjc);
+    auto client = r2GetClient(context, this->bucket->clientIndex,
+        {"r2_completeMultipartUpload"_kjc, {"rpc.method"_kjc, "CompleteMultipartUpload"_kjc},
+          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -145,8 +147,9 @@ jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(
-        this->bucket->clientIndex, true, kj::none, "r2_abortMultipartUpload"_kjc);
+    auto client = r2GetClient(context, this->bucket->clientIndex,
+        {"r2_abortMultipartUpload"_kjc, {"rpc.method"_kjc, "AbortMultipartUpload"_kjc},
+          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();

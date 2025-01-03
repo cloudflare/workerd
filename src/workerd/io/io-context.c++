@@ -839,11 +839,11 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     kj::ConstString operationName,
-    std::initializer_list<SpanTagParams> tags) {
+    kj::Vector<Span::Tag> tags) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
-    for (const SpanTagParams& tag: tags) {
-      tracing.userSpan.setTag(kj::mv(tag.key), kj::str(tag.value));
+    for (Span::Tag& tag: tags) {
+      tracing.userSpan.setTag(kj::mv(tag.key), kj::mv(tag.value));
     }
     return getSubrequestChannelImpl(
         channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
@@ -897,7 +897,7 @@ kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
     bool isInHouse,
     kj::Maybe<kj::String> cfBlobJson,
     kj::ConstString operationName,
-    std::initializer_list<SpanTagParams> tags) {
+    kj::Vector<Span::Tag> tags) {
   return asHttpClient(getSubrequestChannelWithSpans(
       channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
 }
