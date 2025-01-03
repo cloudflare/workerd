@@ -4,6 +4,7 @@
 
 #include "analytics-engine.h"
 
+#include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {

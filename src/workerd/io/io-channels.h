@@ -8,6 +8,7 @@
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
 
+#include <capnp/capability.h>  // for Capability
 #include <kj/debug.h>
 #include <kj/string.h>
 

@@ -4,6 +4,8 @@
 
 #include "alarm-scheduler.h"
 
+#include <cmath>
+
 namespace workerd::server {
 
 int AlarmScheduler::maxJitterMsForDelay(kj::Duration delay) {

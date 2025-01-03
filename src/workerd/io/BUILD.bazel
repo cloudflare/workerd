@@ -57,7 +57,6 @@ wd_cc_library(
     srcs = [
         "compatibility-date.c++",
         "features.c++",
-        "frankenvalue.c++",
         "hibernation-manager.c++",
         "io-context.c++",
         "io-own.c++",
@@ -70,7 +69,6 @@ wd_cc_library(
     hdrs = [
         "compatibility-date.h",
         "features.h",
-        "frankenvalue.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -100,7 +98,7 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":cdp_capnp",
-        ":frankenvalue_capnp",
+        ":frankenvalue",
         ":io-gate",
         ":io-helpers",
         ":limit-enforcer",
@@ -156,6 +154,18 @@ wd_cc_library(
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
+    name = "frankenvalue",
+    srcs = ["frankenvalue.c++"],
+    hdrs = ["frankenvalue.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":frankenvalue_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
 
@@ -354,6 +364,6 @@ kj_test(
 kj_test(
     src = "frankenvalue-test.c++",
     deps = [
-        ":io",
+        ":frankenvalue",
     ],
 )
