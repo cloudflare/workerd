@@ -8,13 +8,39 @@
 namespace workerd::rust::async {
 namespace {
 
+class TestCoroutineEvent: public kj::_::Event {
+public:
+  TestCoroutineEvent(kj::SourceLocation location = {})
+      : Event(location) {}
+  kj::Maybe<kj::Own<kj::_::Event>> fire() override {
+    KJ_UNIMPLEMENTED("nope");
+  }
+  void traceEvent(kj::_::TraceBuilder& builder) override {}
+};
+
+class TestPollEvent: public PollEvent {
+public:
+  TestPollEvent(kj::_::Event& next, kj::SourceLocation location = {})
+      : PollEvent(next, location) {}
+
+  kj::Maybe<kj::Own<kj::_::Event>> fire() override {
+    fired = true;
+    return kj::none;
+  }
+
+  bool fired = false;
+};
+
 KJ_TEST("BoxFutureVoid: C++ can poll() Rust Futures") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   // Poll a Future which returns Pending.
   {
-    AwaitWaker waker;
+    TestCoroutineEvent coroutineEvent;
+    TestPollEvent pollEvent{coroutineEvent};
+    RootWaker waker{pollEvent};
+
     auto pending = new_pending_future_void();
     KJ_EXPECT(!pending.poll(waker));
 
@@ -27,7 +53,10 @@ KJ_TEST("BoxFutureVoid: C++ can poll() Rust Futures") {
 
   // Poll a Future which returns Ready(()).
   {
-    AwaitWaker waker;
+    TestCoroutineEvent coroutineEvent;
+    TestPollEvent pollEvent{coroutineEvent};
+    RootWaker waker{pollEvent};
+
     auto ready = new_ready_future_void();
     KJ_EXPECT(ready.poll(waker));
 
@@ -41,7 +70,10 @@ KJ_TEST("BoxFutureVoid: C++ can poll() Rust Futures") {
 
   // Poll a Future which returns Pending and immediately calls the Waker.
   {
-    AwaitWaker waker;
+    TestCoroutineEvent coroutineEvent;
+    TestPollEvent pollEvent{coroutineEvent};
+    RootWaker waker{pollEvent};
+
     auto waking = new_waking_future_void();
     KJ_EXPECT(!waking.poll(waker));
 
@@ -55,7 +87,10 @@ KJ_TEST("BoxFutureVoid: C++ can poll() Rust Futures") {
   // Poll a Future which clones the Waker on a different thread, then spawns a new thread to wake
   // the waker after a delay.
   {
-    AwaitWaker waker;
+    TestCoroutineEvent coroutineEvent;
+    TestPollEvent pollEvent{coroutineEvent};
+    RootWaker waker{pollEvent};
+
     auto waking = new_threaded_delay_future_void();
     KJ_EXPECT(!waking.poll(waker));
 

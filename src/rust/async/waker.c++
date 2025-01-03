@@ -42,81 +42,86 @@ PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor) {
 }
 
 // =======================================================================================
-// AwaitWaker
+// RootWaker
 
-const CxxWaker* AwaitWaker::clone() const {
+PollEvent::PollEvent(kj::_::Event& next, kj::SourceLocation location)
+    : Event(location),
+      next(next) {}
+
+void PollEvent::beginTrace(OwnPromiseNode& node) {
+  if (promiseNodeForTrace == kj::none) {
+    promiseNodeForTrace = node;
+  }
+}
+
+void PollEvent::endTrace(OwnPromiseNode& node) {
+  KJ_IF_SOME(myNode, promiseNodeForTrace) {
+    if (myNode.get() == node.get()) {
+      promiseNodeForTrace = kj::none;
+    }
+  }
+}
+
+void PollEvent::traceEvent(kj::_::TraceBuilder& builder) {
+  KJ_IF_SOME(node, promiseNodeForTrace) {
+    node->tracePromise(builder, true);
+  }
+  next.traceEvent(builder);
+}
+
+RootWaker::RootWaker(PollEvent& pollEvent): pollEvent(pollEvent) {}
+
+const CxxWaker* RootWaker::clone() const {
   // Rust code wants to suspend and wait for something other than an OwnPromiseNode from the same
-  // thread as this AwaitWaker. We'll start handing out ArcWakers if we haven't already been woken
+  // thread as this RootWaker. We'll start handing out ArcWakers if we haven't already been woken
   // synchronously.
 
-  auto lock = state.lockExclusive();
-
-  if (lock->wakeCount > 0) {
+  if (wakeCount.load(std::memory_order_relaxed) > 0) {
     // We were already woken synchronously, so there's no point handing out more wakers for the
     // current call to `Future::poll()`. We can hand out a noop waker by returning nullptr.
     return nullptr;
   }
 
-  if (lock->cloned == kj::none) {
+  auto lock = cloned.lockExclusive();
+
+  if (*lock == kj::none) {
     // We haven't been cloned before, so make a new ArcWaker.
-    lock->cloned = newPromiseAndArcWaker(executor);
+    *lock = newPromiseAndArcWaker(executor);
   }
 
-  return KJ_ASSERT_NONNULL(lock->cloned).waker->clone();
+  return KJ_ASSERT_NONNULL(*lock).waker->clone();
 }
 
-void AwaitWaker::wake() const {
-  // AwaitWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
+void RootWaker::wake() const {
+  // RootWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
   // `wake()`, which drops `self`, on this object.
-  KJ_UNIMPLEMENTED("Rust user code should never have a consumable reference to AwaitWaker");
+  KJ_UNIMPLEMENTED("Rust user code should never have a consumable reference to RootWaker");
 }
 
-void AwaitWaker::wake_by_ref() const {
+void RootWaker::wake_by_ref() const {
   // Woken synchronously during a call to `future.poll(awaitWaker)`.
-  auto lock = state.lockExclusive();
-  ++lock->wakeCount;
+  wakeCount.fetch_add(1, std::memory_order_relaxed);
 }
 
-void AwaitWaker::drop() const {
+void RootWaker::drop() const {
   ++dropCount;
 }
 
-bool AwaitWaker::is_current() const {
+bool RootWaker::is_current() const {
   return &executor == &kj::getCurrentThreadExecutor();
 }
 
-void AwaitWaker::wake_after(OwnPromiseNode& node) const {
-  // If our kj::Executor isn't current on this thread, Rust should not have called us.
-  KJ_ASSERT(is_current());
-
-  // TODO(perf): There shouldn't be any need to store `wakeAfter` behind the mutex, since only one
-  //   thread can call this function at a time.
-  auto lock = state.lockExclusive();
-
-  // TODO(now): If we already have a `wakeAfter` promise, Rust must be trying to await two
-  //   OwnPromiseNodes at once. Figure out how to support this case. Options:
-  //   1. Rust learns how to own a kj::_::Event in OwnPromiseNodeFuture, possibly with the `moveit!`
-  //      macro. See comment in IntoFuture trait implementation for OwnPromiseNode.
-  //   2. We maintain a set of kj::_::Events here in AwaitWaker, one for each promise. We could
-  //      store one directly in AwaitWaker for optimizing the common case, then fall back to a heap-
-  //      allocated list of kj::_::Events.
-  //   3. We give PromiseNode an isReady() function, and actually poll them. If we had an
-  //      `Event::isArmed()` function, we could implement this today, but we'd break KJ's orddering
-  //      guarantees...
-  KJ_REQUIRE(lock->wakeAfter == kj::none,
-      "AwaitWaker does not yet know how to await multiple promises at once");
-
-  lock->wakeAfter = node;
-}
-
-AwaitWaker::State AwaitWaker::reset() {
+RootWaker::State RootWaker::reset() {
   // Getting the state without a lock is safe, because this function is only called after
   // `future.poll(awaitWaker)` has returned, meaning Rust has dropped its reference.
   KJ_ASSERT(dropCount == 1);
   KJ_DEFER(dropCount = 0);
-  auto result = kj::mv(state.getWithoutLock());
-  state.getWithoutLock() = State{};
-  return result;
+  KJ_DEFER(wakeCount.store(0, std::memory_order_relaxed));
+  KJ_DEFER(cloned.getWithoutLock() = kj::none);
+  return {
+    .wakeCount = wakeCount.load(std::memory_order_relaxed),
+    .cloned = kj::mv(cloned.getWithoutLock()),
+  };
 }
 
 }  // namespace workerd::rust::async

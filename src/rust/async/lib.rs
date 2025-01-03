@@ -34,9 +34,8 @@ mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/async/waker.h");
 
-        type AwaitWaker;
+        type RootWaker;
         fn is_current(&self) -> bool;
-        fn wake_after(&self, node: Pin<&mut OwnPromiseNode>);
     }
 
     unsafe extern "C++" {
@@ -47,7 +46,7 @@ mod ffi {
     }
 
     extern "Rust" {
-        fn box_future_void_poll(future: &mut BoxFutureVoid, cx: &AwaitWaker) -> bool;
+        fn box_future_void_poll(future: &mut BoxFutureVoid, cx: &RootWaker) -> bool;
         unsafe fn box_future_void_drop_in_place(ptr: PtrBoxFutureVoid);
     }
 

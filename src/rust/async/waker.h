@@ -55,7 +55,7 @@ enum class WakeInstruction {
 // `CrossThreadPromiseFulfiller` aspect makes it safe to call `wake_by_ref()` concurrently. Finally,
 // `wake()` is implemented in terms of `wake_by_ref()` and `drop()`.
 //
-// This class is mostly an implementation detail of AwaitWaker.
+// This class is mostly an implementation detail of RootWaker.
 class ArcWaker: public kj::AtomicRefcounted,
                 public kj::EnableAddRefToThis<ArcWaker>,
                 public CxxWaker {
@@ -82,25 +82,47 @@ struct PromiseArcWakerPair {
 PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor);
 
 // =======================================================================================
-// AwaitWaker
+// RootWaker
 
-// AwaitWaker is intended to serve as the root Waker passed to Rust's `Future::poll()` function.
-// AwaitWaker itself is not refcounted -- instead it is intended to live locally on the stack or in
-// a coroutine frame, and trying to `clone()` it will cause it to allocate an ArcWaker for the
-// caller.
+// A KJ Event whose `fire()` implementation will call a Future's `poll()` function. This base class
+// only implements `traceEvent()`, leaving `fire()` for a derived class.
+class PollEvent: public kj::_::Event {
+public:
+  // Initialize `next` with the enclosing coroutine's `Event`.
+  PollEvent(kj::_::Event& next, kj::SourceLocation location = {});
+
+  // When we `poll()` a Future, our RootWaker will either be cloned and we'll have an ArcWaker
+  // promise, or the Future will `.await` some number of KJ promises itself, or both. We have
+  // awaiter objects which wrap those two kinds of promises, and they use `beginTrace()` and
+  // `endTrace()` to connect the promise they're wrapping to this Event for tracing purposes.
+  void beginTrace(OwnPromiseNode& node);
+  void endTrace(OwnPromiseNode& node);
+
+  void traceEvent(kj::_::TraceBuilder& builder) override;
+
+private:
+  kj::_::Event& next;
+  kj::Maybe<OwnPromiseNode&> promiseNodeForTrace;
+};
+
+// RootWaker is the waker passed to Rust's `Future::poll()` function. RootWaker itself is not
+// refcounted -- instead it is intended to live locally on the stack or in a coroutine frame, and
+// trying to `clone()` it will cause it to allocate an ArcWaker for the caller.
 //
 // This class is mostly an implementation detail of our `co_await` operator implementation for Rust
-// Futures. AwaitWaker exists in order to optimize the case where Rust async code awaits a KJ
+// Futures. RootWaker exists in order to optimize the case where Rust async code awaits a KJ
 // promise, in which case we can make the outer KJ coroutine wait more or less directly on the inner
 // KJ promise which Rust owns.
-class AwaitWaker: public CxxWaker {
+class RootWaker: public CxxWaker {
 public:
+  explicit RootWaker(PollEvent& pollEvent);
+
   // Create a new or clone an existing ArcWaker, leak its pointer, and return it. This may be called
   // by any thread.
   const CxxWaker* clone() const override;
 
   // Unimplemented, because Rust user code cannot consume the `std::task::Waker` we create which
-  // wraps this AwaitWaker.
+  // wraps this RootWaker.
   void wake() const override;
 
   // Rust user code can wake us synchronously during the execution of `future.poll()` using this
@@ -117,11 +139,13 @@ public:
   // `wake_after()`, during `future.poll(awaitWaker)` execution. It uses this to implement a short-
   // circuit optimization when it awaits a KJ promise.
 
-  // True if the current thread's kj::Executor is the same as the AwaitWaker's.
+  // True if the current thread's kj::Executor is the same as the RootWaker's.
   bool is_current() const;
 
-  // Wait for this promise, then resume the task this AwaitWaker represents.
-  void wake_after(OwnPromiseNode& node) const;
+  // Called by OwnPromiseNodeFuture's constructor to get a reference to an Event which will call
+  // the current Future's `poll()` function. This is used to `.await` OwnPromiseNodes in Rust
+  // without having to clone an ArcWaker.
+  PollEvent& getPollEvent();
 
   struct State {
     // Number of times this Waker was synchronously woken during `future.poll(awaitWaker)`.
@@ -130,39 +154,39 @@ public:
 
     // Filled in lazily by `clone()`. If `clone()` is never called, this will remain kj::none.
     kj::Maybe<PromiseArcWakerPair> cloned;
-
-    // Reference to a PromiseNode that Rust is `.await`ing further down the stack. Filled in by
-    // `wake_after()`.
-    //
-    // TODO(perf): This doesn't need to be guarded by a mutex, because this is only accessed on a
-    //   single thread: the one that our `kj::Executor` is current on.
-    kj::Maybe<OwnPromiseNode&> wakeAfter;
   };
 
-  // Used by the owner of AwaitWaker after `future.poll()` has returned, to retrieve the
-  // AwaitWaker's state for further processing. This is non-const, because by the time this is
+  // Used by the owner of RootWaker after `future.poll()` has returned, to retrieve the
+  // RootWaker's state for further processing. This is non-const, because by the time this is
   // called, Rust has dropped all of its borrows to this class, meaning we no longer have to worry
   // about thread safety.
   //
-  // This function will assert if `drop()` has not been called since AwaitWaker was constructed, or
+  // This function will assert if `drop()` has not been called since RootWaker was constructed, or
   // since the last call to `reset()`.
   State reset();
 
 private:
+  PollEvent& pollEvent;
+
   // We store the kj::Executor for the constructing thread so that we can lazily instantiate a
   // CrossThreadPromiseFulfiller from any thread in our `clone()` implementation. This also allows
   // us to guarantee that `wake_after()` will only be called from the awaiting thread, allowing us
   // to ignore thread-safety for the `wakeAfter` promise.
   const kj::Executor& executor = kj::getCurrentThreadExecutor();
 
-  kj::MutexGuarded<State> state;
+  // Initialized by `clone()`, which may be called by any thread.
+  kj::MutexGuarded<kj::Maybe<PromiseArcWakerPair>> cloned;
+
+  // Incremented by `wake_by_ref()`, which may be called by any thread. All operations use relaxed
+  // memory order, because this counter doesn't guard any memory.
+  mutable std::atomic<uint> wakeCount { 0 };
 
   // Incremented by `drop()`, so we can validate that `drop()` is only called once on this object.
   //
   // Rust requires that Wakers be droppable by any thread. However, we own the implementation of
-  // `poll()` to which `AwaitWaker&` is passed, and those implementations store the Rust
+  // `poll()` to which `RootWaker&` is passed, and those implementations store the Rust
   // `std::task::Waker` object on the stack,, and never move it elsewhere. Since that object is
-  // responsible for calling `AwaitWaker::drop()`, we know for sure that `drop()` will only ever be
+  // responsible for calling `RootWaker::drop()`, we know for sure that `drop()` will only ever be
   // called on the thread which constructed it. Therefore, there is no need to make `dropCount`
   // thread-safe.
   mutable uint dropCount = 0;

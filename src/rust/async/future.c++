@@ -13,7 +13,7 @@ BoxFutureVoid::~BoxFutureVoid() noexcept {
   }
 }
 
-bool BoxFutureVoid::poll(const AwaitWaker& waker) noexcept {
+bool BoxFutureVoid::poll(const RootWaker& waker) noexcept {
   return box_future_void_poll(*this, waker);
 }
 

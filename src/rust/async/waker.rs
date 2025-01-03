@@ -50,27 +50,27 @@ static CXX_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_drop,
 );
 
-use crate::ffi::AwaitWaker;
+use crate::ffi::RootWaker;
 
-unsafe impl Send for AwaitWaker {}
-unsafe impl Sync for AwaitWaker {}
+unsafe impl Send for RootWaker {}
+unsafe impl Sync for RootWaker {}
 
-impl From<&AwaitWaker> for Waker {
-    fn from(waker: &AwaitWaker) -> Self {
-        let waker = RawWaker::new(waker as *const AwaitWaker as *const (), &AWAIT_WAKER_VTABLE);
+impl From<&RootWaker> for Waker {
+    fn from(waker: &RootWaker) -> Self {
+        let waker = RawWaker::new(waker as *const RootWaker as *const (), &AWAIT_WAKER_VTABLE);
         unsafe { Waker::from_raw(waker) }
     }
 }
 
-pub fn deref_await_waker<'a>(waker: &Waker) -> Option<&'a AwaitWaker> {
+pub fn deref_root_waker<'a>(waker: &Waker) -> Option<&'a RootWaker> {
     if waker.vtable() == &AWAIT_WAKER_VTABLE {
         let data = waker.data();
         assert!(!data.is_null());
-        let p = data as *const AwaitWaker;
-        let await_waker = unsafe { &*p };
+        let p = data as *const RootWaker;
+        let root_waker = unsafe { &*p };
 
-        if await_waker.is_current() {
-            Some(await_waker)
+        if root_waker.is_current() {
+            Some(root_waker)
         } else {
             None
         }

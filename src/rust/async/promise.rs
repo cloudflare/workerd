@@ -6,7 +6,7 @@ use std::task::Poll;
 
 use cxx::ExternType;
 
-use crate::waker::deref_await_waker;
+use crate::waker::deref_root_waker;
 
 // OwnPromiseNode
 
@@ -39,15 +39,17 @@ impl Drop for OwnPromiseNode {
     }
 }
 
+// TODO(now): Move everything below into await.rs.
+
 impl IntoFuture for OwnPromiseNode {
     type Output = ();
     type IntoFuture = OwnPromiseNodeFuture;
 
     fn into_future(self) -> Self::IntoFuture {
-        // Idea: We could return an `async { ... }.await` expression here, and use the `moveit!`
-        // macro to emplace a kj::_::Event on "the stack" (actually the async block's frame), pass
-        // that Event to `self->onReady()`. When the Event fires, it sets a boolean flag that tells
-        // us this OwnPromiseNode is ready for `get()`ing.
+        // TODO(now): return an `async { ... }.await` expression here, and use the `moveit!`
+        // macro to emplace a C++ OwnPromiseNodeFuture on "the stack" (actually the async block's
+        // frame), pass that Event to `self->onReady()`. When the Event fires, it sets a boolean
+        // flag that tells us this OwnPromiseNode is ready for `get()`ing.
         Self::IntoFuture::new(self)
     }
 }
@@ -77,9 +79,9 @@ impl Future for OwnPromiseNodeFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<()> {
         match self.state {
             OwnPromiseNodeFutureState::OnReady => {
-                if let Some(await_waker) = deref_await_waker(cx.waker()) {
+                if let Some(root_waker) = deref_root_waker(cx.waker()) {
                     let node = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.node) };
-                    await_waker.wake_after(node);
+                    // root_waker.wake_after(node);
                     self.state = OwnPromiseNodeFutureState::Get;
                     Poll::Pending
                 } else {
