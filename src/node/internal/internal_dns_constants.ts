@@ -22,3 +22,6 @@ export const NOTINITIALIZED = 'ENOTINITIALIZED';
 export const LOADIPHLPAPI = 'ELOADIPHLPAPI';
 export const ADDRGETNETWORKPARAMS = 'EADDRGETNETWORKPARAMS';
 export const CANCELLED = 'ECANCELLED';
+export const ADDRCONFIG = 1024;
+export const ALL = 256;
+export const V4MAPPED = 2048;

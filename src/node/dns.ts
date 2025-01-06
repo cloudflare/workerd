@@ -6,9 +6,11 @@
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import * as dns from 'node-internal:internal_dns';
 import { callbackify } from 'node-internal:internal_utils';
+import * as dnsPromises from 'node-internal:internal_dns_promises';
 
 export * from 'node-internal:internal_dns_constants';
 
+export const promises = dnsPromises;
 export const reverse = callbackify(dns.reverse.bind(dns));
 export const resolveTxt = callbackify(dns.resolveTxt.bind(dns));
 export const resolveCaa = callbackify(dns.resolveCaa.bind(dns));
@@ -142,6 +144,6 @@ export default {
   getDefaultResultOrder,
   setServers,
   Resolver,
-
+  promises,
   ...errorCodes,
 };

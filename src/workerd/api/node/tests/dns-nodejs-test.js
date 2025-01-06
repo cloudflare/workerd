@@ -78,6 +78,8 @@ export const functionsExist = {
     for (const fn of syncFns) {
       strictEqual(typeof dns[fn], 'function');
     }
+
+    ok(dns.promises !== undefined);
   },
 };
 
