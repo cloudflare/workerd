@@ -280,26 +280,6 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   return ModuleRegistry::requireImpl(js, info, options);
 }
 
-v8::Local<v8::Value> NonModuleScript::runAndReturn(v8::Local<v8::Context> context) const {
-  auto isolate = context->GetIsolate();
-  auto boundScript = unboundScript.Get(isolate)->BindToCurrentContext();
-  return check(boundScript->Run(context));
-}
-
-void NonModuleScript::run(v8::Local<v8::Context> context) const {
-  auto isolate = context->GetIsolate();
-  auto boundScript = unboundScript.Get(isolate)->BindToCurrentContext();
-  check(boundScript->Run(context));
-}
-
-NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name) {
-  // Create a dummy script origin for it to appear in Sources panel.
-  auto isolate = js.v8Isolate;
-  v8::ScriptOrigin origin(v8StrIntern(isolate, name));
-  v8::ScriptCompiler::Source source(v8Str(isolate, code), origin);
-  return NonModuleScript(js, check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
-}
-
 void instantiateModule(
     jsg::Lock& js, v8::Local<v8::Module>& module, InstantiateModuleOptions options) {
   KJ_ASSERT(!module.IsEmpty());
