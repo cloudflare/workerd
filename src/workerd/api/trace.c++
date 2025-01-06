@@ -669,12 +669,12 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto entrypointName = entrypointNamePtr.map([](auto s) { return kj::str(s); });
   try {
     co_await context.run(
-        [&context, nonEmptyTraces = kj::mv(nonEmptyTraces), entrypointName = kj::mv(entrypointName),
+        [&context, nonEmptyTraces = nonEmptyTraces.asPtr(), entrypointName = kj::mv(entrypointName),
             props = kj::mv(props)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
       auto handler = lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor());
-      return lock.getGlobalScope().sendTraces(nonEmptyTraces.asPtr(), lock, handler);
+      return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
     });
   } catch (kj::Exception e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
