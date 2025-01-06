@@ -21,7 +21,7 @@ jsg::JsValue UnsafeEval::eval(jsg::Lock& js, kj::String script, jsg::Optional<kj
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
   auto compiled = jsg::NonModuleScript::compile(js, script, getName(name, EVAL_STR));
-  return jsg::JsValue(compiled.runAndReturn(js.v8Context()));
+  return compiled.runAndReturn(js);
 }
 
 UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(jsg::Lock& js,

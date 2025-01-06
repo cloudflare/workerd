@@ -2,16 +2,14 @@
 
 namespace workerd::jsg {
 
-v8::Local<v8::Value> NonModuleScript::runAndReturn(v8::Local<v8::Context> context) const {
-  auto isolate = context->GetIsolate();
-  auto boundScript = unboundScript.getHandle(isolate)->BindToCurrentContext();
-  return check(boundScript->Run(context));
+jsg::JsValue NonModuleScript::runAndReturn(jsg::Lock& js) const {
+  auto boundScript = unboundScript.Get(js.v8Isolate)->BindToCurrentContext();
+  return jsg::JsValue(check(boundScript->Run(js.v8Context())));
 }
 
-void NonModuleScript::run(v8::Local<v8::Context> context) const {
-  auto isolate = context->GetIsolate();
-  auto boundScript = unboundScript.getHandle(isolate)->BindToCurrentContext();
-  check(boundScript->Run(context));
+void NonModuleScript::run(jsg::Lock& js) const {
+  auto boundScript = unboundScript.Get(js.v8Isolate)->BindToCurrentContext();
+  check(boundScript->Run(js.v8Context()));
 }
 
 NonModuleScript NonModuleScript::compile(jsg::Lock& js, kj::StringPtr code, kj::StringPtr name) {

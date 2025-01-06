@@ -1662,7 +1662,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
                     script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
-                unboundScript.run(lock.v8Context());
+                unboundScript.run(lock);
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns,
