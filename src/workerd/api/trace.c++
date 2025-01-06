@@ -659,7 +659,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
     if (trace->eventInfo != kj::none) {
-      nonEmptyTraces.add(kj::mv(trace));
+      nonEmptyTraces.add(kj::addRef(*trace));
     }
   }
 
