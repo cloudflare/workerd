@@ -16,6 +16,7 @@ use promise::PtrOwnPromiseNode;
 
 mod test_futures;
 use test_futures::new_layered_ready_future_void;
+use test_futures::new_naive_select_future_void;
 use test_futures::new_pending_future_void;
 use test_futures::new_ready_future_void;
 use test_futures::new_threaded_delay_future_void;
@@ -85,15 +86,35 @@ mod ffi {
         include!("workerd/rust/async/test-promises.h");
 
         fn new_ready_promise_node() -> OwnPromiseNode;
+        fn new_pending_promise_node() -> OwnPromiseNode;
         fn new_coroutine_promise_node() -> OwnPromiseNode;
+    }
+
+    enum CloningAction {
+        None,
+        CloneSameThread,
+        CloneBackgroundThread,
+        WakeByRefThenCloneSameThread,
+    }
+
+    enum WakingAction {
+        None,
+        WakeByRefSameThread,
+        WakeByRefBackgroundThread,
+        WakeSameThread,
+        WakeBackgroundThread,
     }
 
     // Helper functions to create BoxFutureVoids for testing purposes.
     extern "Rust" {
         fn new_pending_future_void() -> BoxFutureVoid;
         fn new_ready_future_void() -> BoxFutureVoid;
-        fn new_waking_future_void() -> BoxFutureVoid;
+        fn new_waking_future_void(
+            cloning_action: CloningAction,
+            waking_action: WakingAction,
+        ) -> BoxFutureVoid;
         fn new_threaded_delay_future_void() -> BoxFutureVoid;
         fn new_layered_ready_future_void() -> BoxFutureVoid;
+        fn new_naive_select_future_void() -> BoxFutureVoid;
     }
 }
