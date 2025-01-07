@@ -204,7 +204,7 @@ KJ_TEST("FutureAwaiter: C++ KJ coroutines can co_await Rust Futures") {
   }().wait(waitScope);
 }
 
-KJ_TEST("RustPromiseAwaiter: Rust can .await KJ promises") {
+KJ_TEST("RustPromiseAwaiter: Rust can .await KJ promises under a co_await") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -213,7 +213,7 @@ KJ_TEST("RustPromiseAwaiter: Rust can .await KJ promises") {
   }().wait(waitScope);
 }
 
-KJ_TEST("RustPromiseAwaiter: Rust can .await KJ promises") {
+KJ_TEST("RustPromiseAwaiter: Rust can poll() multiple promises under a single co_await") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 

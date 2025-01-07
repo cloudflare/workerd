@@ -157,9 +157,13 @@ use std::future::IntoFuture;
 pub fn new_naive_select_future_void() -> BoxFuture<()> {
     Box::pin(
         naive_select(
-            crate::ffi::new_coroutine_promise_node().into_future(),
-            crate::ffi::new_coroutine_promise_node().into_future()
-        )).into()
+            crate::ffi::new_pending_promise_node().into_future(),
+            naive_select(
+                crate::ffi::new_coroutine_promise_node().into_future(),
+                crate::ffi::new_coroutine_promise_node().into_future()
+            )
+        )
+    ).into()
 }
 
 // TODO(now): Similar as above, but poll() until all are ready.
