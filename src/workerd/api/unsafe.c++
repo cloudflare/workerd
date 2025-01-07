@@ -1,5 +1,7 @@
 #include "unsafe.h"
 
+#include <workerd/jsg/script.h>
+
 namespace workerd::api {
 
 namespace {
@@ -18,8 +20,8 @@ inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def)
 jsg::JsValue UnsafeEval::eval(jsg::Lock& js, kj::String script, jsg::Optional<kj::String> name) {
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
-  auto compiled = jsg::NonModuleScript::compile(script, js, getName(name, EVAL_STR));
-  return jsg::JsValue(compiled.runAndReturn(js.v8Context()));
+  auto compiled = jsg::NonModuleScript::compile(js, script, getName(name, EVAL_STR));
+  return compiled.runAndReturn(js);
 }
 
 UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(jsg::Lock& js,

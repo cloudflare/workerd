@@ -18,6 +18,7 @@
 #include <workerd/jsg/inspector.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/script.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
@@ -1344,7 +1345,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   auto limitScope =
                       isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
                   impl->unboundScriptOrMainModule =
-                      jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
+                      jsg::NonModuleScript::compile(lock, script.mainScript, script.mainScriptName);
                 }
 
                 break;
@@ -1661,7 +1662,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
                     script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
-                unboundScript.run(lock.v8Context());
+                unboundScript.run(lock);
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns,

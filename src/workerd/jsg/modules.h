@@ -171,28 +171,6 @@ class NodeJsModuleContext: public jsg::Object {
   jsg::Value exports;
 };
 
-// jsg::NonModuleScript wraps a v8::UnboundScript.
-class NonModuleScript {
- public:
-  NonModuleScript(jsg::Lock& js, v8::Local<v8::UnboundScript> script)
-      : unboundScript(js.v8Isolate, script) {}
-
-  NonModuleScript(NonModuleScript&&) = default;
-  NonModuleScript& operator=(NonModuleScript&&) = default;
-
-  // Running the script will create a v8::Script instance bound to the given
-  // context then will run it to completion.
-  void run(v8::Local<v8::Context> context) const;
-
-  v8::Local<v8::Value> runAndReturn(v8::Local<v8::Context> context) const;
-
-  static jsg::NonModuleScript compile(
-      kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
-
- private:
-  v8::Global<v8::UnboundScript> unboundScript;
-};
-
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause
   // the microtask queue to be drained once in an attempt to resolve those.
