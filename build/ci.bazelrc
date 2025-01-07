@@ -19,9 +19,17 @@ build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
+# Only build runfile trees when needed/lazily, so that they are not built for disabled tests
+build:ci --nobuild_runfile_links
+# Speeds up CI build by making action output uploads non-blocking so Bazel can e.g. run a test
+# before it finishes uploading the test binary. On-by-default in Bazel 8.
+build:ci --experimental_remote_cache_async
+
+# Emit build profile so that slow builds can be investigated
+build:ci --profile build.bazel-profile
+test:ci --profile test.bazel-profile
 build:ci --config=v8-codegen-opt
 test:ci --test_output=errors
-build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
 build:ci-test --remote_download_outputs=minimal
