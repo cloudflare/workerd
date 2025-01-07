@@ -2,8 +2,6 @@ from asyncio import Future, Queue, ensure_future, sleep
 from contextlib import contextmanager
 from inspect import isawaitable
 
-from fastapi import Depends, Request
-
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
 
@@ -14,11 +12,6 @@ def run_in_background(coro):
     fut = ensure_future(coro)
     background_tasks.add(fut)
     fut.add_done_callback(background_tasks.discard)
-
-
-@Depends
-async def env(request: Request):
-    return request.scope["env"]
 
 
 @contextmanager
@@ -84,11 +77,10 @@ async def start_application(app):
 
     async def send(got):
         if got["type"] == "lifespan.startup.complete":
-            print("Application startup complete.")
-            print("Uvicorn running")
             ready.set_result(None)
+            return
         if got["type"] == "lifespan.shutdown.complete":
-            print("Application shutdown complete")
+            return
         raise RuntimeError(f"Unexpected lifespan event {got['type']}")
 
     run_in_background(
@@ -217,3 +209,16 @@ async def fetch(app, req, env):
 
 async def websocket(app, req):
     return await process_websocket(app, req)
+
+
+def __getattr__(name):
+    if name == "env":
+        from fastapi import Depends, Request
+
+        @Depends
+        async def env(request: Request):
+            return request.scope["env"]
+
+        return env
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
