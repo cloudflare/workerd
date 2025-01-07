@@ -4,12 +4,34 @@ use std::task::Waker;
 
 use crate::ffi::CxxWaker;
 
+// Safety: We use the type system to express the Sync nature of CxxWaker in the cxx-rs FFI boundary.
+// Specifically, we only allow invocations on const CxxWakers, and in KJ C++, use of const-qualified
+// functions is thread-safe by convention. Our implementations of CxxWakers in C++ respect this
+// convention.
+//
+// Note: Implementing these traits does not seem to be required for building, but the Waker
+// documentation makes it clear Send and Sync are a requirement of the pointed-to type.
+//
+// https://doc.rust-lang.org/std/task/struct.RawWaker.html
+// https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
 unsafe impl Send for CxxWaker {}
 unsafe impl Sync for CxxWaker {}
 
+// Helper function for use in CxxWaker's RawWakerVTable implementation to factor out a tedious null
+// pointer check.
 fn deref_cxx_waker<'a>(data: *const ()) -> Option<&'a CxxWaker> {
     if !data.is_null() {
         let p = data as *const CxxWaker;
+        // Safety:
+        // 1. p is guaranteed non-null by the check above.
+        // 2. This function is only used in the implementations of our RawWakerVTable for CxxWaker.
+        //    All vtable implementation functions are trivially guaranteed that their owning Waker
+        //    object is still alive. We assume the Waker was constructed correctly to begin with,
+        //    and that therefore the pointer still points to valid memory.
+        // 3. We do not read or write the CxxWaker's memory, so there are no atomicity concerns nor
+        //    interleaved pointer/reference access concerns.
+        //
+        // https://doc.rust-lang.org/std/ptr/index.html#safety
         Some(unsafe { &*p })
     } else {
         None
@@ -43,6 +65,7 @@ pub fn cxx_waker_drop(data: *const ()) {
     }
 }
 
+// `cxx_waker_clone()` uses this vtable to wrap new CxxWaker pointers.
 static CXX_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_clone,
     cxx_waker_wake,
@@ -52,21 +75,46 @@ static CXX_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
 
 use crate::ffi::RootWaker;
 
+// Safety: We use the type system to express the Sync nature of RootWaker in the cxx-rs FFI
+// boundary. Specifically, we only allow invocations on const RootWakers, and in KJ C++, use of
+// const-qualified functions is thread-safe by convention. Our implementations of RootWakers in C++
+// respect this convention.
+//
+// Note: Implementing these traits does not seem to be required for building, but the Waker
+// documentation makes it clear Send and Sync are a requirement of the pointed-to type.
+//
+// https://doc.rust-lang.org/std/task/struct.RawWaker.html
+// https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
 unsafe impl Send for RootWaker {}
 unsafe impl Sync for RootWaker {}
 
 impl From<&RootWaker> for Waker {
     fn from(waker: &RootWaker) -> Self {
         let waker = RawWaker::new(waker as *const RootWaker as *const (), &ROOT_WAKER_VTABLE);
+        // Safety: RootWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
+        // implementation functions are all thread-safe.
+        //
+        // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
         unsafe { Waker::from_raw(waker) }
     }
 }
 
+/// If `waker` wraps a `RootWaker` associated with the current thread's KJ event loop, return a
+/// reference to the `RootWaker`.
 pub fn deref_root_waker<'a>(waker: &Waker) -> Option<&'a RootWaker> {
     if waker.vtable() == &ROOT_WAKER_VTABLE {
         let data = waker.data();
         assert!(!data.is_null());
         let p = data as *const RootWaker;
+        // Safety:
+        // 1. p is guaranteed non-null by the assertion above.
+        // 2. We possess a const borrow of the Waker which owns this pointer, so we are guaranteed
+        //    the Waker is still alive. We assume the Waker was constructed correctly to begin with,
+        //    and that therefore the pointer still points to valid memory.
+        // 3. We do not read or write the RootWaker's memory, so there are no atomicity concerns nor
+        //    interleaved pointer/reference access concerns.
+        //
+        // https://doc.rust-lang.org/std/ptr/index.html#safety
         let root_waker = unsafe { &*p };
 
         if root_waker.is_current() {
@@ -79,6 +127,9 @@ pub fn deref_root_waker<'a>(waker: &Waker) -> Option<&'a RootWaker> {
     }
 }
 
+// Define a separate `ROOT_WAKER_VTABLE` object so we can distinguish RootWakers from other Waker
+// objects. Since RootWakers have CxxWaker as a base class, we can re-use the CxxWaker's vtable
+// functions.
 static ROOT_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_clone,
     cxx_waker_wake,

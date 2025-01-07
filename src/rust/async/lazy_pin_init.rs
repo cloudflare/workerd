@@ -3,6 +3,8 @@ use std::pin::Pin;
 
 // Based on StackInit from the `pinned-init` crate:
 // https://github.com/Rust-for-Linux/pinned-init/blob/67c0a0c35bf23b8584f8e7792f9098de5fe0c8b0/src/__internal.rs#L142
+//
+// TODO(now): Define this in terms of some trait?
 
 /// # Invariants
 ///
@@ -35,7 +37,7 @@ impl<T> LazyPinInit<T> {
 
     /// Initializes the contents and returns the result.
     #[inline]
-    pub fn get(self: Pin<&mut Self>, init: impl FnOnce(*mut T)) -> Pin<&mut T> {
+    pub fn get_or_init(self: Pin<&mut Self>, init: impl FnOnce(*mut T)) -> Pin<&mut T> {
         // SAFETY: We never move out of `this`.
         let this = unsafe { Pin::into_inner_unchecked(self) };
         // The value is currently initialized, so it needs to be dropped before we can reuse

@@ -30,15 +30,14 @@ impl<T, F: Future<Output = T> + 'static> From<Pin<Box<F>>> for BoxFuture<T> {
     }
 }
 
-// We must manually implement the ExternType trait, poll, and drop functions for each possible T of
-// BoxFuture<T> and PtrBoxFuture<T>.
-//
+// TODO(now): Use bindgen to guarantee safety.
 // TODO(now): Make this a macro so we can define them easier?
 unsafe impl ExternType for BoxFuture<()> {
     type Id = cxx::type_id!("workerd::rust::async::BoxFutureVoid");
     type Kind = cxx::kind::Trivial;
 }
 
+// TODO(now): Use bindgen to guarantee safety.
 unsafe impl ExternType for PtrBoxFuture<()> {
     type Id = cxx::type_id!("workerd::rust::async::PtrBoxFutureVoid");
     type Kind = cxx::kind::Trivial;
