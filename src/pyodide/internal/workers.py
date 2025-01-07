@@ -5,7 +5,7 @@ from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
-from typing import TypedDict, Unpack
+from typing import Any, TypedDict, Unpack
 
 import js
 
@@ -21,10 +21,32 @@ Body = "str | FormData | JSBody"
 Headers = dict[str, str] | list[tuple[str, str]]
 
 
+# https://developers.cloudflare.com/workers/runtime-apis/request/#the-cf-property-requestinitcfproperties
+class RequestInitCfProperties(TypedDict, total=False):
+    apps: bool | None
+    cacheEverything: bool | None
+    cacheKey: str | None
+    cacheTags: list[str] | None
+    cacheTtl: int
+    cacheTtlByStatus: dict[str, int]
+    image: (
+        Any | None
+    )  # TODO: https://developers.cloudflare.com/images/transform-images/transform-via-workers/
+    mirage: bool | None
+    polish: str | None
+    resolveOverride: str | None
+    scrapeShield: bool | None
+    webp: bool | None
+
+
+# This matches the Request options:
+# https://developers.cloudflare.com/workers/runtime-apis/request/#options
 class FetchKwargs(TypedDict, total=False):
     headers: Headers | None
     body: "Body | None"
     method: HTTPMethod = HTTPMethod.GET
+    redirect: str | None
+    cf: RequestInitCfProperties | None
 
 
 # TODO: Pyodide's FetchResponse.headers returns a dict[str, str] which means
@@ -65,6 +87,15 @@ class FetchResponse(pyodide.http.FetchResponse):
         except JsException as exc:
             raise _to_python_exception(exc) from exc
 
+    def replace_body(self, body: Body) -> "FetchResponse":
+        """
+        Returns a new Response object with the same options (status, headers, etc) as
+        the original but with an updated body.
+        """
+        b = body.js_object if isinstance(body, FormData) else body
+        js_resp = js.Response.new(b, self.js_response)
+        return FetchResponse(js_resp.url, js_resp)
+
 
 async def fetch(
     resource: str,
@@ -99,7 +130,7 @@ class Response(FetchResponse):
         self,
         body: Body,
         status: HTTPStatus | int = HTTPStatus.OK,
-        statusText="",
+        status_text="",
         headers: Headers = None,
     ):
         """
@@ -108,7 +139,7 @@ class Response(FetchResponse):
         Based on the JS API of the same name:
         https://developer.mozilla.org/en-US/docs/Web/API/Response/Response.
         """
-        options = self._create_options(status, statusText, headers)
+        options = self._create_options(status, status_text, headers)
 
         # Initialise via the FetchResponse super-class which gives us access to
         # methods that we would ordinarily have to redeclare.
@@ -119,13 +150,15 @@ class Response(FetchResponse):
 
     @staticmethod
     def _create_options(
-        status: HTTPStatus | int = HTTPStatus.OK, statusText="", headers: Headers = None
+        status: HTTPStatus | int = HTTPStatus.OK,
+        status_text="",
+        headers: Headers = None,
     ):
         options = {
             "status": status.value if isinstance(status, HTTPStatus) else status,
         }
-        if len(statusText) > 0:
-            options["statusText"] = statusText
+        if status_text:
+            options["statusText"] = status_text
         if headers:
             if isinstance(headers, list):
                 # We should have a list[tuple[str, str]]
@@ -154,10 +187,10 @@ class Response(FetchResponse):
     def json(
         data: str | dict[str, str],
         status: HTTPStatus | int = HTTPStatus.OK,
-        statusText="",
+        status_text="",
         headers: Headers = None,
     ):
-        options = Response._create_options(status, statusText, headers)
+        options = Response._create_options(status, status_text, headers)
         with _manage_pyproxies() as pyproxies:
             try:
                 return js.Response.json(
