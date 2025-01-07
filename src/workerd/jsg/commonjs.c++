@@ -4,6 +4,11 @@
 
 namespace workerd::jsg {
 
+CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
+    : module(jsg::alloc<CommonJsModuleObject>(js, path.toString(true))),
+      path(kj::mv(path)),
+      exports(js.v8Isolate, module->getExports(js)) {}
+
 v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
   auto modulesForResolveCallback = getModulesForResolveCallback(js.v8Isolate);
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
@@ -42,18 +47,48 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   return ModuleRegistry::requireImpl(js, info, options);
 }
 
-CommonJsModuleObject::CommonJsModuleObject(jsg::Lock& js)
-    : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)) {}
+void CommonJsModuleContext::visitForMemoryInfo(MemoryTracker& tracker) const {
+  tracker.trackField("exports", exports);
+  tracker.trackFieldWithSize("path", path.size());
+}
 
-v8::Local<v8::Value> CommonJsModuleObject::getExports(jsg::Lock& js) {
+kj::String CommonJsModuleContext::getFilename() const {
+  return path.toString(true);
+}
+
+kj::String CommonJsModuleContext::getDirname() const {
+  return path.parent().toString(true);
+}
+
+jsg::Ref<CommonJsModuleObject> CommonJsModuleContext::getModule(jsg::Lock& js) {
+  return module.addRef();
+}
+
+v8::Local<v8::Value> CommonJsModuleContext::getExports(jsg::Lock& js) const {
+  return exports.getHandle(js);
+}
+void CommonJsModuleContext::setExports(jsg::Value value) {
+  exports = kj::mv(value);
+}
+
+CommonJsModuleObject::CommonJsModuleObject(jsg::Lock& js, kj::String path)
+    : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)),
+      path(kj::mv(path)) {}
+
+v8::Local<v8::Value> CommonJsModuleObject::getExports(jsg::Lock& js) const {
   return exports.getHandle(js);
 }
 void CommonJsModuleObject::setExports(jsg::Value value) {
   exports = kj::mv(value);
 }
 
+kj::StringPtr CommonJsModuleObject::getPath() const {
+  return path;
+}
+
 void CommonJsModuleObject::visitForMemoryInfo(MemoryTracker& tracker) const {
   tracker.trackField("exports", exports);
+  tracker.trackField("path", path);
 }
 
 // ======================================================================================
@@ -107,21 +142,6 @@ v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String spec
   }
 
   return ModuleRegistry::requireImpl(js, info, ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT);
-}
-
-v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
-  auto value = require(js, kj::str("node:buffer"));
-  JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:buffer implementation");
-  auto module = value.As<v8::Object>();
-  auto buffer = js.v8Get(module, "Buffer"_kj);
-  JSG_REQUIRE(buffer->IsFunction(), TypeError, "Invalid node:buffer implementation");
-  return buffer;
-}
-
-v8::Local<v8::Value> NodeJsModuleContext::getProcess(jsg::Lock& js) {
-  auto value = require(js, kj::str("node:process"));
-  JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:process implementation");
-  return value;
 }
 
 kj::String NodeJsModuleContext::getFilename() {
