@@ -96,6 +96,7 @@ You may then build `workerd` at the command-line with:
 bazel build //src/workerd/server:workerd
 ```
 
+
 You can also build from within Visual Studio Code using the instructions in [docs/vscode.md](docs/vscode.md).
 
 The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
