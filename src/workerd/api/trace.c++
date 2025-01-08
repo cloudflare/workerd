@@ -520,15 +520,15 @@ TraceItem::CustomEventInfo::CustomEventInfo(
     : eventInfo(eventInfo) {}
 
 TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Message& eventInfo)
+    const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Message eventInfo)
     : eventType(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Message>(trace, eventInfo)) {}
 
 TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Close& eventInfo)
+    const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Close eventInfo)
     : eventType(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Close>(trace, eventInfo)) {}
 
 TraceItem::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
-    const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Error& eventInfo)
+    const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Error eventInfo)
     : eventType(jsg::alloc<TraceItem::HibernatableWebSocketEventInfo::Error>(trace, eventInfo)) {}
 
 TraceItem::HibernatableWebSocketEventInfo::Type TraceItem::HibernatableWebSocketEventInfo::
