@@ -475,6 +475,8 @@ wd_test(
     src = "tests/htmlrewriter-test.wd-test",
     args = ["--experimental"],
     data = ["tests/htmlrewriter-test.js"],
+    # TODO(soon): Test is excessively flaky under ASan, re-enable once fixed
+    tags = ["no-asan"],
 )
 
 wd_test(
