@@ -23,9 +23,13 @@ function canonicalizePackageName(name: string): string {
 }
 
 // The "name" field in the lockfile is not canonicalized
-const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
+export const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
   .filter(({ install_dir }) => install_dir === 'stdlib')
   .map(({ name }) => canonicalizePackageName(name));
+
+// Each item in the list is an element of the file path, for example
+// `folder/file.txt` -> `["folder", "file.txt"]
+export type FilePath = string[];
 
 /**
  * SitePackagesDir keeps track of the virtualized view of the site-packages
@@ -33,7 +37,7 @@ const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
  */
 class SitePackagesDir {
   public rootInfo: TarFSInfo;
-  public soFiles: string[][];
+  public soFiles: FilePath[];
   public loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = {
@@ -133,6 +137,7 @@ class SitePackagesDir {
 export function buildSitePackages(requirements: Set<string>): SitePackagesDir {
   if (EmbeddedPackagesTarReader.read === undefined) {
     // Package retrieval is enabled, so the embedded tar reader isn't initialised.
+    // All packages, including STDLIB_PACKAGES, are loaded in `loadPackages`.
     return new SitePackagesDir();
   }
 

@@ -16,3 +16,8 @@ interface PackageLock {
     [id: string]: PackageDeclaration;
   };
 }
+
+declare module 'pyodide-internal:generated/pyodide-lock.json' {
+  const lock: PackageLock;
+  export default lock;
+}

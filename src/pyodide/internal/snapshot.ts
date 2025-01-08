@@ -2,6 +2,7 @@ import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import {
+  FilePath,
   SITE_PACKAGES,
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
@@ -102,6 +103,49 @@ function loadDynlib(
   }
 }
 
+/**
+ * This function is used to ensure the order in which we load SO_FILES stays the same.
+ *
+ * The sort always puts _lzma.so and _ssl.so
+ * first, because these SO_FILES are loaded in the baseline snapshot, and if we want to generate
+ * a package snapshot while a baseline snapshot is loaded we need them to be first. The rest of the
+ * files are sorted alphabetically.
+ *
+ * The `filePaths` list is of the form [["folder", "file.so"], ["file.so"]], so each element in it
+ * is effectively a file path.
+ */
+function sortSoFiles(filePaths: FilePath[]): FilePath[] {
+  let result = [];
+  let hasLzma = false;
+  let hasSsl = false;
+  const lzmaFile = '_lzma.so';
+  const sslFile = '_ssl.so';
+  for (const path of filePaths) {
+    if (path.length == 1 && path[0] == lzmaFile) {
+      hasLzma = true;
+    } else if (path.length == 1 && path[0] == sslFile) {
+      hasSsl = true;
+    } else {
+      result.push(path);
+    }
+  }
+
+  // JS might handle sorting lists of lists fine, but I'd rather be explicit here and make it compare
+  // strings.
+  result = result
+    .map((x) => x.join('/'))
+    .sort()
+    .map((x) => x.split('/'));
+  if (hasSsl) {
+    result.unshift([sslFile]);
+  }
+  if (hasLzma) {
+    result.unshift([lzmaFile]);
+  }
+
+  return result;
+}
+
 // used for checkLoadedSoFiles a snapshot sanity check
 const PRELOADED_SO_FILES: string[] = [];
 
@@ -121,6 +165,11 @@ export function preloadDynamicLibs(Module: Module): void {
   if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
     SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
   }
+  // The order in which we load the SO_FILES matters. For example, if a snapshot was generated with
+  // SO_FILES loaded in a certain way, then if we load that snapshot and load the SO_FILES
+  // differently here then Python will crash.
+  SO_FILES_TO_LOAD = sortSoFiles(SO_FILES_TO_LOAD);
+
   try {
     const sitePackages = getSitePackagesPath(Module);
     for (const soFile of SO_FILES_TO_LOAD) {
