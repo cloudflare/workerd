@@ -30,10 +30,10 @@ py_wd_test("subdirectory")
 
 py_wd_test(
     "sdk",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
+    # TODO(someday): Fix leak san failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
+    env = {
+        "ASAN_OPTIONS": "detect_leaks=0",
+    },
 )
 
 gen_import_tests(PYODIDE_IMPORTS_TO_TEST)
