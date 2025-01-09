@@ -16,17 +16,21 @@ use crate::lazy_pin_init::LazyPinInit;
 
 #[path = "await.h.rs"]
 mod await_h;
-pub use await_h::RustPromiseAwaiter;
+pub use await_h::GuardedRustPromiseAwaiter;
+
+// TODO(now): Safety comment, observe that it can be sent across threads, but will panic if polled
+//   with no KJ EventLoop active, or if subsequently polled with a different KJ EventLoop active.
+unsafe impl Send for GuardedRustPromiseAwaiter {}
 
 #[repr(transparent)]
-pub struct PtrRustPromiseAwaiter(*mut RustPromiseAwaiter);
+pub struct PtrGuardedRustPromiseAwaiter(*mut GuardedRustPromiseAwaiter);
 
-use crate::ffi::rust_promise_awaiter_drop_in_place;
-use crate::ffi::rust_promise_awaiter_new_in_place;
+use crate::ffi::guarded_rust_promise_awaiter_drop_in_place;
+use crate::ffi::guarded_rust_promise_awaiter_new_in_place;
 
 use crate::OwnPromiseNode;
 
-impl Drop for RustPromiseAwaiter {
+impl Drop for GuardedRustPromiseAwaiter {
     fn drop(&mut self) {
         // Pin safety:
         // The pin crate suggests implementing drop traits for address-sensitive types with an inner
@@ -43,20 +47,20 @@ impl Drop for RustPromiseAwaiter {
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
         unsafe {
-            rust_promise_awaiter_drop_in_place(PtrRustPromiseAwaiter(self));
+            guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter(self));
         }
     }
 }
 
 // TODO(now): bindgen to guarantee safety
-unsafe impl ExternType for RustPromiseAwaiter {
-    type Id = cxx::type_id!("workerd::rust::async::RustPromiseAwaiter");
+unsafe impl ExternType for GuardedRustPromiseAwaiter {
+    type Id = cxx::type_id!("workerd::rust::async::GuardedRustPromiseAwaiter");
     type Kind = cxx::kind::Opaque;
 }
 
 // TODO(now): bindgen to guarantee safety
-unsafe impl ExternType for PtrRustPromiseAwaiter {
-    type Id = cxx::type_id!("workerd::rust::async::PtrRustPromiseAwaiter");
+unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
+    type Id = cxx::type_id!("workerd::rust::async::PtrGuardedRustPromiseAwaiter");
     type Kind = cxx::kind::Trivial;
 }
 
@@ -74,7 +78,7 @@ impl IntoFuture for OwnPromiseNode {
 
 pub struct LazyRustPromiseAwaiter {
     node: Option<OwnPromiseNode>,
-    awaiter: LazyPinInit<RustPromiseAwaiter>,
+    awaiter: LazyPinInit<GuardedRustPromiseAwaiter>,
     // Safety: `rust_waker` must be declared after `awaiter`, because `awaiter` stores a pointer to
     // `rust_waker`. This ensures `rust_waker` will be dropped after `awaiter`.
     rust_waker: RustWaker,
@@ -89,9 +93,9 @@ impl LazyRustPromiseAwaiter {
         }
     }
 
-    fn get_awaiter(mut self: Pin<&mut Self>) -> Pin<&mut RustPromiseAwaiter> {
+    fn get_awaiter(mut self: Pin<&mut Self>) -> Pin<&mut GuardedRustPromiseAwaiter> {
         // On our first invocation, `node` will be Some, and `get_awaiter` will forward its
-        // contents into RustPromiseAwaiter's constructor. On all subsequent invocations, `node`
+        // contents into GuardedRustPromiseAwaiter's constructor. On all subsequent invocations, `node`
         // will be None and the constructor will not run.
         let node = self.node.take();
 
@@ -107,14 +111,14 @@ impl LazyRustPromiseAwaiter {
 
         // Safety:
         // 1. We trust that LazyPinInit's implementation passed us a valid pointer to an
-        //    uninitialized RustPromiseAwaiter.
-        // 2. We do not read or write to the RustPromiseAwaiter's memory, so there are no atomicity
+        //    uninitialized GuardedRustPromiseAwaiter.
+        // 2. We do not read or write to the GuardedRustPromiseAwaiter's memory, so there are no atomicity
         //    nor interleaved pointer reference access concerns.
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
-        awaiter.get_or_init(move |ptr: *mut RustPromiseAwaiter| unsafe {
-            rust_promise_awaiter_new_in_place(
-                PtrRustPromiseAwaiter(ptr),
+        awaiter.get_or_init(move |ptr: *mut GuardedRustPromiseAwaiter| unsafe {
+            guarded_rust_promise_awaiter_new_in_place(
+                PtrGuardedRustPromiseAwaiter(ptr),
                 node.expect("node should be Some in call to init()"),
             );
         })

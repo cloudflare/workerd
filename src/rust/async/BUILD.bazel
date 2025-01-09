@@ -17,6 +17,7 @@ wd_cc_library(
     name = "cxx-bridge",
     srcs = [
         "await.c++",
+        "executor-guarded.c++",
         "future.c++",
         "promise.c++",
         "test-promises.c++",

@@ -44,7 +44,7 @@ PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor) {
 // =======================================================================================
 // KjWaker
 
-KjWaker::KjWaker(FuturePollerBase& futurePoller): futurePoller(futurePoller) {}
+KjWaker::KjWaker(FutureAwaiterBase& futureAwaiter): futureAwaiter(futureAwaiter) {}
 
 const CxxWaker* KjWaker::clone() const {
   // Rust code wants to suspend and wait for something other than an OwnPromiseNode from the same
@@ -86,8 +86,8 @@ bool KjWaker::is_current() const {
   return &executor == &kj::getCurrentThreadExecutor();
 }
 
-FuturePollerBase& KjWaker::getFuturePoller() {
-  return futurePoller;
+FutureAwaiterBase& KjWaker::getFutureAwaiter() {
+  return futureAwaiter;
 }
 
 KjWaker::State KjWaker::reset() {
