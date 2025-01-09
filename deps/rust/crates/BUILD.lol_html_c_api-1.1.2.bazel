@@ -29,6 +29,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "capi",
+        "default",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -45,9 +49,9 @@ rust_library(
     deps = [
         "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
         "@crates_vendor__libc-0.2.168//:libc",
-        "@crates_vendor__lol_html-2.1.0//:lol_html",
+        "@crates_vendor__lol_html-2.2.0//:lol_html",
         "@crates_vendor__lol_html_c_api-1.1.2//:build_script_build",
-        "@crates_vendor__thiserror-1.0.69//:thiserror",
+        "@crates_vendor__thiserror-2.0.6//:thiserror",
     ],
 )
 
@@ -70,6 +74,10 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "capi",
+        "default",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
