@@ -83,8 +83,8 @@ http_archive(
 http_archive(
     name = "pyodide",
     build_file = "//:build/BUILD.pyodide",
-    sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
-    urls = ["https://github.com/pyodide/pyodide/releases/download/0.26.0a2/pyodide-core-0.26.0a2.tar.bz2"],
+    sha256 = "6e45f93c71ed21bff4a06d6d9d8e27e815269dabf8ab34dc400939fd45edc665",
+    urls = ["https://github.com/pyodide/pyodide/releases/download/0.27.1/pyodide-core-0.27.1.tar.bz2"],
 )
 
 http_archive(
