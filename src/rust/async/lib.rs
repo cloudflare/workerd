@@ -21,8 +21,10 @@ use test_futures::new_pending_future_void;
 use test_futures::new_ready_future_void;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_waking_future_void;
+use test_futures::new_wrapped_waker_future_void;
 
 mod waker;
+use waker::RustWaker;
 
 #[cxx::bridge(namespace = "workerd::rust::async")]
 mod ffi {
@@ -40,8 +42,18 @@ mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/async/waker.h");
 
-        type RootWaker;
+        type KjWaker;
         fn is_current(&self) -> bool;
+    }
+
+    extern "Rust" {
+        // We expose the Rust Waker type to C++ through this RustWaker reference wrapper. cxx-rs
+        // does not allow us to export types not defined in this module directly.
+        //
+        // When Rust code polls a KJ promise with a Waker implemented in Rust, it uses this type to
+        // pass the Waker to the `RustPromiseAwaiter` class, which is implemented in C++.
+        type RustWaker;
+        fn wake_by_ref(&self);
     }
 
     unsafe extern "C++" {
@@ -52,7 +64,7 @@ mod ffi {
     }
 
     extern "Rust" {
-        fn box_future_void_poll(future: &mut BoxFutureVoid, cx: &RootWaker) -> bool;
+        fn box_future_void_poll(future: &mut BoxFutureVoid, waker: &KjWaker) -> bool;
         unsafe fn box_future_void_drop_in_place(ptr: PtrBoxFutureVoid);
     }
 
@@ -73,12 +85,12 @@ mod ffi {
 
         unsafe fn rust_promise_awaiter_new_in_place(
             ptr: PtrRustPromiseAwaiter,
-            root_waker: &RootWaker,
             node: OwnPromiseNode,
         );
         unsafe fn rust_promise_awaiter_drop_in_place(ptr: PtrRustPromiseAwaiter);
 
-        fn poll(self: Pin<&mut RustPromiseAwaiter>, cx: &RootWaker) -> bool;
+        fn poll_with_kj_waker(self: Pin<&mut RustPromiseAwaiter>, waker: &KjWaker) -> bool;
+        unsafe fn poll(self: Pin<&mut RustPromiseAwaiter>, waker: *const RustWaker) -> bool;
     }
 
     // Helper functions to create OwnPromiseNodes for testing purposes.
@@ -116,5 +128,6 @@ mod ffi {
         fn new_threaded_delay_future_void() -> BoxFutureVoid;
         fn new_layered_ready_future_void() -> BoxFutureVoid;
         fn new_naive_select_future_void() -> BoxFutureVoid;
+        fn new_wrapped_waker_future_void() -> BoxFutureVoid;
     }
 }

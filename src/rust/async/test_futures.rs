@@ -1,5 +1,14 @@
-use std::pin::Pin;
+use std::future;
 use std::future::Future;
+use std::future::IntoFuture;
+
+use std::pin::pin;
+use std::pin::Pin;
+
+use std::sync::Arc;
+
+use std::task::Wake;
+use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
 
@@ -138,20 +147,19 @@ fn naive_select<T>(
     b: impl Future<Output = T>,
 ) -> impl Future<Output = T>
 {
-    let (mut a, mut b) = (Box::pin(a), Box::pin(b));
-    future::poll_fn(move |cx| {
-        if let Poll::Ready(r) = a.as_mut().poll(cx) {
-            Poll::Ready(r)
-        } else if let Poll::Ready(r) = b.as_mut().poll(cx) {
-            Poll::Ready(r)
-        } else {
-            Poll::Pending
-        }
-    })
+    async {
+        let (mut a, mut b) = (pin!(a), pin!(b));
+        future::poll_fn(move |cx| {
+            if let Poll::Ready(r) = a.as_mut().poll(cx) {
+                Poll::Ready(r)
+            } else if let Poll::Ready(r) = b.as_mut().poll(cx) {
+                Poll::Ready(r)
+            } else {
+                Poll::Pending
+            }
+        }).await
+    }
 }
-
-use std::future;
-use std::future::IntoFuture;
 
 // A Future which polls multiple OwnPromiseNodes at once.
 pub fn new_naive_select_future_void() -> BoxFuture<()> {
@@ -164,6 +172,36 @@ pub fn new_naive_select_future_void() -> BoxFuture<()> {
             )
         )
     ).into()
+}
+
+struct WrappedWaker(Waker);
+
+impl Wake for WrappedWaker {
+    fn wake(self: Arc<Self>) {
+        // We cannot consume our internal Waker without interior mutability, so we don't call
+        // wake().
+        self.0.wake_by_ref()
+    }
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.wake_by_ref()
+    }
+}
+
+// Return a Future which awaits a KJ promise using a custom Waker implementation, opaque to KJ.
+pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
+    Box::pin(async {
+        let mut promise = pin!(crate::ffi::new_coroutine_promise_node().into_future());
+        future::poll_fn(move |cx| {
+            let waker = cx.waker().clone();
+            let waker = Arc::new(WrappedWaker(waker)).into();
+            let mut cx = Context::from_waker(&waker);
+            if let Poll::Ready(r) = promise.as_mut().poll(&mut cx) {
+                Poll::Ready(r)
+            } else {
+                Poll::Pending
+            }
+        }).await
+    }).into()
 }
 
 // TODO(now): Similar as above, but poll() until all are ready.

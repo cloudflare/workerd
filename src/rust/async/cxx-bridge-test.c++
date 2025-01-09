@@ -32,7 +32,7 @@ public:
   kj::_::ExceptionOr<kj::_::Void> result;
 };
 
-KJ_TEST("RootWaker: C++ can poll() Rust Futures") {
+KJ_TEST("KjWaker: C++ can poll() Rust Futures") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -40,7 +40,7 @@ KJ_TEST("RootWaker: C++ can poll() Rust Futures") {
   {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto pending = new_pending_future_void();
     KJ_EXPECT(!pending.poll(waker));
@@ -56,7 +56,7 @@ KJ_TEST("RootWaker: C++ can poll() Rust Futures") {
   {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto ready = new_ready_future_void();
     KJ_EXPECT(ready.poll(waker));
@@ -70,7 +70,7 @@ KJ_TEST("RootWaker: C++ can poll() Rust Futures") {
   }
 }
 
-KJ_TEST("RootWaker: C++ can receive synchronous wakes during poll()") {
+KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -87,12 +87,12 @@ KJ_TEST("RootWaker: C++ can receive synchronous wakes during poll()") {
   }) {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     KJ_EXPECT(!waking.poll(waker));
 
-    // The waking future immediately called wake_by_ref() on the RootWaker. This incremented our
+    // The waking future immediately called wake_by_ref() on the KjWaker. This incremented our
     // count, and didn't populate a cloned promise.
     auto state = waker.reset();
     KJ_EXPECT(state.wakeCount == 1);
@@ -111,7 +111,7 @@ KJ_TEST("RootWaker: C++ can receive synchronous wakes during poll()") {
   }) {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     KJ_EXPECT(!waking.poll(waker));
@@ -133,7 +133,7 @@ KJ_TEST("RootWaker: C++ can receive synchronous wakes during poll()") {
   }) {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     KJ_EXPECT(!waking.poll(waker));
@@ -154,7 +154,7 @@ KJ_TEST("RootWaker: C++ can receive synchronous wakes during poll()") {
   }) {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     KJ_EXPECT(!waking.poll(waker));
@@ -169,7 +169,7 @@ KJ_TEST("RootWaker: C++ can receive synchronous wakes during poll()") {
   }
 }
 
-KJ_TEST("RootWaker: C++ can receive asynchronous wakes after poll()") {
+KJ_TEST("KjWaker: C++ can receive asynchronous wakes after poll()") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -178,7 +178,7 @@ KJ_TEST("RootWaker: C++ can receive asynchronous wakes after poll()") {
   {
     TestCoroutineEvent coroutineEvent;
     TestFuturePoller futurePoller{coroutineEvent};
-    RootWaker waker{futurePoller};
+    KjWaker waker{futurePoller};
 
     auto waking = new_threaded_delay_future_void();
     KJ_EXPECT(!waking.poll(waker));
@@ -192,7 +192,7 @@ KJ_TEST("RootWaker: C++ can receive asynchronous wakes after poll()") {
   }
 }
 
-// TODO(now): Test changing which RootWaker is passed to a LazyRustPromiseAwaiter::poll().
+// TODO(now): Test changing which KjWaker is passed to a LazyRustPromiseAwaiter::poll().
 
 KJ_TEST("FutureAwaiter: C++ KJ coroutines can co_await Rust Futures") {
   kj::EventLoop loop;
@@ -221,6 +221,17 @@ KJ_TEST("RustPromiseAwaiter: Rust can poll() multiple promises under a single co
     co_await new_naive_select_future_void();
   }().wait(waitScope);
 }
+
+KJ_TEST("RustPromiseAwaiter: Rust can poll() KJ promises with non-KJ Wakers") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  []() -> kj::Promise<void> {
+    co_await new_wrapped_waker_future_void();
+  }().wait(waitScope);
+}
+
+// TODO(now): Similar as above, but poll() until all are ready.
 
 }  // namespace
 }  // namespace workerd::rust::async
