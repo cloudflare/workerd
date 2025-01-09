@@ -679,4 +679,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("cache_no_cache_disabled")
       $experimental;
   # Enables the use of cache: no-cache in the fetch api.
+
+  nodeJsCompatNet @71 :Bool
+      $compatEnableFlag("nodejs_compat_net")
+      $compatDisableFlag("no_nodejs_compat_net")
+      $compatEnableDate("2025-06-01")
+      $experimental;
+  # When the nodejs_compat or nodejs_compat v2 flags are enabled, the nodejs_compat_net
+  # flag determines if the node:net built-in module is also available.
 }

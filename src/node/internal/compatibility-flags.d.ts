@@ -31,3 +31,4 @@ export const workerdExperimental: boolean;
 export const durableObjectGetExisting: boolean;
 export const vectorizeQueryMetadataOptional: boolean;
 export const nodeJsZlib: boolean;
+export const nodeJsCompatNet: boolean;

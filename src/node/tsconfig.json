@@ -29,6 +29,7 @@
       "node:path/*": ["./*"],
       "node:stream/*": ["./*"],
       "node-internal:*": ["./internal/*"],
+      "cloudflare-internal:sockets": ["./internal/sockets.d.ts"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
       "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }

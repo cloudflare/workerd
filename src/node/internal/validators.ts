@@ -30,11 +30,12 @@ import { normalizeEncoding } from 'node-internal:internal_utils';
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_SOCKET_BAD_PORT,
   ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
 import { default as bufferUtil } from 'node-internal:buffer';
 
-// TODO(someday): Not current implementing parseFileMode, validatePort
+// TODO(someday): Not current implementing parseFileMode
 
 export function isInt32(value: unknown): value is number {
   // @ts-expect-error Due to value being unknown
@@ -301,6 +302,23 @@ export function checkRangesOrGetDefault(
   return number;
 }
 
+export function validatePort(
+  port: unknown,
+  name = 'Port',
+  allowZero = true
+): number {
+  if (
+    (typeof port !== 'number' && typeof port !== 'string') ||
+    (typeof port === 'string' && port.trim().length === 0) ||
+    +port !== +port >>> 0 ||
+    +port > 0xffff ||
+    (port === 0 && !allowZero)
+  ) {
+    throw new ERR_SOCKET_BAD_PORT(name, port, allowZero);
+  }
+  return +port | 0;
+}
+
 export default {
   isInt32,
   isUint32,
@@ -316,6 +334,7 @@ export default {
   validateOneOf,
   validateString,
   validateUint32,
+  validatePort,
 
   // Zlib specific
   checkFiniteNumber,
