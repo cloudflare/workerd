@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "thiserror",
+    name = "selectors",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,32 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_root = "src/lib.rs",
-    edition = "2021",
+    crate_root = "lib.rs",
+    edition = "2015",
     proc_macro_deps = [
-        "@crates_vendor__thiserror-impl-1.0.69//:thiserror_impl",
+        "@crates_vendor__derive_more-0.99.18//:derive_more",
     ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.69",
+    version = "0.24.0",
     deps = [
-        "@crates_vendor__thiserror-1.0.69//:build_script_build",
+        "@crates_vendor__bitflags-1.3.2//:bitflags",
+        "@crates_vendor__cssparser-0.29.6//:cssparser",
+        "@crates_vendor__fxhash-0.2.1//:fxhash",
+        "@crates_vendor__log-0.4.22//:log",
+        "@crates_vendor__phf-0.8.0//:phf",
+        "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
+        "@crates_vendor__selectors-0.24.0//:build_script_build",
+        "@crates_vendor__servo_arc-0.2.0//:servo_arc",
+        "@crates_vendor__smallvec-1.13.2//:smallvec",
     ],
 )
 
@@ -83,20 +91,23 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "thiserror",
+    edition = "2015",
+    pkg_name = "selectors",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.69",
+    version = "0.24.0",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__phf_codegen-0.8.0//:phf_codegen",
+    ],
 )
 
 alias(

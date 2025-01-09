@@ -16,10 +16,8 @@ PACKAGES = {
     "cxx": crate.spec(version = "1"),
     "cxxbridge-cmd": crate.spec(version = "1"),
     "flate2": crate.spec(version = "1"),
-    # Commit hash refers to lol-html v2.1.0. We then access the nested lol_html_c_api crate within.
-    # TODO(npaun): The next release of lol-html could change the way we access the nested crate.
-    # Check once https://github.com/cloudflare/lol-html/pull/247 is in a release.
-    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", rev = "cac9f2f59aea8ad803286b0aae0d667926f441c7"),
+    # Tag refers to lol-html v2.2.0. We then access the nested lol_html_c_api crate within.
+    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", tag = "v2.2.0"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),
     "proc-macro2": crate.spec(version = "1"),

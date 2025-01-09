@@ -44,11 +44,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.27.2",
+    version = "0.29.6",
     deps = [
-        "@crates_vendor__cssparser-0.27.2//:build_script_build",
+        "@crates_vendor__cssparser-0.29.6//:build_script_build",
         "@crates_vendor__dtoa-short-0.3.5//:dtoa_short",
-        "@crates_vendor__itoa-0.4.8//:itoa",
+        "@crates_vendor__itoa-1.0.14//:itoa",
         "@crates_vendor__matches-0.1.10//:matches",
         "@crates_vendor__phf-0.8.0//:phf",
         "@crates_vendor__smallvec-1.13.2//:smallvec",
@@ -100,7 +100,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.27.2",
+    version = "0.29.6",
     visibility = ["//visibility:private"],
     deps = [
         "@crates_vendor__proc-macro2-1.0.92//:proc_macro2",
