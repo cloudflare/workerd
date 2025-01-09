@@ -94,6 +94,13 @@ const location = undefined;
 function addEventListener(){}
 
 function reportUndefinedSymbolsNoOp() {}
+
+if (typeof FinalizationRegistry === "undefined") {
+    globalThis.FinalizationRegistry = class FinalizationRegistry {
+        register(){}
+        unregister(){}
+    };
+}
 """
 
 REPLACEMENTS = [
