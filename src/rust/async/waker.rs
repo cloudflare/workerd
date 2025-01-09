@@ -73,11 +73,11 @@ static CXX_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_drop,
 );
 
-use crate::ffi::RootWaker;
+use crate::ffi::KjWaker;
 
-// Safety: We use the type system to express the Sync nature of RootWaker in the cxx-rs FFI
-// boundary. Specifically, we only allow invocations on const RootWakers, and in KJ C++, use of
-// const-qualified functions is thread-safe by convention. Our implementations of RootWakers in C++
+// Safety: We use the type system to express the Sync nature of KjWaker in the cxx-rs FFI
+// boundary. Specifically, we only allow invocations on const KjWakers, and in KJ C++, use of
+// const-qualified functions is thread-safe by convention. Our implementations of KjWakers in C++
 // respect this convention.
 //
 // Note: Implementing these traits does not seem to be required for building, but the Waker
@@ -85,13 +85,13 @@ use crate::ffi::RootWaker;
 //
 // https://doc.rust-lang.org/std/task/struct.RawWaker.html
 // https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
-unsafe impl Send for RootWaker {}
-unsafe impl Sync for RootWaker {}
+unsafe impl Send for KjWaker {}
+unsafe impl Sync for KjWaker {}
 
-impl From<&RootWaker> for Waker {
-    fn from(waker: &RootWaker) -> Self {
-        let waker = RawWaker::new(waker as *const RootWaker as *const (), &ROOT_WAKER_VTABLE);
-        // Safety: RootWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
+impl From<&KjWaker> for Waker {
+    fn from(waker: &KjWaker) -> Self {
+        let waker = RawWaker::new(waker as *const KjWaker as *const (), &KJ_WAKER_VTABLE);
+        // Safety: KjWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
         // implementation functions are all thread-safe.
         //
         // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
@@ -99,26 +99,26 @@ impl From<&RootWaker> for Waker {
     }
 }
 
-/// If `waker` wraps a `RootWaker` associated with the current thread's KJ event loop, return a
-/// reference to the `RootWaker`.
-pub fn deref_root_waker<'a>(waker: &Waker) -> Option<&'a RootWaker> {
-    if waker.vtable() == &ROOT_WAKER_VTABLE {
+/// If `waker` wraps a `KjWaker` associated with the current thread's KJ event loop, return a
+/// reference to the `KjWaker`.
+pub fn deref_kj_waker<'a>(waker: &Waker) -> Option<&'a KjWaker> {
+    if waker.vtable() == &KJ_WAKER_VTABLE {
         let data = waker.data();
         assert!(!data.is_null());
-        let p = data as *const RootWaker;
+        let p = data as *const KjWaker;
         // Safety:
         // 1. p is guaranteed non-null by the assertion above.
         // 2. We possess a const borrow of the Waker which owns this pointer, so we are guaranteed
         //    the Waker is still alive. We assume the Waker was constructed correctly to begin with,
         //    and that therefore the pointer still points to valid memory.
-        // 3. We do not read or write the RootWaker's memory, so there are no atomicity concerns nor
+        // 3. We do not read or write the KjWaker's memory, so there are no atomicity concerns nor
         //    interleaved pointer/reference access concerns.
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
-        let root_waker = unsafe { &*p };
+        let kj_waker = unsafe { &*p };
 
-        if root_waker.is_current() {
-            Some(root_waker)
+        if kj_waker.is_current() {
+            Some(kj_waker)
         } else {
             None
         }
@@ -127,12 +127,47 @@ pub fn deref_root_waker<'a>(waker: &Waker) -> Option<&'a RootWaker> {
     }
 }
 
-// Define a separate `ROOT_WAKER_VTABLE` object so we can distinguish RootWakers from other Waker
-// objects. Since RootWakers have CxxWaker as a base class, we can re-use the CxxWaker's vtable
+// Define a separate `KJ_WAKER_VTABLE` object so we can distinguish KjWakers from other Waker
+// objects. Since KjWakers have CxxWaker as a base class, we can re-use the CxxWaker's vtable
 // functions.
-static ROOT_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+static KJ_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_clone,
     cxx_waker_wake,
     cxx_waker_wake_by_ref,
     cxx_waker_drop,
 );
+
+// =======================================================================================
+// RustWaker
+//
+// This is a wrapper around `std::task::Waker`, exposed to C++. We use it in `RustPromiseAwaiter`
+// to allow KJ promises to be awaited using opaque Wakers implemented in Rust.
+
+pub struct RustWaker {
+    inner: Option<Waker>,
+}
+
+impl RustWaker {
+    pub fn empty() -> RustWaker {
+        RustWaker { inner: None }
+    }
+
+    pub fn set(&mut self, waker: &Waker) {
+        if let Some(w) = &mut self.inner {
+            w.clone_from(waker);
+        } else {
+            self.inner = Some(waker.clone());
+        }
+    }
+
+    pub fn set_none(&mut self) {
+        self.inner = None;
+    }
+
+    pub fn wake_by_ref(&self) {
+        self.inner
+            .as_ref()
+            .expect("should have been set() before wake_by_ref()")
+            .wake_by_ref();
+    }
+}

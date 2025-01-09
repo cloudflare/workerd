@@ -55,7 +55,7 @@ enum class WakeInstruction {
 // `CrossThreadPromiseFulfiller` aspect makes it safe to call `wake_by_ref()` concurrently. Finally,
 // `wake()` is implemented in terms of `wake_by_ref()` and `drop()`.
 //
-// This class is mostly an implementation detail of RootWaker.
+// This class is mostly an implementation detail of KjWaker.
 class ArcWaker: public kj::AtomicRefcounted,
                 public kj::EnableAddRefToThis<ArcWaker>,
                 public CxxWaker {
@@ -82,30 +82,30 @@ struct PromiseArcWakerPair {
 PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor);
 
 // =======================================================================================
-// RootWaker
+// KjWaker
 
 class FuturePollerBase;
 
-// RootWaker is the waker passed to Rust's `Future::poll()` function. RootWaker itself is not
+// KjWaker is the waker passed to Rust's `Future::poll()` function. KjWaker itself is not
 // refcounted -- instead it is intended to live locally on the stack or in a coroutine frame, and
 // trying to `clone()` it will cause it to allocate an ArcWaker for the caller.
 //
 // This class is mostly an implementation detail of our `co_await` operator implementation for Rust
-// Futures. RootWaker exists in order to optimize the case where Rust async code awaits a KJ
+// Futures. KjWaker exists in order to optimize the case where Rust async code awaits a KJ
 // promise, in which case we can make the outer KJ coroutine wait more or less directly on the inner
 // KJ promise which Rust owns.
-class RootWaker: public CxxWaker {
+class KjWaker: public CxxWaker {
 public:
-  // Saves a reference to the FuturePoller which is using this RootWaker. The FuturePoller creates
-  // RootWakers on the stack in `await_ready()`, so its lifetime always encloses RootWakers.
-  explicit RootWaker(FuturePollerBase& futurePoller);
+  // Saves a reference to the FuturePoller which is using this KjWaker. The FuturePoller creates
+  // KjWakers on the stack in `await_ready()`, so its lifetime always encloses KjWakers.
+  explicit KjWaker(FuturePollerBase& futurePoller);
 
   // Create a new or clone an existing ArcWaker, leak its pointer, and return it. This may be called
   // by any thread.
   const CxxWaker* clone() const override;
 
   // Unimplemented, because Rust user code cannot consume the `std::task::Waker` we create which
-  // wraps this RootWaker.
+  // wraps this KjWaker.
   void wake() const override;
 
   // Rust user code can wake us synchronously during the execution of `future.poll()` using this
@@ -121,7 +121,7 @@ public:
   // In addition to the above functions, Rust may invoke `is_current()` during `future.poll()`
   // execution. It uses this to implement a short- circuit optimization when it awaits a KJ promise.
 
-  // True if the current thread's kj::Executor is the same as the RootWaker's.
+  // True if the current thread's kj::Executor is the same as the KjWaker's.
   bool is_current() const;
 
   // Called by RustPromiseAwaiter's constructor to get a reference to an Event which will call
@@ -134,17 +134,17 @@ public:
     // Incremented by `wake_by_ref()`.
     uint wakeCount = 0;
 
-    // Filled in if `clone()` was called on the RootWaker during `future.poll()`. This promise is
+    // Filled in if `clone()` was called on the KjWaker during `future.poll()`. This promise is
     // fulfilled by the ArcWaker clones' CrossThreadPromiseFulfiller.
     kj::Maybe<kj::Promise<WakeInstruction>> cloned;
   };
 
-  // Used by the owner of RootWaker after `future.poll()` has returned, to retrieve the
-  // RootWaker's state for further processing. This is non-const, because by the time this is
+  // Used by the owner of KjWaker after `future.poll()` has returned, to retrieve the
+  // KjWaker's state for further processing. This is non-const, because by the time this is
   // called, Rust has dropped all of its borrows to this class, meaning we no longer have to worry
   // about thread safety.
   //
-  // This function will assert if `drop()` has not been called since RootWaker was constructed, or
+  // This function will assert if `drop()` has not been called since KjWaker was constructed, or
   // since the last call to `reset()`.
   State reset();
 
@@ -167,12 +167,25 @@ private:
   // Incremented by `drop()`, so we can validate that `drop()` is only called once on this object.
   //
   // Rust requires that Wakers be droppable by any thread. However, we own the implementation of
-  // `poll()` to which `RootWaker&` is passed, and those implementations store the Rust
+  // `poll()` to which `KjWaker&` is passed, and those implementations store the Rust
   // `std::task::Waker` object on the stack,, and never move it elsewhere. Since that object is
-  // responsible for calling `RootWaker::drop()`, we know for sure that `drop()` will only ever be
+  // responsible for calling `KjWaker::drop()`, we know for sure that `drop()` will only ever be
   // called on the thread which constructed it. Therefore, there is no need to make `dropCount`
   // thread-safe.
   mutable uint dropCount = 0;
 };
+
+// =======================================================================================
+// RustWaker
+
+// An opaque Rust type defined in lib.rs, and thus in lib.rs.h. lib.rs.h depends on our C++ headers,
+// including waker.h (the file you're currently reading), so we forward-declare RustWaker here for
+// use in the C++ headers.
+//
+// This class is a wrapper around an arbitrary `std::task::Waker`. It has one function on it:
+// `wake_by_ref()`. RustPromiseAwaiter calls it when the KJ promise it is currently waiting on
+// becomes ready. In this way, Rust is able to await KJ promises using any Waker of their choosing,
+// not just a KjWaker.
+struct RustWaker;
 
 }  // namespace workerd::rust::async

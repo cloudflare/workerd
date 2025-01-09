@@ -5,7 +5,7 @@ use std::task::Waker;
 
 use cxx::ExternType;
 
-use crate::ffi::RootWaker;
+use crate::ffi::KjWaker;
 
 // Expose Pin<Box<dyn Future<Output = ()>> to C++ as BoxFutureVoid.
 //
@@ -43,7 +43,7 @@ unsafe impl ExternType for PtrBoxFuture<()> {
     type Kind = cxx::kind::Trivial;
 }
 
-pub fn box_future_void_poll(future: &mut BoxFuture<()>, waker: &RootWaker) -> bool {
+pub fn box_future_void_poll(future: &mut BoxFuture<()>, waker: &KjWaker) -> bool {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
     // TODO(now): Figure out how to propagate value-or-exception.

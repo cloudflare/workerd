@@ -4,10 +4,23 @@
 #[repr(align(8))]
 #[derive(Debug)]
 pub struct RustPromiseAwaiter {
-    pub _bindgen_opaque_blob: [u64; 12usize],
+    pub _bindgen_opaque_blob: [u64; 14usize],
+}
+#[repr(C)]
+#[repr(align(1))]
+#[derive(Debug)]
+pub struct RustPromiseAwaiter_Uninit {
+    pub _bindgen_opaque_blob: u8,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of RustPromiseAwaiter"][::std::mem::size_of::<RustPromiseAwaiter>() - 96usize];
+    ["Size of RustPromiseAwaiter_Uninit"]
+        [::std::mem::size_of::<RustPromiseAwaiter_Uninit>() - 1usize];
+    ["Alignment of RustPromiseAwaiter_Uninit"]
+        [::std::mem::align_of::<RustPromiseAwaiter_Uninit>() - 1usize];
+};
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RustPromiseAwaiter"][::std::mem::size_of::<RustPromiseAwaiter>() - 112usize];
     ["Alignment of RustPromiseAwaiter"][::std::mem::align_of::<RustPromiseAwaiter>() - 8usize];
 };

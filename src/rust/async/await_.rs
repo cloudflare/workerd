@@ -10,11 +10,9 @@ use std::task::Poll;
 
 use cxx::ExternType;
 
-use crate::waker::deref_root_waker;
+use crate::waker::deref_kj_waker;
 
 use crate::lazy_pin_init::LazyPinInit;
-
-use crate::ffi::RootWaker;
 
 #[path = "await.h.rs"]
 mod await_h;
@@ -77,6 +75,9 @@ impl IntoFuture for OwnPromiseNode {
 pub struct LazyRustPromiseAwaiter {
     node: Option<OwnPromiseNode>,
     awaiter: LazyPinInit<RustPromiseAwaiter>,
+    // Safety: `rust_waker` must be declared after `awaiter`, because `awaiter` stores a pointer to
+    // `rust_waker`. This ensures `rust_waker` will be dropped after `awaiter`.
+    rust_waker: RustWaker,
 }
 
 impl LazyRustPromiseAwaiter {
@@ -84,14 +85,16 @@ impl LazyRustPromiseAwaiter {
         LazyRustPromiseAwaiter {
             node: Some(node),
             awaiter: LazyPinInit::uninit(),
+            rust_waker: RustWaker::empty(),
         }
     }
 
-    fn get_awaiter(
-        self: Pin<&mut Self>,
-        root_waker: &RootWaker,
-        node: Option<OwnPromiseNode>,
-    ) -> Pin<&mut RustPromiseAwaiter> {
+    fn get_awaiter(mut self: Pin<&mut Self>) -> Pin<&mut RustPromiseAwaiter> {
+        // On our first invocation, `node` will be Some, and `get_awaiter` will forward its
+        // contents into RustPromiseAwaiter's constructor. On all subsequent invocations, `node`
+        // will be None and the constructor will not run.
+        let node = self.node.take();
+
         // Safety:
         // 1. We do not implment Unpin for LazyRustPromiseAwaiter.
         // 2. Our Drop trait implementation does not move the awaiter value, nor do we use
@@ -112,33 +115,40 @@ impl LazyRustPromiseAwaiter {
         awaiter.get_or_init(move |ptr: *mut RustPromiseAwaiter| unsafe {
             rust_promise_awaiter_new_in_place(
                 PtrRustPromiseAwaiter(ptr),
-                root_waker,
                 node.expect("node should be Some in call to init()"),
             );
         })
     }
 }
 
+use crate::RustWaker;
+
 impl Future for LazyRustPromiseAwaiter {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<()> {
-        if let Some(root_waker) = deref_root_waker(cx.waker()) {
-            // On our first invocation, `node` will be Some, and `get_awaiter` will forward its
-            // contents into RustPromiseAwaiter's constructor. On all subsequent invocations, `node`
-            // will be None and the constructor will not run.
-            let node = self.node.take();
-            let awaiter = self.get_awaiter(root_waker, node);
-            if awaiter.poll(root_waker) {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
+        // Safety: We are pinned, so this pointer to our RustWaker is valid for as long as
+        // `self.rust_waker` is valid.
+        let rust_waker_ptr = &self.rust_waker as *const RustWaker;
+
+        let done = if let Some(kj_waker) = deref_kj_waker(cx.waker()) {
+            self.rust_waker.set_none();
+            let awaiter = self.as_mut().get_awaiter();
+            let done = awaiter.poll_with_kj_waker(kj_waker);
+            done
         } else {
-            unreachable!("unimplemented");
-            // TODO(now): Store a clone of the waker, then replace self.node with the result
-            //   of wake_after(&waker, node), which will be implemented like
-            //   node.attach(kj::defer([&waker]() { waker.wake_by_ref(); }))
-            //       .eagerlyEvaluate(nullptr)
+            self.rust_waker.set(cx.waker());
+            let awaiter = self.as_mut().get_awaiter();
+            // Safety: `awaiter` stores `rust_waker_ptr` and uses it to call `wake_by_ref()`. Note
+            // that `awaiter` is `self.awaiter`, which lives before `self.rust_waker`. Since struct
+            // members are dropped in declaration order, the `rust_waker_ptr` that `awaiter` stores
+            // will always be valid during its lifetime.
+            unsafe { awaiter.poll(rust_waker_ptr) }
+        };
+
+        if done {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
         }
     }
 }

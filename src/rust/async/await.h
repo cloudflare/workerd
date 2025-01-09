@@ -35,47 +35,30 @@ private:
 // the block's storage at the point where the `.await` expression is evaluated, similar to how
 // `kj::_::PromiseAwaiter` is created in the KJ coroutine frame when C++ `co_await`s a promise.
 //
-// To initialize the object, Rust needs to know the size and alignment of RustPromiseAwaiter. To
-// that end, I used bindgen to generate an opaque FFI type in await_h.rs using the command below.
-//
-// TODO(now): Automate this?
-
-#if 0
-
-bindgen \
-    --rust-target 1.83.0 \
-    --disable-name-namespacing \
-    --generate "types" \
-    --allowlist-type "workerd::rust::async_::RustPromiseAwaiter" \
-    --opaque-type ".*" \
-    --no-derive-copy \
-    ./await.h \
-    -o ./await.h.rs \
-    -- \
-    -x c++ \
-    -std=c++23 \
-    -stdlib=libc++ \
-    -Wno-pragma-once-outside-header \
-    -I $(bazel info bazel-bin)/external/capnp-cpp/src/kj/_virtual_includes/kj \
-    -I $(bazel info bazel-bin)/external/capnp-cpp/src/kj/_virtual_includes/kj-async \
-    -I $(bazel info bazel-bin)/external/crates_vendor__cxx-1.0.133/_virtual_includes/cxx_cc \
-    -I $(bazel info bazel-bin)/src/rust/async/_virtual_includes/async@cxx
-
-#endif
-
+// Rust knows how big RustPromiseAwaiter is because we generate a Rust type of equal size and
+// alignment using bindgen. See inside await.c++ for a static_assert to remind us to re-run bindgen.
 class RustPromiseAwaiter final: public kj::_::Event {
 public:
-  RustPromiseAwaiter(const RootWaker& rootWaker, OwnPromiseNode node, kj::SourceLocation location = {});
+  RustPromiseAwaiter(OwnPromiseNode node, kj::SourceLocation location = {});
   ~RustPromiseAwaiter() noexcept(false);
 
   kj::Maybe<kj::Own<kj::_::Event>> fire() override;
   void traceEvent(kj::_::TraceBuilder& builder) override;
 
   // Called by Rust.
-  bool poll(const RootWaker& cx);
+  bool poll_with_kj_waker(const KjWaker& waker);
+  bool poll(const RustWaker* waker);
 
 private:
-  FuturePollerBase& futurePoller;
+  // For async tracing and ensuring we are only ever polled by a single KJ coroutine, even if our
+  // enclosing Future interleaves Rust Wakers into its calls to `poll()`.
+  kj::Maybe<KjWaker&> maybeKjWaker;
+
+  // To wake our enclosing Future, we either arm a KJ Event (an optimized path for Futures which
+  // run entirely on the KJ runtime), or wake a RustWaker.
+  struct Uninit {};
+  kj::OneOf<Uninit, Event*, const RustWaker*> currentWaker = Uninit();
+
   kj::UnwindDetector unwindDetector;
   kj::_::OwnPromiseNode node;
   bool done;
@@ -83,7 +66,7 @@ private:
 
 using PtrRustPromiseAwaiter = RustPromiseAwaiter*;
 
-void rust_promise_awaiter_new_in_place(PtrRustPromiseAwaiter, const RootWaker&, OwnPromiseNode);
+void rust_promise_awaiter_new_in_place(PtrRustPromiseAwaiter, OwnPromiseNode);
 void rust_promise_awaiter_drop_in_place(PtrRustPromiseAwaiter);
 
 // =======================================================================================
@@ -96,7 +79,7 @@ public:
   FuturePollerBase(
       kj::_::Event& next, kj::_::ExceptionOrValue& resultRef, kj::SourceLocation location = {});
 
-  // When we `poll()` a Future, our RootWaker will either be cloned (creating an ArcWaker
+  // When we `poll()` a Future, our KjWaker will either be cloned (creating an ArcWaker
   // promise), or the Future will `.await` some number of KJ promises itself, or both. The awaiter
   // objects which wrap those two kinds of promises, use `beginTrace()` and `endTrace()` to connect
   // the promise they're wrapping to the enclosing coroutine for tracing purposes.
@@ -132,10 +115,9 @@ public:
 
   bool await_ready() {
     // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
-    //   RootWaker for cloning if we have the last reference to it at this point. This could save
+    //   KjWaker for cloning if we have the last reference to it at this point. This could save
     //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
     //   to really benefit.
-    RootWaker waker(*this);
 
     if (future.poll(waker)) {
       // Future is ready, we're done.
@@ -146,7 +128,7 @@ public:
     auto state = waker.reset();
 
     if (state.wakeCount > 0) {
-      // The future returned Pending, but synchronously called `wake_by_ref()` on the RootWaker,
+      // The future returned Pending, but synchronously called `wake_by_ref()` on the KjWaker,
       // indicating it wants to immediately be polled again. We should arm our event right now,
       // which will call `await_ready()` again on the event loop.
       armDepthFirst();
@@ -155,7 +137,7 @@ public:
       // the ArcWaker's promise to arm our event once it's fulfilled.
       arcWakerAwaiter.emplace(*this, kj::_::PromiseNode::from(kj::mv(promise)));
     } else {
-      // The future returned Pending, did not call `wake_by_ref()` on the RootWaker, and did not
+      // The future returned Pending, did not call `wake_by_ref()` on the KjWaker, and did not
       // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
       // kj::NEVER_DONE.
     }
@@ -183,6 +165,7 @@ public:
 
 private:
   kj::_::CoroutineBase& coroutine;
+  KjWaker waker { *this };
   BoxFutureVoid future;
   kj::_::ExceptionOr<kj::_::Void> result;
 

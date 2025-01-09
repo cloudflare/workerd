@@ -42,13 +42,13 @@ PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor) {
 }
 
 // =======================================================================================
-// RootWaker
+// KjWaker
 
-RootWaker::RootWaker(FuturePollerBase& futurePoller): futurePoller(futurePoller) {}
+KjWaker::KjWaker(FuturePollerBase& futurePoller): futurePoller(futurePoller) {}
 
-const CxxWaker* RootWaker::clone() const {
+const CxxWaker* KjWaker::clone() const {
   // Rust code wants to suspend and wait for something other than an OwnPromiseNode from the same
-  // thread as this RootWaker. We'll start handing out ArcWakers if we haven't already been woken
+  // thread as this KjWaker. We'll start handing out ArcWakers if we haven't already been woken
   // synchronously.
 
   if (wakeCount.load(std::memory_order_relaxed) > 0) {
@@ -67,30 +67,30 @@ const CxxWaker* RootWaker::clone() const {
   return KJ_ASSERT_NONNULL(*lock).waker->clone();
 }
 
-void RootWaker::wake() const {
-  // RootWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
+void KjWaker::wake() const {
+  // KjWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
   // `wake()`, which drops `self`, on this object.
-  KJ_UNIMPLEMENTED("Rust user code should never have a consumable reference to RootWaker");
+  KJ_UNIMPLEMENTED("Rust user code should never have a consumable reference to KjWaker");
 }
 
-void RootWaker::wake_by_ref() const {
+void KjWaker::wake_by_ref() const {
   // Woken synchronously during a call to `future.poll(awaitWaker)`.
   wakeCount.fetch_add(1, std::memory_order_relaxed);
 }
 
-void RootWaker::drop() const {
+void KjWaker::drop() const {
   ++dropCount;
 }
 
-bool RootWaker::is_current() const {
+bool KjWaker::is_current() const {
   return &executor == &kj::getCurrentThreadExecutor();
 }
 
-FuturePollerBase& RootWaker::getFuturePoller() {
+FuturePollerBase& KjWaker::getFuturePoller() {
   return futurePoller;
 }
 
-RootWaker::State RootWaker::reset() {
+KjWaker::State KjWaker::reset() {
   // Getting the state without a lock is safe, because this function is only called after
   // `future.poll(awaitWaker)` has returned, meaning Rust has dropped its reference.
   KJ_ASSERT(dropCount == 1);
