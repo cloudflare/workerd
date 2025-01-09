@@ -15,7 +15,9 @@ use crate::ffi::KjWaker;
 // lines of boilerplate, we can avoid the extra Box:, as dtolnay showed in this demo PR:
 // https://github.com/dtolnay/cxx/pull/672/files
 
-pub struct BoxFuture<T>(Pin<Box<dyn Future<Output = T>>>);
+pub struct BoxFuture<T>(Pin<Box<dyn Future<Output = T> + Send>>);
+
+// TODO(now): Might as well implement Future for BoxFuture<T>.
 
 #[repr(transparent)]
 pub struct PtrBoxFuture<T>(*mut BoxFuture<T>);
@@ -23,8 +25,11 @@ pub struct PtrBoxFuture<T>(*mut BoxFuture<T>);
 // A From implementation to make it easier to convert from an arbitrary Future
 // type into a BoxFuture<T>.
 //
+// Of interest: the `async-trait` crate contains a macro which seems like it could eliminate the
+// `Box::pin(f).into()` boilerplate this currently requires. https://github.com/dtolnay/async-trait
+//
 // TODO(now): Understand why 'static is needed.
-impl<T, F: Future<Output = T> + 'static> From<Pin<Box<F>>> for BoxFuture<T> {
+impl<T, F: Future<Output = T> + Send + 'static> From<Pin<Box<F>>> for BoxFuture<T> {
     fn from(value: Pin<Box<F>>) -> Self {
         BoxFuture(value)
     }

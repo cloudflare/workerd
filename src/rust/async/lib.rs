@@ -1,6 +1,6 @@
 mod await_;
-use await_::PtrRustPromiseAwaiter;
-pub use await_::RustPromiseAwaiter;
+pub use await_::GuardedRustPromiseAwaiter;
+use await_::PtrGuardedRustPromiseAwaiter;
 
 mod future;
 use future::box_future_void_drop_in_place;
@@ -52,8 +52,10 @@ mod ffi {
         //
         // When Rust code polls a KJ promise with a Waker implemented in Rust, it uses this type to
         // pass the Waker to the `RustPromiseAwaiter` class, which is implemented in C++.
+        //
+        // TODO(now): Make `&mut self`.
         type RustWaker;
-        fn wake_by_ref(&self);
+        fn wake(&self);
     }
 
     unsafe extern "C++" {
@@ -80,17 +82,17 @@ mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/async/await.h");
 
-        type RustPromiseAwaiter = crate::RustPromiseAwaiter;
-        type PtrRustPromiseAwaiter = crate::PtrRustPromiseAwaiter;
+        type GuardedRustPromiseAwaiter = crate::GuardedRustPromiseAwaiter;
+        type PtrGuardedRustPromiseAwaiter = crate::PtrGuardedRustPromiseAwaiter;
 
-        unsafe fn rust_promise_awaiter_new_in_place(
-            ptr: PtrRustPromiseAwaiter,
+        unsafe fn guarded_rust_promise_awaiter_new_in_place(
+            ptr: PtrGuardedRustPromiseAwaiter,
             node: OwnPromiseNode,
         );
-        unsafe fn rust_promise_awaiter_drop_in_place(ptr: PtrRustPromiseAwaiter);
+        unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: PtrGuardedRustPromiseAwaiter);
 
-        fn poll_with_kj_waker(self: Pin<&mut RustPromiseAwaiter>, waker: &KjWaker) -> bool;
-        unsafe fn poll(self: Pin<&mut RustPromiseAwaiter>, waker: *const RustWaker) -> bool;
+        fn poll_with_kj_waker(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: &KjWaker) -> bool;
+        unsafe fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: *const RustWaker) -> bool;
     }
 
     // Helper functions to create OwnPromiseNodes for testing purposes.

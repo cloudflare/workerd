@@ -6,20 +6,18 @@ namespace workerd::rust::async {
 // =======================================================================================
 // ArcWakerAwaiter
 
-ArcWakerAwaiter::ArcWakerAwaiter(FuturePollerBase& futurePoller, OwnPromiseNode node, kj::SourceLocation location)
+ArcWakerAwaiter::ArcWakerAwaiter(
+    FutureAwaiterBase& futureAwaiter, OwnPromiseNode nodeParam, kj::SourceLocation location)
     : Event(location),
-      futurePoller(futurePoller),
-      node(kj::mv(node)) {
-  this->node->setSelfPointer(&this->node);
-  this->node->onReady(this);
+      futureAwaiter(futureAwaiter),
+      node(kj::mv(nodeParam)) {
+  node->setSelfPointer(&node);
+  node->onReady(this);
   // TODO(perf): If `this->isNext()` is true, can we immediately resume? Or should we check if
   //   the enclosing coroutine has suspended at least once?
-  futurePoller.beginTrace(this->node);
 }
 
 ArcWakerAwaiter::~ArcWakerAwaiter() noexcept(false) {
-  futurePoller.endTrace(node);
-
   unwindDetector.catchExceptionsIfUnwinding([this]() {
     node = nullptr;
   });
@@ -28,8 +26,6 @@ ArcWakerAwaiter::~ArcWakerAwaiter() noexcept(false) {
 // Validity-check the Promise's result, then fire the BaseFutureAwaiterBase Event to poll the
 // wrapped Future again.
 kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
-  futurePoller.endTrace(node);
-
   kj::_::ExceptionOr<WakeInstruction> result;
 
   node->get(result);
@@ -42,7 +38,7 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
   // We should only ever receive a WakeInstruction, never an exception. But if we do, propagate
   // it to the coroutine.
   KJ_IF_SOME(exception, result.exception) {
-    futurePoller.reject(kj::mv(exception));
+    futureAwaiter.internalReject(kj::mv(exception));
     return kj::none;
   }
 
@@ -50,7 +46,7 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 
   if (value == WakeInstruction::WAKE) {
     // This was an actual wakeup.
-    futurePoller.armDepthFirst();
+    futureAwaiter.armDepthFirst();
   } else {
     // All of our Wakers were dropped. We are awaiting the Rust equivalent of kj::NEVER_DONE.
   }
@@ -59,23 +55,63 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 }
 
 void ArcWakerAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
+  // FutureAwaiter will call our `tracePromise()`.
+  futureAwaiter.traceEvent(builder);
+}
+
+void ArcWakerAwaiter::tracePromise(kj::_::TraceBuilder& builder) {
   if (node.get() != nullptr) {
     node->tracePromise(builder, true);
   }
-  futurePoller.traceEvent(builder);
 }
 
 // =================================================================================================
 // RustPromiseAwaiter
 
-static_assert(sizeof(RustPromiseAwaiter) == sizeof(uint64_t) * 14,
-    "RustPromiseAwaiter size changed, you must re-run bindgen");
-
-// To initialize the object, Rust needs to know the size and alignment of RustPromiseAwaiter. To
+// To own RustPromiseAwaiters, Rust needs to know the size and alignment of RustPromiseAwaiter. To
 // that end, we use bindgen to generate an opaque FFI type of known size for RustPromiseAwaiter in
-// await_h.rs. There is a static_assert in await.c++ which ensures
+// await.h.rs.
 //
-// TODO(now): Automate this?
+// Our use of bindgen is non-automated, and the generated await.hs.rs file must be manually
+// regenerated whenever the size and alignment of RustPromiseAwaiter changes. To remind us to do so,
+// we have these static_asserts.
+//
+// If you are reading this because a static_assert fired:
+//
+//   1. Scroll down to find a sample `bindgen` command line invocation.
+//   2. Run the command in this directory.
+//   3. Read the new await.hs.rs and adjust the constants in these static_asserts with the new size
+//      or alignment.
+//   4. Commit the changes here with the new await.hs.rs file.
+//
+// It would be nice to automate this someday. `rules_rust` has some bindgen rules, but it adds a few
+// thousand years to the build times due to its hermetic dependency on LLVM. It's possible to
+// provide our own toolchain, but I became fatigued in the attempt.
+static_assert(sizeof(GuardedRustPromiseAwaiter) == sizeof(uint64_t) * 17,
+    "GuardedRustPromiseAwaiter size changed, you must re-run bindgen");
+static_assert(alignof(GuardedRustPromiseAwaiter) == alignof(uint64_t) * 1,
+    "GuardedRustPromiseAwaiter alignment changed, you must re-run bindgen");
+
+// Notes about the bindgen command below:
+//
+//   - `--generate "types"` inhibits the generation of any binding other than types.
+//   - We use `--allow-list-type` and `--blocklist-type` regexes to select specific types.
+//   - `--blocklist-type` seems to be necessary if your allowlisted type has nested types.
+//   - The allowlist/blocklist regexes are applied to an intermediate mangling of the types' paths
+//     in C++. In particular, C++ namespaces are replaced with Rust module names. Since `async` is
+//     a keyword in Rust, bindgen mangles the corresponding Rust module to `async_`. Meanwhile,
+//     nested types are mangled to `T_Nested`, despite being `T::Nested` in C++.
+//   - `--opaque-type` tells bindgen to generate a type containing a single array of words, rather
+//     than named members which alias the members in C++.
+//
+// The end result is a Rust file which defines Rust equivalents for our selected C++ types. The
+// types will have the same size and alignment as our C++ types, but do not provide data member
+// access, nor does bindgen define any member functions or special functions for the type. Instead,
+// we define the entire interface for the types in our `cxxbridge` FFI module.
+//
+// We do it this way because in our philosophy on cross-language safety, the only structs which both
+// languages are allowed to mutate are those generated by our `cxxbridge` macro. RustPromiseAwaiter
+// is a C++ class, so we don't let Rust mutate its internal data members.
 
 #if 0
 
@@ -83,7 +119,7 @@ bindgen \
     --rust-target 1.83.0 \
     --disable-name-namespacing \
     --generate "types" \
-    --allowlist-type "^workerd::rust::async_::RustPromiseAwaiter$" \
+    --allowlist-type "workerd::rust::async_::GuardedRustPromiseAwaiter" \
     --opaque-type ".*" \
     --no-derive-copy \
     ./await.h \
@@ -109,10 +145,8 @@ RustPromiseAwaiter::RustPromiseAwaiter(OwnPromiseNode nodeParam, kj::SourceLocat
 }
 
 RustPromiseAwaiter::~RustPromiseAwaiter() noexcept(false) {
-  // End tracing.
-  KJ_IF_SOME(kjWaker, maybeKjWaker) {
-    kjWaker.getFuturePoller().endTrace(node);
-  }
+  // Sever any promise tracing relationship before we destroy our PromiseNode.
+  linkedGroup().invalidate();
 
   unwindDetector.catchExceptionsIfUnwinding([this]() {
     node = nullptr;
@@ -120,30 +154,23 @@ RustPromiseAwaiter::~RustPromiseAwaiter() noexcept(false) {
 }
 
 kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
+  // Safety: Our Event can only fire on the event loop which was active when our Event base class
+  // was constructed. Therefore, we don't need to check that we're on the correct event loop.
+
   done = true;
 
-  KJ_IF_SOME(kjWaker, maybeKjWaker) {
-    kjWaker.getFuturePoller().endTrace(node);
+  KJ_IF_SOME(coAwait, linkedGroup().tryGet()) {
+    coAwait.armDepthFirst();
+    linkedGroup().invalidate();
+  } else KJ_IF_SOME(waker, rustWaker) {
+    waker.wake();
+    rustWaker = kj::none;
+  } else {
+    // We were constructed, and our Event even fired, but our owner still didn't `poll()` us yet.
+    // This is currently an unlikely case given how the rest of the code is written, but doing
+    // nothing here is the right thing regardless: `poll()` will see `done == true` if/when it is
+    // eventually called.
   }
-
-  KJ_SWITCH_ONEOF(currentWaker) {
-    KJ_CASE_ONEOF(_, Uninit) {
-      // We were constructed, and our Event even fired, but our owner still didn't `poll()` us yet.
-      // This is currently an unlikely case given how the rest of the code is written, but doing
-      // nothing here is the right thing regardless: `poll()` will see `done == true` if/when it is
-      // eventually called.
-    }
-    KJ_CASE_ONEOF(event, Event*) {
-      event->armDepthFirst();
-    }
-    KJ_CASE_ONEOF(rustWaker, const RustWaker*) {
-      rustWaker->wake_by_ref();
-    }
-  }
-
-  // We don't need our Waker pointer anymore. `done` is true, so the next call to `poll()` will not
-  // register a new one.
-  currentWaker = Uninit{};
 
   return kj::none;
 }
@@ -152,8 +179,15 @@ void RustPromiseAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
   if (node.get() != nullptr) {
     node->tracePromise(builder, true);
   }
-  KJ_IF_SOME(kjWaker, maybeKjWaker) {
-    kjWaker.getFuturePoller().traceEvent(builder);
+  // TODO(now): This seems wrong ... this will trace back into me?
+  KJ_IF_SOME(coAwait, linkedGroup().tryGet()) {
+    coAwait.traceEvent(builder);
+  }
+}
+
+void RustPromiseAwaiter::tracePromise(kj::_::TraceBuilder& builder) {
+  if (node.get() != nullptr) {
+    node->tracePromise(builder, true);
   }
 }
 
@@ -168,37 +202,15 @@ bool RustPromiseAwaiter::poll_with_kj_waker(const KjWaker& waker) {
   }
 
   // Safety: const_cast is okay, because `waker.is_current()` means we are running on the same
-  // event loop that the `waker.getFuturePoller()` Event is a member of, and we only use KjWaker
+  // event loop that the `waker.getFutureAwaiter()` Event is a member of, and we only use KjWaker
   // to access that Event.
   // TODO(now): Scope this mutable access tighter somehow.
   KJ_ASSERT(waker.is_current());
   auto& mutWaker = const_cast<KjWaker&>(waker);
 
-  KJ_IF_SOME(previousWaker, maybeKjWaker) {
-    // We assert that we are polled with the same `KjWaker` pointer value every time. To us, the
-    // `KjWaker` pointer identifies the KJ coroutine which transitively owns us. We rely on this
-    // ownership to guarantee that it is safe for this `RustPromiseAwaiter` to store the `KjWaker`
-    // pointer, and later to use it to arm the KJ coroutine event when our PromiseNode becomes
-    // ready.
-    //
-    // If we are now being polled with a different `KjWaker`, that means that ownership of the
-    // enclosing Future must have passed from one KJ coroutine's `co_await` expression to another,
-    // and it is very likely that `previousWaker` is now dangling. Our `co_await` implementation
-    // does not allow cross-coroutine ownership transfer, so we can assert here.
-    //
-    // TODO(now): This assumes that `KjWaker` is only used in `co_await` expressions. Perhaps it
-    //   should be renamed? I used to call it AwaitWaker, but I didn't like that. KjAwaitWaker?
-    //   KjStaticWaker, to reflect the stability of its address relative to us? KjCoroutineWaker?
-    KJ_ASSERT(&previousWaker == &mutWaker,
-        "RustPromiseAwaiters may be awaited by only one coroutine");
-  } else {
-    // First call to `poll()`.
-    mutWaker.getFuturePoller().beginTrace(node);
-  }
-
-  maybeKjWaker = mutWaker;
-
-  currentWaker = &static_cast<Event&>(mutWaker.getFuturePoller());
+  // TODO(now): Only re-link if it's a different FutureAwaiter.
+  linkedGroup().set(mutWaker.getFutureAwaiter());
+  rustWaker = kj::none;
 
   return false;
 }
@@ -214,54 +226,41 @@ bool RustPromiseAwaiter::poll(const RustWaker* waker) {
     return true;
   }
 
-  KJ_IF_SOME(previousWaker, currentWaker.tryGet<const RustWaker*>()) {
-    KJ_ASSERT(previousWaker == waker);
-  } else {
-    // TODO(now): Safety comment.
-    currentWaker = waker;
-  }
+  // TODO(now): Pass RustWaker pointer at construction time, or assert it's the same as the
+  //   previous one.
+  linkedGroup().invalidate();
+  rustWaker = waker;
 
   return false;
 }
 
-void rust_promise_awaiter_new_in_place(RustPromiseAwaiter* ptr, OwnPromiseNode node) {
+void guarded_rust_promise_awaiter_new_in_place(PtrGuardedRustPromiseAwaiter ptr, OwnPromiseNode node) {
   kj::ctor(*ptr, kj::mv(node));
 }
-void rust_promise_awaiter_drop_in_place(RustPromiseAwaiter* ptr) {
+void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr) {
   kj::dtor(*ptr);
 }
 
 // =======================================================================================
-// FuturePollerBase
+// FutureAwaiterBase
 
-FuturePollerBase::FuturePollerBase(
+FutureAwaiterBase::FutureAwaiterBase(
     kj::_::Event& next, kj::_::ExceptionOrValue& resultRef, kj::SourceLocation location)
     : Event(location),
       next(next),
       resultRef(resultRef) {}
 
-void FuturePollerBase::beginTrace(OwnPromiseNode& node) {
-  if (promiseNodeForTrace == kj::none) {
-    promiseNodeForTrace = node;
-  }
-}
-
-void FuturePollerBase::endTrace(OwnPromiseNode& node) {
-  KJ_IF_SOME(myNode, promiseNodeForTrace) {
-    if (myNode.get() == node.get()) {
-      promiseNodeForTrace = kj::none;
-    }
-  }
-}
-
-void FuturePollerBase::reject(kj::Exception exception) {
+void FutureAwaiterBase::internalReject(kj::Exception exception) {
   resultRef.addException(kj::mv(exception));
   next.armDepthFirst();
 }
 
-void FuturePollerBase::traceEvent(kj::_::TraceBuilder& builder) {
-  KJ_IF_SOME(node, promiseNodeForTrace) {
-    node->tracePromise(builder, true);
+void FutureAwaiterBase::traceEvent(kj::_::TraceBuilder& builder) {
+  auto elements = linkedObjects();
+  if (elements.begin() != elements.end()) {
+    elements.front().tracePromise(builder);
+  } else KJ_IF_SOME(awaiter, arcWakerAwaiter) {
+    awaiter.tracePromise(builder);
   }
   next.traceEvent(builder);
 }

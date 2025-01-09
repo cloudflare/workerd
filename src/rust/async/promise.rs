@@ -9,6 +9,10 @@ pub struct OwnPromiseNode(*const ());
 #[repr(transparent)]
 pub struct PtrOwnPromiseNode(*mut OwnPromiseNode);
 
+// TODO(now): Safety comment, observe that it can be sent across threads, but will panic if polled
+//   without a KJ EventLoop active on the current thread.
+unsafe impl Send for OwnPromiseNode {}
+
 // TODO(now): bindgen to guarantee safety
 unsafe impl ExternType for OwnPromiseNode {
     type Id = cxx::type_id!("workerd::rust::async::OwnPromiseNode");

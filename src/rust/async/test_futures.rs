@@ -143,9 +143,9 @@ pub fn new_layered_ready_future_void() -> BoxFuture<()> {
 
 // From example at https://doc.rust-lang.org/std/future/fn.poll_fn.html#capturing-a-pinned-state
 fn naive_select<T>(
-    a: impl Future<Output = T>,
-    b: impl Future<Output = T>,
-) -> impl Future<Output = T>
+    a: impl Future<Output = T> + Send,
+    b: impl Future<Output = T> + Send,
+) -> impl Future<Output = T> + Send
 {
     async {
         let (mut a, mut b) = (pin!(a), pin!(b));
@@ -203,5 +203,3 @@ pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
         }).await
     }).into()
 }
-
-// TODO(now): Similar as above, but poll() until all are ready.

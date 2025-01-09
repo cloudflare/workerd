@@ -164,10 +164,12 @@ impl RustWaker {
         self.inner = None;
     }
 
-    pub fn wake_by_ref(&self) {
+    pub fn wake(&self) {
+        // TODO(now): Should be able to call `.wake()` because we're only called on the event loop's
+        //   thread.
         self.inner
             .as_ref()
-            .expect("should have been set() before wake_by_ref()")
+            .expect("should have been set() before wake()")
             .wake_by_ref();
     }
 }
