@@ -6,7 +6,6 @@ js_library(
     visibility = ["//visibility:public"],
     deps = [
         "//:node_modules/@eslint/js",
-        "//:node_modules/eslint-plugin-prettier",
         "//:node_modules/typescript-eslint",
     ],
 )
