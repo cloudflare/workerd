@@ -4,6 +4,7 @@
 #include "pyodide.h"
 
 #include <workerd/api/pyodide/setup-emscripten.h>
+#include <workerd/io/compatibility-date.h>
 #include <workerd/util/string-buffer.h>
 #include <workerd/util/strings.h>
 
@@ -20,6 +21,22 @@ const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(
     kj::StringPtr version) const {
   return bundles.lockShared()->find(version).map(
       [](const MessageBundlePair& t) { return t.bundle; });
+}
+
+kj::Maybe<kj::String> PyodideBundleManager::getPyodideLock(
+    PythonSnapshotRelease::Reader pythonSnapshotRelease) const {
+  auto bundleName = getPythonBundleName(pythonSnapshotRelease);
+  // We expect the Pyodide Bundle for the specified bundle name to already be downloaded here.
+  auto maybeBundle = getPyodideBundle(bundleName);
+  auto bundle = KJ_ASSERT_NONNULL(maybeBundle);
+  for (auto module: bundle.getModules()) {
+    if (module.which() == workerd::jsg::Module::JSON &&
+        module.getName() == "pyodide-internal:generated/pyodide-lock.json") {
+      return kj::str(module.getJson());
+    }
+  }
+
+  return kj::none;
 }
 
 void PyodideBundleManager::setPyodideBundleData(
@@ -440,8 +457,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
     names.finish(),
     contents.finish(),
     requirements.finish(),
-    kj::str("20240829.4"), // TODO: hardcoded version & lock
-    kj::str(PYODIDE_LOCK.toString()),
+    kj::str("20240829.4"), // TODO: hardcoded version
     true      /* isWorkerd */,
     false     /* isTracing */,
     snapshotToDisk,

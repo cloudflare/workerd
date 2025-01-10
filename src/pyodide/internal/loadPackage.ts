@@ -18,6 +18,7 @@ import {
 } from 'pyodide-internal:metadata';
 import {
   SITE_PACKAGES,
+  STDLIB_PACKAGES,
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
 import { parseTarInfo } from 'pyodide-internal:tar';
@@ -113,7 +114,12 @@ async function loadPackagesImpl(
   let loadPromises: Promise<[string, Reader]>[] = [];
   let loading = [];
   for (const req of requirements) {
-    if (SITE_PACKAGES.loadedRequirements.has(req)) continue;
+    if (req === 'test') {
+      continue; // Skip the test package, it is only useful for internal Python regression testing.
+    }
+    if (SITE_PACKAGES.loadedRequirements.has(req)) {
+      continue;
+    }
     loadPromises.push(loadBundle(req).then((r) => [req, r]));
     loading.push(req);
   }
@@ -135,9 +141,10 @@ async function loadPackagesImpl(
 }
 
 export async function loadPackages(Module: Module, requirements: Set<string>) {
+  const pkgsToLoad = requirements.union(new Set(STDLIB_PACKAGES));
   if (LOAD_WHEELS_FROM_R2) {
-    await loadPackagesImpl(Module, requirements, loadBundleFromR2);
+    await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromR2);
   } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    await loadPackagesImpl(Module, requirements, loadBundleFromArtifactBundler);
+    await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromArtifactBundler);
   }
 }
