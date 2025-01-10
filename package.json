@@ -21,7 +21,6 @@
     "esbuild": "^0.21.5",
     "eslint": "^9.10.0",
     "eslint-plugin-import": "^2.30.0",
-    "eslint-plugin-prettier": "^5.2.1",
     "expect-type": "^0.20.0",
     "typescript-eslint": "^8.4.0"
   },

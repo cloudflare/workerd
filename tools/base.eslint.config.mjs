@@ -1,6 +1,5 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
-import prettierPlugin from "eslint-plugin-prettier/recommended";
 
 /**
  * @param {string} tsconfigRootDir
@@ -25,7 +24,6 @@ export function baseConfig({ tsconfigRootDir }) {
         "@typescript-eslint/explicit-module-boundary-types": "error",
         "@typescript-eslint/no-require-imports": "error",
         "@typescript-eslint/prefer-enum-initializers": "error",
-        "@typescript-eslint/type-annotation-spacing": "error",
         "@typescript-eslint/restrict-template-expressions": "warn",
         "@typescript-eslint/no-non-null-assertion": "warn",
         "@typescript-eslint/no-extraneous-class": "off",
@@ -44,7 +42,6 @@ export function baseConfig({ tsconfigRootDir }) {
         ],
       },
     },
-    prettierPlugin,
     {
       files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
       ...tseslint.configs.disableTypeChecked,
