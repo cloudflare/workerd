@@ -310,7 +310,10 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
     }
-    return v8::Isolate::New(params);
+    // Create new isolate group so that isolate is in its own group and not in a shared group. That
+    // way the isolates don't all use the same pointer cage.
+    v8::IsolateGroup group = v8::IsolateGroup::Create();
+    return v8::Isolate::New(group, params);
   });
 }
 }  // namespace
