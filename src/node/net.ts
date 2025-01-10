@@ -327,7 +327,10 @@ Socket.prototype._unrefTimer = function _unrefTimer(
   for (let s = this; s != null; s = s._parent) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = this?.setTimeout(s.timeout, s._onTimeout.bind(s));
+      s[kTimeout] = (this as SocketClass).setTimeout(
+        s.timeout,
+        s._onTimeout.bind(s)
+      );
     }
   }
 };
@@ -363,8 +366,8 @@ Socket.prototype.setTimeout = function (
 
 Socket.prototype._onTimeout = function (this: SocketClass): void {
   const handle = this._handle;
-  const lastWriteQueueSize = this[kLastWriteQueueSize];
-  if (lastWriteQueueSize != null && lastWriteQueueSize > 0 && handle) {
+  const lastWriteQueueSize = this[kLastWriteQueueSize] as number;
+  if (lastWriteQueueSize > 0 && handle) {
     // `lastWriteQueueSize !== writeQueueSize` means there is
     // an active write in progress, so we suppress the timeout.
     const { writeQueueSize } = handle;
