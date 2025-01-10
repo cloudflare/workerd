@@ -457,7 +457,7 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     v8::Local<v8::String> str = check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
-    auto buf = kj::heapArray<char>(str->Utf8Length(isolate) + 1);
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
     str->WriteUtf8(isolate, buf.begin(), buf.size());
     buf[buf.size() - 1] = 0;
     return kj::String(kj::mv(buf));
@@ -1009,7 +1009,7 @@ class DictWrapper {
     // TypeErrorContext, or worrying about whether the tryUnwrap(kj::String*) version will ever be
     // modified to return nullptr in the future.
     const auto convertToUtf8 = [isolate = context->GetIsolate()](v8::Local<v8::String> v8String) {
-      auto buf = kj::heapArray<char>(v8String->Utf8Length(isolate) + 1);
+      auto buf = kj::heapArray<char>(v8String->Utf8LengthV2(isolate) + 1);
       v8String->WriteUtf8(isolate, buf.begin(), buf.size());
       buf[buf.size() - 1] = 0;
       return kj::String(kj::mv(buf));
