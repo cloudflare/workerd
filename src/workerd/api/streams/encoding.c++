@@ -24,7 +24,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
       Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
                       [](jsg::Lock& js, auto chunk, auto controller) {
     auto str = jsg::check(chunk->ToString(js.v8Context()));
-    auto maybeBuffer = v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8Length(js.v8Isolate));
+    auto maybeBuffer = v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8LengthV2(js.v8Isolate));
     JSG_ASSERT(!maybeBuffer.IsEmpty(), RangeError, "Cannot allocate space for TextEncoder.encode");
     auto buffer = maybeBuffer.ToLocalChecked();
 
