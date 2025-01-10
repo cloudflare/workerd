@@ -532,8 +532,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   }
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), tracing::QueueEventInfo(kj::mv(queueName), batchSize));
+    t.setEventInfo(context.now(), tracing::QueueEventInfo(kj::str(queueName), batchSize));
   }
+
+  context.getMetrics().reportTailEvent(context, [&] {
+    return tracing::Onset(tracing::QueueEventInfo(kj::mv(queueName), batchSize),
+        tracing::Onset::WorkerInfo{}, kj::none);
+  });
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
   // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.

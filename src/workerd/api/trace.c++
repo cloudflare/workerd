@@ -656,6 +656,10 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     t.setEventInfo(context.now(), tracing::TraceEventInfo(traces));
   }
 
+  metrics.reportTailEvent(context, [&] {
+    return tracing::Onset(tracing::TraceEventInfo(traces), tracing::Onset::WorkerInfo{}, kj::none);
+  });
+
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
     if (trace->eventInfo != kj::none) {

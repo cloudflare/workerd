@@ -75,29 +75,33 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   auto eventParameters = consumeParams();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    tracing::HibernatableWebSocketEventInfo::Type type =
-        [&]() -> tracing::HibernatableWebSocketEventInfo::Type {
-      KJ_SWITCH_ONEOF(eventParameters.eventType) {
-        KJ_CASE_ONEOF(_, HibernatableSocketParams::Text) {
-          return tracing::HibernatableWebSocketEventInfo::Message{};
-        }
-        KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
-          return tracing::HibernatableWebSocketEventInfo::Message{};
-        }
-        KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
-          return tracing::HibernatableWebSocketEventInfo::Close{
-            .code = close.code, .wasClean = close.wasClean};
-        }
-        KJ_CASE_ONEOF(_, HibernatableSocketParams::Error) {
-          return tracing::HibernatableWebSocketEventInfo::Error{};
-        }
+  auto getType = [&]() -> tracing::HibernatableWebSocketEventInfo::Type {
+    KJ_SWITCH_ONEOF(eventParameters.eventType) {
+      KJ_CASE_ONEOF(_, HibernatableSocketParams::Text) {
+        return tracing::HibernatableWebSocketEventInfo::Message{};
       }
-      KJ_UNREACHABLE;
-    }();
+      KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
+        return tracing::HibernatableWebSocketEventInfo::Message{};
+      }
+      KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
+        return tracing::HibernatableWebSocketEventInfo::Close{
+          .code = close.code, .wasClean = close.wasClean};
+      }
+      KJ_CASE_ONEOF(_, HibernatableSocketParams::Error) {
+        return tracing::HibernatableWebSocketEventInfo::Error{};
+      }
+    }
+    KJ_UNREACHABLE;
+  };
 
-    t.setEventInfo(context.now(), tracing::HibernatableWebSocketEventInfo(kj::mv(type)));
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(context.now(), tracing::HibernatableWebSocketEventInfo(getType()));
   }
+
+  context.getMetrics().reportTailEvent(context, [&] {
+    return tracing::Onset(
+        tracing::HibernatableWebSocketEventInfo(getType()), tracing::Onset::WorkerInfo{}, kj::none);
+  });
 
   try {
     co_await context.run(

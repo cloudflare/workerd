@@ -1026,6 +1026,18 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
             addExceptionToTrace(js, ioContext, tracer, UncaughtExceptionSource::REQUEST_HANDLER,
                 error, api->getErrorInterfaceTypeHandler(js));
           }
+
+          ioContext.getMetrics().reportTailEvent(ioContext, [&] {
+            KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
+              auto name = obj.get(js, "name"_kj);
+              auto message = obj.get(js, "message"_kj);
+              auto stack = obj.get(js, "stack"_kj);
+              return tracing::Mark(tracing::Exception(
+                  ioContext.now(), kj::str(name), kj::str(message), kj::str(stack)));
+            }
+            return tracing::Mark(
+                tracing::Exception(ioContext.now(), kj::str(), kj::str(error), kj::none));
+          });
         }
 
         KJ_IF_SOME(i, impl->inspector) {
@@ -1865,6 +1877,9 @@ void Worker::handleLog(jsg::Lock& js,
       auto timestamp = ioContext.now();
       tracer.addLog(timestamp, level, message());
     }
+
+    ioContext.getMetrics().reportTailEvent(
+        ioContext, [&] { return tracing::Mark(tracing::Log(ioContext.now(), level, message())); });
   }
 
   if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
@@ -2066,6 +2081,18 @@ void Worker::Lock::logUncaughtException(
             worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
     }
+
+    ioContext.getMetrics().reportTailEvent(ioContext, [&] {
+      KJ_IF_SOME(obj, exception.tryCast<jsg::JsObject>()) {
+        auto name = obj.get(*this, "name"_kj);
+        auto message = obj.get(*this, "message"_kj);
+        auto stack = obj.get(*this, "stack"_kj);
+        return tracing::Mark(
+            tracing::Exception(ioContext.now(), kj::str(name), kj::str(message), kj::str(stack)));
+      }
+      return tracing::Mark(
+          tracing::Exception(ioContext.now(), kj::str(), kj::str(exception), kj::none));
+    });
   }
 
   KJ_IF_SOME(i, worker.script->isolate->impl->inspector) {

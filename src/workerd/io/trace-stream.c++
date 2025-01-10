@@ -738,7 +738,7 @@ class TailStreamHandler final: public TailStreamTargetBase {
     // Take the received set of events and dispatch them to the correct handler.
 
     v8::Local<v8::Value> h = handler.getHandle(js);
-    v8::LocalVector<v8::Value> returnValues(js.v8Isolate, events.size());
+    v8::LocalVector<v8::Value> returnValues(js.v8Isolate);
     StringCache stringCache;
 
     if (h->IsFunction()) {
@@ -836,7 +836,8 @@ class TailStreamEntrypoint final: public TailStreamTargetBase {
 
     return ioContext.awaitJs(js,
         js.toPromise(result).then(js,
-            ioContext.addFunctor([&results, &ioContext](jsg::Lock& js, jsg::Value value) {
+            ioContext.addFunctor(
+                [results = kj::mv(results), &ioContext](jsg::Lock& js, jsg::Value value) mutable {
       // The value here can be one of a function, an object, or undefined.
       // Any value other than these will result in a warning but will otherwise
       // be treated like undefined.
