@@ -400,8 +400,9 @@ kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
   return result.releaseAsArray();
 }
 
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
-    Worker::Reader conf, const PythonConfig& pythonConfig) {
+jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
+    const PythonConfig& pythonConfig,
+    PythonSnapshotRelease::Reader pythonRelease) {
   auto modules = conf.getModules();
   auto mainModule = kj::str(modules.begin()->getName());
   int numFiles = 0;
@@ -451,13 +452,14 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
   bool createSnapshot = pythonConfig.createSnapshot;
   bool createBaselineSnapshot = pythonConfig.createBaselineSnapshot;
   bool snapshotToDisk = createSnapshot || createBaselineSnapshot;
+
   // clang-format off
   return jsg::alloc<PyodideMetadataReader>(
     kj::mv(mainModule),
     names.finish(),
     contents.finish(),
     requirements.finish(),
-    kj::str("20240829.4"), // TODO: hardcoded version
+    kj::str(pythonRelease.getPackages()),
     true      /* isWorkerd */,
     false     /* isTracing */,
     snapshotToDisk,
