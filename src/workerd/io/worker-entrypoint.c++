@@ -279,7 +279,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
-  // TODO(streaming-tail-workers): Instrument properly
   context.getMetrics().reportTailEvent(context, [&] {
     return tracing::Onset(tracing::FetchEventInfo(method, kj::str(url), kj::str("{}"), nullptr),
         tracing::Onset::WorkerInfo{}, kj::none);
@@ -501,10 +500,16 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
 
+  double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
     t.setEventInfo(context.now(), tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
+
+  context.getMetrics().reportTailEvent(context, [&] {
+    return tracing::Onset(tracing::ScheduledEventInfo(eventTime, kj::str(cron)),
+        tracing::Onset::WorkerInfo{}, kj::none);
+  });
 
   // Scheduled handlers run entirely in waitUntil() tasks.
   context.addWaitUntil(context.run(
@@ -563,6 +568,10 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(context.now(), tracing::AlarmEventInfo(scheduledTime));
   }
+  context.getMetrics().reportTailEvent(context, [&] {
+    return tracing::Onset(
+        tracing::AlarmEventInfo(scheduledTime), tracing::Onset::WorkerInfo{}, kj::none);
+  });
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {

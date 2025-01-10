@@ -7,7 +7,10 @@ export default {
   tail(traces) {
     console.log(traces[0].logs);
   },
-  tailStream() {
-    return {};
+  tailStream(...args) {
+    console.log(...args);
+    return (...args) => {
+      console.log(...args);
+    };
   },
 };
