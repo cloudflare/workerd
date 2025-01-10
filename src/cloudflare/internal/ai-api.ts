@@ -32,8 +32,42 @@ export type AiOptions = {
   sessionOptions?: SessionOptions;
 };
 
+export type AiModelsSearchParams = {
+  author?: string;
+  hide_experimental?: boolean;
+  page?: number;
+  per_page?: number;
+  search?: string;
+  source?: number;
+  task?: string;
+};
+
+export type AiModelsSearchObject = {
+  id: string;
+  source: number;
+  name: string;
+  description: string;
+  task: {
+    id: string;
+    name: string;
+    description: string;
+  };
+  tags: string[];
+  properties: {
+    property_id: string;
+    value: string;
+  }[];
+};
+
 export class InferenceUpstreamError extends Error {
   public constructor(message: string, name = 'InferenceUpstreamError') {
+    super(message);
+    this.name = name;
+  }
+}
+
+export class AiInternalError extends Error {
+  public constructor(message: string, name = 'AiInternalError') {
     super(message);
     this.name = name;
   }
@@ -160,6 +194,30 @@ export class Ai {
       }
     } catch {
       return new InferenceUpstreamError(content);
+    }
+  }
+
+  public async models(
+    params: AiModelsSearchParams = {}
+  ): Promise<AiModelsSearchObject[]> {
+    const url = new URL('https://workers-binding.ai/ai-api/models/search');
+
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value.toString());
+    }
+
+    const res = await this.fetcher.fetch(url, { method: 'GET' });
+
+    switch (res.status) {
+      case 200: {
+        const data = (await res.json()) as { result: AiModelsSearchObject[] };
+        return data.result;
+      }
+      default: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiInternalError(data.errors[0]?.message || 'Internal Error');
+      }
     }
   }
 

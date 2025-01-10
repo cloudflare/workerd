@@ -3721,6 +3721,33 @@ export interface AiModels {
   "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
 }
 export type ModelListType = Record<string, any>;
+export type AiModelsSearchParams = {
+  author?: string;
+  hide_experimental?: boolean;
+  page?: number;
+  per_page?: number;
+  search?: string;
+  source?: number;
+  task?: string;
+};
+export type AiModelsSearchObject = {
+  id: string;
+  source: number;
+  name: string;
+  description: string;
+  task: {
+    id: string;
+    name: string;
+    description: string;
+  };
+  tags: string[];
+  properties: {
+    property_id: string;
+    value: string;
+  }[];
+};
+export interface InferenceUpstreamError extends Error {}
+export interface AiInternalError extends Error {}
 export declare abstract class Ai<ModelList extends ModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
@@ -3729,6 +3756,7 @@ export declare abstract class Ai<ModelList extends ModelListType = AiModels> {
     inputs: ModelList[Name]["inputs"],
     options?: AiOptions,
   ): Promise<ModelList[Name]["postProcessedOutputs"]>;
+  public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
 }
 export type GatewayOptions = {
   id: string;
