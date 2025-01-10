@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { run } from 'harness';
+import { run } from 'wpt:harness';
 
 export const urlpatternCompareTests = run(
   'urlpattern-compare-tests.tentative.js',

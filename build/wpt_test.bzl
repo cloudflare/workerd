@@ -53,7 +53,7 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker", esModule = embed "{test_js}"),
-          (name = "harness", esModule = embed "../../../../../workerd/src/wpt/harness.js"),
+          (name = "wpt:harness", esModule = embed "../../../../../workerd/src/wpt/harness.js"),
           {modules}
         ],
         bindings = [

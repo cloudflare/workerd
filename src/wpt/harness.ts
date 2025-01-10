@@ -24,56 +24,182 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
-  AssertionError,
   strictEqual,
   notStrictEqual,
   deepStrictEqual,
   ok,
   throws,
+  type AssertPredicate,
 } from 'node:assert';
 
-function OptionalFeatureUnsupportedError(message) {
+type TestRunnerOptions = {
+  expectedFailures?: string[];
+  verbose?: boolean;
+  skippedTests?: string[];
+};
+
+type TestRunnerFn = (callback: TestFn | PromiseTestFn, message: string) => void;
+type TestFn = () => void;
+type PromiseTestFn = () => Promise<void>;
+type ThrowingFn = () => unknown;
+
+declare global {
+  // eslint-disable-next-line no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis
+  var errors: Error[];
+  // eslint-disable-next-line no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis
+  var testOptions: TestRunnerOptions;
+
+  // eslint-disable-next-line no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis
+  var GLOBAL: { isWindow(): boolean };
+
+  function test(func: TestFn, name: string): void;
+  function done(): undefined;
+  function subsetTestByKey(
+    _key: string,
+    testType: TestRunnerFn,
+    testCallback: TestFn | PromiseTestFn,
+    testMessage: string
+  ): void | Promise<void>;
+  function promise_test(
+    func: PromiseTestFn,
+    name: string,
+    properties?: unknown
+  ): Promise<void>;
+  function assert_equals(a: unknown, b: unknown, message?: string): void;
+  function assert_not_equals(a: unknown, b: unknown, message?: string): void;
+  function assert_true(val: unknown, message?: string): void;
+  function assert_false(val: unknown, message?: string): void;
+  function assert_array_equals(a: unknown, b: unknown, message?: string): void;
+  function assert_object_equals(a: unknown, b: unknown, message?: string): void;
+  function assert_implements(condition: unknown, description?: string): void;
+  function assert_implements_optional(
+    condition: unknown,
+    description?: string
+  ): void;
+  function assert_unreached(description?: string): void;
+  function assert_throws_js(
+    constructor: AssertPredicate,
+    func: ThrowingFn,
+    description?: string
+  ): void;
+  function assert_throws_exactly(
+    exception: AssertPredicate,
+    fn: ThrowingFn,
+    description?: string
+  ): void;
+  function assert_throws_dom(
+    type: number | string,
+    funcOrConstructor: ThrowingFn | typeof DOMException,
+    descriptionOrFunc: string | ThrowingFn,
+    maybeDescription?: string
+  ): void;
+}
+
+/**
+ * @class
+ * Exception type that represents a failing assert.
+ * NOTE: This a custom error type defined by WPT - it's not the same as node:assert's AssertionError
+ * @param {string} message - Error message.
+ */
+declare class AssertionError extends Error {}
+function AssertionError(this: AssertionError, message: string): void {
+  if (typeof message == 'string') {
+    message = sanitize_unpaired_surrogates(message);
+  }
+  this.message = message;
+}
+
+// eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
+AssertionError.prototype = Object.create(Error.prototype);
+
+declare class OptionalFeatureUnsupportedError extends AssertionError {}
+function OptionalFeatureUnsupportedError(
+  this: OptionalFeatureUnsupportedError,
+  message: string
+): void {
   AssertionError.call(this, message);
 }
+
+// eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
 OptionalFeatureUnsupportedError.prototype = Object.create(
   AssertionError.prototype
 );
 
+function code_unit_str(char: string): string {
+  return 'U+' + char.charCodeAt(0).toString(16);
+}
+
+function sanitize_unpaired_surrogates(str: string): string {
+  // Test logs will be exported to XML, so we must escape any characters that
+  // are forbidden in an XML CDATA section, namely "[...] the surrogate blocks,
+  // FFFE, and FFFF".
+  // See https://www.w3.org/TR/REC-xml/#NT-Char
+
+  return str.replace(
+    /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
+    function (_, low?: string, prefix?: string, high?: string) {
+      let output = prefix || ''; // prefix may be undefined
+      const string: string = low || high || ''; // only one of these alternates can match
+
+      for (const ch of string) {
+        output += code_unit_str(ch);
+      }
+      return output;
+    }
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access --  We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.Window = Object.getPrototypeOf(globalThis).constructor;
 
-globalThis.fetch = async (url) => {
-  const { default: data } = await import(url);
-  return {
-    async json() {
-      return data;
-    },
-  };
+globalThis.fetch = async (
+  input: RequestInfo | URL,
+  _init?: RequestInit
+): Promise<Response> => {
+  const url =
+    input instanceof Request ? input.url.toString() : input.toString();
+  const exports: unknown = await import(url);
+
+  if (
+    !(typeof exports == 'object' && exports !== null && 'default' in exports)
+  ) {
+    throw new Error(`Cannot fetch ${url}`);
+  }
+
+  const data: unknown = exports.default;
+
+  const response = new Response();
+  // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
+  response.json = async (): Promise<unknown> => data;
+  return response;
 };
 
+// @ts-expect-error We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.self = globalThis;
+
 globalThis.GLOBAL = {
-  isWindow() {
+  isWindow(): boolean {
     return false;
   },
 };
 
-globalThis.done = () => undefined;
+globalThis.done = (): undefined => undefined;
 
-globalThis.subsetTestByKey = (_key, testType, testCallback, testMessage) => {
+globalThis.subsetTestByKey = (
+  _key,
+  testType,
+  testCallback,
+  testMessage
+): void | Promise<void> => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
 
+  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
   return testType(testCallback, testMessage);
 };
 
-globalThis.promise_test = async (func, name, properties) => {
-  if (typeof func !== 'function') {
-    properties = name;
-    name = func;
-    func = null;
-  }
-
+globalThis.promise_test = async (func, name, _properties): Promise<void> => {
   if (!shouldRunTest(name)) {
     return;
   }
@@ -85,27 +211,27 @@ globalThis.promise_test = async (func, name, properties) => {
   }
 };
 
-globalThis.assert_equals = (a, b, message) => {
+globalThis.assert_equals = (a, b, message): void => {
   strictEqual(a, b, message);
 };
 
-globalThis.assert_not_equals = (a, b, message) => {
+globalThis.assert_not_equals = (a, b, message): void => {
   notStrictEqual(a, b, message);
 };
 
-globalThis.assert_true = (val, message) => {
+globalThis.assert_true = (val, message): void => {
   strictEqual(val, true, message);
 };
 
-globalThis.assert_false = (val, message) => {
+globalThis.assert_false = (val, message): void => {
   strictEqual(val, false, message);
 };
 
-globalThis.assert_array_equals = (a, b, message) => {
+globalThis.assert_array_equals = (a, b, message): void => {
   deepStrictEqual(a, b, message);
 };
 
-globalThis.assert_object_equals = (a, b, message) => {
+globalThis.assert_object_equals = (a, b, message): void => {
   deepStrictEqual(a, b, message);
 };
 
@@ -121,7 +247,7 @@ globalThis.assert_object_equals = (a, b, message) => {
  * @param {object} condition The truthy value to test
  * @param {string} [description] Error description for the case that the condition is not truthy.
  */
-globalThis.assert_implements = (condition, description) => {
+globalThis.assert_implements = (condition, description): void => {
   ok(!!condition, description);
 };
 
@@ -138,9 +264,9 @@ globalThis.assert_implements = (condition, description) => {
  * @param {object} condition The truthy value to test
  * @param {string} [description] Error description for the case that the condition is not truthy.
  */
-globalThis.assert_implements_optional = (condition, description) => {
+globalThis.assert_implements_optional = (condition, description): void => {
   if (!condition) {
-    throw new OptionalFeatureUnsupportedError(description);
+    throw new OptionalFeatureUnsupportedError(description ?? '');
   }
 };
 
@@ -150,8 +276,8 @@ globalThis.assert_implements_optional = (condition, description) => {
  *
  * @param {string} [description] - Description of the condition being tested.
  */
-globalThis.assert_unreached = (description) => {
-  ok(false, `Reached unreachable code: ${description}`);
+globalThis.assert_unreached = (description): void => {
+  ok(false, `Reached unreachable code: ${description ?? 'undefined'}`);
 };
 
 /**
@@ -161,7 +287,7 @@ globalThis.assert_unreached = (description) => {
  * @param {Function} func Function which should throw.
  * @param {string} [description] Error description for the case that the error is not thrown.
  */
-globalThis.assert_throws_js = (constructor, func, description) => {
+globalThis.assert_throws_js = (constructor, func, description): void => {
   throws(
     () => {
       func.call(this);
@@ -178,7 +304,7 @@ globalThis.assert_throws_js = (constructor, func, description) => {
  * @param {Function} fn Function which should throw.
  * @param {string} [description] Error description for the case that the error is not thrown.
  */
-globalThis.assert_throws_exactly = (exception, fn, description) => {
+globalThis.assert_throws_exactly = (exception, fn, description): void => {
   throws(
     () => {
       fn.call(this);
@@ -219,20 +345,24 @@ globalThis.assert_throws_exactly = (exception, fn, description) => {
  *
  */
 globalThis.assert_throws_dom = (
-  type,
+  _type,
   funcOrConstructor,
   descriptionOrFunc,
   maybeDescription
-) => {
-  let constructor, func, description;
+): void => {
+  let constructor: typeof DOMException;
+  let func: ThrowingFn;
+  let description: string;
+
   if (funcOrConstructor.name === 'DOMException') {
-    constructor = funcOrConstructor;
-    func = descriptionOrFunc;
-    description = maybeDescription;
+    constructor = funcOrConstructor as typeof DOMException;
+    func = descriptionOrFunc as ThrowingFn;
+    description = maybeDescription as string;
   } else {
-    constructor = this.DOMException;
-    func = funcOrConstructor;
-    description = descriptionOrFunc;
+    // @ts-expect-error This code is copied as is from the WPT harness
+    constructor = this.DOMException as typeof DOMException;
+    func = funcOrConstructor as ThrowingFn;
+    description = descriptionOrFunc as string;
     ok(
       maybeDescription === undefined,
       'Too many args passed to no-constructor version of assert_throws_dom'
@@ -251,7 +381,7 @@ globalThis.assert_throws_dom = (
 /**
  * Create a synchronous test
  *
- * @param {TestFunction} func - Test function. This is executed
+ * @param {TestFn} func - Test function. This is executed
  * immediately. If it returns without error, the test status is
  * set to ``PASS``. If it throws an :js:class:`AssertionError`, or
  * any other exception, the test status is set to ``FAIL``
@@ -259,7 +389,7 @@ globalThis.assert_throws_dom = (
  * @param {String} name - Test name. This must be unique in a
  * given file and must be invariant between runs.
  */
-globalThis.test = (func, name) => {
+globalThis.test = (func, name): void => {
   if (!shouldRunTest(name)) {
     return;
   }
@@ -273,7 +403,7 @@ globalThis.test = (func, name) => {
 
 globalThis.errors = [];
 
-function shouldRunTest(message) {
+function shouldRunTest(message: string): boolean {
   if ((globalThis.testOptions.skippedTests ?? []).includes(message)) {
     return false;
   }
@@ -285,36 +415,18 @@ function shouldRunTest(message) {
   return true;
 }
 
-function prepare(options) {
+function prepare(options: TestRunnerOptions): void {
   globalThis.errors = [];
   globalThis.testOptions = options;
 }
 
-function sanitizeMessage(message) {
-  // Test logs will be exported to XML, so we must escape any characters that
-  // are forbidden in an XML CDATA section, namely "[...] the surrogate blocks,
-  // FFFE, and FFFF".
-  // See https://www.w3.org/TR/REC-xml/#NT-Char
-  return message.replace(
-    /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
-    function (_, low, prefix, high) {
-      let output = prefix || ''; // prefix may be undefined
-      const string = low || high; // only one of these alternates can match
-      for (let i = 0; i < string.length; i++) {
-        output += 'U+' + string[i].charCodeAt(0).toString(16);
-      }
-      return output;
-    }
-  );
-}
-
-function validate(testFileName, options) {
+function validate(testFileName: string, options: TestRunnerOptions): void {
   const expectedFailures = new Set(options.expectedFailures ?? []);
 
   let failing = false;
   for (const err of globalThis.errors) {
     if (!expectedFailures.delete(err.message)) {
-      err.message = sanitizeMessage(err.message);
+      err.message = sanitize_unpaired_surrogates(err.message);
       console.error(err);
       failing = true;
     }
@@ -332,9 +444,12 @@ function validate(testFileName, options) {
   }
 }
 
-export function run(file, options = {}) {
+export function run(
+  file: string,
+  options: TestRunnerOptions = {}
+): { test(): Promise<void> } {
   return {
-    async test() {
+    async test(): Promise<void> {
       prepare(options);
       await import(file);
       validate(file, options);
