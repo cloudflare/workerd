@@ -30,6 +30,7 @@ py_wd_test("subdirectory")
 
 py_wd_test(
     "sdk",
+    python_flags = ["0.26.0a2"],
     tags = [
         # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
         "no-asan",
