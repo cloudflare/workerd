@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 import type { FinishedOptions } from 'node:stream';
 
 type FinishedStream =

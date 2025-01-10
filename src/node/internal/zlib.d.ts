@@ -184,7 +184,6 @@ export abstract class CompressionStream {
   public [owner_symbol]: Zlib;
   // Not used by C++ implementation but required to be Node.js compatible.
   public inOff: number;
-  /* eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents */
   public buffer: NodeJS.TypedArray | null;
   public cb: () => void;
   public availOutBefore: number;
