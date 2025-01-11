@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/io/compatibility-date.capnp.h>
-#include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd {

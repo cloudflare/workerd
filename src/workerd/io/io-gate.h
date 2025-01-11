@@ -24,8 +24,6 @@
 #include <kj/list.h>
 #include <kj/one-of.h>
 
-#include <type_traits>
-
 namespace workerd {
 
 using kj::uint;

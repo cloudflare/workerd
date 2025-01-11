@@ -15,6 +15,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/util.h>
+#include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/async-context.h>

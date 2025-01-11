@@ -5,8 +5,10 @@
 #pragma once
 
 #include <kj/filesystem.h>
+#include <kj/function.h>
 #include <kj/list.h>
 #include <kj/one-of.h>
+#include <kj/string.h>
 
 #include <utility>
 

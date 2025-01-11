@@ -8,6 +8,9 @@ filegroup(
     srcs = glob(
         ["**/*.c++"],
         exclude = [
+            # TODO(cleanup): Continue shrinking the io target: Create independent targets for
+            # analytics-engine, kv, urlpattern and streams/compression, which either do not depend
+            # on io or do not have io depending on them.
             "**/*test*.c++",
             "data-url.c++",
             "encoding.c++",
