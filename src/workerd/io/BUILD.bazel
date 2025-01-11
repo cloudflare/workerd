@@ -303,6 +303,13 @@ wd_capnp_library(src = "features.capnp")
 
 wd_capnp_library(src = "frankenvalue.capnp")
 
+wd_capnp_library(
+    src = "container.capnp",
+    deps = [
+        "@capnp-cpp//src/capnp/compat:byte-stream_capnp",
+    ],
+)
+
 kj_test(
     src = "io-gate-test.c++",
     deps = [
