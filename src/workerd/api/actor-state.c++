@@ -825,10 +825,13 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId() {
   KJ_UNREACHABLE;
 }
 
-DurableObjectState::DurableObjectState(
-    Worker::Actor::Id actorId, kj::Maybe<jsg::Ref<DurableObjectStorage>> storage)
+DurableObjectState::DurableObjectState(Worker::Actor::Id actorId,
+    kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
+    kj::Maybe<rpc::Container::Client> container)
     : id(kj::mv(actorId)),
-      storage(kj::mv(storage)) {}
+      storage(kj::mv(storage)),
+      container(container.map(
+          [&](rpc::Container::Client& cap) { return jsg::alloc<Container>(kj::mv(cap)); })) {}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
