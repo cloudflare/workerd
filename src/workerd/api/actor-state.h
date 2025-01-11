@@ -8,6 +8,7 @@
 // See actor.h for APIs used by other Workers to talk to Actors.
 
 #include <workerd/api/actor.h>
+#include <workerd/api/container.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -462,7 +463,9 @@ class WebSocketRequestResponsePair: public jsg::Object {
 // The type passed as the first parameter to durable object class's constructor.
 class DurableObjectState: public jsg::Object {
  public:
-  DurableObjectState(Worker::Actor::Id actorId, kj::Maybe<jsg::Ref<DurableObjectStorage>> storage);
+  DurableObjectState(Worker::Actor::Id actorId,
+      kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
+      kj::Maybe<rpc::Container::Client> container);
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -470,6 +473,10 @@ class DurableObjectState: public jsg::Object {
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getStorage() {
     return storage.map([&](jsg::Ref<DurableObjectStorage>& p) { return p.addRef(); });
+  }
+
+  jsg::Optional<jsg::Ref<Container>> getContainer() {
+    return container.map([](jsg::Ref<Container>& c) { return c.addRef(); });
   }
 
   jsg::Promise<jsg::JsRef<jsg::JsValue>> blockConcurrencyWhile(
@@ -536,6 +543,7 @@ class DurableObjectState: public jsg::Object {
     JSG_METHOD(waitUntil);
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(storage, getStorage);
+    JSG_READONLY_INSTANCE_PROPERTY(container, getContainer);
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
@@ -574,6 +582,7 @@ class DurableObjectState: public jsg::Object {
  private:
   Worker::Actor::Id id;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
+  kj::Maybe<jsg::Ref<Container>> container;
 
   // Limits for Hibernatable WebSocket tags.
 

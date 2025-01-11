@@ -98,6 +98,7 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":cdp_capnp",
+        ":container_capnp",
         ":frankenvalue",
         ":io-gate",
         ":io-helpers",

@@ -3187,6 +3187,8 @@ struct Worker::Actor::Impl {
   kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
+  kj::Maybe<rpc::Container::Client> container;
+
   struct NoClass {};
   struct Initializing {};
 
@@ -3347,10 +3349,12 @@ struct Worker::Actor::Impl {
       kj::Own<ActorObserver> metricsParam,
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
+      kj::Maybe<rpc::Container::Client> container,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
+        container(kj::mv(container)),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
         outputGate(hooks),
@@ -3407,12 +3411,13 @@ Worker::Actor::Actor(const Worker& worker,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
     kj::Maybe<kj::Own<HibernationManager>> manager,
-    kj::Maybe<uint16_t> hibernationEventType)
+    kj::Maybe<uint16_t> hibernationEventType,
+    kj::Maybe<rpc::Container::Client> container)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType);
+      hibernationEventType, kj::mv(container));
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, lock.getWorker().impl->actorClasses.find(c)) {
@@ -3435,7 +3440,8 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
       KJ_IF_SOME(c, impl->actorCache) {
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
-      auto handler = info.cls(lock, jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage)),
+      auto handler = info.cls(lock,
+          jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage), kj::mv(impl->container)),
           KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
