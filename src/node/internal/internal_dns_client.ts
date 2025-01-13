@@ -232,11 +232,32 @@ export function normalizeSrv({ data }: Answer): SRV {
   };
 }
 
+// This regex works by:
+//
+// `"` - Matches an opening quote
+// ([^"]|"(?!"))* - Matches either:
+//   [^"] - Any character that's not a quote
+//   "(?!") - A quote that's not followed by another quote
+// `"` - Matches a closing quote
+// /g - Global flag to match all occurrences
+const SPLIT_REGEX = /"([^"]|"(?!"))*"/g;
+
 export function normalizeTxt({ data }: Answer): string[] {
   // Each entry has quotation marks as a prefix and suffix.
   // Node.js APIs doesn't have them.
   if (data.startsWith('"') && data.endsWith('"')) {
-    return [data.replaceAll('"', '')];
+    // If the input starts and ends with a quotation mark, we need to split
+    // each occurrence and remove the leading/trailing characters.
+    // For example, for the input `"test""test""test with " quote"`
+    // It returns: ['test', 'test', 'test with " quote']
+    return (
+      data.match(SPLIT_REGEX)?.map((s) => {
+        if (s.startsWith('"') && s.endsWith('"')) {
+          return s.slice(1, -1);
+        }
+        return s;
+      }) ?? []
+    );
   }
   return [data];
 }
