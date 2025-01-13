@@ -46,6 +46,8 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
+#include <pyodide/generated/pyodide_extra.capnp.h>
+
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
@@ -157,6 +159,7 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
     replacer->commit();
   }
 }
+}  // namespace
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
@@ -213,7 +216,6 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
   KJ_LOG(INFO, "Loaded Pyodide package from internet");
   return pyConfig.pyodideBundleManager.getPyodideBundle(version);
 }
-}  // namespace
 
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;

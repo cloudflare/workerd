@@ -265,4 +265,7 @@ class WorkerdApi final: public Worker::Api {
       capnp::List<config::Extension>::Reader extensions) const;
 };
 
+kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
+    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+
 }  // namespace workerd::server

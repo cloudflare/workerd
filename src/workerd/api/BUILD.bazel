@@ -136,7 +136,6 @@ wd_cc_library(
     hdrs = [
         "pyodide/pyodide.h",
         "pyodide/setup-emscripten.h",
-        "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
     implementation_deps = ["//src/workerd/util:string-buffer"],
     visibility = ["//visibility:public"],
