@@ -51,7 +51,7 @@ kj::Own<config::Config::Reader> parseConfig(kj::StringPtr text, kj::SourceLocati
 // This is intended to allow multi-line raw text to be specified conveniently using C++11
 // `R"(blah)"` literal syntax, without the need to mess up indentation relative to the
 // surrounding code.
-kj::String operator"" _blockquote(const char* str, size_t n) {
+kj::String operator""_blockquote(const char* str, size_t n) {
   kj::StringPtr text(str, n);
 
   // Ignore a leading newline so that `R"(` can be placed on the line before the initial indent.
