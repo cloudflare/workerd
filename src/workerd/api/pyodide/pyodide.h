@@ -420,8 +420,9 @@ class SetupEmscripten: public jsg::Object {
 
 using Worker = server::config::Worker;
 
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(
-    Worker::Reader conf, const PythonConfig& pythonConfig);
+jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
+    const PythonConfig& pythonConfig,
+    PythonSnapshotRelease::Reader pythonRelease);
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 

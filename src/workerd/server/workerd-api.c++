@@ -559,7 +559,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
       // Inject metadata that the entrypoint module will read.
       modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
-          makePyodideMetadataReader(conf, impl->pythonConfig), jsg::ModuleRegistry::Type::INTERNAL);
+          makePyodideMetadataReader(conf, impl->pythonConfig, pythonRelease),
+          jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
       if (featureFlags.getPythonExternalPackages()) {
@@ -984,12 +985,15 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
     auto limiterSpecifier = "pyodide-internal:limiter"_url;
 
+    auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     // Inject metadata that the entrypoint module will read.
     pyodideBundleBuilder.addSynthetic(metadataSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<PyodideMetadataReader,
             JsgWorkerdIsolate_TypeWrapper>(
-            [metadataReader = makePyodideMetadataReader(conf, pythonConfig)](jsg::Lock& js) mutable
-            -> jsg::Ref<PyodideMetadataReader> { return metadataReader.addRef(); }));
+            [metadataReader = makePyodideMetadataReader(conf, pythonConfig, pythonRelease)](
+                jsg::Lock& js) mutable -> jsg::Ref<PyodideMetadataReader> {
+      return metadataReader.addRef();
+    }));
     // Inject artifact bundler.
     pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<ArtifactBundler,
