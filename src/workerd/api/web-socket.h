@@ -98,64 +98,6 @@ class MessageEvent: public Event {
   }
 };
 
-class CloseEvent: public Event {
- public:
-  CloseEvent(uint code, kj::String reason, bool clean)
-      : Event("close"),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-  CloseEvent(kj::String type, int code, kj::String reason, bool clean)
-      : Event(kj::mv(type)),
-        code(code),
-        reason(kj::mv(reason)),
-        clean(clean) {}
-
-  struct Initializer {
-    jsg::Optional<int> code;
-    jsg::Optional<kj::String> reason;
-    jsg::Optional<bool> wasClean;
-
-    JSG_STRUCT(code, reason, wasClean);
-    JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
-  };
-  static jsg::Ref<CloseEvent> constructor(kj::String type, jsg::Optional<Initializer> initializer) {
-    Initializer init = kj::mv(initializer).orDefault({});
-    return jsg::alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
-        kj::mv(init.reason).orDefault(nullptr), init.wasClean.orDefault(false));
-  }
-
-  int getCode() {
-    return code;
-  }
-  kj::StringPtr getReason() {
-    return reason;
-  }
-  bool getWasClean() {
-    return clean;
-  }
-
-  JSG_RESOURCE_TYPE(CloseEvent) {
-    JSG_INHERIT(Event);
-
-    JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-    JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
-
-    JSG_TS_ROOT();
-    // CloseEvent will be referenced from the `WebSocketEventMap` define
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  int code;
-  kj::String reason;
-  bool clean;
-};
-
 // The forward declaration is necessary so we can make some
 // WebSocket methods accessible to WebSocketPair via friend declaration.
 class WebSocket;
@@ -695,8 +637,7 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::MessageEvent,                                \
-      api::MessageEvent::Initializer, api::WebSocket, api::WebSocketPair,                          \
+  api::MessageEvent, api::MessageEvent::Initializer, api::WebSocket, api::WebSocketPair,           \
       api::WebSocketPair::PairIterator,                                                            \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE

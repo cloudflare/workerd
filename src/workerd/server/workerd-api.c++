@@ -19,6 +19,7 @@
 #include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/memory-cache.h>
+#include <workerd/api/message-channel.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
@@ -103,6 +104,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_UNSAFE_ISOLATE_TYPES,
     EW_MEMORY_CACHE_ISOLATE_TYPES,
     EW_URL_ISOLATE_TYPES,
+    EW_MESSAGE_CHANNEL_ISOLATE_TYPES,
     EW_URL_STANDARD_ISOLATE_TYPES,
     EW_URLPATTERN_ISOLATE_TYPES,
     EW_WEBSOCKET_ISOLATE_TYPES,

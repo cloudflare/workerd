@@ -23,6 +23,7 @@ namespace workerd::api {
 class TailEvent;
 class Cache;
 class CacheStorage;
+class CloseEvent;
 class Crypto;
 class CryptoKey;
 class ErrorEvent;
