@@ -77,7 +77,7 @@ if not "$(SIDECAR)" == "" (
 )
 
 REM Run the actual test
-powershell -Command "%*" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+%* -dTEST_TMPDIR=%TEST_TMPDIR%
 set TEST_EXIT=!ERRORLEVEL!
 
 REM Cleanup sidecar if it was started
