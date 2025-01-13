@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "net-nodejs-test.js")
         ],
         compatibilityDate = "2025-01-09",
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_net", "experimental"],
+        compatibilityFlags = ["nodejs_compat"],
       )
     ),
     ( name = "internet", network = ( allow = ["private"] ) ),

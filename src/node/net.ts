@@ -27,14 +27,6 @@
 
 import inner from 'cloudflare-internal:sockets';
 
-import { default as compatFlags } from 'workerd:compatibility-flags';
-
-if (!compatFlags.nodeJsCompatNet || !compatFlags.workerdExperimental) {
-  throw new Error(
-    'To use the node:net built-in module, set the nodejs_compat_net flag'
-  );
-}
-
 import {
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_ARG_TYPE,
