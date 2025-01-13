@@ -2,10 +2,34 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
+load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 load("//:build/wpt_test.bzl", "wpt_test")
 
+srcs = glob(["*-test.ts"])
+
 [wpt_test(
-    name = file.replace("-test.js", ""),
-    test_js = file,
-    wpt_directory = "@wpt//:{}".format(file.replace("-test.js", "")),
-) for file in glob(["*-test.js"])]
+    name = file.replace("-test.ts", ""),
+    test_config = file,
+    wpt_directory = "@wpt//:{}".format(file.replace("-test.ts", "")),
+) for file in srcs]
+
+eslint_bin.eslint_test(
+    name = "all@eslint",
+    size = "large",
+    args = [
+        "--config $(location {})".format("eslint.config.mjs"),
+        "--parser-options project:$(location {})".format("tsconfig.json"),
+        "-f stylish",
+        "--report-unused-disable-directives",
+    ] + ["$(location " + src + ")" for src in srcs],
+    data = srcs + [
+        "eslint.config.mjs",
+        "tsconfig.json",
+        "//tools:base-eslint",
+    ],
+    tags = ["lint"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)

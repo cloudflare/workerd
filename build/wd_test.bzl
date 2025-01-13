@@ -5,6 +5,7 @@ def wd_test(
         data = [],
         name = None,
         args = [],
+        ts_deps = [],
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -38,7 +39,7 @@ def wd_test(
             source_map = True,
             composite = True,
             declaration = True,
-            deps = ["//src/node:node@tsproject"],
+            deps = ["//src/node:node@tsproject"] + ts_deps,
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]
 
