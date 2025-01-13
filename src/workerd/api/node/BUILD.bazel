@@ -1,5 +1,4 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
-load("@bazel_skylib//lib:selects.bzl", "selects")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
@@ -29,6 +28,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":node-core",
+        "//src/node",
         "@capnp-cpp//src/kj/compat:kj-brotli",
     ],
 )

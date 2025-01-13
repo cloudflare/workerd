@@ -18,6 +18,8 @@ cc_ast_dump(
         "//conditions:default": [],
     }),
     deps = [
+        "//src/cloudflare",
+        "//src/node",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:memory-cache",

@@ -2301,6 +2301,6 @@ UrlPattern::UrlPattern(kj::Array<Component> components, bool ignoreCase)
 
 }  // namespace workerd::jsg
 
-const workerd::jsg::Url operator"" _url(const char* str, size_t size) {
+const workerd::jsg::Url operator""_url(const char* str, size_t size) {
   return KJ_ASSERT_NONNULL(workerd::jsg::Url::tryParse(kj::ArrayPtr<const char>(str, size)));
 }

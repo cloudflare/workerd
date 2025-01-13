@@ -95,6 +95,8 @@ wd_cc_library(
         ":memory-cache",
         ":pyodide",
         ":r2",
+        "//src/cloudflare",
+        "//src/node",
         "//src/pyodide",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api/node",
