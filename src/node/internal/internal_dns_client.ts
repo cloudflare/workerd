@@ -236,7 +236,7 @@ export function normalizeTxt({ data }: Answer): string[] {
   // Each entry has quotation marks as a prefix and suffix.
   // Node.js APIs doesn't have them.
   if (data.startsWith('"') && data.endsWith('"')) {
-    return [data.slice(1, -1)];
+    return [data.replaceAll('"', '')];
   }
   return [data];
 }
