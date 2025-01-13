@@ -63,6 +63,9 @@ def _wd_test_impl(ctx):
     # can't just specify some other executable with some args. OK, fine, we'll use a script that
     # just execs its args.
     if is_windows:
+        if len(ctx.attr.env):
+            fail("`env` attribute to _wd_test not supported on Windows")
+
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
         ctx.actions.write(
@@ -73,6 +76,12 @@ def _wd_test_impl(ctx):
         )
     else:
         executable = ctx.outputs.executable
+
+        env_exports_list = []
+        for key, value in ctx.attr.env.items():
+            env_exports_list.append('export %s="%s"' % (key, value))
+        env_exports = "\n".join(env_exports_list)
+
         ctx.actions.write(
             output = executable,
             content = """
@@ -80,8 +89,9 @@ def _wd_test_impl(ctx):
                 echo
                 echo \\(cd `pwd` \\&\\& \"$@\" -dTEST_TMPDIR=$TEST_TMPDIR\\)
                 echo
+                %s
                 exec \"$@\" -dTEST_TMPDIR=$TEST_TMPDIR
-                """,
+                """ % env_exports,
             is_executable = True,
         )
 
@@ -105,5 +115,6 @@ _wd_test = rule(
         "flags": attr.string_list(),
         "data": attr.label_list(allow_files = True),
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
+        "env": attr.string_dict(default = {}),
     },
 )
