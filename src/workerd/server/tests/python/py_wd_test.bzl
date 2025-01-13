@@ -3,7 +3,7 @@ load("//:build/wd_test.bzl", "wd_test")
 
 FEATURE_FLAGS = {
     "0.26.0a2": ["python_workers"],
-    "development": ["python_workers_development"],
+    "development": ["python_workers_development", "python_external_packages"],
 }
 
 def py_wd_test(
