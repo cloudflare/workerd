@@ -50,7 +50,7 @@ def wd_rust_binary(
         crate_name = crate_name,
         srcs = srcs,
         rustc_env = rustc_env,
-        deps = deps,
+        deps = deps + ["@workerd-v8//:v8-static"],
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,

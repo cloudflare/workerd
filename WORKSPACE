@@ -305,6 +305,7 @@ http_archive(
         "//:patches/v8/0020-Add-another-slot-in-the-isolate-for-embedder.patch",
         "//:patches/v8/0021-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
         "//:patches/v8/0022-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+        "//:patches/v8/0023-Towards-macOS-V8-shared-library-build.patch",
     ],
     strip_prefix = "v8-13.1.201.8",
     url = "https://github.com/v8/v8/archive/refs/tags/13.1.201.8.tar.gz",
@@ -381,8 +382,17 @@ new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
-        deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
-        visibility = ["//visibility:public"])""",
+        deps = [ "@workerd//:icudata-embed", "@com_googlesource_chromium_icu//:icu_headers", "@v8//:v8_include"],
+        visibility = ["//visibility:public"])
+cc_library(
+        name = "v8-static",
+        deps = [ "@v8//:v8_icu" ],
+        visibility = ["//visibility:public"])
+cc_shared_library(
+        name = "v8-shared",
+        deps = [ "@v8//:v8_icu" ],
+        visibility = ["//visibility:public"])
+""",
     path = "empty",
 )
 

@@ -11,6 +11,9 @@ def kj_test(
         deps = [
             "@capnp-cpp//src/kj:kj-test",
         ] + deps,
+        dynamic_deps = [
+            "@workerd-v8//:v8-shared",
+        ],
         linkopts = select({
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],

@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 12 Jan 2025 19:14:30 -0500
+Subject: Towards macOS V8 shared library build
+
+Change-Id: Ib8a91d8dafcdf46607bd39738c121fb60e9597c4
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 065c5d32b8bd79ca37f074c14846516fabaa20e2..a7329c5e6a97bfc732579b8f0fd98a2660e3a741 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -588,6 +588,14 @@ filegroup(
+     srcs = glob(["include/**/*.h"]),
+ )
+ 
++# Transitively defines V8 build flags and adds includes for its public API.
++v8_library(
++    name = "v8_include",
++    srcs = [],
++    hdrs = [":public_header_files"],
++    visibility = ["//visibility:public"],
++)
++
+ filegroup(
+     name = "public_wasm_c_api_header_files",
+     srcs = [
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index 5127ceb7b783b11d5750c01977d7e34606c39667..293d265a8f3bbd210d939d20d2815d3e16cc1eab 100644
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -111,3 +111,13 @@ cc_library(
+     ],
+     alwayslink = 1,
+ )
++
++cc_library(
++    name = "icu_headers",
++    hdrs = glob([
++        "source/common/unicode/*.h",
++    ]),
++    strip_include_prefix = "source/common",
++    visibility = ["//visibility:public"],
++)
++

@@ -24,6 +24,9 @@ def wd_cc_binary(
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
         }),
+        dynamic_deps = [
+            "@workerd-v8//:v8-shared",
+        ],
         visibility = visibility,
         **kwargs
     )
