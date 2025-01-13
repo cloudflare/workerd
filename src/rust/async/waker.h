@@ -78,28 +78,19 @@ struct PromiseArcWakerPair {
   kj::Arc<const ArcWaker> waker;
 };
 
-// TODO(now): Doc comment.
+// Construct a new promise and ArcWaker promise pair, with the Promise to be scheduled on the event
+// loop associated with `executor`.
 PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor);
 
 // =======================================================================================
 // KjWaker
 
-class FutureAwaiterBase;
+class CoAwaitWaker;
 
-// KjWaker is the waker passed to Rust's `Future::poll()` function. KjWaker itself is not
-// refcounted -- instead it is intended to live locally on the stack or in a coroutine frame, and
-// trying to `clone()` it will cause it to allocate an ArcWaker for the caller.
-//
-// This class is mostly an implementation detail of our `co_await` operator implementation for Rust
-// Futures. KjWaker exists in order to optimize the case where Rust async code awaits a KJ
-// promise, in which case we can make the outer KJ coroutine wait more or less directly on the inner
-// KJ promise which Rust owns.
+// KjWaker is intended to live locally on the stack or in a coroutine frame. Trying to `clone()` it
+// will cause it to allocate an ArcWaker for the caller.
 class KjWaker: public CxxWaker {
 public:
-  // Saves a reference to the FutureAwaiter which is using this KjWaker. The FutureAwaiter creates
-  // KjWakers on the stack in `await_ready()`, so its lifetime always encloses KjWakers.
-  explicit KjWaker(FutureAwaiterBase& futureAwaiter);
-
   // Create a new or clone an existing ArcWaker, leak its pointer, and return it. This may be called
   // by any thread.
   const CxxWaker* clone() const override;
@@ -121,14 +112,6 @@ public:
   // In addition to the above functions, Rust may invoke `is_current()` during `future.poll()`
   // execution. It uses this to implement a short- circuit optimization when it awaits a KJ promise.
 
-  // True if the current thread's kj::Executor is the same as the KjWaker's.
-  bool is_current() const;
-
-  // Called by RustPromiseAwaiter's constructor to get a reference to an Event which will call
-  // the current Future's `poll()` function. This is used to `.await` OwnPromiseNodes in Rust
-  // without having to clone an ArcWaker.
-  FutureAwaiterBase& getFutureAwaiter();
-
   struct State {
     // Number of times this Waker was synchronously woken during `future.poll()`.
     // Incremented by `wake_by_ref()`.
@@ -148,20 +131,21 @@ public:
   // since the last call to `reset()`.
   State reset();
 
-private:
-  FutureAwaiterBase& futureAwaiter;
+  // Access the Executor that was active when this KjWaker was constructed. This a convenience
+  // function to help CoAwaitWaker figure out if it can optimize Rust Promise `.await`s
+  // without having to store its own Executor reference.
+  const kj::Executor& getExecutor() const;
 
+private:
   // We store the kj::Executor for the constructing thread so that we can lazily instantiate a
-  // CrossThreadPromiseFulfiller from any thread in our `clone()` implementation. This also allows
-  // us to guarantee that `wake_after()` will only be called from the awaiting thread, allowing us
-  // to ignore thread-safety for the `wakeAfter` promise.
+  // CrossThreadPromiseFulfiller from any thread in our `clone()` implementation.
   const kj::Executor& executor = kj::getCurrentThreadExecutor();
 
   // Initialized by `clone()`, which may be called by any thread.
   kj::MutexGuarded<kj::Maybe<PromiseArcWakerPair>> cloned;
 
   // Incremented by `wake_by_ref()`, which may be called by any thread. All operations use relaxed
-  // memory order, because this counter doesn't guard any memory.
+  // memory order, because this counter does not guard any memory.
   mutable std::atomic<uint> wakeCount { 0 };
 
   // Incremented by `drop()`, so we can validate that `drop()` is only called once on this object.

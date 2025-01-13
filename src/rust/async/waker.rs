@@ -17,6 +17,17 @@ use crate::ffi::CxxWaker;
 unsafe impl Send for CxxWaker {}
 unsafe impl Sync for CxxWaker {}
 
+impl From<&CxxWaker> for Waker {
+    fn from(waker: &CxxWaker) -> Self {
+        let waker = RawWaker::new(waker as *const CxxWaker as *const (), &CXX_WAKER_VTABLE);
+        // Safety: CxxWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
+        // implementation functions are all thread-safe.
+        //
+        // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
+        unsafe { Waker::from_raw(waker) }
+    }
+}
+
 // Helper function for use in CxxWaker's RawWakerVTable implementation to factor out a tedious null
 // pointer check.
 fn deref_cxx_waker<'a>(data: *const ()) -> Option<&'a CxxWaker> {
@@ -73,9 +84,9 @@ static CXX_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_drop,
 );
 
-use crate::ffi::KjWaker;
+use crate::ffi::CoAwaitWaker;
 
-// Safety: We use the type system to express the Sync nature of KjWaker in the cxx-rs FFI
+// Safety: We use the type system to express the Sync nature of CoAwaitWaker in the cxx-rs FFI
 // boundary. Specifically, we only allow invocations on const KjWakers, and in KJ C++, use of
 // const-qualified functions is thread-safe by convention. Our implementations of KjWakers in C++
 // respect this convention.
@@ -85,13 +96,16 @@ use crate::ffi::KjWaker;
 //
 // https://doc.rust-lang.org/std/task/struct.RawWaker.html
 // https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
-unsafe impl Send for KjWaker {}
-unsafe impl Sync for KjWaker {}
+unsafe impl Send for CoAwaitWaker {}
+unsafe impl Sync for CoAwaitWaker {}
 
-impl From<&KjWaker> for Waker {
-    fn from(waker: &KjWaker) -> Self {
-        let waker = RawWaker::new(waker as *const KjWaker as *const (), &KJ_WAKER_VTABLE);
-        // Safety: KjWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
+impl From<&CoAwaitWaker> for Waker {
+    fn from(waker: &CoAwaitWaker) -> Self {
+        let waker = RawWaker::new(
+            waker as *const CoAwaitWaker as *const (),
+            &CO_AWAIT_WAKER_VTABLE,
+        );
+        // Safety: CoAwaitWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
         // implementation functions are all thread-safe.
         //
         // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
@@ -99,26 +113,29 @@ impl From<&KjWaker> for Waker {
     }
 }
 
-/// If `waker` wraps a `KjWaker` associated with the current thread's KJ event loop, return a
-/// reference to the `KjWaker`.
-pub fn deref_kj_waker<'a>(waker: &Waker) -> Option<&'a KjWaker> {
-    if waker.vtable() == &KJ_WAKER_VTABLE {
+/// If `waker` wraps a `CoAwaitWaker` associated with the current thread's KJ event loop, return a
+/// reference to the `CoAwaitWaker`.
+pub fn deref_co_await_waker<'a>(waker: &Waker) -> Option<&'a CoAwaitWaker> {
+    if waker.vtable() == &CO_AWAIT_WAKER_VTABLE {
         let data = waker.data();
         assert!(!data.is_null());
-        let p = data as *const KjWaker;
+        let p = data as *const CoAwaitWaker;
+
         // Safety:
         // 1. p is guaranteed non-null by the assertion above.
-        // 2. We possess a const borrow of the Waker which owns this pointer, so we are guaranteed
-        //    the Waker is still alive. We assume the Waker was constructed correctly to begin with,
-        //    and that therefore the pointer still points to valid memory.
-        // 3. We do not read or write the KjWaker's memory, so there are no atomicity concerns nor
+        // 2. We assume the Waker was constructed correctly to begin with in the C++ -> Rust call to
+        //    `poll()`, and that therefore the pointer still points to valid memory. Our `poll()`
+        //    implementation that receives the CoAwaitWaker type receives it by const borrow, and we are
+        //    creating another const borrow here, and no mutable borrows exist, so there is no UB
+        //    in that regard.
+        // 3. We do not read or write the CoAwaitWaker's memory, so there are no atomicity concerns nor
         //    interleaved pointer/reference access concerns.
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
-        let kj_waker = unsafe { &*p };
+        let co_await_waker = unsafe { &*p };
 
-        if kj_waker.is_current() {
-            Some(kj_waker)
+        if co_await_waker.is_current() {
+            Some(co_await_waker)
         } else {
             None
         }
@@ -127,10 +144,10 @@ pub fn deref_kj_waker<'a>(waker: &Waker) -> Option<&'a KjWaker> {
     }
 }
 
-// Define a separate `KJ_WAKER_VTABLE` object so we can distinguish KjWakers from other Waker
+// Define a separate `CO_AWAIT_WAKER_VTABLE` object so we can distinguish KjWakers from other Waker
 // objects. Since KjWakers have CxxWaker as a base class, we can re-use the CxxWaker's vtable
 // functions.
-static KJ_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+static CO_AWAIT_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_clone,
     cxx_waker_wake,
     cxx_waker_wake_by_ref,
@@ -164,12 +181,21 @@ impl RustWaker {
         self.inner = None;
     }
 
-    pub fn wake(&self) {
-        // TODO(now): Should be able to call `.wake()` because we're only called on the event loop's
-        //   thread.
+    pub fn is_some(&self) -> bool {
+        self.inner.is_some()
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.inner.is_none()
+    }
+
+    pub fn wake(&mut self) {
         self.inner
-            .as_ref()
-            .expect("should have been set() before wake()")
-            .wake_by_ref();
+            .take()
+            .expect(
+                "RustWaker::set() should be called before RustPromiseAwaiter::poll(); \
+                RustWaker::wake() should be called at most once after poll()",
+            )
+            .wake();
     }
 }

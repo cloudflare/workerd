@@ -44,12 +44,9 @@ PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor) {
 // =======================================================================================
 // KjWaker
 
-KjWaker::KjWaker(FutureAwaiterBase& futureAwaiter): futureAwaiter(futureAwaiter) {}
-
 const CxxWaker* KjWaker::clone() const {
-  // Rust code wants to suspend and wait for something other than an OwnPromiseNode from the same
-  // thread as this KjWaker. We'll start handing out ArcWakers if we haven't already been woken
-  // synchronously.
+  // Rust code wants to suspend and wait for something. We'll start handing out ArcWakers if we
+  // haven't already been woken synchronously.
 
   if (wakeCount.load(std::memory_order_relaxed) > 0) {
     // We were already woken synchronously, so there's no point handing out more wakers for the
@@ -70,7 +67,7 @@ const CxxWaker* KjWaker::clone() const {
 void KjWaker::wake() const {
   // KjWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
   // `wake()`, which drops `self`, on this object.
-  KJ_UNIMPLEMENTED("Rust user code should never have a consumable reference to KjWaker");
+  KJ_UNIMPLEMENTED("Rust user code should never have possess a consumable reference to KjWaker");
 }
 
 void KjWaker::wake_by_ref() const {
@@ -82,17 +79,15 @@ void KjWaker::drop() const {
   ++dropCount;
 }
 
-bool KjWaker::is_current() const {
-  return &executor == &kj::getCurrentThreadExecutor();
-}
-
-FutureAwaiterBase& KjWaker::getFutureAwaiter() {
-  return futureAwaiter;
+const kj::Executor& KjWaker::getExecutor() const {
+  return executor;
 }
 
 KjWaker::State KjWaker::reset() {
-  // Getting the state without a lock is safe, because this function is only called after
-  // `future.poll(awaitWaker)` has returned, meaning Rust has dropped its reference.
+  // This function is only called after `future.poll(awaitWaker)` has returned, meaning Rust has
+  // dropped its reference. Thus, we don't need to worry about thread-safety here, and can call
+  // `cloned.getWithoutLock()`, for example.
+
   KJ_ASSERT(dropCount == 1);
   KJ_DEFER(dropCount = 0);
   KJ_DEFER(wakeCount.store(0, std::memory_order_relaxed));

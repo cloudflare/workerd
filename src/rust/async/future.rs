@@ -5,7 +5,8 @@ use std::task::Waker;
 
 use cxx::ExternType;
 
-use crate::ffi::KjWaker;
+use crate::ffi::CoAwaitWaker;
+use crate::ffi::CxxWaker;
 
 // Expose Pin<Box<dyn Future<Output = ()>> to C++ as BoxFutureVoid.
 //
@@ -18,9 +19,6 @@ use crate::ffi::KjWaker;
 pub struct BoxFuture<T>(Pin<Box<dyn Future<Output = T> + Send>>);
 
 // TODO(now): Might as well implement Future for BoxFuture<T>.
-
-#[repr(transparent)]
-pub struct PtrBoxFuture<T>(*mut BoxFuture<T>);
 
 // A From implementation to make it easier to convert from an arbitrary Future
 // type into a BoxFuture<T>.
@@ -35,20 +33,40 @@ impl<T, F: Future<Output = T> + Send + 'static> From<Pin<Box<F>>> for BoxFuture<
     }
 }
 
-// TODO(now): Use bindgen to guarantee safety.
-// TODO(now): Make this a macro so we can define them easier?
+// TODO(now): Define these trait implementations with a macro?
+
+// Safety: The size of a Pin<P> is the size of P; the size of a Box<T> is the size of a reference to
+// T, and references to `dyn Trait` types contain two pointers: one for the object, one for the
+// vtable. So, the size of `Pin<Box<dyn Future<Output = T>>>` (a.k.a. `BoxFuture<T>`) is two
+// pointers, and that is unlikely to change.
+//
+// https://doc.rust-lang.org/std/keyword.dyn.html
+// - "As such, a dyn Trait reference contains two pointers."
 unsafe impl ExternType for BoxFuture<()> {
     type Id = cxx::type_id!("workerd::rust::async::BoxFutureVoid");
     type Kind = cxx::kind::Trivial;
 }
 
-// TODO(now): Use bindgen to guarantee safety.
+#[repr(transparent)]
+pub struct PtrBoxFuture<T>(*mut BoxFuture<T>);
+
+// Safety: Raw pointers are the same size in both languages.
 unsafe impl ExternType for PtrBoxFuture<()> {
     type Id = cxx::type_id!("workerd::rust::async::PtrBoxFutureVoid");
     type Kind = cxx::kind::Trivial;
 }
 
-pub fn box_future_void_poll(future: &mut BoxFuture<()>, waker: &KjWaker) -> bool {
+pub fn box_future_void_poll(future: &mut BoxFuture<()>, waker: &CxxWaker) -> bool {
+    let waker = Waker::from(waker);
+    let mut cx = Context::from_waker(&waker);
+    // TODO(now): Figure out how to propagate value-or-exception.
+    future.0.as_mut().poll(&mut cx).is_ready()
+}
+
+pub fn box_future_void_poll_with_co_await_waker(
+    future: &mut BoxFuture<()>,
+    waker: &CoAwaitWaker,
+) -> bool {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
     // TODO(now): Figure out how to propagate value-or-exception.

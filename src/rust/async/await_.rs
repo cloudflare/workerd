@@ -1,8 +1,6 @@
 use std::future::Future;
 use std::future::IntoFuture;
 
-// use std::mem::MaybeUninit;
-
 use std::pin::Pin;
 
 use std::task::Context;
@@ -10,25 +8,26 @@ use std::task::Poll;
 
 use cxx::ExternType;
 
-use crate::waker::deref_kj_waker;
+use crate::waker::deref_co_await_waker;
 
 use crate::lazy_pin_init::LazyPinInit;
+
+// =======================================================================================
+// GuardedRustPromiseAwaiter
+
+use crate::ffi::guarded_rust_promise_awaiter_drop_in_place;
+use crate::ffi::guarded_rust_promise_awaiter_new_in_place;
 
 #[path = "await.h.rs"]
 mod await_h;
 pub use await_h::GuardedRustPromiseAwaiter;
 
-// TODO(now): Safety comment, observe that it can be sent across threads, but will panic if polled
-//   with no KJ EventLoop active, or if subsequently polled with a different KJ EventLoop active.
+// Safety: KJ Promises are not associated with threads, but with event loops at construction time.
+// Therefore, they can be polled from any thread, as long as that thread has the correct event loop
+// active at the time of the call to `poll()`. If the correct event loop is not active,
+// GuardedRustPromiseAwaiter's API will panic. (The Guarded- prefix refers to the C++ class template
+// ExecutorGuarded, which enforces the correct event loop requirement.)
 unsafe impl Send for GuardedRustPromiseAwaiter {}
-
-#[repr(transparent)]
-pub struct PtrGuardedRustPromiseAwaiter(*mut GuardedRustPromiseAwaiter);
-
-use crate::ffi::guarded_rust_promise_awaiter_drop_in_place;
-use crate::ffi::guarded_rust_promise_awaiter_new_in_place;
-
-use crate::OwnPromiseNode;
 
 impl Drop for GuardedRustPromiseAwaiter {
     fn drop(&mut self) {
@@ -52,13 +51,21 @@ impl Drop for GuardedRustPromiseAwaiter {
     }
 }
 
-// TODO(now): bindgen to guarantee safety
+// Safety: We have a static_assert in await.c++ which breaks if you change the size or alignment
+// of the C++ definition of GuardedRustPromiseAwaiter, with instructions to regenerate the bindgen-
+// generated type. I couldn't figure out how to static_assert on the actual generated Rust struct,
+// though, so it's not perfect. Ideally we'd run bindgen in the build system.
+//
+// https://docs.rs/cxx/latest/cxx/trait.ExternType.html#integrating-with-bindgen-generated-types
 unsafe impl ExternType for GuardedRustPromiseAwaiter {
     type Id = cxx::type_id!("workerd::rust::async::GuardedRustPromiseAwaiter");
     type Kind = cxx::kind::Opaque;
 }
 
-// TODO(now): bindgen to guarantee safety
+#[repr(transparent)]
+pub struct PtrGuardedRustPromiseAwaiter(*mut GuardedRustPromiseAwaiter);
+
+// Safety: Raw pointers are the same size in both languages.
 unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
     type Id = cxx::type_id!("workerd::rust::async::PtrGuardedRustPromiseAwaiter");
     type Kind = cxx::kind::Trivial;
@@ -66,6 +73,8 @@ unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
 
 // =======================================================================================
 // Await syntax for OwnPromiseNode
+
+use crate::OwnPromiseNode;
 
 impl IntoFuture for OwnPromiseNode {
     type Output = ();
@@ -79,8 +88,8 @@ impl IntoFuture for OwnPromiseNode {
 pub struct LazyRustPromiseAwaiter {
     node: Option<OwnPromiseNode>,
     awaiter: LazyPinInit<GuardedRustPromiseAwaiter>,
-    // Safety: `rust_waker` must be declared after `awaiter`, because `awaiter` stores a pointer to
-    // `rust_waker`. This ensures `rust_waker` will be dropped after `awaiter`.
+    // Safety: `rust_waker` must be declared after `awaiter`, because `awaiter` contains a reference
+    // to `rust_waker`. This ensures `rust_waker` will be dropped after `awaiter`.
     rust_waker: RustWaker,
 }
 
@@ -99,8 +108,18 @@ impl LazyRustPromiseAwaiter {
         // will be None and the constructor will not run.
         let node = self.node.take();
 
+        // Safety: `awaiter` stores `rust_waker_ptr` and uses it to call `wake()`. Note that
+        // `awaiter` is `self.awaiter`, which lives before `self.rust_waker`. Since struct members
+        // are dropped in declaration order, the `rust_waker_ptr` that `awaiter` stores will always
+        // be valid during its lifetime.
+        //
+        // We pass a mutable pointer to C++. This is safe, because our use of the RustWaker inside
+        // of `std::task::Waker` is synchronized by ensuring we only allow calls to `poll()` on the
+        // thread with the Promise's event loop active.
+        let rust_waker_ptr = &mut self.rust_waker as *mut RustWaker;
+
         // Safety:
-        // 1. We do not implment Unpin for LazyRustPromiseAwaiter.
+        // 1. We do not implement Unpin for LazyRustPromiseAwaiter.
         // 2. Our Drop trait implementation does not move the awaiter value, nor do we use
         //    `repr(packed)` anywhere.
         // 3. The backing memory is inside our pinned Future, so we can be assured our Drop trait
@@ -119,6 +138,7 @@ impl LazyRustPromiseAwaiter {
         awaiter.get_or_init(move |ptr: *mut GuardedRustPromiseAwaiter| unsafe {
             guarded_rust_promise_awaiter_new_in_place(
                 PtrGuardedRustPromiseAwaiter(ptr),
+                rust_waker_ptr,
                 node.expect("node should be Some in call to init()"),
             );
         })
@@ -130,23 +150,14 @@ use crate::RustWaker;
 impl Future for LazyRustPromiseAwaiter {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<()> {
-        // Safety: We are pinned, so this pointer to our RustWaker is valid for as long as
-        // `self.rust_waker` is valid.
-        let rust_waker_ptr = &self.rust_waker as *const RustWaker;
-
-        let done = if let Some(kj_waker) = deref_kj_waker(cx.waker()) {
+        let done = if let Some(kj_waker) = deref_co_await_waker(cx.waker()) {
             self.rust_waker.set_none();
             let awaiter = self.as_mut().get_awaiter();
-            let done = awaiter.poll_with_kj_waker(kj_waker);
-            done
+            awaiter.poll_with_co_await_waker(kj_waker)
         } else {
             self.rust_waker.set(cx.waker());
             let awaiter = self.as_mut().get_awaiter();
-            // Safety: `awaiter` stores `rust_waker_ptr` and uses it to call `wake_by_ref()`. Note
-            // that `awaiter` is `self.awaiter`, which lives before `self.rust_waker`. Since struct
-            // members are dropped in declaration order, the `rust_waker_ptr` that `awaiter` stores
-            // will always be valid during its lifetime.
-            unsafe { awaiter.poll(rust_waker_ptr) }
+            awaiter.poll()
         };
 
         if done {

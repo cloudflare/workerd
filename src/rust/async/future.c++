@@ -13,8 +13,12 @@ BoxFutureVoid::~BoxFutureVoid() noexcept {
   }
 }
 
-bool BoxFutureVoid::poll(const KjWaker& waker) noexcept {
+bool BoxFutureVoid::poll(const CxxWaker& waker) noexcept {
   return box_future_void_poll(*this, waker);
+}
+
+bool BoxFutureVoid::poll(const CoAwaitWaker& waker) noexcept {
+  return box_future_void_poll_with_co_await_waker(*this, waker);
 }
 
 }  // namespace workerd::rust::async

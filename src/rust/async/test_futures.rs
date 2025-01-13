@@ -7,9 +7,9 @@ use std::pin::Pin;
 
 use std::sync::Arc;
 
-use std::task::Wake;
 use std::task::Context;
 use std::task::Poll;
+use std::task::Wake;
 use std::task::Waker;
 
 use crate::BoxFuture;
@@ -32,13 +32,17 @@ struct WakingFuture {
 
 impl WakingFuture {
     fn new(cloning_action: CloningAction, waking_action: WakingAction) -> Self {
-        Self { done: false, cloning_action, waking_action }
+        Self {
+            done: false,
+            cloning_action,
+            waking_action,
+        }
     }
 }
 
-fn do_no_clone_wake(waker: &Waker, waking_action: WakingAction)  {
+fn do_no_clone_wake(waker: &Waker, waking_action: WakingAction) {
     match waking_action {
-        WakingAction::None => {},
+        WakingAction::None => {}
         WakingAction::WakeByRefSameThread => waker.wake_by_ref(),
         WakingAction::WakeByRefBackgroundThread => on_background_thread(|| waker.wake_by_ref()),
         WakingAction::WakeSameThread | WakingAction::WakeBackgroundThread => {
@@ -48,9 +52,9 @@ fn do_no_clone_wake(waker: &Waker, waking_action: WakingAction)  {
     }
 }
 
-fn do_cloned_wake(waker: Waker, waking_action: WakingAction)  {
+fn do_cloned_wake(waker: Waker, waking_action: WakingAction) {
     match waking_action {
-        WakingAction::None => {},
+        WakingAction::None => {}
         WakingAction::WakeByRefSameThread => waker.wake_by_ref(),
         WakingAction::WakeByRefBackgroundThread => on_background_thread(|| waker.wake_by_ref()),
         WakingAction::WakeSameThread => waker.wake(),
@@ -75,11 +79,11 @@ impl Future for WakingFuture {
             CloningAction::CloneSameThread => {
                 let waker = waker.clone();
                 do_cloned_wake(waker, self.waking_action);
-            },
+            }
             CloningAction::CloneBackgroundThread => {
                 let waker = on_background_thread(|| waker.clone());
                 do_cloned_wake(waker, self.waking_action);
-            },
+            }
             CloningAction::WakeByRefThenCloneSameThread => {
                 waker.wake_by_ref();
                 let waker = waker.clone();
@@ -93,7 +97,10 @@ impl Future for WakingFuture {
     }
 }
 
-pub fn new_waking_future_void(cloning_action: CloningAction, waking_action: WakingAction) -> BoxFuture<()> {
+pub fn new_waking_future_void(
+    cloning_action: CloningAction,
+    waking_action: WakingAction,
+) -> BoxFuture<()> {
     Box::pin(WakingFuture::new(cloning_action, waking_action)).into()
 }
 
@@ -138,15 +145,15 @@ pub fn new_layered_ready_future_void() -> BoxFuture<()> {
     Box::pin(async {
         crate::ffi::new_ready_promise_node().await;
         crate::ffi::new_coroutine_promise_node().await;
-    }).into()
+    })
+    .into()
 }
 
 // From example at https://doc.rust-lang.org/std/future/fn.poll_fn.html#capturing-a-pinned-state
 fn naive_select<T>(
     a: impl Future<Output = T> + Send,
     b: impl Future<Output = T> + Send,
-) -> impl Future<Output = T> + Send
-{
+) -> impl Future<Output = T> + Send {
     async {
         let (mut a, mut b) = (pin!(a), pin!(b));
         future::poll_fn(move |cx| {
@@ -157,21 +164,21 @@ fn naive_select<T>(
             } else {
                 Poll::Pending
             }
-        }).await
+        })
+        .await
     }
 }
 
 // A Future which polls multiple OwnPromiseNodes at once.
 pub fn new_naive_select_future_void() -> BoxFuture<()> {
-    Box::pin(
+    Box::pin(naive_select(
+        crate::ffi::new_pending_promise_node().into_future(),
         naive_select(
-            crate::ffi::new_pending_promise_node().into_future(),
-            naive_select(
-                crate::ffi::new_coroutine_promise_node().into_future(),
-                crate::ffi::new_coroutine_promise_node().into_future()
-            )
-        )
-    ).into()
+            crate::ffi::new_coroutine_promise_node().into_future(),
+            crate::ffi::new_coroutine_promise_node().into_future(),
+        ),
+    ))
+    .into()
 }
 
 struct WrappedWaker(Waker);
@@ -200,6 +207,8 @@ pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
             } else {
                 Poll::Pending
             }
-        }).await
-    }).into()
+        })
+        .await
+    })
+    .into()
 }

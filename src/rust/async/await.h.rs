@@ -4,12 +4,12 @@
 #[repr(align(8))]
 #[derive(Debug)]
 pub struct GuardedRustPromiseAwaiter {
-    pub _bindgen_opaque_blob: [u64; 17usize],
+    pub _bindgen_opaque_blob: [u64; 16usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of GuardedRustPromiseAwaiter"]
-        [::std::mem::size_of::<GuardedRustPromiseAwaiter>() - 136usize];
+        [::std::mem::size_of::<GuardedRustPromiseAwaiter>() - 128usize];
     ["Alignment of GuardedRustPromiseAwaiter"]
         [::std::mem::align_of::<GuardedRustPromiseAwaiter>() - 8usize];
 };
