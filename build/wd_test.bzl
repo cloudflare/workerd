@@ -70,14 +70,14 @@ def _wd_test_impl(ctx):
 setlocal EnableDelayedExpansion
 
 REM Start sidecar if specified
-if not "$(SIDECAR)" == "" (
-    start /b "" "$(SIDECAR)" > nul 2>&1
+if not "%SIDECAR%" == "" (
+    start /b "" "%SIDECAR%" > nul 2>&1
     set SIDECAR_PID=!ERRORLEVEL!
     timeout /t 1 > nul
 )
 
 REM Run the actual test
-%* -dTEST_TMPDIR=%TEST_TMPDIR%
+powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
 set TEST_EXIT=!ERRORLEVEL!
 
 REM Cleanup sidecar if it was started
