@@ -186,7 +186,13 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 
 ### Local Worker development with `wrangler`
 
-You can use [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (v3.0 or greater) to develop Cloudflare Workers locally, using `workerd`. Run:
+You can use [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (v3.0 or greater) to develop Cloudflare Workers locally, using `workerd`. First, run the following command to configure Miniflare to use this build of `workerd`.
+
+```
+$ export MINIFLARE_WORKERD_PATH="<WORKERD_REPO_DIR>/bazel-bin/src/workerd/server/workerd"
+```
+
+Then, run:
 
 `wrangler dev`
 
