@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -252,4 +253,22 @@ wd_test(
     src = "tests/dns-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/dns-nodejs-test.js"],
+)
+
+js_binary(
+    name = "net-nodejs-tcp-server",
+    entry_point = "tests/net-nodejs-tcp-server.js",
+)
+
+wd_test(
+    size = "large",
+    src = "tests/net-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/net-nodejs-test.js"],
+    sidecar = "net-nodejs-tcp-server",
+    target_compatible_with = select({
+        # TODO(soon): Investigate why this test timeout on Windows.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
