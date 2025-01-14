@@ -71,10 +71,15 @@ export async function sendDnsRequest(
       },
       method: 'GET',
     });
+    if (!response.ok) {
+      throw new DnsError(name, errorCodes.BADRESP, syscall);
+    }
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     json = await response.json();
-  } catch {
-    throw new DnsError(name, errorCodes.BADQUERY, syscall);
+  } catch (e) {
+    throw e instanceof DnsError
+      ? e
+      : new DnsError(name, errorCodes.BADQUERY, syscall);
   }
 
   if ('error' in json) {
