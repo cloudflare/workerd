@@ -484,18 +484,6 @@ export const testNetConnectNoArg = {
   },
 };
 
-// test/parallel/test-net-connect-nodelay.js
-// We do not support the nodelay option so this test does something different
-// than the original Node.js test
-export const testNetConnectNoDelay = {
-  async test() {
-    throws(() => new net.Socket({ noDelay: true }));
-    const c = new net.Socket();
-    c.setNoDelay(false);
-    throws(() => c.setNoDelay(true));
-  },
-};
-
 // test/parallel/test-net-connect-options-allowhalfopen.js
 // Simplified version of the equivalent Node.js test
 export const testNetConnectOptionsAllowHalfOpen = {

@@ -748,10 +748,11 @@ Socket.prototype.connect = function (
 
 Socket.prototype.setNoDelay = function (
   this: SocketClass,
-  enable?: boolean
+  _enable?: boolean
 ): SocketClass {
-  if (!enable) return this;
-  throw new ERR_INVALID_ARG_VALUE('enable', enable, 'is not supported');
+  // Ignore this for now.
+  // Cloudflare connect() does not support this.
+  return this;
 };
 
 Socket.prototype.setKeepAlive = function (
@@ -1330,7 +1331,6 @@ export function connect(...args: unknown[]): SocketClass {
   const normalized = normalizeArgs(args);
   const options = normalized[0] as SocketOptions;
   // @ts-expect-error TS7009 Required for type usage
-
   const socket: SocketClass = new Socket(options);
   if (options.timeout) {
     socket.setTimeout(options.timeout);
