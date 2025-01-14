@@ -144,6 +144,21 @@ v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String spec
   return ModuleRegistry::requireImpl(js, info, ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT);
 }
 
+v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
+  auto value = require(js, kj::str("node:buffer"));
+  JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:buffer implementation");
+  auto module = value.As<v8::Object>();
+  auto buffer = js.v8Get(module, "Buffer"_kj);
+  JSG_REQUIRE(buffer->IsFunction(), TypeError, "Invalid node:buffer implementation");
+  return buffer;
+}
+
+v8::Local<v8::Value> NodeJsModuleContext::getProcess(jsg::Lock& js) {
+  auto value = require(js, kj::str("node:process"));
+  JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:process implementation");
+  return value;
+}
+
 kj::String NodeJsModuleContext::getFilename() {
   return path.toString(true);
 }
