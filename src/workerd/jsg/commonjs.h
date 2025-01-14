@@ -125,6 +125,9 @@ class NodeJsModuleContext: public jsg::Object {
   v8::Local<v8::Value> getExports(jsg::Lock& js);
   void setExports(jsg::Value value);
 
+  v8::Local<v8::Value> getBuffer(jsg::Lock& js);
+  v8::Local<v8::Value> getProcess(jsg::Lock& js);
+
   kj::String getFilename();
   kj::String getDirname();
 
@@ -132,6 +135,8 @@ class NodeJsModuleContext: public jsg::Object {
     JSG_METHOD(require);
     JSG_READONLY_INSTANCE_PROPERTY(module, getModule);
     JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
+    JSG_LAZY_INSTANCE_PROPERTY(Buffer, getBuffer);
+    JSG_LAZY_INSTANCE_PROPERTY(process, getProcess);
     JSG_LAZY_INSTANCE_PROPERTY(__filename, getFilename);
     JSG_LAZY_INSTANCE_PROPERTY(__dirname, getDirname);
   }
