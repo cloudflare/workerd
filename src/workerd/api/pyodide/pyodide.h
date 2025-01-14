@@ -13,8 +13,6 @@
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
-#include <pyodide/generated/pyodide_extra.capnp.h>
-
 #include <capnp/serialize.h>
 #include <kj/array.h>
 #include <kj/common.h>

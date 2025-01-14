@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "server.h"
+#include "workerd-api.h"
 
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/compatibility-date.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
@@ -15,7 +17,6 @@
 
 #include <fcntl.h>
 #include <openssl/rand.h>
-#include <pyodide/generated/pyodide_extra.capnp.h>
 #include <sys/stat.h>
 
 #include <capnp/dynamic.h>
@@ -807,7 +808,24 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         context, getVersionString(), "Outputs the package lock file used by Pyodide.");
     return builder
         .callAfterParsing([]() -> kj::MainBuilder::Validity {
-      printf("%s\n", PYODIDE_LOCK->cStr());
+      static const PythonConfig config{
+        .packageDiskCacheRoot = kj::none,
+        .pyodideDiskCacheRoot = kj::none,
+        .createSnapshot = false,
+        .createBaselineSnapshot = false,
+      };
+
+      capnp::MallocMessageBuilder message;
+      // TODO(EW-8977): Implement option to specify python worker flags.
+      auto features = message.getRoot<CompatibilityFlags>();
+      features.setPythonWorkers(true);
+      auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(features));
+      auto version = getPythonBundleName(pythonRelease);
+      KJ_ASSERT_NONNULL(fetchPyodideBundle(config, version), "Failed to get Pyodide bundle");
+
+      auto lock = KJ_ASSERT_NONNULL(config.pyodideBundleManager.getPyodideLock(pythonRelease));
+
+      printf("%s\n", lock.cStr());
       fflush(stdout);
       return true;
     }).build();
