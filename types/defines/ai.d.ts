@@ -229,6 +229,7 @@ export interface AiModels {
   "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
+  "@cf/black-forest-labs/flux-1-schnell": BaseAiTextToImage;
   "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
