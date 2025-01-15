@@ -679,4 +679,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("cache_no_cache_disabled")
       $experimental;
   # Enables the use of cache: no-cache in the fetch api.
+
+  requestCfOverridesCacheRules @71 :Bool
+      $compatEnableFlag("request_cf_overrides_cache_rules")
+      $experimental
+      $neededByFl;
+  # Enables cache settings specified request in fetch api cf object to override cache rules. (only for user owned or grey-clouded sites)
 }
