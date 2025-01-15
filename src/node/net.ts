@@ -184,6 +184,18 @@ type SocketClass = SocketType & {
   prototype: SocketClass;
 };
 
+export function BlockList(): void {
+  throw new Error('BlockList is not implemented');
+}
+
+export function SocketAddress(): void {
+  throw new Error('SocketAddress is not implemented');
+}
+
+export function Server(): void {
+  throw new Error('Server is not implemented');
+}
+
 export const Socket = function Socket(
   this: SocketClass,
   options?: SocketOptions
@@ -1343,6 +1355,10 @@ export function connect(...args: unknown[]): SocketClass {
 
 export const createConnection = connect;
 
+export function createServer(): void {
+  throw new Error('createServer() is not implemented');
+}
+
 export function getDefaultAutoSelectFamily(): boolean {
   // This is the only value we support.
   return false;
@@ -1384,10 +1400,14 @@ export function isIPv6(input: unknown): boolean {
 }
 
 export default {
+  BlockList,
+  SocketAddress,
   Stream: Socket,
+  Server,
   Socket,
   connect,
   createConnection,
+  createServer,
   getDefaultAutoSelectFamily,
   setDefaultAutoSelectFamily,
   getDefaultAutoSelectFamilyAttemptTimeout,
