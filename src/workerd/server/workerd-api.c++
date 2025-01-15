@@ -46,8 +46,6 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
-#include <pyodide/generated/pyodide_extra.capnp.h>
-
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
@@ -553,7 +551,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
         auto mainModule = confModules.begin();
         capnp::MallocMessageBuilder message;
         auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(PYTHON_ENTRYPOINT);
+        module.setEsModule(getPythonEntrypoint());
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
         auto path = kj::Path::parse(mainModule->getName());
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
@@ -565,15 +563,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
-      if (featureFlags.getPythonExternalPackages() ||
-          util::Autogate::isEnabled(util::AutogateKey::PYTHON_FETCH_INDIVIDUAL_PACKAGES)) {
-        modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
-            workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
-      } else {
-        modules->addBuiltinModule("pyodide-internal:packages_tar_reader",
-            jsg::alloc<ReadOnlyBuffer>(PYODIDE_PACKAGES_TAR.get()),
-            workerd::jsg::ModuleRegistry::Type::INTERNAL);
-      }
+      modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
+          workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
 
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",
@@ -968,7 +959,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         KJ_REQUIRE(featureFlags.getPythonWorkers(),
             "The python_workers compatibility flag is required to use Python.");
         hasPythonModules = true;
-        bundleBuilder.addEsmModule(def.getName(), kj::str(PYTHON_ENTRYPOINT).releaseArray());
+        bundleBuilder.addEsmModule(def.getName(), kj::str(getPythonEntrypoint()).releaseArray());
         break;
       }
       case config::Worker::Module::PYTHON_REQUIREMENT: {

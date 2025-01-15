@@ -20,46 +20,10 @@ capnp_embed(
     deps = ["pyodide_packages_archive"],
 )
 
-copy_file(
-    name = "python_entrypoint_file",
-    src = "python-entrypoint.js",
-    out = "generated/python-entrypoint.js",
-)
-
-capnp_embed(
-    name = "python_entrypoint_file_embed",
-    src = "generated/python-entrypoint.js",
-    deps = ["python_entrypoint_file"],
-)
-
-copy_file(
-    name = "pyodide_extra_capnp_file",
-    src = "pyodide_extra.capnp",
-    out = "generated/pyodide_extra.capnp",
-)
-
-capnp_embed(
-    name = "pyodide_extra_file_embed",
-    src = "generated/pyodide_extra.capnp",
-    deps = ["pyodide_extra_capnp_file"],
-)
-
 capnp_embed(
     name = "pyodide_lock_file_embed",
     src = "generated/pyodide-lock.json",
     deps = ["pyodide-lock.js@rule"],
-)
-
-cc_capnp_library(
-    name = "pyodide_extra_capnp",
-    srcs = ["generated/pyodide_extra.capnp"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":pyodide_extra_file_embed",
-        ":pyodide_lock_file_embed",
-        ":pyodide_packages_archive_embed",
-        ":python_entrypoint_file_embed",
-    ],
 )
 
 copy_file(
