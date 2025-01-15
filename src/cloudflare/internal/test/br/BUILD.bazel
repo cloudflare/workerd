@@ -1,0 +1,22 @@
+load("//:build/wd_test.bzl", "wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+
+wd_test(
+    src = "br-api-test.wd-test",
+    args = ["--experimental"],
+    data = glob(["*.js"]),
+)
+
+py_wd_test(
+    size = "large",
+    src = "python-br-api-test.wd-test",
+    args = ["--experimental"],
+    data = glob([
+        "*.js",
+        "*.py",
+    ]),
+    tags = [
+        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
+        "no-asan",
+    ],
+)
