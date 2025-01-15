@@ -30,10 +30,10 @@ class WrappableFunction<Ret(Args...)>: public Wrappable {
 
   const bool needsGcTracing;
 
-  kj::StringPtr jsgGetMemoryName() const override {
+  constexpr kj::StringPtr jsgGetMemoryName() const override {
     return "WrappableFunction"_kjc;
   }
-  size_t jsgGetMemorySelfSize() const override {
+  constexpr size_t jsgGetMemorySelfSize() const override {
     return sizeof(WrappableFunction<Ret(Args...)>);
   }
   void jsgGetMemoryInfo(MemoryTracker& tracker) const override {

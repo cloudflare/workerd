@@ -55,10 +55,10 @@ namespace workerd::jsg {
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
   using jsgSuper = jsgThis;                                                                        \
   using jsgThis = Type;                                                                            \
-  inline kj::StringPtr jsgGetMemoryName() const override {                                         \
+  inline constexpr kj::StringPtr jsgGetMemoryName() const override {                               \
     return #Type##_kjc;                                                                            \
   }                                                                                                \
-  inline size_t jsgGetMemorySelfSize() const override {                                            \
+  inline constexpr size_t jsgGetMemorySelfSize() const override {                                  \
     return sizeof(Type);                                                                           \
   }                                                                                                \
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {                       \
@@ -1225,10 +1225,10 @@ class Object: private Wrappable {
 
   // Subclasses should override these to provide appropriate information for
   // the heap snapshot process.
-  inline kj::StringPtr jsgGetMemoryName() const override {
-    return "Object";
+  inline constexpr kj::StringPtr jsgGetMemoryName() const override {
+    return "Object"_kjc;
   }
-  inline size_t jsgGetMemorySelfSize() const override {
+  inline constexpr size_t jsgGetMemorySelfSize() const override {
     return sizeof(Object);
   }
   inline void jsgGetMemoryInfo(MemoryTracker& tracker) const override {

@@ -1186,7 +1186,7 @@ struct JsSetup {
     ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
   }
 
-  template <const char* propertyName, const char* moduleName>
+  template <const char* moduleName>
   struct LazyJsInstancePropertyCallback {
     static void callback(
         v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
@@ -1210,7 +1210,7 @@ struct JsSetup {
 
   template <const char* propertyName, const char* moduleName, bool readonly>
   inline void registerLazyJsInstanceProperty() {
-    using Callback = LazyJsInstancePropertyCallback<propertyName, moduleName>;
+    using Callback = LazyJsInstancePropertyCallback<moduleName>;
     check(context->Global()->SetLazyDataProperty(context, v8StrIntern(js.v8Isolate, propertyName),
         Callback::callback, v8::Local<v8::Value>(),
         readonly ? v8::PropertyAttribute::ReadOnly : v8::PropertyAttribute::None));
@@ -1503,21 +1503,6 @@ class ResourceWrapper {
   v8::Local<v8::FunctionTemplate> getTemplate(v8::Isolate* isolate, T*) {
     v8::Global<v8::FunctionTemplate>& slot = isContext ? contextConstructor : memoizedConstructor;
     if (slot.IsEmpty()) {
-      auto result = makeConstructor<isContext>(isolate);
-      slot.Reset(isolate, result);
-      return result;
-    } else {
-      return slot.Get(isolate);
-    }
-  }
-
- private:
-  Configuration configuration;
-  v8::Global<v8::FunctionTemplate> memoizedConstructor;
-  v8::Global<v8::FunctionTemplate> contextConstructor;
-
-  template <bool isContext>
-  v8::Local<v8::FunctionTemplate> makeConstructor(v8::Isolate* isolate) {
     // Construct lazily.
     v8::EscapableHandleScope scope(isolate);
 
@@ -1574,8 +1559,18 @@ class ResourceWrapper {
       T::template registerMembers<decltype(builder), T>(builder);
     }
 
-    return scope.Escape(constructor);
+    auto result = scope.Escape(constructor);
+      slot.Reset(isolate, result);
+      return result;
+    } else {
+      return slot.Get(isolate);
+    }
   }
+
+ private:
+  Configuration configuration;
+  v8::Global<v8::FunctionTemplate> memoizedConstructor;
+  v8::Global<v8::FunctionTemplate> contextConstructor;
 
   void setupJavascript(jsg::Lock& js) {
     JsSetup<TypeWrapper, T> setup(js, js.v8Context());
