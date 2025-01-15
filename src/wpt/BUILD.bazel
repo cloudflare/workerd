@@ -33,7 +33,6 @@ eslint_bin.eslint_test(
         "eslint.config.mjs",
         "tsconfig.json",
         "//:node_modules/@types/node",
-        "//:prettierrc",
         "//tools:base-eslint",
     ],
     tags = ["lint"],

@@ -32,10 +32,33 @@ import {
   type AssertPredicate,
 } from 'node:assert';
 
-type TestRunnerOptions = {
-  expectedFailures?: string[];
+type CommonOptions = {
+  comment?: string;
   verbose?: boolean;
+};
+
+type SuccessOptions = {
+  expectedFailures?: undefined;
+  skippedTests?: undefined;
+  skipAllTests?: false;
+};
+
+type ErrorOptions = {
+  // A comment is mandatory when there are expected failures or skipped tests
+  comment: string;
+  expectedFailures?: string[];
   skippedTests?: string[];
+  skipAllTests?: boolean;
+};
+
+type TestRunnerOptions = CommonOptions & (SuccessOptions | ErrorOptions);
+
+export type TestRunnerConfig = {
+  [key: string]: TestRunnerOptions;
+};
+
+type TestCase = {
+  test(): Promise<void>;
 };
 
 type TestRunnerFn = (callback: TestFn | PromiseTestFn, message: string) => void;
@@ -444,12 +467,16 @@ function validate(testFileName: string, options: TestRunnerOptions): void {
   }
 }
 
-export function run(
-  file: string,
-  options: TestRunnerOptions = {}
-): { test(): Promise<void> } {
+export function run(config: TestRunnerConfig, file: string): TestCase {
+  const options = config[file] ?? {};
+
   return {
     async test(): Promise<void> {
+      if (options.skipAllTests) {
+        console.warn(`All tests in ${file} have been skipped.`);
+        return;
+      }
+
       prepare(options);
       await import(file);
       validate(file, options);
