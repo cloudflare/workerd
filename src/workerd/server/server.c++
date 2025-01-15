@@ -1492,7 +1492,7 @@ struct TailStreamWriterState {
 
   struct Closed {};
 
-  kj::OneOf<Pending, kj::Array<Active>, Closed> inner;
+  kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
 
   TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
@@ -1502,12 +1502,12 @@ struct TailStreamWriterState {
 
   void reportImpl(tracing::TailEvent&& event) {
     // In reportImpl, our inner state must be active.
-    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<Active>>());
+    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
 
     // We only care about sessions that are currently active.
-    kj::Vector<Active> alive(actives.size());
+    kj::Vector<kj::Own<Active>> alive(actives.size());
     for (auto& active: actives) {
-      if (active.capability != kj::none) {
+      if (active->capability != kj::none) {
         alive.add(kj::mv(active));
       }
     }
@@ -1520,10 +1520,10 @@ struct TailStreamWriterState {
     }
 
     // Deliver the event to the queue and make sure we are processing.
-    for (Active& active: alive) {
-      active.queue.push_back(event.clone());
-      if (!active.pumping) {
-        waitUntilTasks.add(pump(active));
+    for (auto& active: alive) {
+      active->queue.push_back(event.clone());
+      if (!active->pumping) {
+        waitUntilTasks.add(pump(*active));
       }
     }
 
@@ -1618,13 +1618,13 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
           ioContext.addTask(
               wi->customEvent(kj::mv(customEvent)).attach(kj::mv(wi)).then([](auto&&) {
           }, [](kj::Exception&&) {}));
-          return TailStreamWriterState::Active{
+          return kj::heap<TailStreamWriterState::Active>({
             .capability = kj::mv(result),
-          };
+          });
         };
         state->reportImpl(kj::mv(event));
       }
-      KJ_CASE_ONEOF(active, kj::Array<TailStreamWriterState::Active>) {
+      KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
         auto final = event.event.is<tracing::Outcome>() || event.event.is<tracing::Hibernate>();
