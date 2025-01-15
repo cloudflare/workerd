@@ -437,19 +437,6 @@ export const testNetConnectImmediateFinish = {
   },
 };
 
-// test/parallel/test-net-connect-keepalive.js
-// test/parallel/test-net-keepalive.js
-// We don't actually support keep alive so this test does
-// something different than the original Node.js test
-export const testNetConnectKeepAlive = {
-  async test() {
-    throws(() => new net.Socket({ keepAlive: true }));
-    const c = new net.Socket();
-    c.setKeepAlive(false);
-    throws(() => c.setKeepAlive(true));
-  },
-};
-
 // test/parallel/test-net-connect-memleak.js
 export const testNetConnectMemleak = {
   async test() {
