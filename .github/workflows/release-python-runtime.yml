@@ -46,5 +46,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
         run: |
-          pip install boto3
+          # boto3 v1.36.0 fails with:
+          # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
+          pip install 'boto3<1.36.0'
           python3 src/pyodide/upload_bundle.py pyodide.capnp.bin pyodide_${{ inputs.pyodide }}_${{ inputs.pyodideRevision }}_${{ inputs.backport }}.capnp.bin
