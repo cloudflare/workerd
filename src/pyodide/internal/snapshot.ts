@@ -26,10 +26,6 @@ let LOADED_BASELINE_SNAPSHOT: number;
  * `pyodide.loadPackage`. In trade we add memory snapshots here.
  */
 
-const TOP_LEVEL_SNAPSHOT =
-  ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
-const SHOULD_UPLOAD_SNAPSHOT = TOP_LEVEL_SNAPSHOT;
-
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of
  * the linear memory here, on subsequent runs we can skip bootstrapping Python
@@ -44,32 +40,6 @@ export let SHOULD_RESTORE_SNAPSHOT = false;
  * Record the dlopen handles that are needed by the MEMORY.
  */
 let DSO_METADATA: any = {}; // TODO
-
-/**
- * Used to defer artifact upload. This is set during initialisation, but is executed during a
- * request because an IO context is needed for the upload.
- */
-let DEFERRED_UPLOAD_FUNCTION: (() => Promise<void>) | undefined = undefined;
-
-export async function uploadArtifacts(): Promise<void> {
-  if (DEFERRED_UPLOAD_FUNCTION) {
-    return await DEFERRED_UPLOAD_FUNCTION();
-  }
-}
-
-/**
- * Used to hold the memory that needs to be uploaded for the validator.
- */
-let MEMORY_TO_UPLOAD: ArtifactBundler.MemorySnapshotResult | undefined =
-  undefined;
-function getMemoryToUpload(): ArtifactBundler.MemorySnapshotResult {
-  if (!MEMORY_TO_UPLOAD) {
-    throw new TypeError('Expected MEMORY_TO_UPLOAD to be set');
-  }
-  const tmp = MEMORY_TO_UPLOAD;
-  MEMORY_TO_UPLOAD = undefined;
-  return tmp;
-}
 
 /**
  * Preload a dynamic library.
@@ -333,28 +303,6 @@ function makeLinearMemorySnapshot(
   };
 }
 
-function setUploadFunction(
-  snapshot: Uint8Array,
-  importedModulesList: string[]
-): void {
-  if (snapshot.constructor.name !== 'Uint8Array') {
-    throw new TypeError('Expected TO_UPLOAD to be a Uint8Array');
-  }
-  if (TOP_LEVEL_SNAPSHOT) {
-    MEMORY_TO_UPLOAD = { snapshot, importedModulesList };
-    return;
-  }
-}
-
-// TODO(later): Rename this to avoid `upload` nomenclature.
-export function maybeSetupSnapshotUpload(Module: Module): void {
-  if (!SHOULD_UPLOAD_SNAPSHOT) {
-    return;
-  }
-  const { snapshot, importedModulesList } = makeLinearMemorySnapshot(Module);
-  setUploadFunction(snapshot, importedModulesList);
-}
-
 // "\x00snp"
 const SNAPSHOT_MAGIC = 0x706e7300;
 const CREATE_SNAPSHOT_VERSION = 2;
@@ -465,11 +413,11 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
   }
 }
 
-export function maybeStoreMemorySnapshot() {
+export function maybeCollectSnapshot(Module: Module): void {
   if (ArtifactBundler.isEwValidating()) {
-    ArtifactBundler.storeMemorySnapshot(getMemoryToUpload());
+    ArtifactBundler.storeMemorySnapshot(makeLinearMemorySnapshot(Module));
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    DiskCache.put('snapshot.bin', getMemoryToUpload().snapshot);
-    console.log('Saved snapshot to disk');
+    const { snapshot } = makeLinearMemorySnapshot(Module);
+    DiskCache.put('snapshot.bin', snapshot);
   }
 }

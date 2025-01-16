@@ -9,7 +9,7 @@ import {
 import {
   SHOULD_RESTORE_SNAPSHOT,
   finishSnapshotSetup,
-  maybeSetupSnapshotUpload,
+  maybeCollectSnapshot,
   restoreSnapshot,
   preloadDynamicLibs,
 } from 'pyodide-internal:snapshot';
@@ -92,7 +92,7 @@ export async function loadPyodide(
     prepareWasmLinearMemory(Module)
   );
 
-  maybeSetupSnapshotUpload(Module);
+  maybeCollectSnapshot(Module);
   // Mount worker files after doing snapshot upload so we ensure that data from the files is never
   // present in snapshot memory.
   mountWorkerFiles(Module);
