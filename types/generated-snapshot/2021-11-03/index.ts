@@ -3802,6 +3802,26 @@ export declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
 }
+export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer.
+   */
+  steps?: number;
+}
+export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Output {
+  /**
+   * The generated image in Base64 format.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell {
+  inputs: Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input;
+  postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Output;
+}
 export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input = Prompt | Messages;
 export interface Prompt {
   /**
@@ -4055,6 +4075,7 @@ export interface AiModels {
   "@cf/thebloke/discolm-german-7b-v1-awq": BaseAiTextGeneration;
   "@cf/qwen/qwen1.5-0.5b-chat": BaseAiTextGeneration;
   "@cf/qwen/qwen1.5-7b-chat-awq": BaseAiTextGeneration;
+  "@cf/qwen/qwen1.5-14b-chat-awq": BaseAiTextGeneration;
   "@cf/tinyllama/tinyllama-1.1b-chat-v1.0": BaseAiTextGeneration;
   "@cf/microsoft/phi-2": BaseAiTextGeneration;
   "@cf/qwen/qwen1.5-1.8b-chat": BaseAiTextGeneration;
@@ -4073,6 +4094,9 @@ export interface AiModels {
   "@cf/meta/llama-3.1-8b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-fp8": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
+  "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
+  "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": BaseAiTextGeneration;
   "@cf/meta/m2m100-1.2b": BaseAiTranslation;
   "@cf/facebook/bart-large-cnn": BaseAiSummarization;
   "@cf/unum/uform-gen2-qwen-500m": BaseAiImageToText;
@@ -4080,6 +4104,7 @@ export interface AiModels {
   "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
+  "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
 }
 export type AiOptions = {
