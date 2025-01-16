@@ -443,10 +443,12 @@ export const testNetConnectImmediateFinish = {
 // something different than the original Node.js test
 export const testNetConnectKeepAlive = {
   async test() {
+    // Test that setKeepAlive call does not throw.
     throws(() => new net.Socket({ keepAlive: true }));
     const c = new net.Socket();
     c.setKeepAlive(false);
-    throws(() => c.setKeepAlive(true));
+    c.setKeepAlive(true);
+    // throws(() => c.setKeepAlive(true));
   },
 };
 

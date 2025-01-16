@@ -769,11 +769,13 @@ Socket.prototype.setNoDelay = function (
 
 Socket.prototype.setKeepAlive = function (
   this: SocketClass,
-  enable?: boolean,
+  _enable?: boolean,
   _initialDelay?: number
 ): SocketClass {
-  if (!enable) return this;
-  throw new ERR_INVALID_ARG_VALUE('enable', enable, 'is not supported');
+  // Ignore this for now.
+  // This is used by services like mySQL.
+  // TODO(soon): Investigate supporting this.
+  return this;
 };
 
 // @ts-expect-error TS2322 Intentionally no-op
@@ -960,13 +962,9 @@ function initializeConnection(
   let { port = 0 } = options;
 
   if (autoSelectFamily != null) {
-    // We don't support this option. If the value is falsy, we can safely ignore it.
-    // If the value is truthy, we'll throw an error.
-    throw new ERR_INVALID_ARG_VALUE(
-      'options.autoSelectFamily',
-      autoSelectFamily,
-      'is not supported'
-    );
+    // We don't support this option.
+    // We shouldn't throw this because services like mongodb depends on it.
+    // TODO(soon): Investigate supporting this.
   }
 
   if (typeof port !== 'number' && typeof port !== 'string') {
