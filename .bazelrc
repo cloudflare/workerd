@@ -156,13 +156,10 @@ build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 build --@capnp-cpp//src/capnp:gen_rust=True
 
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
-# Need to disable debug-assertions for fastbuild, should be off automatically for opt. As long as
-# rust-level LTO is not enabled, LLVM bitcode is not needed so -C embed-bitcode=n provides a free
-# improvement to build speed and Rust code size.
+# Need to disable debug-assertions for fastbuild, should be off automatically for opt.
 # Using extra_rustc_flag for non-exec flags so they can be overwritten selectively.
-build --@rules_rust//:extra_rustc_flag=-Cembed-bitcode=n
 build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
-build --@rules_rust//:extra_exec_rustc_flags=-C,debug-assertions=n,-C,embed-bitcode=n
+build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
 
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.

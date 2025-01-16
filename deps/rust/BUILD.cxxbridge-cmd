@@ -5,7 +5,7 @@ load("@rules_rust//rust:defs.bzl", "rust_binary")
 rust_binary(
     name = "cxxbridge-cmd",
     srcs = glob(["src/**/*.rs"]),
-    data = ["src/gen/include/cxx.h"],
+    compile_data = ["src/gen/include/cxx.h"],
     edition = "2021",
     visibility = ["//visibility:public"],
     deps = [
