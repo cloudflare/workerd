@@ -1123,3 +1123,10 @@ export const echoServer = {
     return inbound.pipeThrough(new IdentityTransformStream());
   },
 };
+
+export const testSetTimeout = {
+  async test() {
+    const socket = net.connect({ port: 9999, host: 'localhost', timeout: 0 });
+    strictEqual(socket.timeout, 0);
+  },
+};
