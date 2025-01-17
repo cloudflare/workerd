@@ -23,14 +23,57 @@ class Container: public jsg::Object {
  public:
   Container(rpc::Container::Client rpcClient);
 
+  struct StartupOptions {
+    jsg::Optional<kj::Array<kj::String>> entrypoint;
+    bool enableInternet = false;
+
+    // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
+
+    JSG_STRUCT(entrypoint, enableInternet);
+  };
+
+  bool getRunning() {
+    return running;
+  }
+
+  // Methods correspond closely to the RPC interface in `container.capnp`.
+  void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
+  jsg::Promise<void> monitor(jsg::Lock& js);
+  jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
+  void signal(jsg::Lock& js, int signo);
+  jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
+
+  // TODO(containers): listenTcp()
+
   JSG_RESOURCE_TYPE(Container) {
-    // TODO(now): Implement the API.
+    JSG_READONLY_PROTOTYPE_PROPERTY(running, getRunning);
+    JSG_METHOD(start);
+    JSG_METHOD(monitor);
+    JSG_METHOD(destroy);
+    JSG_METHOD(signal);
+    JSG_METHOD(getTcpPort);
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("destroyReason", destroyReason);
   }
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
+
+  // TODO(containers): Actually check if the container is already running when the DO starts.
+  bool running = false;
+
+  kj::Maybe<jsg::Value> destroyReason;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(destroyReason);
+  }
+
+  class TcpPortWorkerInterface;
+  class TcpPortOutgoingFactory;
 };
 
-#define EW_CONTAINER_ISOLATE_TYPES api::Container
+#define EW_CONTAINER_ISOLATE_TYPES api::Container, api::Container::StartupOptions
 
 }  // namespace workerd::api
