@@ -116,11 +116,7 @@
       "type": "github_release",
       "owner": "aspect-build",
       "repo": "rules_js",
-      "file_regex": "^rules_js-",
-      // TODO(cleanup): On latest version, Windows build fails with `tar.exe: Error opening archive:
-      // Can't initialize filter; unable to run program "gzip -d"`, likely due to
-      // https://github.com/aspect-build/rules_js/pull/1905/files. Develop a workaround.
-      "freeze_version": "v2.0.1"
+      "file_regex": "^rules_js-"
     },
     {
       "name": "aspect_rules_ts",

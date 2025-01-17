@@ -680,7 +680,14 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables the use of cache: no-cache in the fetch api.
 
-  requestCfOverridesCacheRules @71 :Bool
+  pythonWorkers20250116 @71 :Bool
+      $compatEnableFlag("python_workers_20250116")
+      $experimental
+      $pythonSnapshotRelease(pyodide = "0.27.1", pyodideRevision = "2025-01-16",
+          packages = "2024-12-18", backport = 0,
+          baselineSnapshotHash = "TODO");
+
+  requestCfOverridesCacheRules @72 :Bool
       $compatEnableFlag("request_cf_overrides_cache_rules")
       $experimental
       $neededByFl;

@@ -2,7 +2,8 @@ load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("//:build/wd_test.bzl", "wd_test")
 
 FEATURE_FLAGS = {
-    "0.26.0a2": ["python_workers"],
+    "0.26.0a2": [],
+    "0.27.1": ["python_workers_20250116"],
     "development": ["python_workers_development", "python_external_packages"],
 }
 
@@ -37,7 +38,8 @@ def py_wd_test(
         name_flag = name + "_" + python_flag
         templated_src = name_flag.replace("/", "-") + "@template"
         templated_src = "/".join(src.split("/")[:-1] + [templated_src])
-        feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in FEATURE_FLAGS[python_flag]])
+        flags = FEATURE_FLAGS[python_flag] + ["python_workers"]
+        feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
         expand_template(
             name = name_flag + "@rule",
             out = templated_src,

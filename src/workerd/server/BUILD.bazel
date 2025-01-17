@@ -114,6 +114,8 @@ wd_cc_library(
         ":alarm-scheduler",
         ":workerd_capnp",
         "//deps/rust:runtime",
+        "//src/cloudflare",
+        "//src/node",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:memory-cache",

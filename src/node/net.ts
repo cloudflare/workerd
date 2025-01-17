@@ -184,6 +184,18 @@ type SocketClass = SocketType & {
   prototype: SocketClass;
 };
 
+export function BlockList(): void {
+  throw new Error('BlockList is not implemented');
+}
+
+export function SocketAddress(): void {
+  throw new Error('SocketAddress is not implemented');
+}
+
+export function Server(): void {
+  throw new Error('Server is not implemented');
+}
+
 export const Socket = function Socket(
   this: SocketClass,
   options?: SocketOptions
@@ -757,11 +769,13 @@ Socket.prototype.setNoDelay = function (
 
 Socket.prototype.setKeepAlive = function (
   this: SocketClass,
-  enable?: boolean,
+  _enable?: boolean,
   _initialDelay?: number
 ): SocketClass {
-  if (!enable) return this;
-  throw new ERR_INVALID_ARG_VALUE('enable', enable, 'is not supported');
+  // Ignore this for now.
+  // This is used by services like mySQL.
+  // TODO(soon): Investigate supporting this.
+  return this;
 };
 
 // @ts-expect-error TS2322 Intentionally no-op
@@ -948,13 +962,9 @@ function initializeConnection(
   let { port = 0 } = options;
 
   if (autoSelectFamily != null) {
-    // We don't support this option. If the value is falsy, we can safely ignore it.
-    // If the value is truthy, we'll throw an error.
-    throw new ERR_INVALID_ARG_VALUE(
-      'options.autoSelectFamily',
-      autoSelectFamily,
-      'is not supported'
-    );
+    // We don't support this option.
+    // We shouldn't throw this because services like mongodb depends on it.
+    // TODO(soon): Investigate supporting this.
   }
 
   if (typeof port !== 'number' && typeof port !== 'string') {
@@ -1343,6 +1353,10 @@ export function connect(...args: unknown[]): SocketClass {
 
 export const createConnection = connect;
 
+export function createServer(): void {
+  throw new Error('createServer() is not implemented');
+}
+
 export function getDefaultAutoSelectFamily(): boolean {
   // This is the only value we support.
   return false;
@@ -1384,10 +1398,14 @@ export function isIPv6(input: unknown): boolean {
 }
 
 export default {
+  BlockList,
+  SocketAddress,
   Stream: Socket,
+  Server,
   Socket,
   connect,
   createConnection,
+  createServer,
   getDefaultAutoSelectFamily,
   setDefaultAutoSelectFamily,
   getDefaultAutoSelectFamilyAttemptTimeout,

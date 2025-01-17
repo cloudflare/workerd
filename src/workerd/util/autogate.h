@@ -15,6 +15,9 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   STREAMING_TAIL_WORKERS,
+  // Fetches Python packages as individual bundles from GCS instead of using a single big bundle
+  // embedded in the binary
+  PYTHON_FETCH_INDIVIDUAL_PACKAGES,
   NumOfKeys  // Reserved for iteration.
 };
 

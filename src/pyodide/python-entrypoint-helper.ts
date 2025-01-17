@@ -2,10 +2,6 @@
 // python-entrypoint.js USER module.
 
 import { loadPyodide } from 'pyodide-internal:python';
-import {
-  uploadArtifacts,
-  maybeStoreMemorySnapshot,
-} from 'pyodide-internal:snapshot';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import {
   TRANSITIVE_REQUIREMENTS,
@@ -149,8 +145,6 @@ function makeHandler(pyHandlerName: string): Handler {
     } catch (e) {
       console.warn('Error in makeHandler');
       reportError(e);
-    } finally {
-      args[2].waitUntil(uploadArtifacts());
     }
   };
 }
@@ -180,13 +174,6 @@ try {
       }
     }
   }
-  /**
-   * Store the memory snapshot in the ArtifactBundler so that the validator can
-   * read it out. Needs to happen at the top level because the validator does
-   * not perform requests. In workerd, this will save a snapshot to disk if the
-   * `--python-save-snapshot` or `--python-save-baseline-snapshot` is passed.
-   */
-  maybeStoreMemorySnapshot();
 } catch (e) {
   console.warn('Error in top level in python-entrypoint-helper.js');
   reportError(e);

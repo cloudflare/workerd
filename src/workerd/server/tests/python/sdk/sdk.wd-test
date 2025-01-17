@@ -19,13 +19,34 @@ const server :Workerd.Worker = (
   compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
 );
 
+# We need this proxy so that internal requests made to fetch packages for Python Workers are sent
+# out to the open internet and not to the python-server worker.
+const jsChooserProxy :Workerd.Worker = (
+  modules = [
+    (name = "proxy.js", esModule = embed "proxy.js")
+  ],
+  bindings = [
+    ( name = "PYTHON", service = "python-server" ),
+    ( name = "INTERNET", service = "external" ),
+  ],
+  compatibilityDate = "2024-10-01",
+);
+
 const unitTests :Workerd.Config = (
   services = [
+    ( name = "external",
+      network = (
+        tlsOptions = (trustBrowserCas = true)
+      )
+    ),
+    ( name = "internet",
+      worker = .jsChooserProxy
+    ),
+    ( name = "python-server",
+      worker = .server
+    ),
     ( name = "python-sdk",
       worker = .python
     ),
-    ( name = "internet",
-      worker = .server
-    )
   ],
 );
