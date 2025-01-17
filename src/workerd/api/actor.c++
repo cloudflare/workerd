@@ -40,7 +40,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
     },
         {.inHouse = true,
           .wrapMetrics = true,
-          .operationName = kj::ConstString("actor_subrequest"_kjc)}));
+          .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
   }
 
  private:
@@ -82,7 +82,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
     },
         {.inHouse = true,
           .wrapMetrics = true,
-          .operationName = kj::ConstString("actor_subrequest"_kjc)}));
+          .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
   }
 
  private:
@@ -110,7 +110,7 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
   },
       {.inHouse = true,
         .wrapMetrics = true,
-        .operationName = kj::ConstString("actor_subrequest"_kjc)}));
+        .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
 }
 
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
