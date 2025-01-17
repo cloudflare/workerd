@@ -117,7 +117,7 @@ def _wpt_wd_test_gen_impl(ctx):
             test_name = ctx.attr.test_name,
             test_config = ctx.file.test_config.basename,
             test_js_generated = wd_relative_path(ctx.file.test_js_generated),
-            modules = generate_external_modules(ctx.attr.wpt_directory.files),
+            bindings = generate_external_bindings(ctx.attr.wpt_directory.files),
         ),
     )
 
@@ -135,10 +135,11 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "{test_js_generated}"),
           (name = "{test_config}", esModule = embed "{test_config}"),
           (name = "wpt:harness", esModule = embed "../../../../../workerd/src/wpt/harness.js"),
-          {modules}
         ],
         bindings = [
           (name = "wpt", service = "wpt"),
+          (name = "unsafe", unsafeEval = void),
+          {bindings}
         ],
         compatibilityDate = embed "../../../../../workerd/src/workerd/io/trimmed-supported-compatibility-date.txt",
         compatibilityFlags = ["nodejs_compat", "experimental"],
@@ -159,13 +160,11 @@ def wd_relative_path(file):
 
     return "../" * 4 + file.short_path
 
-def generate_external_modules(files):
+def generate_external_bindings(files):
     """
-    Generates a string for all files in the given directory in the specified format.
-    Example for a JS file:
-        (name = "url-origin.any.js", esModule = embed "../../../../../wpt/url/url-origin.any.js"),
-    Example for a JSON file:
-        (name = "resources/urltestdata.json", json = embed "../../../../../wpt/url/resources/urltestdata.json"),
+    Generates appropriate bindings for each file in the WPT module:
+    - JS files: text binding to allow code to be evaluated
+    - JSON files: JSON binding to allow test code to fetch resources
     """
 
     result = []
@@ -173,7 +172,7 @@ def generate_external_modules(files):
     for file in files.to_list():
         file_path = wd_relative_path(file)
         if file.extension == "js":
-            entry = """(name = "{}", esModule = embed "{}")""".format(file.basename, file_path)
+            entry = """(name = "{}", text = embed "{}")""".format(file.basename, file_path)
         elif file.extension == "json":
             # TODO(soon): It's difficult to manipulate paths in Bazel, so we assume that all JSONs are in a resources/ directory for now
             entry = """(name = "resources/{}", json = embed "{}")""".format(file.basename, file_path)

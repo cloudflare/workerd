@@ -50,11 +50,12 @@ export default {
     ],
   },
   'url-setters-a-area.window.js': {
-    comment: 'Implement promise_test',
+    comment: 'Implement globalThis.document',
     skipAllTests: true,
   },
   'urlencoded-parser.any.js': {
-    comment: 'Implement unsafeRequire',
+    comment:
+      'Requests fail due to HTTP method "LADIDA", responses fail due to shift_jis encoding',
     expectedFailures: [
       'request.formData() with input: test',
       'response.formData() with input: test',
