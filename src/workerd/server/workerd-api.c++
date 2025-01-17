@@ -565,7 +565,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
-      if (featureFlags.getPythonExternalPackages()) {
+      if (featureFlags.getPythonExternalPackages() ||
+          util::Autogate::isEnabled(util::AutogateKey::PYTHON_FETCH_INDIVIDUAL_PACKAGES)) {
         modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
             workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
       } else {
