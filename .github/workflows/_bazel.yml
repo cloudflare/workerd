@@ -45,7 +45,7 @@ jobs:
           # ends up with a larger cache at the end when starting with an available cache entry,
           # resulting in a snowballing cache size and cache download/upload times.
       - name: Setup Linux
-        if: inputs.os_name == 'linux'
+        if: inputs.os_name == 'linux' || inputs.os_name == 'linux-arm'
         # Install dependencies, including clang through the LLVM APT repository. We drop the
         # install step so we can install just the packages we need.
         # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of

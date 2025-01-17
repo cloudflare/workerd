@@ -56,12 +56,16 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-15, windows-2022]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, windows-2022]
         target-arch: [ X64 ]
         include:
           - os-name: linux
             os: ubuntu-22.04
             bazel-config: release_linux
+          - os-name: linux-arm64
+            os: ubuntu-22.04-arm
+            bazel-config: release_linux
+            target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
           # release binaries on the macos-15 runner.
           - os-name: macOS-x64
@@ -150,6 +154,9 @@ jobs:
         include:
           - arch: linux-64
             name: Linux-X64
+          - arch: linux-arm64
+            name: Linux-ARM64
+            cpu: ARM64
           - arch: darwin-64
             name: macOS-X64
           - arch: darwin-arm64
