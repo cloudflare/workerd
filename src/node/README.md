@@ -1,1 +1,21 @@
-# Node Compatibility Layer
+# Node.js Compatibility
+
+1. Node.js compatibility is best-effort. We intend to implement a subset of the Node.js API as closely as possible but we do not intend on being generally 100% compatible with Node.js as a whole.
+
+1. For Web Platform Standard APIs, the standard spec is the source of truth. If Node.js implements those APIs differently, we will implement those differences in nodejs_compat mode ONLY if it can be done so in a backwards-compatible way or ONLY with an explicitly opt-in compatibility flag.
+
+1. For Node.js APIs, Node.js is the source of truth. We will attempt, to the best of our ability within the constraints of our runtime, to implement the API as close to Node.js' defined behavior as possible. However, exceptions will be made when those cannot be implemented without breaking backwards compatibility. When Workers Runtime constraints, or this framework, make it impossible to implement a Node.js API in a manner that exactly matches Node.js, a best-effort attempt will be made to get as close as possible and any differences will be documented.
+
+1. When a Node.js API overlaps (even partially) in functionality with a Workers runtime or Web Platform Standard API, there is no requirement that the Node.js API implementation conform to, or even be consistent with, the standard or runtime API as long as it does not conflict with those or force backwards compatibility issues. The existence of a Web Platform or Workers specific API will not rule out implementing the Node.js API even if functionally equivalent.
+
+1. Just as we do with Web Platform APIs, we may choose not to implement some Node.js APIs simply because we decide they are not a good fit or experience for the Workers runtime environment (or, in some cases because doing so is simply not possible because of runtime constraints).
+
+1. When implementing a Node.js API adds significant runtime, or development time, overhead, partial implementations can be merged and evolved incrementally, taking care to avoid breaking changes and using compatibility flags where appropriate. The emphasis will be on making smaller incremental improvements over time.
+
+1. Enabling the nodejs_compat flag does not mean "all APIs work the way they do in Node.js" ... it just means that the Node.js APIs are available. When there is conflict between a Node.js API and a Web Platform API, or Workers-specific API, that is already implemented in the runtime, the Web Platform API / Workers API will take precedence. We may still implement the Node.js alternative behavior behind an explicitly opt-in compat flag.
+
+1. For the global scope, Node.js APIs and behaviors are second to web platform APIs and other existing runtime globals. We will implement the Node.js specific globals only if they do not break backwards compatibility. We may implement such changes behind an explicitly opt-in compat flag.
+
+1. We will seek to prioritize implementation of Node.js APIs that are needed by npm modules and other ecosystem dependencies that our customers want and are trying to use. When those modules require Node.js core APIs, we will implement those in accordance with this framework. In some cases that may mean it will not be possible to support the module as written. Like the Node.js APIs themselves, support will be best-effort. When we cannot fully implement support for these modules directly in the runtime, we will attempt to work with the maintainers of those modules to implement a workers-compatible alternative or work to develop alternative workarounds.
+
+1. Polyfills of Node.js APIs (that is, external implementations that are not bundled directly into the workers runtime) may be leveraged as a last-resort alternative to patch over parts of the Node.js API we choose not to implement in the runtime. When used, these must be generally available for any Workers user, not only those using wrangler. The built-in implementation of Node.js APIs should always take precedence in general but individual workers should be able to BYOI ("bring your own implementation") within the reasonable constraints of the runtime. Cloudflare tooling should never polyfill an API that already exists within the runtime, and the existence of a polyfill implementation will not rule out implementing the API directly in the runtime.
