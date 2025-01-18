@@ -28,6 +28,7 @@
       "node:util/*": ["./*"],
       "node:path/*": ["./*"],
       "node:stream/*": ["./*"],
+      "node:timers/*": ["./*"],
       "node-internal:*": ["./internal/*"],
       "cloudflare-internal:sockets": ["./internal/sockets.d.ts"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],

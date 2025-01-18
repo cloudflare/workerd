@@ -272,3 +272,9 @@ wd_test(
         "//conditions:default": [],
     }),
 )
+
+wd_test(
+    src = "tests/timers-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/timers-nodejs-test.js"],
+)

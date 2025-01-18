@@ -17,6 +17,7 @@ wd_ts_bundle(
         "stream/*.js",
         "path/*.ts",
         "util/*.ts",
+        "timers/*.ts",
     ]),
     schema_id = "0xbcc8f57c63814005",
     tsconfig_json = "tsconfig.json",
