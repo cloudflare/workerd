@@ -666,9 +666,16 @@ class SubtleCrypto: public jsg::Object {
 // DigestStream is a non-standard extension that provides a way of generating
 // a hash digest from streaming data. It combines Web Crypto concepts into a
 // WritableStream and is compatible with both APIs.
+class DigestContext {
+ public:
+  virtual ~DigestContext() noexcept = default;
+  virtual void write(kj::ArrayPtr<kj::byte> buffer) = 0;
+  virtual kj::Array<kj::byte> close() = 0;
+};
+
 class DigestStream: public WritableStream {
  public:
-  using DigestContextPtr = kj::Own<EVP_MD_CTX>;
+  using DigestContextPtr = kj::Own<DigestContext>;
   using Algorithm = kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>;
 
   explicit DigestStream(kj::Own<WritableStreamController> controller,
