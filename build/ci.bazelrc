@@ -57,9 +57,7 @@ build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-debug --config=debug --config=rust-debug
 
 build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
-# we're really struggling to fit asan build into worker disk size
-# having asan without symbols is better than none
-build:ci-linux-asan --config=asan --copt="-g0" --strip=always
+build:ci-linux-asan --config=asan
 
 
 # Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
