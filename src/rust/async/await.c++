@@ -293,15 +293,13 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr
 // CoAwaitWaker
 
 CoAwaitWaker::CoAwaitWaker(
-    kj::_::CoroutineBase& coroutine,
     kj::_::ExceptionOrValue& resultRef,
     kj::SourceLocation location)
     : Event(location),
-      coroutine(coroutine),
       resultRef(resultRef) {}
 
 CoAwaitWaker::~CoAwaitWaker() noexcept(false) {
-  coroutine.awaitEnd();
+  getCoroutine().clearPromiseNodeForTrace();
 }
 
 bool CoAwaitWaker::is_current() const {
@@ -325,63 +323,6 @@ void CoAwaitWaker::wake_by_ref() const {
 
 void CoAwaitWaker::drop() const {
   kjWaker.drop();
-}
-
-bool CoAwaitWaker::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
-  // We would only trace the ArcWakerAwaiter if we have no RustPromiseAwaiters.
-  auto objects = linkedObjects();
-  if (objects.begin() == objects.end()) {
-    KJ_IF_SOME(awa, arcWakerAwaiter) {
-      KJ_ASSERT(&awa == &awaiter,
-          "Should not be possible for foreign ArcWakerAwaiter to call our wouldTrace()");
-      return true;
-    }
-  }
-  return false;
-}
-
-bool CoAwaitWaker::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter) {
-  // We prefer to trace the first RustPromiseAwaiter in our list, if there is one.
-  auto objects = linkedObjects();
-  if (objects.begin() != objects.end()) {
-    return &awaiter == &objects.front();
-  }
-  return false;
-}
-
-void CoAwaitWaker::internalReject(kj::Badge<ArcWakerAwaiter>, kj::Exception exception) {
-  resultRef.addException(kj::mv(exception));
-  coroutine.armDepthFirst();
-}
-
-void CoAwaitWaker::awaitBegin() {
-  auto state = kjWaker.reset();
-
-  if (state.wakeCount > 0) {
-    // The future returned Pending, but synchronously called `wake_by_ref()` on the KjWaker,
-    // indicating it wants to immediately be polled again. We should arm our event right now,
-    // which will call `await_ready()` again on the event loop.
-    armDepthFirst();
-  } else KJ_IF_SOME(promise, state.cloned) {
-    // The future returned Pending and cloned an ArcWaker to notify us later. We'll arrange for
-    // the ArcWaker's promise to arm our event once it's fulfilled.
-    arcWakerAwaiter.emplace(*this, kj::_::PromiseNode::from(kj::mv(promise)));
-  } else {
-    // The future returned Pending, did not call `wake_by_ref()` on the KjWaker, and did not
-    // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
-    // kj::NEVER_DONE.
-  }
-
-  // Integrate with our enclosing coroutine's tracing.
-  coroutine.awaitBegin(self);
-}
-
-void CoAwaitWaker::awaitEnd() {
-  coroutine.awaitEnd();
-}
-
-void CoAwaitWaker::scheduleResumption() {
-  coroutine.armDepthFirst();
 }
 
 void CoAwaitWaker::onReady(kj::_::Event* event) noexcept {
@@ -416,15 +357,81 @@ void CoAwaitWaker::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEve
 
 void CoAwaitWaker::traceEvent(kj::_::TraceBuilder& builder) {
   // Just defer to our enclosing Coroutine. It will immediately call our `tracePromise` implementation.
+  auto& coroutine = getCoroutine();
   static_cast<Event&>(coroutine).traceEvent(builder);
 }
 
-BoxFutureVoidAwaiter operator co_await(kj::_::CoroutineBase::Await<BoxFutureVoid> await) {
-  return BoxFutureVoidAwaiter{await.coroutine, kj::mv(await.awaitable)};
+bool CoAwaitWaker::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
+  // We would only trace the ArcWakerAwaiter if we have no RustPromiseAwaiters.
+  auto objects = linkedObjects();
+  if (objects.begin() == objects.end()) {
+    KJ_IF_SOME(awa, arcWakerAwaiter) {
+      KJ_ASSERT(&awa == &awaiter,
+          "Should not be possible for foreign ArcWakerAwaiter to call our wouldTrace()");
+      return true;
+    }
+  }
+  return false;
 }
 
-BoxFutureVoidAwaiter operator co_await(kj::_::CoroutineBase::Await<BoxFutureVoid&> await) {
-  return BoxFutureVoidAwaiter{await.coroutine, kj::mv(await.awaitable)};
+bool CoAwaitWaker::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter) {
+  // We prefer to trace the first RustPromiseAwaiter in our list, if there is one.
+  auto objects = linkedObjects();
+  if (objects.begin() != objects.end()) {
+    return &awaiter == &objects.front();
+  }
+  return false;
+}
+
+void CoAwaitWaker::internalReject(kj::Badge<ArcWakerAwaiter>, kj::Exception exception) {
+  resultRef.addException(kj::mv(exception));
+  getCoroutine().armDepthFirst();
+}
+
+void CoAwaitWaker::awaitBegin() {
+  auto state = kjWaker.reset();
+
+  if (state.wakeCount > 0) {
+    // The future returned Pending, but synchronously called `wake_by_ref()` on the KjWaker,
+    // indicating it wants to immediately be polled again. We should arm our event right now,
+    // which will call `await_ready()` again on the event loop.
+    armDepthFirst();
+  } else KJ_IF_SOME(promise, state.cloned) {
+    // The future returned Pending and cloned an ArcWaker to notify us later. We'll arrange for
+    // the ArcWaker's promise to arm our event once it's fulfilled.
+    arcWakerAwaiter.emplace(*this, kj::_::PromiseNode::from(kj::mv(promise)));
+  } else {
+    // The future returned Pending, did not call `wake_by_ref()` on the KjWaker, and did not
+    // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
+    // kj::NEVER_DONE.
+  }
+
+  // Integrate with our enclosing coroutine's tracing.
+  getCoroutine().setPromiseNodeForTrace(self);
+}
+
+void CoAwaitWaker::awaitEnd() {
+  getCoroutine().clearPromiseNodeForTrace();
+}
+
+void CoAwaitWaker::scheduleResumption() {
+  getCoroutine().armDepthFirst();
+}
+
+void CoAwaitWaker::setCoroutine(kj::_::CoroutineBase& coroutine) {
+  maybeCoroutine = coroutine;
+}
+
+kj::_::CoroutineBase& CoAwaitWaker::getCoroutine() {
+  return KJ_ASSERT_NONNULL(maybeCoroutine, "CoroutineBase reference should be initialized");
+}
+
+BoxFutureVoidAwaiter operator co_await(BoxFutureVoid future) {
+  return BoxFutureVoidAwaiter{kj::mv(future)};
+}
+
+BoxFutureVoidAwaiter operator co_await(BoxFutureVoid& future) {
+  return BoxFutureVoidAwaiter{kj::mv(future)};
 }
 
 }  // namespace workerd::rust::async

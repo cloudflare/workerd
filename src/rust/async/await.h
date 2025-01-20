@@ -167,7 +167,6 @@ class CoAwaitWaker: public CxxWaker,
 public:
   // Initialize `next` with the enclosing coroutine's `Event`.
   CoAwaitWaker(
-      kj::_::CoroutineBase& coroutine,
       kj::_::ExceptionOrValue& resultRef,
       kj::SourceLocation location = {});
   ~CoAwaitWaker() noexcept(false);
@@ -224,10 +223,21 @@ protected:
   void awaitEnd();
   void scheduleResumption();  // TODO(now): Rename to fulfill()?
 
+  // Called from `await_suspend()`, which is the earliest we get access to the coroutine handle.
+  void setCoroutine(kj::_::CoroutineBase& coroutine);
+
 private:
+  // Helper to access `maybeCoroutine`, which is effectively always non-none.
+  kj::_::CoroutineBase& getCoroutine();
+
   // The enclosing coroutine, which we will arm once our wrapped Future returns Ready, or an
   // internal error occurs.
-  kj::_::CoroutineBase& coroutine;
+  //
+  // This member is a Maybe because we don't have access to the coroutine until `await_suspend()` is
+  // called, which initializes this member by calling `setCoroutine()`. Since our derived classes'
+  // `await_ready()` implementations do nothing but immediately return false, we can assume that
+  // this Maybe is non-none effectively everywhere in the implementation of this class.
+  kj::Maybe<kj::_::CoroutineBase&> maybeCoroutine;
 
   // This KjWaker is our actual implementation of the CxxWaker interface. We forward all calls here.
   KjWaker kjWaker;
@@ -248,29 +258,19 @@ private:
 
 class BoxFutureVoidAwaiter: public CoAwaitWaker {
 public:
-  BoxFutureVoidAwaiter(kj::_::CoroutineBase& coroutine, BoxFutureVoid&& future, kj::SourceLocation location = {})
-      : CoAwaitWaker(coroutine, result),
+  BoxFutureVoidAwaiter(BoxFutureVoid&& future, kj::SourceLocation location = {})
+      : CoAwaitWaker(result),
         future(kj::mv(future)) {}
 
-  bool await_ready() {
-    // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
-    //   KjWaker for cloning if we have the last reference to it at this point. This could save
-    //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
-    //   to really benefit.
-
-    if (future.poll(*this)) {
-      // Future is ready, we're done.
-      // TODO(now): Propagate value-or-exception.
-      return true;
-    }
-
-    awaitBegin();
-
+  bool await_ready() const {
     return false;
   }
 
-  // We already arranged to be scheduled in await_ready(), nothing to do here.
-  void await_suspend(kj::_::stdcoro::coroutine_handle<>) {}
+  template <typename T> requires (kj::canConvert<T&, kj::_::CoroutineBase&>())
+  bool await_suspend(kj::_::stdcoro::coroutine_handle<T> handle) {
+    setCoroutine(handle.promise());
+    return awaitSuspendImpl();
+  }
 
   // Unit futures return void.
   void await_resume() {
@@ -282,18 +282,36 @@ public:
   }
 
   kj::Maybe<kj::Own<kj::_::Event>> fire() override {
-    if (await_ready()) {
+    if (!awaitSuspendImpl()) {
       scheduleResumption();
     }
     return kj::none;
   }
 
 private:
+  // Poll the wrapped Future, returning false if we should _not_ suspend, true if we should suspend.
+  bool awaitSuspendImpl() {
+    // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
+    //   KjWaker for cloning if we have the last reference to it at this point. This could save
+    //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
+    //   to really benefit.
+
+    if (future.poll(*this)) {
+      // Future is ready, we're done.
+      // TODO(now): Propagate value-or-exception.
+      return false;
+    }
+
+    awaitBegin();
+
+    return true;
+  }
+
   BoxFutureVoid future;
   kj::_::ExceptionOr<kj::_::Void> result;
 };
 
-BoxFutureVoidAwaiter operator co_await(kj::_::CoroutineBase::Await<BoxFutureVoid> await);
-BoxFutureVoidAwaiter operator co_await(kj::_::CoroutineBase::Await<BoxFutureVoid&> await);
+BoxFutureVoidAwaiter operator co_await(BoxFutureVoid future);
+BoxFutureVoidAwaiter operator co_await(BoxFutureVoid& future);
 
 }  // namespace workerd::rust::async
