@@ -29,6 +29,7 @@ jobs:
         os:
           [
             { name : linux, image : ubuntu-22.04 },
+            { name : linux-arm, image : ubuntu-22.04-arm },
             { name : macOS, image : macos-15 },
             { name : windows, image : windows-2025 }
           ]

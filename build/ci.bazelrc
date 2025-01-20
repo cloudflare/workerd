@@ -52,14 +52,18 @@ build:ci-linux-common --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CX
 build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++
 
 build:ci-linux --config=ci-linux-common
+build:ci-linux-arm --config=ci-linux
 
 build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-debug --config=debug --config=rust-debug
+
+build:ci-linux-arm-debug --config=ci-linux-debug
 
 build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 # we're really struggling to fit asan build into worker disk size
 # having asan without symbols is better than none
 build:ci-linux-asan --config=asan --copt="-g0" --strip=always
+build:ci-linux-arm-asan --config=ci-linux-asan
 
 
 # Unlike the bazel Unix toolchain the macOS toolchain sets "-O0 -DDEBUG" for fastbuild by
