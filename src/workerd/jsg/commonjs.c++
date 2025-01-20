@@ -1,5 +1,6 @@
 #include "commonjs.h"
 
+#include "modules-new.h"
 #include "modules.h"
 
 namespace workerd::jsg {
@@ -9,55 +10,95 @@ CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
       path(kj::mv(path)),
       exports(js.v8Isolate, module->getExports(js)) {}
 
+CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, const jsg::Url& url)
+    : module(jsg::alloc<CommonJsModuleObject>(js, kj::str(url.getHref()))),
+      path(url.clone()),
+      exports(js.v8Isolate, module->getExports(js)) {}
+
 v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
-  auto modulesForResolveCallback = getModulesForResolveCallback(js.v8Isolate);
-  KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      auto modulesForResolveCallback = getModulesForResolveCallback(js.v8Isolate);
+      KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
-  if (isNodeJsCompatEnabled(js)) {
-    KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
-      specifier = kj::mv(nodeSpec);
+      if (isNodeJsCompatEnabled(js)) {
+        KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
+          specifier = kj::mv(nodeSpec);
+        }
+      }
+
+      kj::Path targetPath = ([&] {
+        // If the specifier begins with one of our known prefixes, let's not resolve
+        // it against the referrer.
+        if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:") ||
+            specifier.startsWith("workerd:")) {
+          return kj::Path::parse(specifier);
+        }
+        return p.parent().eval(specifier);
+      })();
+
+      // require() is only exposed to worker bundle modules so the resolve here is only
+      // permitted to require worker bundle or built-in modules. Internal modules are
+      // excluded.
+      auto& info =
+          JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, p,
+                                  ModuleRegistry::ResolveOption::DEFAULT,
+                                  ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
+              Error, "No such module \"", targetPath.toString(), "\".");
+      // Adding imported from suffix here not necessary like it is for
+      // resolveCallback, since we have a js stack that will include the parent
+      // module's name and location of the failed require().
+
+      ModuleRegistry::RequireImplOptions options = ModuleRegistry::RequireImplOptions::DEFAULT;
+      if (getCommonJsExportDefault(js.v8Isolate)) {
+        options = ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
+      }
+
+      return ModuleRegistry::requireImpl(js, info, options);
+    }
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      return modules::ModuleRegistry::resolve(js, specifier, "default"_kj,
+          modules::ResolveContext::Type::BUNDLE, modules::ResolveContext::Source::REQUIRE, u);
     }
   }
-
-  kj::Path targetPath = ([&] {
-    // If the specifier begins with one of our known prefixes, let's not resolve
-    // it against the referrer.
-    if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:") ||
-        specifier.startsWith("workerd:")) {
-      return kj::Path::parse(specifier);
-    }
-    return path.parent().eval(specifier);
-  })();
-
-  // require() is only exposed to worker bundle modules so the resolve here is only
-  // permitted to require worker bundle or built-in modules. Internal modules are
-  // excluded.
-  auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, path,
-                                       ModuleRegistry::ResolveOption::DEFAULT,
-                                       ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
-      Error, "No such module \"", targetPath.toString(), "\".");
-  // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
-  // js stack that will include the parent module's name and location of the failed require().
-
-  ModuleRegistry::RequireImplOptions options = ModuleRegistry::RequireImplOptions::DEFAULT;
-  if (getCommonJsExportDefault(js.v8Isolate)) {
-    options = ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
-  }
-
-  return ModuleRegistry::requireImpl(js, info, options);
+  KJ_UNREACHABLE;
 }
 
 void CommonJsModuleContext::visitForMemoryInfo(MemoryTracker& tracker) const {
   tracker.trackField("exports", exports);
-  tracker.trackFieldWithSize("path", path.size());
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      tracker.trackFieldWithSize("path", p.size());
+    }
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      tracker.trackFieldWithSize("path", u.getHref().size());
+    }
+  }
 }
 
 kj::String CommonJsModuleContext::getFilename() const {
-  return path.toString(true);
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      return p.toString(true);
+    }
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      return kj::str(u.getPathname());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::String CommonJsModuleContext::getDirname() const {
-  return path.parent().toString(true);
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      return p.parent().toString(true);
+    }
+    // TODO(new-module-registry): Appropriately convert file URL into path
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      return kj::str(u.getPathname());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::Ref<CommonJsModuleObject> CommonJsModuleContext::getModule(jsg::Lock& js) {
@@ -67,7 +108,7 @@ jsg::Ref<CommonJsModuleObject> CommonJsModuleContext::getModule(jsg::Lock& js) {
 v8::Local<v8::Value> CommonJsModuleContext::getExports(jsg::Lock& js) const {
   return exports.getHandle(js);
 }
-void CommonJsModuleContext::setExports(jsg::Value value) {
+void CommonJsModuleContext::setExports(jsg::Lock& js, jsg::Value value) {
   exports = kj::mv(value);
 }
 
@@ -98,50 +139,66 @@ NodeJsModuleContext::NodeJsModuleContext(jsg::Lock& js, kj::Path path)
       path(kj::mv(path)),
       exports(js.v8Ref(module->getExports(js))) {}
 
+NodeJsModuleContext::NodeJsModuleContext(jsg::Lock& js, const jsg::Url& url)
+    : module(jsg::alloc<NodeJsModuleObject>(js, kj::str(url.getHref()))),
+      path(url.clone()),
+      exports(js.v8Isolate, module->getExports(js)) {}
+
 v8::Local<v8::Value> NodeJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
-  // If it is a bare specifier known to be a Node.js built-in, then prefix the
-  // specifier with node:
-  bool isNodeBuiltin = false;
-  auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
-  KJ_IF_SOME(spec, checkNodeSpecifier(specifier)) {
-    specifier = kj::mv(spec);
-    isNodeBuiltin = true;
-    resolveOption = jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
-  }
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      // If it is a bare specifier known to be a Node.js built-in, then prefix the
+      // specifier with node:
+      bool isNodeBuiltin = false;
+      auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
+      KJ_IF_SOME(spec, checkNodeSpecifier(specifier)) {
+        specifier = kj::mv(spec);
+        isNodeBuiltin = true;
+        resolveOption = jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
+      }
 
-  // TODO(cleanup): This implementation from here on is identical to the
-  // CommonJsModuleContext::require. We should consolidate these as the
-  // next step.
+      // TODO(cleanup): This implementation from here on is identical to the
+      // CommonJsModuleContext::require. We should consolidate these as the
+      // next step.
 
-  auto modulesForResolveCallback = jsg::getModulesForResolveCallback(js.v8Isolate);
-  KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
+      auto modulesForResolveCallback = jsg::getModulesForResolveCallback(js.v8Isolate);
+      KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
-  kj::Path targetPath = ([&] {
-    // If the specifier begins with one of our known prefixes, let's not resolve
-    // it against the referrer.
-    if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:") ||
-        specifier.startsWith("workerd:")) {
-      return kj::Path::parse(specifier);
+      kj::Path targetPath = ([&] {
+        // If the specifier begins with one of our known prefixes, let's not resolve
+        // it against the referrer.
+        if (specifier.startsWith("node:") || specifier.startsWith("cloudflare:") ||
+            specifier.startsWith("workerd:")) {
+          return kj::Path::parse(specifier);
+        }
+        return p.parent().eval(specifier);
+      })();
+
+      // require() is only exposed to worker bundle modules so the resolve here is only
+      // permitted to require worker bundle or built-in modules. Internal modules are
+      // excluded.
+      auto& info =
+          JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, p, resolveOption,
+                                  ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
+              Error, "No such module \"", targetPath.toString(), "\".");
+      // Adding imported from suffix here not necessary like it is for resolveCallback,
+      // since we have a js stack that will include the parent module's name and location
+      // of the failed require().
+
+      if (!isNodeBuiltin) {
+        JSG_REQUIRE_NONNULL(
+            info.maybeSynthetic, TypeError, "Cannot use require() to import an ES Module.");
+      }
+
+      return ModuleRegistry::requireImpl(
+          js, info, ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT);
     }
-    return path.parent().eval(specifier);
-  })();
-
-  // require() is only exposed to worker bundle modules so the resolve here is only
-  // permitted to require worker bundle or built-in modules. Internal modules are
-  // excluded.
-  auto& info =
-      JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, path, resolveOption,
-                              ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
-          Error, "No such module \"", targetPath.toString(), "\".");
-  // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
-  // js stack that will include the parent module's name and location of the failed require().
-
-  if (!isNodeBuiltin) {
-    JSG_REQUIRE_NONNULL(
-        info.maybeSynthetic, TypeError, "Cannot use require() to import an ES Module.");
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      return modules::ModuleRegistry::resolve(js, specifier, "default"_kj,
+          modules::ResolveContext::Type::BUNDLE, modules::ResolveContext::Source::REQUIRE, u);
+    }
   }
-
-  return ModuleRegistry::requireImpl(js, info, ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT);
+  KJ_UNREACHABLE;
 }
 
 v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
@@ -160,11 +217,28 @@ v8::Local<v8::Value> NodeJsModuleContext::getProcess(jsg::Lock& js) {
 }
 
 kj::String NodeJsModuleContext::getFilename() {
-  return path.toString(true);
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      return p.toString(true);
+    }
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      return kj::str(u.getPathname());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::String NodeJsModuleContext::getDirname() {
-  return path.parent().toString(true);
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      return p.parent().toString(true);
+    }
+    // TODO(new-module-registry): Appropriately convert file URL into path
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      return kj::str(u.getPathname());
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::Ref<NodeJsModuleObject> NodeJsModuleContext::getModule(jsg::Lock& js) {
@@ -193,6 +267,18 @@ void NodeJsModuleObject::setExports(jsg::Value value) {
 
 kj::StringPtr NodeJsModuleObject::getPath() {
   return path;
+}
+
+void NodeJsModuleContext::visitForMemoryInfo(MemoryTracker& tracker) const {
+  tracker.trackField("exports", exports);
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(p, kj::Path) {
+      tracker.trackFieldWithSize("path", p.size());
+    }
+    KJ_CASE_ONEOF(u, jsg::Url) {
+      tracker.trackFieldWithSize("path", u.getHref().size());
+    }
+  }
 }
 
 }  // namespace workerd::jsg

@@ -30,6 +30,15 @@ const unitTests :Workerd.Config = (
           (name = "data", data = "abcdef"),
           (name = "json", json = "{ \"foo\": 1 }"),
           (name = "invalid-json", json = "1n"),
+          (name = "cjs", commonJsModule = "module.exports = 1"),
+          (name = "cjs-throw", commonJsModule = "throw new Error('boom')"),
+          (name = "nodejs", nodeJsCompatModule = "module.exports = 2"),
+          (name = "cjs2",
+           commonJsModule = "module.exports = { a: 1 }",
+           namedExports = ["a"],
+           ),
+          (name = "cjs3",
+           commonJsModule = "module.exports = require('.././.././cjs')")
         ],
         compatibilityDate = "2024-07-01",
         compatibilityFlags = [

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/url.h>
 
 #include <kj/filesystem.h>
 
@@ -29,13 +30,14 @@ class CommonJsModuleObject final: public jsg::Object {
 class CommonJsModuleContext final: public jsg::Object {
  public:
   CommonJsModuleContext(jsg::Lock& js, kj::Path path);
+  CommonJsModuleContext(jsg::Lock&, const jsg::Url&);
 
   v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
 
   jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js);
 
   v8::Local<v8::Value> getExports(jsg::Lock& js) const;
-  void setExports(jsg::Value value);
+  void setExports(jsg::Lock& js, jsg::Value value);
 
   kj::String getFilename() const;
   kj::String getDirname() const;
@@ -53,7 +55,7 @@ class CommonJsModuleContext final: public jsg::Object {
   void visitForMemoryInfo(MemoryTracker& tracker) const;
 
  private:
-  kj::Path path;
+  kj::OneOf<kj::Path, jsg::Url> path;
   jsg::Value exports;
 };
 
@@ -115,6 +117,7 @@ class NodeJsModuleObject: public jsg::Object {
 class NodeJsModuleContext: public jsg::Object {
  public:
   NodeJsModuleContext(jsg::Lock& js, kj::Path path);
+  NodeJsModuleContext(jsg::Lock&, const jsg::Url&);
 
   v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
 
@@ -143,13 +146,10 @@ class NodeJsModuleContext: public jsg::Object {
 
   jsg::Ref<NodeJsModuleObject> module;
 
-  void visitForMemoryInfo(MemoryTracker& tracker) const {
-    tracker.trackField("exports", exports);
-    tracker.trackFieldWithSize("path", path.size());
-  }
+  void visitForMemoryInfo(MemoryTracker& tracker) const;
 
  private:
-  kj::Path path;
+  kj::OneOf<kj::Path, jsg::Url> path;
   jsg::Value exports;
 };
 

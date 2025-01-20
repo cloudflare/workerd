@@ -46,6 +46,18 @@ strictEqual(Buffer.from(data.default).toString(), 'abcdef');
 import * as json from 'json';
 deepStrictEqual(json.default, { foo: 1 });
 
+import * as cjs from 'cjs';
+deepStrictEqual(cjs.default, 1);
+
+import * as nodejs from 'nodejs';
+deepStrictEqual(nodejs.default, 2);
+
+import { a as cjsA } from 'cjs2';
+deepStrictEqual(cjsA, 1);
+
+import * as cjs3 from 'cjs3';
+deepStrictEqual(cjs.default, 1);
+
 await rejects(import('invalid-json'), {
   message: /Unexpected non-whitespace character after JSON/,
 });
@@ -141,10 +153,20 @@ export const evalErrorsInEsmTopLevel = {
   },
 };
 
+export const cjsThrow = {
+  async test() {
+    await rejects(import('cjs-throw'), {
+      message: 'boom',
+    });
+  },
+};
+
 // TODO(now): Tests
 // * [ ] Include tests for all known module types
 //   * [x] ESM
-//   * [ ] CommonJS
+//   * [x] CommonJS
+//     * [x] CommonJS with top level errors
+//     * [ ] CommonJS with disallowed top-level i/o
 //   * [x] Text
 //   * [x] Data
 //   * [x] JSON
@@ -164,12 +186,12 @@ export const evalErrorsInEsmTopLevel = {
 //   * [x] URL resolution works correctly
 //   * [x] Invalid URLs are correctly reported as errors
 // * [x] Import assertions should be rejected
-// * [ ] require(...) Works in CommonJs Modules
+// * [x] require(...) Works in CommonJs Modules
 // * [ ] require(...) correctly handles node: modules with/without the node: prefix
 // * [ ] Circular dependencies are correctly handled
 // * [ ] Errors during CommonJs evaluation are correctly reported
 // * [ ] Entry point ESM with no default export is correctly reported as error
-// * [ ] CommonJs modules correctly expose named exports
+// * [x] CommonJs modules correctly expose named exports
 // * [ ] require('module').createRequire API works as expected
 // * [ ] Fallback service works as expected
 // * [ ] console.log output correctly uses node-internal:inspect for output
