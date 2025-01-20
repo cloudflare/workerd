@@ -1739,6 +1739,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     KJ_IF_SOME(t, tracer) {
       t->setEventInfo(ioctx.now(), tracing::JsRpcEventInfo(kj::str(methodName)));
     }
+    ioctx.getMetrics().reportTailEvent(ioctx, [&] {
+      return tracing::Onset(
+          tracing::JsRpcEventInfo(kj::str(methodName)), tracing::Onset::WorkerInfo{}, kj::none);
+    });
   }
 };
 
