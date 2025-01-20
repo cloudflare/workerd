@@ -703,6 +703,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest), "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
+          .addSubCommand("make-pyodide-baseline-snapshot",
+              KJ_BIND_METHOD(*this, getMakePyodideBaselineSnapshot),
+              "Make a Pyodide baseline memory snapshot")
           .build();
       // TODO(someday):
       // "validate": Loads the config and parses all the code to report errors, but then exits
@@ -899,6 +902,18 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         .build();
   }
 
+  kj::MainFunc getMakePyodideBaselineSnapshot() {
+    server->allowExperimental();
+    server->setPythonCreateBaselineSnapshot();
+    auto builder =
+        kj::MainBuilder(context, getVersionString(), "Make a Pyodide baseline memory snapshot", "");
+    setPyodideDiskCacheDir(".");
+    return builder.expectArg("<python-version>", CLI_METHOD(parsePythonCompatFlag))
+        .expectArg("<output-directory>", CLI_METHOD(setPackageDiskCacheDir))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
+  }
+
   void addImportPath(kj::StringPtr pathStr) {
     auto path = fs->getCurrentPath().evalNative(pathStr);
     if (fs->getRoot().tryOpenSubdir(path) != kj::none) {
@@ -1021,6 +1036,24 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     kj::Maybe<kj::Own<const kj::Directory>> dir =
         fs->getRoot().tryOpenSubdir(path, kj::WriteMode::MODIFY);
     server->setPyodideDiskCacheRoot(kj::mv(dir));
+  }
+
+  void parsePythonCompatFlag(kj::StringPtr compatFlagStr) {
+    auto builder = kj::heap<capnp::MallocMessageBuilder>();
+    auto configBuilder = builder->initRoot<config::Config>();
+    auto service = configBuilder.initServices(1)[0];
+    service.setName("main");
+    auto worker = service.initWorker();
+    worker.setCompatibilityDate("2023-12-18");
+    auto flags = worker.initCompatibilityFlags(2);
+    flags.set(0, compatFlagStr);
+    flags.set(1, "python_workers");
+    auto mod = worker.initModules(1)[0];
+    mod.setName("main.py");
+    mod.setPythonModule("def test():\n pass");
+    config = configBuilder.asReader();
+    configOwner = kj::mv(builder);
+    util::Autogate::initAutogate(getConfig().getAutogates());
   }
 
   void watch() {
