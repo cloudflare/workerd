@@ -20,8 +20,7 @@ py_wd_test("env-param")
 
 py_wd_test(
     "asgi",
-    # TODO: update bundle to include asgi fix and test on 0.26.0a2
-    python_flags = ["development"],
+    skip_python_flags = ["0.27.1"],
 )
 
 py_wd_test("random")
@@ -39,22 +38,18 @@ py_wd_test(
 gen_import_tests(
     PYODIDE_IMPORTS_TO_TEST,
     # TODO: Micropip version mismatch for 0.27.0
-    pkg_python_versions = {
+    pkg_skip_versions = {
         "micropip": [
-            "0.26.0a2",
-            "development",
+            "0.27.1",
         ],
         "langchain-core": [
-            "0.26.0a2",
-            "development",
+            "0.27.1",
         ],
         "langchain_openai": [
-            "0.26.0a2",
-            "development",
+            "0.27.1",
         ],
         "langsmith": [
-            "0.26.0a2",
-            "development",
+            "0.27.1",
         ],
     },
 )

@@ -32,7 +32,7 @@ def generate_wd_test_file(requirement):
     return WD_FILE_TEMPLATE.format(requirement, requirement)
 
 # to_test is a dictionary from library name to list of imports
-def gen_import_tests(to_test, pkg_python_versions = {}):
+def gen_import_tests(to_test, pkg_skip_versions = {}):
     for lib in to_test.keys():
         prefix = "import/" + lib
         worker_py_fname = prefix + "/worker.py"
@@ -52,7 +52,7 @@ def gen_import_tests(to_test, pkg_python_versions = {}):
             name = prefix,
             directory = lib,
             src = wd_test_fname,
-            python_flags = pkg_python_versions.get(lib, "all"),
+            skip_python_flags = pkg_skip_versions.get(lib, []),
             args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels"],
             data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
             size = "enormous",
