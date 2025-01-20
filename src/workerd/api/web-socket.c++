@@ -854,6 +854,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
   KJ_ASSERT(!native.isPumping);
   native.isPumping = true;
   autoResponse.isPumping = true;
+  bool completed = false;
   KJ_DEFER({
     // We use a KJ_DEFER to set native.isPumping = false to ensure that it happens -- we had a bug
     // in the past where this was handled by the caller of WebSocket::pump() and it allowed for
@@ -868,6 +869,14 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     if (autoResponse.pendingAutoResponseDeque.size() > 0) {
       autoResponse.pendingAutoResponseDeque.clear();
+    }
+
+    if (!completed) {
+      // We didn't make it to `completed = true` at the end of this function, so either an
+      // exception was thrown or the task was canceled. Either way, we cannot send any futher
+      // messages, because the connection is in a broken state and will just throw more exceptions.
+      // Setting `outgoingAborted` stops us from even trying to queue any more messages.
+      native.outgoingAborted = true;
     }
   });
 
@@ -925,6 +934,8 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
     autoResponse.pendingAutoResponseDeque.pop_front();
     co_await ws.send(message);
   }
+
+  completed = true;
 }
 
 void WebSocket::tryReleaseNative(jsg::Lock& js) {
