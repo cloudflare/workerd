@@ -53,13 +53,11 @@ export class Timeout {
   }
 
   #constructTimer(): number {
-    if (this.#isRepeat) {
-      // @ts-expect-error TS2322 Due to difference between Node.js and globals
-      return globalThis.setInterval(this.#callback, this.#after, ...this.#args);
-    } else {
-      // @ts-expect-error TS2322 Due to difference between Node.js and globals
-      return globalThis.setTimeout(this.#callback, this.#after, ...this.#args);
-    }
+    // @ts-expect-error TS2322 Due to difference between Node.js and globals
+    this.#timer = this.#isRepeat
+      ? globalThis.setInterval(this.#callback, this.#after, ...this.#args)
+      : globalThis.setTimeout(this.#callback, this.#after, ...this.#args);
+    return this.#timer;
   }
 
   #clearTimeout(): void {

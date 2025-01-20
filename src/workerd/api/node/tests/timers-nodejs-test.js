@@ -136,3 +136,22 @@ export const testSetInterval = {
     }
   },
 };
+
+export const testRefresh = {
+  async test() {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    timers.clearTimeout(
+      timers
+        .setTimeout(() => {
+          reject();
+        }, 1)
+        .refresh()
+    );
+
+    timers.setTimeout(() => {
+      resolve();
+    }, 2);
+
+    await promise;
+  },
+};
