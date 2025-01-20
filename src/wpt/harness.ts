@@ -57,8 +57,13 @@ export type TestRunnerConfig = {
   [key: string]: TestRunnerOptions;
 };
 
+type Env = {
+  unsafe: { eval: (code: string) => void };
+  [key: string]: unknown;
+};
+
 type TestCase = {
-  test(): Promise<void>;
+  test(_: unknown, env: Env): Promise<void>;
 };
 
 type TestRunnerFn = (callback: TestFn | PromiseTestFn, message: string) => void;
@@ -67,13 +72,13 @@ type PromiseTestFn = () => Promise<void>;
 type ThrowingFn = () => unknown;
 
 declare global {
-  // eslint-disable-next-line no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis
+  /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   var errors: Error[];
-  // eslint-disable-next-line no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis
   var testOptions: TestRunnerOptions;
-
-  // eslint-disable-next-line no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis
   var GLOBAL: { isWindow(): boolean };
+  var env: Env;
+  var promises: { [name: string]: Promise<void> };
+  /* eslint-enable no-var */
 
   function test(func: TestFn, name: string): void;
   function done(): undefined;
@@ -82,12 +87,12 @@ declare global {
     testType: TestRunnerFn,
     testCallback: TestFn | PromiseTestFn,
     testMessage: string
-  ): void | Promise<void>;
+  ): void;
   function promise_test(
     func: PromiseTestFn,
     name: string,
     properties?: unknown
-  ): Promise<void>;
+  ): void;
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
   function assert_true(val: unknown, message?: string): void;
@@ -178,22 +183,14 @@ globalThis.Window = Object.getPrototypeOf(globalThis).constructor;
 globalThis.fetch = async (
   input: RequestInfo | URL,
   _init?: RequestInit
+  // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
 ): Promise<Response> => {
   const url =
     input instanceof Request ? input.url.toString() : input.toString();
-  const exports: unknown = await import(url);
-
-  if (
-    !(typeof exports == 'object' && exports !== null && 'default' in exports)
-  ) {
-    throw new Error(`Cannot fetch ${url}`);
-  }
-
-  const data: unknown = exports.default;
-
+  const exports: unknown = env[url];
   const response = new Response();
   // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
-  response.json = async (): Promise<unknown> => data;
+  response.json = async (): Promise<unknown> => exports;
   return response;
 };
 
@@ -213,7 +210,7 @@ globalThis.subsetTestByKey = (
   testType,
   testCallback,
   testMessage
-): void | Promise<void> => {
+): void => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
@@ -222,13 +219,13 @@ globalThis.subsetTestByKey = (
   return testType(testCallback, testMessage);
 };
 
-globalThis.promise_test = async (func, name, _properties): Promise<void> => {
+globalThis.promise_test = (func, name, _properties): void => {
   if (!shouldRunTest(name)) {
     return;
   }
 
   try {
-    await func.call(this);
+    globalThis.promises[name] = func.call(this);
   } catch (err) {
     globalThis.errors.push(new AggregateError([err], name));
   }
@@ -438,12 +435,25 @@ function shouldRunTest(message: string): boolean {
   return true;
 }
 
-function prepare(options: TestRunnerOptions): void {
+function prepare(env: Env, options: TestRunnerOptions): void {
   globalThis.errors = [];
   globalThis.testOptions = options;
+  globalThis.env = env;
+  globalThis.promises = {};
 }
 
-function validate(testFileName: string, options: TestRunnerOptions): void {
+async function validate(
+  testFileName: string,
+  options: TestRunnerOptions
+): Promise<void> {
+  for (const [name, promise] of Object.entries(globalThis.promises)) {
+    try {
+      await promise;
+    } catch (err) {
+      globalThis.errors.push(new AggregateError([err], name));
+    }
+  }
+
   const expectedFailures = new Set(options.expectedFailures ?? []);
 
   let failing = false;
@@ -452,6 +462,9 @@ function validate(testFileName: string, options: TestRunnerOptions): void {
       err.message = sanitize_unpaired_surrogates(err.message);
       console.error(err);
       failing = true;
+    } else if (options.verbose) {
+      err.message = sanitize_unpaired_surrogates(err.message);
+      console.warn('Expected failure: ', err);
     }
   }
 
@@ -471,15 +484,18 @@ export function run(config: TestRunnerConfig, file: string): TestCase {
   const options = config[file] ?? {};
 
   return {
-    async test(): Promise<void> {
+    async test(_: unknown, env: Env): Promise<void> {
       if (options.skipAllTests) {
         console.warn(`All tests in ${file} have been skipped.`);
         return;
       }
 
-      prepare(options);
-      await import(file);
-      validate(file, options);
+      prepare(env, options);
+      if (typeof env[file] !== 'string') {
+        throw new Error(`Unable to run ${file}. Code is not a string`);
+      }
+      env.unsafe.eval(env[file]);
+      await validate(file, options);
     },
   };
 }
