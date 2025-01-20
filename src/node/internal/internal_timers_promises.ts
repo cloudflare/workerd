@@ -34,13 +34,13 @@ import {
 
 const kScheduler = Symbol.for('kScheduler');
 
-export async function setTimeout(
-  after: number | undefined,
-  value?: unknown,
+export async function setTimeout<T = void>(
+  delay: number | undefined,
+  value?: T,
   options: { signal?: AbortSignal; ref?: boolean } = {}
-): Promise<typeof value> {
-  if (after !== undefined) {
-    validateNumber(after, 'delay');
+): Promise<T> {
+  if (delay !== undefined) {
+    validateNumber(delay, 'delay');
   }
 
   validateObject(options, 'options');
@@ -61,11 +61,11 @@ export async function setTimeout(
     throw new AbortError(undefined, { cause: signal.reason });
   }
 
-  const { promise, resolve, reject } = Promise.withResolvers<typeof value>();
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
 
   const timer = timers.setTimeout(() => {
-    resolve(value);
-  }, after ?? 0);
+    resolve(value as T);
+  }, delay ?? 0);
 
   if (signal) {
     function onCancel(): void {
@@ -78,10 +78,10 @@ export async function setTimeout(
   return promise;
 }
 
-export async function setImmediate(
-  value?: unknown,
+export async function setImmediate<T>(
+  value?: T,
   options: { signal?: AbortSignal; ref?: boolean } = {}
-): Promise<typeof value> {
+): Promise<T> {
   validateObject(options, 'options');
 
   // Ref options is a no-op.
@@ -100,10 +100,10 @@ export async function setImmediate(
     throw new AbortError(undefined, { cause: signal.reason });
   }
 
-  const { promise, resolve, reject } = Promise.withResolvers<typeof value>();
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
 
   const timer = globalThis.setImmediate(() => {
-    resolve(value);
+    resolve(value as T);
   });
 
   if (signal) {
@@ -118,13 +118,13 @@ export async function setImmediate(
   return promise;
 }
 
-export async function* setInterval(
-  after?: number,
-  value?: unknown,
+export async function* setInterval<T = void>(
+  delay?: number,
+  value?: T,
   options: { signal?: AbortSignal; ref?: boolean } = {}
-): AsyncGenerator {
-  if (after !== undefined) {
-    validateNumber(after, 'delay');
+): AsyncGenerator<T> {
+  if (delay !== undefined) {
+    validateNumber(delay, 'delay');
   }
 
   validateObject(options, 'options');
@@ -155,7 +155,7 @@ export async function* setInterval(
         callback?.();
         callback = undefined;
       },
-      after,
+      delay,
       undefined,
       true,
       ref
@@ -179,7 +179,7 @@ export async function* setInterval(
         await new Promise((resolve) => (callback = resolve));
       }
       for (; notYielded > 0; notYielded--) {
-        yield value;
+        yield value as T;
       }
     }
     throw new AbortError(undefined, { cause: signal.reason });
@@ -214,7 +214,6 @@ class Scheduler {
 
   public yield(): Promise<void> {
     if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
-    // @ts-expect-error TS2555 Following Node.js implementation
     return setImmediate();
   }
 
