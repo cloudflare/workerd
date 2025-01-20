@@ -13,12 +13,14 @@ def py_wd_test(
         data = None,
         name = None,
         python_flags = "all",
+        skip_python_flags = [],
         args = [],
         size = "enormous",
         tags = [],
         **kwargs):
     if python_flags == "all":
         python_flags = FEATURE_FLAGS.keys()
+    python_flags = [flag for flag in python_flags if flag not in skip_python_flags]
     if data == None and directory != None:
         data = native.glob(
             [
