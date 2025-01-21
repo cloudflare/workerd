@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import { validateFunction } from 'node-internal:validators';
+import { default as timersUtil } from 'node-internal:timers';
 
 let clearTimeoutImpl: (obj: Timeout) => void;
 
@@ -134,9 +135,9 @@ export function clearTimeout(timer: unknown): void {
   }
 }
 
-export const setImmediate = globalThis.setImmediate.bind(globalThis);
+export const setImmediate = timersUtil.setImmediate.bind(timersUtil);
 
-export const clearImmediate = globalThis.clearImmediate.bind(globalThis);
+export const clearImmediate = timersUtil.clearImmediate.bind(timersUtil);
 
 export function setInterval(
   callback: (...args: unknown[]) => void,

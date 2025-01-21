@@ -206,9 +206,12 @@ export function deprecate(
   return fn;
 }
 
-export function getCallSite(frames: number = 10) {
-  return utilImpl.getCallSite(frames);
-}
+// Node.js originally introduced the API with the name `getCallSite()` as an experimental
+// API but then renamed it to `getCallSites()` soon after. We had already implemented the
+// API with the original name in a release. To avoid the possibility of breaking, we export
+// the function using both names.
+export const getCallSite = utilImpl.getCallSites.bind(utilImpl);
+export const getCallSites = utilImpl.getCallSites.bind(utilImpl);
 
 export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
   return _isDeepStrictEqual(a, b);
@@ -247,6 +250,7 @@ export default {
   transferableAbortController,
   transferableAbortSignal,
   getCallSite,
+  getCallSites,
   isDeepStrictEqual,
   isArray,
 };

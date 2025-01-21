@@ -92,6 +92,58 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
   return msg.flatten();
 }
 
+// If a VFS call throws an exception, and vfsErrorListener is non-null, the exception will
+// be placed there, otherwise it will be logged. This is used to implement pass-through of KJ
+// exceptions through SQLite.
+static thread_local kj::Maybe<kj::Exception>* vfsErrorListener = nullptr;
+
+// Report that in a sqlite VFS callback, an exception was caught, and SQLITE_IOERROR is being
+// returned to SQLite.
+//
+// The exception must be caught using `catch (kj::Exception& e)`, NOT using `catch (...)` followed
+// by kj::getCaughtExceptionAsKj(). This is because the latter truncates the stack trace to show
+// only the frames between the throw and the catch. We actually want to retain the full trace
+// through SQLite.
+void reportVfsErrorCaught(kj::Exception&& e) {
+  if (vfsErrorListener != nullptr) {
+    // Only capture the first error; assume subsequent errors are side effects.
+    if (*vfsErrorListener == kj::none) {
+      *vfsErrorListener = kj::mv(e);
+    }
+  } else {
+    LOG_EXCEPTION("sqliteVfsError", e);
+  }
+}
+
+// Implements SQLITE_CALL_SCOPE.
+class SqliteCallScope {
+ public:
+  SqliteCallScope() {
+    KJ_DASSERT(vfsErrorListener == nullptr);
+    vfsErrorListener = &error;
+  }
+  ~SqliteCallScope() {
+    vfsErrorListener = nullptr;
+  }
+
+  void rethrowVfsError() {
+    KJ_IF_SOME(e, error) {
+      // Slight hack: The exception already has a stack trace attached which should include the
+      // current stack, but `kj::throwFatalException()` would re-append the current stack trace
+      // to the exception. We can avoid that by calling
+      // kj::getExceptionCallback().onFatalException() directly, which is what
+      // `throwFatalException()` does after extending the stack.
+      kj::getExceptionCallback().onFatalException(kj::mv(e));
+    }
+  }
+
+  // Hack to allow block syntax with for(); see SQLITE_CALL_SCOPE.
+  bool done = false;
+
+ private:
+  kj::Maybe<kj::Exception> error;
+};
+
 }  // namespace
 
 // Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
@@ -117,9 +169,11 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 // can convert to it.
 #define SQLITE_CALL(code, ...)                                                                     \
   do {                                                                                             \
+    SqliteCallScope sqliteCallScope;                                                               \
     int _ec = code;                                                                                \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
+    if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                    \
     SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
 
@@ -128,8 +182,24 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
+    if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
+
+// When using SQLITE_CALL_FAILED(), you must place the actual sqlite call and the
+// SQLITE_CALL_FAILED() invocation within a SQLITE_CALL_SCOPE block, in order to set up VFS error
+// capture. Example:
+//
+//   SQLITE_CALL_SCOPE {
+//     int errorCode = sqlite3_do_something();
+//     if (errorCode != SQLITE_OK) {
+//       SQLITE_CALL_FAILED("sqlite3_do_something()", errorCode, "failed to do something");
+//     }
+//   }
+//
+// Note that if you use SQLITE_CALL(), this is handled automatically.
+#define SQLITE_CALL_SCOPE                                                                          \
+  for (SqliteCallScope sqliteCallScope; !sqliteCallScope.done; sqliteCallScope.done = true)
 
 namespace {
 
@@ -591,21 +661,23 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
     sqlite3_stmt* result;
     const char* tail;
 
-    auto prepareResult =
-        sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail);
+    SQLITE_CALL_SCOPE {
+      auto prepareResult =
+          sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail);
 
-    // If we had an auth error specifically, check if we recorded a better error message during
-    // the authorizor callback.
-    if (prepareResult == SQLITE_AUTH) {
-      KJ_IF_SOME(error, parseContext.authError) {
-        // Throw the tailored auth error.
-        kj::throwFatalException(kj::mv(error));
+      // If we had an auth error specifically, check if we recorded a better error message during
+      // the authorizor callback.
+      if (prepareResult == SQLITE_AUTH) {
+        KJ_IF_SOME(error, parseContext.authError) {
+          // Throw the tailored auth error.
+          kj::throwFatalException(kj::mv(error));
+        }
+        // we don't have a better error, so fall back to SQLITE_CALL_FAILED below
       }
-      // we don't have a better error, so fall back to SQLITE_CALL_FAILED below
-    }
 
-    if (prepareResult != SQLITE_OK) {
-      SQLITE_CALL_FAILED("sqlite3_prepare_v3", prepareResult);
+      if (prepareResult != SQLITE_OK) {
+        SQLITE_CALL_FAILED("sqlite3_prepare_v3", prepareResult);
+      }
     }
 
     SQLITE_REQUIRE(result != nullptr, kj::none, "SQL code did not contain a statement.", sqlCode);
@@ -643,13 +715,15 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
           }
 
           // This isn't the last statement in the code. Execute it immediately.
-          int err = sqlite3_step(result);
-          if (err == SQLITE_DONE) {
-            // good
-          } else if (err == SQLITE_ROW) {
-            // Intermediate statement returned results. We will discard.
-          } else {
-            SQLITE_CALL_FAILED("sqlite3_step()", err);
+          SQLITE_CALL_SCOPE {
+            int err = sqlite3_step(result);
+            if (err == SQLITE_DONE) {
+              // good
+            } else if (err == SQLITE_ROW) {
+              // Intermediate statement returned results. We will discard.
+            } else {
+              SQLITE_CALL_FAILED("sqlite3_step()", err);
+            }
           }
 
           // Apply any state changes from executing the statement.
@@ -1307,16 +1381,19 @@ void SqliteDatabase::Query::nextRow(bool first) {
   KJ_DEFER(db.currentRegulator = kj::none);
   db.currentRegulator = regulator;
 
-  int err = sqlite3_step(statement);
-  // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
-  // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
-  // in the Dtor, and handle the case where the statement could be null when the Query gets destructed
-  rowsRead = getRowsRead();
-  rowsWritten = getRowsWritten();
-  if (err == SQLITE_DONE) {
-    done = true;
-  } else if (err != SQLITE_ROW) {
-    SQLITE_CALL_FAILED("sqlite3_step()", err);
+  SQLITE_CALL_SCOPE {
+    int err = sqlite3_step(statement);
+    // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
+    // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
+    // in the Dtor, and handle the case where the statement could be null when the Query gets
+    // destructed
+    rowsRead = getRowsRead();
+    rowsWritten = getRowsWritten();
+    if (err == SQLITE_DONE) {
+      done = true;
+    } else if (err != SQLITE_ROW) {
+      SQLITE_CALL_FAILED("sqlite3_step()", err);
+    }
   }
 
   if (first) {
@@ -1715,7 +1792,7 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<FileImpl*>(file);                                            \
   try block catch (kj::Exception & e) {                                                            \
-    LOG_EXCEPTION("sqliteVfsError", e);                                                            \
+    reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
   }
 

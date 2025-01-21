@@ -128,7 +128,7 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
     }
   }();
 
-  if (!committed) {
+  if (!committed && actorSqlite.broken == kj::none) {
     // Assume rollback if not committed.
     rollbackImpl();
   }

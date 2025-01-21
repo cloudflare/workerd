@@ -102,13 +102,13 @@ export async function setImmediate<T>(
 
   const { promise, resolve, reject } = Promise.withResolvers<T>();
 
-  const timer = globalThis.setImmediate(() => {
+  const timer = timers.setImmediate(() => {
     resolve(value as T);
   });
 
   if (signal) {
     function onCancel(): void {
-      globalThis.clearImmediate(timer);
+      timers.clearImmediate(timer);
       signal?.removeEventListener('abort', onCancel);
       reject(new AbortError(undefined, { cause: signal?.reason }));
     }

@@ -6,6 +6,7 @@
 
 #include <fcntl.h>
 
+#include <kj/refcount.h>
 #include <kj/test.h>
 #include <kj/thread.h>
 
@@ -1274,6 +1275,206 @@ KJ_TEST("SQLite prepareMulti w/BEGIN TRANSACTION") {
 
     KJ_ASSERT(query.isDone());
   }
+}
+
+// =======================================================================================
+// Error pass-through test
+//
+// TODO(cleanup): There is a LOT of boilerplate here to inject an exception into the VFS. Do we
+//   need better test utils for KJ filesystem APIs?
+
+// kj::File that throws errors when written.
+class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
+ public:
+  // Initialize `error` to cause writes to fail.
+  kj::Maybe<kj::Exception> error;
+
+  void write(uint64_t offset, kj::ArrayPtr<const byte> data) const override {
+    KJ_IF_SOME(e, error) {
+      kj::throwFatalException(kj::cp(e));
+    }
+    inner->write(offset, data);
+  }
+
+  // All other operations just pass through.
+  // TODO(cleanup): Do we need a FileWrapper base class in KJ?
+  Metadata stat() const override {
+    return inner->stat();
+  }
+  void sync() const override {
+    inner->sync();
+  }
+  void datasync() const override {
+    inner->datasync();
+  }
+  size_t read(uint64_t offset, kj::ArrayPtr<byte> buffer) const override {
+    return inner->read(offset, buffer);
+  }
+  kj::Array<const byte> mmap(uint64_t offset, uint64_t size) const override {
+    return inner->mmap(offset, size);
+  }
+  kj::Array<byte> mmapPrivate(uint64_t offset, uint64_t size) const override {
+    return inner->mmapPrivate(offset, size);
+  }
+  void zero(uint64_t offset, uint64_t size) const override {
+    inner->zero(offset, size);
+  }
+  void truncate(uint64_t size) const override {
+    inner->truncate(size);
+  }
+  kj::Own<const kj::WritableFileMapping> mmapWritable(
+      uint64_t offset, uint64_t size) const override {
+    return inner->mmapWritable(offset, size);
+  }
+  size_t copy(uint64_t offset,
+      const ReadableFile& from,
+      uint64_t fromOffset,
+      uint64_t size) const override {
+    return inner->copy(offset, from, fromOffset, size);
+  }
+
+ private:
+  kj::Own<const kj::File> inner = kj::newInMemoryFile(kj::nullClock());
+
+  kj::Own<const FsNode> cloneFsNode() const override {
+    return kj::atomicAddRef(*this);
+  }
+};
+
+// kj::Directory that serves ErrorInjectableFiles to SQLite.
+class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRefcounted {
+ public:
+  kj::Maybe<kj::Own<ErrorInjectableFile>> dbFile;
+  kj::Maybe<kj::Own<ErrorInjectableFile>> walFile;
+  kj::Maybe<kj::Own<ErrorInjectableFile>> journalFile;
+
+  // Map filenames to the three Maybe<File>s above.
+  kj::Maybe<kj::Own<ErrorInjectableFile>>& getSlot(kj::PathPtr path) {
+    if (path.size() == 1) {
+      kj::StringPtr name = path[0];
+      if (name == "db"_kj) {
+        return dbFile;
+      } else if (name == "db-wal"_kj) {
+        return walFile;
+      } else if (name == "db-journal"_kj) {
+        return journalFile;
+      }
+    }
+    KJ_FAIL_ASSERT("unexpected file opened", path);
+  }
+
+  kj::Maybe<kj::Own<ErrorInjectableFile>>& getSlot(kj::PathPtr path) const {
+    // const_cast OK because it's test code
+    return const_cast<ErrorInjectableDirectory*>(this)->getSlot(path);
+  }
+
+  // ---------------------------------------------------------------------------
+  // implements kj::Directory
+
+  kj::Maybe<kj::Own<const kj::ReadableFile>> tryOpenFile(kj::PathPtr path) const override {
+    return getSlot(path).map([](kj::Own<ErrorInjectableFile>& file) { return file->clone(); });
+  }
+
+  kj::Maybe<kj::Own<const kj::File>> tryOpenFile(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    auto& slot = getSlot(path);
+
+    KJ_IF_SOME(file, slot) {
+      if (kj::has(mode, kj::WriteMode::MODIFY)) {
+        return file->clone();
+      } else {
+        return kj::none;
+      }
+    } else {
+      if (kj::has(mode, kj::WriteMode::CREATE)) {
+        return slot.emplace(kj::atomicRefcounted<ErrorInjectableFile>())->clone();
+      } else {
+        return kj::none;
+      }
+    }
+  }
+
+  bool exists(kj::PathPtr path) const override {
+    return getSlot(path) != kj::none;
+  }
+
+  bool tryRemove(kj::PathPtr path) const override {
+    auto& slot = getSlot(path);
+    bool result = slot != kj::none;
+    slot = kj::none;
+    return result;
+  }
+
+  kj::Own<const FsNode> cloneFsNode() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  Metadata stat() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  void sync() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  void datasync() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Array<kj::String> listNames() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Array<Entry> listEntries() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Maybe<FsNode::Metadata> tryLstat(kj::PathPtr path) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Maybe<kj::Own<const ReadableDirectory>> tryOpenSubdir(kj::PathPtr path) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Maybe<kj::String> tryReadlink(kj::PathPtr path) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Own<Replacer<kj::File>> replaceFile(kj::PathPtr path, kj::WriteMode mode) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Own<const kj::File> createTemporary() const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Maybe<kj::Own<kj::AppendableFile>> tryAppendFile(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Maybe<kj::Own<const kj::Directory>> tryOpenSubdir(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  kj::Own<Replacer<kj::Directory>> replaceSubdir(
+      kj::PathPtr path, kj::WriteMode mode) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+  bool trySymlink(kj::PathPtr linkpath, kj::StringPtr content, kj::WriteMode mode) const override {
+    KJ_UNIMPLEMENTED("this method is unused by SQLite");
+  }
+};
+
+KJ_TEST("I/O exceptions pass through SQLite") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+    CREATE TABLE IF NOT EXISTS things (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value INTEGER
+    );
+    INSERT INTO things(value) VALUES (123);
+  )"));
+
+  // Now arrange for an error on write().
+  KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
+
+  // It should pass through.
+  KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+    INSERT INTO things(value) VALUES (456);
+  )")));
 }
 
 }  // namespace
