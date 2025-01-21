@@ -116,6 +116,9 @@ jobs:
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi
+      - id: location
+        run: |
+          echo "::set-output path=$(bazel cquery --output=files //src/workerd/server:workerd)"
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
@@ -123,4 +126,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
-          path: bazel-bin/src/workerd/server/workerd${{ inputs.os_name == 'Windows' && '.exe' || '' }}
+          path: ${{ steps.location.outputs.path }}
