@@ -111,23 +111,25 @@ export class Timeout {
   }
 }
 
-export function setTimeout(
-  callback: (...args: unknown[]) => unknown,
-  after: number,
-  ...args: unknown[]
+export function setTimeout<TArgs extends unknown[]>(
+  callback: (...args: TArgs) => unknown,
+  delay?: number,
+  ...args: TArgs
 ): Timeout {
   validateFunction(callback, 'callback');
 
   return new Timeout(
     callback,
-    after,
+    delay,
     args,
     /* isRepeat */ false,
     /* isRefed */ true
   );
 }
 
-export function clearTimeout(timer: unknown): void {
+export function clearTimeout(
+  timer: Timeout | string | number | undefined
+): void {
   if (timer instanceof Timeout) {
     clearTimeoutImpl(timer);
   } else if (typeof timer === 'number') {
@@ -139,10 +141,10 @@ export const setImmediate = timersUtil.setImmediate.bind(timersUtil);
 
 export const clearImmediate = timersUtil.clearImmediate.bind(timersUtil);
 
-export function setInterval(
-  callback: (...args: unknown[]) => void,
-  repeat: number,
-  ...args: unknown[]
+export function setInterval<TArgs extends unknown[]>(
+  callback: (...args: TArgs) => void,
+  repeat?: number,
+  ...args: TArgs
 ): Timeout {
   validateFunction(callback, 'callback');
   return new Timeout(
@@ -154,7 +156,9 @@ export function setInterval(
   );
 }
 
-export function clearInterval(timer: unknown): void {
+export function clearInterval(
+  timer: Timeout | string | number | undefined
+): void {
   if (timer instanceof Timeout) {
     clearTimeoutImpl(timer);
   } else if (typeof timer === 'number') {
@@ -165,7 +169,7 @@ export function clearInterval(timer: unknown): void {
 /**
  * @deprecated Please use timeout.refresh() instead.
  */
-export function active(timer: unknown): void {
+export function active(timer: Timeout | string | number | undefined): void {
   if (timer instanceof Timeout) {
     timer.refresh();
   }
