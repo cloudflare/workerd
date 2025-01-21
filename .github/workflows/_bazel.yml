@@ -1,19 +1,19 @@
-name: "Run Bazel"
+name: 'Run Bazel'
 on:
   workflow_call:
     inputs:
       image:
         type: string
         required: false
-        default: "ubuntu-22.04"
+        default: 'ubuntu-22.04'
       os_name:
         type: string
         required: false
-        default: "linux"
+        default: 'linux'
       suffix:
         type: string
         required: false
-        default: ""
+        default: ''
       run_tests:
         type: boolean
         required: false
@@ -21,7 +21,7 @@ on:
       extra_bazel_args:
         type: string
         required: false
-        default: ""
+        default: ''
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -119,3 +119,8 @@ jobs:
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
+          path: bazel-bin/src/workerd/server/workerd${{ inputs.os_name == 'Windows' && '.exe' || '' }}
