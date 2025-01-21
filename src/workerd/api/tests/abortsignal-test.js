@@ -180,11 +180,7 @@ export const onabortPrototypeProperty = {
     [123, null, 'foo'].forEach((v) => {
       ac.signal.onabort = () => {};
       ac.signal.onabort = v;
-      // TODO(soon): For now, we are relaxing this check and will log a warning
-      // if the value is not a function or object. If we get no hits on that warning,
-      // we can return to checking for null here.
-      //strictEqual(ac.signal.onabort, null);
-      strictEqual(ac.signal.onabort, v);
+      strictEqual(ac.signal.onabort, null);
     });
 
     const handler = {};
