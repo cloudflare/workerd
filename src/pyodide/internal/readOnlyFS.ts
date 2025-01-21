@@ -63,10 +63,10 @@ export function createReadonlyFS<Info>(
         } else if (whence === 2) {
           // SEEK_END
           if (FS.isFile(stream.node.mode)) {
-            if ((stream.node.info as any).size == undefined) {
+            if (stream.node.usedBytes == undefined) {
               throw new Error('File size is undefined');
             }
-            position += (stream.node.info as any).size;
+            position += stream.node.usedBytes;
           }
         }
         return position;

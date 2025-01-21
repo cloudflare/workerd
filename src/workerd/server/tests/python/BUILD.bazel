@@ -35,6 +35,8 @@ py_wd_test(
     ],
 )
 
+py_wd_test("seek-metadatafs")
+
 gen_import_tests(
     PYODIDE_IMPORTS_TO_TEST,
     # TODO: Micropip version mismatch for 0.27.0

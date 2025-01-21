@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "main",
+      worker = (
+        modules = [
+          (name = "a.py", pythonModule = embed "./a.py"),
+        ],
+        compatibilityDate = "2023-12-18",
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+  ],
+);
+
