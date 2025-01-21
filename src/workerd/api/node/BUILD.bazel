@@ -10,6 +10,7 @@ wd_cc_library(
         "crypto-keys.c++",
         "diagnostics-channel.c++",
         "dns.c++",
+        "timers.c++",
         "zlib-util.c++",
     ],
     hdrs = [
@@ -17,6 +18,7 @@ wd_cc_library(
         "diagnostics-channel.h",
         "dns.h",
         "node.h",
+        "timers.h",
         "zlib-util.h",
     ],
     implementation_deps = [
