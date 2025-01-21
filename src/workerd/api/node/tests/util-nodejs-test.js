@@ -4343,15 +4343,23 @@ export const debuglog = {
   },
 };
 
-export const getCallSiteTest = {
+export const getCallSitesTest = {
   test() {
-    const callSites = util.getCallSite();
+    const callSites = util.getCallSites();
     assert.strictEqual(callSites.length, 1);
     const [stack] = callSites;
     assert.strictEqual(stack.functionName, 'test');
     assert.strictEqual(stack.scriptName, 'worker');
     assert.strictEqual(typeof stack.lineNumber, 'number');
+    assert.strictEqual(typeof stack.columnNumber, 'number');
     assert.strictEqual(typeof stack.column, 'number');
+
+    // We leave this implementation for compat reasons.
+    // Node.js originally introduced the API with the name `getCallSite()` as an experimental
+    // API but then renamed it to `getCallSites()` soon after. We had already implemented the
+    // API with the original name in a release. To avoid the possibility of breaking, we export
+    // the function using both names.
+    assert.strictEqual(typeof util.getCallSite, 'function');
   },
 };
 
