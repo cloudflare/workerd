@@ -85,7 +85,6 @@ wd_cc_library(
     hdrs = [
         "modules.h",
         "rtti.h",
-        "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/workerd/server:workerd.capnp.h",
     ],
     visibility = ["//visibility:public"],
@@ -98,7 +97,6 @@ wd_cc_library(
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
-        "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api/node",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
@@ -142,7 +140,6 @@ wd_cc_library(
     implementation_deps = ["//src/workerd/util:string-buffer"],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/server:workerd_capnp",

@@ -424,6 +424,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
 
 bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
+kj::StringPtr getPythonEntrypoint();
+
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
