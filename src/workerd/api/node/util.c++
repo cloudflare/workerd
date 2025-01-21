@@ -177,22 +177,29 @@ jsg::Name UtilModule::getResourceTypeInspect(jsg::Lock& js) {
   return js.newApiSymbol("kResourceTypeInspect"_kj);
 }
 
-kj::Array<UtilModule::CallSiteEntry> UtilModule::getCallSite(jsg::Lock& js, int frames) {
-  JSG_REQUIRE(
-      frames >= 1 && frames <= 200, Error, "Frame count should be between 1 and 200 inclusive."_kj);
-  auto stack = v8::StackTrace::CurrentStackTrace(js.v8Isolate, frames + 1);
+kj::Array<UtilModule::CallSiteEntry> UtilModule::getCallSites(
+    jsg::Lock& js, jsg::Optional<int> frames) {
+  KJ_IF_SOME(f, frames) {
+    JSG_REQUIRE(f >= 1 && f <= 200, Error, "Frame count should be between 1 and 200 inclusive."_kj);
+  }
+
+  auto stack = v8::StackTrace::CurrentStackTrace(js.v8Isolate, frames.orDefault(10) + 1);
   const int frameCount = stack->GetFrameCount();
   auto objects = kj::Vector<CallSiteEntry>();
   objects.reserve(frameCount - 1);
 
-  // Frame 0 is node:util. It should be skipped.
-  for (int i = 1; i < frameCount; ++i) {
+  for (int i = 0; i < frameCount; ++i) {
     auto stack_frame = stack->GetFrame(js.v8Isolate, i);
 
     objects.add(CallSiteEntry{
       .functionName = js.toString(stack_frame->GetFunctionName()),
       .scriptName = js.toString(stack_frame->GetScriptName()),
       .lineNumber = stack_frame->GetLineNumber(),
+      // Node.js originally implemented the experimental API using the "column" field
+      // then later renamed it to columnNumber. We had already implemented the API
+      // using column. To ensure backwards compat without the complexity of a compat
+      // flag, we just export both.
+      .columnNumber = stack_frame->GetColumn(),
       .column = stack_frame->GetColumn(),
     });
   }
