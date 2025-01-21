@@ -118,7 +118,7 @@ jobs:
           fi
       - id: location
         run: |
-          echo "::set-output path=$(bazel cquery --output=files //src/workerd/server:workerd)"
+          echo "WORKERD_OUTPUT_PATH=$(bazel cquery --output=files //src/workerd/server:workerd)" >> "$GITHUB_OUTPUT"
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
