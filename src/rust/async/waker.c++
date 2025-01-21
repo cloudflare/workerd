@@ -1,5 +1,4 @@
 #include <workerd/rust/async/waker.h>
-#include <workerd/rust/async/leak.h>
 
 #include <kj/debug.h>
 
@@ -17,7 +16,7 @@ ArcWaker::~ArcWaker() noexcept(false) {
 }
 
 const CxxWaker* ArcWaker::clone() const {
-  return leak(addRefToThis());
+  return addRefToThis().disown();
 }
 void ArcWaker::wake() const {
   wake_by_ref();
@@ -27,7 +26,7 @@ void ArcWaker::wake_by_ref() const {
   fulfiller->fulfill(WakeInstruction::WAKE);
 }
 void ArcWaker::drop() const {
-  auto drop = unleak(this);
+  auto drop = kj::Arc<const ArcWaker>::reown(this);
 }
 
 PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor) {
