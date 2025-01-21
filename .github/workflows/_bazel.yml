@@ -126,4 +126,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
-          path: ${{ steps.location.outputs.path }}
+          path: ${{ steps.location.outputs.WORKERD_OUTPUT_PATH }}
