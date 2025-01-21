@@ -53,7 +53,7 @@ export const testSetImmediate = {
 
     {
       const { promise, resolve } = Promise.withResolvers();
-      globalThis.setImmediate(
+      timers.setImmediate(
         (...args) => {
           deepStrictEqual(args, [1, 2, 3]);
           resolve();
