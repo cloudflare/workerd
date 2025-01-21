@@ -52,12 +52,6 @@ kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
         partSize <= upperLimit, RangeError, kj::str("Blob part too large: ", partSize, " bytes"));
 
     // Checks for oversize
-    if (size + partSize > maxBlobSize) {
-      // TODO(soon): This logging is just to help us determine further how common
-      // this case is. We can and should remove the logging once we have enough data.
-      LOG_WARNING_PERIODICALLY(
-          kj::str("NOSENTRY Attempt to create a Blob with size ", size + partSize));
-    }
     JSG_REQUIRE(size + partSize <= maxBlobSize, RangeError,
         kj::str("Blob size ", size + partSize, " exceeds limit ", maxBlobSize));
     size += partSize;
