@@ -55,8 +55,10 @@ constexpr std::array<T, crcTableSize> gen_crc_table(T polynomial, bool reflectIn
   return crcTable;
 }
 
+#if !(__CRC32__ || __ARM_FEATURE_CRC32)
 // https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-32-iscsi
 constexpr auto crc32c_table = gen_crc_table(static_cast<uint32_t>(0x1edc6f41), true, true);
+#endif
 // https://reveng.sourceforge.io/crc-catalogue/all.htm#crc.cat.crc-64-nvme
 constexpr auto crc64nvme_table =
     gen_crc_table(static_cast<uint64_t>(0xad93d23594c93659), true, true);
@@ -67,8 +69,30 @@ uint32_t crc32c(uint32_t crc, const uint8_t *data, unsigned int length) {
     return 0;
   }
   crc ^= 0xffffffff;
+#if __CRC32__ || __ARM_FEATURE_CRC32
+  // Using hardware acceleration, process data in 8-byte chunks. Any remaining bytes are processed
+  // one-by-one in the main loop.
+  while (length >= 8) {
+    // 8-byte unaligned read
+    uint64_t val = *(uint64_t *)data;
+#if __ARM_FEATURE_CRC32
+    crc = __builtin_arm_crc32cd(crc, val);
+#else
+    crc = __builtin_ia32_crc32di(crc, val);
+#endif
+    length -= 8;
+    data += 8;
+  }
+#endif
+
   while (length--) {
+#if __ARM_FEATURE_CRC32
+    crc = __builtin_arm_crc32cb(crc, *data++);
+#elif __CRC32__
+    crc = __builtin_ia32_crc32qi(crc, *data++);
+#else
     crc = crc32c_table[(crc ^ *data++) & 0xffL] ^ (crc >> 8);
+#endif
   }
   return crc ^ 0xffffffff;
 }

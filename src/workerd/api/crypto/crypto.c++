@@ -734,7 +734,7 @@ class CRC64NVMEDigestContext final: public DigestContext {
 
   kj::Array<kj::byte> close() override {
     auto beValue = htobe64(value);
-    static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
+    static_assert(sizeof(value) == sizeof(beValue), "CRC64 digest is not 64 bits?");
     auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
     KJ_DASSERT(digest.size() == sizeof(beValue));
     memcpy(digest.begin(), &beValue, sizeof(beValue));

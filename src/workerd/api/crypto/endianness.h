@@ -6,8 +6,8 @@
 #include <stdint.h>
 
 // This file provides cross platform support for endianness conversions.
-// It is intended to hide away the poluting includes of system headers to provide the functions
-// without poluting the global namespace.
+// It is intended to hide away the polluting includes of system headers to provide the functions
+// without polluting the global namespace.
 
 uint16_t htobe16(uint16_t x);
 uint16_t htole16(uint16_t x);
