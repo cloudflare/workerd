@@ -94,13 +94,17 @@ http_archive(
     urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
 )
 
-load("//:build/pyodide_bucket.bzl", "PYODIDE_ALL_WHEELS_ZIP_SHA256", "PYODIDE_GITHUB_RELEASE_URL", "PYODIDE_LOCK_SHA256")
+load("//:build/pyodide_bucket.bzl", "PYODIDE_ALL_WHEELS_ZIP_SHA256", "PYODIDE_GITHUB_RELEASE_URL")
+load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
 
-http_file(
-    name = "pyodide-lock.json",
-    sha256 = PYODIDE_LOCK_SHA256,
-    url = PYODIDE_GITHUB_RELEASE_URL + "pyodide-lock.json",
-)
+[
+    http_file(
+        name = "pyodide-lock_" + package_date + ".json",
+        sha256 = package_lock_sha,
+        url = "https://github.com/cloudflare/pyodide-build-scripts/releases/download/" + package_date + "/pyodide-lock.json",
+    )
+    for package_date, package_lock_sha in PYTHON_LOCKFILES.items()
+]
 
 http_archive(
     name = "all_pyodide_wheels",

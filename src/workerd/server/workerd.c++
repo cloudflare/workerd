@@ -826,7 +826,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto version = getPythonBundleName(pythonRelease);
       KJ_ASSERT_NONNULL(fetchPyodideBundle(config, version), "Failed to get Pyodide bundle");
 
-      auto lock = KJ_ASSERT_NONNULL(config.pyodideBundleManager.getPyodideLock(pythonRelease));
+      auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
 
       printf("%s\n", lock.cStr());
       fflush(stdout);

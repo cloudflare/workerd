@@ -3,7 +3,6 @@
 # both edgeworker and workerd, as well as src/pyodide/BUILD.bazel
 PYODIDE_PACKAGE_BUCKET_URL = "https://pyodide-packages.runtime-playground.workers.dev/20240513.2/"
 PYODIDE_GITHUB_RELEASE_URL = "https://github.com/cloudflare/pyodide-build-scripts/releases/download/20240513.2/"
-PYODIDE_LOCK_SHA256 = "51eb3fd8dae5f551e2393ac58edfaf6a6c8d9c51b39c1584dd5d74bd7fb803fc"
 PYODIDE_PACKAGES_TAR_ZIP_SHA256 = "b71d4c3cee3b6bd12969a788545f4159fb1eb984a7ca5de2493c4fa8479beeec"
 PYODIDE_ALL_WHEELS_ZIP_SHA256 = "c17feb45fdcb4b41eab9c719e69c9e062a8fc88344fcb6bbd7de0de92c3ae660"
 
