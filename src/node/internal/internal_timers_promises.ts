@@ -34,6 +34,8 @@ import {
 
 const kScheduler = Symbol.for('kScheduler');
 
+type OnCancelCallback = (() => void) | undefined;
+
 export async function setTimeout<T = void>(
   delay: number | undefined,
   value?: T,
@@ -62,17 +64,21 @@ export async function setTimeout<T = void>(
   }
 
   const { promise, resolve, reject } = Promise.withResolvers<T>();
+  let onCancel: OnCancelCallback;
 
   const timer = timers.setTimeout(() => {
     resolve(value as T);
-  }, delay ?? 0);
+    if (onCancel) {
+      signal?.removeEventListener('abort', onCancel);
+    }
+  }, delay ?? 1);
 
   if (signal) {
-    function onCancel(): void {
+    onCancel = (): void => {
       timers.clearTimeout(timer);
-      reject(new AbortError(undefined, { cause: signal?.reason }));
-    }
-    signal.addEventListener('abort', onCancel);
+      reject(new AbortError(undefined, { cause: signal.reason }));
+    };
+    signal.addEventListener('abort', onCancel, { once: true });
   }
 
   return promise;
@@ -101,18 +107,21 @@ export async function setImmediate<T>(
   }
 
   const { promise, resolve, reject } = Promise.withResolvers<T>();
+  let onCancel: OnCancelCallback;
 
   const timer = timers.setImmediate(() => {
     resolve(value as T);
+    if (onCancel) {
+      signal?.removeEventListener('abort', onCancel);
+    }
   });
 
   if (signal) {
-    function onCancel(): void {
+    onCancel = (): void => {
       timers.clearImmediate(timer);
-      signal?.removeEventListener('abort', onCancel);
-      reject(new AbortError(undefined, { cause: signal?.reason }));
-    }
-    signal.addEventListener('abort', onCancel);
+      reject(new AbortError(undefined, { cause: signal.reason }));
+    };
+    signal.addEventListener('abort', onCancel, { once: true });
   }
 
   return promise;
@@ -144,7 +153,7 @@ export async function* setInterval<T = void>(
     throw new AbortError(undefined, { cause: signal.reason });
   }
 
-  let onCancel: (() => void) | undefined;
+  let onCancel: OnCancelCallback;
   let interval: timers.Timeout;
   try {
     let notYielded = 0;
@@ -164,14 +173,12 @@ export async function* setInterval<T = void>(
     if (signal) {
       onCancel = (): void => {
         timers.clearInterval(interval);
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        signal.removeEventListener('abort', onCancel!);
         callback?.(
           Promise.reject(new AbortError(undefined, { cause: signal.reason }))
         );
         callback = undefined;
       };
-      signal.addEventListener('abort', onCancel);
+      signal.addEventListener('abort', onCancel, { once: true });
     }
 
     while (!signal?.aborted) {
