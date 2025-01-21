@@ -22,6 +22,21 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
   auto& js = jsg::Lock::from(context->GetIsolate());
   v8::MaybeLocal<v8::Module> result;
 
+  // TODO(new-module-registry): The specification for import assertions strongly
+  // recommends that embedders reject import attributes and types they do not
+  // understand/implement. This is because import attributes can alter the
+  // interpretation of a module and are considered to be part of the unique
+  // key for caching a module.
+  // Throwing an error for things we do not understand is the safest thing to do.
+  // However, historically we have not followed this guideline in the spec and
+  // it's not clear if enforcing that constraint would be breaking so let's
+  // first try to determine if anyone is making use of import assertions.
+  // If we're lucky, we won't receive any hits on this and we can start
+  // enforcing the rule without a compat flag.
+  if (import_assertions->Length() > 0) {
+    LOG_NOSENTRY(WARNING, "Import attributes specified (and ignored) on static import");
+  }
+
   js.tryCatch([&] {
     auto registry = getModulesForResolveCallback(js.v8Isolate);
     KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
