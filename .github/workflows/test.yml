@@ -83,6 +83,7 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
 
   workers-sdk-test:
+    needs: test
     name: Run workers-sdk tests
     runs-on: ubuntu-22.04
     steps:
