@@ -6,6 +6,8 @@
 
 #include "impl.h"
 
+#include <workerd/api/crypto/crc-impl.h>
+#include <workerd/api/crypto/endianness.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
@@ -14,6 +16,7 @@
 
 #include <openssl/digest.h>
 #include <openssl/mem.h>
+#include <zlib.h>
 
 #include <algorithm>
 #include <array>
@@ -676,13 +679,113 @@ kj::String Crypto::randomUUID() {
 // =======================================================================================
 // Crypto Streams implementation
 
+class CRC32DigestContext final: public DigestContext {
+ public:
+  CRC32DigestContext(): value(crc32(0, Z_NULL, 0)) {}
+  ~CRC32DigestContext() noexcept override = default;
+
+  void write(kj::ArrayPtr<kj::byte> buffer) override {
+    value = crc32(value, buffer.begin(), buffer.size());
+  }
+
+  kj::Array<kj::byte> close() override {
+    auto beValue = htobe32(value);
+    static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
+    auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
+    KJ_DASSERT(digest.size() == sizeof(beValue));
+    memcpy(digest.begin(), &beValue, sizeof(beValue));
+    return digest;
+  }
+
+ private:
+  uint32_t value;
+};
+
+class CRC32CDigestContext final: public DigestContext {
+ public:
+  CRC32CDigestContext(): value(crc32c(0, nullptr, 0)) {}
+  ~CRC32CDigestContext() noexcept override = default;
+
+  void write(kj::ArrayPtr<kj::byte> buffer) override {
+    value = crc32c(value, buffer.begin(), buffer.size());
+  }
+
+  kj::Array<kj::byte> close() override {
+    auto beValue = htobe32(value);
+    static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
+    auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
+    KJ_DASSERT(digest.size() == sizeof(beValue));
+    memcpy(digest.begin(), &beValue, sizeof(beValue));
+    return digest;
+  }
+
+ private:
+  uint32_t value;
+};
+
+class CRC64NVMEDigestContext final: public DigestContext {
+ public:
+  CRC64NVMEDigestContext(): value(crc64nvme(0, nullptr, 0)) {}
+  ~CRC64NVMEDigestContext() noexcept override = default;
+
+  void write(kj::ArrayPtr<kj::byte> buffer) override {
+    value = crc64nvme(value, buffer.begin(), buffer.size());
+  }
+
+  kj::Array<kj::byte> close() override {
+    auto beValue = htobe64(value);
+    static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
+    auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
+    KJ_DASSERT(digest.size() == sizeof(beValue));
+    memcpy(digest.begin(), &beValue, sizeof(beValue));
+    return digest;
+  }
+
+ private:
+  uint64_t value;
+};
+
+class OpenSSLDigestContext final: public DigestContext {
+ public:
+  OpenSSLDigestContext(kj::StringPtr algorithm): algorithm(kj::str(algorithm)) {
+    auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+    auto type = lookupDigestAlgorithm(algorithm).second;
+    auto opensslContext = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
+    KJ_ASSERT(opensslContext.get() != nullptr);
+    OSSLCALL(EVP_DigestInit_ex(opensslContext.get(), type, nullptr));
+    context = kj::mv(opensslContext);
+  }
+  ~OpenSSLDigestContext() noexcept override = default;
+
+  void write(kj::ArrayPtr<kj::byte> buffer) override {
+    auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+    OSSLCALL(EVP_DigestUpdate(context.get(), buffer.begin(), buffer.size()));
+  }
+
+  kj::Array<kj::byte> close() override {
+    auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
+    uint size = 0;
+    auto digest = kj::heapArray<kj::byte>(EVP_MD_CTX_size(context.get()));
+    OSSLCALL(EVP_DigestFinal_ex(context.get(), digest.begin(), &size));
+    KJ_ASSERT(size, digest.size());
+    return kj::mv(digest);
+  }
+
+ private:
+  kj::String algorithm;
+  kj::Own<EVP_MD_CTX> context;
+};
+
 DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgorithm& algorithm) {
-  auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm.name);
-  auto type = lookupDigestAlgorithm(algorithm.name).second;
-  auto context = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
-  KJ_ASSERT(context.get() != nullptr);
-  OSSLCALL(EVP_DigestInit_ex(context.get(), type, nullptr));
-  return kj::mv(context);
+  if (algorithm.name == "crc32") {
+    return kj::heap<CRC32DigestContext>();
+  } else if (algorithm.name == "crc32c") {
+    return kj::heap<CRC32CDigestContext>();
+  } else if (algorithm.name == "crc64nvme") {
+    return kj::heap<CRC64NVMEDigestContext>();
+  } else {
+    return kj::heap<OpenSSLDigestContext>(algorithm.name);
+  }
 }
 
 DigestStream::DigestStream(kj::Own<WritableStreamController> controller,
@@ -726,8 +829,7 @@ kj::Maybe<StreamStates::Errored> DigestStream::write(jsg::Lock& js, kj::ArrayPtr
       return errored.addRef(js);
     }
     KJ_CASE_ONEOF(ready, Ready) {
-      auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, ready.algorithm.name);
-      OSSLCALL(EVP_DigestUpdate(ready.context.get(), buffer.begin(), buffer.size()));
+      ready.context->write(buffer);
       return kj::none;
     }
   }
@@ -743,12 +845,7 @@ kj::Maybe<StreamStates::Errored> DigestStream::close(jsg::Lock& js) {
       return errored.addRef(js);
     }
     KJ_CASE_ONEOF(ready, Ready) {
-      auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, ready.algorithm.name);
-      uint size = 0;
-      auto digest = kj::heapArray<kj::byte>(EVP_MD_CTX_size(ready.context.get()));
-      OSSLCALL(EVP_DigestFinal_ex(ready.context.get(), digest.begin(), &size));
-      KJ_ASSERT(size, digest.size());
-      ready.resolver.resolve(js, kj::mv(digest));
+      ready.resolver.resolve(js, ready.context->close());
       state.init<StreamStates::Closed>();
       return kj::none;
     }
