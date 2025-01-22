@@ -8,7 +8,9 @@ on:
 jobs:
   version:
     outputs:
+      date: ${{ steps.echo.outputs.date }}
       version: ${{ steps.echo.outputs.version }}
+      release_version: ${{ steps.echo.outputs.release_version }}
     # version job uses ubuntu 24.04, this way we don't have to install the updated clang while
     # the build job uses 22.04 for libc compatibility.
     runs-on: ubuntu-24.04
@@ -16,7 +18,9 @@ jobs:
       - uses: actions/checkout@v4
       - id: echo
         run: |
-          echo "::set-output name=version::1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0"
+          echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
+          echo "version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
+          echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
   check-tag:
     name: Check tag is new
     outputs:
@@ -143,7 +147,7 @@ jobs:
 
   upload-artifacts:
     name: Upload Artifacts
-    needs: [tag-and-release, build]
+    needs: [version, tag-and-release, build]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -193,6 +197,23 @@ jobs:
           asset_name: workerd-${{ matrix.arch }}.gz
           asset_content_type: application/gzip
 
+      # Upload release to npm
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Modify package.json version
+        run: node npm/scripts/bump-version.mjs npm/workerd-${{ matrix.arch }}/package.json
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: mkdir npm/workerd-${{ matrix.arch }}/bin
+      - run: cp /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+      - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
+      - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag 'latest'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+
   miniflare-test:
     name: Run Miniflare tests
     needs: [build]
@@ -228,3 +249,113 @@ jobs:
         run: pnpm --filter miniflare test
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+  publish-wrapper:
+    name: Publish `workerd` to NPM
+    needs: [version, upload-artifacts]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        # Use same cache and build configuration as release build, this allows us to keep download
+        # sizes small and generate types with optimization enabled, should be slightly faster.
+        with:
+          path: ~/bazel-disk-cache
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+      - name: Setup Linux
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+      - name: Build type generating Worker
+        run: |
+          bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types_worker
+
+      - name: Modify package.json version
+        run: node npm/scripts/bump-version.mjs npm/workerd/package.json
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: mkdir -p npm/workerd/lib
+      - run: mkdir -p npm/workerd/bin
+      - name: Build node-install
+        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - name: Build node-shim
+        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - name: Build node-path
+        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node18 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - name: Build package
+        run: node npm/scripts/build-shim-package.mjs
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd/.npmrc
+      - run: cd npm/workerd && npm publish --access public --tag 'latest'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+
+  build-and-publish-types:
+    runs-on: ubuntu-22.04
+    needs: [version, upload-artifacts]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        # Use same cache and build configuration as release build, this allows us to keep download
+        # sizes small and generate types with optimization enabled, should be slightly faster.
+        with:
+          path: ~/bazel-disk-cache
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+      - name: Setup Linux
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+      - name: build types
+        run: |
+            bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
+      - name: Build package
+        run: node npm/scripts/build-types-package.mjs
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: cp -r bazel-bin/types/definitions/. npm/workers-types
+      - run: cp npm/workers-types/oldest/* npm/workers-types
+      - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
+      - run: cd npm/workers-types && npm publish --access public --tag 'latest'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+
