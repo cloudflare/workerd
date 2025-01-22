@@ -3,22 +3,19 @@
 
 namespace workerd::rust::async {
 
-BoxFutureVoid::BoxFutureVoid(BoxFutureVoid&& other) noexcept: repr(other.repr) {
-  other.repr = {0, 0};
+template <>
+void box_future_drop_in_place(BoxFuture<kj::_::Void>* self) {
+  box_future_void_drop_in_place(self);
+}
+template <>
+bool box_future_poll(BoxFuture<kj::_::Void>& self, const CxxWaker& waker) {
+  return box_future_void_poll(self, waker);
+}
+template <>
+bool box_future_poll_with_co_await_waker(BoxFuture<kj::_::Void>& self, const CoAwaitWaker& waker) {
+  return box_future_void_poll_with_co_await_waker(self, waker);
 }
 
-BoxFutureVoid::~BoxFutureVoid() noexcept {
-  if (repr != std::array<std::uintptr_t, 2>{0, 0}) {
-    box_future_void_drop_in_place(this);
-  }
-}
-
-bool BoxFutureVoid::poll(const CxxWaker& waker) noexcept {
-  return box_future_void_poll(*this, waker);
-}
-
-bool BoxFutureVoid::poll(const CoAwaitWaker& waker) noexcept {
-  return box_future_void_poll_with_co_await_waker(*this, waker);
-}
+// ---------------------------------------------------------
 
 }  // namespace workerd::rust::async

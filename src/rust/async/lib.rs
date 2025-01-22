@@ -3,6 +3,9 @@ pub use await_::GuardedRustPromiseAwaiter;
 use await_::PtrGuardedRustPromiseAwaiter;
 
 mod future;
+use future::box_future_fallible_void_drop_in_place;
+use future::box_future_fallible_void_poll;
+use future::box_future_fallible_void_poll_with_co_await_waker;
 use future::box_future_void_drop_in_place;
 use future::box_future_void_poll;
 use future::box_future_void_poll_with_co_await_waker;
@@ -16,6 +19,7 @@ pub use promise::OwnPromiseNode;
 use promise::PtrOwnPromiseNode;
 
 mod test_futures;
+use test_futures::new_errored_future_fallible_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
 use test_futures::new_pending_future_void;
@@ -26,6 +30,8 @@ use test_futures::new_wrapped_waker_future_void;
 
 mod waker;
 use waker::RustWaker;
+
+type Result<T> = std::io::Result<T>;
 
 #[cxx::bridge(namespace = "workerd::rust::async")]
 mod ffi {
@@ -65,6 +71,9 @@ mod ffi {
 
         type BoxFutureVoid = crate::BoxFuture<()>;
         type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
+
+        type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
+        type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
     }
 
     extern "Rust" {
@@ -74,6 +83,16 @@ mod ffi {
             waker: &CoAwaitWaker,
         ) -> bool;
         unsafe fn box_future_void_drop_in_place(ptr: PtrBoxFutureVoid);
+
+        fn box_future_fallible_void_poll(
+            future: &mut BoxFutureFallibleVoid,
+            waker: &CxxWaker,
+        ) -> bool;
+        fn box_future_fallible_void_poll_with_co_await_waker(
+            future: &mut BoxFutureFallibleVoid,
+            waker: &CoAwaitWaker,
+        ) -> bool;
+        unsafe fn box_future_fallible_void_drop_in_place(ptr: PtrBoxFutureFallibleVoid);
     }
 
     unsafe extern "C++" {
@@ -141,5 +160,7 @@ mod ffi {
         fn new_layered_ready_future_void() -> BoxFutureVoid;
         fn new_naive_select_future_void() -> BoxFutureVoid;
         fn new_wrapped_waker_future_void() -> BoxFutureVoid;
+
+        fn new_errored_future_fallible_void() -> BoxFutureFallibleVoid;
     }
 }

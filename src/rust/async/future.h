@@ -8,15 +8,33 @@ namespace workerd::rust::async {
 
 class CoAwaitWaker;
 
+template <typename T>
+class BoxFuture;
+
+// Function templates which are explicitly specialized for each instance of BoxFuture<T>.
+template <typename T>
+void box_future_drop_in_place(BoxFuture<T>* self);
+template <typename T>
+bool box_future_poll(BoxFuture<T>& self, const CxxWaker& waker);
+template <typename T>
+bool box_future_poll_with_co_await_waker(BoxFuture<T>& self, const CoAwaitWaker& waker);
+
 // A `Pin<Box<dyn Future<Output = ()>>>` owned by C++.
 //
 // The only way to construct a BoxFutureVoid is by returning one from a Rust function.
 //
 // TODO(now): Figure out how to make this a template, BoxFuture<T>.
-class BoxFutureVoid {
+template <typename T>
+class BoxFuture {
 public:
-  BoxFutureVoid(BoxFutureVoid&&) noexcept;
-  ~BoxFutureVoid() noexcept;
+  BoxFuture(BoxFuture&& other) noexcept: repr(other.repr) {
+    other.repr = {0, 0};
+  }
+  ~BoxFuture() noexcept {
+    if (repr != std::array<std::uintptr_t, 2>{0, 0}) {
+      box_future_drop_in_place(this);
+    }
+  }
 
   // This function constructs a `std::task::Context` in Rust wrapping the given `CxxWaker`. It then
   // calls the future's `Future::poll()` trait function.
@@ -35,8 +53,12 @@ public:
   // The overload accepting a `const CxxWaker&` exists mostly to simplify testing.
   //
   // TODO(now): Figure out how to return non-unit/void values and exceptions.
-  bool poll(const CxxWaker& waker) noexcept;
-  bool poll(const CoAwaitWaker& waker) noexcept;
+  bool poll(const CxxWaker& waker) noexcept {
+    return box_future_poll(*this, waker);
+  }
+  bool poll(const CoAwaitWaker& waker) noexcept {
+    return box_future_poll_with_co_await_waker(*this, waker);
+  }
 
   // Tell cxx-rs that this type follows Rust's move semantics, and can thus be passed across the FFI
   // boundary.
@@ -47,8 +69,30 @@ private:
   std::array<std::uintptr_t, 2> repr;
 };
 
+// ---------------------------------------------------------
+
+template <typename T>
+class BoxFutureFallible: private BoxFuture<T> {
+public:
+  using BoxFuture<T>::BoxFuture;
+  using BoxFuture<T>::poll;
+  using typename BoxFuture<T>::IsRelocatable;
+};
+
+// ---------------------------------------------------------
+
+using BoxFutureVoid = BoxFuture<kj::_::Void>;
+
 // We define this the pointer typedef so that cxx-rs can associate it with the same pointer type our
 // drop function uses.
 using PtrBoxFutureVoid = BoxFutureVoid*;
+
+// ---------------------------------------------------------
+
+using BoxFutureFallibleVoid = BoxFutureFallible<kj::_::Void>;
+
+// We define this the pointer typedef so that cxx-rs can associate it with the same pointer type our
+// drop function uses.
+using PtrBoxFutureFallibleVoid = BoxFutureFallibleVoid*;
 
 }  // namespace workerd::rust::async

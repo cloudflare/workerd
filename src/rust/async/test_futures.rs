@@ -212,3 +212,10 @@ pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
     })
     .into()
 }
+
+use std::io::Error;
+use std::io::ErrorKind;
+
+pub fn new_errored_future_fallible_void() -> BoxFuture<crate::Result<()>> {
+    Box::pin(std::future::ready(Err(Error::new(ErrorKind::Other, "test error")))).into()
+}

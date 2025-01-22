@@ -8,6 +8,8 @@ use cxx::ExternType;
 use crate::ffi::CoAwaitWaker;
 use crate::ffi::CxxWaker;
 
+use crate::Result;
+
 // Expose Pin<Box<dyn Future<Output = ()>> to C++ as BoxFutureVoid.
 //
 // We want to allow C++ to own Rust Futures in a Box. At present, cxx-rs can easily expose Box<T>
@@ -33,6 +35,11 @@ impl<T, F: Future<Output = T> + Send + 'static> From<Pin<Box<F>>> for BoxFuture<
     }
 }
 
+#[repr(transparent)]
+pub struct PtrBoxFuture<T>(*mut BoxFuture<T>);
+
+// =======================================================================================
+
 // TODO(now): Define these trait implementations with a macro?
 
 // Safety: The size of a Pin<P> is the size of P; the size of a Box<T> is the size of a reference to
@@ -46,9 +53,6 @@ unsafe impl ExternType for BoxFuture<()> {
     type Id = cxx::type_id!("workerd::rust::async::BoxFutureVoid");
     type Kind = cxx::kind::Trivial;
 }
-
-#[repr(transparent)]
-pub struct PtrBoxFuture<T>(*mut BoxFuture<T>);
 
 // Safety: Raw pointers are the same size in both languages.
 unsafe impl ExternType for PtrBoxFuture<()> {
@@ -74,5 +78,46 @@ pub fn box_future_void_poll_with_co_await_waker(
 }
 
 pub unsafe fn box_future_void_drop_in_place(ptr: PtrBoxFuture<()>) {
+    std::ptr::drop_in_place(ptr.0);
+}
+
+// ---------------------------------------------------------
+
+// Safety: The size of a Pin<P> is the size of P; the size of a Box<T> is the size of a reference to
+// T, and references to `dyn Trait` types contain two pointers: one for the object, one for the
+// vtable. So, the size of `Pin<Box<dyn Future<Output = T>>>` (a.k.a. `BoxFuture<T>`) is two
+// pointers, and that is unlikely to change.
+//
+// https://doc.rust-lang.org/std/keyword.dyn.html
+// - "As such, a dyn Trait reference contains two pointers."
+unsafe impl ExternType for BoxFuture<Result<()>> {
+    type Id = cxx::type_id!("workerd::rust::async::BoxFutureFallibleVoid");
+    type Kind = cxx::kind::Trivial;
+}
+
+// Safety: Raw pointers are the same size in both languages.
+unsafe impl ExternType for PtrBoxFuture<Result<()>> {
+    type Id = cxx::type_id!("workerd::rust::async::PtrBoxFutureFallibleVoid");
+    type Kind = cxx::kind::Trivial;
+}
+
+pub fn box_future_fallible_void_poll(future: &mut BoxFuture<Result<()>>, waker: &CxxWaker) -> bool {
+    let waker = Waker::from(waker);
+    let mut cx = Context::from_waker(&waker);
+    // TODO(now): Figure out how to propagate value-or-exception.
+    future.0.as_mut().poll(&mut cx).is_ready()
+}
+
+pub fn box_future_fallible_void_poll_with_co_await_waker(
+    future: &mut BoxFuture<Result<()>>,
+    waker: &CoAwaitWaker,
+) -> bool {
+    let waker = Waker::from(waker);
+    let mut cx = Context::from_waker(&waker);
+    // TODO(now): Figure out how to propagate value-or-exception.
+    future.0.as_mut().poll(&mut cx).is_ready()
+}
+
+pub unsafe fn box_future_fallible_void_drop_in_place(ptr: PtrBoxFuture<Result<()>>) {
     std::ptr::drop_in_place(ptr.0);
 }
