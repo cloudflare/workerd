@@ -169,6 +169,11 @@ jobs:
           - arch: windows-64
             name: Windows-X64
     steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download ${{ matrix.name }}
         uses: actions/download-artifact@v4
         with:
