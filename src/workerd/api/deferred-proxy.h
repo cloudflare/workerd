@@ -181,7 +181,7 @@ class DeferredProxyCoroutine: public kj::_::PromiseNode,
   }
 
   template <typename U>
-  auto await_transform(U&& awaitable) {
+  decltype(auto) await_transform(U&& awaitable) {
     // Trivially forward everything, so we can await anything a kj::Promise<T> can.
     return inner.await_transform(kj::fwd<U>(awaitable));
   }
