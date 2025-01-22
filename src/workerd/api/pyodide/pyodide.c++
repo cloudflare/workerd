@@ -8,6 +8,8 @@
 #include <workerd/util/string-buffer.h>
 #include <workerd/util/strings.h>
 
+#include <pyodide/generated/pyodide_extra.capnp.h>
+
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -21,22 +23,6 @@ const kj::Maybe<jsg::Bundle::Reader> PyodideBundleManager::getPyodideBundle(
     kj::StringPtr version) const {
   return bundles.lockShared()->find(version).map(
       [](const MessageBundlePair& t) { return t.bundle; });
-}
-
-kj::Maybe<kj::String> PyodideBundleManager::getPyodideLock(
-    PythonSnapshotRelease::Reader pythonSnapshotRelease) const {
-  auto bundleName = getPythonBundleName(pythonSnapshotRelease);
-  // We expect the Pyodide Bundle for the specified bundle name to already be downloaded here.
-  auto maybeBundle = getPyodideBundle(bundleName);
-  auto bundle = KJ_ASSERT_NONNULL(maybeBundle);
-  for (auto module: bundle.getModules()) {
-    if (module.which() == workerd::jsg::Module::JSON &&
-        module.getName() == "pyodide-internal:generated/pyodide-lock.json") {
-      return kj::str(module.getJson());
-    }
-  }
-
-  return kj::none;
 }
 
 void PyodideBundleManager::setPyodideBundleData(
@@ -400,6 +386,16 @@ kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
   return result.releaseAsArray();
 }
 
+kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease) {
+  for (auto pkgLock: *PACKAGE_LOCKS) {
+    if (pkgLock.getPackageDate() == pythonSnapshotRelease.getPackages()) {
+      return kj::str(pkgLock.getLock());
+    }
+  }
+
+  return kj::none;
+}
+
 jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
     const PythonConfig& pythonConfig,
     PythonSnapshotRelease::Reader pythonRelease) {
@@ -452,6 +448,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
   bool createSnapshot = pythonConfig.createSnapshot;
   bool createBaselineSnapshot = pythonConfig.createBaselineSnapshot;
   bool snapshotToDisk = createSnapshot || createBaselineSnapshot;
+  auto lock = KJ_ASSERT_NONNULL(getPyodideLock(pythonRelease),
+      kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
 
   // clang-format off
   return jsg::alloc<PyodideMetadataReader>(
@@ -460,6 +458,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
     contents.finish(),
     requirements.finish(),
     kj::str(pythonRelease.getPackages()),
+    kj::mv(lock),
     true      /* isWorkerd */,
     false     /* isTracing */,
     snapshotToDisk,

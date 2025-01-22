@@ -25,7 +25,6 @@ class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
   const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
-  kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease) const;
 
  private:
   struct MessageBundlePair {
@@ -79,6 +78,7 @@ class PyodideMetadataReader: public jsg::Object {
   kj::Array<kj::Array<kj::byte>> contents;
   kj::Array<kj::String> requirements;
   kj::String packagesVersion;
+  kj::String packagesLock;
   bool isWorkerdFlag;
   bool isTracingFlag;
   bool snapshotToDisk;
@@ -92,6 +92,7 @@ class PyodideMetadataReader: public jsg::Object {
       kj::Array<kj::Array<kj::byte>> contents,
       kj::Array<kj::String> requirements,
       kj::String packagesVersion,
+      kj::String packagesLock,
       bool isWorkerd,
       bool isTracing,
       bool snapshotToDisk,
@@ -103,6 +104,7 @@ class PyodideMetadataReader: public jsg::Object {
         contents(kj::mv(contents)),
         requirements(kj::mv(requirements)),
         packagesVersion(kj::mv(packagesVersion)),
+        packagesLock(kj::mv(packagesLock)),
         isWorkerdFlag(isWorkerd),
         isTracingFlag(isTracing),
         snapshotToDisk(snapshotToDisk),
@@ -165,6 +167,10 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::str(packagesVersion);
   }
 
+  kj::String getPackagesLock() {
+    return kj::str(packagesLock);
+  }
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -181,6 +187,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(shouldUsePackagesInArtifactBundler);
     JSG_METHOD(getPackagesVersion);
+    JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
   }
 
@@ -415,6 +422,8 @@ class SetupEmscripten: public jsg::Object {
   const EmscriptenRuntime& emscriptenRuntime;
   void visitForGc(jsg::GcVisitor& visitor);
 };
+
+kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
 using Worker = server::config::Worker;
 
