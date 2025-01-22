@@ -1,11 +1,11 @@
-From 0aacdd667c6e47b5c1d958e711d0491acd7ff959 Mon Sep 17 00:00:00 2001
+From 53626a47eed7ca39c323c708ee6d088680249c5b Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Tue, 9 Jul 2024 08:37:05 -0700
 Subject: Update illegal invocation error message in v8
 
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index 364c0b85e1c61d097272ac3fcd73916cc54b2a15..cc2aa0669515e6274fce675075c79264a8d8e3fc 100644
+index 2928f78dcbd551dfd14fb7c01670a9b282c29b41..503ce8ac38a26be6aa4abb048e19c5ddce76e2b4 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
 @@ -112,7 +112,9 @@ namespace internal {

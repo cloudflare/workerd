@@ -224,10 +224,6 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void clearFreelistedShims();
 
   // implements EmbedderRootsHandler -------------------------------------------
-  // todo: cleanup after 13.2 upgrade
-#if V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION < 2
-  bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
-#endif
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
   bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
 
