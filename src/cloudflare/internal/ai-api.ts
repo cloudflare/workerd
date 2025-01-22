@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Cloudflare, Inc.
+// Copyright (c) 2025 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
@@ -142,25 +142,24 @@ export class Ai {
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
     this.lastRequestHttpStatusCode = res.status;
 
+    if (!res.ok) {
+      throw await this._parseError(res);
+    }
+
     if (inputs['stream']) {
-      if (!res.ok) {
-        throw await this._parseError(res);
-      }
-
-      return res.body;
-    } else {
-      if (!res.ok || !res.body) {
-        throw await this._parseError(res);
-      }
-
-      const contentType = res.headers.get('content-type');
-
-      if (contentType === 'application/json') {
-        return (await res.json()) as object;
-      }
-
       return res.body;
     }
+
+    if (!res.body) {
+      throw await this._parseError(res);
+    }
+
+    const contentType = res.headers.get('content-type');
+    if (contentType === 'application/json') {
+      return (await res.json()) as object;
+    }
+
+    return res.body;
   }
 
   /*
