@@ -1431,7 +1431,7 @@ class ResourceWrapper {
     // We do not allow use of WeakRef or FinalizationRegistry because they introduce
     // non-deterministic behavior.
     check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
-    check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+    //check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
     context->SetAlignedPointerInEmbedderData(1, ptr.get());
