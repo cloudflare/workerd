@@ -252,15 +252,6 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).heapTracer;
 }
 
-// todo: cleanup after 13.2 upgrade
-#if V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION < 2
-bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 doesn't actually call this anymore unless a deprecated EmbedderRootsHandler option is used.
-  // V8 will potentially use ResetRoot() only on references that were marked droppable.
-  KJ_UNREACHABLE;
-}
-#endif
-
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
