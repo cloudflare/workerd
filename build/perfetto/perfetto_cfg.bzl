@@ -75,6 +75,9 @@ PERFETTO_CONFIG = struct(
         #     your own demangling implementation.
         demangle_wrapper = ["//:src_trace_processor_demangle"],
         llvm_demangle = ["@perfetto_dep_llvm_demangle//:llvm_demangle"],
+
+        # no open csd support needed
+        open_csd = [],
     ),
 
     # This struct allows embedders to customize the cc_opts for Perfetto

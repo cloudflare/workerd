@@ -1,4 +1,4 @@
-From 17e693a9eeaf7049e4d32a55565e856017d42c5b Mon Sep 17 00:00:00 2001
+From d0537368e8550cad1303e2a80ba8545a3e6ee536 Mon Sep 17 00:00:00 2001
 From: Aaron Loyd <aloyd@cloudflare.com>
 Date: Fri, 8 Nov 2024 16:41:46 -0600
 Subject: Return rejected promise from WebAssembly.compile if codegen is
@@ -20,10 +20,10 @@ Commit-Queue: Clemens Backes <clemensb@chromium.org>
 Cr-Commit-Position: refs/heads/main@{#97094}
 
 diff --git a/src/wasm/wasm-js.cc b/src/wasm/wasm-js.cc
-index 97ca3192572df7ed0363fe51cd7eb36bae69513b..82c0361a84dfeb1ee193f9cadc9b17194e03ef91 100644
+index ddf4d4911e28df0fc9b75a099e598c6860caf368..04203d29a8403d8d6377cb624353fb017a9d8ef1 100644
 --- a/src/wasm/wasm-js.cc
 +++ b/src/wasm/wasm-js.cc
-@@ -701,14 +701,6 @@ void WebAssemblyCompileImpl(const v8::FunctionCallbackInfo<v8::Value>& info) {
+@@ -702,14 +702,6 @@ void WebAssemblyCompileImpl(const v8::FunctionCallbackInfo<v8::Value>& info) {
    auto [isolate, i_isolate, thrower] = js_api_scope.isolates_and_thrower();
    RecordCompilationMethod(i_isolate, kAsyncCompilation);
  
@@ -38,7 +38,7 @@ index 97ca3192572df7ed0363fe51cd7eb36bae69513b..82c0361a84dfeb1ee193f9cadc9b1719
    Local<Context> context = isolate->GetCurrentContext();
    ASSIGN(Promise::Resolver, promise_resolver, Promise::Resolver::New(context));
    Local<Promise> promise = promise_resolver->GetPromise();
-@@ -718,6 +710,15 @@ void WebAssemblyCompileImpl(const v8::FunctionCallbackInfo<v8::Value>& info) {
+@@ -719,6 +711,15 @@ void WebAssemblyCompileImpl(const v8::FunctionCallbackInfo<v8::Value>& info) {
    std::shared_ptr<i::wasm::CompilationResultResolver> resolver(
        new AsyncCompilationResolver(isolate, context, promise_resolver));
  
