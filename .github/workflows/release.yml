@@ -187,7 +187,7 @@ jobs:
             # As of release v1.20230404.0 the Linux x64 binary after debug_strip is 65.8 MB,
             # 21.0 MB with gzip and 17.3 MB with brotli -9. Use gzip as a widely supported format
             # which still produces an acceptable compressed size.
-            gzip -9N /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+            gzip -9N -k /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
       - run: mv /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}.gz /tmp/workerd-${{ matrix.arch }}.gz
       # Upload compressed release binaries – one set of artifacts is sufficient with gzip being
       # widely supported
