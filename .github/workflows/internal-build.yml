@@ -1,0 +1,35 @@
+name: Run internal build
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'doc/**'
+
+concurrency:
+  # Cancel existing builds for the same PR.
+  # Otherwise, all other builds will be allowed to run through.
+  group: internal-build.yml-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  internal-build:
+    if: "! ${{github.event.pull_request.head.repo.fork}}" # Don't run on forks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Run internal build
+        env:
+          CI_URL: ${{ secrets.CI_URL }}
+          CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
+          CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python3 ./tools/cross/internal_build.py \
+            ${{github.event.pull_request.id}} \
+            ${{github.event.pull_request.head.sha}} \
+            $GITHUB_RUN_ATTEMPT \
+            "${{github.event.pull_request.head.ref}}" \
+            $CI_URL \
+            $CI_CLIENT_ID \
+            $CI_CLIENT_SECRET
