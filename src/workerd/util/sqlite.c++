@@ -891,8 +891,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     case SQLITE_SELECT: /* NULL            NULL            */
       // Yes, SELECT statements are allowed. (Note that if the SELECT names any tables, a separate
       // SQLITE_READ will be authorized for each one.)
-      KJ_ASSERT(param1 == nullptr);
-      KJ_ASSERT(param2 == nullptr);
+      KJ_ASSERT(param1 == kj::none);
+      KJ_ASSERT(param2 == kj::none);
       return true;
 
     case SQLITE_CREATE_TABLE: /* Table Name      NULL            */
@@ -903,7 +903,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     case SQLITE_CREATE_VIEW:  /* View Name       NULL            */
     case SQLITE_DROP_VIEW:    /* View Name       NULL            */
     case SQLITE_REINDEX:      /* Index Name      NULL            */
-      KJ_ASSERT(param2 == nullptr);
+      KJ_ASSERT(param2 == kj::none);
       return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
 
     case SQLITE_ALTER_TABLE: /* Table Name      NULL (modified) */
@@ -941,7 +941,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         ctx.stateChange = kj::mv(change);
       }
 
-      KJ_ASSERT(param2 == nullptr);
+      KJ_ASSERT(param2 == kj::none);
       return true;
     }
 

@@ -3593,7 +3593,7 @@ void Worker::Actor::assertCanSetAlarm() {
       return;
     }
     KJ_CASE_ONEOF(handler, api::ExportedHandler) {
-      JSG_REQUIRE(handler.alarm != nullptr, TypeError,
+      JSG_REQUIRE(handler.alarm != kj::none, TypeError,
           "Your Durable Object class must have an alarm() handler in order to call setAlarm()");
       return;
     }

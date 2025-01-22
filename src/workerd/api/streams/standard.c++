@@ -1278,8 +1278,8 @@ typename WritableImpl<Self>::WriteRequest WritableImpl<Self>::dequeueWriteReques
 
 template <typename Self>
 void WritableImpl<Self>::doClose(jsg::Lock& js) {
-  KJ_ASSERT(closeRequest == nullptr);
-  KJ_ASSERT(inFlightClose == nullptr);
+  KJ_ASSERT(closeRequest == kj::none);
+  KJ_ASSERT(inFlightClose == kj::none);
   KJ_ASSERT(inFlightWrite == kj::none);
   KJ_ASSERT(maybePendingAbort == kj::none);
   KJ_ASSERT(writeRequests.empty());
@@ -3855,9 +3855,9 @@ void TransformStreamDefaultController::init(jsg::Lock& js,
   // TODO(someday): The stream standard includes placeholders for supporting byte-oriented
   // TransformStreams but does not yet define them. For now, we are limiting our implementation
   // here to only support value-based transforms.
-  JSG_REQUIRE(transformer.readableType == nullptr, TypeError,
+  JSG_REQUIRE(transformer.readableType == kj::none, TypeError,
       "transformer.readableType must be undefined.");
-  JSG_REQUIRE(transformer.writableType == nullptr, TypeError,
+  JSG_REQUIRE(transformer.writableType == kj::none, TypeError,
       "transformer.writableType must be undefined.");
 
   KJ_IF_SOME(transform, transformer.transform) {
