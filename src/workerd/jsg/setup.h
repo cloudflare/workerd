@@ -56,19 +56,28 @@ class V8System {
   explicit V8System(v8::Platform& platform);
 
   // Use a possibly-custom v8::Platform implementation, and apply flags.
-  explicit V8System(v8::Platform& platform, kj::ArrayPtr<const kj::StringPtr> flags);
+  explicit V8System(v8::Platform& platform,
+      kj::ArrayPtr<const kj::StringPtr> flags,
+      v8::Platform* defaultPlatformPtr = nullptr);
 
   ~V8System() noexcept(false);
 
   typedef void FatalErrorCallback(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
+  auto& getDefaultPlatform() {
+    return *defaultPlatformPtr_;
+  }
+
  private:
   kj::Own<v8::Platform> platformInner;
   V8PlatformWrapper platformWrapper;
   friend class IsolateBase;
+  v8::Platform* defaultPlatformPtr_;
 
-  explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);
+  explicit V8System(kj::Own<v8::Platform>,
+      kj::ArrayPtr<const kj::StringPtr>,
+      v8::Platform* defaultPlatformPtr = nullptr);
 };
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
@@ -76,6 +85,10 @@ class V8System {
 class IsolateBase {
  public:
   static IsolateBase& from(v8::Isolate* isolate);
+
+  auto& getV8System() {
+    return system;
+  }
 
   // Unwraps a JavaScript exception as a kj::Exception.
   virtual kj::Exception unwrapException(

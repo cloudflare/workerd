@@ -8,6 +8,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
 
@@ -456,9 +457,11 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
     timeoutPromise = context->limitEnforcer->limitDrain();
   }
+  context->pumpMessageLoop();
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&&) {}));
+      .exclusiveJoin(context->abortPromise.addBranch().then(
+          [] {}, [](kj::Exception&& e) { KJ_LOG(INFO, "uncaught exception", e); }));
 }
 
 kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
@@ -475,6 +478,7 @@ kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::Incomin
   // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
+  context->pumpMessageLoop();
 
   auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
       [] { return IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT; });
@@ -1378,6 +1382,73 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());
   }
+}
+
+void IoContext::pumpMessageLoop() {
+  kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
+  KJ_IF_SOME(a, actor) {
+    asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), a, getMetrics());
+  } else {
+    asyncLockPromise = worker->takeAsyncLock(getMetrics());
+  }
+
+  addWaitUntil(asyncLockPromise.then([](Worker::AsyncLock lock) {
+    return lock;
+  }).then([this](Worker::AsyncLock lock) mutable {
+    KJ_REQUIRE(threadId == getThreadId(), "IoContext cannot switch threads");
+    IoContext* previousRequest = threadLocalRequest;
+    KJ_DEFER(threadLocalRequest = previousRequest);
+    threadLocalRequest = nullptr;
+
+    worker->runInLockScope(lock, [&](Worker::Lock& workerLock) {
+      workerLock.requireNoPermanentException();
+
+      auto limiterScope = limitEnforcer->enterJs(workerLock, *this);
+
+      bool gotTermination = false;
+
+      KJ_DEFER({
+        jsg::Lock& js = workerLock;
+        if (gotTermination) {
+          js.terminateExecution();
+        }
+      });
+
+      v8::TryCatch tryCatch(workerLock.getIsolate());
+      try {
+        jsg::Lock& js = workerLock;
+        js.pumpMessageLoop();
+      } catch (const jsg::JsExceptionThrown&) {
+        if (tryCatch.HasTerminated()) {
+          gotTermination = true;
+          limiterScope = nullptr;
+
+          limitEnforcer->requireLimitsNotExceeded();
+
+          if (!abortFulfiller->isWaiting()) {
+            KJ_FAIL_ASSERT("request terminated because it was aborted");
+          }
+
+          // That should have thrown, so we shouldn't get here.
+          KJ_FAIL_ASSERT("script terminated for unknown reasons");
+        } else {
+          if (tryCatch.Message().IsEmpty()) {
+            // Should never happen, but check for it because otherwise V8 will crash.
+            KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??",
+                kj::getStackTrace());
+            JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
+          } else {
+            auto jsException = tryCatch.Exception();
+
+            workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
+                jsg::JsValue(jsException), jsg::JsMessage(tryCatch.Message()));
+
+            jsg::throwTunneledException(workerLock.getIsolate(), jsException);
+          }
+        }
+      }
+    });
+  }));
 }
 
 // ======================================================================================
