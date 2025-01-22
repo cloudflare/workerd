@@ -541,9 +541,9 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
-    JSG_READONLY_INSTANCE_PROPERTY(id, getId);
-    JSG_READONLY_INSTANCE_PROPERTY(storage, getStorage);
-    JSG_READONLY_INSTANCE_PROPERTY(container, getContainer);
+    JSG_LAZY_INSTANCE_PROPERTY(id, getId);
+    JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
+    JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
