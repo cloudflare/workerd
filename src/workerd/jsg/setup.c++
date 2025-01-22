@@ -77,11 +77,19 @@ static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
 V8System::V8System(): V8System(defaultPlatform(0), nullptr) {}
 V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags): V8System(defaultPlatform(0), flags) {}
 V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr) {}
-V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : V8System(userPlatform(platformParam), flags) {}
-V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
+V8System::V8System(v8::Platform& platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    v8::Platform* defaultPlatformPtr)
+    : V8System(userPlatform(platformParam), flags, defaultPlatformPtr) {}
+V8System::V8System(kj::Own<v8::Platform> platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    v8::Platform* defaultPlatformPtr)
     : platformInner(kj::mv(platformParam)),
-      platformWrapper(*platformInner) {
+      platformWrapper(*platformInner),
+      defaultPlatformPtr_{defaultPlatformPtr} {
+  if (!defaultPlatformPtr_) {
+    defaultPlatformPtr_ = platformInner.get();
+  }
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif

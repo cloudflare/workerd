@@ -730,4 +730,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # WHATWG URLPattern Standard, leading to a number of issues reported by users. Unfortunately,
   # making it spec compliant is a breaking change. This flag controls the availability
   # of the new spec-compliant URLPattern implementation.
+
+  jsWeakRef @84 :Bool
+      $compatEnableFlag("enable_weak_ref")
+      $compatDisableFlag("disable_weak_ref");
+  # Enables WeakRefs and FinalizationRegistry API.
+  # WebAssembly based projects often rely on this API for wasm memory cleanup
 }

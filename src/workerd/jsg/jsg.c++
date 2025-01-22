@@ -4,6 +4,7 @@
 
 #include "jsg.h"
 
+#include "libplatform/libplatform.h"
 #include "setup.h"
 #include "simdutf.h"
 
@@ -267,6 +268,11 @@ void Lock::runMicrotasks() {
 
 void Lock::terminateExecution() {
   v8Isolate->TerminateExecution();
+}
+
+void Lock::pumpMessageLoop() {
+  auto& system = const_cast<jsg::V8System&>(this->getV8System());
+  while (v8::platform::PumpMessageLoop(&system.getDefaultPlatform(), v8Isolate)) {}
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {

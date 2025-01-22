@@ -1347,8 +1347,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto config = getConfig();
       auto platform = jsg::defaultPlatform(0);
       WorkerdPlatform v8Platform(*platform);
-      jsg::V8System v8System(
-          v8Platform, KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
+      jsg::V8System v8System(v8Platform,
+          KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
       auto promise = func(v8System, config);
       KJ_IF_SOME(w, watcher) {
         promise = promise.exclusiveJoin(waitForChanges(w).then([this]() {
