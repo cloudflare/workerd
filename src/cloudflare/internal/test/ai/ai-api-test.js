@@ -196,5 +196,16 @@ export const tests = {
         },
       ]);
     }
+
+    {
+      // Test `returnRawResponse` option is returning a Response object
+      const resp = await env.ai.run(
+        'rawInputs',
+        { prompt: 'test' },
+        { returnRawResponse: true }
+      );
+
+      assert.ok(resp instanceof Response);
+    }
   },
 };

@@ -4251,6 +4251,7 @@ interface AiModels {
 }
 type AiOptions = {
   gateway?: GatewayOptions;
+  returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
 };
@@ -4285,11 +4286,17 @@ type AiModelListType = Record<string, any>;
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  run<Name extends keyof AiModelList>(
+  run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
-    options?: AiOptions,
-  ): Promise<AiModelList[Name]["postProcessedOutputs"]>;
+    options?: Options,
+  ): Promise<
+    Options extends {
+      returnRawResponse: true;
+    }
+      ? Response
+      : AiModelList[Name]["postProcessedOutputs"]
+  >;
   public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
 }
 type GatewayOptions = {
