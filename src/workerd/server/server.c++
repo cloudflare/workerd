@@ -597,14 +597,21 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
       kj::Timer& timer,
       kj::EntropySource& entropySource,
       capnp::ByteStreamFactory& byteStreamFactory,
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::Own<kj::NetworkAddress> addrFetchParam)
       : addr(kj::mv(addrParam)),
+        addrFetch(kj::mv(addrFetchParam)),
         inner(kj::newHttpClient(timer,
             headerTable,
             *addr,
             {.entropySource = entropySource,
               .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION})),
-        serviceAdapter(kj::newHttpService(*inner)),
+        innerFetch(kj::newHttpClient(timer,
+            headerTable,
+            *addrFetch,
+            {.entropySource = entropySource,
+              .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION})),
+        serviceAdapterFetch(kj::newHttpService(*innerFetch)),
         rewriter(kj::mv(rewriter)),
         headerTable(headerTable),
         byteStreamFactory(byteStreamFactory),
@@ -621,9 +628,11 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
 
  private:
   kj::Own<kj::NetworkAddress> addr;
+  kj::Own<kj::NetworkAddress> addrFetch;
 
   kj::Own<kj::HttpClient> inner;
-  kj::Own<kj::HttpService> serviceAdapter;
+  kj::Own<kj::HttpClient> innerFetch;
+  kj::Own<kj::HttpService> serviceAdapterFetch;
 
   kj::Own<HttpRewriter> rewriter;
 
@@ -693,10 +702,10 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
       wrappedResponse = response;
       if (parent.rewriter->needsRewriteRequest()) {
         auto rewrite = parent.rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
-        return parent.serviceAdapter->request(method, url, *rewrite.headers, requestBody, *this)
+        return parent.serviceAdapterFetch->request(method, url, *rewrite.headers, requestBody, *this)
             .attach(kj::mv(rewrite));
       } else {
-        return parent.serviceAdapter->request(method, url, headers, requestBody, *this);
+        return parent.serviceAdapterFetch->request(method, url, headers, requestBody, *this);
       }
     }
 
@@ -706,7 +715,7 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
         ConnectResponse& tunnel,
         kj::HttpConnectSettings settings) override {
       TRACE_EVENT("workerd", "ExternalHttpServer::connect()");
-      return parent.serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
+      return parent.serviceAdapterFetch->connect(host, headers, connection, tunnel, kj::mv(settings));
     }
 
     kj::Promise<void> prewarm(kj::StringPtr url) override {
@@ -792,9 +801,20 @@ kj::Own<Server::Service> Server::makeExternalService(kj::StringPtr name,
       // HeaderTable::Builder is only available synchronously.
       auto rewriter = kj::heap<HttpRewriter>(conf.getHttp(), headerTableBuilder);
       auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
-      return kj::heap<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
+      if(conf.hasAddressFetch()){
+        auto addrFetch = kj::heap<PromisedNetworkAddress>(network.parseAddress(conf.getAddressFetch(), 80));
+
+        return kj::heap<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
           headerTableBuilder.getFutureTable(), timer, entropySource,
-          globalContext->byteStreamFactory, globalContext->httpOverCapnpFactory);
+          globalContext->byteStreamFactory, globalContext->httpOverCapnpFactory, kj::mv(addrFetch));
+      } else {
+        auto addrCapnp = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
+
+        return kj::heap<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
+          headerTableBuilder.getFutureTable(), timer, entropySource,
+          globalContext->byteStreamFactory, globalContext->httpOverCapnpFactory, kj::mv(addrCapnp));
+      }
+
     }
     case config::ExternalServer::HTTPS: {
       auto httpsConf = conf.getHttps();
