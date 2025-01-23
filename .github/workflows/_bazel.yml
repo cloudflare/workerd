@@ -120,7 +120,7 @@ jobs:
         if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
         run: |
           echo "WORKERD_OUTPUT_PATH=$(bazel cquery --output=files //src/workerd/server:workerd)" >> "$GITHUB_OUTPUT"
-          ls bazel-out/aarch64-fastbuild
+          ls bazel-out/aarch64-fastbuild/bin/src/workerd/server
 
       - name: Upload binary
         if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
