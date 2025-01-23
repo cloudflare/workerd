@@ -343,7 +343,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
     // flush operation is taking a particularly long time (EW-8538), so we throw a JSG error if
     // that's the case.
     JSG_REQUIRE(
-        *tlsStarter != nullptr, TypeError, "The request has finished before startTls completed.");
+        *tlsStarter != kj::none, TypeError, "The request has finished before startTls completed.");
     auto secureStream = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname)
                             .then([stream = connectionStream->addWrappedRef()]() mutable
                                 -> kj::Own<kj::AsyncIoStream> { return kj::mv(stream); });

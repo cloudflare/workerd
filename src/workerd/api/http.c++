@@ -1500,7 +1500,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
   auto statusText = defaultStatusText(statusCode);
 
   return jsg::alloc<Response>(
-      js, statusCode, kj::str(statusText), kj::mv(headers), nullptr, nullptr);
+      js, statusCode, kj::str(statusText), kj::mv(headers), nullptr, kj::none);
 }
 
 jsg::Ref<Response> Response::json_(
@@ -2448,7 +2448,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
   auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
   for (auto& msg: messages) {
     KJ_IF_SOME(b, msg.body) {
-      JSG_REQUIRE(msg.serializedBody == nullptr, TypeError,
+      JSG_REQUIRE(msg.serializedBody == kj::none, TypeError,
           "Expected one of body or serializedBody for each message");
       jsg::Serializer serializer(js,
           jsg::Serializer::Options{

@@ -533,7 +533,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(
 // =======================================================================================
 // CacheStorage
 
-CacheStorage::CacheStorage(): default_(jsg::alloc<Cache>(nullptr)) {}
+CacheStorage::CacheStorage(): default_(jsg::alloc<Cache>(kj::none)) {}
 
 jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cacheName) {
   // Set some reasonable limit to prevent scripts from blowing up our control header size.
