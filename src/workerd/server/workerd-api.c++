@@ -37,7 +37,6 @@
 #include <workerd/api/urlpattern.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/promise-wrapper.h>
-#include <workerd/jsg/commonjs.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/setup.h>
@@ -859,7 +858,6 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 
 // =======================================================================================
 
-// This methdd is used to initialize the new module registry implementation.
 kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry(
     const jsg::ResolveObserver& observer,
     const config::Worker::Reader& conf,
@@ -873,9 +871,6 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         [](kj::Own<const Worker> worker, const auto& module, jsg::V8Ref<v8::Module> v8Module,
             const auto& observer, kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
         -> kj::Promise<jsg::Promise<jsg::Value>> {
-      // Awaiting yield here forces the event loop to turn and runs the
-      // continuation outside the scope of the IoContext, ensuring that
-      // the evaluation that comes next is unable to schedule i/o.
       co_await kj::yield();
       KJ_ASSERT(!IoContext::hasCurrent());
       auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
@@ -949,27 +944,24 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         break;
       }
       case config::Worker::Module::COMMON_JS_MODULE: {
-        kj::Vector<kj::String> exports(def.getNamedExports().size());
-        for (auto name: def.getNamedExports()) {
-          exports.add(kj::str(name));
-        }
-        bundleBuilder.addSyntheticModule(def.getName(),
-            jsg::modules::Module::newCjsStyleModuleHandler<jsg::CommonJsModuleContext,
-                JsgWorkerdIsolate_TypeWrapper>(
-                kj::str(def.getCommonJsModule()), kj::str(def.getName())),
-            exports.releaseAsArray());
+        // TODO(soon): These are intentionally commented out for the time
+        // being and will be soon handled in a follow up PR. This branch
+        // is not yet taken in production.
+        // bundleBuilder.addSyntheticModule(
+        //     def.getName(), jsg::modules::Module::newCjsStyleModuleHandler<
+        //         jsg::CommonJsModuleContext,
+        //         JsgWorkerdIsolate_TypeWrapper>(
+        //             kj::str(def.getCommonJsModule()),
+        //             kj::str(def.getName())));
         break;
       }
       case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
-        kj::Vector<kj::String> exports(def.getNamedExports().size());
-        for (auto name: def.getNamedExports()) {
-          exports.add(kj::str(name));
-        }
-        bundleBuilder.addSyntheticModule(def.getName(),
-            jsg::modules::Module::newCjsStyleModuleHandler<jsg::NodeJsModuleContext,
-                JsgWorkerdIsolate_TypeWrapper>(
-                kj::str(def.getNodeJsCompatModule()), kj::str(def.getName())),
-            exports.releaseAsArray());
+        // bundleBuilder.addSyntheticModule(
+        //     def.getName(), jsg::modules::Module::newCjsStyleModuleHandler<
+        //         jsg::NodeJsModuleContext,
+        //         JsgWorkerdIsolate_TypeWrapper>(
+        //             kj::str(def.getNodeJsCompatModule()),
+        //             kj::str(def.getName())));
         break;
       }
       case config::Worker::Module::PYTHON_MODULE: {
