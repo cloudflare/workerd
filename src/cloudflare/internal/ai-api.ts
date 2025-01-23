@@ -23,7 +23,8 @@ export type SessionOptions = {
 
 export type AiOptions = {
   gateway?: GatewayOptions;
-
+  /** If true it will return a Response object */
+  returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
   /*
@@ -141,6 +142,10 @@ export class Ai {
     this.lastRequestId = res.headers.get('cf-ai-req-id');
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
     this.lastRequestHttpStatusCode = res.status;
+
+    if (this.options.returnRawResponse) {
+      return res;
+    }
 
     if (!res.ok) {
       throw await this._parseError(res);
