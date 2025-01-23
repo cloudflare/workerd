@@ -88,6 +88,18 @@ jobs:
         if: inputs.run_tests
         run: |
           bazel test --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+      - name: Release build
+        if: inputs.os_name == 'linux' && inputs.suffix == ''
+        run: |
+          bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //src/workerd/server:workerd
+
+      - name: Upload binary
+        if: inputs.os_name == 'linux' && inputs.suffix == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
+          path: bazel-bin/src/workerd/server/workerd
+
       - name: Report disk usage (in MB)
         if: always()
         shell: bash
@@ -116,18 +128,6 @@ jobs:
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi
-      - name: Release build
-        if: inputs.os_name == 'linux' && inputs.suffix == ''
-        run: |
-          bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //src/workerd/server:workerd
-
-      - name: Upload binary
-        if: inputs.os_name == 'linux' && inputs.suffix == ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
-          path: bazel-bin/src/workerd/server/workerd
-
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
