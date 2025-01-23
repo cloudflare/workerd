@@ -65,10 +65,6 @@ struct TestType: public jsg::Object {
     barCalled = true;
   }
 
-  jsg::Ref<TestType> getModule(Lock& js) {
-    return JSG_THIS;
-  }
-
   JsObject getExports(Lock& js) {
     KJ_IF_SOME(exp, exports) {
       return exp.getHandle(js);
@@ -89,7 +85,6 @@ struct TestType: public jsg::Object {
     JSG_METHOD(bar);
     JSG_METHOD(require);
     JSG_PROTOTYPE_PROPERTY(exports, getExports, setExports);
-    JSG_READONLY_PROTOTYPE_PROPERTY(module, getModule);
   }
 };
 
