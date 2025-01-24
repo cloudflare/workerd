@@ -11,6 +11,7 @@ jobs:
       date: ${{ steps.echo.outputs.date }}
       version: ${{ steps.echo.outputs.version }}
       release_version: ${{ steps.echo.outputs.release_version }}
+      types_version: ${{ steps.echo.outputs.types_version }}
     # version job uses ubuntu 24.04, this way we don't have to install the updated clang while
     # the build job uses 22.04 for libc compatibility.
     runs-on: ubuntu-24.04
@@ -20,6 +21,7 @@ jobs:
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
           echo "version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
+          echo "types_version=4.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
           echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
   check-tag:
     name: Check tag is new
@@ -355,7 +357,7 @@ jobs:
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:
-          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          WORKERD_VERSION: ${{ needs.version.outputs.types_version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: cp -r bazel-bin/types/definitions/. npm/workers-types
       - run: cp npm/workers-types/oldest/* npm/workers-types
