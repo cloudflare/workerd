@@ -106,14 +106,9 @@ jobs:
         run: chmod +x /tmp/workerd
 
       - name: Build Wrangler + Miniflare & dependencies
-        run: pnpm turbo build --filter miniflare wrangler
+        run: pnpm build --filter miniflare --filter wrangler
 
       - name: Run Miniflare tests
-        run: pnpm --filter miniflare test:ci
-        env:
-          MINIFLARE_WORKERD_PATH: /tmp/workerd
-
-      - name: Run Wrangler tests
-        run: pnpm --filter wrangler test:ci
+        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
