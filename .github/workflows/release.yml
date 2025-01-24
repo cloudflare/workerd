@@ -226,7 +226,7 @@ jobs:
       - run: mkdir npm/workerd-${{ matrix.arch }}/bin
       - run: cp /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
-      - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag 'latest'
+      - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
@@ -331,7 +331,7 @@ jobs:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd/.npmrc
-      - run: cd npm/workerd && npm publish --access public --tag 'latest'
+      - run: cd npm/workerd && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
@@ -371,7 +371,7 @@ jobs:
       - run: cp -r bazel-bin/types/definitions/. npm/workers-types
       - run: cp npm/workers-types/oldest/* npm/workers-types
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
-      - run: cd npm/workers-types && npm publish --access public --tag 'latest'
+      - run: cd npm/workers-types && npm publish --access public --tag ${{ startsWith(needs.version.outputs.version, '0') && 'beta' || 'latest'}}
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
