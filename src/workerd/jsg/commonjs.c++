@@ -2,7 +2,15 @@
 
 #include "modules.h"
 
+// TODO DO NOT COMMIT
+#include <workerd/jsg/url.h>
+
 namespace workerd::jsg {
+
+void someFunc(kj::String s) {
+  // TODO DO NOT COMMIT
+  auto url = KJ_REQUIRE_NONNULL(jsg::Url::tryParse(""_kj));
+}
 
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
     : module(jsg::alloc<CommonJsModuleObject>(js, path.toString(true))),
