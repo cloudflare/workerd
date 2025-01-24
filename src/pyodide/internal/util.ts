@@ -1,7 +1,33 @@
 export function reportError(e: any): never {
-  e.stack?.split('\n').forEach((s: any) => console.warn(s));
+  if (e instanceof SimpleRunPythonError) {
+    // PyRun_SimpleString will have written a Python traceback to stderr.
+    console.warn('Command failed:', e.pyCode);
+    console.warn('Error was:');
+    for (const line of e.pyTraceback.split('\n')) {
+      console.warn(line);
+    }
+  } else {
+    e.stack?.split('\n').forEach((s: any) => console.warn(s));
+  }
   throw e;
 }
+
+function setErrorName(errClass: any) {
+  Object.defineProperty(errClass.prototype, 'name', {
+    value: errClass.name,
+  });
+}
+
+export class SimpleRunPythonError extends Error {
+  pyCode: string;
+  pyTraceback: string;
+  constructor(pyCode: string, pyTraceback: string) {
+    super('Failed to run Python code: ' + pyTraceback);
+    this.pyCode = pyCode;
+    this.pyTraceback = pyTraceback;
+  }
+}
+setErrorName(SimpleRunPythonError);
 
 /**
  *  Simple as possible runPython function which works with no foreign function
@@ -36,13 +62,7 @@ export function simpleRunPython(
   // status 0: Ok
   // status -1: Error
   if (status) {
-    // PyRun_SimpleString will have written a Python traceback to stderr.
-    console.warn('Command failed:', code);
-    console.warn('Error was:');
-    for (const line of err.split('\n')) {
-      console.warn(line);
-    }
-    throw new Error('Failed to run Python code: ' + err);
+    throw new SimpleRunPythonError(code, err);
   }
   return err;
 }

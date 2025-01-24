@@ -13,7 +13,11 @@ import {
   MEMORY_SNAPSHOT_READER,
   REQUIREMENTS,
 } from 'pyodide-internal:metadata';
-import { reportError, simpleRunPython } from 'pyodide-internal:util';
+import {
+  reportError,
+  simpleRunPython,
+  SimpleRunPythonError,
+} from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 let LOADED_BASELINE_SNAPSHOT: number;
@@ -262,8 +266,22 @@ function memorySnapshotDoImports(Module: Module): string[] {
   const deduplicatedModules = [...new Set(importedModules)];
 
   // Import the modules list so they are included in the snapshot.
-  if (deduplicatedModules.length > 0) {
-    simpleRunPython(Module, 'import ' + deduplicatedModules.join(','));
+  for (const mod of deduplicatedModules) {
+    try {
+      // If the module manipulates sys.path or sys.meta_path, we hopefully won't be able to import
+      // some of the things it imports. If they import a package that attempts to import from js,
+      // then this might leave the package in an unusable state. TODO: finalizeBootstrap before
+      // taking the snapshot.
+      simpleRunPython(Module, `import ${mod}`);
+    } catch (e) {
+      if (!(e instanceof SimpleRunPythonError)) {
+        // This probably means we segfaulted.
+        throw e;
+      }
+      continue;
+    }
+    // Delete the imported module to avoid polluting the namespace
+    simpleRunPython(Module, `del ${mod.split('.', 1)[0]}`);
   }
 
   return deduplicatedModules;
