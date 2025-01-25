@@ -561,6 +561,7 @@ export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
+  container?: Container;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -3463,6 +3464,18 @@ export declare class EventSource extends EventTarget {
 export interface EventSourceEventSourceInit {
   withCredentials?: boolean;
   fetcher?: Fetcher;
+}
+export interface Container {
+  get running(): boolean;
+  start(options?: ContainerStartupOptions): void;
+  monitor(): Promise<void>;
+  destroy(error?: any): Promise<void>;
+  signal(signo: number): void;
+  getTcpPort(port: number): Fetcher;
+}
+export interface ContainerStartupOptions {
+  entrypoint?: string[];
+  enableInternet: boolean;
 }
 export type AiImageClassificationInput = {
   image: number[];

@@ -8,6 +8,7 @@
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/container.capnp.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
@@ -762,7 +763,8 @@ class Worker::Actor final: public kj::Refcounted {
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metrics,
       kj::Maybe<kj::Own<HibernationManager>> manager,
-      kj::Maybe<uint16_t> hibernationEventType);
+      kj::Maybe<uint16_t> hibernationEventType,
+      kj::Maybe<rpc::Container::Client> container = kj::none);
 
   ~Actor() noexcept(false);
 
