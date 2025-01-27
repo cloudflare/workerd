@@ -269,6 +269,7 @@ export function urlToHttpOptions(url: URL): Record<string, unknown> {
   const { hostname, pathname, port, username, password, search } = url;
   const options: Record<string, unknown> = {
     __proto__: null,
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread
     ...url, // In case the url object was extended by the user.
     protocol: url.protocol,
     hostname:

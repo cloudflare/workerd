@@ -12,6 +12,7 @@ async function* readLines(
   let partial = '';
 
   // @ts-expect-error must have a '[Symbol.asyncIterator]()' method
+  // eslint-disable-next-line @typescript-eslint/await-thenable
   for await (const chunk of stream) {
     const full = partial + (chunk as string);
     for (const char of full) {
@@ -94,6 +95,7 @@ export class PipelineTransformImpl extends entrypoints.WorkerEntrypoint {
     this.#initalized = true;
 
     switch (this.#batch.format) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       case Format.JSON_STREAM: {
         const data = await this.#readJsonStream();
         const transformed = await this.transformJson(data);

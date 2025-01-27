@@ -12,8 +12,8 @@ export function checkPrimeSync(
 export function randomPrime(
   size: number,
   safe: boolean,
-  add?: ArrayBufferView | undefined,
-  rem?: ArrayBufferView | undefined
+  add?: ArrayBufferView,
+  rem?: ArrayBufferView
 ): ArrayBuffer;
 
 // X509Certificate
