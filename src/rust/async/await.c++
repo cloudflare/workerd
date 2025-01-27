@@ -363,8 +363,7 @@ void CoAwaitWaker::traceEvent(kj::_::TraceBuilder& builder) {
 
 bool CoAwaitWaker::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
   // We would only trace the ArcWakerAwaiter if we have no RustPromiseAwaiters.
-  auto objects = linkedObjects();
-  if (objects.begin() == objects.end()) {
+  if (linkedObjects().empty()) {
     KJ_IF_SOME(awa, arcWakerAwaiter) {
       KJ_ASSERT(&awa == &awaiter,
           "Should not be possible for foreign ArcWakerAwaiter to call our wouldTrace()");

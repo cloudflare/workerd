@@ -40,6 +40,7 @@ namespace workerd::rust::async {
 //  - `group.linkedObjects().end()` obtains an iterator to the end of the list of Objets.
 //  - `group.linkedObjects().front()` dereferences the front of the list of Objects.
 //    Calling `front()` on an empty list (`begin() == end()`) is undefined behavior.
+//  - `group.linkedObjects().empty()` is true if there are no Objects in the list.
 //
 // Finally, destroying either the Group or its Object safely severs their relationship(s).
 //
@@ -107,6 +108,7 @@ protected:
     Iterator begin() { return list.begin(); }
     Iterator end() { return list.end(); }
     decltype(*kj::instance<Iterator>()) front() { return *begin(); }
+    bool empty() const { return list.empty(); }
   private:
     List& list;
   };
@@ -117,6 +119,7 @@ protected:
     ConstIterator begin() const { return list.begin(); }
     ConstIterator end() const { return list.end(); }
     decltype(*kj::instance<ConstIterator>()) front() const { return *begin(); }
+    bool empty() const { return list.empty(); }
   private:
     const List& list;
   };
