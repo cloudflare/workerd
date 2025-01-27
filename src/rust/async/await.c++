@@ -25,7 +25,7 @@ ArcWakerAwaiter::~ArcWakerAwaiter() noexcept(false) {
   });
 }
 
-// Validity-check the Promise's result, then fire the BaseCoAwaitWaker Event to poll the
+// Validity-check the Promise's result, then fire the CoAwaitWaker Event to poll the
 // wrapped Future again.
 kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
   kj::_::ExceptionOr<WakeInstruction> result;

@@ -7,8 +7,6 @@
 
 namespace workerd::rust::async {
 
-// TODO(cleanup): Code duplication with kj::_::PromiseAwaiterBase. If BaseCoAwaitWaker could
-//   somehow implement CoroutineBase's interface, we could fold this into one class.
 // TODO(perf): This is only an Event because we need to handle the case where all the Wakers are
 //   dropped and we receive a WakeInstruction::IGNORE. If we could somehow disarm the
 //   CrossThreadPromiseFulfillers inside ArcWaker when it's dropped, we could avoid requiring this
