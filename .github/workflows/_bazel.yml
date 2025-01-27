@@ -100,6 +100,14 @@ jobs:
           du -ms -t 1 $BAZEL_OUTPUT_BASE
           echo "Workspace usage statistics"
           du -ms -t 1 $GITHUB_WORKSPACE
+
+      - name: Upload binary
+        if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
+          path: bazel-bin/src/workerd/server/workerd
+
       - name: Drop large Bazel cache files
         if: always()
         # Github has a nominal 10GB of storage for all cached builds associated with a project.
@@ -116,17 +124,6 @@ jobs:
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi
-      - id: location
-        if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
-        run: |
-          echo "WORKERD_OUTPUT_PATH=$(bazel cquery --output=files //src/workerd/server:workerd)" >> "$GITHUB_OUTPUT"
-
-      - name: Upload binary
-        if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
-          path: ${{ github.workspace }}/${{ steps.location.outputs.WORKERD_OUTPUT_PATH }}
 
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
