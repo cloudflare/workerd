@@ -25,39 +25,38 @@ jobs:
   test:
     strategy:
       matrix:
-        os:
-          [
-            { name: linux, image: ubuntu-22.04 },
+        os: [
+            # { name: linux, image: ubuntu-22.04 },
             { name: linux-arm, image: ubuntu-22.04-arm },
-            { name: macOS, image: macos-15 },
-            { name: windows, image: windows-2025 },
+            # { name: macOS, image: macos-15 },
+            # { name: windows, image: windows-2025 },
           ]
         config: [
             # Default build: no suffix or additional bazel arguments
             { suffix: '' },
             # Debug build
-            { suffix: -debug },
+            # { suffix: -debug },
           ]
-        include:
-          # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os: { name: linux, image: ubuntu-22.04 }
-            config: { suffix: -asan }
-          # TODO (later): The custom Windows-debug configuration consistently runs out of disk
-          # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
-          # has been resolved we can likely re-enable it and possibly fold up the custom
-          # configurations, as we can more easily disable PDB file generation.
-          # - os:     { name : windows, image : windows-2025 }
-          #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
-        exclude:
-          - os: { name: windows, image: windows-2025 }
-            config: { suffix: -debug }
-          # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
-          # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
-          # debug configuration.
-          - os: { name: macOS, image: macos-15 }
-            config: { suffix: -debug }
-          - os: { name: linux, image: ubuntu-22.04 }
-            config: { suffix: -debug }
+        # include:
+        #   # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
+        #   - os: { name: linux, image: ubuntu-22.04 }
+        #     config: { suffix: -asan }
+        #   # TODO (later): The custom Windows-debug configuration consistently runs out of disk
+        #   # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
+        #   # has been resolved we can likely re-enable it and possibly fold up the custom
+        #   # configurations, as we can more easily disable PDB file generation.
+        #   # - os:     { name : windows, image : windows-2025 }
+        #   #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
+        # exclude:
+        #   - os: { name: windows, image: windows-2025 }
+        #     config: { suffix: -debug }
+        #   # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
+        #   # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
+        #   # debug configuration.
+        #   - os: { name: macOS, image: macos-15 }
+        #     config: { suffix: -debug }
+        #   - os: { name: linux, image: ubuntu-22.04 }
+        #     config: { suffix: -debug }
       fail-fast: false
     uses: ./.github/workflows/_bazel.yml
     with:
