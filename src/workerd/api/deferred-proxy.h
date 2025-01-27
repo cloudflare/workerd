@@ -189,7 +189,7 @@ class DeferredProxyCoroutine: public kj::_::PromiseNode,
   operator kj::_::CoroutineBase&() {
     return inner;
   }
-  // Required by Awaiter<T>::await_suspend() to support awaiting Promises.
+  // Required by PromiseAwaiter<T>::await_suspend() to support awaiting Promises.
 
  private:
   void fulfillOuterPromise() {
