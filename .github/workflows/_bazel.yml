@@ -1,19 +1,19 @@
-name: "Run Bazel"
+name: 'Run Bazel'
 on:
   workflow_call:
     inputs:
       image:
         type: string
         required: false
-        default: "ubuntu-22.04"
+        default: 'ubuntu-22.04'
       os_name:
         type: string
         required: false
-        default: "linux"
+        default: 'linux'
       suffix:
         type: string
         required: false
-        default: ""
+        default: ''
       run_tests:
         type: boolean
         required: false
@@ -21,7 +21,7 @@ on:
       extra_bazel_args:
         type: string
         required: false
-        default: ""
+        default: ''
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -83,11 +83,11 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-          bazel build --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+          bazel build ${{ inputs.extra_bazel_args }} --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //...
       - name: Bazel test
         if: inputs.run_tests
         run: |
-          bazel test --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.extra_bazel_args }} //...
+          bazel test ${{ inputs.extra_bazel_args }} --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //...
       - name: Report disk usage (in MB)
         if: always()
         shell: bash
@@ -100,6 +100,14 @@ jobs:
           du -ms -t 1 $BAZEL_OUTPUT_BASE
           echo "Workspace usage statistics"
           du -ms -t 1 $GITHUB_WORKSPACE
+
+      - name: Upload binary
+        if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
+          path: bazel-bin/src/workerd/server/workerd
+
       - name: Drop large Bazel cache files
         if: always()
         # Github has a nominal 10GB of storage for all cached builds associated with a project.
@@ -116,6 +124,7 @@ jobs:
           else
             echo "Disk cache does not exist: ~/bazel-disk-cache"
           fi
+
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
