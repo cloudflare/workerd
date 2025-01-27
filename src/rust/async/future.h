@@ -81,7 +81,7 @@ public:
 
 // ---------------------------------------------------------
 
-using BoxFutureVoid = BoxFuture<kj::_::Void>;
+using BoxFutureVoid = BoxFuture<void>;
 
 // We define this the pointer typedef so that cxx-rs can associate it with the same pointer type our
 // drop function uses.
@@ -89,7 +89,7 @@ using PtrBoxFutureVoid = BoxFutureVoid*;
 
 // ---------------------------------------------------------
 
-using BoxFutureFallibleVoid = BoxFutureFallible<kj::_::Void>;
+using BoxFutureFallibleVoid = BoxFutureFallible<void>;
 
 // We define this the pointer typedef so that cxx-rs can associate it with the same pointer type our
 // drop function uses.

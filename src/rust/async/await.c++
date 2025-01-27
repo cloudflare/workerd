@@ -40,7 +40,7 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
   // We should only ever receive a WakeInstruction, never an exception. But if we do, propagate
   // it to the coroutine.
   KJ_IF_SOME(exception, result.exception) {
-    coAwaitWaker.internalReject({}, kj::mv(exception));
+    coAwaitWaker.getFuturePoller().reject(kj::mv(exception));
     return kj::none;
   }
 
@@ -48,7 +48,7 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 
   if (value == WakeInstruction::WAKE) {
     // This was an actual wakeup.
-    coAwaitWaker.armDepthFirst();
+    coAwaitWaker.getFuturePoller().armDepthFirst();
   } else {
     // All of our Wakers were dropped. We are awaiting the Rust equivalent of kj::NEVER_DONE.
   }
@@ -58,9 +58,9 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 
 void ArcWakerAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
   if (coAwaitWaker.wouldTrace({}, *this)) {
-    // Our associated CoAwaitWaker's `traceEvent()` implementation would call our `tracePromise()`
-    // function. Just forward the call to CoAwaitWaker.
-    coAwaitWaker.traceEvent(builder);
+    // Our associated FuturePoller's `traceEvent()` implementation would call our `tracePromise()`
+    // function. Just forward the call to the FuturePoller.
+    coAwaitWaker.getFuturePoller().traceEvent(builder);
   } else {
     // Our CoAwaitWaker would choose a different branch to trace, so just record our own trace
     // address(es) and stop here.
@@ -174,7 +174,7 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
   KJ_DEFER(setDone());
 
   KJ_IF_SOME(coAwaitWaker, linkedGroup().tryGet()) {
-    coAwaitWaker.armDepthFirst();
+    coAwaitWaker.getFuturePoller().armDepthFirst();
     linkedGroup().set(kj::none);
   } else KJ_IF_SOME(waker, rustWaker) {
     // This call to `waker.wake()` consumes RustWaker's inner Waker. If we call it more than once,
@@ -193,9 +193,11 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
 void RustPromiseAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
   KJ_IF_SOME(coAwaitWaker, linkedGroup().tryGet()) {
     if (coAwaitWaker.wouldTrace({}, *this)) {
-      // We are associated with a CoAwaitWaker, and CoAwaitWaker's `traceEvent()` implementation
-      // would call our `tracePromise()` function. Just forward the call to CoAwaitWaker.
-      coAwaitWaker.traceEvent(builder);
+      // We are associated with a CoAwaitWaker, and we are at the head of the its list of Promises,
+      // meaning its `tracePromise()` implementation would forward to our `tracePromise()`. We can
+      // therefore forward this `traceEvent()` call to the coroutine's `traceEvent()` to generate a
+      // slightly longer trace with this node in it.
+      coAwaitWaker.getFuturePoller().traceEvent(builder);
       return;
     }
   }
@@ -290,17 +292,28 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr
 }
 
 // =======================================================================================
+// FuturePoller
+
+void FuturePoller::reject(kj::Exception&& exception) {
+  maybeException = kj::mv(exception);
+  armDepthFirst();
+}
+
+bool FuturePoller::isWaiting() {
+  return maybeException == kj::none;
+}
+
+void FuturePoller::throwIfRejected() {
+  KJ_IF_SOME(exception, maybeException) {
+    KJ_DEFER(maybeException = kj::none);
+    kj::throwFatalException(kj::mv(exception));
+  }
+}
+
+// =======================================================================================
 // CoAwaitWaker
 
-CoAwaitWaker::CoAwaitWaker(
-    kj::_::ExceptionOrValue& resultRef,
-    kj::SourceLocation location)
-    : Event(location),
-      resultRef(resultRef) {}
-
-CoAwaitWaker::~CoAwaitWaker() noexcept(false) {
-  getCoroutine().clearPromiseNodeForTrace();
-}
+CoAwaitWaker::CoAwaitWaker(FuturePoller& futurePoller): futurePoller(futurePoller) {}
 
 bool CoAwaitWaker::is_current() const {
   return &kjWaker.getExecutor() == &kj::getCurrentThreadExecutor();
@@ -355,10 +368,8 @@ void CoAwaitWaker::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEve
   }
 }
 
-void CoAwaitWaker::traceEvent(kj::_::TraceBuilder& builder) {
-  // Just defer to our enclosing Coroutine. It will immediately call our `tracePromise` implementation.
-  auto& coroutine = getCoroutine();
-  static_cast<Event&>(coroutine).traceEvent(builder);
+FuturePoller& CoAwaitWaker::getFuturePoller() {
+  return futurePoller;
 }
 
 bool CoAwaitWaker::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
@@ -382,11 +393,6 @@ bool CoAwaitWaker::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter&
   return false;
 }
 
-void CoAwaitWaker::internalReject(kj::Badge<ArcWakerAwaiter>, kj::Exception exception) {
-  resultRef.addException(kj::mv(exception));
-  getCoroutine().armDepthFirst();
-}
-
 void CoAwaitWaker::awaitBegin() {
   auto state = kjWaker.reset();
 
@@ -394,7 +400,7 @@ void CoAwaitWaker::awaitBegin() {
     // The future returned Pending, but synchronously called `wake_by_ref()` on the KjWaker,
     // indicating it wants to immediately be polled again. We should arm our event right now,
     // which will call `await_ready()` again on the event loop.
-    armDepthFirst();
+    futurePoller.armDepthFirst();
   } else KJ_IF_SOME(promise, state.cloned) {
     // The future returned Pending and cloned an ArcWaker to notify us later. We'll arrange for
     // the ArcWaker's promise to arm our event once it's fulfilled.
@@ -404,33 +410,6 @@ void CoAwaitWaker::awaitBegin() {
     // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
     // kj::NEVER_DONE.
   }
-
-  // Integrate with our enclosing coroutine's tracing.
-  getCoroutine().setPromiseNodeForTrace(self);
-}
-
-void CoAwaitWaker::awaitEnd() {
-  getCoroutine().clearPromiseNodeForTrace();
-}
-
-void CoAwaitWaker::scheduleResumption() {
-  getCoroutine().armDepthFirst();
-}
-
-void CoAwaitWaker::setCoroutine(kj::_::CoroutineBase& coroutine) {
-  maybeCoroutine = coroutine;
-}
-
-kj::_::CoroutineBase& CoAwaitWaker::getCoroutine() {
-  return KJ_ASSERT_NONNULL(maybeCoroutine, "CoroutineBase reference should be initialized");
-}
-
-BoxFutureVoidAwaiter operator co_await(BoxFutureVoid future) {
-  return BoxFutureVoidAwaiter{kj::mv(future)};
-}
-
-BoxFutureVoidAwaiter operator co_await(BoxFutureVoid& future) {
-  return BoxFutureVoidAwaiter{kj::mv(future)};
 }
 
 }  // namespace workerd::rust::async

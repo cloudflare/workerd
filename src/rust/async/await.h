@@ -5,6 +5,8 @@
 #include <workerd/rust/async/executor-guarded.h>
 #include <workerd/rust/async/linked-group.h>
 
+#include <kj/debug.h>
+
 namespace workerd::rust::async {
 
 // TODO(perf): This is only an Event because we need to handle the case where all the Wakers are
@@ -147,9 +149,40 @@ void guarded_rust_promise_awaiter_new_in_place(
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 
 // =======================================================================================
-// CoAwaitWaker
+// FuturePoller
 
 // Base class for the awaitable created by `co_await` when awaiting a Rust Future in a KJ coroutine.
+class FuturePoller: public kj::_::Event,
+                    public kj::PromiseRejector {
+public:
+  using Event::Event;
+
+  // Reject this Future with an exception. This is not an expected code path, and indicates a bug in
+  // our implementation. Currently it is only required because it is not possible to "disarm"
+  // CrossThreadPromiseFulfillers.
+  void reject(kj::Exception&& exception) override final;
+
+  // True if we haven't been rejected yet.
+  bool isWaiting() override final;
+
+protected:
+  // Throw the saved exception if one exists. Helper to implement derived classes.
+  void throwIfRejected();
+
+private:
+  // We use this only to reject the `co_await` with an exception if there's a bug in our usage of
+  // our ArcWaker. Specifically, if our ArcWaker promise is rejected, the exception ends up here.
+  // Since we never reject that promise, this is dead code. Or at least, it should be.
+  //
+  // TODO(cleanup): If we can make CrossThreadPromiseFulfillers disarmable -- i.e., convert the
+  //   promise into an effectively NEVER_DONE promise -- then this dead code path can go away.
+  kj::Maybe<kj::Exception> maybeException;
+};
+
+// =======================================================================================
+// CoAwaitWaker
+
+// A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust.
 //
 // The PromiseNode base class is a hack to implement async tracing. That is, we only implement the
 // `tracePromise()` function, and, instead of calling `coroutine.awaitBegin(p)` with the Promise `p`
@@ -159,15 +192,10 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 // RustPromiseAwaiter LinkedObjects have independent lifetimes from the CoAwaitWaker, so we mustn't
 // leave references to them, or their members, lying around in the Coroutine class.
 class CoAwaitWaker: public CxxWaker,
-                    public kj::_::Event,
                     public kj::_::PromiseNode,
                     public LinkedGroup<CoAwaitWaker, RustPromiseAwaiter> {
 public:
-  // Initialize `next` with the enclosing coroutine's `Event`.
-  CoAwaitWaker(
-      kj::_::ExceptionOrValue& resultRef,
-      kj::SourceLocation location = {});
-  ~CoAwaitWaker() noexcept(false);
+  CoAwaitWaker(FuturePoller& futurePoller);
 
   // True if the current thread's kj::Executor is the same as the one that was active when this
   // CoAwaitWaker was constructed. This allows Rust to optimize Promise `.await`s.
@@ -184,12 +212,6 @@ public:
   void drop() const override;
 
   // -------------------------------------------------------
-  // Event API
-
-  void traceEvent(kj::_::TraceBuilder& builder) override;
-  // fire() implemented in derived class
-
-  // -------------------------------------------------------
   // PromiseNode API
   //
   // We only implement this for `tracePromise()`, so we can give our CoroutineBase an API to trace
@@ -203,90 +225,45 @@ public:
   // -------------------------------------------------------
   // Other stuff
 
-  // True if `CoAwaitWaker::traceEvent()` would immediately call
-  // `awaiter.tracePromise()`
+  FuturePoller& getFuturePoller();
+
+  // True if our `tracePromise()` implementation would choose the given awaiter's promise for
+  // tracing. If our wrapped Future is awaiting multiple other Promises and/or Futures, our
+  // `tracePromise()` implementation might choose a different branch to go down.
   bool wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter);
   bool wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter);
 
   // TODO(now): Propagate value-or-exception.
 
-  // Reject the Future with an exception. Arms the enclosing coroutine's event. The event will
-  // resume the coroutine, which will then rethrow the exception from `await_resume()`. This is not
-  // an expected code path, and indicates a bug.
-  void internalReject(kj::Badge<ArcWakerAwaiter>, kj::Exception exception);
-
-protected:
-  // API for derived class.
+  // TODO(now): Can we get rid of this API?
   void awaitBegin();
-  void awaitEnd();
-  void scheduleResumption();  // TODO(now): Rename to fulfill()?
-
-  // Called from `await_suspend()`, which is the earliest we get access to the coroutine handle.
-  void setCoroutine(kj::_::CoroutineBase& coroutine);
 
 private:
-  // Helper to access `maybeCoroutine`, which is effectively always non-none.
-  kj::_::CoroutineBase& getCoroutine();
-
-  // The enclosing coroutine, which we will arm once our wrapped Future returns Ready, or an
-  // internal error occurs.
-  //
-  // This member is a Maybe because we don't have access to the coroutine until `await_suspend()` is
-  // called, which initializes this member by calling `setCoroutine()`. Since our derived classes'
-  // `await_ready()` implementations do nothing but immediately return false, we can assume that
-  // this Maybe is non-none effectively everywhere in the implementation of this class.
-  kj::Maybe<kj::_::CoroutineBase&> maybeCoroutine;
+  FuturePoller& futurePoller;
 
   // This KjWaker is our actual implementation of the CxxWaker interface. We forward all calls here.
   KjWaker kjWaker;
 
-  // HACK: We implement the PromiseNode interface to integrate with the Coroutine class' current
-  // tracing implementation.
-  OwnPromiseNode self { this };
-
-  // Reference to a member of our derived class. We use this only to reject the `co_await` with an
-  // exception if an internal error occurs. What is an internal error? Any condition which causes
-  // `internalReject()` to be called. :)
-  //
-  // The referee is of course uninitialized in our constructor and destructor.
-  kj::_::ExceptionOrValue& resultRef;
-
+  // TODO(now): Can this be moved into KjWaker?
   kj::Maybe<ArcWakerAwaiter> arcWakerAwaiter;
 };
 
-class BoxFutureVoidAwaiter: public CoAwaitWaker {
+template <typename T>
+class BoxFutureAwaiter final: public FuturePoller {
 public:
-  BoxFutureVoidAwaiter(BoxFutureVoid&& future, kj::SourceLocation location = {})
-      : CoAwaitWaker(result),
+  BoxFutureAwaiter(
+      kj::_::CoroutineBase& coroutine,
+      BoxFuture<T> future,
+      kj::SourceLocation location = {})
+      : FuturePoller(location),
+        coroutine(coroutine),
+        coAwaitWaker(*this),
         future(kj::mv(future)) {}
-
-  bool await_ready() const {
-    return false;
+  ~BoxFutureAwaiter() noexcept(false) {
+    coroutine.clearPromiseNodeForTrace();
   }
+  KJ_DISALLOW_COPY_AND_MOVE(BoxFutureAwaiter);
 
-  template <typename T> requires (kj::canConvert<T&, kj::_::CoroutineBase&>())
-  bool await_suspend(kj::_::stdcoro::coroutine_handle<T> handle) {
-    setCoroutine(handle.promise());
-    return awaitSuspendImpl();
-  }
-
-  // Unit futures return void.
-  void await_resume() {
-    awaitEnd();
-
-    KJ_IF_SOME(exception, result.exception) {
-      kj::throwFatalException(kj::mv(exception));
-    }
-  }
-
-  kj::Maybe<kj::Own<kj::_::Event>> fire() override {
-    if (!awaitSuspendImpl()) {
-      scheduleResumption();
-    }
-    return kj::none;
-  }
-
-private:
   // Poll the wrapped Future, returning false if we should _not_ suspend, true if we should suspend.
   bool awaitSuspendImpl() {
     // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
@@ -294,22 +271,84 @@ private:
     //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
     //   to really benefit.
 
-    if (future.poll(*this)) {
+    if (future.poll(coAwaitWaker)) {
       // Future is ready, we're done.
       // TODO(now): Propagate value-or-exception.
       return false;
     }
 
-    awaitBegin();
+    // TODO(now): Get rid of this?
+    coAwaitWaker.awaitBegin();
+
+    // Integrate with our enclosing coroutine's tracing.
+    coroutine.setPromiseNodeForTrace(promiseNodeForTrace);
 
     return true;
   }
 
-  BoxFutureVoid future;
-  kj::_::ExceptionOr<kj::_::Void> result;
+  void awaitResumeImpl() {
+    coroutine.clearPromiseNodeForTrace();
+    throwIfRejected();
+  }
+
+  // -------------------------------------------------------
+  // Event API
+
+  void traceEvent(kj::_::TraceBuilder& builder) override {
+    // Just defer to our enclosing Coroutine. It will immediately call our CoAwaitWaker's
+    // `tracePromise()` implementation.
+    static_cast<Event&>(coroutine).traceEvent(builder);
+  }
+
+protected:
+  kj::Maybe<kj::Own<kj::_::Event>> fire() override {
+    if (!awaitSuspendImpl()) {
+      coroutine.armDepthFirst();
+    }
+    return kj::none;
+  }
+
+private:
+  kj::_::CoroutineBase& coroutine;
+  CoAwaitWaker coAwaitWaker;
+  // HACK: CoAwaitWaker implements the PromiseNode interface to integrate with the Coroutine class'
+  // current tracing implementation.
+  OwnPromiseNode promiseNodeForTrace { &coAwaitWaker };
+
+  BoxFuture<T> future;
 };
 
-BoxFutureVoidAwaiter operator co_await(BoxFutureVoid future);
-BoxFutureVoidAwaiter operator co_await(BoxFutureVoid& future);
+template <typename T>
+class LazyBoxFutureAwaiter {
+public:
+  LazyBoxFutureAwaiter(BoxFuture<T>&& future): impl(kj::mv(future)) {}
+
+  bool await_ready() const { return false; }
+
+  template <typename U> requires (kj::canConvert<U&, kj::_::CoroutineBase&>())
+  bool await_suspend(kj::_::stdcoro::coroutine_handle<U> handle) {
+    auto future = kj::mv(KJ_ASSERT_NONNULL(impl.template tryGet<BoxFuture<T>>()));
+    return impl.template init<BoxFutureAwaiter<T>>(handle.promise(), kj::mv(future))
+        .awaitSuspendImpl();
+  }
+
+  // TODO(now): Return non-void T.
+  void await_resume() {
+    KJ_ASSERT_NONNULL(impl.template tryGet<BoxFutureAwaiter<T>>()).awaitResumeImpl();
+  }
+
+private:
+  // TODO(now): Comment.
+  kj::OneOf<BoxFuture<T>, BoxFutureAwaiter<T>> impl;
+};
+
+template <typename T>
+LazyBoxFutureAwaiter<T> operator co_await(BoxFuture<T> future) {
+  return kj::mv(future);
+}
+template <typename T>
+LazyBoxFutureAwaiter<T> operator co_await(BoxFuture<T>& future) {
+  return kj::mv(future);
+}
 
 }  // namespace workerd::rust::async
