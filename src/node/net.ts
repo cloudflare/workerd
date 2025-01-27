@@ -1028,7 +1028,6 @@ function initializeConnection(
 
       handle.closed.then(
         onConnectionClosed.bind(socket),
-        // eslint-disable-next-line @typescript-eslint/use-unknown-in-catch-callback-variable
         socket.destroy.bind(socket)
       );
     } catch (err) {

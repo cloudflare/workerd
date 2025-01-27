@@ -284,7 +284,7 @@ export function checkRangesOrGetDefault(
   name: string,
   lower: number,
   upper: number,
-  def?: number | undefined
+  def?: number
 ): number | undefined;
 export function checkRangesOrGetDefault(
   number: unknown,

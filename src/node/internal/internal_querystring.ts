@@ -209,8 +209,9 @@ const noEscape = new Int8Array([
 export function escape(input: unknown): string {
   let str: string;
   if (typeof input !== 'string') {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     if (typeof input === 'object') str = String(input);
-    // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
+    // eslint-disable-next-line @typescript-eslint/restrict-plus-operands,@typescript-eslint/no-base-to-string
     else str = input + '';
   } else {
     str = input;
