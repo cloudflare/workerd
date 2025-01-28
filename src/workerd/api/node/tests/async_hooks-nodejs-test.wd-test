@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "nodejs-async_hooks-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "async_hooks-nodejs-test.js")
+        ],
+        compatibilityDate = "2025-01-24",
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
