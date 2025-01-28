@@ -12,8 +12,8 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
-cfg-if = "0.1.2"
-worker = "0.0.15"
+cfg-if = "1.0"
+worker = "0.0.18"
 serde_json = "1.0.67"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
