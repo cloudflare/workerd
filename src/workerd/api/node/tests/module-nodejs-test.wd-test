@@ -2,10 +2,10 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "module-create-require-test",
+    ( name = "nodejs-module-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "module-create-require-test.js"),
+          (name = "worker", esModule = embed "module-nodejs-test.js"),
           (name = "foo", esModule = "export default 1;"),
           (name = "bar", esModule = "export default 2; export const __cjsUnwrapDefault = true;"),
           (name = "baz", commonJsModule = "module.exports = 3;"),

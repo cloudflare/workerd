@@ -212,9 +212,9 @@ wd_test(
 )
 
 wd_test(
-    src = "tests/module-create-require-test.wd-test",
+    src = "tests/module-nodejs-test.wd-test",
     args = ["--experimental"],
-    data = ["tests/module-create-require-test.js"],
+    data = ["tests/module-nodejs-test.js"],
 )
 
 wd_test(
