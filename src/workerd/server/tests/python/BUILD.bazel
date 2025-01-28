@@ -68,3 +68,5 @@ py_wd_test(
 )
 
 py_wd_test("dont-snapshot-pyodide")
+
+py_wd_test("filter-non-py-files")

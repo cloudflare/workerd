@@ -77,13 +77,13 @@ kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(jsg::Lock& 
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getWorkerFiles(
     jsg::Lock& js, kj::String ext) {
-  auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->names.size());
-  for (auto i: kj::zeroTo(builder.capacity())) {
+  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->names.size());
+  for (auto i: kj::zeroTo(this->names.size())) {
     if (this->names[i].endsWith(ext)) {
       builder.add(js, js.str(this->contents[i]));
     }
   }
-  return builder.finish();
+  return builder.releaseAsArray();
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
