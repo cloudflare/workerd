@@ -149,37 +149,6 @@ void guarded_rust_promise_awaiter_new_in_place(
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 
 // =======================================================================================
-// FuturePoller
-
-// Base class for the awaitable created by `co_await` when awaiting a Rust Future in a KJ coroutine.
-class FuturePoller: public kj::_::Event,
-                    public kj::PromiseRejector {
-public:
-  using Event::Event;
-
-  // Reject this Future with an exception. This is not an expected code path, and indicates a bug in
-  // our implementation. Currently it is only required because it is not possible to "disarm"
-  // CrossThreadPromiseFulfillers.
-  void reject(kj::Exception&& exception) override final;
-
-  // True if we haven't been rejected yet.
-  bool isWaiting() override final;
-
-protected:
-  // Throw the saved exception if one exists. Helper to implement derived classes.
-  void throwIfRejected();
-
-private:
-  // We use this only to reject the `co_await` with an exception if there's a bug in our usage of
-  // our ArcWaker. Specifically, if our ArcWaker promise is rejected, the exception ends up here.
-  // Since we never reject that promise, this is dead code. Or at least, it should be.
-  //
-  // TODO(cleanup): If we can make CrossThreadPromiseFulfillers disarmable -- i.e., convert the
-  //   promise into an effectively NEVER_DONE promise -- then this dead code path can go away.
-  kj::Maybe<kj::Exception> maybeException;
-};
-
-// =======================================================================================
 // CoAwaitWaker
 
 // A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust.
@@ -195,7 +164,7 @@ class CoAwaitWaker: public CxxWaker,
                     public kj::_::PromiseNode,
                     public LinkedGroup<CoAwaitWaker, RustPromiseAwaiter> {
 public:
-  CoAwaitWaker(FuturePoller& futurePoller);
+  CoAwaitWaker(kj::_::Event& futurePoller);
 
   // True if the current thread's kj::Executor is the same as the one that was active when this
   // CoAwaitWaker was constructed. This allows Rust to optimize Promise `.await`s.
@@ -225,7 +194,7 @@ public:
   // -------------------------------------------------------
   // Other stuff
 
-  FuturePoller& getFuturePoller();
+  kj::_::Event& getFuturePollEvent();
 
   // True if our `tracePromise()` implementation would choose the given awaiter's promise for
   // tracing. If our wrapped Future is awaiting multiple other Promises and/or Futures, our
@@ -239,7 +208,7 @@ public:
   void awaitBegin();
 
 private:
-  FuturePoller& futurePoller;
+  kj::_::Event& futurePoller;
 
   // This KjWaker is our actual implementation of the CxxWaker interface. We forward all calls here.
   KjWaker kjWaker;
@@ -249,13 +218,13 @@ private:
 };
 
 template <typename T>
-class BoxFutureAwaiter final: public FuturePoller {
+class BoxFutureAwaiter final: public kj::_::Event {
 public:
   BoxFutureAwaiter(
       kj::_::CoroutineBase& coroutine,
       BoxFuture<T> future,
       kj::SourceLocation location = {})
-      : FuturePoller(location),
+      : Event(location),
         coroutine(coroutine),
         coAwaitWaker(*this),
         future(kj::mv(future)) {}
@@ -288,7 +257,6 @@ public:
 
   void awaitResumeImpl() {
     coroutine.clearPromiseNodeForTrace();
-    throwIfRejected();
   }
 
   // -------------------------------------------------------

@@ -37,18 +37,23 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
     result.addException(kj::mv(exception));
   }
 
-  // We should only ever receive a WakeInstruction, never an exception. But if we do, propagate
-  // it to the coroutine.
-  KJ_IF_SOME(exception, result.exception) {
-    coAwaitWaker.getFuturePoller().reject(kj::mv(exception));
-    return kj::none;
-  }
+  [&result]() noexcept {
+    KJ_IF_SOME(exception, result.exception) {
+      // We should only ever receive a WakeInstruction, never an exception. If we do receive an
+      // exception, it would be because our ArcWaker implementation allowed its cross-thread promise
+      // fulfiller to be destroyed without being fulfilled, or because we foolishly added an
+      // explicit call to the fulfiller's reject() function. Either way, it is a programming error,
+      // so we abort the process here by re-throwing across a noexcept boundary. This avoids having
+      // implement the ability to "reject" the Future poll() Event.
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }();
 
   auto value = KJ_ASSERT_NONNULL(result.value);
 
   if (value == WakeInstruction::WAKE) {
     // This was an actual wakeup.
-    coAwaitWaker.getFuturePoller().armDepthFirst();
+    coAwaitWaker.getFuturePollEvent().armDepthFirst();
   } else {
     // All of our Wakers were dropped. We are awaiting the Rust equivalent of kj::NEVER_DONE.
   }
@@ -58,9 +63,9 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 
 void ArcWakerAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
   if (coAwaitWaker.wouldTrace({}, *this)) {
-    // Our associated FuturePoller's `traceEvent()` implementation would call our `tracePromise()`
-    // function. Just forward the call to the FuturePoller.
-    coAwaitWaker.getFuturePoller().traceEvent(builder);
+    // Our associated futurePollEvent's `traceEvent()` implementation would call our
+    // `tracePromise()` function. Just forward the call to the futurePollEvent.
+    coAwaitWaker.getFuturePollEvent().traceEvent(builder);
   } else {
     // Our CoAwaitWaker would choose a different branch to trace, so just record our own trace
     // address(es) and stop here.
@@ -174,7 +179,7 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
   KJ_DEFER(setDone());
 
   KJ_IF_SOME(coAwaitWaker, linkedGroup().tryGet()) {
-    coAwaitWaker.getFuturePoller().armDepthFirst();
+    coAwaitWaker.getFuturePollEvent().armDepthFirst();
     linkedGroup().set(kj::none);
   } else KJ_IF_SOME(waker, rustWaker) {
     // This call to `waker.wake()` consumes RustWaker's inner Waker. If we call it more than once,
@@ -197,7 +202,7 @@ void RustPromiseAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
       // meaning its `tracePromise()` implementation would forward to our `tracePromise()`. We can
       // therefore forward this `traceEvent()` call to the coroutine's `traceEvent()` to generate a
       // slightly longer trace with this node in it.
-      coAwaitWaker.getFuturePoller().traceEvent(builder);
+      coAwaitWaker.getFuturePollEvent().traceEvent(builder);
       return;
     }
   }
@@ -292,28 +297,9 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr
 }
 
 // =======================================================================================
-// FuturePoller
-
-void FuturePoller::reject(kj::Exception&& exception) {
-  maybeException = kj::mv(exception);
-  armDepthFirst();
-}
-
-bool FuturePoller::isWaiting() {
-  return maybeException == kj::none;
-}
-
-void FuturePoller::throwIfRejected() {
-  KJ_IF_SOME(exception, maybeException) {
-    KJ_DEFER(maybeException = kj::none);
-    kj::throwFatalException(kj::mv(exception));
-  }
-}
-
-// =======================================================================================
 // CoAwaitWaker
 
-CoAwaitWaker::CoAwaitWaker(FuturePoller& futurePoller): futurePoller(futurePoller) {}
+CoAwaitWaker::CoAwaitWaker(kj::_::Event& futurePoller): futurePoller(futurePoller) {}
 
 bool CoAwaitWaker::is_current() const {
   return &kjWaker.getExecutor() == &kj::getCurrentThreadExecutor();
@@ -368,7 +354,7 @@ void CoAwaitWaker::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEve
   }
 }
 
-FuturePoller& CoAwaitWaker::getFuturePoller() {
+kj::_::Event& CoAwaitWaker::getFuturePollEvent() {
   return futurePoller;
 }
 
