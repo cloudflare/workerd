@@ -7,8 +7,32 @@ FEATURE_FLAGS = {
     "development": ["python_workers_development", "python_external_packages"],
 }
 
+def _py_wd_test_helper(
+        name,
+        src,
+        python_flag,
+        **kwargs):
+    name_flag = name + "_" + python_flag
+    templated_src = name_flag.replace("/", "-") + "@template"
+    templated_src = "/".join(src.split("/")[:-1] + [templated_src])
+    flags = FEATURE_FLAGS[python_flag] + ["python_workers"]
+    feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
+    expand_template(
+        name = name_flag + "@rule",
+        out = templated_src,
+        template = src,
+        substitutions = {"%PYTHON_FEATURE_FLAGS": feature_flags_txt},
+    )
+
+    wd_test(
+        src = templated_src,
+        name = name_flag + "@",
+        **kwargs
+    )
+
 def py_wd_test(
         directory = None,
+        *,
         src = None,
         data = None,
         name = None,
@@ -36,25 +60,14 @@ def py_wd_test(
         name = src.removesuffix(".wd-test")
     data += ["//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule"]
     args = args + ["--pyodide-bundle-disk-cache-dir", "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..", "--experimental"]
+    tags = tags + ["py_wd_test"]
     for python_flag in python_flags:
-        name_flag = name + "_" + python_flag
-        templated_src = name_flag.replace("/", "-") + "@template"
-        templated_src = "/".join(src.split("/")[:-1] + [templated_src])
-        flags = FEATURE_FLAGS[python_flag] + ["python_workers"]
-        feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
-        expand_template(
-            name = name_flag + "@rule",
-            out = templated_src,
-            template = src,
-            substitutions = {"%PYTHON_FEATURE_FLAGS": feature_flags_txt},
-        )
-
-        wd_test(
-            src = templated_src,
+        _py_wd_test_helper(
+            name,
+            src,
+            python_flag,
             data = data,
-            name = name_flag + "@",
             args = args,
             size = size,
-            tags = tags + ["py_wd_test"],
-            **kwargs
+            tags = tags,
         )
