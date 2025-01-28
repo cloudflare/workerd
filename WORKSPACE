@@ -144,6 +144,12 @@ git_repository(
     remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git",
 )
 
+git_repository(
+    name = "hwy",
+    commit = "00fe003dac355b979f36157f9407c7c46448958e",
+    remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
+)
+
 # Bindings for abseil libraries used by V8
 [
     bind(
