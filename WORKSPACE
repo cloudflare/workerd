@@ -145,9 +145,15 @@ git_repository(
 )
 
 git_repository(
-    name = "hwy",
+    name = "highway",
     commit = "00fe003dac355b979f36157f9407c7c46448958e",
     remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
+)
+
+# Bindings for Highway library used by V8
+bind(
+    name = "hwy",
+    actual = "@highway//:hwy",
 )
 
 # Bindings for abseil libraries used by V8

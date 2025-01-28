@@ -3,7 +3,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 VERSION = "13.3.415.17"
 
-INTEGRITY = "sha256-wER1sDu6Ez7pXzLDufpxYE26d3S1WdsyuQxoFvzLc5Q="
+INTEGRITY = "sha256-J8JbPX90nicruZRg+c2PtM65gk5QWH7bmFHY30eXsw4="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
