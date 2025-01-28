@@ -154,10 +154,8 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 // A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust.
 //
 // The PromiseNode base class is a hack to implement async tracing. That is, we only implement the
-// `tracePromise()` function, and, instead of calling `coroutine.awaitBegin(p)` with the Promise `p`
-// that we ultimately suspend on (either a RustPromiseAwaiter's, or an ArcWakerAwaiter's), we call
-// `coroutine.awaitBegin(*this)`, and decide which Promise to trace into if/when the coroutine calls
-// our `tracePromise()` implementation. This primarily makes the lifetimes easier to manage: our
+// `tracePromise()` function, and decide which Promise to trace into if/when the coroutine calls our
+// `tracePromise()` implementation. This primarily makes the lifetimes easier to manage: our
 // RustPromiseAwaiter LinkedObjects have independent lifetimes from the CoAwaitWaker, so we mustn't
 // leave references to them, or their members, lying around in the Coroutine class.
 class CoAwaitWaker: public CxxWaker,
@@ -165,6 +163,29 @@ class CoAwaitWaker: public CxxWaker,
                     public LinkedGroup<CoAwaitWaker, RustPromiseAwaiter> {
 public:
   CoAwaitWaker(kj::_::Event& futurePoller);
+
+  // After constructing a CoAwaitWaker, pass it by reference to `BoxFuture<T>::poll()`. If `poll()`
+  // returns Pending, call this `suspend()` function to arrange to arm the Future poll() Event when
+  // we are woken.
+  //
+  // TODO(cleanup): Make a RAII PollScope instead? Call this from the Rust side?
+  void suspend();
+
+  // The Event which is using this CoAwaitWaker to poll() a Future. Waking the CoAwaitWaker
+  // arms this Event (possibly via a cross-thread promise fulfiller). We also arm the Event directly
+  // in the RustPromiseAwaiter class, to more optimally await KJ Promises from within Rust.
+  kj::_::Event& getFuturePollEvent();
+
+  // True if our `tracePromise()` implementation would choose the given awaiter's promise for
+  // tracing. If our wrapped Future is awaiting multiple other Promises and/or Futures, our
+  // `tracePromise()` implementation might choose a different branch to go down.
+  bool wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter);
+  bool wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter);
+
+  // TODO(now): Propagate value-or-exception.
+
+  // -------------------------------------------------------
+  // API exposed to Rust
 
   // True if the current thread's kj::Executor is the same as the one that was active when this
   // CoAwaitWaker was constructed. This allows Rust to optimize Promise `.await`s.
@@ -183,29 +204,13 @@ public:
   // -------------------------------------------------------
   // PromiseNode API
   //
-  // We only implement this for `tracePromise()`, so we can give our CoroutineBase an API to trace
-  // the promise we're currently waiting on.
+  // HACK: We only implement this interface for `tracePromise()`, which is the only function
+  // CoroutineBase uses on its `promiseNodeForTrace` reference.
 
   void destroy() override {}  // No-op because we are allocated inside the coroutine frame
   void onReady(kj::_::Event* event) noexcept override;
   void get(kj::_::ExceptionOrValue& output) noexcept override;
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
-
-  // -------------------------------------------------------
-  // Other stuff
-
-  kj::_::Event& getFuturePollEvent();
-
-  // True if our `tracePromise()` implementation would choose the given awaiter's promise for
-  // tracing. If our wrapped Future is awaiting multiple other Promises and/or Futures, our
-  // `tracePromise()` implementation might choose a different branch to go down.
-  bool wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter);
-  bool wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter);
-
-  // TODO(now): Propagate value-or-exception.
-
-  // TODO(now): Can we get rid of this API?
-  void awaitBegin();
 
 private:
   kj::_::Event& futurePoller;
@@ -246,8 +251,7 @@ public:
       return false;
     }
 
-    // TODO(now): Get rid of this?
-    coAwaitWaker.awaitBegin();
+    coAwaitWaker.suspend();
 
     // Integrate with our enclosing coroutine's tracing.
     coroutine.setPromiseNodeForTrace(promiseNodeForTrace);

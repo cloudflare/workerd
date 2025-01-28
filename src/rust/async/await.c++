@@ -379,7 +379,7 @@ bool CoAwaitWaker::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter&
   return false;
 }
 
-void CoAwaitWaker::awaitBegin() {
+void CoAwaitWaker::suspend() {
   auto state = kjWaker.reset();
 
   if (state.wakeCount > 0) {
