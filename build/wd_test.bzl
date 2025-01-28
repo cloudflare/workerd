@@ -6,6 +6,7 @@ def wd_test(
         name = None,
         args = [],
         ts_deps = [],
+        python_snapshot_test = False,
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -54,6 +55,7 @@ def wd_test(
         name = name,
         data = data,
         args = args,
+        python_snapshot_test = python_snapshot_test,
         **kwargs
     )
 
@@ -69,8 +71,7 @@ if not "%SIDECAR%" == "" (
 )
 
 REM Run the actual test
-powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
-set TEST_EXIT=!ERRORLEVEL!
+$(RUNTEST)
 
 REM Cleanup sidecar if it was started
 if defined SIDECAR_PID (
@@ -98,8 +99,41 @@ if [ ! -z "$(SIDECAR)" ]; then
     sleep 3
 fi
 
-# Run the actual test
+$(RUNTEST)
+"""
+
+WINDOWS_RUNTEST_NORMAL = """
+powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+set TEST_EXIT=!ERRORLEVEL!
+"""
+
+SH_RUNTEST_NORMAL = """
 "$@" -dTEST_TMPDIR=$TEST_TMPDIR
+"""
+
+# We need variants of the RUN_TEST command for Python memory snapshot tests. We have to invoke
+# workerd twice, once with --python-save-snapshot to produce the snapshot and once with
+# --python-load-snapshot to use it.
+#
+# We would like to implement this in py_wd_test and not have to complicate wd_test for it, but
+# unfortunately bazel provides no way for a test to create a file that is used by another test. So
+# we cannot do this with two separate `wd_test` rules. We _could_ use a build step to create the
+# snapshot, but then a failure at this stage would be reported as a build failure when really it
+# should count as a test failure. So the only option left is to make this modification to wd_test to
+# invoke workerd twice for snapshot tests.
+
+WINDOWS_RUNTEST_SNAPSHOT = """
+powershell -Command \"%* --python-save-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+set TEST_EXIT=!ERRORLEVEL!
+if !TEST_EXIT! EQ 0 (
+    powershell -Command \"%* --python-load-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+    set TEST_EXIT=!ERRORLEVEL!
+)
+"""
+
+SH_RUNTEST_SNAPSHOT = """
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot
 """
 
 def _wd_test_impl(ctx):
@@ -112,9 +146,13 @@ def _wd_test_impl(ctx):
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
         content = WINDOWS_TEMPLATE.replace("$(SIDECAR)", ctx.file.sidecar.path if ctx.file.sidecar else "")
+        runtest = WINDOWS_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else WINDOWS_RUNTEST_NORMAL
+        content = content.replace("$(RUNTEST)", runtest)
     else:
         executable = ctx.outputs.executable
         content = SH_TEMPLATE.replace("$(SIDECAR)", ctx.file.sidecar.short_path if ctx.file.sidecar else "")
+        runtest = SH_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else SH_RUNTEST_NORMAL
+        content = content.replace("$(RUNTEST)", runtest)
 
     ctx.actions.write(
         output = executable,
@@ -155,6 +193,7 @@ _wd_test = rule(
             executable = True,
             cfg = "exec",
         ),
+        "python_snapshot_test": attr.bool(),
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
 )

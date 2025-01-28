@@ -79,6 +79,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void setPythonCreateBaselineSnapshot() {
     pythonConfig.createBaselineSnapshot = true;
   }
+  void setPythonLoadSnapshot() {
+    pythonConfig.loadSnapshotFromDisk = true;
+  }
 
   // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System,
@@ -118,7 +121,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
   PythonConfig pythonConfig = PythonConfig{.packageDiskCacheRoot = kj::none,
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
-    .createBaselineSnapshot = false};
+    .createBaselineSnapshot = false,
+    .loadSnapshotFromDisk = false};
 
   bool experimental = false;
 

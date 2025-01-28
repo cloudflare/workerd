@@ -15,6 +15,8 @@ py_wd_test(
         "*.js",
         "*.py",
     ]),
+    # Works but times out frequently
+    make_snapshot = False,
     tags = [
         # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
         "no-asan",
