@@ -11,12 +11,16 @@ def _py_wd_test_helper(
         name,
         src,
         python_flag,
+        snapshot,
+        *,
+        args = [],
         **kwargs):
     name_flag = name + "_" + python_flag
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
     flags = FEATURE_FLAGS[python_flag] + ["python_workers"]
     feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
+
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
@@ -27,6 +31,8 @@ def _py_wd_test_helper(
     wd_test(
         src = templated_src,
         name = name_flag + "@",
+        args = args,
+        python_snapshot_test = snapshot,
         **kwargs
     )
 
@@ -41,6 +47,7 @@ def py_wd_test(
         args = [],
         size = "enormous",
         tags = [],
+        make_snapshot = True,
         **kwargs):
     if python_flags == "all":
         python_flags = FEATURE_FLAGS.keys()
@@ -59,13 +66,21 @@ def py_wd_test(
     elif name == None:
         name = src.removesuffix(".wd-test")
     data += ["//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule"]
-    args = args + ["--pyodide-bundle-disk-cache-dir", "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..", "--experimental"]
+    args = args + [
+        "--pyodide-bundle-disk-cache-dir",
+        "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)/..",
+        "--experimental",
+        "--pyodide-package-disk-cache-dir",
+        ".",
+    ]
     tags = tags + ["py_wd_test"]
+
     for python_flag in python_flags:
         _py_wd_test_helper(
             name,
             src,
             python_flag,
+            snapshot = make_snapshot,
             data = data,
             args = args,
             size = size,

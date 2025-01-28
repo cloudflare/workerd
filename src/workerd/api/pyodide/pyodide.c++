@@ -445,9 +445,21 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
     }
     names.add(kj::str(module.getName()));
   }
-  bool createSnapshot = pythonConfig.createSnapshot;
-  bool createBaselineSnapshot = pythonConfig.createBaselineSnapshot;
-  bool snapshotToDisk = createSnapshot || createBaselineSnapshot;
+  bool snapshotToDisk = pythonConfig.createSnapshot || pythonConfig.createBaselineSnapshot;
+  if (pythonConfig.loadSnapshotFromDisk && snapshotToDisk) {
+    KJ_FAIL_ASSERT(
+        "Doesn't make sense to pass both --python-save-snapshot and --python-load-snapshot");
+  }
+  kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
+  if (pythonConfig.loadSnapshotFromDisk) {
+    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.packageDiskCacheRoot);
+    kj::Path path("snapshot.bin");
+    auto maybeFile = root->tryOpenFile(path);
+    if (maybeFile == kj::none) {
+      KJ_FAIL_REQUIRE("Expected to find snapshot.bin in the package cache directory");
+    }
+    memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
+  }
   auto lock = KJ_ASSERT_NONNULL(getPyodideLock(pythonRelease),
       kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
 
@@ -462,9 +474,9 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
     true      /* isWorkerd */,
     false     /* isTracing */,
     snapshotToDisk,
-    createBaselineSnapshot,
+    pythonConfig.createBaselineSnapshot,
     false,    /* usePackagesInArtifactBundler */
-    kj::none  /* memorySnapshot */
+    kj::mv(memorySnapshot)
   );
   // clang-format on
 }
