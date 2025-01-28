@@ -1,7 +1,7 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.2.152.34"
+VERSION = "13.3.415.17"
 
 INTEGRITY = "sha256-wER1sDu6Ez7pXzLDufpxYE26d3S1WdsyuQxoFvzLc5Q="
 
@@ -23,11 +23,10 @@ PATCHES = [
     "0015-Update-illegal-invocation-error-message-in-v8.patch",
     "0016-Implement-cross-request-context-promise-resolve-hand.patch",
     "0017-Modify-where-to-look-for-fast_float-dependency.patch",
-    "0018-Return-rejected-promise-from-WebAssembly.compile-if-.patch",
-    "0019-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0020-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0021-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0022-Enable-V8-shared-linkage.patch",
+    "0018-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0019-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0020-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0021-Enable-V8-shared-linkage.patch",
 ]
 
 # V8 and its dependencies
