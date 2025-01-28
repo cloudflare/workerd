@@ -3,12 +3,15 @@ pub use await_::GuardedRustPromiseAwaiter;
 use await_::PtrGuardedRustPromiseAwaiter;
 
 mod future;
-use future::box_future_fallible_void_drop_in_place;
-use future::box_future_fallible_void_poll;
-use future::box_future_fallible_void_poll_with_co_await_waker;
-use future::box_future_void_drop_in_place;
-use future::box_future_void_poll;
-use future::box_future_void_poll_with_co_await_waker;
+use future::box_future_drop_in_place_fallible_i32;
+use future::box_future_drop_in_place_fallible_void;
+use future::box_future_drop_in_place_void;
+use future::box_future_poll_fallible_i32;
+use future::box_future_poll_fallible_void;
+use future::box_future_poll_void;
+use future::box_future_poll_with_co_await_waker_fallible_i32;
+use future::box_future_poll_with_co_await_waker_fallible_void;
+use future::box_future_poll_with_co_await_waker_void;
 pub use future::BoxFuture;
 use future::PtrBoxFuture;
 
@@ -77,24 +80,36 @@ mod ffi {
     }
 
     extern "Rust" {
-        fn box_future_void_poll(future: &mut BoxFutureVoid, waker: &CxxWaker) -> bool;
-        fn box_future_void_poll_with_co_await_waker(
+        fn box_future_poll_void(future: &mut BoxFutureVoid, waker: &CxxWaker) -> bool;
+        fn box_future_poll_with_co_await_waker_void(
             future: &mut BoxFutureVoid,
             waker: &CoAwaitWaker,
         ) -> bool;
-        unsafe fn box_future_void_drop_in_place(ptr: PtrBoxFutureVoid);
+        unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
 
-        fn box_future_fallible_void_poll(
+        fn box_future_poll_fallible_void(
             future: &mut BoxFutureFallibleVoid,
             waker: &CxxWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
         ) -> Result<bool>;
-        fn box_future_fallible_void_poll_with_co_await_waker(
+        fn box_future_poll_with_co_await_waker_fallible_void(
             future: &mut BoxFutureFallibleVoid,
             waker: &CoAwaitWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
         ) -> Result<bool>;
-        unsafe fn box_future_fallible_void_drop_in_place(ptr: PtrBoxFutureFallibleVoid);
+        unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFutureFallibleVoid);
+
+        fn box_future_poll_fallible_i32(
+            future: &mut BoxFutureFallibleI32,
+            waker: &CxxWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
+        ) -> Result<bool>;
+        fn box_future_poll_with_co_await_waker_fallible_i32(
+            future: &mut BoxFutureFallibleI32,
+            waker: &CoAwaitWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
+        ) -> Result<bool>;
+        unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFutureFallibleI32);
     }
 
     unsafe extern "C++" {

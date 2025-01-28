@@ -62,14 +62,20 @@ unsafe impl ExternType for PtrBoxFuture<()> {
     type Kind = cxx::kind::Trivial;
 }
 
-pub fn box_future_void_poll(future: &mut BoxFuture<()>, waker: &CxxWaker) -> bool {
+use crate::ffi::BoxFutureFulfillerVoid;
+
+pub fn box_future_poll_void(
+    future: &mut BoxFuture<()>,
+    waker: &CxxWaker,
+    fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
+) -> bool {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
     // TODO(now): Figure out how to propagate value-or-exception.
     future.0.as_mut().poll(&mut cx).is_ready()
 }
 
-pub fn box_future_void_poll_with_co_await_waker(
+pub fn box_future_poll_with_co_await_waker_void(
     future: &mut BoxFuture<()>,
     waker: &CoAwaitWaker,
 ) -> bool {
@@ -79,7 +85,7 @@ pub fn box_future_void_poll_with_co_await_waker(
     future.0.as_mut().poll(&mut cx).is_ready()
 }
 
-pub unsafe fn box_future_void_drop_in_place(ptr: PtrBoxFuture<()>) {
+pub unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFuture<()>) {
     std::ptr::drop_in_place(ptr.0);
 }
 
@@ -103,7 +109,9 @@ unsafe impl ExternType for PtrBoxFuture<Result<()>> {
     type Kind = cxx::kind::Trivial;
 }
 
-pub fn box_future_fallible_void_poll(
+use crate::ffi::BoxFutureFulfillerFallibleVoid;
+
+pub fn box_future_poll_fallible_void(
     future: &mut BoxFuture<Result<()>>,
     waker: &CxxWaker,
     fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
@@ -120,7 +128,7 @@ pub fn box_future_fallible_void_poll(
     }
 }
 
-pub fn box_future_fallible_void_poll_with_co_await_waker(
+pub fn box_future_poll_with_co_await_waker_fallible_void(
     future: &mut BoxFuture<Result<()>>,
     waker: &CoAwaitWaker,
     fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
@@ -137,6 +145,6 @@ pub fn box_future_fallible_void_poll_with_co_await_waker(
     }
 }
 
-pub unsafe fn box_future_fallible_void_drop_in_place(ptr: PtrBoxFuture<Result<()>>) {
+pub unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFuture<Result<()>>) {
     std::ptr::drop_in_place(ptr.0);
 }
