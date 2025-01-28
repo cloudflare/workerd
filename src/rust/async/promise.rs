@@ -6,24 +6,14 @@ use crate::ffi::own_promise_node_drop_in_place;
 #[allow(dead_code)]
 pub struct OwnPromiseNode(*const ());
 
-#[repr(transparent)]
-pub struct PtrOwnPromiseNode(*mut OwnPromiseNode);
-
-// TODO(now): Safety comment, observe that it can be sent across threads, but will panic if polled
-//   without a KJ EventLoop active on the current thread.
+// Safety: KJ Promises are not associated with threads, but with event loops at construction time.
+// Therefore, they can be polled from any thread, as long as that thread has the correct event loop
+// active at the time of the call to `poll()`. If the correct event loop is not active, the
+// OwnPromiseNode's API will typically panic, undefined behavior could be possible. However, Rust
+// doesn't have direct access to OwnPromiseNode's API. Instead, it can only use the Promise by
+// having GuardedRustPromiseAwaiter consume it, and GuardedRustPromiseAwaiter implements the
+// correct-executor guarantee.
 unsafe impl Send for OwnPromiseNode {}
-
-// TODO(now): bindgen to guarantee safety
-unsafe impl ExternType for OwnPromiseNode {
-    type Id = cxx::type_id!("workerd::rust::async::OwnPromiseNode");
-    type Kind = cxx::kind::Trivial;
-}
-
-// TODO(now): bindgen to guarantee safety
-unsafe impl ExternType for PtrOwnPromiseNode {
-    type Id = cxx::type_id!("workerd::rust::async::PtrOwnPromiseNode");
-    type Kind = cxx::kind::Trivial;
-}
 
 impl Drop for OwnPromiseNode {
     fn drop(&mut self) {
@@ -37,4 +27,23 @@ impl Drop for OwnPromiseNode {
             own_promise_node_drop_in_place(PtrOwnPromiseNode(self));
         }
     }
+}
+
+// Safety: We have a static_assert in promise.c++ which breaks if you change the size or alignment
+// of the C++ definition of OwnPromiseNode, with a comment directing the reader to adjust the
+// OwnPromiseNode definition in this .rs file.
+//
+// https://docs.rs/cxx/latest/cxx/trait.ExternType.html#integrating-with-bindgen-generated-types
+unsafe impl ExternType for OwnPromiseNode {
+    type Id = cxx::type_id!("workerd::rust::async::OwnPromiseNode");
+    type Kind = cxx::kind::Trivial;
+}
+
+#[repr(transparent)]
+pub struct PtrOwnPromiseNode(*mut OwnPromiseNode);
+
+// Safety: Raw pointers are the same size in both languages.
+unsafe impl ExternType for PtrOwnPromiseNode {
+    type Id = cxx::type_id!("workerd::rust::async::PtrOwnPromiseNode");
+    type Kind = cxx::kind::Trivial;
 }

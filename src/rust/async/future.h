@@ -21,9 +21,7 @@ bool box_future_poll_with_co_await_waker(BoxFuture<T>& self, const CoAwaitWaker&
 
 // A `Pin<Box<dyn Future<Output = ()>>>` owned by C++.
 //
-// The only way to construct a BoxFutureVoid is by returning one from a Rust function.
-//
-// TODO(now): Figure out how to make this a template, BoxFuture<T>.
+// The only way to construct a BoxFuture<T> is by returning one from a Rust function.
 template <typename T>
 class BoxFuture {
 public:

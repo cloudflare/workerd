@@ -9,6 +9,12 @@
 
 namespace workerd::rust::async {
 
+// =======================================================================================
+// ArcWakerAwaiter
+
+// ArcWakerAwaiter is an awaiter intended to await Promises associated with the ArcWaker produced
+// when a KjWaker is cloned.
+//
 // TODO(perf): This is only an Event because we need to handle the case where all the Wakers are
 //   dropped and we receive a WakeInstruction::IGNORE. If we could somehow disarm the
 //   CrossThreadPromiseFulfillers inside ArcWaker when it's dropped, we could avoid requiring this
@@ -26,8 +32,9 @@ public:
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent);
 
 private:
-  // We need to keep a reference to our CoAwaitWaker so that we can arm its Event when our
-  // wrapped OwnPromiseNode becomes ready.
+  // We need to keep a reference to our CoAwaitWaker so that we can decide whether our
+  // `traceEvent()` implementation should forward to its Future poll() Event. Additionally, we need
+  // to be able to arm the Future poll() Event when our wrapped OwnPromiseNode becomes ready.
   //
   // Safety: It is safe to store a bare reference to our CoAwaitWaker, because this object
   // (ArcWakerAwaiter) lives inside of CoAwaitWaker, and thus our lifetime is encompassed by
@@ -151,7 +158,15 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 // =======================================================================================
 // CoAwaitWaker
 
-// A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust.
+// A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust. It
+// consists of a KjWaker, an Event reference, and a set of "sub-Promise awaiters".
+//
+// The Event in question is responsible for calling `Future::poll()`, elsewhere I call it "the
+// Future poll() Event". It owns this CoAwaitWaker in an object lifetime sense.
+//
+// The sub-Promise awaiters comprise an optional ArcWakerAwaiter and a list of zero or more
+// RustPromiseAwaiters. These sub-Promise awaiters all wrap a KJ Promise of some sort, and arrange
+// to arm the Future poll() Event when their Promises become ready.
 //
 // The PromiseNode base class is a hack to implement async tracing. That is, we only implement the
 // `tracePromise()` function, and decide which Promise to trace into if/when the coroutine calls our
@@ -222,6 +237,13 @@ private:
   kj::Maybe<ArcWakerAwaiter> arcWakerAwaiter;
 };
 
+// =======================================================================================
+// BoxFutureAwaiter, LazyBoxFutureAwaiter, and operator co_await implementations
+
+// BoxFutureAwaiter<T> is a Future poll() Event, and is the inner implementation of our co_await
+// syntax. It wraps a BoxFuture<T> and captures a reference to its enclosing KJ coroutine, arranging
+// to continuously call `BoxFuture<T>::poll()` on the KJ event loop until the Future produces a
+// result, after which it arms the enclosing KJ coroutine's Event.
 template <typename T>
 class BoxFutureAwaiter final: public kj::_::Event {
 public:
@@ -272,7 +294,7 @@ public:
     static_cast<Event&>(coroutine).traceEvent(builder);
   }
 
-protected:
+private:
   kj::Maybe<kj::Own<kj::_::Event>> fire() override {
     if (!awaitSuspendImpl()) {
       coroutine.armDepthFirst();
@@ -280,7 +302,6 @@ protected:
     return kj::none;
   }
 
-private:
   kj::_::CoroutineBase& coroutine;
   CoAwaitWaker coAwaitWaker;
   // HACK: CoAwaitWaker implements the PromiseNode interface to integrate with the Coroutine class'
@@ -290,13 +311,23 @@ private:
   BoxFuture<T> future;
 };
 
+// LazyBoxFutureAwaiter<T> is the outer implementation of our co_await syntax, providing the
+// await_ready(), await_suspend(), await_resume() facade expected by the compiler.
+//
+// LazyBoxFutureAwaiter is a type with two stages. At first, it merely wraps a BoxFuture<T>. Once
+// its await_suspend() function is called, it transitions to wrap a BoxFutureAwaiter<T>, our inner
+// awaiter implementation. We do this because we don't get a reference to our enclosing
+// coroutine until await_suspend() is called, and our awaiter implementation is greatly simplified
+// if we can avoid using a Maybe. So, we defer the real awaiter instantiation to await_suspend().
 template <typename T>
 class LazyBoxFutureAwaiter {
 public:
   LazyBoxFutureAwaiter(BoxFuture<T>&& future): impl(kj::mv(future)) {}
 
+  // Always return false, so our await_suspend() is guaranteed to be called.
   bool await_ready() const { return false; }
 
+  // Initialize our wrapped Awaiter and forward to `BoxFutureAwaiter<T>::awaitSuspendImpl()`.
   template <typename U> requires (kj::canConvert<U&, kj::_::CoroutineBase&>())
   bool await_suspend(kj::_::stdcoro::coroutine_handle<U> handle) {
     auto future = kj::mv(KJ_ASSERT_NONNULL(impl.template tryGet<BoxFuture<T>>()));
@@ -304,13 +335,12 @@ public:
         .awaitSuspendImpl();
   }
 
-  // TODO(now): Return non-void T.
+  // Forward to our wrapped `BoxFutureAwaiter<T>::awaitResumeImpl()`.
   void await_resume() {
-    KJ_ASSERT_NONNULL(impl.template tryGet<BoxFutureAwaiter<T>>()).awaitResumeImpl();
+    return KJ_ASSERT_NONNULL(impl.template tryGet<BoxFutureAwaiter<T>>()).awaitResumeImpl();
   }
 
 private:
-  // TODO(now): Comment.
   kj::OneOf<BoxFuture<T>, BoxFutureAwaiter<T>> impl;
 };
 
