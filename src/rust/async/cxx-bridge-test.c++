@@ -206,6 +206,22 @@ KJ_TEST("RustPromiseAwaiter: Rust can poll() KJ promises with non-KJ Wakers") {
   }().wait(waitScope);
 }
 
+KJ_TEST("BoxFuture<Fallible<T>> can throw when awaited") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  []() -> kj::Promise<void> {
+    kj::Maybe<kj::Exception> maybeException;
+    try {
+      co_await new_errored_future_fallible_void();
+    } catch (...) {
+      maybeException = kj::getCaughtExceptionAsKj();
+    }
+    auto& exception = KJ_ASSERT_NONNULL(maybeException, "should have thrown");
+    KJ_EXPECT(exception.getDescription() == "std::exception: test error");
+  }().wait(waitScope);
+}
+
 // TODO(now): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
 //   - Ensure Rust calls PromiseNode destructor from LazyRustPromiseAwaiter.

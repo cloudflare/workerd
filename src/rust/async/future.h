@@ -51,11 +51,34 @@ public:
   // The overload accepting a `const CxxWaker&` exists mostly to simplify testing.
   //
   // TODO(now): Figure out how to return non-unit/void values and exceptions.
-  bool poll(const CxxWaker& waker) noexcept {
-    return box_future_poll(*this, waker);
+  // TODO(now): Get rid of one of these overloads.
+  bool poll(const CxxWaker& waker, ExceptionOrValue& output) noexcept {
+    bool ready = false;
+
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      BoxFutureFulfiller<T> fulfiller(output);
+      // Safety: BoxFutureFulfiller is effectively pinned because it's a temporary.
+      ready = box_future_poll(*this, waker, fulfiller);
+    })) {
+      output.addException(kj::mv(exception));
+      ready = true;
+    }
+
+    return ready;
   }
-  bool poll(const CoAwaitWaker& waker) noexcept {
-    return box_future_poll_with_co_await_waker(*this, waker);
+  bool poll(const CoAwaitWaker& waker, ExceptionOrValue& output) noexcept {
+    bool ready = false;
+
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      BoxFutureFulfiller<T> fulfiller(output);
+      // Safety: BoxFutureFulfiller is effectively pinned.
+      ready = box_future_poll_with_co_await_waker(*this, waker, fulfiller);
+    })) {
+      output.addException(kj::mv(exception));
+      ready = true;
+    }
+
+    return ready;
   }
 
   // Tell cxx-rs that this type follows Rust's move semantics, and can thus be passed across the FFI
@@ -69,25 +92,17 @@ private:
 
 // ---------------------------------------------------------
 
-template <typename T>
-class BoxFutureFallible: private BoxFuture<T> {
-public:
-  using BoxFuture<T>::BoxFuture;
-  using BoxFuture<T>::poll;
-  using typename BoxFuture<T>::IsRelocatable;
-};
-
-// ---------------------------------------------------------
-
 using BoxFutureVoid = BoxFuture<void>;
 
-// We define this the pointer typedef so that cxx-rs can associate it with the same pointer type our
+// We define this pointer typedef so that cxx-rs can associate it with the same pointer type our
 // drop function uses.
 using PtrBoxFutureVoid = BoxFutureVoid*;
 
+using BoxFutureFulfillerVoid = BoxFutureFulfiller<void>;
+
 // ---------------------------------------------------------
 
-using BoxFutureFallibleVoid = BoxFutureFallible<void>;
+using BoxFutureFallibleVoid = BoxFuture<Fallible<void>>;
 
 // We define this the pointer typedef so that cxx-rs can associate it with the same pointer type our
 // drop function uses.

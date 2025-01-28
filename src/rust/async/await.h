@@ -267,7 +267,7 @@ public:
     //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
     //   to really benefit.
 
-    if (future.poll(coAwaitWaker)) {
+    if (future.poll(coAwaitWaker, result)) {
       // Future is ready, we're done.
       // TODO(now): Propagate value-or-exception.
       return false;
@@ -281,8 +281,9 @@ public:
     return true;
   }
 
-  void awaitResumeImpl() {
+  RemoveFallible<T> awaitResumeImpl() {
     coroutine.clearPromiseNodeForTrace();
+    return kj::_::convertToReturn(kj::mv(result));
   }
 
   // -------------------------------------------------------
@@ -308,6 +309,7 @@ private:
   // current tracing implementation.
   OwnPromiseNode promiseNodeForTrace { &coAwaitWaker };
 
+  kj::_::ExceptionOr<kj::_::FixVoid<RemoveFallible<T>>> result;
   BoxFuture<T> future;
 };
 
@@ -336,7 +338,7 @@ public:
   }
 
   // Forward to our wrapped `BoxFutureAwaiter<T>::awaitResumeImpl()`.
-  void await_resume() {
+  RemoveFallible<T> await_resume() {
     return KJ_ASSERT_NONNULL(impl.template tryGet<BoxFutureAwaiter<T>>()).awaitResumeImpl();
   }
 

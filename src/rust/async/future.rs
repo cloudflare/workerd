@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
+use std::task::Poll::Pending;
+use std::task::Poll::Ready;
 use std::task::Waker;
 
 use cxx::ExternType;
@@ -101,21 +103,38 @@ unsafe impl ExternType for PtrBoxFuture<Result<()>> {
     type Kind = cxx::kind::Trivial;
 }
 
-pub fn box_future_fallible_void_poll(future: &mut BoxFuture<Result<()>>, waker: &CxxWaker) -> bool {
+pub fn box_future_fallible_void_poll(
+    future: &mut BoxFuture<Result<()>>,
+    waker: &CxxWaker,
+    fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
+) -> Result<bool> {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
-    // TODO(now): Figure out how to propagate value-or-exception.
-    future.0.as_mut().poll(&mut cx).is_ready()
+    match future.0.as_mut().poll(&mut cx) {
+        Ready(Ok(_v)) => {
+            fulfiller.fulfill();
+            Ok(true)
+        }
+        Ready(Err(e)) => Err(e),
+        Pending => Ok(false),
+    }
 }
 
 pub fn box_future_fallible_void_poll_with_co_await_waker(
     future: &mut BoxFuture<Result<()>>,
     waker: &CoAwaitWaker,
-) -> bool {
+    fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
+) -> Result<bool> {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
-    // TODO(now): Figure out how to propagate value-or-exception.
-    future.0.as_mut().poll(&mut cx).is_ready()
+    match future.0.as_mut().poll(&mut cx) {
+        Ready(Ok(_v)) => {
+            fulfiller.fulfill();
+            Ok(true)
+        }
+        Ready(Err(e)) => Err(e),
+        Pending => Ok(false),
+    }
 }
 
 pub unsafe fn box_future_fallible_void_drop_in_place(ptr: PtrBoxFuture<Result<()>>) {

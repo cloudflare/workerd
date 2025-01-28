@@ -87,11 +87,13 @@ mod ffi {
         fn box_future_fallible_void_poll(
             future: &mut BoxFutureFallibleVoid,
             waker: &CxxWaker,
-        ) -> bool;
+            fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
+        ) -> Result<bool>;
         fn box_future_fallible_void_poll_with_co_await_waker(
             future: &mut BoxFutureFallibleVoid,
             waker: &CoAwaitWaker,
-        ) -> bool;
+            fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
+        ) -> Result<bool>;
         unsafe fn box_future_fallible_void_drop_in_place(ptr: PtrBoxFutureFallibleVoid);
     }
 
