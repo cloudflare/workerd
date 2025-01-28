@@ -73,6 +73,7 @@ wd_cc_library(
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
         "@simdutf",
+        "@ssl",
         "@workerd-v8//:v8",
     ],
 )

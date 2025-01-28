@@ -113,25 +113,37 @@ struct ThrowContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(ThrowIsolate, ThrowContext);
 
 KJ_TEST("throw internal error") {
+  setPredictableModeForTest();
+
   Evaluator<ThrowContext, ThrowIsolate> e(v8System);
   {
     KJ_EXPECT_LOG(ERROR, "thrown from throwException");
-    e.expectEval("throwException()", "throws", "Error: internal error");
+    e.expectEval("throwException()", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
+  }
+  {
+    // We also expect the logged internal error to contain the error id.
+    KJ_EXPECT_LOG(ERROR, "wdErrId = 0123456789abcdefghijklmn");
+    e.expectEval("throwException()", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
 
   {
     KJ_EXPECT_LOG(ERROR, "thrown from getThrowing");
-    e.expectEval("throwing", "throws", "Error: internal error");
+    e.expectEval(
+        "throwing", "throws", "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
 
   {
     KJ_EXPECT_LOG(ERROR, "thrown from setThrowing");
-    e.expectEval("throwing = 123", "throws", "Error: internal error");
+    e.expectEval(
+        "throwing = 123", "throws", "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
 
   {
     KJ_EXPECT_LOG(ERROR, "thrown from returnFunctionThatThrows");
-    e.expectEval("returnFunctionThatThrows(123)(321)", "throws", "Error: internal error");
+    e.expectEval("returnFunctionThatThrows(123)(321)", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
 }
 
@@ -262,6 +274,8 @@ struct TunneledContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(TunneledIsolate, TunneledContext);
 
 KJ_TEST("throw tunneled exception") {
+  setPredictableModeForTest();
+
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   e.expectEval(
       "throwTunneledTypeError()", "throws", "TypeError: thrown from throwTunneledTypeError");
@@ -276,16 +290,24 @@ KJ_TEST("throw tunneled exception") {
       "OperationError: thrown from throwTunneledOperationErrorWithExpectation");
   {
     KJ_EXPECT_LOG(ERROR, "thrown from throwTunneledInternalOperationError");
-    e.expectEval(
-        "throwTunneledInternalOperationError()", "throws", "OperationError: internal error");
+    e.expectEval("throwTunneledInternalOperationError()", "throws",
+        "OperationError: internal error; reference = 0123456789abcdefghijklmn");
+  }
+  {
+    // We also expect the logged internal error to contain the error id.
+    KJ_EXPECT_LOG(ERROR, "wdErrId = 0123456789abcdefghijklmn");
+    e.expectEval("throwTunneledInternalOperationError()", "throws",
+        "OperationError: internal error; reference = 0123456789abcdefghijklmn");
   }
   {
     KJ_EXPECT_LOG(ERROR, " jsg.TypeError");
-    e.expectEval("throwBadTunneledError()", "throws", "Error: internal error");
+    e.expectEval("throwBadTunneledError()", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
   {
     KJ_EXPECT_LOG(ERROR, "expected s.startsWith(\";\");  jsg.TypeError");
-    e.expectEval("throwBadTunneledErrorWithExpectation()", "throws", "Error: internal error");
+    e.expectEval("throwBadTunneledErrorWithExpectation()", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
   e.expectEval("throwTunneledMacroTypeError()", "throws",
       "TypeError: thrown from throwTunneledMacroTypeError");
@@ -305,11 +327,13 @@ KJ_TEST("throw tunneled exception") {
       "throwTunneledDOMException()", "throws", "Some error: thrown from throwTunneledDOMException");
   {
     KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledInvalidDOMException");
-    e.expectEval("throwTunneledInvalidDOMException()", "throws", "Error: internal error");
+    e.expectEval("throwTunneledInvalidDOMException()", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
   {
     KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledGarbledDOMException");
-    e.expectEval("throwTunneledGarbledDOMException()", "throws", "Error: internal error");
+    e.expectEval("throwTunneledGarbledDOMException()", "throws",
+        "Error: internal error; reference = 0123456789abcdefghijklmn");
   }
 }
 
