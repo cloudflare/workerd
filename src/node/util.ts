@@ -221,6 +221,28 @@ export function isArray(a: unknown): boolean {
   return Array.isArray(a);
 }
 
+export function parseEnv(): void {
+  // We don't implement this function yet because it is currently under
+  // active development. We should implement it when it's stable
+  throw new Error('node:util parseEnv is not implemented');
+}
+
+export function getSystemErrorMap(): void {
+  throw new Error('node:util getSystemErrorMap is not implemented');
+}
+
+export function getSystemErrorName(): void {
+  throw new Error('node:util getSystemErrorName is not implemented');
+}
+
+export function getSystemErrorMessage(): void {
+  throw new Error('node:util getSystemErrorMessage is not implemented');
+}
+
+export function styleText(): void {
+  throw new Error('node:util styleText is not implemented');
+}
+
 export default {
   types,
   callbackify,
@@ -239,14 +261,16 @@ export default {
   debuglog,
   debug,
   deprecate,
+  getSystemErrorMap,
+  getSystemErrorMessage,
+  getSystemErrorName,
   // Node.js originally exposed TextEncoder and TextDecoder off the util
   // module originally, so let's just go ahead and do the same.
   TextEncoder,
   TextDecoder,
-  // We currently have no plans to implement the following APIs but we want
-  // to provide throwing placeholders for them. We may eventually come back
-  // around and implement these later.
   parseArgs,
+  parseEnv,
+  styleText,
   transferableAbortController,
   transferableAbortSignal,
   getCallSite,
@@ -254,30 +278,3 @@ export default {
   isDeepStrictEqual,
   isArray,
 };
-
-// Node.js util APIs we're currently not supporting
-//
-// The following functions doesn't make sense for Workerd to support in runtime.
-//   * util._errnoException
-//   * util._exceptionWithHostPort
-//   * util.getSystemErrorMap
-//   * util.getSystemErrorName
-//   * util.parseEnv
-// The following functions are removed from Node.js, and only supported using
-// a polyfill.
-//   * util.isBoolean
-//   * util.isBuffer
-//   * util.isDate
-//   * util.isError
-//   * util.isFunction
-//   * util.isNull
-//   * util.isNullOrUndefined
-//   * util.isNumber
-//   * util.isObject
-//   * util.isPrimitive
-//   * util.isRegExp
-//   * util.isString
-//   * util.isSymbol
-//   * util.isUndefined
-// TODO:
-//   * util.styleText
