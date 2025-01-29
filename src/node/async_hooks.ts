@@ -4,7 +4,16 @@
 //
 
 import { default as async_hooks } from 'node-internal:async_hooks';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+
+class AsyncHook {
+  public enable(): this {
+    return this;
+  }
+
+  public disable(): this {
+    return this;
+  }
+}
 
 export const { AsyncLocalStorage, AsyncResource } = async_hooks;
 
@@ -14,20 +23,33 @@ export const asyncWrapProviders: Record<string, number> = {
   NONE: 0,
 };
 
-export function createHook(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('createHook');
+export function createHook(): AsyncHook {
+  // Even though we don't implement this function, we return a default value
+  // in order to preserve backward compatibility and avoid breaking changes
+  // with unenv polyfills.
+  return new AsyncHook();
 }
 
-export function executionAsyncId(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('executionAsyncId');
+export function executionAsyncId(): number {
+  // Even though we don't implement this function, we return a default value
+  // in order to preserve backward compatibility and avoid breaking changes
+  // with unenv polyfills.
+  return 0;
 }
 
-export function executionAsyncResource(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('executionAsyncResource');
+export function executionAsyncResource(): Record<string, string> {
+  // Even though we don't implement this function, we return a default value
+  // in order to preserve backward compatibility and avoid breaking changes
+  // with unenv polyfills.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+  return Object.create(null);
 }
 
-export function triggerAsyncId(): void {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('triggerAsyncId');
+export function triggerAsyncId(): number {
+  // Even though we don't implement this function, we return a default value
+  // in order to preserve backward compatibility and avoid breaking changes
+  // with unenv polyfills.
+  return 0;
 }
 
 export default {
