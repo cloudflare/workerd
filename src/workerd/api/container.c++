@@ -199,6 +199,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     });
 
     co_await pipeline.ignoreResult();
+    co_await kj::joinPromisesFailFast(kj::arr(kj::mv(upPumpTask), kj::mv(downPumpTask)));
   }
 };
 
