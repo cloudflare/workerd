@@ -126,7 +126,7 @@ filegroup(
 #
 git_repository(
     name = "com_google_absl",
-    commit = "dc257ad54f38739767a6cb26eb57fd51c37bfe3c",
+    commit = "72093794ac42be8105817ae0b0569fb411a6ca9b",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -191,7 +191,7 @@ git_repository(
     name = "zlib",
     build_file = "//:build/BUILD.zlib",
     # Must match the version used by v8
-    commit = "fa9f14143c7938e6a1d18443900efee7a1e5e669",
+    commit = "82a5fecf8aae8f288267cfdb2d29c9ebf7b37e59",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 

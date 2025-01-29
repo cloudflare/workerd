@@ -80,6 +80,11 @@ build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/base@-O2
 
+# Starting with V8 13.3 we use an IsolateGroup per Isolate.  Otherwise
+# the internal Workers build at CF would run out of space.  That means we need
+# slightly different build flags for V8.
+build --@v8//:v8_enable_pointer_compression_shared_cage=False
+
 # Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
 # performance improvements but makes code size worse. This will be the default in LLVM19.
 # https://maskray.me/blog/2024-04-27-clang-o0-output-branch-displacement-and-size-increase
