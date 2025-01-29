@@ -1503,6 +1503,185 @@ KJ_TEST("Server: referencing non-extant default entrypoint is not an error") {
     wat)"_blockquote);
 }
 
+KJ_TEST("Server: referencing DO class as entrypoint is not an error") {
+  // For historical reasons, it's not a config error to refer to an actor class as a stateless
+  // entrypoint.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers"
+                `
+                `export class SomeActor extends DurableObject {}
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = (name = "hello", entrypoint = "SomeActor")
+      ),
+    ]
+  ))"_kj);
+
+  // We see no error at config time -- this completes successfully.
+  test.start();
+
+  // However, a request will still fail at runtime.
+  KJ_EXPECT_LOG(ERROR, "worker is not an actor but class name was requested");
+  KJ_EXPECT_LOG(INFO, "Unable to get exported handler");
+  KJ_EXPECT_LOG(ERROR, "Unable to get exported handler");
+
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recv(R"(
+    HTTP/1.1 500 Internal Server Error
+    Connection: close
+    Content-Length: 21
+
+    Internal Server Error)"_blockquote);
+}
+
+KJ_TEST("Server: exporting a DO class as the default export is not an error") {
+  // For historical reasons, it's not a config error to export a DO class as the default
+  // entrypoint. It doesn't work at runtime, but it's not a config error.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers"
+                `
+                `export default class extends DurableObject {
+                `  async fetch(request) {
+                `    return new Response("this should not be called");
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      ),
+    ]
+  ))"_kj);
+
+  // We see no error at config time -- this completes successfully.
+  test.start();
+
+  // Note that there is no way to actually configure the default export as a DO class since
+  // `className` is non-optional in both `DurableObjectNamespace` and
+  // `DurableObjectNamespaceDesignator`.
+  //
+  // We can, however, try to send a stateless request to the default entrypoint and see what
+  // happens!
+  //
+  // Since the runtime does not believe there is any (stateless) entrypoint exported as the
+  // default entrypoint, if you try to send a request to it, it behaves the same as if there were
+  // no `export default` at all.
+  //
+  // The behavior of this is quite strange. See the comment in the earlier test:
+  //
+  //   KJ_TEST("Server: referencing non-extant default entrypoint is not an error")
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("foo", {"public"});
+    subreq.recv(R"(
+      GET / HTTP/1.1
+      Host: foo
+
+    )"_blockquote);
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      Content-Length: 3
+
+      wat)"_blockquote);
+  }
+
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 3
+
+    wat)"_blockquote);
+}
+
+KJ_TEST("Server: configuring a DO namespace with no class export is not an error") {
+  // For historical reasons, it's not a config error to configure a DO namespace when there is
+  // no corresponding class export.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    return env.ns.get(env.ns.newUniqueId()).fetch(request);
+                `    //return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      ),
+    ]
+  ))"_kj);
+
+  // We see no error at config time -- this completes successfully.
+  test.start();
+
+  // However, a request will still fail at runtime.
+  KJ_EXPECT_LOG(ERROR, "no such actor class");
+  KJ_EXPECT_LOG(INFO, "internal error");
+  KJ_EXPECT_LOG(INFO, "internal error");
+  KJ_EXPECT_LOG(ERROR, "internal error");
+
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recv(R"(
+    HTTP/1.1 500 Internal Server Error
+    Connection: close
+    Content-Length: 21
+
+    Internal Server Error)"_blockquote);
+}
+
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [
