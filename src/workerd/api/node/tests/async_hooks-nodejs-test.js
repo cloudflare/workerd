@@ -1,20 +1,11 @@
 import async_hooks from 'node:async_hooks';
-import { throws } from 'node:assert';
+import { ok, deepStrictEqual } from 'node:assert';
 
 export const testErrorMethodNotImplemented = {
   async test() {
-    const methods = [
-      'createHook',
-      'executionAsyncId',
-      'executionAsyncResource',
-      'triggerAsyncId',
-    ];
-
-    for (const method of methods) {
-      throws(() => async_hooks[method](), {
-        name: 'Error',
-        code: 'ERR_METHOD_NOT_IMPLEMENTED',
-      });
-    }
+    deepStrictEqual(async_hooks.executionAsyncId(), 0);
+    deepStrictEqual(async_hooks.triggerAsyncId(), 0);
+    deepStrictEqual(async_hooks.executionAsyncResource(), Object.create(null));
+    ok(async_hooks.createHook({}));
   },
 };
