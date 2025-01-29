@@ -310,7 +310,12 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
     }
+#if (V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION > 2) || V8_MAJOR_VERSION > 13
+    v8::IsolateGroup group = v8::IsolateGroup::Create();
+    return v8::Isolate::New(group, params);
+#else
     return v8::Isolate::New(params);
+#endif
   });
 }
 }  // namespace

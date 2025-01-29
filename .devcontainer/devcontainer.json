@@ -3,7 +3,6 @@
 	"build": {
 		"dockerfile": "Dockerfile"
 	},
-	"postStartCommand": "npm i",
 	"customizations": {
 		// Configure properties specific to VS Code.
 		"vscode": {
