@@ -139,7 +139,7 @@ type SocketClass = SocketType & {
     | null
     | undefined
     | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
-  [kBufferGen]: null | (() => null | boolean | Uint8Array);
+  [kBufferGen]: null | (() => undefined | Uint8Array);
   [kSocketInfo]: null | {
     address?: string;
     port?: number;
@@ -311,7 +311,7 @@ export const Socket = function Socket(
       this[kBufferGen] = onread.buffer;
     } else {
       this[kBuffer] = onread.buffer;
-      this[kBufferGen] = (): Uint8Array | boolean | null => this[kBuffer];
+      this[kBufferGen] = (): Uint8Array | undefined => onread.buffer;
     }
     this[kBufferCb] = onread.callback;
   } else {
@@ -1110,10 +1110,23 @@ async function startRead(socket: SocketClass): Promise<void> {
   const reader = socket._handle.reader;
   try {
     while (socket._handle.reading === true) {
+      const generatedBuffer = socket[kBufferGen]?.();
+
+      // Let's be extra cautious here and handle nullish values.
+      if (generatedBuffer == null || generatedBuffer.length === 0) {
+        // When reading a static buffer with fixed length, it's highly likely to
+        // read the whole buffer in a single take, which will make the second
+        // operation to read an empty buffer.
+        //
+        // Workerd throws the following exception when reading empty buffers
+        // TypeError: You must call read() on a "byob" reader with a positive-sized TypedArray object.
+        // Therefore, let's skip calling read operation and stop reading here.
+        break;
+      }
+
       // The [kBufferGen] function should always be a function that returns
       // a Uint8Array we can read into.
-      // @ts-expect-error TS2721 Required due to types
-      const { value, done } = await reader.read(socket[kBufferGen]());
+      const { value, done } = await reader.read(generatedBuffer);
 
       // Make sure the socket was not destroyed while we were waiting.
       // If it was, we're going to throw away the chunk of data we just
