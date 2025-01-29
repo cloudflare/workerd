@@ -238,7 +238,6 @@ bool RustPromiseAwaiter::poll_with_co_await_waker(const CoAwaitWaker& coAwaitWak
   //   suspended at least once, we may be able to check for that through KjWaker.
 
   if (isDone()) {
-    // TODO(now): Propagate value-or-exception.
     return true;
   }
 
@@ -270,7 +269,6 @@ bool RustPromiseAwaiter::poll() {
   //   doesn't have access to one.
 
   if (isDone()) {
-    // TODO(now): Propagate value-or-exception.
     return true;
   }
 
@@ -294,6 +292,11 @@ void guarded_rust_promise_awaiter_new_in_place(PtrGuardedRustPromiseAwaiter ptr,
 }
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr) {
   kj::dtor(*ptr);
+}
+
+// TODO(now): Generate boilerplate with a macro.
+void guarded_rust_promise_awaiter_unwrap_void(GuardedRustPromiseAwaiter& awaiter) {
+  return awaiter.unwrap<void>();
 }
 
 // =======================================================================================

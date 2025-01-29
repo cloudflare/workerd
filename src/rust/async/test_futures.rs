@@ -13,6 +13,8 @@ use std::task::Wake;
 use std::task::Waker;
 
 use crate::BoxFuture;
+use crate::Result;
+use crate::Error;
 
 pub fn new_pending_future_void() -> BoxFuture<()> {
     Box::pin(std::future::pending()).into()
@@ -141,10 +143,10 @@ pub fn new_threaded_delay_future_void() -> BoxFuture<()> {
     Box::pin(ThreadedDelayFuture::new()).into()
 }
 
-pub fn new_layered_ready_future_void() -> BoxFuture<()> {
+pub fn new_layered_ready_future_void() -> BoxFuture<Result<()>> {
     Box::pin(async {
-        crate::ffi::new_ready_promise_void().await;
-        crate::ffi::new_coroutine_promise_void().await;
+        crate::ffi::new_ready_promise_void().await.map_err(Error::other)?;
+        crate::ffi::new_coroutine_promise_void().await.map_err(Error::other)
     })
     .into()
 }
@@ -170,14 +172,16 @@ fn naive_select<T>(
 }
 
 // A Future which polls multiple OwnPromiseNodes at once.
-pub fn new_naive_select_future_void() -> BoxFuture<()> {
-    Box::pin(naive_select(
-        crate::ffi::new_pending_promise_void().into_future(),
+pub fn new_naive_select_future_void() -> BoxFuture<Result<()>> {
+    Box::pin(async {
         naive_select(
-            crate::ffi::new_coroutine_promise_void().into_future(),
-            crate::ffi::new_coroutine_promise_void().into_future(),
-        ),
-    ))
+            crate::ffi::new_pending_promise_void().into_future(),
+            naive_select(
+                crate::ffi::new_coroutine_promise_void().into_future(),
+                crate::ffi::new_coroutine_promise_void().into_future(),
+            ),
+        ).await.map_err(Error::other)
+    })
     .into()
 }
 
@@ -195,7 +199,7 @@ impl Wake for WrappedWaker {
 }
 
 // Return a Future which awaits a KJ promise using a custom Waker implementation, opaque to KJ.
-pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
+pub fn new_wrapped_waker_future_void() -> BoxFuture<Result<()>> {
     Box::pin(async {
         let mut promise = pin!(crate::ffi::new_coroutine_promise_void().into_future());
         future::poll_fn(move |cx| {
@@ -208,14 +212,18 @@ pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
                 Poll::Pending
             }
         })
-        .await
+        .await.map_err(Error::other)
     })
     .into()
 }
 
-use std::io::Error;
-use std::io::ErrorKind;
+pub fn new_errored_future_fallible_void() -> BoxFuture<Result<()>> {
+    Box::pin(std::future::ready(Err(Error::other("test error")))).into()
+}
 
-pub fn new_errored_future_fallible_void() -> BoxFuture<crate::Result<()>> {
-    Box::pin(std::future::ready(Err(Error::new(ErrorKind::Other, "test error")))).into()
+pub fn new_error_handling_future_void() -> BoxFuture<()> {
+    Box::pin(async {
+        let err = crate::ffi::new_errored_promise_void().await.expect_err("should see error");
+        assert!(err.what().contains("test error"));
+    }).into()
 }

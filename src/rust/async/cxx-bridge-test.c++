@@ -206,7 +206,7 @@ KJ_TEST("RustPromiseAwaiter: Rust can poll() KJ promises with non-KJ Wakers") {
   }().wait(waitScope);
 }
 
-KJ_TEST("BoxFuture<Fallible<T>> can throw when awaited") {
+KJ_TEST("co_awaiting a BoxFuture<Fallible<T>> from C++ can throw") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -219,6 +219,15 @@ KJ_TEST("BoxFuture<Fallible<T>> can throw when awaited") {
     }
     auto& exception = KJ_ASSERT_NONNULL(maybeException, "should have thrown");
     KJ_EXPECT(exception.getDescription() == "std::exception: test error");
+  }().wait(waitScope);
+}
+
+KJ_TEST(".awaiting a Promise<T> from Rust can produce an Err Result") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  []() -> kj::Promise<void> {
+    co_await new_error_handling_future_void();
   }().wait(waitScope);
 }
 

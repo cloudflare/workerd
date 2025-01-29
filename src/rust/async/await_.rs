@@ -12,6 +12,8 @@ use crate::waker::deref_co_await_waker;
 
 use crate::lazy_pin_init::LazyPinInit;
 
+use crate::CxxResult;
+
 // =======================================================================================
 // GuardedRustPromiseAwaiter
 
@@ -74,20 +76,50 @@ unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
 // =======================================================================================
 // Await syntax for OwnPromiseNode
 
+use std::marker::PhantomData;
+
 use crate::promise::PromiseTarget;
 use crate::OwnPromiseNode;
 use crate::Promise;
+use crate::RustWaker;
 
 impl<T: PromiseTarget> IntoFuture for Promise<T> {
-    type Output = ();
-    type IntoFuture = LazyRustPromiseAwaiter;
+    type IntoFuture = PromiseFuture<T>;
+    type Output = <PromiseFuture<T> as Future>::Output;
 
     fn into_future(self) -> Self::IntoFuture {
-        LazyRustPromiseAwaiter::new(T::into_own_promise_node(self))
+        PromiseFuture::new(self)
     }
 }
 
-pub struct LazyRustPromiseAwaiter {
+pub struct PromiseFuture<T: PromiseTarget> {
+    awaiter: PromiseAwaiter,
+    _marker: PhantomData<T>,
+}
+
+impl<T: PromiseTarget> PromiseFuture<T> {
+    fn new(promise: Promise<T>) -> Self {
+        PromiseFuture {
+            awaiter: PromiseAwaiter::new(T::into_own_promise_node(promise)),
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<T: PromiseTarget> Future for PromiseFuture<T> {
+    type Output = CxxResult<T>;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        // TODO(now): Safety comment.
+        let mut awaiter = unsafe { self.map_unchecked_mut(|s| &mut s.awaiter) };
+        if awaiter.as_mut().poll(cx) {
+            Poll::Ready(T::unwrap(awaiter.get_awaiter()))
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+struct PromiseAwaiter {
     node: Option<OwnPromiseNode>,
     awaiter: LazyPinInit<GuardedRustPromiseAwaiter>,
     // Safety: `rust_waker` must be declared after `awaiter`, because `awaiter` contains a reference
@@ -95,9 +127,9 @@ pub struct LazyRustPromiseAwaiter {
     rust_waker: RustWaker,
 }
 
-impl LazyRustPromiseAwaiter {
+impl PromiseAwaiter {
     fn new(node: OwnPromiseNode) -> Self {
-        LazyRustPromiseAwaiter {
+        PromiseAwaiter {
             node: Some(node),
             awaiter: LazyPinInit::uninit(),
             rust_waker: RustWaker::empty(),
@@ -121,7 +153,7 @@ impl LazyRustPromiseAwaiter {
         let rust_waker_ptr = &mut self.rust_waker as *mut RustWaker;
 
         // Safety:
-        // 1. We do not implement Unpin for LazyRustPromiseAwaiter.
+        // 1. We do not implement Unpin for PromiseAwaiter.
         // 2. Our Drop trait implementation does not move the awaiter value, nor do we use
         //    `repr(packed)` anywhere.
         // 3. The backing memory is inside our pinned Future, so we can be assured our Drop trait
@@ -145,14 +177,9 @@ impl LazyRustPromiseAwaiter {
             );
         })
     }
-}
 
-use crate::RustWaker;
-
-impl Future for LazyRustPromiseAwaiter {
-    type Output = ();
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<()> {
-        let done = if let Some(kj_waker) = deref_co_await_waker(cx.waker()) {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
+        if let Some(kj_waker) = deref_co_await_waker(cx.waker()) {
             self.rust_waker.set_none();
             let awaiter = self.as_mut().get_awaiter();
             awaiter.poll_with_co_await_waker(kj_waker)
@@ -160,12 +187,6 @@ impl Future for LazyRustPromiseAwaiter {
             self.rust_waker.set(cx.waker());
             let awaiter = self.as_mut().get_awaiter();
             awaiter.poll()
-        };
-
-        if done {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
         }
     }
 }

@@ -13,16 +13,16 @@ static_assert(sizeof(OwnPromiseNode) == sizeof(uint64_t) * 1,
 static_assert(alignof(OwnPromiseNode) == alignof(uint64_t) * 1,
     "OwnPromiseNode alignment changed");
 
-void own_promise_node_drop_in_place(OwnPromiseNode* node) {
-  node->~OwnPromiseNode();
+void own_promise_node_drop_in_place(PtrOwnPromiseNode node) {
+  kj::dtor(*node);
 }
 
 OwnPromiseNode promise_into_own_promise_node_void(PromiseVoid promise) {
   return kj::_::PromiseNode::from(kj::mv(promise));
 };
 
-void promise_drop_in_place_void(PromiseVoid* promise) {
-  promise->~PromiseVoid();
+void promise_drop_in_place_void(PtrPromiseVoid promise) {
+  kj::dtor(*promise);
 }
 
 }  // namespace workerd::rust::async
