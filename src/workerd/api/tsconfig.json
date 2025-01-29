@@ -15,5 +15,5 @@
     "allowJs": true
   },
   "include": ["**/*.ts"],
-  "exclude": []
+  "exclude": ["wpt/**"]
 }
