@@ -28,6 +28,9 @@ js_binary(
         ":types_lib",
     ],
     entry_point = "scripts/build-types.js",
+    env = {
+        "NODE_COMPILE_CACHE": "/tmp/workerd-types-compile-cache",
+    },
 )
 
 js_run_binary(
@@ -38,6 +41,9 @@ js_run_binary(
         "//:node_modules/prettier",
         "//src/workerd/server:workerd",
     ],
+    env = {
+        "NODE_COMPILE_CACHE": "/tmp/workerd-types-compile-cache",
+    },
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
     tool = ":build_types_bin",

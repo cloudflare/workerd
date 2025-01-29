@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v6.3.2"
-URL = "https://api.github.com/repos/bazel-contrib/rules_nodejs/tarball/v6.3.2"
-STRIP_PREFIX = "bazel-contrib-rules_nodejs-ea47e8d"
-SHA256 = "990827af9f845b5e7089ce80ca0737f73b7569f0e6011d0d59b4448967a439be"
+TAG_NAME = "v6.3.3"
+URL = "https://api.github.com/repos/bazel-contrib/rules_nodejs/tarball/v6.3.3"
+STRIP_PREFIX = "bazel-contrib-rules_nodejs-398bcf9"
+SHA256 = "057a4add02cfe13da99c2f0c44f8ca94f7ba1dd683592b983c06912c2aa8e9f9"
 TYPE = "tgz"
 
 def dep_rules_nodejs():

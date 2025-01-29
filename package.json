@@ -13,7 +13,7 @@
   "devDependencies": {
     "@eslint/js": "^9.19.0",
     "@types/debug": "^4.1.12",
-    "@types/node": "^20.16.5",
+    "@types/node": "^22.11.0",
     "capnpc-ts": "^0.7.0",
     "chrome-remote-interface": "^0.33.2",
     "esbuild": "^0.24.2",
