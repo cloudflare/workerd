@@ -212,6 +212,12 @@ class Server::Service {
 
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
   virtual bool hasHandler(kj::StringPtr handlerName) = 0;
+
+  // Return the service itself, or the underlying service if this instance wraps another service as
+  // with EntrypointService.
+  virtual Service* service() {
+    return this;
+  }
 };
 
 Server::~Server() noexcept {
@@ -1895,6 +1901,7 @@ class Server::WorkerService final: public Service,
       kj::Vector<kj::Own<WorkerInterface>> legacyList;
       kj::Vector<kj::Own<WorkerInterface>> streamingList;
       for (auto& service: channels.tails) {
+        KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
         if (service->hasHandler("tailStream"_kj)) {
           streamingList.add(service->startRequest({}));
         } else if (service->hasHandler("tail") || service->hasHandler("trace")) {
@@ -1905,12 +1912,14 @@ class Server::WorkerService final: public Service,
       streamingTailWorkers = streamingList.releaseAsArray();
     } else {
       legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
-        KJ_ASSERT(service != this, "A worker currently cannot log to itself");
         // Caution here... if the tail worker ends up have a cirular dependency
         // on the worker we'll end up with an infinite loop trying to initialize.
         // We can test this directly but it's more difficult to test indirect
         // loops (dependency of dependency, etc). Here we're just going to keep
         // it simple and just check the direct dependency.
+        // If service refers to an EntrypointService, we need to compare with the underlying
+        // WorkerService to match this.
+        KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
         return service->startRequest({});
       };
     }
@@ -2471,6 +2480,11 @@ class Server::WorkerService final: public Service,
 
     bool hasHandler(kj::StringPtr handlerName) override {
       return handlers.contains(handlerName);
+    }
+
+    // Return underlying WorkerService.
+    virtual Service* service() override {
+      return &worker;
     }
 
    private:
