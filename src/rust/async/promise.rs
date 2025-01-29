@@ -2,6 +2,10 @@ use cxx::ExternType;
 
 use crate::ffi::own_promise_node_drop_in_place;
 
+// TODO(now): Generate boilerplate with a macro.
+use crate::ffi::promise_drop_in_place_void;
+use crate::ffi::promise_into_own_promise_node_void;
+
 // The inner pointer is never read on Rust's side, so Rust thinks it's dead code.
 #[allow(dead_code)]
 pub struct OwnPromiseNode(*const ());
@@ -46,4 +50,55 @@ pub struct PtrOwnPromiseNode(*mut OwnPromiseNode);
 unsafe impl ExternType for PtrOwnPromiseNode {
     type Id = cxx::type_id!("workerd::rust::async::PtrOwnPromiseNode");
     type Kind = cxx::kind::Trivial;
+}
+
+// ---------------------------------------------------------
+
+pub trait PromiseTarget: Sized {
+    fn into_own_promise_node(this: Promise<Self>) -> OwnPromiseNode;
+    unsafe fn drop_in_place(this: PtrPromise<Self>);
+}
+
+use std::marker::PhantomData;
+
+#[allow(dead_code)]
+pub struct Promise<T: PromiseTarget>(*const (), PhantomData<T>);
+
+// TODO(now): `where T: Send`? Do I need to do this for Future too?
+unsafe impl<T: PromiseTarget> Send for Promise<T> {}
+
+impl<T: PromiseTarget> Drop for Promise<T> {
+    fn drop(&mut self) {
+        // TODO(now): Safety comment.
+        unsafe {
+            T::drop_in_place(PtrPromise(self));
+        }
+    }
+}
+
+// TODO(now): Generate boilerplate with a macro.
+// TODO(now): Safety comment.
+unsafe impl ExternType for Promise<()> {
+    type Id = cxx::type_id!("workerd::rust::async::PromiseVoid");
+    type Kind = cxx::kind::Trivial;
+}
+
+#[repr(transparent)]
+pub struct PtrPromise<T: PromiseTarget>(*mut Promise<T>);
+
+// TODO(now): Generate boilerplate with a macro.
+// Safety: Raw pointers are the same size in both languages.
+unsafe impl ExternType for PtrPromise<()> {
+    type Id = cxx::type_id!("workerd::rust::async::PtrPromiseVoid");
+    type Kind = cxx::kind::Trivial;
+}
+
+// TODO(now): Generate boilerplate with a macro.
+impl PromiseTarget for () {
+    fn into_own_promise_node(this: Promise<Self>) -> OwnPromiseNode {
+        promise_into_own_promise_node_void(this)
+    }
+    unsafe fn drop_in_place(this: PtrPromise<Self>) {
+        promise_drop_in_place_void(this);
+    }
 }

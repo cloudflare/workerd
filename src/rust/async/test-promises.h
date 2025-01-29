@@ -4,8 +4,8 @@
 
 namespace workerd::rust::async {
 
-OwnPromiseNode new_ready_promise_node();
-OwnPromiseNode new_pending_promise_node();
-OwnPromiseNode new_coroutine_promise_node();
+kj::Promise<void> new_ready_promise_void();
+kj::Promise<void> new_pending_promise_void();
+kj::Promise<void> new_coroutine_promise_void();
 
 }  // namespace workerd::rust::async

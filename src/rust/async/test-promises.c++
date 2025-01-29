@@ -2,20 +2,20 @@
 
 namespace workerd::rust::async {
 
-OwnPromiseNode new_ready_promise_node() {
-  return kj::_::PromiseNode::from(kj::Promise<void>(kj::READY_NOW));
+kj::Promise<void> new_ready_promise_void() {
+  return kj::Promise<void>(kj::READY_NOW);
 }
 
-OwnPromiseNode new_pending_promise_node() {
-  return kj::_::PromiseNode::from(kj::Promise<void>(kj::NEVER_DONE));
+kj::Promise<void> new_pending_promise_void() {
+  return kj::Promise<void>(kj::NEVER_DONE);
 }
 
-OwnPromiseNode new_coroutine_promise_node() {
-  return kj::_::PromiseNode::from([]() -> kj::Promise<void> {
+kj::Promise<void> new_coroutine_promise_void() {
+  return []() -> kj::Promise<void> {
     co_await kj::Promise<void>(kj::READY_NOW);
     co_await kj::Promise<void>(kj::READY_NOW);
     co_await kj::Promise<void>(kj::READY_NOW);
-  }());
+  }();
 }
 
 }  // namespace workerd::rust::async

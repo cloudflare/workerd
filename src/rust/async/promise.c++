@@ -17,4 +17,12 @@ void own_promise_node_drop_in_place(OwnPromiseNode* node) {
   node->~OwnPromiseNode();
 }
 
+OwnPromiseNode promise_into_own_promise_node_void(PromiseVoid promise) {
+  return kj::_::PromiseNode::from(kj::mv(promise));
+};
+
+void promise_drop_in_place_void(PromiseVoid* promise) {
+  promise->~PromiseVoid();
+}
+
 }  // namespace workerd::rust::async

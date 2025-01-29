@@ -74,14 +74,16 @@ unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
 // =======================================================================================
 // Await syntax for OwnPromiseNode
 
+use crate::promise::PromiseTarget;
 use crate::OwnPromiseNode;
+use crate::Promise;
 
-impl IntoFuture for OwnPromiseNode {
+impl<T: PromiseTarget> IntoFuture for Promise<T> {
     type Output = ();
     type IntoFuture = LazyRustPromiseAwaiter;
 
     fn into_future(self) -> Self::IntoFuture {
-        LazyRustPromiseAwaiter::new(self)
+        LazyRustPromiseAwaiter::new(T::into_own_promise_node(self))
     }
 }
 

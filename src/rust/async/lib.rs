@@ -19,7 +19,9 @@ mod lazy_pin_init;
 
 mod promise;
 pub use promise::OwnPromiseNode;
+pub use promise::Promise;
 use promise::PtrOwnPromiseNode;
+use promise::PtrPromise;
 
 mod test_futures;
 use test_futures::new_errored_future_fallible_void;
@@ -72,21 +74,29 @@ mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/async/future.h");
 
+        // TODO(now): Generate boilerplate with a macro.
         type BoxFutureVoid = crate::BoxFuture<()>;
         type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
 
+        // TODO(now): Generate boilerplate with a macro.
         type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
         type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
     }
 
     extern "Rust" {
-        fn box_future_poll_void(future: &mut BoxFutureVoid, waker: &CxxWaker) -> bool;
+        // TODO(now): Generate boilerplate with a macro.
+        fn box_future_poll_void(
+            future: &mut BoxFutureVoid,
+            waker: &CxxWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
+        ) -> bool;
         fn box_future_poll_with_co_await_waker_void(
             future: &mut BoxFutureVoid,
             waker: &CoAwaitWaker,
         ) -> bool;
         unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
 
+        // TODO(now): Generate boilerplate with a macro.
         fn box_future_poll_fallible_void(
             future: &mut BoxFutureFallibleVoid,
             waker: &CxxWaker,
@@ -119,6 +129,12 @@ mod ffi {
         type PtrOwnPromiseNode = crate::PtrOwnPromiseNode;
 
         unsafe fn own_promise_node_drop_in_place(node: PtrOwnPromiseNode);
+
+        // TODO(now): Generate boilerplate with a macro.
+        type PromiseVoid = crate::Promise<()>;
+        type PtrPromiseVoid = crate::PtrPromise<()>;
+        fn promise_into_own_promise_node_void(promise: PromiseVoid) -> OwnPromiseNode;
+        unsafe fn promise_drop_in_place_void(promise: PtrPromiseVoid);
     }
 
     unsafe extern "C++" {
@@ -134,6 +150,7 @@ mod ffi {
         );
         unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: PtrGuardedRustPromiseAwaiter);
 
+        // TODO(now): Generate boilerplate with a macro.
         fn poll_with_co_await_waker(
             self: Pin<&mut GuardedRustPromiseAwaiter>,
             waker: &CoAwaitWaker,
@@ -141,13 +158,13 @@ mod ffi {
         fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>) -> bool;
     }
 
-    // Helper functions to create OwnPromiseNodes for testing purposes.
+    // Helper functions to create Promises for testing purposes.
     unsafe extern "C++" {
         include!("workerd/rust/async/test-promises.h");
 
-        fn new_ready_promise_node() -> OwnPromiseNode;
-        fn new_pending_promise_node() -> OwnPromiseNode;
-        fn new_coroutine_promise_node() -> OwnPromiseNode;
+        fn new_ready_promise_void() -> PromiseVoid;
+        fn new_pending_promise_void() -> PromiseVoid;
+        fn new_coroutine_promise_void() -> PromiseVoid;
     }
 
     enum CloningAction {

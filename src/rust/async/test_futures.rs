@@ -143,8 +143,8 @@ pub fn new_threaded_delay_future_void() -> BoxFuture<()> {
 
 pub fn new_layered_ready_future_void() -> BoxFuture<()> {
     Box::pin(async {
-        crate::ffi::new_ready_promise_node().await;
-        crate::ffi::new_coroutine_promise_node().await;
+        crate::ffi::new_ready_promise_void().await;
+        crate::ffi::new_coroutine_promise_void().await;
     })
     .into()
 }
@@ -172,10 +172,10 @@ fn naive_select<T>(
 // A Future which polls multiple OwnPromiseNodes at once.
 pub fn new_naive_select_future_void() -> BoxFuture<()> {
     Box::pin(naive_select(
-        crate::ffi::new_pending_promise_node().into_future(),
+        crate::ffi::new_pending_promise_void().into_future(),
         naive_select(
-            crate::ffi::new_coroutine_promise_node().into_future(),
-            crate::ffi::new_coroutine_promise_node().into_future(),
+            crate::ffi::new_coroutine_promise_void().into_future(),
+            crate::ffi::new_coroutine_promise_void().into_future(),
         ),
     ))
     .into()
@@ -197,7 +197,7 @@ impl Wake for WrappedWaker {
 // Return a Future which awaits a KJ promise using a custom Waker implementation, opaque to KJ.
 pub fn new_wrapped_waker_future_void() -> BoxFuture<()> {
     Box::pin(async {
-        let mut promise = pin!(crate::ffi::new_coroutine_promise_node().into_future());
+        let mut promise = pin!(crate::ffi::new_coroutine_promise_void().into_future());
         future::poll_fn(move |cx| {
             let waker = cx.waker().clone();
             let waker = Arc::new(WrappedWaker(waker)).into();
