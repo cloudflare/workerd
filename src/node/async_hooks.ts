@@ -13,6 +13,22 @@ class AsyncHook {
   public disable(): this {
     return this;
   }
+
+  // IMPORTANT
+  //
+  // The following methods were defined in unenv while they don't exist in Node.js
+  // async_hooks module. This is a bug with unenv.
+  // Unfortunately, unless we are 100% sure these methods are not used in production,
+  // we can not remove them from workerd.
+  //
+  // More information about the bug is available at https://github.com/unjs/unenv/issues/403
+  //
+  // Ref: https://github.com/unjs/unenv/blob/ada7c4093c69c9729f1b008a8ab7902389941624/src/runtime/node/async_hooks/internal/async-hook.ts#L25
+  public init(): void {}
+  public before(): void {}
+  public after(): void {}
+  public destroy(): void {}
+  public promiseResolve(): void {}
 }
 
 export const { AsyncLocalStorage, AsyncResource } = async_hooks;
