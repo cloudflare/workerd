@@ -2144,20 +2144,22 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
     ignoredHandlers.insert("rejectionhandled"_kj);
 
     KJ_IF_SOME(c, worker.impl->context) {
+      // Service workers syntax.
       auto handlerNames = c->getHandlerNames();
-      bool foundAny = false;
+      kj::Vector<kj::String> handlers;
       for (auto& name: handlerNames) {
         if (!ignoredHandlers.contains(name)) {
-          errorReporter.addHandler(kj::none, name);
-          foundAny = true;
+          handlers.add(kj::str(name));
         }
       }
-      if (!foundAny) {
+      if (handlers.size() == 0) {
         errorReporter.addError(
             kj::str("No event handlers were registered. This script does nothing."));
       }
+      errorReporter.addEntrypoint(kj::none, handlers.releaseAsArray());
     } else {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
+        kj::Vector<kj::String> methods;
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
           // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
@@ -2167,21 +2169,15 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           //   hence we will see it here. Rather than try to correct this inconsistency between
           //   struct and dict handling (which could have unintended consequences), let's just
           //   work around by ignoring arrays here.
-          errorReporter.addEmptyExport(name);
-          return;
-        }
-
-        auto dict = js.toDict(handle);
-        bool empty = true;
-        for (auto& field: dict.fields) {
-          if (!ignoredHandlers.contains(field.name)) {
-            errorReporter.addHandler(name, field.name);
-            empty = false;
+        } else {
+          auto dict = js.toDict(handle);
+          for (auto& field: dict.fields) {
+            if (!ignoredHandlers.contains(field.name)) {
+              methods.add(kj::mv(field.name));
+            }
           }
         }
-        if (empty) {
-          errorReporter.addEmptyExport(name);
-        }
+        errorReporter.addEntrypoint(name, methods.releaseAsArray());
       };
 
       auto getEntrypointName = [&](kj::StringPtr key) -> kj::Maybe<kj::StringPtr> {
@@ -2196,7 +2192,19 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         report(getEntrypointName(entry.key), entry.value);
       }
       for (auto& entry: worker.impl->actorClasses) {
-        errorReporter.addHandler(getEntrypointName(entry.key), "class");
+        KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
+          errorReporter.addActorClass(entrypointName);
+        } else {
+          // Hmm, it appears someone tried to export a Durable Object class as a default
+          // entrypoint. This doesn't actually work: the runtime will not allow this DO class
+          // to be used, either for actors or as an entrypoint.
+          //
+          // TODO(someday): Make this a hard error. I'm hesitant to do it in my current change
+          //   for fear that it'll break someone somewhere forcing a rollback. For now we log.
+          LOG_PERIODICALLY(ERROR,
+              "Exported actor class as default entrypoint. This doesn't work, but historically "
+              "did not produce a startup-time error.");
+        }
       }
       for (auto& entry: worker.impl->statelessClasses) {
         // We want to report all of the stateless class's members. To do this, we examine its
@@ -2233,16 +2241,13 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
               }
 
               // Only report each method name once, even if it overrides a method in a superclass.
-              bool isNew = true;
-              kj::StringPtr namePtr =
-                  seenNames.upsert(kj::mv(name), [&](auto&, auto&&) { isNew = false; });
-              if (isNew) {
-                errorReporter.addHandler(entrypointName, namePtr);
-              }
+              seenNames.upsert(kj::mv(name), [&](auto&, auto&&) {});
             }
 
             proto = protoObj.getPrototype(js);
           }
+
+          errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
         });
       }
     }

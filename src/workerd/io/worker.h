@@ -78,11 +78,14 @@ class Worker: public kj::AtomicRefcounted {
   class ValidationErrorReporter {
    public:
     virtual void addError(kj::String error) = 0;
-    virtual void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) = 0;
 
-    // Called when an export is encountered that defines no handlers, thus isn't useful for
-    // anything.
-    virtual void addEmptyExport(kj::Maybe<kj::StringPtr> exportName) {}
+    // Report that the Worker implements a stateless entrypoint (e.g. WorkerEntrypoint or plain
+    // object export) with the given export name and methods.
+    virtual void addEntrypoint(
+        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) = 0;
+
+    // Report that the Worker exports a Durable Object class with the given name.
+    virtual void addActorClass(kj::StringPtr exportName) = 0;
   };
 
   class LockType;
@@ -884,7 +887,10 @@ struct SimpleWorkerErrorReporter final: public Worker::ValidationErrorReporter {
   void addError(kj::String error) override {
     errors.add(kj::mv(error));
   }
-  void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
+  void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
+    KJ_UNREACHABLE;
+  }
+  void addActorClass(kj::StringPtr exportName) override {
     KJ_UNREACHABLE;
   }
 

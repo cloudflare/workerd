@@ -1536,8 +1536,15 @@ KJ_TEST("Server: referencing DO class as entrypoint is not an error") {
     ]
   ))"_kj);
 
-  // We see no error at config time -- this completes successfully.
-  test.start();
+  // We see a log warning at config time, but config otherwise completes successfully.
+  {
+    KJ_EXPECT_LOG(WARNING,
+        "A ServiceDesignator in the config referenced the entrypoint \"SomeActor\", but this "
+        "class does not extend 'WorkerEntrypoint'. Attempts to call this entrypoint will "
+        "fail at runtime, but historically this was not a startup-time error. Future "
+        "versions of workerd may make this a startup-time error.");
+    test.start();
+  }
 
   // However, a request will still fail at runtime.
   KJ_EXPECT_LOG(ERROR, "worker is not an actor but class name was requested");
@@ -1585,8 +1592,13 @@ KJ_TEST("Server: exporting a DO class as the default export is not an error") {
     ]
   ))"_kj);
 
-  // We see no error at config time -- this completes successfully.
-  test.start();
+  // We see a log error at config time, but config otherwise completes successfully.
+  {
+    KJ_EXPECT_LOG(ERROR,
+        "Exported actor class as default entrypoint. This doesn't work, but historically "
+        "did not produce a startup-time error.");
+    test.start();
+  }
 
   // Note that there is no way to actually configure the default export as a DO class since
   // `className` is non-optional in both `DurableObjectNamespace` and
@@ -1663,8 +1675,17 @@ KJ_TEST("Server: configuring a DO namespace with no class export is not an error
     ]
   ))"_kj);
 
-  // We see no error at config time -- this completes successfully.
-  test.start();
+  // We see a log warning at config time, but config otherwise completes successfully.
+  {
+    KJ_EXPECT_LOG(WARNING,
+        "A DurableObjectNamespace in the config referenced the class \"MyActorClass\", but "
+        "no such Durable Object class is exported from the worker. Please make sure the "
+        "class name matches, it is exported, and the class extends 'DurableObject'. "
+        "Attempts to call to this Durable Object class will fail at runtime, but historically "
+        "this was not a startup-time error. Future versions of workerd may make this a "
+        "startup-time error.");
+    test.start();
+  }
 
   // However, a request will still fail at runtime.
   KJ_EXPECT_LOG(ERROR, "no such actor class");
