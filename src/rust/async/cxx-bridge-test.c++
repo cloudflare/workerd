@@ -17,7 +17,10 @@ KJ_TEST("KjWaker: C++ can poll() Rust Futures") {
     KjWaker waker;
 
     auto pending = new_pending_future_void();
-    KJ_EXPECT(!pending.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(!pending.poll(waker, result));
+    KJ_EXPECT(result.value == kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     // The pending future never calls Waker::wake() because it has no intention to ever wake us up.
     // Additionally, it never even calls `waker.clone()`, so we have no promise at all.
@@ -31,7 +34,10 @@ KJ_TEST("KjWaker: C++ can poll() Rust Futures") {
     KjWaker waker;
 
     auto ready = new_ready_future_void();
-    KJ_EXPECT(ready.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(ready.poll(waker, result));
+    KJ_EXPECT(result.value != kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     // The ready future never calls Waker::wake() because it instead indicates immediate
     // readiness by its return value. Additionally, it never even calls `waker.clone()`, so we have no
@@ -60,7 +66,10 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KjWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
-    KJ_EXPECT(!waking.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(!waking.poll(waker, result));
+    KJ_EXPECT(result.value == kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     // The waking future immediately called wake_by_ref() on the KjWaker. This incremented our
     // count, and didn't populate a cloned promise.
@@ -82,7 +91,10 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KjWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
-    KJ_EXPECT(!waking.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(!waking.poll(waker, result));
+    KJ_EXPECT(result.value == kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     auto state = waker.reset();
 
@@ -91,8 +103,8 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
 
     // We expect our cloned ArcWaker promise to be immediately ready.
     KJ_EXPECT(KJ_ASSERT_NONNULL(state.cloned).poll(waitScope));
-    auto result = KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
-    KJ_EXPECT(result == WakeInstruction::WAKE);
+    auto wakeInstruction = KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
+    KJ_EXPECT(wakeInstruction == WakeInstruction::WAKE);
   }
 
   // Test wake_by_ref()-before-clone().
@@ -102,7 +114,10 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KjWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
-    KJ_EXPECT(!waking.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(!waking.poll(waker, result));
+    KJ_EXPECT(result.value == kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     auto state = waker.reset();
 
@@ -121,15 +136,18 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KjWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
-    KJ_EXPECT(!waking.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(!waking.poll(waker, result));
+    KJ_EXPECT(result.value == kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     auto state = waker.reset();
 
     KJ_EXPECT(state.wakeCount == 0);
 
     KJ_EXPECT(KJ_ASSERT_NONNULL(state.cloned).poll(waitScope));
-    auto result = KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
-    KJ_EXPECT(result == WakeInstruction::IGNORE);
+    auto wakeInstruction = KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
+    KJ_EXPECT(wakeInstruction == WakeInstruction::IGNORE);
   }
 }
 
@@ -143,7 +161,10 @@ KJ_TEST("KjWaker: C++ can receive asynchronous wakes after poll()") {
     KjWaker waker;
 
     auto waking = new_threaded_delay_future_void();
-    KJ_EXPECT(!waking.poll(waker));
+    kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
+    KJ_EXPECT(!waking.poll(waker, result));
+    KJ_EXPECT(result.value == kj::none);
+    KJ_EXPECT(result.exception == kj::none);
 
     auto state = waker.reset();
     KJ_EXPECT(state.wakeCount == 0);

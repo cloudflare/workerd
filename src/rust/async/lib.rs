@@ -30,6 +30,7 @@ use test_futures::new_errored_future_fallible_void;
 use test_futures::new_layered_ready_future_void;
 use test_futures::new_naive_select_future_void;
 use test_futures::new_pending_future_void;
+use test_futures::new_ready_future_fallible_i32;
 use test_futures::new_ready_future_void;
 use test_futures::new_threaded_delay_future_void;
 use test_futures::new_waking_future_void;
@@ -82,10 +83,19 @@ mod ffi {
         // TODO(now): Generate boilerplate with a macro.
         type BoxFutureVoid = crate::BoxFuture<()>;
         type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
+        type BoxFutureFulfillerVoid;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerVoid>);
 
         // TODO(now): Generate boilerplate with a macro.
         type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
         type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
+        type BoxFutureFulfillerFallibleVoid;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleVoid>);
+
+        type BoxFutureFallibleI32 = crate::BoxFuture<crate::Result<i32>>;
+        type PtrBoxFutureFallibleI32 = crate::PtrBoxFuture<crate::Result<i32>>;
+        type BoxFutureFulfillerFallibleI32;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleI32>, value: i32);
     }
 
     extern "Rust" {
@@ -98,6 +108,7 @@ mod ffi {
         fn box_future_poll_with_co_await_waker_void(
             future: &mut BoxFutureVoid,
             waker: &CoAwaitWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
         ) -> bool;
         unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
 

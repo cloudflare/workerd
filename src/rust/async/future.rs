@@ -71,18 +71,29 @@ pub fn box_future_poll_void(
 ) -> bool {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
-    // TODO(now): Figure out how to propagate value-or-exception.
-    future.0.as_mut().poll(&mut cx).is_ready()
+    match future.0.as_mut().poll(&mut cx) {
+        Ready(_v) => {
+            fulfiller.fulfill();
+            true
+        }
+        Pending => false,
+    }
 }
 
 pub fn box_future_poll_with_co_await_waker_void(
     future: &mut BoxFuture<()>,
     waker: &CoAwaitWaker,
+    fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
 ) -> bool {
     let waker = Waker::from(waker);
     let mut cx = Context::from_waker(&waker);
-    // TODO(now): Figure out how to propagate value-or-exception.
-    future.0.as_mut().poll(&mut cx).is_ready()
+    match future.0.as_mut().poll(&mut cx) {
+        Ready(_v) => {
+            fulfiller.fulfill();
+            true
+        }
+        Pending => false,
+    }
 }
 
 pub unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFuture<()>) {
@@ -146,5 +157,58 @@ pub fn box_future_poll_with_co_await_waker_fallible_void(
 }
 
 pub unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFuture<Result<()>>) {
+    std::ptr::drop_in_place(ptr.0);
+}
+
+// ---------------------------------------------------------
+
+unsafe impl ExternType for BoxFuture<Result<i32>> {
+    type Id = cxx::type_id!("workerd::rust::async::BoxFutureFallibleI32");
+    type Kind = cxx::kind::Trivial;
+}
+
+// Safety: Raw pointers are the same size in both languages.
+unsafe impl ExternType for PtrBoxFuture<Result<i32>> {
+    type Id = cxx::type_id!("workerd::rust::async::PtrBoxFutureFallibleI32");
+    type Kind = cxx::kind::Trivial;
+}
+
+use crate::ffi::BoxFutureFulfillerFallibleI32;
+
+pub fn box_future_poll_fallible_i32(
+    future: &mut BoxFuture<Result<i32>>,
+    waker: &CxxWaker,
+    fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
+) -> Result<bool> {
+    let waker = Waker::from(waker);
+    let mut cx = Context::from_waker(&waker);
+    match future.0.as_mut().poll(&mut cx) {
+        Ready(Ok(v)) => {
+            fulfiller.fulfill(v);
+            Ok(true)
+        }
+        Ready(Err(e)) => Err(e),
+        Pending => Ok(false),
+    }
+}
+
+pub fn box_future_poll_with_co_await_waker_fallible_i32(
+    future: &mut BoxFuture<Result<i32>>,
+    waker: &CoAwaitWaker,
+    fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
+) -> Result<bool> {
+    let waker = Waker::from(waker);
+    let mut cx = Context::from_waker(&waker);
+    match future.0.as_mut().poll(&mut cx) {
+        Ready(Ok(v)) => {
+            fulfiller.fulfill(v);
+            Ok(true)
+        }
+        Ready(Err(e)) => Err(e),
+        Pending => Ok(false),
+    }
+}
+
+pub unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFuture<Result<i32>>) {
     std::ptr::drop_in_place(ptr.0);
 }
