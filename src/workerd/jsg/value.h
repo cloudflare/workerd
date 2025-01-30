@@ -457,7 +457,11 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     v8::Local<v8::String> str = check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
+#if (V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION > 2) || V8_MAJOR_VERSION > 13
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
+#else
     auto buf = kj::heapArray<char>(str->Utf8Length(isolate) + 1);
+#endif
     str->WriteUtf8(isolate, buf.begin(), buf.size());
     buf[buf.size() - 1] = 0;
     return kj::String(kj::mv(buf));
@@ -1009,7 +1013,11 @@ class DictWrapper {
     // TypeErrorContext, or worrying about whether the tryUnwrap(kj::String*) version will ever be
     // modified to return nullptr in the future.
     const auto convertToUtf8 = [isolate = context->GetIsolate()](v8::Local<v8::String> v8String) {
+#if (V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION > 2) || V8_MAJOR_VERSION > 13
+      auto buf = kj::heapArray<char>(v8String->Utf8LengthV2(isolate) + 1);
+#else
       auto buf = kj::heapArray<char>(v8String->Utf8Length(isolate) + 1);
+#endif
       v8String->WriteUtf8(isolate, buf.begin(), buf.size());
       buf[buf.size() - 1] = 0;
       return kj::String(kj::mv(buf));

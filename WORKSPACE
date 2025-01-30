@@ -190,7 +190,9 @@ http_archive(
 git_repository(
     name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    # Must match the version used by v8
+    # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
+    # for it to be behind – zlib is very stable and its API has not changed in a long time, most
+    # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
     commit = "82a5fecf8aae8f288267cfdb2d29c9ebf7b37e59",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
