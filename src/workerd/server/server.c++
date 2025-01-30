@@ -1797,6 +1797,7 @@ class Server::WorkerService final: public Service,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
+      kj::HashSet<kj::String> actorClassEntrypoints,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback)
@@ -1805,6 +1806,7 @@ class Server::WorkerService final: public Service,
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         namedEntrypoints(kj::mv(namedEntrypoints)),
+        actorClassEntrypoints(kj::mv(actorClassEntrypoints)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)) {
 
@@ -1818,11 +1820,24 @@ class Server::WorkerService final: public Service,
 
   kj::Maybe<kj::Own<Service>> getEntrypoint(
       kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
-    kj::HashSet<kj::String>* handlers;
+    const kj::HashSet<kj::String>* handlers;
     KJ_IF_SOME(n, name) {
-      auto& entry = KJ_UNWRAP_OR_RETURN(namedEntrypoints.findEntry(n), kj::none);
-      name = entry.key;  // replace with more-permanent string
-      handlers = &entry.value;
+      KJ_IF_SOME(entry, namedEntrypoints.findEntry(n)) {
+        name = entry.key;  // replace with more-permanent string
+        handlers = &entry.value;
+      } else KJ_IF_SOME(className, actorClassEntrypoints.find(n)) {
+        KJ_LOG(WARNING,
+            kj::str("A ServiceDesignator in the config referenced the entrypoint \"", n,
+                "\", but this class does not extend 'WorkerEntrypoint'. Attempts to call this "
+                "entrypoint will fail at runtime, but historically this was not a startup-time "
+                "error. Future versions of workerd may make this a startup-time error."));
+
+        const kj::HashSet<kj::String> EMPTY_HANDLERS;
+        name = className;  // replace with more-permanent string
+        handlers = &EMPTY_HANDLERS;
+      } else {
+        return kj::none;
+      }
     } else {
       KJ_IF_SOME(d, defaultEntrypointHandlers) {
         handlers = &d;
@@ -1983,7 +1998,17 @@ class Server::WorkerService final: public Service,
         : service(service),
           className(className),
           config(config),
-          timer(timer) {}
+          timer(timer) {
+      if (!service.actorClassEntrypoints.contains(className)) {
+        KJ_LOG(WARNING,
+            kj::str("A DurableObjectNamespace in the config referenced the class \"", className,
+                "\", but no such Durable Object class is exported from the worker. Please make "
+                "sure the class name matches, it is exported, and the class extends "
+                "'DurableObject'. Attempts to call to this Durable Object class will fail at "
+                "runtime, but historically this was not a startup-time error. Future versions of "
+                "workerd may make this a startup-time error."));
+      }
+    }
 
     const ActorConfig& getConfig() {
       return config;
@@ -2465,7 +2490,7 @@ class Server::WorkerService final: public Service,
     EntrypointService(WorkerService& worker,
         kj::Maybe<kj::StringPtr> entrypoint,
         kj::Maybe<kj::StringPtr> propsJson,
-        kj::HashSet<kj::String>& handlers)
+        const kj::HashSet<kj::String>& handlers)
         : worker(worker),
           entrypoint(entrypoint),
           handlers(handlers) {
@@ -2490,7 +2515,7 @@ class Server::WorkerService final: public Service,
    private:
     WorkerService& worker;
     kj::Maybe<kj::StringPtr> entrypoint;
-    kj::HashSet<kj::String>& handlers;
+    const kj::HashSet<kj::String>& handlers;
     Frankenvalue props;
   };
 
@@ -2502,6 +2527,7 @@ class Server::WorkerService final: public Service,
   kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
+  kj::HashSet<kj::String> actorClassEntrypoints;
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
@@ -3099,41 +3125,30 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     Server& server;
     kj::StringPtr name;
 
-    kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
-
     // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
+    kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
     kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
+    kj::HashSet<kj::String> actorClasses;
 
     void addError(kj::String error) override {
       server.reportConfigError(kj::str("service ", name, ": ", error));
     }
 
-    void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
-      kj::HashSet<kj::String>* set;
-      KJ_IF_SOME(e, exportName) {
-        set = &namedEntrypoints.findOrCreate(
-            e, [&]() -> decltype(namedEntrypoints)::Entry { return {kj::str(e), {}}; });
-      } else {
-        set = &defaultEntrypoint.emplace();
+    void addEntrypoint(
+        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
+      kj::HashSet<kj::String> set;
+      for (auto& method: methods) {
+        set.insert(kj::mv(method));
       }
-      set->insert(kj::str(type));
+      KJ_IF_SOME(e, exportName) {
+        namedEntrypoints.insert(kj::str(e), kj::mv(set));
+      } else {
+        defaultEntrypoint = kj::mv(set);
+      }
     }
 
-    void addEmptyExport(kj::Maybe<kj::StringPtr> exportName) override {
-      // Even though the export has no handlers, we want to add it to the namedEntrypoints map,
-      // so that other parts of the config are allowed to refer to this entrypoint. Otherwise,
-      // if anything in the config refers to it, we'll treat the config as invalid. Of course, if
-      // any actual requests are sent to an empty handler, they will fail at runtime.
-      //
-      // The reason we want the config to be considered valid even if it refers to empty
-      // entrypoints is so that it's safe to auto-generate a config that binds every export to
-      // a socket, without checking the types of all the exports. Miniflare does this.
-      KJ_IF_SOME(e, exportName) {
-        namedEntrypoints.findOrCreate(
-            e, [&]() -> decltype(namedEntrypoints)::Entry { return {kj::str(e), {}}; });
-      } else {
-        defaultEntrypoint.emplace();
-      }
+    void addActorClass(kj::StringPtr exportName) override {
+      actorClasses.insert(kj::str(exportName));
     }
   };
 
@@ -3523,7 +3538,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      localActorConfigs, kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors));
+      kj::mv(errorReporter.actorClasses), localActorConfigs, kj::mv(linkCallback),
+      KJ_BIND_METHOD(*this, abortAllActors));
 }
 
 // =======================================================================================
