@@ -3807,6 +3807,54 @@ declare abstract class Base_Ai_Cf_Openai_Whisper {
   inputs: Ai_Cf_Openai_Whisper_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Output;
 }
+type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
+  | string
+  | {
+      /**
+       * The input text prompt for the model to generate a response.
+       */
+      prompt?: string;
+      /**
+       * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+       */
+      raw?: boolean;
+      /**
+       * Controls the creativity of the AI's responses by adjusting how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+       */
+      top_p?: number;
+      /**
+       * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+       */
+      top_k?: number;
+      /**
+       * Random seed for reproducibility of the generation.
+       */
+      seed?: number;
+      /**
+       * Penalty for repeated tokens; higher values discourage repetition.
+       */
+      repetition_penalty?: number;
+      /**
+       * Decreases the likelihood of the model repeating the same lines verbatim.
+       */
+      frequency_penalty?: number;
+      /**
+       * Increases the likelihood of the model introducing new topics.
+       */
+      presence_penalty?: number;
+      image: number[] | (string & NonNullable<unknown>);
+      /**
+       * The maximum number of tokens to generate in the response.
+       */
+      max_tokens?: number;
+    };
+interface Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Output {
+  description?: string;
+}
+declare abstract class Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M {
+  inputs: Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input;
+  postProcessedOutputs: Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Output;
+}
 type Ai_Cf_Openai_Whisper_Tiny_En_Input =
   | string
   | {
@@ -4239,11 +4287,12 @@ interface AiModels {
   "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": BaseAiTextGeneration;
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": BaseAiTextGeneration;
   "@cf/meta/m2m100-1.2b": BaseAiTranslation;
   "@cf/facebook/bart-large-cnn": BaseAiSummarization;
-  "@cf/unum/uform-gen2-qwen-500m": BaseAiImageToText;
   "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
   "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
+  "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
