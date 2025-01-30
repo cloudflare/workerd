@@ -126,7 +126,7 @@ filegroup(
 #
 git_repository(
     name = "com_google_absl",
-    commit = "dc257ad54f38739767a6cb26eb57fd51c37bfe3c",
+    commit = "72093794ac42be8105817ae0b0569fb411a6ca9b",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
 
@@ -144,6 +144,18 @@ git_repository(
     remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git",
 )
 
+git_repository(
+    name = "highway",
+    commit = "00fe003dac355b979f36157f9407c7c46448958e",
+    remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
+)
+
+# Bindings for Highway library used by V8
+bind(
+    name = "hwy",
+    actual = "@highway//:hwy",
+)
+
 # Bindings for abseil libraries used by V8
 [
     bind(
@@ -156,11 +168,6 @@ git_repository(
         "flat_hash_set",
     ]
 ]
-
-bind(
-    name = "absl_optional",
-    actual = "@com_google_absl//absl/types:optional",
-)
 
 # OK, now we can bring in tcmalloc itself.
 http_archive(
@@ -178,8 +185,10 @@ http_archive(
 git_repository(
     name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    # Must match the version used by v8
-    commit = "fa9f14143c7938e6a1d18443900efee7a1e5e669",
+    # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
+    # for it to be behind – zlib is very stable and its API has not changed in a long time, most
+    # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
+    commit = "82a5fecf8aae8f288267cfdb2d29c9ebf7b37e59",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 

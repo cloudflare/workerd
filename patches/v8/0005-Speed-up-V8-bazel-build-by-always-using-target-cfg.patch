@@ -1,4 +1,4 @@
-From b44a9a7a78ddfe2d29b96b05ea9ed3c3638088bd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -12,7 +12,7 @@ generated files as the output set. While unrelated to the build cfg change,
 this also improves build times.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 13e4bc0c80f23907cf07a7d338a6bd4398e413ca..f62048d985496583457ef370bea74c761524bf3a 100644
+index c056e87386233c7d8e512dfa53f4108c8b42678e..69d5e5206ccae77199b9df7efe7797264b42a6e7 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -23,7 +23,7 @@ index 13e4bc0c80f23907cf07a7d338a6bd4398e413ca..f62048d985496583457ef370bea74c76
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4242,22 +4243,20 @@ filegroup(
+@@ -4237,22 +4238,20 @@ filegroup(
      }),
  )
  
@@ -52,7 +52,7 @@ index 13e4bc0c80f23907cf07a7d338a6bd4398e413ca..f62048d985496583457ef370bea74c76
  )
  
  v8_mksnapshot(
-@@ -4458,8 +4457,6 @@ v8_binary(
+@@ -4454,8 +4453,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -61,7 +61,7 @@ index 13e4bc0c80f23907cf07a7d338a6bd4398e413ca..f62048d985496583457ef370bea74c76
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -4471,6 +4468,7 @@ v8_binary(
+@@ -4467,6 +4464,7 @@ v8_binary(
      ],
      deps = [
          "//external:absl_optional",

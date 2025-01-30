@@ -1,14 +1,14 @@
-From e6e2d1b8bd0d7c0b61291530d226030c8ca6bb06 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7f45aca93 100644
+index cbef1193f598eb1bbb95eee9857ad70efb2f0d3f..d42347b15fa323835c7b2e65346548ae21573ae2 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1372,6 +1372,7 @@ filegroup(
+@@ -1366,6 +1366,7 @@ filegroup(
          "src/builtins/constants-table-builder.cc",
          "src/builtins/constants-table-builder.h",
          "src/builtins/data-view-ops.h",
@@ -16,7 +16,7 @@ index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7
          "src/builtins/profile-data-reader.h",
          "src/codegen/aligned-slot-allocator.cc",
          "src/codegen/aligned-slot-allocator.h",
-@@ -1553,7 +1554,6 @@ filegroup(
+@@ -1547,7 +1548,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -24,7 +24,7 @@ index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3073,7 +3073,6 @@ filegroup(
+@@ -3068,7 +3068,6 @@ filegroup(
  filegroup(
      name = "v8_compiler_files",
      srcs = [
@@ -32,7 +32,7 @@ index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7
          "src/compiler/access-builder.cc",
          "src/compiler/access-builder.h",
          "src/compiler/access-info.cc",
-@@ -3645,8 +3644,6 @@ filegroup(
+@@ -3642,8 +3641,6 @@ filegroup(
          "src/builtins/growable-fixed-array-gen.cc",
          "src/builtins/growable-fixed-array-gen.h",
          "src/builtins/number-builtins-reducer-inl.h",
@@ -41,7 +41,7 @@ index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -3926,6 +3923,7 @@ filegroup(
+@@ -3923,6 +3920,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -49,7 +49,7 @@ index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7
      ],
  )
  
-@@ -4038,6 +4036,10 @@ filegroup(
+@@ -4033,6 +4031,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -60,7 +60,7 @@ index d242f66075dba2d9fc34b87f6a9055f6fa1907c1..c995b20ed73f2e1cc6cab07eece15eb7
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4055,6 +4057,7 @@ filegroup(
+@@ -4050,6 +4052,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",

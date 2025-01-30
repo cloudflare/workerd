@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.2.152.34"
+VERSION = "13.3.415.18"
 
-INTEGRITY = "sha256-wER1sDu6Ez7pXzLDufpxYE26d3S1WdsyuQxoFvzLc5Q="
+INTEGRITY = "sha256-irTC8837o+iRvTVx6YatlscLn3+nJcr5RumtHCMUhW0="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -23,11 +23,11 @@ PATCHES = [
     "0015-Update-illegal-invocation-error-message-in-v8.patch",
     "0016-Implement-cross-request-context-promise-resolve-hand.patch",
     "0017-Modify-where-to-look-for-fast_float-dependency.patch",
-    "0018-Return-rejected-promise-from-WebAssembly.compile-if-.patch",
-    "0019-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0020-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0021-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0022-Enable-V8-shared-linkage.patch",
+    "0018-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0019-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0020-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0021-Enable-V8-shared-linkage.patch",
+    "0022-Fix-macOS-build.patch",
 ]
 
 # V8 and its dependencies
@@ -56,7 +56,7 @@ def deps_v8():
     git_repository(
         name = "com_googlesource_chromium_icu",
         build_file = "@v8//:bazel/BUILD.icu",
-        commit = "4239b1559d11d4fa66c100543eda4161e060311e",
+        commit = "bbccc2f6efc1b825de5f2c903c48be685cd0cf22",
         patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",

@@ -1,4 +1,4 @@
-From 3f431d206a052078a48d91cd34470bcddb1497fa Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Wed, 4 Dec 2024 22:36:05 -0600
 Subject: Add ValueSerializer::SetTreatProxiesAsHostObjects().
@@ -28,10 +28,10 @@ index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a507
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index a003e70866cad5e1a52607fb09706abd6cc01496..fbe9d4e9168ec630a5cb77136dc0d1dfe9dccc81 100644
+index 650987da800d1b5bafb591b5dc8ded3b9b61356a..cc4812a2210bb0e39ac1c1821927b6b9153d1eac 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3508,6 +3508,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -3528,6 +3528,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    private_->serializer.SetTreatFunctionsAsHostObjects(mode);
  }
  
@@ -43,7 +43,7 @@ index a003e70866cad5e1a52607fb09706abd6cc01496..fbe9d4e9168ec630a5cb77136dc0d1df
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index de82d953dcb146d3871cb7ae6ed6cdbc7fca8c26..87986ebe280cde52d661050a8761aa425ef5e34a 100644
+index 5bd754981ece3065e456106ae125b7209f45bc34..ce945998cbf66ab10124b78d64b7d218a2d62ea1 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -332,6 +332,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
@@ -71,7 +71,7 @@ index de82d953dcb146d3871cb7ae6ed6cdbc7fca8c26..87986ebe280cde52d661050a8761aa42
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
-@@ -1207,7 +1216,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+@@ -1208,7 +1217,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
    return ThrowIfOutOfMemory();
  }
  
@@ -81,7 +81,7 @@ index de82d953dcb146d3871cb7ae6ed6cdbc7fca8c26..87986ebe280cde52d661050a8761aa42
    if (!delegate_) {
      isolate_->Throw(*isolate_->factory()->NewError(
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index a657bb7f6def9d795d6504eb62f49b5b34c46406..31406f1d3f430b501fe49fa207e2b8fee2ea57da 100644
+index d8d53f40f9d674d39a5f5bc700a79fa08eccf71c..a9f869d5da8d6e90ed2857b5984de4e62751832b 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -111,6 +111,15 @@ class ValueSerializer {
@@ -100,7 +100,7 @@ index a657bb7f6def9d795d6504eb62f49b5b34c46406..31406f1d3f430b501fe49fa207e2b8fe
   private:
    // Managing allocations of the internal buffer.
    Maybe<bool> ExpandBuffer(size_t required_capacity);
-@@ -159,7 +168,7 @@ class ValueSerializer {
+@@ -161,7 +170,7 @@ class ValueSerializer {
  #endif  // V8_ENABLE_WEBASSEMBLY
    Maybe<bool> WriteSharedObject(DirectHandle<HeapObject> object)
        V8_WARN_UNUSED_RESULT;
@@ -109,7 +109,7 @@ index a657bb7f6def9d795d6504eb62f49b5b34c46406..31406f1d3f430b501fe49fa207e2b8fe
  
    /*
     * Reads the specified keys from the object and writes key-value pairs to the
-@@ -192,6 +201,7 @@ class ValueSerializer {
+@@ -194,6 +203,7 @@ class ValueSerializer {
    bool has_custom_host_objects_ = false;
    bool treat_array_buffer_views_as_host_objects_ = false;
    bool treat_functions_as_host_objects_ = false;

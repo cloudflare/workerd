@@ -1,11 +1,11 @@
-From 535b20147b765b270a058045daf74ce1c87441f4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Thu, 5 Dec 2024 14:07:44 +0100
 Subject: Disable memory leak assert when shutting down V8
 
 
 diff --git a/src/wasm/wasm-code-pointer-table.cc b/src/wasm/wasm-code-pointer-table.cc
-index a93a8cea87f90faf79b9263e62fde1199cbcf30d..585e7531e0cb8c1ebc9077c8d2be43853d3af89c 100644
+index d65f7c30d5396a99a03802c230cea0e1fcb88eb5..8717260cdd4f83a4cdfe138ae6f1fe10e1ba4f03 100644
 --- a/src/wasm/wasm-code-pointer-table.cc
 +++ b/src/wasm/wasm-code-pointer-table.cc
 @@ -14,7 +14,10 @@ void WasmCodePointerTable::Initialize() { Base::Initialize(); }

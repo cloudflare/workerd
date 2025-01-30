@@ -1,15 +1,15 @@
-From b4b564bfaa8e891876aea6c3f9ee198e1c575222 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 21 Aug 2024 16:29:43 +0200
 Subject: Implement Promise Context Tagging
 
 
 diff --git a/include/v8-callbacks.h b/include/v8-callbacks.h
-index f757eb1540827260ec93ce605f1125605d295066..0a913f4eed5eb91d36eba41e77f3adc22018e075 100644
+index a86f2f4344fd3fca3a75a7ab2e02cf220b079b21..57db44234e2273476fe1cdcde31e1702bbabd61d 100644
 --- a/include/v8-callbacks.h
 +++ b/include/v8-callbacks.h
-@@ -495,6 +495,15 @@ using FilterETWSessionByURLCallback =
-     bool (*)(Local<Context> context, const std::string& etw_filter_payload);
+@@ -515,6 +515,15 @@ using FilterETWSessionByURL2Callback = FilterETWSessionByURLResult (*)(
+     Local<Context> context, const std::string& etw_filter_payload);
  #endif  // V8_OS_WIN
  
 +/**
@@ -25,10 +25,10 @@ index f757eb1540827260ec93ce605f1125605d295066..0a913f4eed5eb91d36eba41e77f3adc2
  
  #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 74bd5b88c9077b0ef3930f4d52cce75412086b36..92b6320e661aba1c17746dbc30d8688fb94fdad3 100644
+index f070682c798c73bdab0ff49a7c157fc1bc5d8361..106fc521b5a92690f66a7fb57900428dfb561326 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1769,6 +1769,9 @@ class V8_EXPORT Isolate {
+@@ -1823,6 +1823,9 @@ class V8_EXPORT Isolate {
     */
    std::string GetDefaultLocale();
  
@@ -38,7 +38,7 @@ index 74bd5b88c9077b0ef3930f4d52cce75412086b36..92b6320e661aba1c17746dbc30d8688f
    Isolate() = delete;
    ~Isolate() = delete;
    Isolate(const Isolate&) = delete;
-@@ -1814,6 +1817,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+@@ -1870,6 +1873,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
    return {};
  }
  
@@ -59,10 +59,10 @@ index 74bd5b88c9077b0ef3930f4d52cce75412086b36..92b6320e661aba1c17746dbc30d8688f
  
  #endif  // INCLUDE_V8_ISOLATE_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 2e2dcb6a26d61bddd23a783fc50d2f22b2ed4070..617e44daf4ad1fbe87bed10bbbfa89f2997eae11 100644
+index 1cb6383aa42545433f07e88e0a21a2bc73d44348..58410e2f918402c438c632a3cea24108e7d817e5 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -12416,6 +12416,23 @@ TryToCopyAndConvertArrayToCppBuffer<CTypeInfoBuilder<double>::Build().GetId(),
+@@ -12565,6 +12565,23 @@ TryToCopyAndConvertArrayToCppBuffer<CTypeInfoBuilder<double>::Build().GetId(),
        double>(src, dst, max_length);
  }
  
@@ -85,7 +85,7 @@ index 2e2dcb6a26d61bddd23a783fc50d2f22b2ed4070..617e44daf4ad1fbe87bed10bbbfa89f2
 +
  }  // namespace v8
  
- EXPORT_CONTEXTUAL_VARIABLE(v8::internal::StackAllocatedCheck)
+ #ifdef ENABLE_SLOW_DCHECKS
 diff --git a/src/builtins/promise-abstract-operations.tq b/src/builtins/promise-abstract-operations.tq
 index f4e17456651516dfb3e81880da82ab228646ccfd..6142e0450dac646ccebd3fc7c5168f9b42b4d0b5 100644
 --- a/src/builtins/promise-abstract-operations.tq
@@ -128,7 +128,7 @@ index f4e17456651516dfb3e81880da82ab228646ccfd..6142e0450dac646ccebd3fc7c5168f9b
  
  transitioning javascript builtin PerformPromiseThenFunction(
 diff --git a/src/builtins/promise-constructor.tq b/src/builtins/promise-constructor.tq
-index 7ace785675fe1b8ae005a1c38f9c0c32e41ac7f3..88efee16b51a6e26bd20fc4ed1222091cac8670b 100644
+index 50677631b5399453eebc6b149272431f74b1fce6..c652bd836b27805865e0a902ef9cf7c1ff254646 100644
 --- a/src/builtins/promise-constructor.tq
 +++ b/src/builtins/promise-constructor.tq
 @@ -8,6 +8,9 @@
@@ -141,7 +141,7 @@ index 7ace785675fe1b8ae005a1c38f9c0c32e41ac7f3..88efee16b51a6e26bd20fc4ed1222091
  }
  
  // https://tc39.es/ecma262/#sec-promise-constructor
-@@ -65,6 +68,7 @@ transitioning javascript builtin PromiseConstructor(
+@@ -62,6 +65,7 @@ transitioning javascript builtin PromiseConstructor(
      result = UnsafeCast<JSPromise>(
          FastNewObject(context, promiseFun, UnsafeCast<JSReceiver>(newTarget)));
      PromiseInit(result);
@@ -186,10 +186,10 @@ index 1f90230bcafe424b2260598906cc7586f5406848..44ff23634e5a91498736fa2a15b324b2
    return instance;
  }
 diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
-index dd10f386c666e4f2c6b8d33727b5195b617bd4ae..f3e71ace7b346872d9cd7c95c107cb69e85ec2fe 100644
+index c95bb6fd7bbd3484cc66da3d6f464f3b8e04ab6f..c51464b66425b5eb38e13e9ac5d1ba3de11dcd1a 100644
 --- a/src/compiler/js-create-lowering.cc
 +++ b/src/compiler/js-create-lowering.cc
-@@ -1115,10 +1115,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
+@@ -1118,10 +1118,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
            jsgraph()->EmptyFixedArrayConstant());
    a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kReactionsOrResultOffset),
            jsgraph()->ZeroConstant());
@@ -204,10 +204,10 @@ index dd10f386c666e4f2c6b8d33727b5195b617bd4ae..f3e71ace7b346872d9cd7c95c107cb69
         offset < JSPromise::kSizeWithEmbedderFields; offset += kTaggedSize) {
      a.Store(AccessBuilder::ForJSObjectOffset(offset),
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index 3c80e74096d08ebe4983096b310669fd3a74c50c..4b45911deb4346d136d44b803a2122c338255ef4 100644
+index 9367ba333a20bcb3a59ddb7fc0eeadc69c4d81cc..621a336d1213629ad95dea79db173b183c84f00e 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -867,6 +867,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
+@@ -877,6 +877,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
    }
    os << "\n - has_handler: " << has_handler();
    os << "\n - is_silent: " << is_silent();
@@ -247,10 +247,10 @@ index 04eaa77fa5623fc1260c00ed18a7b3a0b023dfbb..ee91206385174d3bc3392543753fbe3a
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index a5b2762ea8b13f12aec288a180c4beac4d2e33f8..cdc63ac9d0dbdd08ddd5bdf6f2d3fb9b300fa290 100644
+index 4e8605752b52efbc8d39fe5b4feb83d7dd3b06dc..a237eda826b52ab1116bb7a4bf6f86a8ea807a38 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
-@@ -604,6 +604,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
+@@ -611,6 +611,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
                        FullObjectSlot(&thread->pending_message_));
    v->VisitRootPointer(Root::kStackRoots, nullptr,
                        FullObjectSlot(&thread->context_));
@@ -259,7 +259,7 @@ index a5b2762ea8b13f12aec288a180c4beac4d2e33f8..cdc63ac9d0dbdd08ddd5bdf6f2d3fb9b
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -5620,6 +5622,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+@@ -5678,6 +5680,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
      shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
    }
  
@@ -267,7 +267,7 @@ index a5b2762ea8b13f12aec288a180c4beac4d2e33f8..cdc63ac9d0dbdd08ddd5bdf6f2d3fb9b
    InitializeThreadLocal();
  
    // Profiler has to be created after ThreadLocal is initialized
-@@ -7528,5 +7531,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
+@@ -7617,5 +7620,39 @@ void Isolate::InitializeBuiltinJSDispatchTable() {
  #endif
  }
  
@@ -308,10 +308,10 @@ index a5b2762ea8b13f12aec288a180c4beac4d2e33f8..cdc63ac9d0dbdd08ddd5bdf6f2d3fb9b
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index 54860be225e2bf6a242c63d6958e21f616441698..26ae75f916df5b22aadfd0f43ad7fbd259a635cf 100644
+index 067d7f1cdf06e399567dc545e88c66a3e75108b4..934e3caa56b3454620b9f2393723c66cf7e635ab 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
-@@ -2307,6 +2307,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2344,6 +2344,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                         v8::ExceptionContext callback_kind);
    void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
  
@@ -326,7 +326,7 @@ index 54860be225e2bf6a242c63d6958e21f616441698..26ae75f916df5b22aadfd0f43ad7fbd2
  #ifdef V8_ENABLE_WASM_SIMD256_REVEC
    void set_wasm_revec_verifier_for_test(
        compiler::turboshaft::WasmRevecVerifier* verifier) {
-@@ -2825,12 +2833,19 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2851,12 +2859,19 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    int current_thread_counter_ = 0;
  #endif
  
@@ -347,10 +347,10 @@ index 54860be225e2bf6a242c63d6958e21f616441698..26ae75f916df5b22aadfd0f43ad7fbd2
  
  // The current entered Isolate and its thread data. Do not access these
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index 86fd6298016204ba08a91945569623000091b0a8..aee09bb536207c7565b2345f19d1fb907243afa5 100644
+index 22f4131b3a856b7664bc19b2f6a9af86fea9b01e..b1055de0b3701432e4dffd31037854ebf599c98a 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -4477,6 +4477,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+@@ -4480,6 +4480,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
    DisallowGarbageCollection no_gc;
    Tagged<JSPromise> raw = *promise;
    raw->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
@@ -376,10 +376,10 @@ index 93a4a34f9f1f7fad40611d4b9432aaf944c9fbae..188619ea64c9e307f014898e4023ce79
  }
  
 diff --git a/src/profiler/heap-snapshot-generator.cc b/src/profiler/heap-snapshot-generator.cc
-index a42e7fd9b1f2f36ba6e1a61fbab8f93698bfc06d..8a6ea75fb28c5d0f2a183242b5c2f9cb27f7f539 100644
+index 908e9bb0297846fb49b8e1561a0f50dfce1bbff6..fa034eac055d729888138d3cf7024a94f408050c 100644
 --- a/src/profiler/heap-snapshot-generator.cc
 +++ b/src/profiler/heap-snapshot-generator.cc
-@@ -1938,6 +1938,9 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
+@@ -1947,6 +1947,9 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
    SetInternalReference(entry, "reactions_or_result",
                         promise->reactions_or_result(),
                         JSPromise::kReactionsOrResultOffset);
@@ -390,7 +390,7 @@ index a42e7fd9b1f2f36ba6e1a61fbab8f93698bfc06d..8a6ea75fb28c5d0f2a183242b5c2f9cb
  
  void V8HeapExplorer::ExtractJSGeneratorObjectReferences(
 diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
-index 20ba437b34afd13bc0e43e87785544160b5c109b..4fbdf90319c5fc3b3e6f60aaf1b12a33c5f537ea 100644
+index 262b9aa5aa6974a4628d0679ada91aff76567906..9142039e4f6b52727e6e590807618c5f03ba22b9 100644
 --- a/src/runtime/runtime-promise.cc
 +++ b/src/runtime/runtime-promise.cc
 @@ -216,5 +216,40 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
@@ -435,10 +435,10 @@ index 20ba437b34afd13bc0e43e87785544160b5c109b..4fbdf90319c5fc3b3e6f60aaf1b12a33
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
-index d0912afa87b6fc57ef6191b6db0b49f9d886b00b..57aa52ce75891dc9c350f52127b6e64f4ef57e64 100644
+index 23b7aeabaf04a6852daa56fa22c41b357cd1644e..9e179a45af466c56574193ec70d0b8fa1dfbf1d1 100644
 --- a/src/runtime/runtime.h
 +++ b/src/runtime/runtime.h
-@@ -411,7 +411,9 @@ namespace internal {
+@@ -429,7 +429,9 @@ namespace internal {
    F(PromiseResolveAfterResolved, 2, 1)   \
    F(ConstructSuppressedError, 3, 1)      \
    F(ConstructAggregateErrorHelper, 4, 1) \

@@ -1,4 +1,4 @@
-From c91852b0c200a9d09fdec05926add1e64e070ba6 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Harris Hancock <harris@cloudflare.com>
 Date: Wed, 3 Jul 2024 15:46:43 +0100
 Subject: Revert "heap: Add masm-specific unwinding annotations to GC
@@ -9,12 +9,12 @@ This reverts commit 42bc7bfdf56cc7a8cd7757d96aa70b83ce82d9ff.
 This commit broke our build, because we patch V8 to build push_registers_asm.cc with clang-cl on Windows, and this commit makes it an error to compile that file on Windows with any compiler. Maybe clang-cl and masm can be used together? I'm not sure. In the meantime, I'm reverting this commit in the hope of getting our V8 upgrade unblocked.
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 0c559713ea0b00afa7d22399d084dd4d259e0d20..002154c26b07b451e1adf9aeea6d641d5743cef2 100644
+index f8a0507c92c019a5d610b77e1c11975dd7dcabac..2c0574706afd90a2ff3c41d601854b39c6b82933 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4309,8 +4309,8 @@ v8_header_set("v8_internal_headers") {
-     "src/third_party/siphash/halfsiphash.h",
-     "src/third_party/utf8-decoder/utf8-decoder.h",
+@@ -4341,8 +4341,8 @@ v8_header_set("v8_internal_headers") {
+     "src/tasks/task-utils.h",
+     "src/temporal/temporal-parser.h",
      "src/torque/runtime-macro-shims.h",
 -    "src/tracing/trace-event-no-perfetto.h",
      "src/tracing/trace-event.h",
@@ -22,7 +22,7 @@ index 0c559713ea0b00afa7d22399d084dd4d259e0d20..002154c26b07b451e1adf9aeea6d641d
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
      "src/utils/address-map.h",
-@@ -6944,12 +6944,7 @@ v8_source_set("v8_heap_base") {
+@@ -6982,12 +6982,7 @@ v8_source_set("v8_heap_base") {
  
    if (is_clang || !is_win) {
      if (current_cpu == "x64") {

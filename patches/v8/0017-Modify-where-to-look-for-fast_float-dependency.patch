@@ -1,4 +1,4 @@
-From 4226548634357a303694f64fee2203bcd850e1d2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dominik Picheta <dominik@cloudflare.com>
 Date: Tue, 24 Sep 2024 15:30:12 +0000
 Subject: Modify where to look for fast_float dependency.
@@ -6,10 +6,10 @@ Subject: Modify where to look for fast_float dependency.
 Similar to fp16, this dependency now needs to be downloaded by bazel.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8c810d3707340f9b1ec7cb5b13cacae7dbc10c94..d242f66075dba2d9fc34b87f6a9055f6fa1907c1 100644
+index bc3c06083bb50475031703c4e7dc498e2d6384f5..cbef1193f598eb1bbb95eee9857ad70efb2f0d3f 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3843,23 +3843,21 @@ filegroup(
+@@ -3840,23 +3840,21 @@ filegroup(
      }),
  )
  
