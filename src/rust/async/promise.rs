@@ -1,13 +1,6 @@
 use cxx::ExternType;
 
-use crate::ffi::own_promise_node_drop_in_place;
-
 use crate::CxxResult;
-
-// TODO(now): Generate boilerplate with a macro.
-use crate::ffi::own_promise_node_unwrap_void;
-use crate::ffi::promise_drop_in_place_void;
-use crate::ffi::promise_into_own_promise_node_void;
 
 // The inner pointer is never read on Rust's side, so Rust thinks it's dead code.
 #[allow(dead_code)]
@@ -31,7 +24,7 @@ impl Drop for OwnPromiseNode {
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
         unsafe {
-            own_promise_node_drop_in_place(PtrOwnPromiseNode(self));
+            crate::ffi::own_promise_node_drop_in_place(PtrOwnPromiseNode(self));
         }
     }
 }
@@ -80,32 +73,60 @@ impl<T: PromiseTarget> Drop for Promise<T> {
     }
 }
 
+#[repr(transparent)]
+pub struct PtrPromise<T: PromiseTarget>(*mut Promise<T>);
+
+// =======================================================================================
+// Boilerplate follows
+//
 // TODO(now): Generate boilerplate with a macro.
+
 // TODO(now): Safety comment.
 unsafe impl ExternType for Promise<()> {
     type Id = cxx::type_id!("workerd::rust::async::PromiseVoid");
     type Kind = cxx::kind::Trivial;
 }
 
-#[repr(transparent)]
-pub struct PtrPromise<T: PromiseTarget>(*mut Promise<T>);
-
-// TODO(now): Generate boilerplate with a macro.
 // Safety: Raw pointers are the same size in both languages.
 unsafe impl ExternType for PtrPromise<()> {
     type Id = cxx::type_id!("workerd::rust::async::PtrPromiseVoid");
     type Kind = cxx::kind::Trivial;
 }
 
-// TODO(now): Generate boilerplate with a macro.
 impl PromiseTarget for () {
     fn into_own_promise_node(promise: Promise<Self>) -> OwnPromiseNode {
-        promise_into_own_promise_node_void(promise)
+        crate::ffi::promise_into_own_promise_node_void(promise)
     }
     unsafe fn drop_in_place(ptr: PtrPromise<Self>) {
-        promise_drop_in_place_void(ptr);
+        crate::ffi::promise_drop_in_place_void(ptr);
     }
     fn unwrap(node: OwnPromiseNode) -> std::result::Result<Self, cxx::Exception> {
-        own_promise_node_unwrap_void(node)
+        crate::ffi::own_promise_node_unwrap_void(node)
+    }
+}
+
+// ---------------------------------------------------------
+
+// TODO(now): Safety comment.
+unsafe impl ExternType for Promise<i32> {
+    type Id = cxx::type_id!("workerd::rust::async::PromiseI32");
+    type Kind = cxx::kind::Trivial;
+}
+
+// Safety: Raw pointers are the same size in both languages.
+unsafe impl ExternType for PtrPromise<i32> {
+    type Id = cxx::type_id!("workerd::rust::async::PtrPromiseI32");
+    type Kind = cxx::kind::Trivial;
+}
+
+impl PromiseTarget for i32 {
+    fn into_own_promise_node(promise: Promise<Self>) -> OwnPromiseNode {
+        crate::ffi::promise_into_own_promise_node_i32(promise)
+    }
+    unsafe fn drop_in_place(ptr: PtrPromise<Self>) {
+        crate::ffi::promise_drop_in_place_i32(ptr);
+    }
+    fn unwrap(node: OwnPromiseNode) -> std::result::Result<Self, cxx::Exception> {
+        crate::ffi::own_promise_node_unwrap_i32(node)
     }
 }

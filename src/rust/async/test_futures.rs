@@ -223,7 +223,19 @@ pub fn new_errored_future_fallible_void() -> BoxFuture<Result<()>> {
 
 pub fn new_error_handling_future_void() -> BoxFuture<()> {
     Box::pin(async {
-        let err = crate::ffi::new_errored_promise_void().await.expect_err("should see error");
+        let err = crate::ffi::new_errored_promise_void().await.expect_err("should throw");
         assert!(err.what().contains("test error"));
     }).into()
+}
+
+// TODO(now): Rename to new_promise_i32_awaiting_future_void
+pub fn new_awaiting_future_i32() -> BoxFuture<()> {
+    Box::pin(async {
+        let value = crate::ffi::new_ready_promise_i32(123).await.expect("should not throw");
+        assert_eq!(value, 123);
+    }).into()
+}
+
+pub fn new_ready_future_fallible_i32(value: i32) -> BoxFuture<Result<i32>> {
+    Box::pin(std::future::ready(Ok(value))).into()
 }

@@ -24,6 +24,7 @@ use promise::PtrOwnPromiseNode;
 use promise::PtrPromise;
 
 mod test_futures;
+use test_futures::new_awaiting_future_i32;
 use test_futures::new_error_handling_future_void;
 use test_futures::new_errored_future_fallible_void;
 use test_futures::new_layered_ready_future_void;
@@ -167,6 +168,12 @@ mod ffi {
         fn own_promise_node_unwrap_void(node: OwnPromiseNode) -> Result<()>;
         unsafe fn promise_drop_in_place_void(promise: PtrPromiseVoid);
         fn promise_into_own_promise_node_void(promise: PromiseVoid) -> OwnPromiseNode;
+
+        type PromiseI32 = crate::Promise<i32>;
+        type PtrPromiseI32 = crate::PtrPromise<i32>;
+        fn own_promise_node_unwrap_i32(node: OwnPromiseNode) -> Result<i32>;
+        unsafe fn promise_drop_in_place_i32(promise: PtrPromiseI32);
+        fn promise_into_own_promise_node_i32(promise: PromiseI32) -> OwnPromiseNode;
     }
     // -----------------------------------------------------
     // Test functions
@@ -180,6 +187,7 @@ mod ffi {
         fn new_coroutine_promise_void() -> PromiseVoid;
 
         fn new_errored_promise_void() -> PromiseVoid;
+        fn new_ready_promise_i32(value: i32) -> PromiseI32;
     }
 
     enum CloningAction {
@@ -213,5 +221,8 @@ mod ffi {
 
         fn new_errored_future_fallible_void() -> BoxFutureFallibleVoid;
         fn new_error_handling_future_void() -> BoxFutureVoid;
+
+        fn new_awaiting_future_i32() -> BoxFutureVoid;
+        fn new_ready_future_fallible_i32(value: i32) -> BoxFutureFallibleI32;
     }
 }

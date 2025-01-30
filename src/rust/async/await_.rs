@@ -17,9 +17,6 @@ use crate::CxxResult;
 // =======================================================================================
 // GuardedRustPromiseAwaiter
 
-use crate::ffi::guarded_rust_promise_awaiter_drop_in_place;
-use crate::ffi::guarded_rust_promise_awaiter_new_in_place;
-
 #[path = "await.h.rs"]
 mod await_h;
 pub use await_h::GuardedRustPromiseAwaiter;
@@ -48,7 +45,9 @@ impl Drop for GuardedRustPromiseAwaiter {
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
         unsafe {
-            guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter(self));
+            crate::ffi::guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter(
+                self,
+            ));
         }
     }
 }
@@ -170,7 +169,7 @@ impl PromiseAwaiter {
         //
         // https://doc.rust-lang.org/std/ptr/index.html#safety
         awaiter.get_or_init(move |ptr: *mut GuardedRustPromiseAwaiter| unsafe {
-            guarded_rust_promise_awaiter_new_in_place(
+            crate::ffi::guarded_rust_promise_awaiter_new_in_place(
                 PtrGuardedRustPromiseAwaiter(ptr),
                 rust_waker_ptr,
                 node.expect("node should be Some in call to init()"),

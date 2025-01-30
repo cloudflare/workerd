@@ -231,6 +231,24 @@ KJ_TEST(".awaiting a Promise<T> from Rust can produce an Err Result") {
   }().wait(waitScope);
 }
 
+KJ_TEST("Rust can await Promise<int32_t>") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  []() -> kj::Promise<void> {
+    co_await new_awaiting_future_i32();
+  }().wait(waitScope);
+}
+
+KJ_TEST("C++ can await BoxFuture<i32>") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  []() -> kj::Promise<void> {
+    KJ_EXPECT(co_await new_ready_future_fallible_i32(123) == 123);
+  }().wait(waitScope);
+}
+
 // TODO(now): More test cases.
 //   - Standalone ArcWaker tests. Ensure Rust calls ArcWaker destructor when we expect.
 //   - Ensure Rust calls PromiseNode destructor from LazyRustPromiseAwaiter.
