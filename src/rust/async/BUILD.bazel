@@ -20,6 +20,7 @@ wd_cc_library(
         "executor-guarded.c++",
         "future.c++",
         "promise.c++",
+        "promise-boilerplate.c++",
         "test-promises.c++",
         "waker.c++",
     ],

@@ -133,12 +133,6 @@ mod ffi {
         type PtrOwnPromiseNode = crate::PtrOwnPromiseNode;
 
         unsafe fn own_promise_node_drop_in_place(node: PtrOwnPromiseNode);
-
-        // TODO(now): Generate boilerplate with a macro.
-        type PromiseVoid = crate::Promise<()>;
-        type PtrPromiseVoid = crate::PtrPromise<()>;
-        fn promise_into_own_promise_node_void(promise: PromiseVoid) -> OwnPromiseNode;
-        unsafe fn promise_drop_in_place_void(promise: PtrPromiseVoid);
     }
 
     unsafe extern "C++" {
@@ -161,12 +155,19 @@ mod ffi {
         ) -> bool;
         fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>) -> bool;
 
-        // TODO(now): Generate boilerplate with a macro.
-        fn guarded_rust_promise_awaiter_unwrap_void(
-            awaiter: Pin<&mut GuardedRustPromiseAwaiter>,
-        ) -> Result<()>;
+        fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
     }
 
+    unsafe extern "C++" {
+        include!("workerd/rust/async/promise-boilerplate.h");
+
+        // TODO(now): Generate boilerplate with a macro.
+        type PromiseVoid = crate::Promise<()>;
+        type PtrPromiseVoid = crate::PtrPromise<()>;
+        fn own_promise_node_unwrap_void(node: OwnPromiseNode) -> Result<()>;
+        unsafe fn promise_drop_in_place_void(promise: PtrPromiseVoid);
+        fn promise_into_own_promise_node_void(promise: PromiseVoid) -> OwnPromiseNode;
+    }
     // -----------------------------------------------------
     // Test functions
 

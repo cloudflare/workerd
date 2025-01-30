@@ -17,12 +17,4 @@ void own_promise_node_drop_in_place(PtrOwnPromiseNode node) {
   kj::dtor(*node);
 }
 
-OwnPromiseNode promise_into_own_promise_node_void(PromiseVoid promise) {
-  return kj::_::PromiseNode::from(kj::mv(promise));
-};
-
-void promise_drop_in_place_void(PtrPromiseVoid promise) {
-  kj::dtor(*promise);
-}
-
 }  // namespace workerd::rust::async

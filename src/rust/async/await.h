@@ -113,19 +113,7 @@ public:
   // Preconditions: `(*rustWaker).is_some()` is true.
   bool poll();
 
-  template <typename T>
-  T unwrap() {
-    kj::_::ExceptionOr<kj::_::FixVoid<T>> result;
-
-    node->get(result);
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([this]() {
-      node = nullptr;
-    })) {
-      result.addException(kj::mv(exception));
-    }
-
-    return kj::_::convertToReturn(kj::mv(result));
-  }
+  OwnPromiseNode take_own_promise_node();
 
 private:
   // Private API to set or query done-ness.
@@ -162,9 +150,8 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
     return get().poll();
   }
 
-  template <typename T>
-  T unwrap() {
-    return get().unwrap<T>();
+  OwnPromiseNode take_own_promise_node() {
+    return get().take_own_promise_node();
   }
 };
 
@@ -173,9 +160,6 @@ using PtrGuardedRustPromiseAwaiter = GuardedRustPromiseAwaiter*;
 void guarded_rust_promise_awaiter_new_in_place(
     PtrGuardedRustPromiseAwaiter, RustWaker*, OwnPromiseNode);
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
-
-// TODO(now): Generate boilerplate with a macro.
-void guarded_rust_promise_awaiter_unwrap_void(GuardedRustPromiseAwaiter&);
 
 // =======================================================================================
 // CoAwaitWaker

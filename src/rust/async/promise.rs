@@ -1,14 +1,11 @@
-use std::pin::Pin;
-
 use cxx::ExternType;
 
 use crate::ffi::own_promise_node_drop_in_place;
 
 use crate::CxxResult;
-use crate::GuardedRustPromiseAwaiter;
 
 // TODO(now): Generate boilerplate with a macro.
-use crate::ffi::guarded_rust_promise_awaiter_unwrap_void;
+use crate::ffi::own_promise_node_unwrap_void;
 use crate::ffi::promise_drop_in_place_void;
 use crate::ffi::promise_into_own_promise_node_void;
 
@@ -63,7 +60,7 @@ unsafe impl ExternType for PtrOwnPromiseNode {
 pub trait PromiseTarget: Sized {
     fn into_own_promise_node(this: Promise<Self>) -> OwnPromiseNode;
     unsafe fn drop_in_place(this: PtrPromise<Self>);
-    fn unwrap(awaiter: Pin<&mut GuardedRustPromiseAwaiter>) -> CxxResult<Self>;
+    fn unwrap(node: OwnPromiseNode) -> CxxResult<Self>;
 }
 
 use std::marker::PhantomData;
@@ -102,15 +99,13 @@ unsafe impl ExternType for PtrPromise<()> {
 
 // TODO(now): Generate boilerplate with a macro.
 impl PromiseTarget for () {
-    fn into_own_promise_node(this: Promise<Self>) -> OwnPromiseNode {
-        promise_into_own_promise_node_void(this)
+    fn into_own_promise_node(promise: Promise<Self>) -> OwnPromiseNode {
+        promise_into_own_promise_node_void(promise)
     }
-    unsafe fn drop_in_place(this: PtrPromise<Self>) {
-        promise_drop_in_place_void(this);
+    unsafe fn drop_in_place(ptr: PtrPromise<Self>) {
+        promise_drop_in_place_void(ptr);
     }
-    fn unwrap(
-        awaiter: Pin<&mut GuardedRustPromiseAwaiter>,
-    ) -> std::result::Result<Self, cxx::Exception> {
-        guarded_rust_promise_awaiter_unwrap_void(awaiter)
+    fn unwrap(node: OwnPromiseNode) -> std::result::Result<Self, cxx::Exception> {
+        own_promise_node_unwrap_void(node)
     }
 }

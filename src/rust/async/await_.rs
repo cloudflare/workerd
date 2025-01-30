@@ -112,7 +112,7 @@ impl<T: PromiseTarget> Future for PromiseFuture<T> {
         // TODO(now): Safety comment.
         let mut awaiter = unsafe { self.map_unchecked_mut(|s| &mut s.awaiter) };
         if awaiter.as_mut().poll(cx) {
-            Poll::Ready(T::unwrap(awaiter.get_awaiter()))
+            Poll::Ready(T::unwrap(awaiter.get_awaiter().take_own_promise_node()))
         } else {
             Poll::Pending
         }

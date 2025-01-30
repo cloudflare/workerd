@@ -287,16 +287,17 @@ bool RustPromiseAwaiter::poll() {
   return false;
 }
 
+OwnPromiseNode RustPromiseAwaiter::take_own_promise_node() {
+  KJ_ASSERT(isDone(), "take_own_promise_node() should only be called after poll() returns true");
+  KJ_ASSERT(node.get() != nullptr, "take_own_promise_node() should only be called once");
+  return kj::mv(node);
+}
+
 void guarded_rust_promise_awaiter_new_in_place(PtrGuardedRustPromiseAwaiter ptr, RustWaker* rustWaker, OwnPromiseNode node) {
   kj::ctor(*ptr, *rustWaker, kj::mv(node));
 }
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr) {
   kj::dtor(*ptr);
-}
-
-// TODO(now): Generate boilerplate with a macro.
-void guarded_rust_promise_awaiter_unwrap_void(GuardedRustPromiseAwaiter& awaiter) {
-  return awaiter.unwrap<void>();
 }
 
 // =======================================================================================
