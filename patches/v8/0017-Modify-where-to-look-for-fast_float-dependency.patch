@@ -1,4 +1,4 @@
-From b56cfb15c4513e83ffd31e4e7653c572ea0c0395 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dominik Picheta <dominik@cloudflare.com>
 Date: Tue, 24 Sep 2024 15:30:12 +0000
 Subject: Modify where to look for fast_float dependency.

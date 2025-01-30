@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.3.415.17"
+VERSION = "13.3.415.18"
 
-INTEGRITY = "sha256-J8JbPX90nicruZRg+c2PtM65gk5QWH7bmFHY30eXsw4="
+INTEGRITY = "sha256-irTC8837o+iRvTVx6YatlscLn3+nJcr5RumtHCMUhW0="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -27,6 +27,7 @@ PATCHES = [
     "0019-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
     "0020-Disable-memory-leak-assert-when-shutting-down-V8.patch",
     "0021-Enable-V8-shared-linkage.patch",
+    "0022-Fix-macOS-build.patch",
 ]
 
 # V8 and its dependencies

@@ -169,11 +169,6 @@ bind(
     ]
 ]
 
-bind(
-    name = "absl_optional",
-    actual = "@com_google_absl//absl/types:optional",
-)
-
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",

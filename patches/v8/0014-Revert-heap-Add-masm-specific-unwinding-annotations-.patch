@@ -1,4 +1,4 @@
-From f33abd94012ad9b5eb47592c27ab273bd7c6afb8 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Harris Hancock <harris@cloudflare.com>
 Date: Wed, 3 Jul 2024 15:46:43 +0100
 Subject: Revert "heap: Add masm-specific unwinding annotations to GC
