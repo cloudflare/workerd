@@ -210,6 +210,13 @@ wd_cc_library(
     deps = ["@capnp-cpp//src/capnp"],
 )
 
+wd_cc_library(
+    name = "exception",
+    hdrs = ["exception.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
 exports_files(["autogate.h"])
 
 [

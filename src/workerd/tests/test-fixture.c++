@@ -212,6 +212,9 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
     return kj::none;
   }
+  bool hasExcessivelyExceededHeapLimit() const override {
+    return false;
+  }
 };
 
 struct MockErrorReporter final: public Worker::ValidationErrorReporter {

@@ -16,6 +16,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/exception.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
 
@@ -1257,23 +1258,42 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
   struct RefcountedFulfiller: public Finalizeable, public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
+    kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
     bool isDone = false;
 
-    RefcountedFulfiller(kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller)
-        : fulfiller(kj::mv(fulfiller)) {}
+    RefcountedFulfiller(kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate,
+        kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller)
+        : fulfiller(kj::mv(fulfiller)),
+          maybeIsolate(kj::mv(maybeIsolate)) {}
 
     ~RefcountedFulfiller() noexcept(false) {
       if (!isDone) {
+        reject();
+      }
+    }
+
+   private:
+    void reject() {
+      // We use a weak isolate reference here in case the isolate gets dropped before this code
+      // is executed. In that case we default to `false` as we cannot access the original isolate.
+      auto hasExcessivelyExceededHeapLimit = maybeIsolate->tryAddStrongRef()
+                                                 .map([](kj::Own<const Worker::Isolate> isolate) {
+        return isolate->getLimitEnforcer().hasExcessivelyExceededHeapLimit();
+      }).orDefault(false);
+      if (hasExcessivelyExceededHeapLimit) {
+        auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error, "Worker has exceeded memory limit.");
+        e.setDetail(MEMORY_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+        fulfiller->reject(kj::mv(e));
+      } else {
         // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
         // this promise.
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
       }
     }
 
-   private:
     kj::Maybe<kj::StringPtr> finalize() override {
       if (!isDone) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
+        reject();
         isDone = true;
         return "A hanging Promise was canceled. This happens when the worker runtime is waiting "
                "for a Promise from JavaScript to resolve, but has detected that the Promise "
@@ -1284,7 +1304,8 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
       }
     }
   };
-  auto fulfiller = kj::refcounted<RefcountedFulfiller>(kj::mv(paf.fulfiller));
+  auto& isolate = Worker::Isolate::from(js);
+  auto fulfiller = kj::refcounted<RefcountedFulfiller>(isolate.getWeakRef(), kj::mv(paf.fulfiller));
 
   auto errorHandler = [fulfiller = addObject(kj::addRef(*fulfiller))](
                           jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
