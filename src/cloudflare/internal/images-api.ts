@@ -87,11 +87,11 @@ class ImageTransformerImpl implements ImageTransformer {
 
   public draw(
     image: ReadableStream<Uint8Array> | ImageTransformer,
-    options?: ImageDrawOptions
+    options: ImageDrawOptions = {}
   ): this {
     if (isTransformer(image)) {
       image.consume();
-      this.transforms.push(new DrawTransformer(image, options || {}));
+      this.transforms.push(new DrawTransformer(image, options));
     } else {
       this.transforms.push(
         new DrawTransformer(
@@ -99,7 +99,7 @@ class ImageTransformerImpl implements ImageTransformer {
             this.fetcher,
             image as ReadableStream<Uint8Array>
           ),
-          options || {}
+          options
         )
       );
     }
@@ -172,7 +172,7 @@ class ImageTransformerImpl implements ImageTransformer {
             imageIndex: targetImageIndex,
             ...transform,
           });
-        } else if (isDrawTransformer(transform)) {
+        } else {
           // Drawn child image
           // Set the input for the drawn image on the form
           const drawImageIndex = appendDrawImage(
