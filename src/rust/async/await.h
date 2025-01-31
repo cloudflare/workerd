@@ -90,29 +90,20 @@ public:
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent);
 
   // -------------------------------------------------------
-  // poll() API exposed to Rust code
+  // API exposed to Rust code
   //
   // Additionally, see GuardedRustPromiseAwaiter below, which mediates access to this API.
 
-  // Poll this Promise for readiness using a KjWaker.
+  // Poll this Promise for readiness.
   //
-  // If we are polled by a Future being driven by a KJ coroutine's `co_await` expression, then we
-  // have an optimization opportunity: when our wrapped Promise becomes ready, we can arm the
-  // `co_await` expression's `CoAwaitWaker` directly to tell it to poll us again. This allows
-  // the Rust call site of `poll()` to avoid having to clone its Waker, which can be high overhead.
+  // If the Waker is a CxxWaker, you may pass the CxxWaker pointer as a second parameter. This may
+  // allow the implementation of `poll()` to optimize the wake by arming a KJ Event directly when
+  // the wrapped Promise becomes ready.
   //
-  // Preconditions:
-  // - `waker.is_current()` is true: the KjWaker is associated with the event loop running on the
-  //   current thread.
-  // - `(*optionWaker).is_none()` is true.
-  bool poll_with_cxx_waker(const WakerRef& waker, const CoAwaitWaker& cxxWaker);
+  // If the Waker is not a CxxWaker, the `maybeCxxWaker` pointer argument must be nullptr.
+  bool poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker);
 
-  // Poll this Promise for readiness using a clone of a Waker stored on the Rust side of the FFI
-  // boundary.
-  //
-  // Preconditions: `(*optionWaker).is_some()` is true.
-  bool poll(const WakerRef& waker);
-
+  // Release ownership of the OwnPromiseNode. Asserts if called before the Promise is ready.
   OwnPromiseNode take_own_promise_node();
 
 private:
@@ -121,11 +112,9 @@ private:
   bool isDone() const;
 
   // The Rust code which instantiates RustPromiseAwaiter does so with a OptionWaker object right next
-  // to the RustPromiseAwaiter, such that its lifetime encompasses RustPromiseAwaiter's. Thus, our
-  // reference to our OptionWaker is stable. We use the OptionWaker to wake our enclosing Future if we
-  // were last polled with a non-KjWaker. The Rust code which calls our `poll*()` functions stores a
-  // clone of the actual `std::task::Waker` inside the OptionWaker before calling poll(), and clears
-  // the OptionWaker before calling `poll_with_cxx_waker()`.
+  // to the RustPromiseAwaiter, such that it is dropped after RustPromiseAwaiter. Thus, our
+  // reference to our OptionWaker is stable. We use the OptionWaker to (optionally) store a clone of
+  // the Waker with which we were last polled.
   //
   // When we wake our enclosing Future, either with CoAwaitWaker or with OptionWaker, we nullify
   // this Maybe. Therefore, this Maybe being kj::none means our OwnPromiseNode is ready, and it is
@@ -143,13 +132,9 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   // We need to inherit constructors or else placement-new will try to aggregate-initialize us.
   using ExecutorGuarded<RustPromiseAwaiter>::ExecutorGuarded;
 
-  bool poll_with_cxx_waker(const WakerRef& waker, const CoAwaitWaker& cxxWaker) {
-    return get().poll_with_cxx_waker(waker, cxxWaker);
+  bool poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker) {
+    return get().poll(waker, maybeCxxWaker);
   }
-  bool poll(const WakerRef& waker) {
-    return get().poll(waker);
-  }
-
   OwnPromiseNode take_own_promise_node() {
     return get().take_own_promise_node();
   }
@@ -210,6 +195,7 @@ public:
 
   // True if the current thread's kj::Executor is the same as the one that was active when this
   // CoAwaitWaker was constructed. This allows Rust to optimize Promise `.await`s.
+  // TODO(now): Eliminate, wrap in ExecutorGuarded instead.
   bool is_current() const;
 
   // -------------------------------------------------------

@@ -9,9 +9,6 @@ use future::box_future_drop_in_place_void;
 use future::box_future_poll_fallible_i32;
 use future::box_future_poll_fallible_void;
 use future::box_future_poll_void;
-use future::box_future_poll_with_co_await_waker_fallible_i32;
-use future::box_future_poll_with_co_await_waker_fallible_void;
-use future::box_future_poll_with_co_await_waker_void;
 pub use future::BoxFuture;
 use future::PtrBoxFuture;
 
@@ -59,13 +56,6 @@ mod ffi {
         fn drop(&self);
     }
 
-    unsafe extern "C++" {
-        include!("workerd/rust/async/await.h");
-
-        type CoAwaitWaker;
-        fn is_current(&self) -> bool;
-    }
-
     extern "Rust" {
         type WakerRef<'a>;
     }
@@ -111,11 +101,6 @@ mod ffi {
             waker: &CxxWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
         ) -> bool;
-        fn box_future_poll_with_co_await_waker_void(
-            future: &mut BoxFutureVoid,
-            waker: &CoAwaitWaker,
-            fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
-        ) -> bool;
         unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
 
         // TODO(now): Generate boilerplate with a macro.
@@ -124,21 +109,11 @@ mod ffi {
             waker: &CxxWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
         ) -> Result<bool>;
-        fn box_future_poll_with_co_await_waker_fallible_void(
-            future: &mut BoxFutureFallibleVoid,
-            waker: &CoAwaitWaker,
-            fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
-        ) -> Result<bool>;
         unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFutureFallibleVoid);
 
         fn box_future_poll_fallible_i32(
             future: &mut BoxFutureFallibleI32,
             waker: &CxxWaker,
-            fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
-        ) -> Result<bool>;
-        fn box_future_poll_with_co_await_waker_fallible_i32(
-            future: &mut BoxFutureFallibleI32,
-            waker: &CoAwaitWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
         ) -> Result<bool>;
         unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFutureFallibleI32);
@@ -166,13 +141,12 @@ mod ffi {
         );
         unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: PtrGuardedRustPromiseAwaiter);
 
-        // TODO(now): Reduce to just one function.
-        fn poll_with_cxx_waker(
+        // TODO(now): Safety comment.
+        unsafe fn poll(
             self: Pin<&mut GuardedRustPromiseAwaiter>,
             waker: &WakerRef,
-            cxx_waker: &CoAwaitWaker,
+            maybe_cxx_waker: *const CxxWaker,
         ) -> bool;
-        fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: &WakerRef) -> bool;
 
         fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
     }

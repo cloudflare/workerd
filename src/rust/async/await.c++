@@ -232,36 +232,7 @@ bool RustPromiseAwaiter::isDone() const {
   return optionWaker == kj::none;
 }
 
-bool RustPromiseAwaiter::poll_with_cxx_waker(const WakerRef& waker, const CoAwaitWaker& coAwaitWaker) {
-  // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
-  //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
-  //   suspended at least once, we may be able to check for that through KjWaker.
-
-  // TODO(now): Accept const CxxWaker& and try to downcast to optimize.
-
-  if (isDone()) {
-    return true;
-  }
-
-  KJ_ASSERT_NONNULL(
-      optionWaker, "isDone() returned false so we must have a OptionWaker")
-      .set_none();
-
-  // Safety: const_cast is okay, because `coAwaitWaker.is_current()` means we are running on the same
-  // event loop that the CoAwaitWaker's Event base class is a member of.
-  KJ_ASSERT(coAwaitWaker.is_current());
-  auto& mutCoAwaitWaker = const_cast<CoAwaitWaker&>(coAwaitWaker);
-
-  // Store a reference to the current `co_await` expression's Future polling Event. The reference is
-  // weak, and will be cleared if the `co_await` expression happens to end before our Promise is
-  // ready. In the more likely case that our Promise becomes ready while the `co_await` expression
-  // is still active, we'll arm its Event so it can `poll()` us again.
-  linkedGroup().set(mutCoAwaitWaker);
-
-  return false;
-}
-
-bool RustPromiseAwaiter::poll(const WakerRef& waker) {
+bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker) {
   // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
   //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
   //   suspended at least once, we may be able to check for that through KjWaker, but this path
@@ -271,13 +242,42 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker) {
     return true;
   }
 
-  KJ_ASSERT_NONNULL(
-      optionWaker, "isDone() returned false so we must have a OptionWaker")
-      .set(waker);
+  auto& optionWakerRef = KJ_ASSERT_NONNULL(
+      optionWaker, "isDone() returned false so we must have a OptionWaker");
 
-  // By calling this overload of `poll()`, our caller is informing us that we should use our
-  // OptionWaker to wake the Future when the Promise becomes ready. To do that, we need to clear our
-  // reference to the CoAwaitWaker.
+  KJ_IF_SOME(cxxWaker, maybeCxxWaker) {
+    KJ_IF_SOME(coAwaitWaker, kj::dynamicDowncastIfAvailable<const CoAwaitWaker>(cxxWaker)) {
+      if (coAwaitWaker.is_current()) {
+        // Optimized path. The Future which is polling our Promise is in turn being polled by a
+        // `co_await` expression. We can arm the `co_await` expression's KJ Event directly when our
+        // Promise is ready.
+
+        // If we had an opaque Waker stored in OptionWaker before, drop it now, as we won't be
+        // needing it.
+        optionWakerRef.set_none();
+
+        // Store a reference to the current `co_await` expression's Future polling Event. The
+        // reference is weak, and will be cleared if the `co_await` expression happens to end before
+        // our Promise is ready. In the more likely case that our Promise becomes ready while the
+        // `co_await` expression is still active, we'll arm its Event so it can `poll()` us again.
+        //
+        // Safety: const_cast is okay, because `coAwaitWaker.is_current()` means we are running on
+        // the same event loop that the CoAwaitWaker's Event base class is a member of.
+        auto& mutCoAwaitWaker = const_cast<CoAwaitWaker&>(coAwaitWaker);
+        linkedGroup().set(mutCoAwaitWaker);
+
+        return false;
+      }
+    }
+  }
+
+  // Unoptimized fallback path.
+
+  // Tell our OptionWaker to store a clone of whatever Waker we were given.
+  optionWakerRef.set(waker);
+
+  // Clearing our reference to the CoAwaitWaker (if we have one) tells our fire() implementation to
+  // use our OptionWaker to perform the wake.
   linkedGroup().set(kj::none);
 
   return false;

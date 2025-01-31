@@ -6,8 +6,6 @@
 
 namespace workerd::rust::async {
 
-class CoAwaitWaker;
-
 template <typename T>
 class BoxFuture;
 
@@ -84,9 +82,6 @@ template <typename T>
 void box_future_drop_in_place(BoxFuture<T>* self);
 template <typename T>
 bool box_future_poll(BoxFuture<T>& self, const CxxWaker& waker, BoxFutureFulfiller<T>&);
-template <typename T>
-bool box_future_poll_with_co_await_waker(
-    BoxFuture<T>& self, const CoAwaitWaker& waker, BoxFutureFulfiller<T>&);
 
 // A `Pin<Box<dyn Future<Output = ()>>>` owned by C++.
 //
@@ -105,24 +100,10 @@ public:
 
   using ExceptionOrValue = kj::_::ExceptionOr<kj::_::FixVoid<RemoveFallible<T>>>;
 
-  // This function constructs a `std::task::Context` in Rust wrapping the given `CxxWaker`. It then
-  // calls the future's `Future::poll()` trait function.
+  // Poll our Future with the given CxxWaker. Returns true if the future returned `Poll::Ready`,
+  // false if the future returned `Poll::Pending`.
   //
-  // Returns true if the future returned `Poll::Ready`, false if the future returned
-  // `Poll::Pending`.
-  //
-  // The `poll()` overload which accepts a `const CoAwaitWaker&` exists to optimize awaiting KJ
-  // Promises inside of this Future. By passing a distinct type, instead of the abstract CxxWaker,
-  // Rust can recognize the Waker later when it tries to poll a KJ Promise. If the Waker it has is a
-  // CoAwaitWaker associated with the current thread's event loop, it passes it to our
-  // Promise-to-Future adapter class, RustPromiseAwaiter. This gives RustPromiseAwaiter access to a
-  // KJ Event which, when armed, will poll the Future being `co_awaited`. Thus, arming the Event
-  // takes the place of waking the Waker.
-  //
-  // The overload accepting a `const CxxWaker&` exists mostly to simplify testing.
-  //
-  // TODO(now): Figure out how to return non-unit/void values and exceptions.
-  // TODO(now): Get rid of one of these overloads.
+  // `output` will contain the result of the Future iff `poll()` returns true.
   bool poll(const CxxWaker& waker, ExceptionOrValue& output) noexcept {
     bool ready = false;
 
@@ -130,20 +111,6 @@ public:
       BoxFutureFulfiller<T> fulfiller(output);
       // Safety: BoxFutureFulfiller is effectively pinned because it's a temporary.
       ready = box_future_poll(*this, waker, fulfiller);
-    })) {
-      output.addException(kj::mv(exception));
-      ready = true;
-    }
-
-    return ready;
-  }
-  bool poll(const CoAwaitWaker& waker, ExceptionOrValue& output) noexcept {
-    bool ready = false;
-
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
-      BoxFutureFulfiller<T> fulfiller(output);
-      // Safety: BoxFutureFulfiller is effectively pinned.
-      ready = box_future_poll_with_co_await_waker(*this, waker, fulfiller);
     })) {
       output.addException(kj::mv(exception));
       ready = true;

@@ -11,10 +11,6 @@ template <>
 bool box_future_poll(BoxFuture<void>& self, const CxxWaker& waker, BoxFutureFulfiller<void>& fulfiller) {
   return box_future_poll_void(self, waker, fulfiller);
 }
-template <>
-bool box_future_poll_with_co_await_waker(BoxFuture<void>& self, const CoAwaitWaker& waker, BoxFutureFulfiller<void>& fulfiller) {
-  return box_future_poll_with_co_await_waker_void(self, waker, fulfiller);
-}
 
 // ---------------------------------------------------------
 
@@ -25,11 +21,6 @@ void box_future_drop_in_place(BoxFuture<Fallible<void>>* self) {
 template <>
 bool box_future_poll(BoxFuture<Fallible<void>>& self, const CxxWaker& waker, BoxFutureFulfiller<Fallible<void>>& fulfiller) {
   return box_future_poll_fallible_void(self, waker, fulfiller);
-}
-template <>
-bool box_future_poll_with_co_await_waker(
-    BoxFuture<Fallible<void>>& self, const CoAwaitWaker& waker, BoxFutureFulfiller<Fallible<void>>& fulfiller) {
-  return box_future_poll_with_co_await_waker_fallible_void(self, waker, fulfiller);
 }
 
 // ---------------------------------------------------------
@@ -44,13 +35,6 @@ bool box_future_poll(
     const CxxWaker& waker,
     BoxFutureFulfiller<Fallible<int32_t>>& fulfiller) {
   return box_future_poll_fallible_i32(self, waker, fulfiller);
-}
-template <>
-bool box_future_poll_with_co_await_waker(
-    BoxFuture<Fallible<int32_t>>& self,
-    const CoAwaitWaker& waker,
-    BoxFutureFulfiller<Fallible<int32_t>>& fulfiller) {
-  return box_future_poll_with_co_await_waker_fallible_i32(self, waker, fulfiller);
 }
 
 }  // namespace workerd::rust::async

@@ -84,75 +84,16 @@ static CXX_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
     cxx_waker_drop,
 );
 
-use crate::ffi::CoAwaitWaker;
-
-// Safety: We use the type system to express the Sync nature of CoAwaitWaker in the cxx-rs FFI
-// boundary. Specifically, we only allow invocations on const KjWakers, and in KJ C++, use of
-// const-qualified functions is thread-safe by convention. Our implementations of KjWakers in C++
-// respect this convention.
-//
-// Note: Implementing these traits does not seem to be required for building, but the Waker
-// documentation makes it clear Send and Sync are a requirement of the pointed-to type.
-//
-// https://doc.rust-lang.org/std/task/struct.RawWaker.html
-// https://doc.rust-lang.org/std/task/struct.RawWakerVTable.html
-unsafe impl Send for CoAwaitWaker {}
-unsafe impl Sync for CoAwaitWaker {}
-
-impl From<&CoAwaitWaker> for Waker {
-    fn from(waker: &CoAwaitWaker) -> Self {
-        let waker = RawWaker::new(
-            waker as *const CoAwaitWaker as *const (),
-            &CO_AWAIT_WAKER_VTABLE,
-        );
-        // Safety: CoAwaitWaker's Rust-exposed interface is Send and Sync and its RawWakerVTable
-        // implementation functions are all thread-safe.
-        //
-        // https://doc.rust-lang.org/std/task/struct.Waker.html#safety-1
-        unsafe { Waker::from_raw(waker) }
-    }
-}
-
-/// If `waker` wraps a `CoAwaitWaker` associated with the current thread's KJ event loop, return a
-/// reference to the `CoAwaitWaker`.
-pub fn deref_co_await_waker<'a>(waker: &Waker) -> Option<&'a CoAwaitWaker> {
-    if waker.vtable() == &CO_AWAIT_WAKER_VTABLE {
-        let data = waker.data();
-        assert!(!data.is_null());
-        let p = data as *const CoAwaitWaker;
-
-        // Safety:
-        // 1. p is guaranteed non-null by the assertion above.
-        // 2. We assume the Waker was constructed correctly to begin with in the C++ -> Rust call to
-        //    `poll()`, and that therefore the pointer still points to valid memory. Our `poll()`
-        //    implementation that receives the CoAwaitWaker type receives it by const borrow, and we are
-        //    creating another const borrow here, and no mutable borrows exist, so there is no UB
-        //    in that regard.
-        // 3. We do not read or write the CoAwaitWaker's memory, so there are no atomicity concerns nor
-        //    interleaved pointer/reference access concerns.
-        //
-        // https://doc.rust-lang.org/std/ptr/index.html#safety
-        let co_await_waker = unsafe { &*p };
-
-        if co_await_waker.is_current() {
-            Some(co_await_waker)
-        } else {
-            None
-        }
+/// If `waker` wraps a `CxxWaker`, return the `CxxWaker` pointer it was originally constructed with,
+/// or null if `waker` does not wrap a `CxxWaker`. Note that the `CxxWaker` pointer originally used
+/// to construct `waker` may itself by null.
+pub fn try_into_cxx_waker_ptr<'a>(waker: &Waker) -> *const CxxWaker {
+    if waker.vtable() == &CXX_WAKER_VTABLE {
+        waker.data() as *const CxxWaker
     } else {
-        None
+        std::ptr::null() as *const CxxWaker
     }
 }
-
-// Define a separate `CO_AWAIT_WAKER_VTABLE` object so we can distinguish KjWakers from other Waker
-// objects. Since KjWakers have CxxWaker as a base class, we can re-use the CxxWaker's vtable
-// functions.
-static CO_AWAIT_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    cxx_waker_clone,
-    cxx_waker_wake,
-    cxx_waker_wake_by_ref,
-    cxx_waker_drop,
-);
 
 // =======================================================================================
 // OptionWaker

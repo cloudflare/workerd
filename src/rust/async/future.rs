@@ -7,7 +7,6 @@ use std::task::Waker;
 
 use cxx::ExternType;
 
-use crate::ffi::CoAwaitWaker;
 use crate::ffi::CxxWaker;
 
 use crate::Result;
@@ -80,22 +79,6 @@ pub fn box_future_poll_void(
     }
 }
 
-pub fn box_future_poll_with_co_await_waker_void(
-    future: &mut BoxFuture<()>,
-    waker: &CoAwaitWaker,
-    fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
-) -> bool {
-    let waker = Waker::from(waker);
-    let mut cx = Context::from_waker(&waker);
-    match future.0.as_mut().poll(&mut cx) {
-        Ready(_v) => {
-            fulfiller.fulfill();
-            true
-        }
-        Pending => false,
-    }
-}
-
 pub unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFuture<()>) {
     std::ptr::drop_in_place(ptr.0);
 }
@@ -139,23 +122,6 @@ pub fn box_future_poll_fallible_void(
     }
 }
 
-pub fn box_future_poll_with_co_await_waker_fallible_void(
-    future: &mut BoxFuture<Result<()>>,
-    waker: &CoAwaitWaker,
-    fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
-) -> Result<bool> {
-    let waker = Waker::from(waker);
-    let mut cx = Context::from_waker(&waker);
-    match future.0.as_mut().poll(&mut cx) {
-        Ready(Ok(_v)) => {
-            fulfiller.fulfill();
-            Ok(true)
-        }
-        Ready(Err(e)) => Err(e),
-        Pending => Ok(false),
-    }
-}
-
 pub unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFuture<Result<()>>) {
     std::ptr::drop_in_place(ptr.0);
 }
@@ -178,23 +144,6 @@ use crate::ffi::BoxFutureFulfillerFallibleI32;
 pub fn box_future_poll_fallible_i32(
     future: &mut BoxFuture<Result<i32>>,
     waker: &CxxWaker,
-    fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
-) -> Result<bool> {
-    let waker = Waker::from(waker);
-    let mut cx = Context::from_waker(&waker);
-    match future.0.as_mut().poll(&mut cx) {
-        Ready(Ok(v)) => {
-            fulfiller.fulfill(v);
-            Ok(true)
-        }
-        Ready(Err(e)) => Err(e),
-        Pending => Ok(false),
-    }
-}
-
-pub fn box_future_poll_with_co_await_waker_fallible_i32(
-    future: &mut BoxFuture<Result<i32>>,
-    waker: &CoAwaitWaker,
     fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
 ) -> Result<bool> {
     let waker = Waker::from(waker);

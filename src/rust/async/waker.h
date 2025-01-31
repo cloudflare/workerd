@@ -85,8 +85,6 @@ PromiseArcWakerPair newPromiseAndArcWaker(const kj::Executor& executor);
 // =======================================================================================
 // KjWaker
 
-class CoAwaitWaker;
-
 // KjWaker is intended to live locally on the stack or in a coroutine frame. Trying to `clone()` it
 // will cause it to allocate an ArcWaker for the caller.
 class KjWaker: public CxxWaker {
