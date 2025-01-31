@@ -111,10 +111,6 @@ public:
   OwnPromiseNode take_own_promise_node();
 
 private:
-  // Private API to set or query done-ness.
-  void setDone();
-  bool isDone() const;
-
   // The Rust code which instantiates RustPromiseAwaiter does so with a OptionWaker object right
   // next to the RustPromiseAwaiter, such that it is dropped after RustPromiseAwaiter. Thus, our
   // reference to our OptionWaker is stable. We use the OptionWaker to (optionally) store a clone of
@@ -123,7 +119,7 @@ private:
   // When we wake our enclosing Future, either with the FuturePollEvent or with OptionWaker, we
   // nullify this Maybe. Therefore, this Maybe being kj::none means our OwnPromiseNode is ready, and
   // it is safe to call `node->get()` on it.
-  kj::Maybe<OptionWaker&> optionWaker;
+  kj::Maybe<OptionWaker&> maybeOptionWaker;
 
   kj::UnwindDetector unwindDetector;
   OwnPromiseNode node;
