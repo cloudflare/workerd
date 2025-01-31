@@ -3213,6 +3213,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       // No limit on the number of iterations in workerd
       return kj::none;
     }
+
+    bool hasExcessivelyExceededHeapLimit() const override {
+      return false;
+    }
   };
 
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();

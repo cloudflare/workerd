@@ -83,6 +83,8 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   virtual size_t getBlobSizeLimit() const {
     return 128 * 1024 * 1024;  // 128 MB
   }
+
+  virtual bool hasExcessivelyExceededHeapLimit() const = 0;
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
