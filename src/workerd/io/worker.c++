@@ -481,6 +481,7 @@ struct Worker::Impl {
 
   // The environment blob to pass to handlers.
   kj::Maybe<jsg::Value> env;
+  kj::Maybe<jsg::Value> ctxExports;
 
   struct ActorClassInfo {
     EntrypointClass cls;
@@ -1550,8 +1551,10 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
 
 Worker::Worker(kj::Own<const Script> scriptParam,
     kj::Own<WorkerObserver> metricsParam,
-    kj::FunctionParam<void(jsg::Lock& lock, const Api& api, v8::Local<v8::Object> target)>
-        compileBindings,
+    kj::FunctionParam<void(jsg::Lock& lock,
+        const Api& api,
+        v8::Local<v8::Object> target,
+        v8::Local<v8::Object> ctxExports)> compileBindings,
     IsolateObserver::StartType startType,
     TraceParentContext spans,
     LockType lockType,
@@ -1639,7 +1642,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               lock.v8Set(bindingsScope, global.name, global.value);
             }
 
-            compileBindings(lock, script->isolate->getApi(), bindingsScope);
+            v8::Local<v8::Object> ctxExports = v8::Object::New(lock.v8Isolate);
+
+            compileBindings(lock, script->isolate->getApi(), bindingsScope, ctxExports);
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
@@ -1656,6 +1661,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 KJ_IF_SOME(ns,
                     tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
+                  impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
 
                   auto& api = script->isolate->getApi();
                   auto handlers = api.unwrapExports(lock, ns);
@@ -1670,7 +1676,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         //   requests. This is weird and obviously wrong but changing it probably
                         //   requires a compat flag. Until then, connection properties will not be
                         //   available for non-class handlers.
-                        obj.ctx = jsg::alloc<api::ExecutionContext>(lock);
+                        obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
                         impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
                       }
@@ -1974,7 +1980,9 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     jsg::Lock& js = *this;
-    auto handler = kj::heap(cls(js, jsg::alloc<api::ExecutionContext>(js, props.toJs(js)),
+    auto handler = kj::heap(cls(js,
+        jsg::alloc<api::ExecutionContext>(js,
+            jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js)),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
     // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
