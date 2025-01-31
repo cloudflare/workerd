@@ -142,6 +142,10 @@ class RequestObserver: public kj::Refcounted {
   virtual void reportTailEvent(
       IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) {}
 
+  // Reports the outcome event to any configured streaming tail workers, signalizing that the
+  // request has completed and will not produce any more events.
+  virtual void reportOutcome(IoContext& ioContext) {}
+
   virtual kj::Own<void> addedContextTask() {
     return kj::Own<void>();
   }

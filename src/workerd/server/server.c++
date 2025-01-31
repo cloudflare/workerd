@@ -1591,7 +1591,7 @@ struct TailStreamWriterState {
   }
 };
 
-// If we are using streaming tail workers, initialze the mechanism that will deliver events
+// If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
@@ -1679,6 +1679,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) override {
     KJ_IF_SOME(writer, maybeTailStreamWriter) {
       writer->report(ioContext, fn());
+    }
+  }
+
+  void reportOutcome(IoContext& ioContext) override {
+    KJ_IF_SOME(writer, maybeTailStreamWriter) {
+      writer->report(
+          ioContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
     }
   }
 
