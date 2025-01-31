@@ -1499,6 +1499,7 @@ struct TailStreamWriterState {
   struct Closed {};
 
   kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
+  bool hadOutcome = false;
   kj::TaskSet& waitUntilTasks;
 
   TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
@@ -1633,10 +1634,17 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
+        // Reject events after outcome event
+        KJ_ASSERT(!state->hadOutcome, "tail worker received event after outcome");
+
         auto final = event.event.is<tracing::Outcome>() || event.event.is<tracing::Hibernate>();
-        KJ_DEFER({
-          if (final) state->inner = TailStreamWriterState::Closed{};
-        });
+        if (final) {
+          state->hadOutcome = true;
+        }
+        // TODO(streaming-tail-workers): Closing inner prevents delivery of events prior to the current event?
+        // KJ_DEFER({
+        //   if (final) state->inner = TailStreamWriterState::Closed{};
+        // });
         state->reportImpl(kj::mv(event));
       }
     }
