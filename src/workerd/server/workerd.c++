@@ -1094,6 +1094,14 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     } else {
       // Read file from disk.
       auto path = fs->getCurrentPath().evalNative(pathStr);
+
+      // make sure the path represents a file
+      KJ_IF_SOME(fsMetadata, fs->getRoot().tryLstat(path)) {
+        if (fsMetadata.type != kj::FsNode::Type::FILE) {
+          CLI_ERROR("Path is not a file.");
+        }
+      }
+
       auto file = KJ_UNWRAP_OR(fs->getRoot().tryOpenFile(path), CLI_ERROR("No such file."));
 
       if (binaryConfig) {
