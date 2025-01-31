@@ -1546,7 +1546,7 @@ struct TailStreamWriterState {
     if (!current.onsetSeen) {
       // Our first event... yay! Our first job here will be to dispatch
       // the onset event to the tail worker. If the tail worker wishes
-      // to handle the remaining events in the strema, then it will return
+      // to handle the remaining events in the stream, then it will return
       // a new capability to which those would be reported. This is done
       // via the "result.getPipeline()" API below. If hasPipeline()
       // returns false then that means the tail worker did not return
@@ -1591,7 +1591,7 @@ struct TailStreamWriterState {
   }
 };
 
-// If we are using streaming tail workers, initialze the mechanism that will deliver events
+// If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
@@ -1600,7 +1600,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
   }
   return kj::heap<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
-      // the TailStreamWriterState for this strema to actually handle the event.
+      // the TailStreamWriterState for this stream to actually handle the event.
       [state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks)](
           IoContext& ioContext, tracing::TailEvent&& event) mutable {
     KJ_SWITCH_ONEOF(state->inner) {
@@ -1679,6 +1679,13 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) override {
     KJ_IF_SOME(writer, maybeTailStreamWriter) {
       writer->report(ioContext, fn());
+    }
+  }
+
+  void reportOutcome(IoContext& ioContext) override {
+    KJ_IF_SOME(writer, maybeTailStreamWriter) {
+      writer->report(
+          ioContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
     }
   }
 
@@ -1927,7 +1934,7 @@ class Server::WorkerService final: public Service,
       streamingTailWorkers = streamingList.releaseAsArray();
     } else {
       legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
-        // Caution here... if the tail worker ends up have a cirular dependency
+        // Caution here... if the tail worker ends up have a circular dependency
         // on the worker we'll end up with an infinite loop trying to initialize.
         // We can test this directly but it's more difficult to test indirect
         // loops (dependency of dependency, etc). Here we're just going to keep
@@ -3961,7 +3968,7 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
     // since that's what signals us to stop accepting incoming connections. So, we should not
     // co_await the promise returned by `drain()`. Technically, we don't actually have to wait
     // on it at all -- `drain()` returns the promise end of a promise-and-fulfiller, so simply
-    // dropping it won't acutally cancel anything. But since that's not documented in drain()'s
+    // dropping it won't actually cancel anything. But since that's not documented in drain()'s
     // doc comment, we instead add the promise to `tasks` to be safe.
     tasks.add(httpServer.httpServer.drain());
   }

@@ -796,8 +796,8 @@ class TailStreamHandler final: public TailStreamTargetBase {
   jsg::JsRef<jsg::JsValue> handler;
 };
 
-// The TailStreamEndpoint class handles the initial onset event and the determination
-// or whether additional events should be handled in this stream.
+// The TailStreamEntrypoint class handles the initial onset event and the determination
+// of whether additional events should be handled in this stream.
 class TailStreamEntrypoint final: public TailStreamTargetBase {
  public:
   TailStreamEntrypoint(IoContext& ioContext, Frankenvalue props)
