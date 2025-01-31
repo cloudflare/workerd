@@ -269,7 +269,8 @@ class RpcWorkerInterface: public WorkerInterface {
  public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,
-      rpc::EventDispatcher::Client dispatcher);
+      rpc::EventDispatcher::Client dispatcher,
+      kj::EntropySource& entropySource);
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -292,6 +293,7 @@ class RpcWorkerInterface: public WorkerInterface {
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   capnp::ByteStreamFactory& byteStreamFactory;
   rpc::EventDispatcher::Client dispatcher;
+  kj::EntropySource& entropySource;
 };
 
 }  // namespace workerd

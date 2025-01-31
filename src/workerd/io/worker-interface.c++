@@ -345,17 +345,20 @@ kj::Own<WorkerInterface> WorkerInterface::fromException(kj::Exception&& e) {
 
 RpcWorkerInterface::RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
-    rpc::EventDispatcher::Client dispatcher)
+    rpc::EventDispatcher::Client dispatcher,
+    kj::EntropySource& entropySource)
     : httpOverCapnpFactory(httpOverCapnpFactory),
       byteStreamFactory(byteStreamFactory),
-      dispatcher(kj::mv(dispatcher)) {}
+      dispatcher(kj::mv(dispatcher)),
+      entropySource(entropySource) {}
 
 kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
-  auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
+  auto inner = httpOverCapnpFactory.capnpToKj(
+      dispatcher.getHttpServiceRequest().send().getHttp(), entropySource);
   auto promise = inner->request(method, url, headers, requestBody, response);
   return promise.attach(kj::mv(inner));
 }
@@ -365,7 +368,8 @@ kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
     kj::AsyncIoStream& connection,
     ConnectResponse& tunnel,
     kj::HttpConnectSettings settings) {
-  auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
+  auto inner = httpOverCapnpFactory.capnpToKj(
+      dispatcher.getHttpServiceRequest().send().getHttp(), entropySource);
   auto promise = inner->connect(host, headers, connection, tunnel, kj::mv(settings));
   return promise.attach(kj::mv(inner));
 }
