@@ -78,9 +78,9 @@ unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
 use std::marker::PhantomData;
 
 use crate::promise::PromiseTarget;
+use crate::OptionWaker;
 use crate::OwnPromiseNode;
 use crate::Promise;
-use crate::RustWaker;
 
 impl<T: PromiseTarget> IntoFuture for Promise<T> {
     type IntoFuture = PromiseFuture<T>;
@@ -121,9 +121,9 @@ impl<T: PromiseTarget> Future for PromiseFuture<T> {
 struct PromiseAwaiter {
     node: Option<OwnPromiseNode>,
     awaiter: LazyPinInit<GuardedRustPromiseAwaiter>,
-    // Safety: `rust_waker` must be declared after `awaiter`, because `awaiter` contains a reference
-    // to `rust_waker`. This ensures `rust_waker` will be dropped after `awaiter`.
-    rust_waker: RustWaker,
+    // Safety: `option_waker` must be declared after `awaiter`, because `awaiter` contains a reference
+    // to `option_waker`. This ensures `option_waker` will be dropped after `awaiter`.
+    option_waker: OptionWaker,
 }
 
 impl PromiseAwaiter {
@@ -131,7 +131,7 @@ impl PromiseAwaiter {
         PromiseAwaiter {
             node: Some(node),
             awaiter: LazyPinInit::uninit(),
-            rust_waker: RustWaker::empty(),
+            option_waker: OptionWaker::empty(),
         }
     }
 
@@ -142,14 +142,14 @@ impl PromiseAwaiter {
         let node = self.node.take();
 
         // Safety: `awaiter` stores `rust_waker_ptr` and uses it to call `wake()`. Note that
-        // `awaiter` is `self.awaiter`, which lives before `self.rust_waker`. Since struct members
+        // `awaiter` is `self.awaiter`, which lives before `self.option_waker`. Since struct members
         // are dropped in declaration order, the `rust_waker_ptr` that `awaiter` stores will always
         // be valid during its lifetime.
         //
-        // We pass a mutable pointer to C++. This is safe, because our use of the RustWaker inside
+        // We pass a mutable pointer to C++. This is safe, because our use of the OptionWaker inside
         // of `std::task::Waker` is synchronized by ensuring we only allow calls to `poll()` on the
         // thread with the Promise's event loop active.
-        let rust_waker_ptr = &mut self.rust_waker as *mut RustWaker;
+        let rust_waker_ptr = &mut self.option_waker as *mut OptionWaker;
 
         // Safety:
         // 1. We do not implement Unpin for PromiseAwaiter.
@@ -178,14 +178,12 @@ impl PromiseAwaiter {
     }
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
-        if let Some(kj_waker) = deref_co_await_waker(cx.waker()) {
-            self.rust_waker.set_none();
+        if let Some(cxx_waker) = deref_co_await_waker(cx.waker()) {
             let awaiter = self.as_mut().get_awaiter();
-            awaiter.poll_with_co_await_waker(kj_waker)
+            awaiter.poll_with_cxx_waker(&crate::WakerRef(cx.waker()), cxx_waker)
         } else {
-            self.rust_waker.set(cx.waker());
             let awaiter = self.as_mut().get_awaiter();
-            awaiter.poll()
+            awaiter.poll(&crate::WakerRef(cx.waker()))
         }
     }
 }

@@ -71,12 +71,12 @@ private:
 class RustPromiseAwaiter final: public kj::_::Event,
                                 public LinkedObject<CoAwaitWaker, RustPromiseAwaiter> {
 public:
-  // The Rust code which constructs RustPromiseAwaiter passes us a pointer to a RustWaker, which can
+  // The Rust code which constructs RustPromiseAwaiter passes us a pointer to a OptionWaker, which can
   // be thought of as a Rust-native component RustPromiseAwaiter. Its job is to hold a clone of
   // of any non-KJ Waker that we are polled with, and forward calls to `wake()`. Ideally, we could
   // store the clone of the Waker ourselves (it's just two pointers) on the C++ side, so the
   // lifetime safety is more obvious. But, storing a reference works for now.
-  RustPromiseAwaiter(RustWaker& rustWaker, OwnPromiseNode node, kj::SourceLocation location = {});
+  RustPromiseAwaiter(OptionWaker& optionWaker, OwnPromiseNode node, kj::SourceLocation location = {});
   ~RustPromiseAwaiter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(RustPromiseAwaiter);
 
@@ -104,14 +104,14 @@ public:
   // Preconditions:
   // - `waker.is_current()` is true: the KjWaker is associated with the event loop running on the
   //   current thread.
-  // - `(*rustWaker).is_none()` is true.
-  bool poll_with_co_await_waker(const CoAwaitWaker& waker);
+  // - `(*optionWaker).is_none()` is true.
+  bool poll_with_cxx_waker(const WakerRef& waker, const CoAwaitWaker& cxxWaker);
 
   // Poll this Promise for readiness using a clone of a Waker stored on the Rust side of the FFI
   // boundary.
   //
-  // Preconditions: `(*rustWaker).is_some()` is true.
-  bool poll();
+  // Preconditions: `(*optionWaker).is_some()` is true.
+  bool poll(const WakerRef& waker);
 
   OwnPromiseNode take_own_promise_node();
 
@@ -120,17 +120,17 @@ private:
   void setDone();
   bool isDone() const;
 
-  // The Rust code which instantiates RustPromiseAwaiter does so with a RustWaker object right next
+  // The Rust code which instantiates RustPromiseAwaiter does so with a OptionWaker object right next
   // to the RustPromiseAwaiter, such that its lifetime encompasses RustPromiseAwaiter's. Thus, our
-  // reference to our RustWaker is stable. We use the RustWaker to wake our enclosing Future if we
+  // reference to our OptionWaker is stable. We use the OptionWaker to wake our enclosing Future if we
   // were last polled with a non-KjWaker. The Rust code which calls our `poll*()` functions stores a
-  // clone of the actual `std::task::Waker` inside the RustWaker before calling poll(), and clears
-  // the RustWaker before calling `poll_with_co_await_waker()`.
+  // clone of the actual `std::task::Waker` inside the OptionWaker before calling poll(), and clears
+  // the OptionWaker before calling `poll_with_cxx_waker()`.
   //
-  // When we wake our enclosing Future, either with CoAwaitWaker or with RustWaker, we nullify
+  // When we wake our enclosing Future, either with CoAwaitWaker or with OptionWaker, we nullify
   // this Maybe. Therefore, this Maybe being kj::none means our OwnPromiseNode is ready, and it is
   // safe to call `node->get()` on it.
-  kj::Maybe<RustWaker&> rustWaker;
+  kj::Maybe<OptionWaker&> optionWaker;
 
   kj::UnwindDetector unwindDetector;
   OwnPromiseNode node;
@@ -143,11 +143,11 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   // We need to inherit constructors or else placement-new will try to aggregate-initialize us.
   using ExecutorGuarded<RustPromiseAwaiter>::ExecutorGuarded;
 
-  bool poll_with_co_await_waker(const CoAwaitWaker& waker) {
-    return get().poll_with_co_await_waker(waker);
+  bool poll_with_cxx_waker(const WakerRef& waker, const CoAwaitWaker& cxxWaker) {
+    return get().poll_with_cxx_waker(waker, cxxWaker);
   }
-  bool poll() {
-    return get().poll();
+  bool poll(const WakerRef& waker) {
+    return get().poll(waker);
   }
 
   OwnPromiseNode take_own_promise_node() {
@@ -158,7 +158,7 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
 using PtrGuardedRustPromiseAwaiter = GuardedRustPromiseAwaiter*;
 
 void guarded_rust_promise_awaiter_new_in_place(
-    PtrGuardedRustPromiseAwaiter, RustWaker*, OwnPromiseNode);
+    PtrGuardedRustPromiseAwaiter, OptionWaker*, OwnPromiseNode);
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 
 // =======================================================================================

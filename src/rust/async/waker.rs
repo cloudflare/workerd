@@ -155,25 +155,25 @@ static CO_AWAIT_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
 );
 
 // =======================================================================================
-// RustWaker
+// OptionWaker
 //
 // This is a wrapper around `std::task::Waker`, exposed to C++. We use it in `RustPromiseAwaiter`
 // to allow KJ promises to be awaited using opaque Wakers implemented in Rust.
 
-pub struct RustWaker {
+pub struct OptionWaker {
     inner: Option<Waker>,
 }
 
-impl RustWaker {
-    pub fn empty() -> RustWaker {
-        RustWaker { inner: None }
+impl OptionWaker {
+    pub fn empty() -> OptionWaker {
+        OptionWaker { inner: None }
     }
 
-    pub fn set(&mut self, waker: &Waker) {
+    pub fn set(&mut self, waker: &crate::WakerRef) {
         if let Some(w) = &mut self.inner {
-            w.clone_from(waker);
+            w.clone_from(waker.0);
         } else {
-            self.inner = Some(waker.clone());
+            self.inner = Some(waker.0.clone());
         }
     }
 
@@ -181,20 +181,12 @@ impl RustWaker {
         self.inner = None;
     }
 
-    pub fn is_some(&self) -> bool {
-        self.inner.is_some()
-    }
-
-    pub fn is_none(&self) -> bool {
-        self.inner.is_none()
-    }
-
     pub fn wake(&mut self) {
         self.inner
             .take()
             .expect(
-                "RustWaker::set() should be called before RustPromiseAwaiter::poll(); \
-                RustWaker::wake() should be called at most once after poll()",
+                "OptionWaker::set() should be called before RustPromiseAwaiter::poll(); \
+                OptionWaker::wake() should be called at most once after poll()",
             )
             .wake();
     }

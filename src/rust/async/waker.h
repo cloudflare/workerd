@@ -160,16 +160,19 @@ private:
 };
 
 // =======================================================================================
-// RustWaker
+// OptionWaker
 
 // An opaque Rust type defined in lib.rs, and thus in lib.rs.h. lib.rs.h depends on our C++ headers,
-// including waker.h (the file you're currently reading), so we forward-declare RustWaker here for
+// including waker.h (the file you're currently reading), so we forward-declare OptionWaker here for
 // use in the C++ headers.
 //
 // This class is a wrapper around an arbitrary `std::task::Waker`. It has one function on it:
 // `wake_by_ref()`. RustPromiseAwaiter calls it when the KJ promise it is currently waiting on
 // becomes ready. In this way, Rust is able to await KJ promises using any Waker of their choosing,
 // not just a KjWaker.
-struct RustWaker;
+struct OptionWaker;
+
+// Wrapper around an arbitrary `&std::task::Waker`.
+struct WakerRef;
 
 }  // namespace workerd::rust::async

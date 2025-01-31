@@ -152,9 +152,9 @@ bindgen \
 
 #endif
 
-RustPromiseAwaiter::RustPromiseAwaiter(RustWaker& rustWaker, OwnPromiseNode nodeParam, kj::SourceLocation location)
+RustPromiseAwaiter::RustPromiseAwaiter(OptionWaker& optionWaker, OwnPromiseNode nodeParam, kj::SourceLocation location)
     : Event(location),
-      rustWaker(rustWaker),
+      optionWaker(optionWaker),
       node(kj::mv(nodeParam)) {
   node->setSelfPointer(&node);
   node->onReady(this);
@@ -174,15 +174,15 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
   // Safety: Our Event can only fire on the event loop which was active when our Event base class
   // was constructed. Therefore, we don't need to check that we're on the correct event loop.
 
-  // `setDone()` nullifies our `rustWaker` Maybe, but we might need the RustWaker first, so defer
+  // `setDone()` nullifies our `optionWaker` Maybe, but we might need the OptionWaker first, so defer
   // this call to `setDone()`.
   KJ_DEFER(setDone());
 
   KJ_IF_SOME(coAwaitWaker, linkedGroup().tryGet()) {
     coAwaitWaker.getFuturePollEvent().armDepthFirst();
     linkedGroup().set(kj::none);
-  } else KJ_IF_SOME(waker, rustWaker) {
-    // This call to `waker.wake()` consumes RustWaker's inner Waker. If we call it more than once,
+  } else KJ_IF_SOME(waker, optionWaker) {
+    // This call to `waker.wake()` consumes OptionWaker's inner Waker. If we call it more than once,
     // it will panic. Fortunately, we only call it once.
     waker.wake();
   } else {
@@ -225,28 +225,27 @@ void RustPromiseAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtN
 }
 
 void RustPromiseAwaiter::setDone() {
-  rustWaker = kj::none;
+  optionWaker = kj::none;
 }
 
 bool RustPromiseAwaiter::isDone() const {
-  return rustWaker == kj::none;
+  return optionWaker == kj::none;
 }
 
-bool RustPromiseAwaiter::poll_with_co_await_waker(const CoAwaitWaker& coAwaitWaker) {
+bool RustPromiseAwaiter::poll_with_cxx_waker(const WakerRef& waker, const CoAwaitWaker& coAwaitWaker) {
   // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
   //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
   //   suspended at least once, we may be able to check for that through KjWaker.
+
+  // TODO(now): Accept const CxxWaker& and try to downcast to optimize.
 
   if (isDone()) {
     return true;
   }
 
-  // Our caller cleared the RustWaker's inner Option<Waker> before calling us. We'll use the KjWaker
-  // to optimize the wake instead.
-  KJ_ASSERT(
-      KJ_ASSERT_NONNULL(
-          rustWaker, "isDone() returned false so we must have a RustWaker")
-          .is_none());
+  KJ_ASSERT_NONNULL(
+      optionWaker, "isDone() returned false so we must have a OptionWaker")
+      .set_none();
 
   // Safety: const_cast is okay, because `coAwaitWaker.is_current()` means we are running on the same
   // event loop that the CoAwaitWaker's Event base class is a member of.
@@ -262,7 +261,7 @@ bool RustPromiseAwaiter::poll_with_co_await_waker(const CoAwaitWaker& coAwaitWak
   return false;
 }
 
-bool RustPromiseAwaiter::poll() {
+bool RustPromiseAwaiter::poll(const WakerRef& waker) {
   // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
   //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
   //   suspended at least once, we may be able to check for that through KjWaker, but this path
@@ -272,15 +271,12 @@ bool RustPromiseAwaiter::poll() {
     return true;
   }
 
-  // Our caller set the RustWaker's inner Option<Waker> before calling us. We'll use it to wake our
-  // Future if the Promise becomes ready before the next call to `poll()`.
-  KJ_ASSERT(
-      KJ_ASSERT_NONNULL(
-          rustWaker, "isDone() returned false so we must have a RustWaker")
-          .is_some());
+  KJ_ASSERT_NONNULL(
+      optionWaker, "isDone() returned false so we must have a OptionWaker")
+      .set(waker);
 
   // By calling this overload of `poll()`, our caller is informing us that we should use our
-  // RustWaker to wake the Future when the Promise becomes ready. To do that, we need to clear our
+  // OptionWaker to wake the Future when the Promise becomes ready. To do that, we need to clear our
   // reference to the CoAwaitWaker.
   linkedGroup().set(kj::none);
 
@@ -293,8 +289,8 @@ OwnPromiseNode RustPromiseAwaiter::take_own_promise_node() {
   return kj::mv(node);
 }
 
-void guarded_rust_promise_awaiter_new_in_place(PtrGuardedRustPromiseAwaiter ptr, RustWaker* rustWaker, OwnPromiseNode node) {
-  kj::ctor(*ptr, *rustWaker, kj::mv(node));
+void guarded_rust_promise_awaiter_new_in_place(PtrGuardedRustPromiseAwaiter ptr, OptionWaker* optionWaker, OwnPromiseNode node) {
+  kj::ctor(*ptr, *optionWaker, kj::mv(node));
 }
 void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr) {
   kj::dtor(*ptr);

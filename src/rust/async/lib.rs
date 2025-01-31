@@ -37,12 +37,14 @@ use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 
 mod waker;
-use waker::RustWaker;
+use waker::OptionWaker;
 
 type CxxResult<T> = std::result::Result<T, cxx::Exception>;
 
 type Result<T> = std::io::Result<T>;
 type Error = std::io::Error;
+
+pub struct WakerRef<'a>(&'a std::task::Waker);
 
 #[cxx::bridge(namespace = "workerd::rust::async")]
 mod ffi {
@@ -65,15 +67,19 @@ mod ffi {
     }
 
     extern "Rust" {
-        // We expose the Rust Waker type to C++ through this RustWaker reference wrapper. cxx-rs
+        type WakerRef<'a>;
+    }
+
+    extern "Rust" {
+        // We expose the Rust Waker type to C++ through this OptionWaker reference wrapper. cxx-rs
         // does not allow us to export types defined outside this crate, such as Waker, directly.
         //
         // `LazyRustPromiseAwaiter` (the implementation of `.await` syntax/the IntoFuture trait),
-        // stores a RustWaker immediately after `GuardedRustPromiseAwaiter` in declaration order.
+        // stores a OptionWaker immediately after `GuardedRustPromiseAwaiter` in declaration order.
         // pass the Waker to the `RustPromiseAwaiter` class, which is implemented in C++
-        type RustWaker;
-        fn is_some(&self) -> bool;
-        fn is_none(&self) -> bool;
+        type OptionWaker;
+        fn set(&mut self, waker: &WakerRef);
+        fn set_none(&mut self);
         fn wake(&mut self);
     }
 
@@ -155,17 +161,18 @@ mod ffi {
 
         unsafe fn guarded_rust_promise_awaiter_new_in_place(
             ptr: PtrGuardedRustPromiseAwaiter,
-            rust_waker_ptr: *mut RustWaker,
+            rust_waker_ptr: *mut OptionWaker,
             node: OwnPromiseNode,
         );
         unsafe fn guarded_rust_promise_awaiter_drop_in_place(ptr: PtrGuardedRustPromiseAwaiter);
 
         // TODO(now): Reduce to just one function.
-        fn poll_with_co_await_waker(
+        fn poll_with_cxx_waker(
             self: Pin<&mut GuardedRustPromiseAwaiter>,
-            waker: &CoAwaitWaker,
+            waker: &WakerRef,
+            cxx_waker: &CoAwaitWaker,
         ) -> bool;
-        fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>) -> bool;
+        fn poll(self: Pin<&mut GuardedRustPromiseAwaiter>, waker: &WakerRef) -> bool;
 
         fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
     }
