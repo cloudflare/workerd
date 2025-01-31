@@ -9,10 +9,10 @@ namespace workerd::rust::async {
 // ArcWakerAwaiter
 
 ArcWakerAwaiter::ArcWakerAwaiter(
-    CoAwaitWaker& coAwaitWaker, OwnPromiseNode nodeParam, kj::SourceLocation location)
+    FuturePollEvent& futurePollEvent, kj::Promise<WakeInstruction> promise, kj::SourceLocation location)
     : Event(location),
-      coAwaitWaker(coAwaitWaker),
-      node(kj::mv(nodeParam)) {
+      futurePollEvent(futurePollEvent),
+      node(kj::_::PromiseNode::from(kj::mv(promise))) {
   node->setSelfPointer(&node);
   node->onReady(this);
   // TODO(perf): If `this->isNext()` is true, can we immediately resume? Or should we check if
@@ -53,7 +53,7 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 
   if (value == WakeInstruction::WAKE) {
     // This was an actual wakeup.
-    coAwaitWaker.getFuturePollEvent().armDepthFirst();
+    futurePollEvent.armDepthFirst();
   } else {
     // All of our Wakers were dropped. We are awaiting the Rust equivalent of kj::NEVER_DONE.
   }
@@ -62,10 +62,10 @@ kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
 }
 
 void ArcWakerAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
-  if (coAwaitWaker.wouldTrace({}, *this)) {
+  if (futurePollEvent.wouldTrace({}, *this)) {
     // Our associated futurePollEvent's `traceEvent()` implementation would call our
     // `tracePromise()` function. Just forward the call to the futurePollEvent.
-    coAwaitWaker.getFuturePollEvent().traceEvent(builder);
+    futurePollEvent.traceEvent(builder);
   } else {
     // Our CoAwaitWaker would choose a different branch to trace, so just record our own trace
     // address(es) and stop here.
@@ -103,7 +103,7 @@ void ArcWakerAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
 // It would be nice to automate this someday. `rules_rust` has some bindgen rules, but it adds a few
 // thousand years to the build times due to its hermetic dependency on LLVM. It's possible to
 // provide our own toolchain, but I became fatigued in the attempt.
-static_assert(sizeof(GuardedRustPromiseAwaiter) == sizeof(uint64_t) * 16,
+static_assert(sizeof(GuardedRustPromiseAwaiter) == sizeof(uint64_t) * 15,
     "GuardedRustPromiseAwaiter size changed, you must re-run bindgen");
 static_assert(alignof(GuardedRustPromiseAwaiter) == alignof(uint64_t) * 1,
     "GuardedRustPromiseAwaiter alignment changed, you must re-run bindgen");
@@ -178,8 +178,8 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
   // this call to `setDone()`.
   KJ_DEFER(setDone());
 
-  KJ_IF_SOME(coAwaitWaker, linkedGroup().tryGet()) {
-    coAwaitWaker.getFuturePollEvent().armDepthFirst();
+  KJ_IF_SOME(futurePollEvent, linkedGroup().tryGet()) {
+    futurePollEvent.armDepthFirst();
     linkedGroup().set(kj::none);
   } else KJ_IF_SOME(waker, optionWaker) {
     // This call to `waker.wake()` consumes OptionWaker's inner Waker. If we call it more than once,
@@ -196,13 +196,13 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
 }
 
 void RustPromiseAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
-  KJ_IF_SOME(coAwaitWaker, linkedGroup().tryGet()) {
-    if (coAwaitWaker.wouldTrace({}, *this)) {
+  KJ_IF_SOME(futurePollEvent, linkedGroup().tryGet()) {
+    if (futurePollEvent.wouldTrace({}, *this)) {
       // We are associated with a CoAwaitWaker, and we are at the head of the its list of Promises,
       // meaning its `tracePromise()` implementation would forward to our `tracePromise()`. We can
       // therefore forward this `traceEvent()` call to the coroutine's `traceEvent()` to generate a
       // slightly longer trace with this node in it.
-      coAwaitWaker.getFuturePollEvent().traceEvent(builder);
+      futurePollEvent.traceEvent(builder);
       return;
     }
   }
@@ -247,10 +247,10 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWak
 
   KJ_IF_SOME(cxxWaker, maybeCxxWaker) {
     KJ_IF_SOME(coAwaitWaker, kj::dynamicDowncastIfAvailable<const CoAwaitWaker>(cxxWaker)) {
-      if (coAwaitWaker.is_current()) {
+      KJ_IF_SOME(futurePollEvent, coAwaitWaker.tryGetFuturePollEvent()) {
         // Optimized path. The Future which is polling our Promise is in turn being polled by a
-        // `co_await` expression. We can arm the `co_await` expression's KJ Event directly when our
-        // Promise is ready.
+        // `co_await` expression somewhere up the stack from us. We can arrange to arm the
+        // `co_await` expression's KJ Event directly when our Promise is ready.
 
         // If we had an opaque Waker stored in OptionWaker before, drop it now, as we won't be
         // needing it.
@@ -260,11 +260,7 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWak
         // reference is weak, and will be cleared if the `co_await` expression happens to end before
         // our Promise is ready. In the more likely case that our Promise becomes ready while the
         // `co_await` expression is still active, we'll arm its Event so it can `poll()` us again.
-        //
-        // Safety: const_cast is okay, because `coAwaitWaker.is_current()` means we are running on
-        // the same event loop that the CoAwaitWaker's Event base class is a member of.
-        auto& mutCoAwaitWaker = const_cast<CoAwaitWaker&>(coAwaitWaker);
-        linkedGroup().set(mutCoAwaitWaker);
+        linkedGroup().set(futurePollEvent);
 
         return false;
       }
@@ -297,41 +293,20 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr
 }
 
 // =======================================================================================
-// CoAwaitWaker
+// FuturePollEvent
 
-CoAwaitWaker::CoAwaitWaker(kj::_::Event& futurePoller): futurePoller(futurePoller) {}
-
-bool CoAwaitWaker::is_current() const {
-  return &kjWaker.getExecutor() == &kj::getCurrentThreadExecutor();
+void FuturePollEvent::emplaceArcWakerAwaiter(kj::Promise<WakeInstruction> promise) {
+  arcWakerAwaiter.emplace(*this, kj::mv(promise));
 }
 
-const CxxWaker* CoAwaitWaker::clone() const {
-  return kjWaker.clone();
+void FuturePollEvent::onReady(kj::_::Event* event) noexcept {
+  KJ_UNIMPLEMENTED("FuturePollEvent's PromiseNode base class exists only for tracing");
+}
+void FuturePollEvent::get(kj::_::ExceptionOrValue& output) noexcept {
+  KJ_UNIMPLEMENTED("FuturePollEvent's PromiseNode base class exists only for tracing");
 }
 
-void CoAwaitWaker::wake() const {
-  // CoAwaitWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
-  // `wake()`, which drops `self`, on this object.
-  KJ_UNIMPLEMENTED(
-      "Rust user code should never have possess a consumable reference to CoAwaitWaker");
-}
-
-void CoAwaitWaker::wake_by_ref() const {
-  kjWaker.wake_by_ref();
-}
-
-void CoAwaitWaker::drop() const {
-  kjWaker.drop();
-}
-
-void CoAwaitWaker::onReady(kj::_::Event* event) noexcept {
-  KJ_UNIMPLEMENTED("CoAwaitWaker's PromiseNode base class exists only for tracing");
-}
-void CoAwaitWaker::get(kj::_::ExceptionOrValue& output) noexcept {
-  KJ_UNIMPLEMENTED("CoAwaitWaker's PromiseNode base class exists only for tracing");
-}
-
-void CoAwaitWaker::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
+void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
   // We ignore `stopAtNextEvent`, because `kj::_::Coroutine` is our only possible caller. And if
   // it's calling us, it wants us to trace our promise, not ignore the call.
 
@@ -354,11 +329,7 @@ void CoAwaitWaker::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEve
   }
 }
 
-kj::_::Event& CoAwaitWaker::getFuturePollEvent() {
-  return futurePoller;
-}
-
-bool CoAwaitWaker::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
+bool FuturePollEvent::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
   // We would only trace the ArcWakerAwaiter if we have no RustPromiseAwaiters.
   if (linkedObjects().empty()) {
     KJ_IF_SOME(awa, arcWakerAwaiter) {
@@ -370,7 +341,7 @@ bool CoAwaitWaker::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& await
   return false;
 }
 
-bool CoAwaitWaker::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter) {
+bool FuturePollEvent::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter) {
   // We prefer to trace the first RustPromiseAwaiter in our list, if there is one.
   auto objects = linkedObjects();
   if (objects.begin() != objects.end()) {
@@ -379,6 +350,11 @@ bool CoAwaitWaker::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter&
   return false;
 }
 
+// =======================================================================================
+// CoAwaitWaker
+
+CoAwaitWaker::CoAwaitWaker(FuturePollEvent& futurePollEvent): futurePollEvent(futurePollEvent) {}
+
 void CoAwaitWaker::suspend() {
   auto state = kjWaker.reset();
 
@@ -386,16 +362,46 @@ void CoAwaitWaker::suspend() {
     // The future returned Pending, but synchronously called `wake_by_ref()` on the KjWaker,
     // indicating it wants to immediately be polled again. We should arm our event right now,
     // which will call `await_ready()` again on the event loop.
-    futurePoller.armDepthFirst();
+    futurePollEvent.armDepthFirst();
   } else KJ_IF_SOME(promise, state.cloned) {
     // The future returned Pending and cloned an ArcWaker to notify us later. We'll arrange for
     // the ArcWaker's promise to arm our event once it's fulfilled.
-    arcWakerAwaiter.emplace(*this, kj::_::PromiseNode::from(kj::mv(promise)));
+    futurePollEvent.emplaceArcWakerAwaiter(kj::mv(promise));
   } else {
     // The future returned Pending, did not call `wake_by_ref()` on the KjWaker, and did not
     // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
     // kj::NEVER_DONE.
   }
+}
+
+kj::Maybe<FuturePollEvent&> CoAwaitWaker::tryGetFuturePollEvent() const {
+  if (&kjWaker.getExecutor() == &kj::getCurrentThreadExecutor()) {
+    // Safety: const_cast is okay because we know that we are being accessed on a thread running our
+    // original event loop. All successful accesses through `get()` are effectively single-threaded,
+    // even though the event loop, and this object, may collectively move between threads.
+    return futurePollEvent;
+  } else {
+    return kj::none;
+  }
+}
+
+const CxxWaker* CoAwaitWaker::clone() const {
+  return kjWaker.clone();
+}
+
+void CoAwaitWaker::wake() const {
+  // CoAwaitWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
+  // `wake()`, which drops `self`, on this object.
+  KJ_UNIMPLEMENTED(
+      "Rust user code should never have possess a consumable reference to CoAwaitWaker");
+}
+
+void CoAwaitWaker::wake_by_ref() const {
+  kjWaker.wake_by_ref();
+}
+
+void CoAwaitWaker::drop() const {
+  kjWaker.drop();
 }
 
 }  // namespace workerd::rust::async
