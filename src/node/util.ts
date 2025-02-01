@@ -217,7 +217,7 @@ export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
   return _isDeepStrictEqual(a, b);
 }
 
-export function isArray(a: unknown): boolean {
+export function isArray(a: unknown): a is Array<any> {
   return Array.isArray(a);
 }
 
