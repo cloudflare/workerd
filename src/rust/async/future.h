@@ -94,10 +94,12 @@ public:
   }
   ~BoxFuture() noexcept {
     if (repr != std::array<std::uintptr_t, 2>{0, 0}) {
+      // Safety: We can assume that `this` is a valid pointer while we're in the destructor.
       box_future_drop_in_place(this);
     }
   }
 
+  // We use the same output type for both fallible and infallible results.
   using ExceptionOrValue = kj::_::ExceptionOr<kj::_::FixVoid<RemoveFallible<T>>>;
 
   // Poll our Future with the given KjWaker. Returns true if the future returned `Poll::Ready`,
@@ -109,7 +111,9 @@ public:
 
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       BoxFutureFulfiller<T> fulfiller(output);
-      // Safety: BoxFutureFulfiller is effectively pinned because it's a temporary.
+      // Safety: Both `*this` and `fulfiller` are accepted as `Pin<&mut ...>` in the Rust
+      // implementation of `box_future_pull()`. This is safe because both effectively implements
+      // Unpin, since they are non-self-referential, so it's fine if we decide to move them later.
       ready = box_future_poll(*this, waker, fulfiller);
     })) {
       output.addException(kj::mv(exception));

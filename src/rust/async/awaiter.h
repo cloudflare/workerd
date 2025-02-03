@@ -210,7 +210,6 @@ public:
 
     if (future.poll(coAwaitWaker, result)) {
       // Future is ready, we're done.
-      // TODO(now): Propagate value-or-exception.
       return false;
     }
 

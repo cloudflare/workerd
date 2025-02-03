@@ -5,14 +5,11 @@ use awaiter::PtrGuardedRustPromiseAwaiter;
 use awaiter::WakerRef;
 
 mod future;
-use future::box_future_drop_in_place_fallible_i32;
-use future::box_future_drop_in_place_fallible_void;
-use future::box_future_drop_in_place_void;
-use future::box_future_poll_fallible_i32;
-use future::box_future_poll_fallible_void;
-use future::box_future_poll_void;
 pub use future::BoxFuture;
 use future::PtrBoxFuture;
+
+mod future_boilerplate;
+use future_boilerplate::*;
 
 mod lazy_pin_init;
 
@@ -23,17 +20,7 @@ use promise::PtrOwnPromiseNode;
 use promise::PtrPromise;
 
 mod test_futures;
-use test_futures::new_awaiting_future_i32;
-use test_futures::new_error_handling_future_void;
-use test_futures::new_errored_future_fallible_void;
-use test_futures::new_layered_ready_future_void;
-use test_futures::new_naive_select_future_void;
-use test_futures::new_pending_future_void;
-use test_futures::new_ready_future_fallible_i32;
-use test_futures::new_ready_future_void;
-use test_futures::new_threaded_delay_future_void;
-use test_futures::new_waking_future_void;
-use test_futures::new_wrapped_waker_future_void;
+use test_futures::*;
 
 mod waker;
 
@@ -44,17 +31,6 @@ type Error = std::io::Error;
 
 #[cxx::bridge(namespace = "workerd::rust::async")]
 mod ffi {
-    unsafe extern "C++" {
-        include!("workerd/rust/async/waker.h");
-
-        // Match the definition of the abstract virtual class in the C++ header.
-        type KjWaker;
-        fn clone(&self) -> *const KjWaker;
-        fn wake(&self);
-        fn wake_by_ref(&self);
-        fn drop(&self);
-    }
-
     extern "Rust" {
         type WakerRef<'a>;
     }
@@ -73,49 +49,14 @@ mod ffi {
     }
 
     unsafe extern "C++" {
-        include!("workerd/rust/async/future-boilerplate.h");
+        include!("workerd/rust/async/waker.h");
 
-        // TODO(now): Generate boilerplate with a macro.
-        type BoxFutureVoid = crate::BoxFuture<()>;
-        type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
-        type BoxFutureFulfillerVoid;
-        fn fulfill(self: Pin<&mut BoxFutureFulfillerVoid>);
-
-        // TODO(now): Generate boilerplate with a macro.
-        type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
-        type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
-        type BoxFutureFulfillerFallibleVoid;
-        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleVoid>);
-
-        type BoxFutureFallibleI32 = crate::BoxFuture<crate::Result<i32>>;
-        type PtrBoxFutureFallibleI32 = crate::PtrBoxFuture<crate::Result<i32>>;
-        type BoxFutureFulfillerFallibleI32;
-        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleI32>, value: i32);
-    }
-
-    extern "Rust" {
-        // TODO(now): Generate boilerplate with a macro.
-        fn box_future_poll_void(
-            future: &mut BoxFutureVoid,
-            waker: &KjWaker,
-            fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
-        ) -> bool;
-        unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
-
-        // TODO(now): Generate boilerplate with a macro.
-        fn box_future_poll_fallible_void(
-            future: &mut BoxFutureFallibleVoid,
-            waker: &KjWaker,
-            fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
-        ) -> Result<bool>;
-        unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFutureFallibleVoid);
-
-        fn box_future_poll_fallible_i32(
-            future: &mut BoxFutureFallibleI32,
-            waker: &KjWaker,
-            fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
-        ) -> Result<bool>;
-        unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFutureFallibleI32);
+        // Match the definition of the abstract virtual class in the C++ header.
+        type KjWaker;
+        fn clone(&self) -> *const KjWaker;
+        fn wake(&self);
+        fn wake_by_ref(&self);
+        fn drop(&self);
     }
 
     unsafe extern "C++" {
@@ -150,6 +91,55 @@ mod ffi {
         fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;
     }
 
+    // -----------------------------------------------------
+    // Boilerplate
+
+    unsafe extern "C++" {
+        include!("workerd/rust/async/future-boilerplate.h");
+
+        // TODO(now): Generate boilerplate with a macro.
+        type BoxFutureVoid = crate::BoxFuture<()>;
+        type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
+        type BoxFutureFulfillerVoid;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerVoid>);
+
+        // TODO(now): Generate boilerplate with a macro.
+        type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
+        type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
+        type BoxFutureFulfillerFallibleVoid;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleVoid>);
+
+        type BoxFutureFallibleI32 = crate::BoxFuture<crate::Result<i32>>;
+        type PtrBoxFutureFallibleI32 = crate::PtrBoxFuture<crate::Result<i32>>;
+        type BoxFutureFulfillerFallibleI32;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleI32>, value: i32);
+    }
+
+    extern "Rust" {
+        // TODO(now): Generate boilerplate with a macro.
+        fn box_future_poll_void(
+            future: Pin<&mut BoxFutureVoid>,
+            waker: &KjWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
+        ) -> bool;
+        unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
+
+        // TODO(now): Generate boilerplate with a macro.
+        fn box_future_poll_fallible_void(
+            future: Pin<&mut BoxFutureFallibleVoid>,
+            waker: &KjWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
+        ) -> Result<bool>;
+        unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFutureFallibleVoid);
+
+        fn box_future_poll_fallible_i32(
+            future: Pin<&mut BoxFutureFallibleI32>,
+            waker: &KjWaker,
+            fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
+        ) -> Result<bool>;
+        unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFutureFallibleI32);
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/async/promise-boilerplate.h");
 
@@ -166,6 +156,7 @@ mod ffi {
         unsafe fn promise_drop_in_place_i32(promise: PtrPromiseI32);
         fn promise_into_own_promise_node_i32(promise: PromiseI32) -> OwnPromiseNode;
     }
+
     // -----------------------------------------------------
     // Test functions
 
