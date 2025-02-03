@@ -62,7 +62,7 @@ ArcWaker::ArcWaker(kj::Badge<ArcWaker>, kj::PromiseCrossThreadFulfillerPair<void
     : node(kj::mv(paf.promise)),
       fulfiller(kj::mv(paf.fulfiller)) {}
 
-const CxxWaker* ArcWaker::clone() const {
+const KjWaker* ArcWaker::clone() const {
   return addRefToThis().disown();
 }
 void ArcWaker::wake() const {
@@ -79,7 +79,7 @@ void ArcWaker::drop() const {
 // =======================================================================================
 // LazyArcWaker
 
-const CxxWaker* LazyArcWaker::clone() const {
+const KjWaker* LazyArcWaker::clone() const {
   // Rust code wants to suspend and wait for something. We'll start handing out ArcWakers if we
   // haven't already been woken synchronously.
 

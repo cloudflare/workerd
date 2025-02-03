@@ -7,7 +7,7 @@ use std::task::Waker;
 
 use cxx::ExternType;
 
-use crate::ffi::CxxWaker;
+use crate::ffi::KjWaker;
 
 use crate::Result;
 
@@ -65,7 +65,7 @@ use crate::ffi::BoxFutureFulfillerVoid;
 
 pub fn box_future_poll_void(
     future: &mut BoxFuture<()>,
-    waker: &CxxWaker,
+    waker: &KjWaker,
     fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
 ) -> bool {
     let waker = Waker::from(waker);
@@ -107,7 +107,7 @@ use crate::ffi::BoxFutureFulfillerFallibleVoid;
 
 pub fn box_future_poll_fallible_void(
     future: &mut BoxFuture<Result<()>>,
-    waker: &CxxWaker,
+    waker: &KjWaker,
     fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
 ) -> Result<bool> {
     let waker = Waker::from(waker);
@@ -143,7 +143,7 @@ use crate::ffi::BoxFutureFulfillerFallibleI32;
 
 pub fn box_future_poll_fallible_i32(
     future: &mut BoxFuture<Result<i32>>,
-    waker: &CxxWaker,
+    waker: &KjWaker,
     fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
 ) -> Result<bool> {
     let waker = Waker::from(waker);

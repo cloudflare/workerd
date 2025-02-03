@@ -61,12 +61,12 @@ public:
 
   // Poll this Promise for readiness.
   //
-  // If the Waker is a CxxWaker, you may pass the CxxWaker pointer as a second parameter. This may
+  // If the Waker is a KjWaker, you may pass the KjWaker pointer as a second parameter. This may
   // allow the implementation of `poll()` to optimize the wake by arming a KJ Event directly when
   // the wrapped Promise becomes ready.
   //
-  // If the Waker is not a CxxWaker, the `maybeCxxWaker` pointer argument must be nullptr.
-  bool poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker);
+  // If the Waker is not a KjWaker, the `maybeKjWaker` pointer argument must be nullptr.
+  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker);
 
   // Release ownership of the OwnPromiseNode. Asserts if called before the Promise is ready; that
   // is, `poll()` must have returned true prior to calling `take_own_promise_node()`.
@@ -94,8 +94,8 @@ struct GuardedRustPromiseAwaiter: ExecutorGuarded<RustPromiseAwaiter> {
   // We need to inherit constructors or else placement-new will try to aggregate-initialize us.
   using ExecutorGuarded<RustPromiseAwaiter>::ExecutorGuarded;
 
-  bool poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker) {
-    return get().poll(waker, maybeCxxWaker);
+  bool poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
+    return get().poll(waker, maybeKjWaker);
   }
   OwnPromiseNode take_own_promise_node() {
     return get().take_own_promise_node();
@@ -160,12 +160,12 @@ private:
 // =======================================================================================
 // CoAwaitWaker
 
-// A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust. It
+// A KjWaker implementation which provides an optimized path for awaiting KJ Promises in Rust. It
 // consists of a LazyArcWaker and a reference to a FuturePollEvent.
 //
 // The FuturePollEvent is responsible for calling `Future::poll()`. One of its derived classes owns
 // this CoAwaitWaker in an object lifetime sense.
-class CoAwaitWaker: public CxxWaker {
+class CoAwaitWaker: public KjWaker {
 public:
   CoAwaitWaker(FuturePollEvent& futurePollEvent);
 
@@ -179,14 +179,14 @@ public:
   // the RustPromiseAwaiter class, to more optimally `.await` KJ Promises from within Rust. If the
   // current thread's kj::Executor is not the same as the one which owns the FuturePollEvent, this
   // function returns kj::none.
-  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const;
+  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
 
   // -------------------------------------------------------
-  // CxxWaker API
+  // KjWaker API
   //
-  // Our CxxWaker implementation just forwards everything to our LazyArcWaker member.
+  // Our KjWaker implementation just forwards everything to our LazyArcWaker member.
 
-  const CxxWaker* clone() const override;
+  const KjWaker* clone() const override;
   void wake() const override;
   void wake_by_ref() const override;
   void drop() const override;
@@ -195,7 +195,7 @@ private:
   // TODO(now): Can/should we make this ExecutorGuarded?
   FuturePollEvent& futurePollEvent;
 
-  // This LazyArcWaker is our actual implementation of the CxxWaker interface. We forward all calls here.
+  // This LazyArcWaker is our actual implementation of the KjWaker interface. We forward all calls here.
   LazyArcWaker kjWaker;
 };
 

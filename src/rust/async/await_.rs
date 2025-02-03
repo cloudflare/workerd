@@ -8,7 +8,7 @@ use std::task::Poll;
 
 use cxx::ExternType;
 
-use crate::waker::try_into_cxx_waker_ptr;
+use crate::waker::try_into_kj_waker_ptr;
 
 use crate::lazy_pin_init::LazyPinInit;
 
@@ -178,9 +178,9 @@ impl PromiseAwaiter {
     }
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> bool {
-        let maybe_cxx_waker = try_into_cxx_waker_ptr(cx.waker());
+        let maybe_kj_waker = try_into_kj_waker_ptr(cx.waker());
         let awaiter = self.as_mut().get_awaiter();
         // TODO(now): Safety comment.
-        unsafe { awaiter.poll(&crate::WakerRef(cx.waker()), maybe_cxx_waker) }
+        unsafe { awaiter.poll(&crate::WakerRef(cx.waker()), maybe_kj_waker) }
     }
 }

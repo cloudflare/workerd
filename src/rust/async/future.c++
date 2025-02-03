@@ -8,7 +8,7 @@ void box_future_drop_in_place(BoxFuture<void>* self) {
   box_future_drop_in_place_void(self);
 }
 template <>
-bool box_future_poll(BoxFuture<void>& self, const CxxWaker& waker, BoxFutureFulfiller<void>& fulfiller) {
+bool box_future_poll(BoxFuture<void>& self, const KjWaker& waker, BoxFutureFulfiller<void>& fulfiller) {
   return box_future_poll_void(self, waker, fulfiller);
 }
 
@@ -19,7 +19,7 @@ void box_future_drop_in_place(BoxFuture<Fallible<void>>* self) {
   box_future_drop_in_place_fallible_void(self);
 }
 template <>
-bool box_future_poll(BoxFuture<Fallible<void>>& self, const CxxWaker& waker, BoxFutureFulfiller<Fallible<void>>& fulfiller) {
+bool box_future_poll(BoxFuture<Fallible<void>>& self, const KjWaker& waker, BoxFutureFulfiller<Fallible<void>>& fulfiller) {
   return box_future_poll_fallible_void(self, waker, fulfiller);
 }
 
@@ -32,7 +32,7 @@ void box_future_drop_in_place(BoxFuture<Fallible<int32_t>>* self) {
 template <>
 bool box_future_poll(
     BoxFuture<Fallible<int32_t>>& self,
-    const CxxWaker& waker,
+    const KjWaker& waker,
     BoxFutureFulfiller<Fallible<int32_t>>& fulfiller) {
   return box_future_poll_fallible_i32(self, waker, fulfiller);
 }

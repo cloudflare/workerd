@@ -81,7 +81,7 @@ using RemoveFallible = typename RemoveFallible_<T>::Type;
 template <typename T>
 void box_future_drop_in_place(BoxFuture<T>* self);
 template <typename T>
-bool box_future_poll(BoxFuture<T>& self, const CxxWaker& waker, BoxFutureFulfiller<T>&);
+bool box_future_poll(BoxFuture<T>& self, const KjWaker& waker, BoxFutureFulfiller<T>&);
 
 // A `Pin<Box<dyn Future<Output = ()>>>` owned by C++.
 //
@@ -100,11 +100,11 @@ public:
 
   using ExceptionOrValue = kj::_::ExceptionOr<kj::_::FixVoid<RemoveFallible<T>>>;
 
-  // Poll our Future with the given CxxWaker. Returns true if the future returned `Poll::Ready`,
+  // Poll our Future with the given KjWaker. Returns true if the future returned `Poll::Ready`,
   // false if the future returned `Poll::Pending`.
   //
   // `output` will contain the result of the Future iff `poll()` returns true.
-  bool poll(const CxxWaker& waker, ExceptionOrValue& output) noexcept {
+  bool poll(const KjWaker& waker, ExceptionOrValue& output) noexcept {
     bool ready = false;
 
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {

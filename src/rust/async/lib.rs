@@ -49,8 +49,8 @@ mod ffi {
         include!("workerd/rust/async/waker.h");
 
         // Match the definition of the abstract virtual class in the C++ header.
-        type CxxWaker;
-        fn clone(&self) -> *const CxxWaker;
+        type KjWaker;
+        fn clone(&self) -> *const KjWaker;
         fn wake(&self);
         fn wake_by_ref(&self);
         fn drop(&self);
@@ -98,7 +98,7 @@ mod ffi {
         // TODO(now): Generate boilerplate with a macro.
         fn box_future_poll_void(
             future: &mut BoxFutureVoid,
-            waker: &CxxWaker,
+            waker: &KjWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerVoid>,
         ) -> bool;
         unsafe fn box_future_drop_in_place_void(ptr: PtrBoxFutureVoid);
@@ -106,14 +106,14 @@ mod ffi {
         // TODO(now): Generate boilerplate with a macro.
         fn box_future_poll_fallible_void(
             future: &mut BoxFutureFallibleVoid,
-            waker: &CxxWaker,
+            waker: &KjWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleVoid>,
         ) -> Result<bool>;
         unsafe fn box_future_drop_in_place_fallible_void(ptr: PtrBoxFutureFallibleVoid);
 
         fn box_future_poll_fallible_i32(
             future: &mut BoxFutureFallibleI32,
-            waker: &CxxWaker,
+            waker: &KjWaker,
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
         ) -> Result<bool>;
         unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFutureFallibleI32);
@@ -145,7 +145,7 @@ mod ffi {
         unsafe fn poll(
             self: Pin<&mut GuardedRustPromiseAwaiter>,
             waker: &WakerRef,
-            maybe_cxx_waker: *const CxxWaker,
+            maybe_kj_waker: *const KjWaker,
         ) -> bool;
 
         fn take_own_promise_node(self: Pin<&mut GuardedRustPromiseAwaiter>) -> OwnPromiseNode;

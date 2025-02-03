@@ -147,7 +147,7 @@ void RustPromiseAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtN
   // TODO(now): Can we add an entry for the `.await` expression in Rust here?
 }
 
-bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker) {
+bool RustPromiseAwaiter::poll(const WakerRef& waker, const KjWaker* maybeKjWaker) {
   // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
   //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
   //   suspended at least once, we may be able to check for that through LazyArcWaker, but this path
@@ -157,25 +157,23 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWak
     // Our Promise is not yet ready.
 
     // Check for an optimized wake path.
-    KJ_IF_SOME(cxxWaker, maybeCxxWaker) {
-      KJ_IF_SOME(coAwaitWaker, kj::dynamicDowncastIfAvailable<const CoAwaitWaker>(cxxWaker)) {
-        KJ_IF_SOME(futurePollEvent, coAwaitWaker.tryGetFuturePollEvent()) {
-          // Optimized path. The Future which is polling our Promise is in turn being polled by a
-          // `co_await` expression somewhere up the stack from us. We can arrange to arm the
-          // `co_await` expression's KJ Event directly when our Promise is ready.
+    KJ_IF_SOME(kjWaker, maybeKjWaker) {
+      KJ_IF_SOME(futurePollEvent, kjWaker.tryGetFuturePollEvent()) {
+        // Optimized path. The Future which is polling our Promise is in turn being polled by a
+        // `co_await` expression somewhere up the stack from us. We can arrange to arm the
+        // `co_await` expression's KJ Event directly when our Promise is ready.
 
-          // If we had an opaque Waker stored in OptionWaker before, drop it now, as we won't be
-          // needing it.
-          optionWaker.set_none();
+        // If we had an opaque Waker stored in OptionWaker before, drop it now, as we won't be
+        // needing it.
+        optionWaker.set_none();
 
-          // Store a reference to the current `co_await` expression's Future polling Event. The
-          // reference is weak, and will be cleared if the `co_await` expression happens to end before
-          // our Promise is ready. In the more likely case that our Promise becomes ready while the
-          // `co_await` expression is still active, we'll arm its Event so it can `poll()` us again.
-          linkedGroup().set(futurePollEvent);
+        // Store a reference to the current `co_await` expression's Future polling Event. The
+        // reference is weak, and will be cleared if the `co_await` expression happens to end before
+        // our Promise is ready. In the more likely case that our Promise becomes ready while the
+        // `co_await` expression is still active, we'll arm its Event so it can `poll()` us again.
+        linkedGroup().set(futurePollEvent);
 
-          return false;
-        }
+        return false;
       }
     }
 
@@ -184,8 +182,8 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWak
     // Tell our OptionWaker to store a clone of whatever Waker we were given.
     optionWaker.set(waker);
 
-    // Clearing our reference to the CoAwaitWaker (if we have one) tells our fire() implementation to
-    // use our OptionWaker to perform the wake.
+    // Clearing our reference to the CoAwaitWaker (if we have one) tells our fire() implementation
+    // to use our OptionWaker to perform the wake.
     linkedGroup().set(kj::none);
 
     return false;
@@ -306,7 +304,7 @@ kj::Maybe<FuturePollEvent&> CoAwaitWaker::tryGetFuturePollEvent() const {
   }
 }
 
-const CxxWaker* CoAwaitWaker::clone() const {
+const KjWaker* CoAwaitWaker::clone() const {
   return kjWaker.clone();
 }
 

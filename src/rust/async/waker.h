@@ -10,24 +10,26 @@
 namespace workerd::rust::async {
 
 // =======================================================================================
-// CxxWaker
+// KjWaker
 
-// CxxWaker is an abstract base class which defines an interface mirroring Rust's RawWakerVTable
+class FuturePollEvent;
+
+// KjWaker is an abstract base class which defines an interface mirroring Rust's RawWakerVTable
 // struct. Rust has four trampoline functions, defined in waker.rs, which translate Waker::clone(),
 // Waker::wake(), etc. calls to the virtual member functions on this class.
 //
 // Rust requires Wakers to be Send and Sync, meaning all of the functions defined here may be called
 // concurrently by any thread. Derived class implementations of these functions must handle this,
 // which is why all of the virtual member functions are `const`-qualified.
-class CxxWaker {
+class KjWaker {
 public:
-  // Return a pointer to a new strong ref to a CxxWaker. Note that `clone()` may return nullptr,
+  // Return a pointer to a new strong ref to a KjWaker. Note that `clone()` may return nullptr,
   // in which case the Rust implementation in waker.rs will treat it as a no-op Waker. Rust
   // immediately wraps this pointer in its own Waker object, which is responsible for later
   // releasing the strong reference.
   //
   // TODO(cleanup): Build kj::Arc<T> into cxx-rs so we can return one instead of a raw pointer.
-  virtual const CxxWaker* clone() const = 0;
+  virtual const KjWaker* clone() const = 0;
 
   // Wake and drop this waker.
   virtual void wake() const = 0;
@@ -37,6 +39,11 @@ public:
 
   // Drop this waker.
   virtual void drop() const = 0;
+
+  // If this KjWaker implementation has an associated FuturePollEvent, C++ code can request access
+  // to it here. The RustPromiseAwaiter class (which helps Rust `.await` KJ Promises) uses this to
+  // optimize awaits, when possible.
+  virtual kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const { return kj::none; }
 };
 
 // =======================================================================================
@@ -79,7 +86,7 @@ struct PromiseArcWakerPair {
 // This class is mostly an implementation detail of LazyArcWaker.
 class ArcWaker: public kj::AtomicRefcounted,
                 public kj::EnableAddRefToThis<ArcWaker>,
-                public CxxWaker {
+                public KjWaker {
 public:
   // Construct a new promise and ArcWaker promise pair, with the Promise to be scheduled on the
   // event loop associated with `executor`.
@@ -88,7 +95,7 @@ public:
   ArcWaker(kj::Badge<ArcWaker>, kj::PromiseCrossThreadFulfillerPair<void> paf);
   KJ_DISALLOW_COPY_AND_MOVE(ArcWaker);
 
-  const CxxWaker* clone() const override;
+  const KjWaker* clone() const override;
   void wake() const override;
   void wake_by_ref() const override;
   void drop() const override;
@@ -105,11 +112,11 @@ private:
 
 // LazyArcWaker is intended to live locally on the stack or in a coroutine frame. Trying to
 // `clone()` it will cause it to allocate an ArcWaker for the caller.
-class LazyArcWaker: public CxxWaker {
+class LazyArcWaker: public KjWaker {
 public:
   // Create a new or clone an existing ArcWaker, leak its pointer, and return it. This may be called
   // by any thread.
-  const CxxWaker* clone() const override;
+  const KjWaker* clone() const override;
 
   // Unimplemented, because Rust user code cannot consume the `std::task::Waker` we create which
   // wraps this LazyArcWaker.
