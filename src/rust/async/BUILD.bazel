@@ -18,7 +18,7 @@ wd_cc_library(
     srcs = [
         "awaiter.c++",
         "executor-guarded.c++",
-        "future.c++",
+        "future-boilerplate.c++",
         "promise.c++",
         "promise-boilerplate.c++",
         "test-promises.c++",

@@ -73,7 +73,7 @@ mod ffi {
     }
 
     unsafe extern "C++" {
-        include!("workerd/rust/async/future.h");
+        include!("workerd/rust/async/future-boilerplate.h");
 
         // TODO(now): Generate boilerplate with a macro.
         type BoxFutureVoid = crate::BoxFuture<()>;
