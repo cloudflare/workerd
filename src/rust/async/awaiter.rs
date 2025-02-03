@@ -17,9 +17,9 @@ use crate::CxxResult;
 // =======================================================================================
 // GuardedRustPromiseAwaiter
 
-#[path = "await.h.rs"]
-mod await_h;
-pub use await_h::GuardedRustPromiseAwaiter;
+#[path = "awaiter.h.rs"]
+mod awaiter_h;
+pub use awaiter_h::GuardedRustPromiseAwaiter;
 
 // Safety: KJ Promises are not associated with threads, but with event loops at construction time.
 // Therefore, they can be polled from any thread, as long as that thread has the correct event loop
@@ -52,7 +52,7 @@ impl Drop for GuardedRustPromiseAwaiter {
     }
 }
 
-// Safety: We have a static_assert in await.c++ which breaks if you change the size or alignment
+// Safety: We have a static_assert in awaiter.c++ which breaks if you change the size or alignment
 // of the C++ definition of GuardedRustPromiseAwaiter, with instructions to regenerate the bindgen-
 // generated type. I couldn't figure out how to static_assert on the actual generated Rust struct,
 // though, so it's not perfect. Ideally we'd run bindgen in the build system.

@@ -1,4 +1,4 @@
-#include <workerd/rust/async/await.h>
+#include <workerd/rust/async/awaiter.h>
 #include <workerd/rust/async/lib.rs.h>
 
 #include <kj/debug.h>
@@ -10,9 +10,9 @@ namespace workerd::rust::async {
 
 // To own RustPromiseAwaiters, Rust needs to know the size and alignment of RustPromiseAwaiter. To
 // that end, we use bindgen to generate an opaque FFI type of known size for RustPromiseAwaiter in
-// await.h.rs.
+// awaiter.h.rs.
 //
-// Our use of bindgen is non-automated, and the generated await.hs.rs file must be manually
+// Our use of bindgen is non-automated, and the generated awaiter.hs.rs file must be manually
 // regenerated whenever the size and alignment of RustPromiseAwaiter changes. To remind us to do so,
 // we have these static_asserts.
 //
@@ -20,9 +20,9 @@ namespace workerd::rust::async {
 //
 //   1. Scroll down to find a sample `bindgen` command line invocation.
 //   2. Run the command in this directory.
-//   3. Read the new await.hs.rs and adjust the constants in these static_asserts with the new size
+//   3. Read the new awaiter.hs.rs and adjust the constants in these static_asserts with the new size
 //      or alignment.
-//   4. Commit the changes here with the new await.hs.rs file.
+//   4. Commit the changes here with the new awaiter.hs.rs file.
 //
 // It would be nice to automate this someday. `rules_rust` has some bindgen rules, but it adds a few
 // thousand years to the build times due to its hermetic dependency on LLVM. It's possible to
@@ -62,8 +62,8 @@ bindgen \
     --allowlist-type "workerd::rust::async_::GuardedRustPromiseAwaiter" \
     --opaque-type ".*" \
     --no-derive-copy \
-    ./await.h \
-    -o ./await.h.rs \
+    ./awaiter.h \
+    -o ./awaiter.h.rs \
     -- \
     -x c++ \
     -std=c++23 \

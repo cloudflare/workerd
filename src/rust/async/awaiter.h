@@ -13,7 +13,7 @@ namespace workerd::rust::async {
 // Opaque Rust types
 //
 // The following types are defined in lib.rs, and thus in lib.rs.h. lib.rs.h depends on our C++
-// headers, including await.h (the file you're currently reading), so we forward-declare some types
+// headers, including awaiter.h (the file you're currently reading), so we forward-declare some types
 // here for use in the C++ headers.
 
 // Wrapper around an `&std::task::Waker`, passed to `RustPromiseAwaiter::poll()`. This indirection
@@ -44,14 +44,15 @@ struct OptionWaker;
 // driven to complete readiness. Our implementation must be able to handle this case.
 //
 // Rust knows how big RustPromiseAwaiter is because we generate a Rust type of equal size and
-// alignment using bindgen. See inside await.c++ for a static_assert to remind us to re-run bindgen.
+// alignment using bindgen. See inside awaiter.c++ for a static_assert to remind us to re-run
+// bindgen.
 //
-// RustPromiseAwaiter has two base classes: KJ Event, and a LinkedObject template
-// instantiation. We use the Event to discover when our wrapped Promise is ready. Our Event fire()
-// implementation records the fact that we are done, then wakes our Waker or arms the CoAwaitWaker
-// Event, if we have one. We access the CoAwaitWaker via our LinkedObject base class mixin. It
-// gives us the ability to store a weak reference to the CoAwaitWaker, if we were last polled by
-// one's LazyArcWaker.
+// RustPromiseAwaiter has two base classes: KJ Event, and a LinkedObject template instantiation. We
+// use the Event to discover when our wrapped Promise is ready. Our Event fire() implementation
+// records the fact that we are done, then wakes our Waker or arms the CoAwaitWaker Event, if we
+// have one. We access the CoAwaitWaker via our LinkedObject base class mixin. It gives us the
+// ability to store a weak reference to the CoAwaitWaker, if we were last polled by one's
+// LazyArcWaker.
 class RustPromiseAwaiter final: public kj::_::Event,
                                 public LinkedObject<FuturePollEvent, RustPromiseAwaiter> {
 public:

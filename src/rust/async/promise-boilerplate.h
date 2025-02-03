@@ -1,6 +1,6 @@
 #pragma once
 
-#include <workerd/rust/async/await.h>
+#include <workerd/rust/async/awaiter.h>
 #include <workerd/rust/async/promise.h>
 
 namespace workerd::rust::async {

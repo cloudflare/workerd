@@ -1,8 +1,8 @@
-mod await_;
-pub use await_::GuardedRustPromiseAwaiter;
-use await_::OptionWaker;
-use await_::PtrGuardedRustPromiseAwaiter;
-use await_::WakerRef;
+mod awaiter;
+pub use awaiter::GuardedRustPromiseAwaiter;
+use awaiter::OptionWaker;
+use awaiter::PtrGuardedRustPromiseAwaiter;
+use awaiter::WakerRef;
 
 mod future;
 use future::box_future_drop_in_place_fallible_i32;
@@ -128,7 +128,7 @@ mod ffi {
     }
 
     unsafe extern "C++" {
-        include!("workerd/rust/async/await.h");
+        include!("workerd/rust/async/awaiter.h");
 
         type GuardedRustPromiseAwaiter = crate::GuardedRustPromiseAwaiter;
         type PtrGuardedRustPromiseAwaiter = crate::PtrGuardedRustPromiseAwaiter;

@@ -1,5 +1,5 @@
 #include <workerd/rust/async/lib.rs.h>
-#include <workerd/rust/async/await.h>
+#include <workerd/rust/async/awaiter.h>
 #include <workerd/rust/async/future.h>
 #include <workerd/rust/async/waker.h>
 

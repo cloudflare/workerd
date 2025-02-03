@@ -16,7 +16,7 @@ wd_rust_crate(
 wd_cc_library(
     name = "cxx-bridge",
     srcs = [
-        "await.c++",
+        "awaiter.c++",
         "executor-guarded.c++",
         "future.c++",
         "promise.c++",
