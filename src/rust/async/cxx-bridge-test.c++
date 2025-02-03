@@ -8,13 +8,13 @@
 namespace workerd::rust::async {
 namespace {
 
-KJ_TEST("KjWaker: C++ can poll() Rust Futures") {
+KJ_TEST("LazyArcWaker: C++ can poll() Rust Futures") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   // Poll a Future which returns Pending.
   {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto pending = new_pending_future_void();
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -24,14 +24,13 @@ KJ_TEST("KjWaker: C++ can poll() Rust Futures") {
 
     // The pending future never calls Waker::wake() because it has no intention to ever wake us up.
     // Additionally, it never even calls `waker.clone()`, so we have no promise at all.
-    auto state = waker.reset();
-    KJ_EXPECT(state.wakeCount == 0);
-    KJ_EXPECT(state.cloned == kj::none);
+    auto promise = waker.reset();
+    KJ_EXPECT(promise == kj::none);
   }
 
   // Poll a Future which returns Ready(()).
   {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto ready = new_ready_future_void();
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -42,13 +41,12 @@ KJ_TEST("KjWaker: C++ can poll() Rust Futures") {
     // The ready future never calls Waker::wake() because it instead indicates immediate
     // readiness by its return value. Additionally, it never even calls `waker.clone()`, so we have no
     // promise at all.
-    auto state = waker.reset();
-    KJ_EXPECT(state.wakeCount == 0);
-    KJ_EXPECT(state.cloned == kj::none);
+    auto promise = waker.reset();
+    KJ_EXPECT(promise == kj::none);
   }
 }
 
-KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
+KJ_TEST("LazyArcWaker: C++ can receive synchronous wakes during poll()") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -63,7 +61,7 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     { CloningAction::None, WakingAction::WakeByRefSameThread },
     { CloningAction::None, WakingAction::WakeByRefBackgroundThread },
   }) {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -71,11 +69,11 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KJ_EXPECT(result.value == kj::none);
     KJ_EXPECT(result.exception == kj::none);
 
-    // The waking future immediately called wake_by_ref() on the KjWaker. This incremented our
-    // count, and didn't populate a cloned promise.
-    auto state = waker.reset();
-    KJ_EXPECT(state.wakeCount == 1);
-    KJ_EXPECT(state.cloned == kj::none);
+    // The waking future immediately called wake_by_ref() on the LazyArcWaker. This incremented our
+    // count, meaning `reset()` returns an immediately-ready promise.
+    auto promise = KJ_ASSERT_NONNULL(waker.reset());
+    KJ_EXPECT(promise.poll(waitScope));
+    promise.wait(waitScope);
   }
 
   for (auto testCase: std::initializer_list<Actions> {
@@ -88,7 +86,7 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     { CloningAction::CloneBackgroundThread, WakingAction::WakeSameThread },
     { CloningAction::CloneBackgroundThread, WakingAction::WakeBackgroundThread },
   }) {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -96,22 +94,18 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KJ_EXPECT(result.value == kj::none);
     KJ_EXPECT(result.exception == kj::none);
 
-    auto state = waker.reset();
-
-    // Wakes on clones don't increment the wakeCount.
-    KJ_EXPECT(state.wakeCount == 0);
+    auto promise = KJ_ASSERT_NONNULL(waker.reset());
 
     // We expect our cloned ArcWaker promise to be immediately ready.
-    KJ_EXPECT(KJ_ASSERT_NONNULL(state.cloned).poll(waitScope));
-    auto wakeInstruction = KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
-    KJ_EXPECT(wakeInstruction == WakeInstruction::WAKE);
+    KJ_EXPECT(promise.poll(waitScope));
+    promise.wait(waitScope);
   }
 
   // Test wake_by_ref()-before-clone().
   for (auto testCase: std::initializer_list<Actions> {
     { CloningAction::WakeByRefThenCloneSameThread, WakingAction::WakeSameThread },
   }) {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -119,13 +113,9 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KJ_EXPECT(result.value == kj::none);
     KJ_EXPECT(result.exception == kj::none);
 
-    auto state = waker.reset();
-
-    // Our initial `wake_by_ref()` call incremented the wakeCount.
-    KJ_EXPECT(state.wakeCount == 1);
-
-    // The subsequent `clone()` and `wake()` were a no-op.
-    KJ_EXPECT(state.cloned == kj::none);
+    auto promise = KJ_ASSERT_NONNULL(waker.reset());
+    KJ_EXPECT(promise.poll(waitScope));
+    promise.wait(waitScope);
   }
 
   // Test no calls to `wake*()`.
@@ -133,7 +123,7 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     // Note: the None, None case is covered by `new_pending_future_void()`.
     { CloningAction::CloneSameThread, WakingAction::None },
   }) {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto waking = new_waking_future_void(testCase.cloningAction, testCase.wakingAction);
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -141,24 +131,19 @@ KJ_TEST("KjWaker: C++ can receive synchronous wakes during poll()") {
     KJ_EXPECT(result.value == kj::none);
     KJ_EXPECT(result.exception == kj::none);
 
-    auto state = waker.reset();
-
-    KJ_EXPECT(state.wakeCount == 0);
-
-    KJ_EXPECT(KJ_ASSERT_NONNULL(state.cloned).poll(waitScope));
-    auto wakeInstruction = KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
-    KJ_EXPECT(wakeInstruction == WakeInstruction::IGNORE);
+    auto promise = KJ_ASSERT_NONNULL(waker.reset());
+    KJ_EXPECT(!promise.poll(waitScope));
   }
 }
 
-KJ_TEST("KjWaker: C++ can receive asynchronous wakes after poll()") {
+KJ_TEST("LazyArcWaker: C++ can receive asynchronous wakes after poll()") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   // Poll a Future which clones the Waker on a different thread, then spawns a new thread to wake
   // the waker after a delay.
   {
-    KjWaker waker;
+    LazyArcWaker waker;
 
     auto waking = new_threaded_delay_future_void();
     kj::_::ExceptionOr<kj::_::FixVoid<void>> result;
@@ -166,12 +151,11 @@ KJ_TEST("KjWaker: C++ can receive asynchronous wakes after poll()") {
     KJ_EXPECT(result.value == kj::none);
     KJ_EXPECT(result.exception == kj::none);
 
-    auto state = waker.reset();
-    KJ_EXPECT(state.wakeCount == 0);
-    KJ_EXPECT(state.cloned != kj::none);
-
-    KJ_EXPECT(!KJ_ASSERT_NONNULL(state.cloned).poll(waitScope));
-    KJ_ASSERT_NONNULL(state.cloned).wait(waitScope);
+    auto promise = KJ_ASSERT_NONNULL(waker.reset());
+    // It's not ready yet.
+    KJ_EXPECT(!promise.poll(waitScope));
+    // But later it is.
+    promise.wait(waitScope);
   }
 }
 
@@ -205,7 +189,7 @@ KJ_TEST("RustPromiseAwaiter: Rust can poll() multiple promises under a single co
 
 // TODO(now): Similar to "Rust can poll() multiple promises ...", but poll() until all are ready.
 
-// TODO(now): Test polling a Promise from Rust with multiple KjWakers.
+// TODO(now): Test polling a Promise from Rust with multiple LazyArcWakers.
 //   Need a function which:
 //   - Creates an OwnPromiseNode which is fulfilled manually.
 //   - Wraps OwnPromiseNode::into_future() in BoxFuture.

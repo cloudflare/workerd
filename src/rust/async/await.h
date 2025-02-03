@@ -12,44 +12,6 @@ namespace workerd::rust::async {
 class FuturePollEvent;
 
 // =======================================================================================
-// ArcWakerAwaiter
-
-// ArcWakerAwaiter is an awaiter intended to await Promises associated with the ArcWaker produced
-// when a KjWaker is cloned.
-//
-// TODO(perf): This is only an Event because we need to handle the case where all the Wakers are
-//   dropped and we receive a WakeInstruction::IGNORE. If we could somehow disarm the
-//   CrossThreadPromiseFulfillers inside ArcWaker when it's dropped, we could avoid requiring this
-//   separate Event, and connect the ArcWaker promise directly to the FuturePollEvent.
-class ArcWakerAwaiter final: public kj::_::Event {
-public:
-  ArcWakerAwaiter(
-      FuturePollEvent& futurePollEvent,
-      kj::Promise<WakeInstruction> promise,
-      kj::SourceLocation location = {});
-  ~ArcWakerAwaiter() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(ArcWakerAwaiter);
-
-  kj::Maybe<kj::Own<kj::_::Event>> fire() override;
-  void traceEvent(kj::_::TraceBuilder& builder) override;
-
-  // Helper for FuturePollEvent to report what promise it's waiting on.
-  void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent);
-
-private:
-  // We need to keep a reference to our FuturePollEvent in order to arm and trace it.
-  //
-  // Safety: It is safe to store a bare reference to our FuturePollEvent, because this object
-  // (ArcWakerAwaiter) lives inside of the FuturePollEvent, and thus our lifetime is encompassed by
-  // the FuturePollEvent's. Note that if this ever changes in the future, we could switch to making
-  // ArcWakerAwaiter a member of FuturePollEvent's LinkedGroup.
-  FuturePollEvent& futurePollEvent;
-
-  kj::UnwindDetector unwindDetector;
-  OwnPromiseNode node;
-};
-
-// =======================================================================================
 // RustPromiseAwaiter
 
 // RustPromiseAwaiter allows Rust `async` blocks to `.await` KJ promises. Rust code creates one in
@@ -70,7 +32,7 @@ private:
 // implementation records the fact that we are done, then wakes our Waker or arms the CoAwaitWaker
 // Event, if we have one. We access the CoAwaitWaker via our LinkedObject base class mixin. It
 // gives us the ability to store a weak reference to the CoAwaitWaker, if we were last polled by
-// one's KjWaker.
+// one's LazyArcWaker.
 class RustPromiseAwaiter final: public kj::_::Event,
                                 public LinkedObject<FuturePollEvent, RustPromiseAwaiter> {
 public:
@@ -153,7 +115,7 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 // `Event::fire()` override which actually polls the `BoxFuture<T>`; this class implements all other
 // base class virtual functions.
 //
-// A FuturePollEvent contains an optional ArcWakerAwaiter and a list of zero or more
+// A FuturePollEvent contains an optional ArcWakerPromiseAwaiter and a list of zero or more
 // RustPromiseAwaiters. These "sub-Promise awaiters" all wrap a KJ Promise of some sort, and arrange
 // to arm the FuturePollEvent when their Promises become ready.
 //
@@ -168,13 +130,9 @@ class FuturePollEvent: public kj::_::Event,
 public:
   FuturePollEvent(kj::SourceLocation location = {}): Event(location) {}
 
-  // Called by `CoAwaitWaker::suspend()` when it sees that its ArcWaker was cloned into existence.
-  void emplaceArcWakerAwaiter(kj::Promise<WakeInstruction> promise);
-
   // True if our `tracePromise()` implementation would choose the given awaiter's promise for
   // tracing. If our wrapped Future is awaiting multiple other Promises and/or Futures, our
   // `tracePromise()` implementation might choose a different branch to go down.
-  bool wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter);
   bool wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter);
 
   // -------------------------------------------------------
@@ -188,15 +146,22 @@ public:
   void get(kj::_::ExceptionOrValue& output) noexcept override;
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
 
+protected:
+  // Called our BoxFutureAwaiter<T> when a call to `poll()` results in an LazyArcWaker promise.
+  void awaitLazyArcWakerPromise(kj::Maybe<kj::Promise<void>> maybePromise);
+  // Called by BoxFutureAwaiter<T> to clear any existing LazyArcWaker promise. Note that this is not
+  // strictly required for correctness, but does provide some correctness assertions.
+  void consumeLazyArcWakerPromise() noexcept;
+
 private:
-  kj::Maybe<ArcWakerAwaiter> arcWakerAwaiter;
+  kj::Maybe<OwnPromiseNode> arcWakerPromise;
 };
 
 // =======================================================================================
 // CoAwaitWaker
 
 // A CxxWaker implementation which provides an optimized path for awaiting KJ Promises in Rust. It
-// consists of a KjWaker and a reference to a FuturePollEvent.
+// consists of a LazyArcWaker and a reference to a FuturePollEvent.
 //
 // The FuturePollEvent is responsible for calling `Future::poll()`. One of its derived classes owns
 // this CoAwaitWaker in an object lifetime sense.
@@ -207,7 +172,7 @@ public:
   // After constructing a CoAwaitWaker, pass it by reference to `BoxFuture<T>::poll()`. If `poll()`
   // returns Pending, call this `suspend()` function to arrange to arm the Future poll() Event when
   // we are woken.
-  void suspend();
+  kj::Maybe<kj::Promise<void>> reset();
 
   // The Event which is using this CoAwaitWaker to poll() a Future. Waking the CoAwaitWaker arms
   // this Event (possibly via a cross-thread promise fulfiller). We also arm the Event directly in
@@ -219,7 +184,7 @@ public:
   // -------------------------------------------------------
   // CxxWaker API
   //
-  // Our CxxWaker implementation just forwards everything to our KjWaker member.
+  // Our CxxWaker implementation just forwards everything to our LazyArcWaker member.
 
   const CxxWaker* clone() const override;
   void wake() const override;
@@ -230,8 +195,8 @@ private:
   // TODO(now): Can/should we make this ExecutorGuarded?
   FuturePollEvent& futurePollEvent;
 
-  // This KjWaker is our actual implementation of the CxxWaker interface. We forward all calls here.
-  KjWaker kjWaker;
+  // This LazyArcWaker is our actual implementation of the CxxWaker interface. We forward all calls here.
+  LazyArcWaker kjWaker;
 };
 
 // =======================================================================================
@@ -260,7 +225,7 @@ public:
   // Poll the wrapped Future, returning false if we should _not_ suspend, true if we should suspend.
   bool awaitSuspendImpl() {
     // TODO(perf): Check if we already have an ArcWaker from a previous suspension and give it to
-    //   KjWaker for cloning if we have the last reference to it at this point. This could save
+    //   LazyArcWaker for cloning if we have the last reference to it at this point. This could save
     //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
     //   to really benefit.
 
@@ -270,7 +235,7 @@ public:
       return false;
     }
 
-    coAwaitWaker.suspend();
+    awaitLazyArcWakerPromise(coAwaitWaker.reset());
 
     // Integrate with our enclosing coroutine's tracing.
     coroutine.setPromiseNodeForTrace(promiseNodeForTrace);
@@ -280,6 +245,7 @@ public:
 
   RemoveFallible<T> awaitResumeImpl() {
     coroutine.clearPromiseNodeForTrace();
+    consumeLazyArcWakerPromise();
     return kj::_::convertToReturn(kj::mv(result));
   }
 

@@ -5,82 +5,6 @@
 
 namespace workerd::rust::async {
 
-// =======================================================================================
-// ArcWakerAwaiter
-
-ArcWakerAwaiter::ArcWakerAwaiter(
-    FuturePollEvent& futurePollEvent, kj::Promise<WakeInstruction> promise, kj::SourceLocation location)
-    : Event(location),
-      futurePollEvent(futurePollEvent),
-      node(kj::_::PromiseNode::from(kj::mv(promise))) {
-  node->setSelfPointer(&node);
-  node->onReady(this);
-  // TODO(perf): If `this->isNext()` is true, can we immediately resume? Or should we check if
-  //   the enclosing coroutine has suspended at least once?
-}
-
-ArcWakerAwaiter::~ArcWakerAwaiter() noexcept(false) {
-  unwindDetector.catchExceptionsIfUnwinding([this]() {
-    node = nullptr;
-  });
-}
-
-// Validity-check the Promise's result, then fire the CoAwaitWaker Event to poll the
-// wrapped Future again.
-kj::Maybe<kj::Own<kj::_::Event>> ArcWakerAwaiter::fire() {
-  kj::_::ExceptionOr<WakeInstruction> result;
-
-  node->get(result);
-  KJ_IF_SOME(exception, kj::runCatchingExceptions([this]() {
-    node = nullptr;
-  })) {
-    result.addException(kj::mv(exception));
-  }
-
-  [&result]() noexcept {
-    KJ_IF_SOME(exception, result.exception) {
-      // We should only ever receive a WakeInstruction, never an exception. If we do receive an
-      // exception, it would be because our ArcWaker implementation allowed its cross-thread promise
-      // fulfiller to be destroyed without being fulfilled, or because we foolishly added an
-      // explicit call to the fulfiller's reject() function. Either way, it is a programming error,
-      // so we abort the process here by re-throwing across a noexcept boundary. This avoids having
-      // implement the ability to "reject" the Future poll() Event.
-      kj::throwFatalException(kj::mv(exception));
-    }
-  }();
-
-  auto value = KJ_ASSERT_NONNULL(result.value);
-
-  if (value == WakeInstruction::WAKE) {
-    // This was an actual wakeup.
-    futurePollEvent.armDepthFirst();
-  } else {
-    // All of our Wakers were dropped. We are awaiting the Rust equivalent of kj::NEVER_DONE.
-  }
-
-  return kj::none;
-}
-
-void ArcWakerAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
-  if (futurePollEvent.wouldTrace({}, *this)) {
-    // Our associated futurePollEvent's `traceEvent()` implementation would call our
-    // `tracePromise()` function. Just forward the call to the futurePollEvent.
-    futurePollEvent.traceEvent(builder);
-  } else {
-    // Our CoAwaitWaker would choose a different branch to trace, so just record our own trace
-    // address(es) and stop here.
-    tracePromise(builder, false);
-  }
-}
-
-void ArcWakerAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
-  // TODO(someday): Is it possible to get the address of the Rust code which cloned our Waker?
-
-  if (node.get() != nullptr) {
-    node->tracePromise(builder, stopAtNextEvent);
-  }
-}
-
 // =================================================================================================
 // RustPromiseAwaiter
 
@@ -226,7 +150,7 @@ void RustPromiseAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtN
 bool RustPromiseAwaiter::poll(const WakerRef& waker, const CxxWaker* maybeCxxWaker) {
   // TODO(perf): If `this->isNext()` is true, meaning our event is next in line to fire, can we
   //   disarm it, set `done = true`, etc.? If we can only suspend if our enclosing KJ coroutine has
-  //   suspended at least once, we may be able to check for that through KjWaker, but this path
+  //   suspended at least once, we may be able to check for that through LazyArcWaker, but this path
   //   doesn't have access to one.
 
   KJ_IF_SOME(optionWaker, maybeOptionWaker) {
@@ -288,8 +212,37 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr
 // =======================================================================================
 // FuturePollEvent
 
-void FuturePollEvent::emplaceArcWakerAwaiter(kj::Promise<WakeInstruction> promise) {
-  arcWakerAwaiter.emplace(*this, kj::mv(promise));
+void FuturePollEvent::awaitLazyArcWakerPromise(kj::Maybe<kj::Promise<void>> maybePromise) {
+  KJ_IF_SOME(promise, maybePromise) {
+    auto& node = arcWakerPromise.emplace(kj::_::PromiseNode::from(kj::mv(promise)));
+    node->setSelfPointer(&node);
+    node->onReady(this);
+  }
+}
+
+void FuturePollEvent::consumeLazyArcWakerPromise() noexcept {
+  KJ_IF_SOME(node, arcWakerPromise) {
+    kj::_::ExceptionOr<kj::_::Void> output;
+
+    node->get(output);
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([this]() {
+      arcWakerPromise = kj::none;
+    })) {
+      output.addException(kj::mv(exception));
+    }
+
+    // NOTE: `node` is now dangling.
+
+    KJ_IF_SOME(exception, output.exception) {
+      // We should only ever receive a WakeInstruction, never an exception. If we do receive an
+      // exception, it would be because our ArcWaker implementation allowed its cross-thread promise
+      // fulfiller to be destroyed without being fulfilled, or because we foolishly added an
+      // explicit call to the fulfiller's reject() function. Either way, it is a programming error,
+      // so we abort the process here by re-throwing across a noexcept boundary. This avoids having
+      // implement the ability to "reject" the Future poll() Event.
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
 }
 
 void FuturePollEvent::onReady(kj::_::Event* event) noexcept {
@@ -315,23 +268,13 @@ void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
   if (rustPromiseAwaiters.begin() != rustPromiseAwaiters.end()) {
     // Our Rust Future is awaiting an OwnPromiseNode. We'll pick the first one in our list.
     rustPromiseAwaiters.front().tracePromise(builder, stopAtNextEvent);
-  } else KJ_IF_SOME(awaiter, arcWakerAwaiter) {
+  } else KJ_IF_SOME(node, arcWakerPromise) {
     // Our Rust Future is not awaiting any OwnPromiseNode, and instead cloned our Waker. We'll trace
     // our ArcWaker Promise instead.
-    awaiter.tracePromise(builder, stopAtNextEvent);
-  }
-}
-
-bool FuturePollEvent::wouldTrace(kj::Badge<ArcWakerAwaiter>, ArcWakerAwaiter& awaiter) {
-  // We would only trace the ArcWakerAwaiter if we have no RustPromiseAwaiters.
-  if (linkedObjects().empty()) {
-    KJ_IF_SOME(awa, arcWakerAwaiter) {
-      KJ_ASSERT(&awa == &awaiter,
-          "Should not be possible for foreign ArcWakerAwaiter to call our wouldTrace()");
-      return true;
+    if (node.get() != nullptr) {
+      node->tracePromise(builder, stopAtNextEvent);
     }
   }
-  return false;
 }
 
 bool FuturePollEvent::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter) {
@@ -348,23 +291,8 @@ bool FuturePollEvent::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwait
 
 CoAwaitWaker::CoAwaitWaker(FuturePollEvent& futurePollEvent): futurePollEvent(futurePollEvent) {}
 
-void CoAwaitWaker::suspend() {
-  auto state = kjWaker.reset();
-
-  if (state.wakeCount > 0) {
-    // The future returned Pending, but synchronously called `wake_by_ref()` on the KjWaker,
-    // indicating it wants to immediately be polled again. We should arm our event right now,
-    // which will call `await_ready()` again on the event loop.
-    futurePollEvent.armDepthFirst();
-  } else KJ_IF_SOME(promise, state.cloned) {
-    // The future returned Pending and cloned an ArcWaker to notify us later. We'll arrange for
-    // the ArcWaker's promise to arm our event once it's fulfilled.
-    futurePollEvent.emplaceArcWakerAwaiter(kj::mv(promise));
-  } else {
-    // The future returned Pending, did not call `wake_by_ref()` on the KjWaker, and did not
-    // clone an ArcWaker. Rust is either awaiting a KJ promise, or the Rust equivalent of
-    // kj::NEVER_DONE.
-  }
+kj::Maybe<kj::Promise<void>> CoAwaitWaker::reset() {
+  return kjWaker.reset();
 }
 
 kj::Maybe<FuturePollEvent&> CoAwaitWaker::tryGetFuturePollEvent() const {
