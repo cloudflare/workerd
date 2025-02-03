@@ -119,31 +119,21 @@ kj::Maybe<kj::Own<kj::_::Event>> RustPromiseAwaiter::fire() {
 }
 
 void RustPromiseAwaiter::traceEvent(kj::_::TraceBuilder& builder) {
-  KJ_IF_SOME(futurePollEvent, linkedGroup().tryGet()) {
-    if (futurePollEvent.wouldTrace({}, *this)) {
-      // We are associated with a CoAwaitWaker, and we are at the head of the its list of Promises,
-      // meaning its `tracePromise()` implementation would forward to our `tracePromise()`. We can
-      // therefore forward this `traceEvent()` call to the coroutine's `traceEvent()` to generate a
-      // slightly longer trace with this node in it.
-      futurePollEvent.traceEvent(builder);
-      return;
-    }
+  if (node.get() != nullptr) {
+    node->tracePromise(builder, true);
   }
-
-  // If we get here, we either don't have a CoAwaitWaker, or we do but it wouldn't trace our
-  // Promise because the Future in question is polling more than one Promise. We'll just trace our
-  // Promise, and not trace into the CoAwaitWaker.
-  tracePromise(builder, false);
+  // TODO(now): Can we add an entry for the `.await` expression in Rust here?
+  KJ_IF_SOME(futurePollEvent, linkedGroup().tryGet()) {
+    futurePollEvent.traceEvent(builder);
+  }
 }
 
 void RustPromiseAwaiter::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
-  // We ignore `stopAtNextEvent`, because `CoAwaitWaker` is our only possible caller. And if
-  // it's calling us, it wants us to trace our promise, not ignore the call.
+  if (stopAtNextEvent) return;
 
   if (node.get() != nullptr) {
     node->tracePromise(builder, stopAtNextEvent);
   }
-
   // TODO(now): Can we add an entry for the `.await` expression in Rust here?
 }
 
@@ -251,37 +241,25 @@ void FuturePollEvent::get(kj::_::ExceptionOrValue& output) noexcept {
 }
 
 void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
-  // We ignore `stopAtNextEvent`, because `kj::_::Coroutine` is our only possible caller. And if
-  // it's calling us, it wants us to trace our promise, not ignore the call.
+  if (stopAtNextEvent) return;
 
   // CoAwaitWaker is inherently a "join". Even though it polls only one Future, that Future may in
   // turn poll any number of different Futures and Promises.
   //
   // When tracing, we can only pick one branch to follow. Arbitrarily, I'm following the first
-  // RustPromiseAwaiter branch. In the common case, this will be whatever OwnPromiseNode our Rust
-  // Future is currently `.await`ing.
-  //
-  // NOTE: If you change this logic, you must also change the `wouldTrace()` member function!
+  // RustPromiseAwaiter branch, similar to how ExclusiveJoinPromiseNode chooses its left branch. In
+  // the common case, this will be whatever OwnPromiseNode our Rust Future is currently `.await`ing.
   auto rustPromiseAwaiters = linkedObjects();
   if (rustPromiseAwaiters.begin() != rustPromiseAwaiters.end()) {
     // Our Rust Future is awaiting an OwnPromiseNode. We'll pick the first one in our list.
-    rustPromiseAwaiters.front().tracePromise(builder, stopAtNextEvent);
+    rustPromiseAwaiters.front().tracePromise(builder, false);
   } else KJ_IF_SOME(node, arcWakerPromise) {
     // Our Rust Future is not awaiting any OwnPromiseNode, and instead cloned our Waker. We'll trace
     // our ArcWaker Promise instead.
     if (node.get() != nullptr) {
-      node->tracePromise(builder, stopAtNextEvent);
+      node->tracePromise(builder, false);
     }
   }
-}
-
-bool FuturePollEvent::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter) {
-  // We prefer to trace the first RustPromiseAwaiter in our list, if there is one.
-  auto objects = linkedObjects();
-  if (objects.begin() != objects.end()) {
-    return &awaiter == &objects.front();
-  }
-  return false;
 }
 
 }  // namespace workerd::rust::async

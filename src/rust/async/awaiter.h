@@ -71,7 +71,7 @@ public:
   kj::Maybe<kj::Own<kj::_::Event>> fire() override;
   void traceEvent(kj::_::TraceBuilder& builder) override;
 
-  // Helpers for FuturePollEvent to report what promise it's waiting on.
+  // Helper for FuturePollEvent to report what promise it's waiting on.
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent);
 
   // -------------------------------------------------------
@@ -149,11 +149,6 @@ class FuturePollEvent: public kj::_::Event,
                        public LinkedGroup<FuturePollEvent, RustPromiseAwaiter> {
 public:
   FuturePollEvent(kj::SourceLocation location = {}): Event(location) {}
-
-  // True if our `tracePromise()` implementation would choose the given awaiter's promise for
-  // tracing. If our wrapped Future is awaiting multiple other Promises and/or Futures, our
-  // `tracePromise()` implementation might choose a different branch to go down.
-  bool wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwaiter& awaiter);
 
   // -------------------------------------------------------
   // PromiseNode API
