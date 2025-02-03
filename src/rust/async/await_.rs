@@ -78,7 +78,6 @@ unsafe impl ExternType for PtrGuardedRustPromiseAwaiter {
 use std::marker::PhantomData;
 
 use crate::promise::PromiseTarget;
-use crate::OptionWaker;
 use crate::OwnPromiseNode;
 use crate::Promise;
 
@@ -181,6 +180,45 @@ impl PromiseAwaiter {
         let maybe_kj_waker = try_into_kj_waker_ptr(cx.waker());
         let awaiter = self.as_mut().get_awaiter();
         // TODO(now): Safety comment.
-        unsafe { awaiter.poll(&crate::WakerRef(cx.waker()), maybe_kj_waker) }
+        unsafe { awaiter.poll(&WakerRef(cx.waker()), maybe_kj_waker) }
+    }
+}
+
+// =======================================================================================
+// OptionWaker and WakerRef
+
+pub struct WakerRef<'a>(&'a std::task::Waker);
+
+// This is a wrapper around `std::task::Waker`, exposed to C++. We use it in `RustPromiseAwaiter`
+// to allow KJ promises to be awaited using opaque Wakers implemented in Rust.
+pub struct OptionWaker {
+    inner: Option<std::task::Waker>,
+}
+
+impl OptionWaker {
+    pub fn empty() -> OptionWaker {
+        OptionWaker { inner: None }
+    }
+
+    pub fn set(&mut self, waker: &WakerRef) {
+        if let Some(w) = &mut self.inner {
+            w.clone_from(waker.0);
+        } else {
+            self.inner = Some(waker.0.clone());
+        }
+    }
+
+    pub fn set_none(&mut self) {
+        self.inner = None;
+    }
+
+    pub fn wake(&mut self) {
+        self.inner
+            .take()
+            .expect(
+                "OptionWaker::set() should be called before RustPromiseAwaiter::poll(); \
+                OptionWaker::wake() should be called at most once after poll()",
+            )
+            .wake();
     }
 }

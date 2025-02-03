@@ -9,7 +9,26 @@
 
 namespace workerd::rust::async {
 
-class FuturePollEvent;
+// =======================================================================================
+// Opaque Rust types
+//
+// The following types are defined in lib.rs, and thus in lib.rs.h. lib.rs.h depends on our C++
+// headers, including await.h (the file you're currently reading), so we forward-declare some types
+// here for use in the C++ headers.
+
+// Wrapper around an `&std::task::Waker`, passed to `RustPromiseAwaiter::poll()`. This indirection
+// is required because cxx-rs does not permit us to expose opaque Rust types to C++ defined outside
+// of our own crate, like `std::task::Waker`.
+struct WakerRef;
+
+// Wrapper around an `Option<std::task::Waker>`. RustPromiseAwaiter calls `set()` with the WakerRef
+// passed to `poll()` if RustPromiseAwaiter is unable to find an optimized path for awaiting its
+// Promise. Later on, when its Promise becomes ready, RustPromiseAwaiter will use OptionWaker to
+// call wake the wrapped Waker.
+//
+// Otherwise, if RustPromiseAwaiter finds an optimized path for awaiting its Promise, it calls
+// `set_none()` on the OptionWaker to ensure it's empty.
+struct OptionWaker;
 
 // =======================================================================================
 // RustPromiseAwaiter

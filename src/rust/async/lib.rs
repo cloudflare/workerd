@@ -1,6 +1,8 @@
 mod await_;
 pub use await_::GuardedRustPromiseAwaiter;
+use await_::OptionWaker;
 use await_::PtrGuardedRustPromiseAwaiter;
+use await_::WakerRef;
 
 mod future;
 use future::box_future_drop_in_place_fallible_i32;
@@ -34,14 +36,11 @@ use test_futures::new_waking_future_void;
 use test_futures::new_wrapped_waker_future_void;
 
 mod waker;
-use waker::OptionWaker;
 
 type CxxResult<T> = std::result::Result<T, cxx::Exception>;
 
 type Result<T> = std::io::Result<T>;
 type Error = std::io::Error;
-
-pub struct WakerRef<'a>(&'a std::task::Waker);
 
 #[cxx::bridge(namespace = "workerd::rust::async")]
 mod ffi {
