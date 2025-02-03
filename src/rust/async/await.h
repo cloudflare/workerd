@@ -158,30 +158,6 @@ private:
 };
 
 // =======================================================================================
-// CoAwaitWaker
-
-// A KjWaker implementation which provides an optimized path for awaiting KJ Promises in Rust. It
-// consists of a LazyArcWaker and a reference to a FuturePollEvent.
-//
-// The FuturePollEvent is responsible for calling `Future::poll()`. One of its derived classes owns
-// this CoAwaitWaker in an object lifetime sense.
-class CoAwaitWaker: public LazyArcWaker {
-public:
-  CoAwaitWaker(FuturePollEvent& futurePollEvent);
-
-  // The Event which is using this CoAwaitWaker to poll() a Future. Waking the CoAwaitWaker arms
-  // this Event (possibly via a cross-thread promise fulfiller). We also arm the Event directly in
-  // the RustPromiseAwaiter class, to more optimally `.await` KJ Promises from within Rust. If the
-  // current thread's kj::Executor is not the same as the one which owns the FuturePollEvent, this
-  // function returns kj::none.
-  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
-
-private:
-  // TODO(now): Can/should we make this ExecutorGuarded?
-  FuturePollEvent& futurePollEvent;
-};
-
-// =======================================================================================
 // BoxFutureAwaiter, LazyBoxFutureAwaiter, and operator co_await implementations
 
 // BoxFutureAwaiter<T> is a Future poll() Event, and is the inner implementation of our co_await

@@ -145,6 +145,7 @@ public:
   // called, return the promise associated with the cloned ArcWaker.
   kj::Maybe<kj::Promise<void>> reset();
 
+protected:
   // Access the Executor that was active when this LazyArcWaker was constructed. This a convenience
   // function to help CoAwaitWaker figure out if it can optimize Rust Promise `.await`s
   // without having to store its own Executor reference.
@@ -156,8 +157,7 @@ private:
   const kj::Executor& executor = kj::getCurrentThreadExecutor();
 
   // Initialized by `clone()`, which may be called by any thread. This could almost be a
-  // `kj::Lazy<T>`, but we need to be able to reset it.
-  // TODO(now): Or do we? We could just make LazyArcWaker single-use.
+  // `kj::Lazy<T>`, but we need to be able to detect when we haven't been cloned.
   kj::MutexGuarded<kj::Maybe<PromiseArcWakerPair>> cloned;
 
   // Incremented by `wake_by_ref()`, which may be called by any thread. All operations use relaxed
@@ -173,6 +173,30 @@ private:
   // called on the thread which constructed it. Therefore, there is no need to make `dropCount`
   // thread-safe.
   mutable uint dropCount = 0;
+};
+
+// =======================================================================================
+// CoAwaitWaker
+
+// A LazyArcWaker which provides an optimized path for awaiting KJ Promises in Rust. It consists of
+// a LazyArcWaker by inheritance and a FuturePollEvent reference.
+//
+// The FuturePollEvent is responsible for calling `Future::poll()`. One of its derived classes owns
+// this CoAwaitWaker in an object lifetime sense.
+class CoAwaitWaker: public LazyArcWaker {
+public:
+  CoAwaitWaker(FuturePollEvent& futurePollEvent);
+
+  // The Event which is using this CoAwaitWaker to poll() a Future. Waking the CoAwaitWaker arms
+  // this Event (possibly via a cross-thread promise fulfiller). We also arm the Event directly in
+  // the RustPromiseAwaiter class, to more optimally `.await` KJ Promises from within Rust. If the
+  // current thread's kj::Executor is not the same as the one which owns the FuturePollEvent, this
+  // function returns kj::none.
+  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
+
+private:
+  // TODO(now): Can/should we make this ExecutorGuarded?
+  FuturePollEvent& futurePollEvent;
 };
 
 // =======================================================================================

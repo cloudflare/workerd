@@ -151,4 +151,20 @@ const kj::Executor& LazyArcWaker::getExecutor() const {
   return executor;
 }
 
+// =======================================================================================
+// CoAwaitWaker
+
+CoAwaitWaker::CoAwaitWaker(FuturePollEvent& futurePollEvent): futurePollEvent(futurePollEvent) {}
+
+kj::Maybe<FuturePollEvent&> CoAwaitWaker::tryGetFuturePollEvent() const {
+  if (&getExecutor() == &kj::getCurrentThreadExecutor()) {
+    // Safety: const_cast is okay because we know that we are being accessed on a thread running our
+    // original event loop. All successful accesses through `get()` are effectively single-threaded,
+    // even though the event loop, and this object, may collectively move between threads.
+    return futurePollEvent;
+  } else {
+    return kj::none;
+  }
+}
+
 }  // namespace workerd::rust::async
