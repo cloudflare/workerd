@@ -4247,6 +4247,11 @@ export declare abstract class Ai<
   >;
   public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
 }
+export type GatewayReties = {
+  maxAttempts?: 1 | 2 | 3 | 4 | 5;
+  retryDelayMs?: number;
+  backoff?: "constant" | "linear" | "exponential";
+};
 export type GatewayOptions = {
   id: string;
   cacheKey?: string;
@@ -4254,6 +4259,9 @@ export type GatewayOptions = {
   skipCache?: boolean;
   metadata?: Record<string, number | string | boolean | null | bigint>;
   collectLog?: boolean;
+  eventId?: string;
+  requestTimeoutMs?: number;
+  retries?: GatewayReties;
 };
 export type AiGatewayPatchLog = {
   score?: number | null;
