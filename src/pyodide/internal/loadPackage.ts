@@ -169,8 +169,8 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
     pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
   }
   if (LOAD_WHEELS_FROM_R2) {
-    await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromR2);
+    await loadPackagesImpl(Module, requirements, loadBundleFromR2);
   } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromArtifactBundler);
+    await loadPackagesImpl(Module, requirements, loadBundleFromArtifactBundler);
   }
 }

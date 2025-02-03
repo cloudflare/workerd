@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
+load("//:build/python_metadata.bzl", "PYTHON_IMPORTS_TO_TEST", "PYTHON_LOCKFILES", "PYTHON_VERSION_TO_PACKAGES")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
@@ -37,21 +37,28 @@ py_wd_test(
 
 py_wd_test("seek-metadatafs")
 
-gen_import_tests(
-    PYODIDE_IMPORTS_TO_TEST,
-    # TODO: Micropip version mismatch for 0.27.0
-    pkg_skip_versions = {
-        "micropip": [
-            "0.27.1",
-        ],
-        "langchain-core": [
-            "0.27.1",
-        ],
-        "langchain_openai": [
-            "0.27.1",
-        ],
-        "langsmith": [
-            "0.27.1",
-        ],
-    },
-)
+# Each Python version has a different packages bundle. So we generate a separate list of
+# import tests for each Python version. We do however verify that newer package bundles contain
+# all the packages that are in older bundles (see verify_no_packages_were_removed).
+[
+    gen_import_tests(
+        PYTHON_IMPORTS_TO_TEST[package_version],
+        python_version,
+        # TODO: Micropip version mismatch for 0.27.0
+        pkg_skip_versions = {
+            "micropip": [
+                "0.27.1",
+            ],
+            "langchain-core": [
+                "0.27.1",
+            ],
+            "langchain_openai": [
+                "0.27.1",
+            ],
+            "langsmith": [
+                "0.27.1",
+            ],
+        },
+    )
+    for python_version, package_version in PYTHON_VERSION_TO_PACKAGES.items()
+]
