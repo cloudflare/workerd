@@ -4,6 +4,8 @@
 
 namespace workerd::rust::async {
 
+// Return true if `executor`'s event loop is active on the current thread.
+bool isCurrent(const kj::Executor& executor);
 // Assert that `executor`'s event loop is active on the current thread, or throw an exception
 // containing `message`.
 void requireCurrent(const kj::Executor& executor, kj::LiteralStringConst message);
@@ -35,10 +37,20 @@ public:
     return const_cast<T&>(value);
   }
 
+  kj::Maybe<T&> tryGet() const {
+    if (isCurrent(executor)) {
+      // Safety: const_cast is okay because we know that we are being accessed on a thread running our
+      // original event loop. All successful accesses through `get()` are effectively single-threaded,
+      // even though the event loop, and this object, may collectively move between threads.
+      return const_cast<T&>(value);
+    } else {
+      return kj::none;
+    }
+  }
+
 private:
   const kj::Executor& executor = kj::getCurrentThreadExecutor();
   T value;
-  bool uncheckedDestruction = false;
 };
 
 }  // namespace workerd::rust::async

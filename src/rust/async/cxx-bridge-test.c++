@@ -159,7 +159,7 @@ KJ_TEST("LazyArcWaker: C++ can receive asynchronous wakes after poll()") {
   }
 }
 
-KJ_TEST("CoAwaitWaker: C++ KJ coroutines can co_await Rust Futures") {
+KJ_TEST("BoxFutureAwaiter: C++ KJ coroutines can co_await Rust Futures") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 

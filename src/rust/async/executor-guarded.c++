@@ -4,8 +4,12 @@
 
 namespace workerd::rust::async {
 
+bool isCurrent(const kj::Executor& executor) {
+  return &executor == &kj::getCurrentThreadExecutor();
+}
+
 void requireCurrent(const kj::Executor& executor, kj::LiteralStringConst message) {
-  KJ_REQUIRE(&executor == &kj::getCurrentThreadExecutor(), message);
+  KJ_REQUIRE(isCurrent(executor), message);
 }
 
 }  // namespace workerd::rust::async

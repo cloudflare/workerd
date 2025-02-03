@@ -27,7 +27,7 @@ namespace workerd::rust::async {
 // It would be nice to automate this someday. `rules_rust` has some bindgen rules, but it adds a few
 // thousand years to the build times due to its hermetic dependency on LLVM. It's possible to
 // provide our own toolchain, but I became fatigued in the attempt.
-static_assert(sizeof(GuardedRustPromiseAwaiter) == sizeof(uint64_t) * 16,
+static_assert(sizeof(GuardedRustPromiseAwaiter) == sizeof(uint64_t) * 15,
     "GuardedRustPromiseAwaiter size changed, you must re-run bindgen");
 static_assert(alignof(GuardedRustPromiseAwaiter) == alignof(uint64_t) * 1,
     "GuardedRustPromiseAwaiter alignment changed, you must re-run bindgen");
@@ -86,9 +86,9 @@ RustPromiseAwaiter::RustPromiseAwaiter(OptionWaker& optionWaker, OwnPromiseNode 
 
 RustPromiseAwaiter::~RustPromiseAwaiter() noexcept(false) {
   // Our `tracePromise()` implementation checks for a null `node`, so we don't have to sever our
-  // LinkedGroup relationship before destroying `node`. If our CoAwaitWaker (our LinkedGroup) tries
-  // to trace us between now and our destructor completing, `tracePromise()` will ignore the null
-  // `node`.
+  // LinkedGroup relationship before destroying `node`. If our FuturePollEvent (our LinkedGroup)
+  // tries to trace us between now and our destructor completing, `tracePromise()` will ignore the
+  // null `node`.
   unwindDetector.catchExceptionsIfUnwinding([this]() {
     node = nullptr;
   });
@@ -172,8 +172,8 @@ bool RustPromiseAwaiter::poll(const WakerRef& waker, const KjWaker* maybeKjWaker
     // Tell our OptionWaker to store a clone of whatever Waker we were given.
     optionWaker.set(waker);
 
-    // Clearing our reference to the CoAwaitWaker (if we have one) tells our fire() implementation
-    // to use our OptionWaker to perform the wake.
+    // Clearing our reference to the FuturePollEvent (if we have one) tells our fire()
+    // implementation to use our OptionWaker to perform the wake.
     linkedGroup().set(kj::none);
 
     return false;
@@ -200,7 +200,12 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter ptr
 // =======================================================================================
 // FuturePollEvent
 
-void FuturePollEvent::awaitLazyArcWakerPromise(kj::Maybe<kj::Promise<void>> maybePromise) {
+void FuturePollEvent::exitPollScope(kj::Maybe<kj::Promise<void>> maybePromise) {
+  // Await any LazyArcWaker promise that got created during the call to `poll()`. Note that if a
+  // Future returns Ready _and_ synchronously wakes its Waker, the work done to await the
+  // LazyArcWaker promise is wasted, since we will immediately tear the entire BoxFutureAwaiter<T>
+  // down. However, that's an unlikely case, and this work here isn't likely to be a significant
+  // source of overhead.
   KJ_IF_SOME(promise, maybePromise) {
     auto& node = arcWakerPromise.emplace(kj::_::PromiseNode::from(kj::mv(promise)));
     node->setSelfPointer(&node);
@@ -208,7 +213,10 @@ void FuturePollEvent::awaitLazyArcWakerPromise(kj::Maybe<kj::Promise<void>> mayb
   }
 }
 
-void FuturePollEvent::consumeLazyArcWakerPromise() noexcept {
+void FuturePollEvent::enterPollScope() noexcept {
+  // Clear out any previous LazyArcWaker promise the FuturePollEvent was holding onto. Note that
+  // since there is no code path which rejects this Promise, this is not strictly required for
+  // correctness, but nevertheless serves as a useful assertion.
   KJ_IF_SOME(node, arcWakerPromise) {
     kj::_::ExceptionOr<kj::_::Void> output;
 
@@ -243,7 +251,7 @@ void FuturePollEvent::get(kj::_::ExceptionOrValue& output) noexcept {
 void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) {
   if (stopAtNextEvent) return;
 
-  // CoAwaitWaker is inherently a "join". Even though it polls only one Future, that Future may in
+  // FuturePollEvent is inherently a "join". Even though it polls only one Future, that Future may in
   // turn poll any number of different Futures and Promises.
   //
   // When tracing, we can only pick one branch to follow. Arbitrarily, I'm following the first
@@ -259,6 +267,22 @@ void FuturePollEvent::tracePromise(kj::_::TraceBuilder& builder, bool stopAtNext
     if (node.get() != nullptr) {
       node->tracePromise(builder, false);
     }
+  }
+}
+
+FuturePollEvent::PollScope::PollScope(FuturePollEvent& futurePollEvent): holder(futurePollEvent) {
+  futurePollEvent.enterPollScope();
+}
+
+FuturePollEvent::PollScope::~PollScope() noexcept(false) {
+  holder.get().futurePollEvent.exitPollScope(reset());
+}
+
+kj::Maybe<FuturePollEvent&> FuturePollEvent::PollScope::tryGetFuturePollEvent() const {
+  KJ_IF_SOME(h, holder.tryGet()) {
+    return h.futurePollEvent;
+  } else {
+    return kj::none;
   }
 }
 

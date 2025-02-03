@@ -49,10 +49,9 @@ struct OptionWaker;
 //
 // RustPromiseAwaiter has two base classes: KJ Event, and a LinkedObject template instantiation. We
 // use the Event to discover when our wrapped Promise is ready. Our Event fire() implementation
-// records the fact that we are done, then wakes our Waker or arms the CoAwaitWaker Event, if we
-// have one. We access the CoAwaitWaker via our LinkedObject base class mixin. It gives us the
-// ability to store a weak reference to the CoAwaitWaker, if we were last polled by one's
-// LazyArcWaker.
+// records the fact that we are done, then wakes our Waker or arms the FuturePollEvent, if we
+// have one. We access the FuturePollEvent via our LinkedObject base class mixin. It gives us the
+// ability to store a weak reference to the FuturePollEvent, if we were last polled by one.
 class RustPromiseAwaiter final: public kj::_::Event,
                                 public LinkedObject<FuturePollEvent, RustPromiseAwaiter> {
 public:
@@ -142,8 +141,8 @@ void guarded_rust_promise_awaiter_drop_in_place(PtrGuardedRustPromiseAwaiter);
 // The PromiseNode base class is a hack to implement async tracing. That is, we only implement the
 // `tracePromise()` function, and decide which Promise to trace into if/when the coroutine calls our
 // `tracePromise()` implementation. This primarily makes the lifetimes easier to manage: our
-// RustPromiseAwaiter LinkedObjects have independent lifetimes from the CoAwaitWaker, so we mustn't
-// leave references to them, or their members, lying around in the Coroutine class.
+// RustPromiseAwaiter LinkedObjects have independent lifetimes from the FuturePollEvent, so we
+// mustn't leave references to them, or their members, lying around in the Coroutine class.
 class FuturePollEvent: public kj::_::Event,
                        public kj::_::PromiseNode,
                        public LinkedGroup<FuturePollEvent, RustPromiseAwaiter> {
@@ -162,14 +161,41 @@ public:
   void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override;
 
 protected:
-  // Called our BoxFutureAwaiter<T> when a call to `poll()` results in an LazyArcWaker promise.
-  void awaitLazyArcWakerPromise(kj::Maybe<kj::Promise<void>> maybePromise);
-  // Called by BoxFutureAwaiter<T> to clear any existing LazyArcWaker promise. Note that this is not
-  // strictly required for correctness, but does provide some correctness assertions.
-  void consumeLazyArcWakerPromise() noexcept;
+  // PollScope is a LazyArcWaker which is associated with a specific FuturePollEvent, allowing
+  // optimized Promise `.await`s. Additionally, PollScope's destructor arranges to await any
+  // ArcWaker promise which was lazily created.
+  //
+  // Used by BoxFutureAwaiter<T>, our derived class.
+  class PollScope;
 
 private:
+  // Private API for PollScope.
+  void enterPollScope() noexcept;
+  void exitPollScope(kj::Maybe<kj::Promise<void>> maybeLazyArcWakerPromise);
+
   kj::Maybe<OwnPromiseNode> arcWakerPromise;
+};
+
+class FuturePollEvent::PollScope: public LazyArcWaker {
+public:
+  // `futurePollEvent` is the FuturePollEvent responsible for calling `Future::poll()`, and must
+  // outlive this PollScope.
+  PollScope(FuturePollEvent& futurePollEvent);
+  ~PollScope() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(PollScope);
+
+  // The Event which is using this PollScope to poll() a Future. Waking this FuturePollEvent's
+  // PollScope arms this Event (possibly via a cross-thread promise fulfiller). We also arm the
+  // Event directly in the RustPromiseAwaiter class, to more optimally `.await` KJ Promises from
+  // within Rust. If the current thread's kj::Executor is not the same as the one which owns the
+  // FuturePollEvent, this function returns kj::none.
+  kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
+
+private:
+  struct FuturePollEventHolder {
+    FuturePollEvent& futurePollEvent;
+  };
+  ExecutorGuarded<FuturePollEventHolder> holder;
 };
 
 // =======================================================================================
@@ -201,14 +227,14 @@ public:
     //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
     //   to really benefit.
 
-    CoAwaitWaker coAwaitWaker(*this);
+    {
+      PollScope pollScope(*this);
 
-    if (future.poll(coAwaitWaker, result)) {
-      // Future is ready, we're done.
-      return false;
+      if (future.poll(pollScope, result)) {
+        // Future is ready, we're done.
+        return false;
+      }
     }
-
-    awaitLazyArcWakerPromise(coAwaitWaker.reset());
 
     // Integrate with our enclosing coroutine's tracing.
     coroutine.setPromiseNodeForTrace(promiseNodeForTrace);
@@ -218,7 +244,6 @@ public:
 
   RemoveFallible<T> awaitResumeImpl() {
     coroutine.clearPromiseNodeForTrace();
-    consumeLazyArcWakerPromise();
     return kj::_::convertToReturn(kj::mv(result));
   }
 
