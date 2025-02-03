@@ -6,6 +6,16 @@ type Fetcher = {
   fetch: typeof fetch;
 };
 
+type TargetedTransform = ImageTransform & {
+  imageIndex: number;
+};
+
+// Draw image drawImageIndex on image targetImageIndex
+type DrawCommand = ImageDrawOptions & {
+  drawImageIndex: number;
+  targetImageIndex: number;
+};
+
 type RawInfoResponse =
   | { format: 'image/svg+xml' }
   | {
@@ -51,8 +61,15 @@ async function streamToBlob(stream: ReadableStream<Uint8Array>): Promise<Blob> {
   return new Response(stream).blob();
 }
 
+class DrawTransformer {
+  public constructor(
+    public readonly child: ImageTransformerImpl,
+    public readonly options: ImageDrawOptions
+  ) {}
+}
+
 class ImageTransformerImpl implements ImageTransformer {
-  private transforms: ImageTransform[];
+  private transforms: (ImageTransform | DrawTransformer)[];
   private consumed: boolean;
 
   public constructor(
@@ -68,19 +85,38 @@ class ImageTransformerImpl implements ImageTransformer {
     return this;
   }
 
+  public draw(
+    image: ReadableStream<Uint8Array> | ImageTransformer,
+    options: ImageDrawOptions = {}
+  ): this {
+    if (isTransformer(image)) {
+      image.consume();
+      this.transforms.push(new DrawTransformer(image, options));
+    } else {
+      this.transforms.push(
+        new DrawTransformer(
+          new ImageTransformerImpl(
+            this.fetcher,
+            image as ReadableStream<Uint8Array>
+          ),
+          options
+        )
+      );
+    }
+
+    return this;
+  }
+
   public async output(
     options: ImageOutputOptions
   ): Promise<ImageTransformationResult> {
-    if (this.consumed) {
-      throw new ImagesErrorImpl(
-        'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() once',
-        9525
-      );
-    }
-    this.consumed = true;
-
     const body = new FormData();
+
+    this.consume();
     body.append('image', await streamToBlob(this.stream));
+
+    await this.serializeTransforms(body);
+
     body.append('output_format', options.format);
     if (options.quality !== undefined) {
       body.append('output_quality', options.quality.toString());
@@ -89,8 +125,6 @@ class ImageTransformerImpl implements ImageTransformer {
     if (options.background !== undefined) {
       body.append('background', options.background);
     }
-
-    body.append('transforms', JSON.stringify(this.transforms));
 
     const response = await this.fetcher.fetch(
       'https://js.images.cloudflare.com/transform',
@@ -104,6 +138,72 @@ class ImageTransformerImpl implements ImageTransformer {
 
     return new TransformationResultImpl(response);
   }
+
+  private consume(): void {
+    if (this.consumed) {
+      throw new ImagesErrorImpl(
+        'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() or draw a transformer once',
+        9525
+      );
+    }
+
+    this.consumed = true;
+  }
+
+  private async serializeTransforms(body: FormData): Promise<void> {
+    const transforms: (TargetedTransform | DrawCommand)[] = [];
+
+    // image 0 is the canvas, so the first draw_image has index 1
+    let drawImageIndex = 1;
+    function appendDrawImage(blob: Blob): number {
+      body.append('draw_image', blob);
+      return drawImageIndex++;
+    }
+
+    async function walkTransforms(
+      targetImageIndex: number,
+      imageTransforms: (ImageTransform | DrawTransformer)[]
+    ): Promise<void> {
+      for (const transform of imageTransforms) {
+        if (!isDrawTransformer(transform)) {
+          // Simple transformation - we just have to tell the backend to run it
+          // against this image
+          transforms.push({
+            imageIndex: targetImageIndex,
+            ...transform,
+          });
+        } else {
+          // Drawn child image
+          // Set the input for the drawn image on the form
+          const drawImageIndex = appendDrawImage(
+            await streamToBlob(transform.child.stream)
+          );
+
+          // Tell the backend to run any transforms (possibly involving more draws)
+          // required to build this child
+          await walkTransforms(drawImageIndex, transform.child.transforms);
+
+          // Draw the child image on to the canvas
+          transforms.push({
+            drawImageIndex: drawImageIndex,
+            targetImageIndex: targetImageIndex,
+            ...transform.options,
+          });
+        }
+      }
+    }
+
+    await walkTransforms(0, this.transforms);
+    body.append('transforms', JSON.stringify(transforms));
+  }
+}
+
+function isTransformer(input: unknown): input is ImageTransformerImpl {
+  return input instanceof ImageTransformerImpl;
+}
+
+function isDrawTransformer(input: unknown): input is DrawTransformer {
+  return input instanceof DrawTransformer;
 }
 
 class ImagesBindingImpl implements ImagesBinding {

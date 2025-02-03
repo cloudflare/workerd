@@ -5568,6 +5568,14 @@ export type ImageTransform = {
   };
   zoom?: number;
 };
+export type ImageDrawOptions = {
+  opacity?: number;
+  repeat?: boolean | string;
+  top?: number;
+  left?: number;
+  bottom?: number;
+  right?: number;
+};
 export type ImageOutputOptions = {
   format:
     | "image/jpeg"
@@ -5597,10 +5605,20 @@ export interface ImagesBinding {
 export interface ImageTransformer {
   /**
    * Apply transform next, returning a transform handle.
-   * You can then apply more transformations or retrieve the output.
+   * You can then apply more transformations, draw, or retrieve the output.
    * @param transform
    */
   transform(transform: ImageTransform): ImageTransformer;
+  /**
+   * Draw an image on this transformer, returning a transform handle.
+   * You can then apply more transformations, draw, or retrieve the output.
+   * @param image The image (or transformer that will give the image) to draw
+   * @param options The options configuring how to draw the image
+   */
+  draw(
+    image: ReadableStream<Uint8Array> | ImageTransformer,
+    options?: ImageDrawOptions,
+  ): ImageTransformer;
   /**
    * Retrieve the image that results from applying the transforms to the
    * provided input
