@@ -24,47 +24,6 @@ private:
 template <>
 class Fallible<void> {};
 
-template <typename T>
-class BoxFutureFulfiller {
-public:
-  BoxFutureFulfiller(kj::_::ExceptionOr<kj::_::FixVoid<T>>& resultRef): result(resultRef) {}
-  void fulfill(kj::_::FixVoid<T> value) { result.value = kj::mv(value); }
-private:
-  kj::_::ExceptionOr<kj::_::FixVoid<T>>& result;
-};
-
-template <>
-class BoxFutureFulfiller<void> {
-public:
-  BoxFutureFulfiller(kj::_::ExceptionOr<kj::_::FixVoid<void>>& resultRef): result(resultRef) {}
-  void fulfill(kj::_::FixVoid<void> value) { result.value = kj::mv(value); }
-  // For Rust, because it doesn't know how to translate between kj::_::Void and ().
-  void fulfill() { fulfill({}); }
-private:
-  kj::_::ExceptionOr<kj::_::FixVoid<void>>& result;
-};
-
-template <typename T>
-class BoxFutureFulfiller<Fallible<T>> {
-public:
-  BoxFutureFulfiller(kj::_::ExceptionOr<kj::_::FixVoid<T>>& resultRef): result(resultRef) {}
-  void fulfill(kj::_::FixVoid<T> value) { result.value = kj::mv(value); }
-private:
-  kj::_::ExceptionOr<kj::_::FixVoid<T>>& result;
-};
-
-template <>
-class BoxFutureFulfiller<Fallible<void>> {
-public:
-  BoxFutureFulfiller(kj::_::ExceptionOr<kj::_::FixVoid<void>>& resultRef): result(resultRef) {}
-  void fulfill(kj::_::FixVoid<void> value) { result.value = kj::mv(value); }
-  // For Rust, because it doesn't know how to translate between kj::_::Void and ().
-  void fulfill() { fulfill({}); }
-private:
-  kj::_::ExceptionOr<kj::_::FixVoid<void>>& result;
-};
-
-// ---------------------------------------------------------
 
 template <typename T>
 struct RemoveFallible_ {
@@ -76,6 +35,31 @@ struct RemoveFallible_<Fallible<T>> {
 };
 template <typename T>
 using RemoveFallible = typename RemoveFallible_<T>::Type;
+
+template <typename T>
+class BoxFutureFulfiller {
+public:
+  BoxFutureFulfiller(kj::_::ExceptionOr<RemoveFallible<T>>& resultRef): result(resultRef) {}
+  void fulfill(RemoveFallible<T> value) { result.value = kj::mv(value); }
+private:
+  kj::_::ExceptionOr<RemoveFallible<T>>& result;
+};
+
+template <>
+class BoxFutureFulfiller<void> {
+public:
+  BoxFutureFulfiller(kj::_::ExceptionOr<kj::_::Void>& resultRef): result(resultRef) {}
+  void fulfill(kj::_::Void value) { result.value = kj::mv(value); }
+  // For Rust, which doesn't know about our kj::_::Void type.
+  void fulfill() { fulfill({}); }
+private:
+  kj::_::ExceptionOr<kj::_::Void>& result;
+};
+
+template <>
+class BoxFutureFulfiller<Fallible<void>>: public BoxFutureFulfiller<void> {};
+
+// ---------------------------------------------------------
 
 // Function templates which are explicitly specialized for each instance of BoxFuture<T>.
 template <typename T>
