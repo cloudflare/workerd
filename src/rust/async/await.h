@@ -165,14 +165,9 @@ private:
 //
 // The FuturePollEvent is responsible for calling `Future::poll()`. One of its derived classes owns
 // this CoAwaitWaker in an object lifetime sense.
-class CoAwaitWaker: public KjWaker {
+class CoAwaitWaker: public LazyArcWaker {
 public:
   CoAwaitWaker(FuturePollEvent& futurePollEvent);
-
-  // After constructing a CoAwaitWaker, pass it by reference to `BoxFuture<T>::poll()`. If `poll()`
-  // returns Pending, call this `suspend()` function to arrange to arm the Future poll() Event when
-  // we are woken.
-  kj::Maybe<kj::Promise<void>> reset();
 
   // The Event which is using this CoAwaitWaker to poll() a Future. Waking the CoAwaitWaker arms
   // this Event (possibly via a cross-thread promise fulfiller). We also arm the Event directly in
@@ -181,22 +176,9 @@ public:
   // function returns kj::none.
   kj::Maybe<FuturePollEvent&> tryGetFuturePollEvent() const override;
 
-  // -------------------------------------------------------
-  // KjWaker API
-  //
-  // Our KjWaker implementation just forwards everything to our LazyArcWaker member.
-
-  const KjWaker* clone() const override;
-  void wake() const override;
-  void wake_by_ref() const override;
-  void drop() const override;
-
 private:
   // TODO(now): Can/should we make this ExecutorGuarded?
   FuturePollEvent& futurePollEvent;
-
-  // This LazyArcWaker is our actual implementation of the KjWaker interface. We forward all calls here.
-  LazyArcWaker kjWaker;
 };
 
 // =======================================================================================
@@ -215,7 +197,6 @@ public:
       kj::SourceLocation location = {})
       : FuturePollEvent(location),
         coroutine(coroutine),
-        coAwaitWaker(*this),
         future(kj::mv(future)) {}
   ~BoxFutureAwaiter() noexcept(false) {
     coroutine.clearPromiseNodeForTrace();
@@ -228,6 +209,8 @@ public:
     //   LazyArcWaker for cloning if we have the last reference to it at this point. This could save
     //   memory allocations, but would depend on making XThreadFulfiller and XThreadPaf resettable
     //   to really benefit.
+
+    CoAwaitWaker coAwaitWaker(*this);
 
     if (future.poll(coAwaitWaker, result)) {
       // Future is ready, we're done.
@@ -270,7 +253,6 @@ private:
   // HACK: FuturePollEvent implements the PromiseNode interface to integrate with the Coroutine
   // class' current tracing implementation.
   OwnPromiseNode promiseNodeForTrace { this };
-  CoAwaitWaker coAwaitWaker;
   kj::_::ExceptionOr<kj::_::FixVoid<RemoveFallible<T>>> result;
   BoxFuture<T> future;
 };

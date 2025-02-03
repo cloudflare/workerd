@@ -289,12 +289,8 @@ bool FuturePollEvent::wouldTrace(kj::Badge<RustPromiseAwaiter>, RustPromiseAwait
 
 CoAwaitWaker::CoAwaitWaker(FuturePollEvent& futurePollEvent): futurePollEvent(futurePollEvent) {}
 
-kj::Maybe<kj::Promise<void>> CoAwaitWaker::reset() {
-  return kjWaker.reset();
-}
-
 kj::Maybe<FuturePollEvent&> CoAwaitWaker::tryGetFuturePollEvent() const {
-  if (&kjWaker.getExecutor() == &kj::getCurrentThreadExecutor()) {
+  if (&getExecutor() == &kj::getCurrentThreadExecutor()) {
     // Safety: const_cast is okay because we know that we are being accessed on a thread running our
     // original event loop. All successful accesses through `get()` are effectively single-threaded,
     // even though the event loop, and this object, may collectively move between threads.
@@ -302,25 +298,6 @@ kj::Maybe<FuturePollEvent&> CoAwaitWaker::tryGetFuturePollEvent() const {
   } else {
     return kj::none;
   }
-}
-
-const KjWaker* CoAwaitWaker::clone() const {
-  return kjWaker.clone();
-}
-
-void CoAwaitWaker::wake() const {
-  // CoAwaitWakers are only exposed to Rust by const borrow, meaning Rust can never arrange to call
-  // `wake()`, which drops `self`, on this object.
-  KJ_UNIMPLEMENTED(
-      "Rust user code should never have possess a consumable reference to CoAwaitWaker");
-}
-
-void CoAwaitWaker::wake_by_ref() const {
-  kjWaker.wake_by_ref();
-}
-
-void CoAwaitWaker::drop() const {
-  kjWaker.drop();
 }
 
 }  // namespace workerd::rust::async
