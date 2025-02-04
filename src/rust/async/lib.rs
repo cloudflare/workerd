@@ -19,6 +19,8 @@ pub use promise::Promise;
 use promise::PtrOwnPromiseNode;
 use promise::PtrPromise;
 
+mod promise_boilerplate;
+
 mod test_futures;
 use test_futures::*;
 
@@ -94,27 +96,6 @@ mod ffi {
     // -----------------------------------------------------
     // Boilerplate
 
-    unsafe extern "C++" {
-        include!("workerd/rust/async/future-boilerplate.h");
-
-        // TODO(now): Generate boilerplate with a macro.
-        type BoxFutureVoid = crate::BoxFuture<()>;
-        type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
-        type BoxFutureFulfillerVoid;
-        fn fulfill(self: Pin<&mut BoxFutureFulfillerVoid>);
-
-        // TODO(now): Generate boilerplate with a macro.
-        type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
-        type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
-        type BoxFutureFulfillerFallibleVoid;
-        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleVoid>);
-
-        type BoxFutureFallibleI32 = crate::BoxFuture<crate::Result<i32>>;
-        type PtrBoxFutureFallibleI32 = crate::PtrBoxFuture<crate::Result<i32>>;
-        type BoxFutureFulfillerFallibleI32;
-        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleI32>, value: i32);
-    }
-
     extern "Rust" {
         // TODO(now): Generate boilerplate with a macro.
         fn box_future_poll_void(
@@ -138,6 +119,27 @@ mod ffi {
             fulfiller: Pin<&mut BoxFutureFulfillerFallibleI32>,
         ) -> Result<bool>;
         unsafe fn box_future_drop_in_place_fallible_i32(ptr: PtrBoxFutureFallibleI32);
+    }
+
+    unsafe extern "C++" {
+        include!("workerd/rust/async/future-boilerplate.h");
+
+        // TODO(now): Generate boilerplate with a macro.
+        type BoxFutureVoid = crate::BoxFuture<()>;
+        type PtrBoxFutureVoid = crate::PtrBoxFuture<()>;
+        type BoxFutureFulfillerVoid;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerVoid>);
+
+        // TODO(now): Generate boilerplate with a macro.
+        type BoxFutureFallibleVoid = crate::BoxFuture<crate::Result<()>>;
+        type PtrBoxFutureFallibleVoid = crate::PtrBoxFuture<crate::Result<()>>;
+        type BoxFutureFulfillerFallibleVoid;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleVoid>);
+
+        type BoxFutureFallibleI32 = crate::BoxFuture<crate::Result<i32>>;
+        type PtrBoxFutureFallibleI32 = crate::PtrBoxFuture<crate::Result<i32>>;
+        type BoxFutureFulfillerFallibleI32;
+        fn fulfill(self: Pin<&mut BoxFutureFulfillerFallibleI32>, value: i32);
     }
 
     unsafe extern "C++" {
