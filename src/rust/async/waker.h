@@ -7,6 +7,8 @@
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 
+#include <atomic>
+
 namespace workerd::rust::async {
 
 // =======================================================================================
