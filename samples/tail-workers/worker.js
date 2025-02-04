@@ -4,9 +4,9 @@
 
 export default {
   async fetch(req, env) {
-    console.log('hello to the tail worker!');
-    reportError('boom');
-    reportError(new Error('test'));
-    return new Response("Hello World\n");
-  }
+    console.log('log from worker a');
+    return new Response(
+      'response from worker a + \n' + (await env.log.respond('worker b'))
+    );
+  },
 };

@@ -3,7 +3,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const tailWorkerExample :Workerd.Config = (
   services = [
     (name = "main", worker = .helloWorld),
-    (name = "log", worker = .logWorker),
+    (name = "log", external = ( address = "127.0.0.1:8081", http = ( capnpConnectHost = "capnp" ))),
   ],
   sockets = [ ( name = "http", address = "*:8080", http = (), service = "main" ) ],
   autogates = [
@@ -17,11 +17,5 @@ const helloWorld :Workerd.Worker = (
   ],
   compatibilityDate = "2024-10-14",
   tails = ["log"],
-);
-
-const logWorker :Workerd.Worker = (
-  modules = [
-    (name = "worker", esModule = embed "tail.js")
-  ],
-  compatibilityDate = "2024-10-14",
+  bindings = [(name = "log", service = "log")]
 );
