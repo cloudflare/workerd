@@ -10,9 +10,6 @@ using PtrOwnPromiseNode = OwnPromiseNode*;
 
 void own_promise_node_drop_in_place(OwnPromiseNode*);
 
-template <typename T>
-using Promise = kj::Promise<T>;
-
 }  // namespace workerd::rust::async
 
 namespace rust {
@@ -23,6 +20,6 @@ struct IsRelocatable<::workerd::rust::async::OwnPromiseNode>: std::true_type {};
 
 // Promises also follow Rust move semantics.
 template <typename T>
-struct IsRelocatable<::workerd::rust::async::Promise<T>>: std::true_type {};
+struct IsRelocatable<::kj::Promise<T>>: std::true_type {};
 
 }  // namespace rust
