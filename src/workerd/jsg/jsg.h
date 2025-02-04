@@ -1603,7 +1603,7 @@ class Constructor;
 // restriction only applies to calling `.then()` in C++.
 //
 // When a JSG method returns a Promise, the system ensures that the object on which the method
-// was called will not be GC'd until the Promise resolves (or is itself GC'd, indicating it will
+// was called will not be GC'ed until the Promise resolves (or is itself GC'ed, indicating it will
 // never resolve). This is a convenience so that method implementations that return promises do
 // not need to carefully capture a reference to `JSG_THIS`.
 //

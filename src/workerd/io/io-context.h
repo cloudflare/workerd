@@ -203,7 +203,7 @@ class IoContext_IncomingRequest final {
 // The IoContext serves as a bridge between JavaScript objects and I/O objects. I/O
 // objects are strongly tied to the KJ event loop, and thus must live on a single thread. The
 // JS isolate, however, can move between threads, bringing all garbage-collected heap objects
-// with it. So, when a GC'd object holds a reference to I/O objects or tasks (KJ promises), it
+// with it. So, when a GC'ed object holds a reference to I/O objects or tasks (KJ promises), it
 // needs help from IoContext manage this.
 //
 // Whenever JavaScript is executing, the current IoContext can be obtained via
@@ -491,7 +491,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   //
   // The JS promise must complete within this IoContext. The KJ promise will reject
   // immediately if any of these happen:
-  // - The JS promise is GC'd without resolving.
+  // - The JS promise is GC'ed without resolving.
   // - The JS promise is resolved from the wrong context.
   // - The system detects that no further progress will be made in this context (because there is no
   //   more JavaScript to run, and there is no outstanding I/O scheduled with awaitIo()).
@@ -624,7 +624,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns a promise that resolves after some time. This is intended to be used for implementing
   // time limits on some sort of operation, not for implementing application-driven timing, as it
   // does not maintain consistency with the clock as observed through Date.now(), e.g. when it
-  // comes to spectre mitigations.
+  // comes to Spectre mitigations.
   kj::Promise<void> afterLimitTimeout(kj::Duration t) {
     return getIoChannelFactory().getTimer().afterLimitTimeout(t);
   }

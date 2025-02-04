@@ -444,7 +444,7 @@ class ModuleBundle {
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr specifier) KJ_LIFETIMEBOUND;
   };
 
-  // Used to builde a ModuleBundle representing modules sources from the runtime.
+  // Used to build a ModuleBundle representing modules sources from the runtime.
   class BuiltinBuilder final: public Builder {
    public:
     enum class Type {

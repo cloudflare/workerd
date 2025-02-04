@@ -328,7 +328,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     auto out = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, rsSize * 2);
 
     // We're dealing with big-endian, so we have to align the copy to the right. This is exactly
-    // why big-endian is the wrong edian.
+    // why big-endian is the wrong endian.
     memcpy(out.asArrayPtr().begin() + rsSize - r.size(), r.begin(), r.size());
     memcpy(out.asArrayPtr().end() - s.size(), s.begin(), s.size());
     return jsg::BufferSource(js, kj::mv(out));
@@ -1011,7 +1011,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 
     if (getTypeEnum() == KeyType::PRIVATE) {
       // Deliberately use ED25519_PUBLIC_KEY_LEN here.
-      // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
+      // BoringSSL defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
       // with public key data in some functions, but in the EVP interface only the 32B private key
       // itself is returned.
       uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN]{};

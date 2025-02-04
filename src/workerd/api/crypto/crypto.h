@@ -398,7 +398,7 @@ class SubtleCrypto: public jsg::Object {
   };
 
   // Type of the `algorithm` parameter passed to `sign()` and `verify()`. Different
-  // algorithms call for diferent fields.
+  // algorithms call for different fields.
   struct SignAlgorithm {
     // E.g. "RSASSA-PKCS1-v1_5", "ECDSA"
     kj::String name;

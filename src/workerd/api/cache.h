@@ -25,7 +25,7 @@ struct CacheQueryOptions {
 
   // Historically, Cloudflare has not supported the Vary header because it's easy to blow up your
   // cache keys. Customers can now implement this with workers by modifying cache keys as they see
-  // fit based on any arbitary parameter (User-Agent, Content-Encoding, etc.).
+  // fit based on any arbitrary parameter (User-Agent, Content-Encoding, etc.).
   jsg::WontImplement ignoreVary;
 
   // Only used in CacheStorage::match(), which we won't implement.

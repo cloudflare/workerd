@@ -361,7 +361,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       // backend to respond. At that point, we *are* awaiting I/O, and want to record that
       // correctly.
       //
-      // So basically, we have an asynchorous promise we need to wait for, and for the first part
+      // So basically, we have an asynchronous promise we need to wait for, and for the first part
       // of that wait, we don't want to count it as pending I/O, but for the second part, we do.
       // How do we accomplish this?
       //
@@ -446,7 +446,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
           // If the origin or the cache disconnected, we don't treat this as an error, as put()
           // doesn't guarantee that it stores anything anyway.
           //
-          // TODO(someday): I (Kenton) don't undestand why we'd explicitly want to hide this
+          // TODO(someday): I (Kenton) don't understand why we'd explicitly want to hide this
           //   error, even though hiding it is technically not a violation of the contract. To me
           //   this seems undesirable, especially when it was the origin that failed. The caller
           //   can always choose to ignore errors if they want (and many do, by passing to
@@ -544,7 +544,7 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
   // TODO(someday): Implement Cache API in preview.
 
   // It is possible here that open() will be called in the global scope in fiddle
-  // mode in which case the warning will not be emitted. But that's ok? The warning
+  // mode in which case the warning will not be emitted. But that's OK? The warning
   // is not critical by any stretch.
   if (IoContext::hasCurrent()) {
     auto& context = IoContext::current();

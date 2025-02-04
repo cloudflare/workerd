@@ -54,7 +54,7 @@ class TimerChannel {
 
   // Returns a promise that resolves after some time. This is intended to be used for implementing
   // time limits on some sort of operation, not for implementing application-driven timing, as it does
-  // not implement any spectre mitigations.
+  // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
 };
 

@@ -91,9 +91,9 @@ class Worker: public kj::AtomicRefcounted {
   class LockType;
 
   enum class ConsoleMode {
-    // Only send `console.log`s to the inspector. Default, production behaviour.
+    // Only send `console.log`s to the inspector. Default, production behavior.
     INSPECTOR_ONLY,
-    // Send `console.log`s to the inspector and stdout/err. Behaviour running `workerd` locally.
+    // Send `console.log`s to the inspector and stdout/err. Behavior running `workerd` locally.
     STDOUT,
   };
 
@@ -346,7 +346,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // running on the _calling thread_, which will most likely only be inspector console commands, and
   // is not typically desired.
   //
-  // For the above reason , this overload is curently only suitable for use by the internal Workers
+  // For the above reason , this overload is currently only suitable for use by the internal Workers
   // Runtime codebase, which patches V8 to profile whichever thread currently holds the `v8::Locker`
   // for this Isolate.
   kj::Promise<void> attachInspector(kj::Timer& timer,

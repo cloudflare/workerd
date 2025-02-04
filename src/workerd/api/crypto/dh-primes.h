@@ -58,7 +58,7 @@
 
 extern "C" int bn_set_words(BIGNUM *bn, const BN_ULONG *words, size_t num);
 
-// Backporting primes that may not be supported in earlier boringssl versions. Intentionally
+// Backporting primes that may not be supported in earlier BoringSSL versions. Intentionally
 // keeping the existing C-style formatting.
 
 #define OPENSSL_ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))

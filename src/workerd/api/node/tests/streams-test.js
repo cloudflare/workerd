@@ -8490,7 +8490,7 @@ export const readable_unshift = {
       await dataCalled.promise;
     }
     {
-      // Both .push & .unshift should have the same behaviour
+      // Both .push & .unshift should have the same behavior
       // When setting an encoding, each chunk should be emitted with that encoding
       const encoding = 'base64';
       const dataCalled = Promise.withResolvers();

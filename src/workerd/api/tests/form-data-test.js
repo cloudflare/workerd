@@ -622,7 +622,7 @@ export const testFormDataForeach = {
     throws(() => fd.forEach());
     throws(() => fd.forEach(1));
 
-    // `this` can be overriden by setting the second argument
+    // `this` can be overridden by setting the second argument
     fd.forEach(function () {
       // NOTE: can't use `assert_equals` because `this` has type `object` which apparently it doesn't like
       strictEqual(this, 1);

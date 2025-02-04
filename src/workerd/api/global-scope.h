@@ -414,7 +414,7 @@ class Immediate final: public jsg::Object {
   // On the off chance user code holds onto to the Ref<Immediate> longer than
   // the IoContext remains alive, let's maintain just a weak reference to the
   // IoContext here to avoid problems. This reference is used only for handling
-  // the dipose operation, so it should be perfectly fine for it to be weak
+  // the dispose operation, so it should be perfectly fine for it to be weak
   // and a non-op after the IoContext is gone.
   kj::Own<IoContext::WeakRef> contextRef;
   TimeoutId timeoutId;

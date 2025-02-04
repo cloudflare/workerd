@@ -301,7 +301,7 @@ class SqlStorage::Cursor final: public jsg::Object {
 // The prepared statement API is supported only for backwards compatibility for certain early
 // internal users of SQLite-backed DOs. This API was not released because we chose instead to
 // implement automatic prepared statement caching via the simple `exec()` API. Since this is
-// a compatibility shim only, to simplify things, it is acutally just a wrapper around `exec()`.
+// a compatibility shim only, to simplify things, it is actually just a wrapper around `exec()`.
 class SqlStorage::Statement final: public jsg::Object {
  public:
   Statement(jsg::Lock& js, jsg::Ref<SqlStorage> sqlStorage, jsg::JsString query)

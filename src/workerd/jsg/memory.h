@@ -84,7 +84,7 @@ namespace workerd::jsg {
 // Within a jsg::Object, your only responsibility would be to implement the
 // helper visitForMemoryInfo(jsg::MemoryTracker& tracker) const method only
 // if the type has additional fields that need to be tracked. This works a
-// lot like the visitForGc(...) method used for gc tracing:
+// lot like the visitForGc(...) method used for GC tracing:
 //
 //   class Foo : public jsg::Object {
 //   public:

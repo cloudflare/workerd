@@ -474,7 +474,7 @@ inline JsObject Lock::opaque(T&& inner) {
   return JsObject(wrapped.template As<v8::Object>());
 }
 
-// A persistent handle for a Js* type suitable for storage and gc visitable.
+// A persistent handle for a Js* type suitable for storage and GC visitable.
 //
 // For example,
 //

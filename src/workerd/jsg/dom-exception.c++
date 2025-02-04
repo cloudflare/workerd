@@ -66,7 +66,7 @@ void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   serializer.writeLengthDelimited(message);
 
   // It's a bit unfortunate that the stack here ends up also including the name and message
-  // so we end up duplicating some of the information here, but that's ok. It's better to
+  // so we end up duplicating some of the information here, but that's OK. It's better to
   // keep this implementation simple rather than to implement any kind of deduplication.
   KJ_IF_SOME(stack, this->stack.get(js, "stack")) {
     serializer.writeLengthDelimited(stack);

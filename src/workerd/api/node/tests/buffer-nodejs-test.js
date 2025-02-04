@@ -1182,7 +1182,7 @@ export const misc = {
       strictEqual(buf[4], 128);
     }
 
-    // Call .fill() first, stops valgrind warning about uninitialized memory reads.
+    // Call .fill() first, stops Valgrind warning about uninitialized memory reads.
     Buffer.allocUnsafe(3.3).fill().toString();
     // Throws bad argument error in commit 43cb4ec
     Buffer.alloc(3.3).fill().toString();

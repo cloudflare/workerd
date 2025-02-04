@@ -21,7 +21,7 @@
     "moduleResolution": "node",
     "declaration": true,
     "types": [
-      // todo: consume generated workerd types
+      // TODO: consume generated workerd types
       // "@cloudflare/workers-types"
     ],
     "paths": {

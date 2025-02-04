@@ -35,10 +35,10 @@ class AllowV8BackgroundThreadsScope {
 
 // Tracks whether the process hosts isolates from multiple parties that don't know about each
 // other. In such a case, we must take additional precautions against Spectre, and prohibit
-// functionality which cannot be made spectre-safe.
+// functionality which cannot be made Spectre-safe.
 //
-// (Note that simply turning this on is NOT sufficient to enable spectre protection. Instead, this
-// is mostly used as a safeguard to *disable* functionality that is known not to be spectre-safe.)
+// (Note that simply turning this on is NOT sufficient to enable Spectre protection. Instead, this
+// is mostly used as a safeguard to *disable* functionality that is known not to be Spectre-safe.)
 //
 // This is actually a process-level flag rather than thread-level. Once a process becomes
 // multi-tenant it cannot go back, since secrets could persist in memory.
@@ -46,10 +46,10 @@ bool isMultiTenantProcess();
 
 // Tracks whether the process hosts isolates from multiple parties that don't know about each
 // other. In such a case, we must take additional precautions against Spectre, and prohibit
-// functionality which cannot be made spectre-safe.
+// functionality which cannot be made Spectre-safe.
 //
-// (Note that simply turning this on is NOT sufficient to enable spectre protection. Instead, this
-// is mostly used as a safeguard to *disable* functionality that is known not to be spectre-safe.)
+// (Note that simply turning this on is NOT sufficient to enable Spectre protection. Instead, this
+// is mostly used as a safeguard to *disable* functionality that is known not to be Spectre-safe.)
 //
 // This is actually a process-level flag rather than thread-level. Once a process becomes
 // multi-tenant it cannot go back, since secrets could persist in memory.

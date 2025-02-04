@@ -238,7 +238,7 @@ void reportStartupError(kj::StringPtr id,
         KJ_IF_SOME(e, errorReporter) {
           e.addError(kj::heapString(description));
         } else KJ_IF_SOME(i, inspector) {
-          // We want to extend just enough cpu time as is necessary to report the exception
+          // We want to extend just enough CPU time as is necessary to report the exception
           // to the inspector here. 10 milliseconds should be more than enough.
           auto limitScope = limitEnforcer.enterLoggingJs(js, limitErrorOrTime2);
           jsg::sendExceptionToInspector(js, *i.get(), description);
@@ -1213,7 +1213,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           // return control back to V8 which should handle the case.
           // Note that errors thrown here and below should cause the resolve() or reject()
           // function calls to throw, which is unusual. Just important to keep that in mind.
-          // Most likely errors thrown here are fatal so that should be ok.
+          // Most likely errors thrown here are fatal so that should be OK.
           return v8::Nothing<void>();
         } catch (...) {
           jsg::throwInternalError(isolate, kj::getCaughtExceptionAsKj());
@@ -1771,8 +1771,8 @@ void Worker::handleLog(jsg::Lock& js,
   for (auto i: kj::zeroTo(length)) args[i] = info[i];
   jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.data()));
 
-  // The TryCatch is initialised here to catch cases where the v8 isolate's execution is
-  // terminating, usually as a result of an infinite loop. We need to perform the initialisation
+  // The TryCatch is initialized here to catch cases where the v8 isolate's execution is
+  // terminating, usually as a result of an infinite loop. We need to perform the initialization
   // here because `message` is called multiple times.
   v8::TryCatch tryCatch(js.v8Isolate);
   auto message = [&]() {
@@ -3051,7 +3051,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(kj::Timer& timer,
   auto webSocket = response.acceptWebSocket(headers);
 
   // This `attachInspector()` overload is used by the internal Cloudflare Workers runtime, which has
-  // no concept of a single Isolate thread. Instead, it's okay for all inspector messages to be
+  // no concept of a single Isolate thread. Instead, it's OK for all inspector messages to be
   // dispatched on the calling thread.
   auto executor = kj::getCurrentThreadExecutor().addRef();
 
@@ -3336,7 +3336,7 @@ struct Worker::Actor::Impl {
   kj::Maybe<ScheduledAlarm> maybeScheduledAlarm;
 
   // If valid, we have an alarm invocation that has received an `AlarmFulfiller` and is currently
-  // considered running. This alarm is no longer cancellable.
+  // considered running. This alarm is no longer cancelable.
   kj::Maybe<RunningAlarm> maybeRunningAlarm;
 
   // This is a forked promise so that we can schedule and then cancel multiple alarms while an alarm
@@ -3694,7 +3694,7 @@ kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
 
   // Date.now() < scheduledTime when the alarm comes in, since we subtract elapsed CPU time from
   // the time of last I/O in the implementation of Date.now(). This difference could be used to
-  // implement a spectre timer, so we have to wait a little longer until
+  // implement a Spectre timer, so we have to wait a little longer until
   // `Date.now() == scheduledTime`. Note that this also means that we could invoke ahead of its
   // `scheduledTime` and we'll delay until appropriate, this may be useful in cases of clock skew.
 

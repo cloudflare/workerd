@@ -15,7 +15,7 @@ import { Message } from "capnp-ts";
 import { generateDefinitions } from "../../src/generator";
 import { printNodeList } from "../../src/print";
 
-// Initialises a structure group containing `targets` targets to reference.
+// Initializes a structure group containing `targets` targets to reference.
 // Returns a function to point a type at an identified target.
 function initAsReferencableTypesGroup(
   group: StructureGroups_StructureGroup,

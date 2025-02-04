@@ -248,7 +248,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
     } else if (typeName == "text") {
       // NOTE: In theory we should be using awaitIoLegacy() here since ReadableStreamSource is
       //   supposed to handle pending events on its own, but we also know that the HTTP client
-      //   backing a KV namepsace is never implemented in local JavaScript, so whatever.
+      //   backing a KV namespace is never implemented in local JavaScript, so whatever.
       result = context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),

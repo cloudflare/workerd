@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* todo: the following is adopted code, enabling linting one day */
+/* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
 import { compare } from 'node-internal:internal_buffer';
@@ -176,7 +176,7 @@ function innerDeepEqual(
   } else {
     if (val1 === null || typeof val1 !== 'object') {
       if (val2 === null || typeof val2 !== 'object') {
-        // todo: eslint-disable-next-line eqeqeq
+        // TODO: eslint-disable-next-line eqeqeq
         return val1 == val2 || (Number.isNaN(val1) && Number.isNaN(val2));
       }
       return false;

@@ -272,7 +272,7 @@ struct CryptoAlgorithm {
   //   would have to be const in order to enable const-copying, but it turns out you cannot specify
   //   `const` on a reference-to-function (the compiler ignores it as "redundant", but then
   //   template metaprogramming cannot recognize it as const). Maybe we can fix this in KJ, by
-  //   making `RemoveConstOrDisable` recognize function references are inherenly const.
+  //   making `RemoveConstOrDisable` recognize function references are inherently const.
 
   // Allow comparison by name, case-insensitive. This is a convenience for placing in an std::set.
   inline bool operator==(const CryptoAlgorithm& other) const {

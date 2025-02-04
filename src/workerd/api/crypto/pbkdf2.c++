@@ -69,7 +69,7 @@ class Pbkdf2Key final: public CryptoKey::Impl {
 
   // TODO(bug): Possibly by mistake, PBKDF2 was historically not on the allow list of
   //   algorithms in exportKey(). Later, the allow list was removed, instead assuming that any
-  //   alogorithm which implemented this method must be allowed. To maintain exactly the
+  //   algorithm which implemented this method must be allowed. To maintain exactly the
   //   preexisting behavior, then, this implementation had to be commented out. If disallowing this
   //   was a mistake, we can un-comment this method, but we would need to make sure to add tests
   //   when we do.

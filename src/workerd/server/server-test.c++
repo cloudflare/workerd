@@ -28,7 +28,7 @@ jsg::V8System v8System;
 // This can only be created once per process, so we have to put it at the top level.
 
 const bool verboseLog = ([]() {
-  // TODO(beta): Improve uncaught exception reporting so that we dontt have to do this.
+  // TODO(beta): Improve uncaught exception reporting so that we don't have to do this.
   kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
   return true;
 })();

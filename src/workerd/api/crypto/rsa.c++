@@ -463,7 +463,7 @@ void Rsa::validateRsaParams(
   // Now check the public exponent for allow-listed values.
   // First see if we can convert the public exponent to an unsigned number. Unfortunately OpenSSL
   // doesn't have convenient APIs to do this (since these are bignums) so we have to do it by hand.
-  // Since the problematic BIGNUMs are within the range of an unsigned int (& technicall an
+  // Since the problematic BIGNUMs are within the range of an unsigned int (& technically an
   // unsigned short) we can treat an out-of-range issue as valid input.
   KJ_IF_SOME(v, fromBignum<unsigned>(publicExponent)) {
     if (!isImport) {
@@ -848,7 +848,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
       normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages, validUsages);
 
   Rsa::validateRsaParams(js, modulusLength, publicExponent.asPtr());
-  // boringssl silently uses (modulusLength & ~127) for the key size, i.e. it rounds down to the
+  // BoringSSL silently uses (modulusLength & ~127) for the key size, i.e. it rounds down to the
   // closest multiple of 128 bits. This can easily cause confusion when non-standard key sizes are
   // requested.
   // The `modulusLength` field of the resulting CryptoKey will be incorrect when the compat flag

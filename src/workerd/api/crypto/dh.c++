@@ -20,7 +20,7 @@ namespace workerd::api {
 
 namespace {
 
-// Maximum DH prime size, adapted from boringssl.
+// Maximum DH prime size, adapted from BoringSSL.
 constexpr int OPENSSL_DH_MAX_MODULUS_BITS = 10000;
 
 // Returns a function that can be used to create an instance of a standardized
@@ -103,7 +103,7 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
             }
             return 1;
           };
-          // Operations on an "egregiously large" prime will throw with recent boringssl.
+          // Operations on an "egregiously large" prime will throw with recent BoringSSL.
           JSG_REQUIRE(size <= OPENSSL_DH_MAX_MODULUS_BITS, RangeError,
               "DiffieHellman init failed: requested prime size too large");
           if (!DH_generate_parameters_ex(dh.get(), size, gen, &cb)) {
@@ -132,7 +132,7 @@ kj::Own<DH> initDh(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
       }
     }
     KJ_CASE_ONEOF(key, kj::Array<kj::byte>) {
-      // Operations on an "egregiously large" prime will throw with boringssl.
+      // Operations on an "egregiously large" prime will throw with BoringSSL.
       JSG_REQUIRE(key.size() <= OPENSSL_DH_MAX_MODULUS_BITS / CHAR_BIT, RangeError,
           "DiffieHellman init failed: key is too large");
       JSG_REQUIRE(key.size() > 0, Error, "DiffieHellman init failed: invalid key");

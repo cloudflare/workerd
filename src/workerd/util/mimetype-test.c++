@@ -535,7 +535,7 @@ KJ_TEST("Extract Mime Type") {
       .result = "text/html"_kj,
     },
     {
-      // This is actually three separate Content-Type header fields concated together
+      // This is actually three separate Content-Type header fields concatenated together
       // into a list. The original values are:
       //  Content-Type: text/html;\"
       //  Content-Type: \\\"

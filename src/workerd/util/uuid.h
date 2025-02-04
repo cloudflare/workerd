@@ -51,7 +51,7 @@ class UUID {
 
   // Stringify the UUID to 8-4-4-4-12 hex format.
   //
-  // Note that this is NOT just a debugging API. Its behaviour is relied upon to implement
+  // Note that this is NOT just a debugging API. Its behavior is relied upon to implement
   // user-facing APIs.
   kj::String toString() const;
 

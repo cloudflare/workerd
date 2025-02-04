@@ -580,7 +580,7 @@ public:
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     // WARNING: New JSG_METHODs on Fetcher must be gated via compatibility flag to prevent
-    // confilcts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
+    // conflicts with JS RPC methods (implemented via the wildcard property). Ideally, we do not
     // add any new methods here, and instead rely on RPC for all future needs.
     //
     // Similarly, subclasses of `Fetcher` (notably, `DurableObject`) must follow the same rule,
@@ -795,7 +795,7 @@ public:
   static kj::Maybe<Redirect> tryParseRedirect(kj::StringPtr redirect);
 
   enum class CacheMode {
-    // CacheMode::NONE is set when cache is undefined. It represents the dafault cache
+    // CacheMode::NONE is set when cache is undefined. It represents the default cache
     // mode that workers has supported.
     NONE,
     NOSTORE,

@@ -1704,7 +1704,7 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
 
   void onConsumerError(jsg::Lock& js, jsg::Value reason) override {
     // Called by the consumer when a state change to errored happens.
-    // We need to noify the owner. Note that the owner may drop this
+    // We need to notify the owner. Note that the owner may drop this
     // readable in doClose so it is not safe to access anything on this
     // after calling doError.
     KJ_IF_SOME(s, state) {
@@ -3050,9 +3050,9 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
     })();
 
     return maybeAddFunctor(js, kj::mv(promise),
-        // reader is a gc visitable type that holds a reference to either the stream
+        // reader is a GC visitable type that holds a reference to either the stream
         // or an error. Accordingly, we wrap it in a visitable lambda attached as a
-        // continuation on the promise to ensure that it is gc visited and kept alive until
+        // continuation on the promise to ensure that it is GC visited and kept alive until
         // the promise settles.
         JSG_VISITABLE_LAMBDA((reader = kj::mv(reader)), (reader),
             (jsg::Lock & js, T result)->jsg::Promise<T> {

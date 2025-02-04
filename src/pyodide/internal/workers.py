@@ -141,7 +141,7 @@ class Response(FetchResponse):
         """
         options = self._create_options(status, status_text, headers)
 
-        # Initialise via the FetchResponse super-class which gives us access to
+        # Initialize via the FetchResponse super-class which gives us access to
         # methods that we would ordinarily have to redeclare.
         js_resp = js.Response.new(
             body.js_object if isinstance(body, FormData) else body, **options

@@ -37,7 +37,7 @@ jsg::BufferSource randomPrime(jsg::Lock& js,
   if (add != nullptr) {
     // Currently, we only allow certain values for add and rem due to a bug in
     // the BN_generate_prime_ex that allows invalid values to enter an infinite
-    // loop. This diverges fromt the Node.js implementation a bit but that's ok.
+    // loop. This diverges from the Node.js implementation a bit but that's OK.
     // The key use case for this function is generating DH parameters and those
     // have pretty specific values for various generators anyway.
     // Specifically, we limit the values of add and rem to match the specific

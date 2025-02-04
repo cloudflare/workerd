@@ -297,7 +297,7 @@ class IsolateModuleRegistry final {
         return found.key.getHandle(js);
       }
 
-      // No? That's ok, let's look it up.
+      // No? That's OK, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
         return found.key.getHandle(js);
       }
@@ -345,7 +345,7 @@ class IsolateModuleRegistry final {
         return evaluate(js, found, getObserver(), inner.getEvalCallback());
       }
 
-      // No? That's ok, let's look it up.
+      // No? That's OK, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
         return evaluate(js, found, getObserver(), inner.getEvalCallback());
       }

@@ -1238,7 +1238,7 @@ const posix = {
    * @returns {string}
    */
   toNamespacedPath(path: string): string {
-    // Non-op on posix systems
+    // No-op on Posix systems
     return path;
   },
 

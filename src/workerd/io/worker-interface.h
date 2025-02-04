@@ -31,7 +31,7 @@ class WorkerInterface: public kj::HttpService {
       kj::HttpService::Response& response) = 0;
   // TODO(perf): Consider changing this to return Promise<DeferredProxy>. This would allow
   //   more resources to be dropped when merely proxying a request. However, it means we would no
-  //   longer be immplementing kj::HttpService. But maybe that doesn't matter too much in practice.
+  //   longer be implementing kj::HttpService. But maybe that doesn't matter too much in practice.
 
   // This is the same as the inherited HttpService::connect(), but we override it to be
   // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather

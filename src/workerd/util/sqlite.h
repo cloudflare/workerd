@@ -128,7 +128,7 @@ class SqliteDatabase {
   // Don't use this for one-off queries; use run() instead.
   Statement prepare(const Regulator& regulator, kj::StringPtr sqlCode);
 
-  // Prepares a statement that may acutally be multiple statements (separated by semicolons).
+  // Prepares a statement that may actually be multiple statements (separated by semicolons).
   // In this case, the code is not actually parsed until first executed (this implies
   // `prepareMulti()` will never throw since it doesn't actually do anything). This lazy-parsing
   // behavior is necessary in the case that later statements depend on the effects of earlier ones.
@@ -142,7 +142,7 @@ class SqliteDatabase {
 
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
   // except:
-  // - It may be more efficient for one-off use caes.
+  // - It may be more efficient for one-off use case.
   // - The code can include multiple statements, separated by semicolons. The bindings and returned
   //   `Query` object are both associated with the last statement. This is particularly convenient
   //   for doing database initialization such as creating several tables at once.
@@ -220,7 +220,7 @@ class SqliteDatabase {
     // called before actually resetting the database.
     virtual void beforeSqliteReset() = 0;
 
-   protected:  // so that subclasess don't have to store their own copy of the `db` reference
+   protected:  // so that subclasses don't have to store their own copy of the `db` reference
     SqliteDatabase& db;
 
    private:
@@ -323,7 +323,7 @@ class SqliteDatabase {
 
   enum Multi { SINGLE, MULTI };
 
-  // A pair of a complied statement, and a description of the interesting state changes it applies.
+  // A pair of a compiled statement, and a description of the interesting state changes it applies.
   struct StatementAndEffect {
     kj::Own<sqlite3_stmt> statement;
     StateChange stateChange;
@@ -364,7 +364,7 @@ class SqliteDatabase {
     StateChange stateChange = NoChange();
 
     // If the parse fails because the authorizer rejects it, it may fill in `authError` to provide
-    // a more friendly error message. This error will be thrown by the overal query. Otherwise,
+    // a more friendly error message. This error will be thrown by the overall query. Otherwise,
     // a generic "not authorized" error is thrown.
     kj::Maybe<kj::Exception> authError;
   };
@@ -753,7 +753,7 @@ class SqliteDatabase::Lock {
   //     https://www.sqlite.org/lockingv3.html
   //
   // Note, however, that this locking scheme is mostly unused in WAL mode, which everyone should
-  // be using now. In WAL mode, clients almost always have only a `SHARED` lock. It is inreased
+  // be using now. In WAL mode, clients almost always have only a `SHARED` lock. It is increased
   // to `EXCLUSIVE` only when shutting down the database, in order to safely delete the WAL and
   // WAL-index (-shm) files.
   //

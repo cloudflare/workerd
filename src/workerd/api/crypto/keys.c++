@@ -226,7 +226,7 @@ jsg::BufferSource AsymmetricKeyCryptoKeyImpl::sign(jsg::Lock& js,
   auto type = lookupDigestAlgorithm(chooseHash(algorithm.hash)).second;
   if (getAlgorithmName() == "RSASSA-PKCS1-v1_5") {
     // RSASSA-PKCS1-v1_5 requires the RSA key to be at least as big as the digest size
-    // plus a 15 to 19 byte digest-specific prefix (see boringssl's RSA_add_pkcs1_prefix) plus 11
+    // plus a 15 to 19 byte digest-specific prefix (see BoringSSL's RSA_add_pkcs1_prefix) plus 11
     // bytes for padding (see RSA_PKCS1_PADDING_SIZE). For simplicity, require the key to be at
     // least 32 bytes larger than the hash digest.
     // Similar checks could also be adopted for more detailed error handling in verify(), but the

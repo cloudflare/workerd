@@ -667,7 +667,7 @@ KJ_TEST("Compound Registry") {
   }
 
   {
-    // A built-in module is resolved when using a builtin contxt
+    // A built-in module is resolved when using a builtin context
     auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUILTIN, bar));
     KJ_ASSERT(module.specifier() == bar);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);

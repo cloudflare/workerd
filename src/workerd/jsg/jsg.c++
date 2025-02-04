@@ -91,7 +91,7 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
   KJ_ASSERT(v8::Locker::IsLocked(isolate));
 
   // Verify the handle was not garbage-collected by trying to read it. The intention is for this
-  // to crash if the handle was GC'd before being moved away.
+  // to crash if the handle was GC'ed before being moved away.
   {
     auto& js = jsg::Lock::from(isolate);
     js.withinHandleScope([&] {

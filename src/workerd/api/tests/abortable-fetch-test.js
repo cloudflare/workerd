@@ -82,7 +82,7 @@ export const syncSubrequest = {
 
 export const requestAbortSignal = {
   test() {
-    // The request objet has an AbortSignal, even if never used.
+    // The request object has an AbortSignal, even if never used.
     const req1 = new Request('');
     ok(Reflect.has(req1, 'signal'));
 

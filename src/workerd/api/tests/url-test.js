@@ -4013,7 +4013,7 @@ export const urlConstructorTests = {
         search: '',
         hash: '',
       },
-      'Invalid unicode characters should fail... U+FDD0 is disallowed; %ef%b7%90 is U+FDD0',
+      'Invalid Unicode characters should fail... U+FDD0 is disallowed; %ef%b7%90 is U+FDD0',
       {
         input: 'http://\ufdd0zyx.com',
         base: 'http://other.com/',

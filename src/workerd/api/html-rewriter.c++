@@ -262,7 +262,7 @@ class Rewriter final: public WritableStreamSink {
       // We canceled this, which means we used LOL_HTML_STOP. That means we have an error sitting
       // in the error buffer in the lol-html C API. Let's make sure our return code is -1 and get
       // rid of that error value to make sure nobody picks it up later on accident and thinks an
-      // error occured.
+      // error occurred.
       KJ_ASSERT(rc == -1);
       discardLastError();
 

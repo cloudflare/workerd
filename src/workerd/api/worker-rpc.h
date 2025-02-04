@@ -196,8 +196,8 @@ class JsRpcPromise: public JsRpcClientProvider {
   //
   // Note that we intentionally return jsg::JsValue rather than jsg::JsPromise because we actually
   // do not want the JSG glue to recognize we're returning a promise triggering behavior that pins
-  // the JsRpcPromise in memory until it resolves. It's actually fine if the JsRpcPromise is GC'd
-  // before the inner promise resolves, becaues it's just a thin wrapper that delegates to the
+  // the JsRpcPromise in memory until it resolves. It's actually fine if the JsRpcPromise is GC'ed
+  // before the inner promise resolves, because it's just a thin wrapper that delegates to the
   // inner promise. The inner promise will keep running until it completes, and will invoke all
   // the continuations then.
   jsg::JsValue then(jsg::Lock& js,
@@ -235,7 +235,7 @@ class JsRpcPromise: public JsRpcClientProvider {
     // Dummy IoPtr to self, used only to verify that we're running in the correct context.
     // (Dereferencing from the wrong context would throw an exception.)
     // Note: Can't use IoContext::WeakRef here because it's not thread-safe (it's only intended to
-    //   be helf from KJ I/O objects, but this is a JSG object).
+    //   be held from KJ I/O objects, but this is a JSG object).
     IoPtr<JsRpcPromise> ctxCheck;
   };
   struct Disposed {};
@@ -274,7 +274,7 @@ class JsRpcProperty: public JsRpcClientProvider {
   //
   // Note that we intentionally return jsg::JsValue rather than jsg::JsPromise because we actually
   // do not want the JSG glue to recognize we're returning a promise triggering behavior that pins
-  // the JsRpcProperty in memory until it resolves. It's actually fine if the JsRpcProperty is GC'd
+  // the JsRpcProperty in memory until it resolves. It's actually fine if the JsRpcProperty is GC'ed
   // before the promise resolves, since the property is just an API stub. The underlying Cap'n Proto
   // RPCs it starts will keep running; Cap'n Proto refcounts all the necessary resources internally.
   jsg::JsValue then(jsg::Lock& js,

@@ -20,7 +20,7 @@ SOFTWARE. */
 
 // Derived from DefinitelyTyped https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/node/stream.d.ts#L1060
 
-/* todo: the following is adopted code, enabling linting one day */
+/* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
 import { EventEmitter } from 'node:events';

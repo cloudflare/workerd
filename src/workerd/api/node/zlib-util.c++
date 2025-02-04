@@ -742,7 +742,7 @@ kj::Maybe<CompressionError> BrotliDecoderContext::getError() const {
   }
 
   if (flush == BROTLI_OPERATION_FINISH && lastResult == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
-    // Match zlib behaviour, as brotli doesn't have its own code for this.
+    // Match zlib behavior, as brotli doesn't have its own code for this.
     return CompressionError("Unexpected end of file", "Z_BUF_ERROR", Z_BUF_ERROR);
   }
 

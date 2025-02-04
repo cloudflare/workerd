@@ -120,7 +120,7 @@ KJ_TEST("SQLite backed by in-memory directory") {
     KJ_EXPECT(files[0] == "foo");
   }
 
-  // Open it again and make sure tha data is still there!
+  // Open it again and make sure the data is still there!
   {
     SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
@@ -207,7 +207,7 @@ KJ_TEST("SQLite backed by real disk") {
     KJ_EXPECT(files[0] == "foo");
   }
 
-  // Open it again and make sure tha data is still there!
+  // Open it again and make sure the data is still there!
   {
     SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
@@ -1196,7 +1196,7 @@ KJ_TEST("SQLite prepareMulti with failure") {
 
   // We ran the statement three times. Each time it should have inserted a new row containing
   // `123`, before failing on the second insert. So there should be three rows. (At one point there
-  // was a bug where the successful prefix of statements would get duplicated on earch run leading
+  // was a bug where the successful prefix of statements would get duplicated on each run leading
   // to there being 1 + 2 + 3 = 6 rows here.)
   auto query = db.run("SELECT COUNT(*) FROM things");
   KJ_ASSERT(!query.isDone());

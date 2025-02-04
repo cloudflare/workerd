@@ -26,7 +26,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* todo: the following is adopted code, enabling linting one day */
+/* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
 import internalWorkers from 'cloudflare-internal:workers';
@@ -2013,7 +2013,7 @@ function formatPrimitive(
     }
     if (
       ctx.compact !== true &&
-      // We do not support handling unicode characters width with
+      // We do not support handling Unicode characters width with
       // the readline getStringWidth function as there are
       // performance implications.
       value.length > kMinLineLength &&
@@ -2475,7 +2475,7 @@ function isBelowBreakLength(
   // Each entry is separated by at least a comma. Thus, we start with a total
   // length of at least `output.length`. In addition, some cases have a
   // whitespace in-between each other that is added to the total as well.
-  // TODO(BridgeAR): Add unicode support. Use the readline getStringWidth
+  // TODO(BridgeAR): Add Unicode support. Use the readline getStringWidth
   // function. Check the performance overhead and make it an opt-in in case it's
   // significant.
   let totalLength = output.length + start;

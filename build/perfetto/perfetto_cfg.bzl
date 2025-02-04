@@ -104,7 +104,7 @@ PERFETTO_CONFIG = struct(
     proto_library_visibility = "//visibility:private",
 
     # Allow Bazel embedders to change the visibility of the Go protos.
-    # Go protos have all sorts of strange behaviour in Google3 so need special
+    # Go protos have all sorts of strange behavior in Google3 so need special
     # handling as the rules for other languages do not work for Go.
     go_proto_library_visibility = "//visibility:private",
 

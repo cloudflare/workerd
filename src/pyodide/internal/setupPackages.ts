@@ -136,7 +136,7 @@ class SitePackagesDir {
  */
 export function buildSitePackages(requirements: Set<string>): SitePackagesDir {
   if (EmbeddedPackagesTarReader.read === undefined) {
-    // Package retrieval is enabled, so the embedded tar reader isn't initialised.
+    // Package retrieval is enabled, so the embedded tar reader isn't initialized.
     // All packages, including STDLIB_PACKAGES, are loaded in `loadPackages`.
     return new SitePackagesDir();
   }

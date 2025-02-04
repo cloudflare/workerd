@@ -516,7 +516,7 @@ class WebSocket: public EventTarget {
       //        HibernatableWebSocket is free to go away. We can no longer rely on tags stored in
       //        the HibernationManager, so instead we copy the data into the api::WebSocket.
       //
-      // We could just copy all tags into api::WebSocket everytime we reactivate/wake from
+      // We could just copy all tags into api::WebSocet every time we reactivate/wake from
       // hibernation, but it could add up to 2.56KB of memory for each websocket.
       // With a maximum of 32k websockets, that could put a lot of memory pressure on the DO.
       kj::OneOf<kj::Array<kj::StringPtr>, kj::Array<kj::String>> tagsRef;
@@ -566,7 +566,7 @@ class WebSocket: public EventTarget {
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
 
     // This canceler wraps the pump loop as a precaution to make sure we can't exit the Accepted
-    // state with a pump task still happening asychronously. In practice the canceler should usually
+    // state with a pump task still happening asynchronously. In practice the canceler should usually
     // be empty when destroyed because we do not leave the Accepted state if we're still pumping.
     // Even in the case of IoContext premature cancellation, the pump task should be canceled
     // by the IoContext before the Canceler is destroyed.
@@ -608,7 +608,7 @@ class WebSocket: public EventTarget {
   // - Transitions from `AwaitingAcceptanceOrCoupling` to `Released` when it is coupled to another
   //   web socket.
   // - Transitions from `Accepted` to `Released` when outgoing pump is done and either both
-  //   directions have seen "close" messages or an error has occured.
+  //   directions have seen "close" messages or an error has occurred.
   IoOwn<Native> farNative;
 
   // If any error has occurred.
@@ -620,7 +620,7 @@ class WebSocket: public EventTarget {
     size_t pendingAutoResponses = 0;
   };
   using OutgoingMessagesMap = kj::Table<GatedMessage, kj::InsertionOrderIndex>;
-  // Queue of messages to be sent. This is wraped in a IoOwn so that the pump loop can safely
+  // Queue of messages to be sent. This is wrapped in an IoOwn so that the pump loop can safely
   // access the map without locking the isolate.
   IoOwn<OutgoingMessagesMap> outgoingMessages;
 

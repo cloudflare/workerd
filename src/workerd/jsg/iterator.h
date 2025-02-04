@@ -572,7 +572,7 @@ class GeneratorWrapper {
       auto value = check(object->Get(context, v8StrIntern(isolate, "value"_kj)));
 
       if (done) {
-        // If done is true, then it is ok if the value does not map to anything.
+        // If done is true, then it is OK if the value does not map to anything.
         // Why are we doing it this way? Currently in the Generator pattern, there
         // is no way of distinguishing between the generator not having any return
         // value or the generator having undefined as a return value. Because we

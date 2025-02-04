@@ -388,7 +388,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   KJ_IF_SOME(fallback, optionalFallback) {
     KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value, readSpan)) {
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
-        // Optimization: Don't even release the isolate lock if the value is aleady in cache.
+        // Optimization: Don't even release the isolate lock if the value is already in cache.
         jsg::Deserializer deserializer(js, result->bytes.asPtr());
         return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
       }

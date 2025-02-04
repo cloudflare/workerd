@@ -30,7 +30,7 @@ class TimeoutId {
     return TimeoutId(ValueType(id));
   }
 
-  // Convert a TimeoutId to an integer-covertable double for external consumption.
+  // Convert a TimeoutId to an integer-convertable double for external consumption.
   // Note that this is expected to be less than or equal to JavaScript Number.MAX_SAFE_INTEGER
   // (2^53 - 1). To reach greater than that value in normal operation, we'd need a Generator to
   // live far far longer than our normal release/restart cycle, be initialized with a large

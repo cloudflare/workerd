@@ -47,7 +47,7 @@ class Autogate {
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
 
-  // Destroys an initialised global Autogate instance. Used only for testing.
+  // Destroys an initialized global Autogate instance. Used only for testing.
   static void deinitAutogate();
 
  private:

@@ -61,7 +61,7 @@ export class PipelineTransformImpl extends entrypoints.WorkerEntrypoint {
   #batch?: Batch;
   #initalized: boolean = false;
 
-  // stub overriden on the sub class
+  // stub overridden on the sub class
   // eslint-disable-next-line @typescript-eslint/require-await
   public async transformJson(_data: object[]): Promise<object[]> {
     throw new Error('should be implemented by parent');
@@ -70,7 +70,7 @@ export class PipelineTransformImpl extends entrypoints.WorkerEntrypoint {
   // called by the dispatcher which then calls the subclass methods
   // @ts-expect-error thinks ping is never used
   private _ping(): Promise<void> {
-    // making sure the function was overriden by an implementing subclass
+    // making sure the function was overridden by an implementing subclass
     if (this.transformJson !== PipelineTransformImpl.prototype.transformJson) {
       return Promise.resolve();
     } else {
