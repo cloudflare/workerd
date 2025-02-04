@@ -128,6 +128,7 @@ bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_che
 #pragma endregion  // Primes
 
 // ======================================================================================
+#pragma region Hmac
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
     jsg::Lock& js, kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
   KJ_SWITCH_ONEOF(key) {
@@ -172,8 +173,10 @@ jsg::BufferSource CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
 void CryptoImpl::HmacHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackFieldWithSize("digest", ctx.size());
 }
+#pragma endregion  // Hmac
 
 // ======================================================================================
+#pragma region Hash
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
     kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
   return jsg::alloc<HashHandle>(HashContext(algorithm, xofLen));
@@ -203,9 +206,10 @@ jsg::BufferSource CryptoImpl::HashHandle::oneshot(
   ctx.update(data);
   return ctx.digest(js);
 }
+#pragma endregion Hash
 
 // ======================================================================================
-// DiffieHellman
+#pragma region DiffieHellman
 
 jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
   return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(name));
@@ -258,5 +262,6 @@ jsg::BufferSource CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
   return verifyError;
 }
+#pragma endregion  // DiffieHellman
 
 }  // namespace workerd::api::node
