@@ -29,12 +29,14 @@ import {
   deepStrictEqual,
   ok,
   throws,
+  fail,
   type AssertPredicate,
 } from 'node:assert';
 
 type CommonOptions = {
   comment?: string;
   verbose?: boolean;
+  includeFile?: string;
 };
 
 type SuccessOptions = {
@@ -66,9 +68,204 @@ type TestCase = {
   test(_: unknown, env: Env): Promise<void>;
 };
 
+type UnknownFunc = (...args: unknown[]) => unknown;
+
+/**
+ * A single subtest. A Test is not constructed directly but via the
+ * :js:func:`test`, :js:func:`async_test` or :js:func:`promise_test` functions.
+ *
+ * @param name - This must be unique in a given file and must be
+ * invariant between runs.
+ *
+ */
+/* eslint-disable @typescript-eslint/no-this-alias -- WPT allows for overriding the this environment for a step but defaults to the Test class */
+class Test {
+  public static Phases = {
+    INITIAL: 0,
+    STARTED: 1,
+    HAS_RESULT: 2,
+    CLEANING: 3,
+    COMPLETE: 4,
+  } as const;
+
+  public name: string;
+  public properties: unknown;
+  public phase: (typeof Test.Phases)[keyof typeof Test.Phases];
+
+  public error?: Error;
+
+  // For convenience, expose a promise that resolves once done() is called
+  public isDone: Promise<void>;
+  private resolve: () => void;
+
+  public constructor(name: string, properties: unknown) {
+    this.name = name;
+    this.properties = properties;
+    this.phase = Test.Phases.INITIAL;
+
+    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.isDone = promise;
+    this.resolve = resolve;
+  }
+
+  /**
+   * Run a single step of an ongoing test.
+   *
+   * @param func - Callback function to run as a step. If
+   * this throws an :js:func:`AssertionError`, or any other
+   * exception, the :js:class:`Test` status is set to ``FAIL``.
+   * @param [this_obj] - The object to use as the this
+   * value when calling ``func``. Defaults to the  :js:class:`Test` object.
+   */
+  public step(
+    func: UnknownFunc,
+    this_obj?: object,
+    ...rest: unknown[]
+  ): unknown {
+    if (this.phase > Test.Phases.STARTED) {
+      return undefined;
+    }
+
+    if (arguments.length === 1) {
+      this_obj = this;
+    }
+
+    try {
+      return func.call(this_obj, ...rest);
+    } catch (err) {
+      if (this.phase >= Test.Phases.HAS_RESULT) {
+        return undefined;
+      }
+
+      this.error = new AggregateError([err], this.name);
+      this.done();
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Wrap a function so that it runs as a step of the current test.
+   *
+   * This allows creating a callback function that will run as a
+   * test step.
+   *
+   * @example
+   * let t = async_test("Example");
+   * onload = t.step_func(e => {
+   *   assert_equals(e.name, "load");
+   *   // Mark the test as complete.
+   *   t.done();
+   * })
+   *
+   * @param func - Function to run as a step. If this
+   * throws an :js:func:`AssertionError`, or any other exception,
+   * the :js:class:`Test` status is set to ``FAIL``.
+   * @param [this_obj] - The object to use as the this
+   * value when calling ``func``. Defaults to the :js:class:`Test` object.
+   */
+  public step_func(func: UnknownFunc, this_obj?: object): UnknownFunc {
+    const test_this = this;
+
+    if (arguments.length === 1) {
+      this_obj = this;
+    }
+
+    return function (...params: unknown[]) {
+      return test_this.step.call(test_this, func, this_obj, ...params);
+    };
+  }
+
+  /**
+   * Wrap a function so that it runs as a step of the current test,
+   * and automatically marks the test as complete if the function
+   * returns without error.
+   *
+   * @param func - Function to run as a step. If this
+   * throws an :js:func:`AssertionError`, or any other exception,
+   * the :js:class:`Test` status is set to ``FAIL``. If it returns
+   * without error the status is set to ``PASS``.
+   * @param [this_obj] - The object to use as the this
+   * value when calling `func`. Defaults to the :js:class:`Test` object.
+   */
+  public step_func_done(func?: UnknownFunc, this_obj?: object): UnknownFunc {
+    const test_this = this;
+
+    if (arguments.length === 1) {
+      this_obj = test_this;
+    }
+
+    return function (...params: unknown[]) {
+      if (func) {
+        test_this.step.call(test_this, func, this_obj, ...params);
+      }
+
+      test_this.done();
+    };
+  }
+
+  /**
+   * Return a function that automatically sets the current test to
+   * ``FAIL`` if it's called.
+   *
+   * @param [description] - Error message to add to assert
+   * in case of failure.
+   *
+   */
+  public unreached_func(description?: string): UnknownFunc {
+    return this.step_func(() => {
+      assert_unreached(description);
+    });
+  }
+
+  /**
+   * Run a function as a step of the test after a given timeout.
+   *
+   * In general it's encouraged to use :js:func:`Test.step_wait` or
+   * :js:func:`step_wait_func` in preference to this function where possible,
+   * as they provide better test performance.
+   *
+   * @param func - Function to run as a test
+   * step.
+   * @param timeout - Time in ms to wait before running the
+   * test step.
+   *
+   */
+  public step_timeout(
+    func: UnknownFunc,
+    timeout: number,
+    ...rest: unknown[]
+  ): ReturnType<typeof setTimeout> {
+    const test_this = this;
+
+    return setTimeout(
+      this.step_func(function () {
+        return func.call(test_this, ...rest);
+      }),
+      timeout
+    );
+  }
+
+  public done(): void {
+    if (this.phase >= Test.Phases.CLEANING) {
+      return;
+    }
+
+    this.cleanup();
+  }
+
+  public cleanup(): void {
+    // Actual cleanup support is not yet needed for the WPT modules we support
+    this.phase = Test.Phases.COMPLETE;
+    this.resolve();
+  }
+}
+/* eslint-enable @typescript-eslint/no-this-alias */
+
 type TestRunnerFn = (callback: TestFn | PromiseTestFn, message: string) => void;
-type TestFn = () => void;
-type PromiseTestFn = () => Promise<void>;
+type TestFn = UnknownFunc;
+type PromiseTestFn = () => Promise<unknown>;
 type ThrowingFn = () => unknown;
 
 declare global {
@@ -77,10 +274,10 @@ declare global {
   var testOptions: TestRunnerOptions;
   var GLOBAL: { isWindow(): boolean };
   var env: Env;
-  var promises: { [name: string]: Promise<void> };
+  var promises: Promise<unknown>[];
   /* eslint-enable no-var */
 
-  function test(func: TestFn, name: string): void;
+  function test(func: TestFn, name: string, properties?: unknown): void;
   function done(): undefined;
   function subsetTestByKey(
     _key: string,
@@ -93,6 +290,7 @@ declare global {
     name: string,
     properties?: unknown
   ): void;
+  function async_test(func: TestFn, name: string, properties?: unknown): void;
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
   function assert_true(val: unknown, message?: string): void;
@@ -121,13 +319,17 @@ declare global {
     descriptionOrFunc: string | ThrowingFn,
     maybeDescription?: string
   ): void;
+  function assert_not_own_property(
+    object: object,
+    property_name: string,
+    description?: string
+  ): void;
 }
 
 /**
- * @class
  * Exception type that represents a failing assert.
  * NOTE: This a custom error type defined by WPT - it's not the same as node:assert's AssertionError
- * @param {string} message - Error message.
+ * @param message - Error message.
  */
 declare class AssertionError extends Error {}
 function AssertionError(this: AssertionError, message: string): void {
@@ -219,15 +421,76 @@ globalThis.subsetTestByKey = (
   return testType(testCallback, testMessage);
 };
 
-globalThis.promise_test = (func, name, _properties): void => {
+globalThis.promise_test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
     return;
   }
 
-  try {
-    globalThis.promises[name] = func.call(this);
-  } catch (err) {
-    globalThis.errors.push(new AggregateError([err], name));
+  const testCase = new Test(name, properties);
+  const promise = testCase.step(func, testCase, testCase);
+
+  if (!(promise instanceof Promise)) {
+    // The functions passed to promise_test are expected to return a Promise,
+    // but are not required to be async functions. That means they could throw
+    // an error immediately when run.
+
+    if (testCase.error) {
+      globalThis.errors.push(testCase.error);
+    } else {
+      globalThis.errors.push(
+        new Error('Unexpected value returned from promise_test')
+      );
+    }
+
+    return;
+  }
+
+  globalThis.promises.push(
+    promise.catch((err: unknown) => {
+      globalThis.errors.push(new AggregateError([err], name));
+    })
+  );
+};
+
+globalThis.async_test = (func, name, properties): void => {
+  if (!shouldRunTest(name)) {
+    return;
+  }
+
+  const testCase = new Test(name, properties);
+  testCase.step(func, testCase, testCase);
+
+  globalThis.promises.push(
+    testCase.isDone.then(() => {
+      if (testCase.error) {
+        globalThis.errors.push(testCase.error);
+      }
+    })
+  );
+};
+
+/**
+ * Create a synchronous test
+ *
+ * @param func - Test function. This is executed
+ * immediately. If it returns without error, the test status is
+ * set to ``PASS``. If it throws an :js:class:`AssertionError`, or
+ * any other exception, the test status is set to ``FAIL``
+ * (typically from an `assert` function).
+ * @param name - Test name. This must be unique in a
+ * given file and must be invariant between runs.
+ */
+globalThis.test = (func, name, properties): void => {
+  if (!shouldRunTest(name)) {
+    return;
+  }
+
+  const testCase = new Test(name, properties);
+  testCase.step(func, testCase, testCase);
+  testCase.done();
+
+  if (testCase.error) {
+    globalThis.errors.push(testCase.error);
   }
 };
 
@@ -264,8 +527,8 @@ globalThis.assert_object_equals = (a, b, message): void => {
  *
  *     assert_implements(window.Foo, 'Foo is not supported');
  *
- * @param {object} condition The truthy value to test
- * @param {string} [description] Error description for the case that the condition is not truthy.
+ * @param condition The truthy value to test
+ * @param [description] Error description for the case that the condition is not truthy.
  */
 globalThis.assert_implements = (condition, description): void => {
   ok(!!condition, description);
@@ -281,8 +544,8 @@ globalThis.assert_implements = (condition, description): void => {
  *     assert_implements_optional(video.canPlayType("video/webm"),
  *                                "webm video playback not supported");
  *
- * @param {object} condition The truthy value to test
- * @param {string} [description] Error description for the case that the condition is not truthy.
+ * @param condition The truthy value to test
+ * @param [description] Error description for the case that the condition is not truthy.
  */
 globalThis.assert_implements_optional = (condition, description): void => {
   if (!condition) {
@@ -294,7 +557,7 @@ globalThis.assert_implements_optional = (condition, description): void => {
  * Asserts if called. Used to ensure that a specific code path is
  * not taken e.g. that an error event isn't fired.
  *
- * @param {string} [description] - Description of the condition being tested.
+ * @param [description] - Description of the condition being tested.
  */
 globalThis.assert_unreached = (description): void => {
   ok(false, `Reached unreachable code: ${description ?? 'undefined'}`);
@@ -303,9 +566,9 @@ globalThis.assert_unreached = (description): void => {
 /**
  * Assert a JS Error with the expected constructor is thrown.
  *
- * @param {object} constructor The expected exception constructor.
- * @param {Function} func Function which should throw.
- * @param {string} [description] Error description for the case that the error is not thrown.
+ * @param constructor The expected exception constructor.
+ * @param func Function which should throw.
+ * @param [description] Error description for the case that the error is not thrown.
  */
 globalThis.assert_throws_js = (constructor, func, description): void => {
   throws(
@@ -320,18 +583,23 @@ globalThis.assert_throws_js = (constructor, func, description): void => {
 /**
  * Assert the provided value is thrown.
  *
- * @param {value} exception The expected exception.
- * @param {Function} fn Function which should throw.
- * @param {string} [description] Error description for the case that the error is not thrown.
+ * @param exception The expected exception.
+ * @param fn Function which should throw.
+ * @param [description] Error description for the case that the error is not thrown.
  */
 globalThis.assert_throws_exactly = (exception, fn, description): void => {
-  throws(
-    () => {
-      fn.call(this);
-    },
-    exception,
-    description
-  );
+  try {
+    fn.call(this);
+  } catch (err) {
+    strictEqual(
+      err,
+      exception,
+      description ?? "Thrown exception doesn't match expected value"
+    );
+    return;
+  }
+
+  fail(description ?? 'No exception was thrown');
 };
 
 /**
@@ -348,7 +616,7 @@ globalThis.assert_throws_exactly = (exception, fn, description): void => {
  * the third argument the function expected to throw, and the fourth, optional,
  * argument the assertion description.
  *
- * @param {number|string} type - The expected exception name or
+ * @param type - The expected exception name or
  * code.  See the `table of names and codes
  * <https://webidl.spec.whatwg.org/#dfn-error-names-table>`_. If a
  * number is passed it should be one of the numeric code values in
@@ -356,11 +624,11 @@ globalThis.assert_throws_exactly = (exception, fn, description): void => {
  * either be an exception name (e.g. "HierarchyRequestError",
  * "WrongDocumentError") or the name of the corresponding error
  * code (e.g. "``HIERARCHY_REQUEST_ERR``", "``WRONG_DOCUMENT_ERR``").
- * @param {Function} descriptionOrFunc - The function expected to
+ * @param descriptionOrFunc - The function expected to
  * throw (if the exception comes from another global), or the
  * optional description of the condition being tested (if the
  * exception comes from the current global).
- * @param {string} [maybeDescription] - Description of the condition
+ * @param [maybeDescription] - Description of the condition
  * being tested (if the exception comes from another global).
  *
  */
@@ -399,26 +667,22 @@ globalThis.assert_throws_dom = (
 };
 
 /**
- * Create a synchronous test
+ * Assert that ``object`` does not have an own property with name ``property_name``.
  *
- * @param {TestFn} func - Test function. This is executed
- * immediately. If it returns without error, the test status is
- * set to ``PASS``. If it throws an :js:class:`AssertionError`, or
- * any other exception, the test status is set to ``FAIL``
- * (typically from an `assert` function).
- * @param {String} name - Test name. This must be unique in a
- * given file and must be invariant between runs.
+ * @param object - Object that should not have the given property.
+ * @param property_name - Property name to test.
+ * @param [description] - Description of the condition being tested.
  */
-globalThis.test = (func, name): void => {
-  if (!shouldRunTest(name)) {
-    return;
-  }
-
-  try {
-    func.call(this);
-  } catch (err) {
-    globalThis.errors.push(new AggregateError([err], name));
-  }
+globalThis.assert_not_own_property = (
+  object,
+  property_name,
+  description
+): void => {
+  ok(
+    !Object.prototype.hasOwnProperty.call(object, property_name),
+    `unexpected property ${property_name} is found on object: ` +
+      (description ?? '')
+  );
 };
 
 globalThis.errors = [];
@@ -439,20 +703,15 @@ function prepare(env: Env, options: TestRunnerOptions): void {
   globalThis.errors = [];
   globalThis.testOptions = options;
   globalThis.env = env;
-  globalThis.promises = {};
+  globalThis.promises = [];
 }
 
 async function validate(
   testFileName: string,
   options: TestRunnerOptions
 ): Promise<void> {
-  for (const [name, promise] of Object.entries(globalThis.promises)) {
-    try {
-      await promise;
-    } catch (err) {
-      globalThis.errors.push(new AggregateError([err], name));
-    }
-  }
+  // Exception handling is set up on every promise in the test function that created it.
+  await Promise.all(globalThis.promises);
 
   const expectedFailures = new Set(options.expectedFailures ?? []);
 
@@ -480,22 +739,34 @@ async function validate(
   }
 }
 
-export function run(config: TestRunnerConfig, file: string): TestCase {
-  const options = config[file] ?? {};
+export function createRunner(
+  config: TestRunnerConfig
+): (file: string) => TestCase {
+  return (file: string): TestCase => {
+    return {
+      async test(_: unknown, env: Env): Promise<void> {
+        const options = config[file];
+        if (!options) {
+          throw new Error(
+            `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
+          );
+        }
 
-  return {
-    async test(_: unknown, env: Env): Promise<void> {
-      if (options.skipAllTests) {
-        console.warn(`All tests in ${file} have been skipped.`);
-        return;
-      }
+        if (options.skipAllTests) {
+          console.warn(`All tests in ${file} have been skipped.`);
+          return;
+        }
 
-      prepare(env, options);
-      if (typeof env[file] !== 'string') {
-        throw new Error(`Unable to run ${file}. Code is not a string`);
-      }
-      env.unsafe.eval(env[file]);
-      await validate(file, options);
-    },
+        prepare(env, options);
+
+        if (options.includeFile) {
+          env.unsafe.eval(String(env[options.includeFile]));
+        }
+
+        env.unsafe.eval(String(env[file]));
+
+        await validate(file, options);
+      },
+    };
   };
 }

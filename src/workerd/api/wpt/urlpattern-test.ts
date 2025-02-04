@@ -37,6 +37,8 @@ export default {
       'Component: hash Left: {"hash":"a"} Right: {"hash":"b"}',
     ],
   },
+  'urlpattern-compare.tentative.any.js': {},
+  'urlpattern-compare.tentative.https.any.js': {},
   'urlpattern-hasregexpgroups-tests.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [
@@ -45,6 +47,9 @@ export default {
       '', // This file consists of one unnamed subtest
     ],
   },
+  'urlpattern-hasregexpgroups.any.js': {},
+  'urlpattern.any.js': {},
+  'urlpattern.https.any.js': {},
   'urlpatterntests.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [

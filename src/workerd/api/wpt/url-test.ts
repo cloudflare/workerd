@@ -5,6 +5,7 @@
 import { type TestRunnerConfig } from 'wpt:harness';
 
 export default {
+  'IdnaTestV2.window.js': {},
   'a-element-origin.js': {
     comment: 'Implement globalThis.document',
     skipAllTests: true,
@@ -16,7 +17,6 @@ export default {
   'historical.any.js': {
     comment: 'Fix this eventually',
     expectedFailures: [
-      'Constructor only takes strings',
       'URL: no structured serialize/deserialize support',
       'URLSearchParams: no structured serialize/deserialize support',
     ],
@@ -36,7 +36,8 @@ export default {
     ],
   },
   'percent-encoding.window.js': {
-    comment: 'Implement `async_test`',
+    comment:
+      'Implement test code modification feature to allow running this test without document',
     skipAllTests: true,
   },
   'toascii.window.js': {
@@ -49,10 +50,17 @@ export default {
       'Parsing: <http://example.com/\uD800\uD801\uDFFE\uDFFF\uFDD0\uFDCF\uFDEF\uFDF0\uFFFE\uFFFF?\uD800\uD801\uDFFE\uDFFF\uFDD0\uFDCF\uFDEF\uFDF0\uFFFE\uFFFF> without base',
     ],
   },
+  'url-origin.any.js': {},
+  'url-searchparams.any.js': {},
   'url-setters-a-area.window.js': {
     comment: 'Implement globalThis.document',
     skipAllTests: true,
   },
+  'url-setters-stripping.any.js': {},
+  'url-setters.any.js': {},
+  'url-statics-canparse.any.js': {},
+  'url-statics-parse.any.js': {},
+  'url-tojson.any.js': {},
   'urlencoded-parser.any.js': {
     comment:
       'Requests fail due to HTTP method "LADIDA", responses fail due to shift_jis encoding',
@@ -129,6 +137,7 @@ export default {
       'response.formData() with input: b=%%2a',
     ],
   },
+  'urlsearchparams-append.any.js': {},
   'urlsearchparams-constructor.any.js': {
     comment: 'Fix this eventually',
     expectedFailures: [
@@ -138,8 +147,16 @@ export default {
       'Construct with object with NULL, non-ASCII, and surrogate keys',
     ],
   },
+  'urlsearchparams-delete.any.js': {},
+  'urlsearchparams-foreach.any.js': {},
+  'urlsearchparams-get.any.js': {},
+  'urlsearchparams-getall.any.js': {},
+  'urlsearchparams-has.any.js': {},
+  'urlsearchparams-set.any.js': {},
+  'urlsearchparams-size.any.js': {},
   'urlsearchparams-sort.any.js': {
     comment: 'Investigate url_search_params::sort in ada-url',
     expectedFailures: ['Parse and sort: ﬃ&🌈', 'URL parse and sort: ﬃ&🌈'],
   },
+  'urlsearchparams-stringifier.any.js': {},
 } satisfies TestRunnerConfig;
