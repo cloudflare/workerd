@@ -32,6 +32,7 @@ wd_cc_library(
         ":node-core",
         "//src/node",
         "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@ncrypto",
     ],
 )
 
