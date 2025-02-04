@@ -1,7 +1,9 @@
 import argparse
-import requests
-import time
 import sys
+import time
+
+import requests
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -16,31 +18,34 @@ def parse_args():
 
     return parser.parse_args()
 
+
 if __name__ == "__main__":
     args = parse_args()
 
     # Submit build job
     headers = {
         "CF-Access-Client-Id": args.client_id,
-        "CF-Access-Client-Secret": args.secret
+        "CF-Access-Client-Secret": args.secret,
     }
 
     payload = {
         "pr_id": args.pr_id,
         "commit_sha": args.sha,
         "run_attempt": args.run_attempt,
-        "branch_name": args.branch_name
+        "branch_name": args.branch_name,
     }
 
-    workflow_id = ''
+    workflow_id = ""
     try:
         resp = requests.post(args.URL, headers=headers, json=payload)
         resp.raise_for_status()
 
-        workflow_id = resp.json().id
+        workflow_id = resp.json()["workflow_id"]
     except Exception as err:
         print(f"Unexpected error {err=}, {type(err)=}")
         sys.exit(1)
+
+    print("Internal build submitted")
 
     time.sleep(30)
 
@@ -50,14 +55,17 @@ if __name__ == "__main__":
 
     while failed_requests < FAILED_REQUEST_LIMIT:
         try:
-            resp = requests.get(args.URL, headers=headers, params={ 'id': workflow_id })
+            resp = requests.get(args.URL, headers=headers, params={"id": workflow_id})
             resp.raise_for_status()
 
-            status = resp.json().status
+            status = resp.json()["status"]
             if status == "errored":
+                print("Build failed")
                 sys.exit(1)
             elif status == "complete":
                 break
+
+            print("Waiting for build to finish..")
 
         except Exception as err:
             print(f"Unexpected error {err=}, {type(err)=}")
@@ -68,4 +76,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("Internal build succeeded")
-

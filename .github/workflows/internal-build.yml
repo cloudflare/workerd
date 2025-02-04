@@ -26,9 +26,9 @@ jobs:
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
         run: |
           python3 ./tools/cross/internal_build.py \
-            ${{github.event.pull_request.id}} \
+            ${{github.event.pull_request.number}} \
             ${{github.event.pull_request.head.sha}} \
-            $GITHUB_RUN_ATTEMPT \
+            ${{github.run_attempt}} \
             "${{github.event.pull_request.head.ref}}" \
             $CI_URL \
             $CI_CLIENT_ID \
