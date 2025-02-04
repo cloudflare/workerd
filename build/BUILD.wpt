@@ -2,21 +2,19 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-load("@workerd//:build/wpt_test.bzl", "wpt_get_directories")
-
-[filegroup(
-    name = dir,
-    srcs = glob(["{}/**/*".format(dir)]),
-    visibility = ["//visibility:public"],
-) for dir in wpt_get_directories(
-    excludes = [
-        "dom",
+directories = glob(
+    ["*"],
+    exclude = glob(
+        ["*"],
+        exclude_directories = 1,
+    ) + [
+        ".*",
     ],
-    root = "",
-)]
+    exclude_directories = 0,
+)
 
 [filegroup(
     name = dir,
     srcs = glob(["{}/**/*".format(dir)]),
     visibility = ["//visibility:public"],
-) for dir in wpt_get_directories(root = "dom")]
+) for dir in directories]
