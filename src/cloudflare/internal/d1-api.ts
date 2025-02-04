@@ -54,18 +54,21 @@ type SQLError = {
 
 type ResultsFormat = 'ARRAY_OF_OBJECTS' | 'ROWS_AND_COLUMNS' | 'NONE';
 
-type D1SessionCommitTokenOrConstraint = string;
-type D1SessionCommitToken = string;
+type D1SessionBookmarkOrConstraint = string;
+type D1SessionBookmark = string;
 // Indicates that the first query should go to the primary, and the rest queries
 // using the same D1DatabaseSession will go to any replica that is consistent with
-// the commit token maintained by the session (returned by the first query).
+// the bookmark maintained by the session (returned by the first query).
 const D1_SESSION_CONSTRAINT_FIRST_PRIMARY = 'first-primary';
 // Indicates that the first query can go anywhere (primary or replica), and the rest queries
 // using the same D1DatabaseSession will go to any replica that is consistent with
-// the commit token maintained by the session (returned by the first query).
+// the bookmark maintained by the session (returned by the first query).
 const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 
 // Parsed by the D1 eyeball worker.
+// This header is internal only for our D1 binding, not part of the public D1 REST API.
+// Customers should not use this header otherwise their applications can break when we change this.
+// TODO Rename this to `x-cf-d1-session-bookmark`, with coordination with the D1 internal API.
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
@@ -105,7 +108,7 @@ class D1DatabaseWithSessionAPI extends D1Database {
   }
 
   public withSession(
-    constraintOrToken: D1SessionCommitTokenOrConstraint | null | undefined
+    constraintOrToken: D1SessionBookmarkOrConstraint | null | undefined
   ): D1DatabaseSession {
     constraintOrToken = constraintOrToken?.trim();
     if (constraintOrToken == null || constraintOrToken === '') {
@@ -117,42 +120,42 @@ class D1DatabaseWithSessionAPI extends D1Database {
 
 class D1DatabaseSession {
   protected fetcher: Fetcher;
-  protected commitTokenOrConstraint: D1SessionCommitTokenOrConstraint;
+  protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint;
 
   public constructor(
     fetcher: Fetcher,
-    commitTokenOrConstraint: D1SessionCommitTokenOrConstraint
+    bookmarkOrConstraint: D1SessionBookmarkOrConstraint
   ) {
     this.fetcher = fetcher;
-    this.commitTokenOrConstraint = commitTokenOrConstraint;
+    this.bookmarkOrConstraint = bookmarkOrConstraint;
 
-    if (!this.commitTokenOrConstraint) {
-      throw new Error('D1_SESSION_ERROR: invalid commit token or constraint');
+    if (!this.bookmarkOrConstraint) {
+      throw new Error('D1_SESSION_ERROR: invalid bookmark or constraint');
     }
   }
 
-  // Update the commit token IFF the given newCommitToken is more recent.
-  // The commit token held in the session should always be the latest value we
+  // Update the bookmark IFF the given newBookmark is more recent.
+  // The bookmark held in the session should always be the latest value we
   // have observed in the responses to our API. There can be cases where we have concurrent
   // queries running within the same session, and therefore here we ensure we only
-  // retain the latest commit token received.
-  // @returns the final commit token after the update.
-  protected _updateCommitToken(
-    newCommitToken: D1SessionCommitToken
-  ): D1SessionCommitToken | null {
-    newCommitToken = newCommitToken.trim();
-    if (!newCommitToken) {
-      // We should not be receiving invalid commit tokens, but just be defensive.
-      return this.getCommitToken();
+  // retain the latest bookmark received.
+  // @returns the final bookmark after the update.
+  protected _updateBookmark(
+    newBookmark: D1SessionBookmark
+  ): D1SessionBookmark | null {
+    newBookmark = newBookmark.trim();
+    if (!newBookmark) {
+      // We should not be receiving invalid bookmarks, but just be defensive.
+      return this.getBookmark();
     }
-    const currentCommitToken = this.getCommitToken();
+    const currentBookmark = this.getBookmark();
     if (
-      currentCommitToken === null ||
-      currentCommitToken.localeCompare(newCommitToken) < 0
+      currentBookmark === null ||
+      currentBookmark.localeCompare(newBookmark) < 0
     ) {
-      this.commitTokenOrConstraint = newCommitToken;
+      this.bookmarkOrConstraint = newBookmark;
     }
-    return this.getCommitToken();
+    return this.getBookmark();
   }
 
   public prepare(sql: string): D1PreparedStatement {
@@ -171,35 +174,34 @@ class D1DatabaseSession {
     return exec.map(toArrayOfObjects);
   }
 
-  // Returns the latest commit token we received from all responses processed so far.
+  // Returns the latest bookmark we received from all responses processed so far.
   // It does not return constraints that might have be passed during the session creation.
-  public getCommitToken(): D1SessionCommitToken | null {
-    switch (this.commitTokenOrConstraint) {
-      // First to any replica, and then anywhere that satisfies the commit token.
+  public getBookmark(): D1SessionBookmark | null {
+    switch (this.bookmarkOrConstraint) {
+      // First to any replica, and then anywhere that satisfies the bookmark.
       case D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED:
         return null;
-      // First to primary, and then anywhere that satisfies the commit token.
+      // First to primary, and then anywhere that satisfies the bookmark.
       case D1_SESSION_CONSTRAINT_FIRST_PRIMARY:
         return null;
       default:
-        return this.commitTokenOrConstraint;
+        return this.bookmarkOrConstraint;
     }
   }
 
-  // fetch will append the commit token header to all outgoing fetch calls.
-  // The response headers are parsed automatically, extracting the commit token
-  // from the response headers and updating it through `_updateCommitToken(token)`.
+  // fetch will append the bookmark header to all outgoing fetch calls.
+  // The response headers are parsed automatically, extracting the bookmark
+  // from the response headers and updating it through `_updateBookmark(token)`.
   protected async _wrappedFetch(
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> {
-    // We append the commit token to all fetch queries.
     const h = new Headers(init?.headers);
 
-    // We send either a constraint, or a commit token, and the eyeball worker will figure out
+    // We send either a constraint, or a bookmark, and the eyeball worker will figure out
     // what to do based on the value. This simulates the same flow as the REST API would behave too.
-    if (this.commitTokenOrConstraint) {
-      h.set(D1_SESSION_COMMIT_TOKEN_HTTP_HEADER, this.commitTokenOrConstraint);
+    if (this.bookmarkOrConstraint) {
+      h.set(D1_SESSION_COMMIT_TOKEN_HTTP_HEADER, this.bookmarkOrConstraint);
     }
 
     if (!init) {
@@ -208,13 +210,9 @@ class D1DatabaseSession {
       init.headers = h;
     }
     return this.fetcher.fetch(input, init).then((resp) => {
-      const newCommitToken = resp.headers.get(
-        D1_SESSION_COMMIT_TOKEN_HTTP_HEADER
-      );
-      // TODO(soon): Add validation of the received commit token, in case we sent a commit token,
-      //             otherwise sessions functionality could be inconsistent.
-      if (newCommitToken) {
-        this._updateCommitToken(newCommitToken);
+      const newBookmark = resp.headers.get(D1_SESSION_COMMIT_TOKEN_HTTP_HEADER);
+      if (newBookmark) {
+        this._updateBookmark(newBookmark);
       }
       return resp;
     });
@@ -294,17 +292,17 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
     super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY);
   }
 
-  // We ignore commit tokens for this special type of session,
+  // We ignore bookmarks for this special type of session,
   // since all queries are sent to the primary.
-  public override _updateCommitToken(
-    _newCommitToken: D1SessionCommitToken
-  ): D1SessionCommitToken | null {
+  public override _updateBookmark(
+    _newBookmark: D1SessionBookmark
+  ): D1SessionBookmark | null {
     return null;
   }
 
-  // There is not commit token returned every by this special type of session,
+  // There is no bookmark returned ever by this special type of session,
   // since all queries are sent to the primary.
-  public override getCommitToken(): D1SessionCommitToken | null {
+  public override getBookmark(): D1SessionBookmark | null {
     return null;
   }
 
