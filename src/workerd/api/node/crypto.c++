@@ -14,13 +14,6 @@
 
 namespace workerd::api::node {
 
-namespace {
-template <typename T = const kj::byte>
-ncrypto::Buffer<T> ToBuffer(const kj::Array<T>& array) {
-  return ncrypto::Buffer<T>(array.begin(), array.size());
-}
-}  // namespace
-
 // ======================================================================================
 #pragma region KDF
 
