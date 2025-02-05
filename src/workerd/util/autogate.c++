@@ -54,7 +54,7 @@ bool Autogate::isEnabled(AutogateKey key) {
     return a.gates[(unsigned long)key];
   }
   LOG_ERROR_PERIODICALLY(
-      kj::str("Autogates not initialized, check for ", key, " will have no effect"));
+      kj::str("Autogates not initialised, check for ", key, " will have no effect"));
   return false;
 }
 
