@@ -61,6 +61,9 @@ if __name__ == "__main__":
             status = resp.json()["status"]
             if status == "errored":
                 print("Build failed")
+                print(
+                    "For more information, please visit: https://cflare.co/workerd-internal-build"
+                )
                 sys.exit(1)
             elif status == "complete":
                 break
