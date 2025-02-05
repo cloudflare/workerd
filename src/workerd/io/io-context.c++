@@ -4,11 +4,15 @@
 
 #include "io-context.h"
 
+#include "libplatform/libplatform.h"
+#include "v8-platform.h"  // NOLINT(build/include_directory)
+#include "v8config.h"     // NOLINT(build/include_directory)
 #include <workerd/io/io-gate.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/jsg/setup.h>
 
 #include <kj/debug.h>
 
@@ -1092,6 +1096,11 @@ void IoContext::runImpl(Runnable& runnable,
 
       // Running the microtask queue can itself trigger a pending exception in the isolate.
       v8::TryCatch tryCatch(workerLock.getIsolate());
+
+      // Just trying out stuff
+      auto& system = const_cast<jsg::V8System&>(js.getV8System());
+      while (v8::platform::PumpMessageLoop(&system.getDefaultPlatform(), js.v8Isolate, v8::platform::MessageLoopBehavior::kDoNotWait)) {}
+
 
       js.runMicrotasks();
 
