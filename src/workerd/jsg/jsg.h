@@ -2276,6 +2276,8 @@ class ExternalMemoryAdjustment final {
 // Isolate<TypeWrapper>::Lock. Usually this is only done in top-level code, and the Lock is
 // passed down to everyone else from there. See setup.h for details.
 
+class V8System;
+
 class Lock {
  public:
   // The underlying V8 isolate, useful for directly calling V8 APIs. Hopefully, this is rarely
@@ -2287,6 +2289,8 @@ class Lock {
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
     return context;
   }
+
+  virtual const V8System& getV8System() = 0;
 
   // Get the current Lock for the given V8 isolate. Segfaults if the isolate is not locked.
   //
