@@ -518,11 +518,6 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               // retry forever.
               shouldRetryCountsAgainstLimits = true;
             }
-            // We don't usually log these messages, but it's useful to know the real reason we failed
-            // to correctly investigate stuck alarms.
-            LOG_NOSENTRY(ERROR,
-                "output lock broke after executing alarm without an interesting error description",
-                actorId, e, shouldRetryCountsAgainstLimits);
           }
           return WorkerInterface::AlarmResult{.retry = true,
             .retryCountsAgainstLimit = shouldRetryCountsAgainstLimits,
