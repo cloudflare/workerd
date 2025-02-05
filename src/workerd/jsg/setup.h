@@ -235,6 +235,8 @@ class IsolateBase {
   using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
 
   const V8System& system;
+  // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
+  //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
   v8::Isolate* ptr;
   kj::Maybe<kj::String> uuid;
