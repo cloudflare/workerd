@@ -300,9 +300,7 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
     // fully utilized. This differs from browser environments, where a user is typically doing
     // only one thing at a time and thus likely has CPU cores to spare.
 
-    // V8 *claims* to take ownership of the v8::CppHeap but actually releases ownership of it
-    // during v8::Isolate::Dispose.
-    // TODO(soon): submit a bug report/patch to v8.
+    // V8 takes ownership of the v8::CppHeap.
     params.cpp_heap = cppHeap;
 
     if (params.array_buffer_allocator == nullptr &&
@@ -328,7 +326,11 @@ IsolateBase::IsolateBase(const V8System& system,
     kj::Own<IsolateObserver> observer)
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
+#if (V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION >= 4) || V8_MAJOR_VERSION > 13
+      ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
+#else
       ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
+#endif
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -395,6 +397,7 @@ IsolateBase::IsolateBase(const V8System& system,
 IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->Dispose();
+    // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
     ;
   });
