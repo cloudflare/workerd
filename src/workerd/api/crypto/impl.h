@@ -252,6 +252,10 @@ class CryptoKey::Impl {
     return false;
   }
 
+  virtual void visitForGc(jsg::GcVisitor& visitor) {
+    // By default, nothing to visit.
+  }
+
  private:
   const bool extractable;
   const CryptoKeyUsageSet usages;

@@ -3,7 +3,7 @@ import { KeyObject, SecretKeyObject, createSecretKey } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
 export const secret_key_equals_test = {
-  async test(ctrl, env, ctx) {
+  async test() {
     const secretKeyData1 = Buffer.from('abcdefghijklmnop');
     const secretKeyData2 = Buffer.from('abcdefghijklmnop'.repeat(2));
     const aes1 = await crypto.subtle.importKey(
@@ -100,7 +100,7 @@ eD5wgyBQIDAQAB
 `;
 
 export const asymmetric_key_equals_test = {
-  async test(ctrl, env, ctx) {
+  async test() {
     const jwk1_ec = await crypto.subtle.importKey(
       'jwk',
       jwkEcKey,
@@ -181,12 +181,33 @@ export const asymmetric_key_equals_test = {
 };
 
 export const secret_key_test = {
-  test(ctrl, env, ctx) {
+  test() {
+    const buf = Buffer.from('hello');
+    strictEqual(buf.toString(), 'hello');
     const key1 = createSecretKey('hello');
-    const key2 = createSecretKey('hello');
+    const key2 = createSecretKey(buf);
     const key3 = createSecretKey('there');
 
-    key1.toString();
+    // Creating a zero-length key should also just work.
+    const key4 = createSecretKey('');
+    const key5 = createSecretKey(Buffer.alloc(0));
+    ok(key4.equals(key5));
+    strictEqual(key4.export().toString(), '');
+
+    // The key should be immutable after creation,
+    // so modifying the buf now should have no impact
+    // on the test.
+    buf.fill(0);
+    strictEqual(buf.toString(), '\0\0\0\0\0');
+
+    // Now let's make sure the keys we created meet our expectations.
+    strictEqual(key1.export().toString(), 'hello');
+    strictEqual(key2.export().toString(), 'hello');
+    strictEqual(key3.export({ format: 'buffer' }).toString(), 'there');
+
+    strictEqual(key1.toString(), '[object KeyObject]');
+    strictEqual(key2.toString(), '[object KeyObject]');
+    strictEqual(key3.toString(), '[object KeyObject]');
     ok(key1 instanceof SecretKeyObject);
     ok(key2 instanceof SecretKeyObject);
     ok(key3 instanceof SecretKeyObject);
@@ -195,5 +216,16 @@ export const secret_key_test = {
     strictEqual(key3.type, 'secret');
     ok(key1.equals(key2));
     ok(!key1.equals(key3));
+    ok(!key3.equals(key1));
+
+    strictEqual(key1.symmetricKeySize, 5);
+    //    console.log(key1.toCryptoKey());
+
+    const jwk = key3.export({ format: 'jwk' });
+    ok(jwk);
+    strictEqual(typeof jwk, 'object');
+    strictEqual(jwk.kty, 'oct');
+    strictEqual(jwk.ext, true);
+    strictEqual(jwk.k, 'dGhlcmU');
   },
 };

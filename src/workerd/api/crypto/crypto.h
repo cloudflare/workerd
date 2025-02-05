@@ -334,6 +334,8 @@ class CryptoKey: public jsg::Object {
  private:
   kj::Own<Impl> impl;
 
+  void visitForGc(jsg::GcVisitor& visitor);
+
   friend class SubtleCrypto;
   friend class EllipticKey;
   friend class EdDsaKey;

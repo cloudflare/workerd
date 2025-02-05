@@ -205,7 +205,7 @@ class CryptoImpl final: public jsg::Object {
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
   kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
 
-  jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, kj::Array<kj::byte>);
+  jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::BufferSource keyData);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
@@ -252,3 +252,8 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::KeyExportOptions, api::node::CryptoImpl::GenerateKeyPairOptions,      \
       api::node::CryptoImpl::CreateAsymmetricKeyOptions, EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
+
+// Known todos
+//
+// 1. Implement KeyObject.prototype.toCryptoKey(...)
+//

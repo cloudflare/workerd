@@ -129,8 +129,9 @@ export abstract class KeyObject {
     // Yes, converting to any is a bit of a cheat, but it allows us to check
     // each option individually without having to do a bunch of type guards.
     const opts = options as any;
-    if (opts.format !== undefined)
+    if (opts.format !== undefined) {
       validateString(opts.format, 'options.format');
+    }
     if (opts.type !== undefined) validateString(opts.type, 'options.type');
     if (this.type === 'private') {
       if (opts.cipher !== undefined) {
@@ -147,6 +148,8 @@ export abstract class KeyObject {
         }
       }
     }
+
+    options.format ??= 'buffer';
 
     const ret = cryptoImpl.exportKey(
       this[kHandle],
@@ -276,7 +279,24 @@ export function createSecretKey(
   encoding?: string
 ): SecretKeyObject {
   validateKeyData(key, 'key');
-  if (typeof key === 'string') key = Buffer.from(key as string, encoding);
+  if (typeof key === 'string') {
+    key = Buffer.from(key as string, encoding);
+  } else if (isAnyArrayBuffer(key)) {
+    // We want the key to be a copy of the original buffer, not a view.
+    key = Buffer.from(new Uint8Array(key));
+  } else if (isArrayBufferView(key)) {
+    // We want the key to be a copy of the original buffer, not a view.
+    key = Buffer.from(key as any);
+  }
+
+  // Node.js requires that the key data be less than 2 ** 32 - 1,
+  // however it enforces the limit silently... returning an empty
+  // key as opposed to throwing an error. Silly Node.js.
+  // But, it's all good because our runtime limits the size of
+  // buffer allocations to a strict maximum of 2,147,483,646 ... way
+  // more than necessary... no one actually *needs* a 17,179,869,168
+  // bit secret key do they? Good luck to the poor soul who tries.
+
   return KeyObject.from(cryptoImpl.createSecretKey(key)) as SecretKeyObject;
 }
 

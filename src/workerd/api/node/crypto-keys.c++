@@ -20,24 +20,38 @@ namespace {
 // Web Crypto requires a separate key for each algorithm.
 class SecretKey final: public CryptoKey::Impl {
  public:
-  explicit SecretKey(kj::Array<kj::byte> keyData)
+  explicit SecretKey(jsg::BufferSource keyData)
       : Impl(true, CryptoKeyUsageSet::privateKeyMask() | CryptoKeyUsageSet::publicKeyMask()),
         keyData(kj::mv(keyData)) {}
+  ~SecretKey() noexcept(false) {
+    keyData.setToZero();
+  }
 
   kj::StringPtr getAlgorithmName() const override {
     return "secret"_kj;
   }
   CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
-    return CryptoKey::KeyAlgorithm{.name = "secret"_kj};
+    return CryptoKey::ArbitraryKeyAlgorithm{
+      .name = "secret"_kj,
+      .length = keyData.size(),
+    };
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
   }
 
-  bool equals(const kj::Array<kj::byte>& other) const override final {
+  bool equalsImpl(kj::ArrayPtr<const kj::byte> other) const {
     return keyData.size() == other.size() &&
-        CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+        CRYPTO_memcmp(keyData.asArrayPtr().begin(), other.begin(), keyData.size()) == 0;
+  }
+
+  bool equals(const kj::Array<kj::byte>& other) const override final {
+    return equalsImpl(other.asPtr());
+  }
+
+  bool equals(const jsg::BufferSource& other) const override final {
+    return equalsImpl(other.asArrayPtr());
   }
 
   SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
@@ -47,13 +61,13 @@ class SecretKey final: public CryptoKey::Impl {
     if (format == "jwk") {
       SubtleCrypto::JsonWebKey jwk;
       jwk.kty = kj::str("oct");
-      jwk.k = fastEncodeBase64Url(keyData);
+      jwk.k = fastEncodeBase64Url(keyData.asArrayPtr());
       jwk.ext = true;
       return jwk;
     }
 
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, keyData.size());
-    backing.asArrayPtr().copyFrom(keyData);
+    backing.asArrayPtr().copyFrom(keyData.asArrayPtr());
     return jsg::BufferSource(js, kj::mv(backing));
   }
 
@@ -64,11 +78,15 @@ class SecretKey final: public CryptoKey::Impl {
     return sizeof(SecretKey);
   }
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
-    tracker.trackFieldWithSize("keyData", keyData.size());
+    tracker.trackField("keyData", keyData);
+  }
+
+  void visitForGc(jsg::GcVisitor& visitor) override {
+    visitor.visit(keyData);
   }
 
  private:
-  ZeroOnFree keyData;
+  jsg::BufferSource keyData;
 };
 }  // namespace
 
@@ -131,8 +149,12 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return key->getAlgorithmName();
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, kj::Array<kj::byte> keyData) {
-  return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::heapArray(keyData.asPtr())));
+jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::BufferSource keyData) {
+  // The keyData we receive here should be an exclusive copy of the key data.
+  // It will have been copied on the JS side before being passed to this function.
+  // We do not detach the key data, however, because we want to ensure that it
+  // remains associated with the isolate for memory accounting purposes.
+  return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::mv(keyData)));
 }
 
 jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
