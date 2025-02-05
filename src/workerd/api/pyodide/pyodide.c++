@@ -196,7 +196,7 @@ kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::St
       // https://docs.python.org/3/reference/lexical_analysis.html#identifiers
       //
       // We also accept `.` because import idents can contain it.
-      // TODO: We don't currently support unicode, but if we see packages that utilise it we will
+      // TODO: We don't currently support unicode, but if we see packages that utilize it we will
       // implement that support.
       if (isDigit(str[start])) {
         return 0;

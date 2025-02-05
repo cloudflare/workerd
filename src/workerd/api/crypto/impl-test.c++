@@ -24,7 +24,7 @@ KJ_TEST("Crypto error conversion") {
   // throwOpensslError().
 
   OPENSSL_PUT_ERROR(RSA, RSA_R_CANNOT_RECOVER_MULTI_PRIME_KEY);
-  // Throw an exception based on boringssl error queue, expecting to get an internal error instead
+  // Throw an exception based on BoringSSL error queue, expecting to get an internal error instead
   // of a DOMException
   KJ_EXPECT_THROW_MESSAGE("OpenSSL call failed", OSSLCALL(0));
 

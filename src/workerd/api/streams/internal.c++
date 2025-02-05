@@ -85,7 +85,7 @@ class AllReader final {
     // optimize. The most important is that even if a stream reports an expected length
     // using tryGetLength, we really don't know how much data the stream will produce until
     // we try to read it. The only signal we have that the stream is done producing data
-    // is a zero-length result from tryRead. Unfortuntately, we have to allocate a buffer
+    // is a zero-length result from tryRead. Unfortunately, we have to allocate a buffer
     // in advance of calling tryRead so we have to guess a bit at the size of the buffer
     // to allocate.
     //
@@ -111,7 +111,7 @@ class AllReader final {
     // end up resulting in a zero-length read signaling that we are done. Hooray!
     //
     // Not everything can be best case scenario tho, unfortunately. If our first tryRead
-    // does not fully consume the stream or fully fill the desination buffer, we're
+    // does not fully consume the stream or fully fill the destination buffer, we're
     // going to need to try again. It is possible that the new allocation in the next
     // iteration will be wasted if the stream doesn't have any more data so it's important
     // for us to try to be conservative with the allocation. If the running total of data
@@ -2186,9 +2186,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
         // It appears the pump was canceled. We should make sure this propagates back to the
         // source stream. This is important in particular when we're implementing the response
         // pump for an HTTP event (see Response::send()). Presumably it was canceled because the
-        // client disconnecnted. If we don't cancel the source, then if the source is one end of
+        // client disconnected. If we don't cancel the source, then if the source is one end of
         // a TransformStream, the write end will just hang. Of course, this is fine if there are
-        // no waitUntil()s running, because the whole I/O context will be canceled anyawy. But if
+        // no waitUntil()s running, because the whole I/O context will be canceled anyway. But if
         // there are waitUntil()s, then the application probably expects to get an exception from
         // the write() on cancellation, rather than have it hang.
         source->cancel(KJ_EXCEPTION(DISCONNECTED, "pump canceled"));
@@ -2231,7 +2231,7 @@ kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(
   while (total < minBytes) {
     // TODO(perf): tryReadInternal was written assuming minBytes would always be 1 but we've now
     // introduced an API for user to specify a larger minBytes. For now, this is implemented as a
-    // naiive loop dispatching to the 1 byte version but would be better to bake it deeper into
+    // naive loop dispatching to the 1 byte version but would be better to bake it deeper into
     // the implementation where it can be more efficient.
     auto amount = co_await tryReadInternal(buffer, maxBytes);
     KJ_ASSERT(amount <= maxBytes);
@@ -2361,7 +2361,7 @@ void IdentityTransformStreamImpl::abort(kj::Exception reason) {
       return;
     }
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      // If we're in the pending close state... it should be ok to just switch
+      // If we're in the pending close state... it should be OK to just switch
       // the state to errored below.
     }
   }

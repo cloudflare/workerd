@@ -26,7 +26,7 @@ function compileOverride(
   // - `type TransactionOptions = never` (deletes definition)
   if (keywordReplace.test(override)) return [override, true];
 
-  // Fixup overrides, so they can be parsed as TypeScript source files. Whilst
+  // Fix up overrides, so they can be parsed as TypeScript source files. Whilst
   // we convert all overrides to classes, this type classification is ignored
   // when merging. Classes just support all possible forms of override (extends,
   // implements, constructors, (static) properties/methods).

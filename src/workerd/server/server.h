@@ -140,7 +140,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
 
   struct GlobalContext;
-  // General context needed to construct workers. Initilaized early in run().
+  // General context needed to construct workers. Initialized early in run().
   kj::Own<GlobalContext> globalContext;
 
   class Service;

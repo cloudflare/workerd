@@ -37,7 +37,7 @@ jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescripto
 
   KJ_SWITCH_ONEOF(descriptor.size) {
     KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
-      // if we have a sequence of coordinates we assume that the order is: width, heigth, depth, if
+      // if we have a sequence of coordinates we assume that the order is: width, height, depth, if
       // available, and ignore all the rest.
       switch (coords.size()) {
         default:
@@ -583,7 +583,7 @@ jsg::Ref<GPUComputePipeline> GPUDevice::createComputePipeline(
 jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope(jsg::Lock& js) {
   auto paf = kj::newPromiseAndFulfiller<kj::Maybe<jsg::Ref<GPUError>>>();
   // This context object will hold information for the callback, including the
-  // fullfiller to signal the caller with the result, and an async task that
+  // fulfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
   using MapAsyncContext = AsyncContext<kj::Maybe<jsg::Ref<GPUError>>>;

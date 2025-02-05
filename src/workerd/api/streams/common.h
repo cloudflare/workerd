@@ -226,7 +226,7 @@ class ReadableStreamSource {
   // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
   virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
 
-  // If pumpTo() pumps to a system stream, what is the best encoding for that system steram to
+  // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
   virtual StreamEncoding getPreferredEncoding() {
     return StreamEncoding::IDENTITY;
@@ -530,7 +530,7 @@ class ReadableStreamController {
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
       jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
 
-  // If pumpTo() pumps to a system stream, what is the best encoding for that system steram to
+  // If pumpTo() pumps to a system stream, what is the best encoding for that system stream to
   // use? This is just a hint.
   virtual StreamEncoding getPreferredEncoding() {
     return StreamEncoding::IDENTITY;
@@ -719,7 +719,7 @@ class WritableStreamController {
   // closure.
   virtual void setPendingClosure() = 0;
 
-  // For menmory tracking
+  // For memory tracking
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& info) const = 0;

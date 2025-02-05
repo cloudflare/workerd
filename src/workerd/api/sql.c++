@@ -327,7 +327,7 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
   // expecting zero or one results, so it calls `exec(...).next()`. In the case that one result
   // was returned, the application may not bother calling `next()` again. If we hadn't proactively
   // iterated ahead by one, then the statement would not be returned to the cache until it was
-  // GC'd, which might prevent the cache from being effective in the meantime.
+  // GC'ed, which might prevent the cache from being effective in the meantime.
   //
   // Unfortunately, this does not help with the case where the application stops iterating with
   // results still available from the cursor. There's not much we can do about that case since

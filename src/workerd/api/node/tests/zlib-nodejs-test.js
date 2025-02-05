@@ -1398,7 +1398,7 @@ export const zlibFromGzipWithTrailingGarbage = {
     {
       const { promise, resolve } = Promise.withResolvers();
       zlib.gunzip(data, (err, result) => {
-        // TOOD(soon): Use same error code as NodeJS
+        // TODO(soon): Use same error code as NodeJS
         // TODO(soon): Do our messages have a redundant "Error: " word?
         assert.strictEqual(err.name, 'Error');
         assert.match(err.message, /unknown compression method/);

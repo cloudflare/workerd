@@ -565,7 +565,7 @@ class ActorCache final: public ActorCacheInterface {
         co_await promise;
       } catch (...) {
         if (isFinished) {
-          // We already flushed, so it's okay that the promise threw.
+          // We already flushed, so it's OK that the promise threw.
           co_return;
         } else {
           throw;

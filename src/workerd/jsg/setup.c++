@@ -487,7 +487,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   switch (event->type) {
     case v8::JitCodeEvent::CODE_ADDED: {
       // Usually CODE_ADDED comes after CODE_END_LINE_INFO_RECORDING, but sometimes it doesn't,
-      // particularly in the case of Wasm where it apperas no line info is provided.
+      // particularly in the case of Wasm where it appears no line info is provided.
       auto& info = codeMap.findOrCreate(
           startAddr, [&]() { return decltype(self->codeMap)::Entry{startAddr, CodeBlockInfo()}; });
       info.size = event->code_len;

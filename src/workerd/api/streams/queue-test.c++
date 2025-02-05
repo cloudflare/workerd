@@ -1104,7 +1104,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
       jsg::BufferSource source(js, view);
       KJ_ASSERT(source.size() == 4);
       auto ptr = source.asArrayPtr();
-      // Our read was for at least 3 bytes, with a maximun of 5.
+      // Our read was for at least 3 bytes, with a maximum of 5.
       // For this first read, we received 4. One the second read
       // we should receive 2.
       KJ_ASSERT(ptr[0] == 1);

@@ -221,7 +221,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
       }
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         // Because the ReadableStream might be a fully JavaScript-backed stream, we must
-        // start running the pump within the IoContex/isolate lock.
+        // start running the pump within the IoContext/isolate lock.
         co_await context.run(
             [dest = newSystemStream(kj::mv(request.body), StreamEncoding::IDENTITY, context),
                 stream = kj::mv(stream)](jsg::Lock& js) mutable {

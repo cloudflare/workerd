@@ -2141,7 +2141,7 @@ export const utilInspect = {
         out === expect || out === expectAlt,
         `Found: "${out}"\nrather than: "${expect}"\nor: "${expectAlt}"`
       );
-      // Keep references to the WeakMap entries, otherwise they could be GCed too
+      // Keep references to the WeakMap entries, otherwise they could be GC'ed too
       // early.
       assert(obj && arr);
     }
@@ -3296,7 +3296,7 @@ export const utilInspect = {
       // "grey" is reference-equal alias of "gray".
       assert.strictEqual(colors.grey, colors.gray);
 
-      // Assigninging one should assign the other. This tests that the alias setter
+      // Assigning one should assign the other. This tests that the alias setter
       // function keeps things reference-equal.
       colors.gray = [0, 0];
       assert.deepStrictEqual(colors.gray, [0, 0]);

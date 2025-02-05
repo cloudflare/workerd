@@ -534,7 +534,7 @@ template <typename TypeWrapper, typename Input>
 void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
   if constexpr (isVoid<Input>()) {
     // No wrapping needed. Note that we still attach `thenWrap` to the promise chain only because
-    // we use `args.data` to prevent the object from being GC'd while the promise is still
+    // we use `args.data` to prevent the object from being GC'ed while the promise is still
     // executing.
     args.GetReturnValue().SetUndefined();
   } else if constexpr (isV8Ref<Input>()) {
@@ -584,7 +584,7 @@ class PromiseWrapper {
     // Add a .then() to unwrap the value (i.e. convert C++ value to JavaScript).
     //
     // We use `creator` as the `data` value for this continuation so that the creator object
-    // cannot be GC'd while the callback still exists. This gives us the KJ-style guarantee that
+    // cannot be GC'ed while the callback still exists. This gives us the KJ-style guarantee that
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;

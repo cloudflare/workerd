@@ -63,7 +63,7 @@ export const newWasmModule = {
     );
     // Fails to construct: missing magic number
     throws(() => env.unsafe.newWasmModule(new Uint8Array([])));
-    // Test that we can successully construct a minimal valid Wasm module: magic
+    // Test that we can successfully construct a minimal valid Wasm module: magic
     // number 0asm + version
     const result = env.unsafe.newWasmModule(
       new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])

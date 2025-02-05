@@ -1335,7 +1335,7 @@ class ResourceWrapper {
           return DeserializeInvoker<TypeWrapper, T>::call(wrapper, js, typedTag, deserializer);
         };
 
-        // We make duplicatse here fatal because it's really hard to debug exceptions thrown during
+        // We make duplicates here fatal because it's really hard to debug exceptions thrown during
         // isolate startup and frankly this is pretty fatal for the runtime anyway.
         auto reportDuplicate = [](auto&, auto&&) noexcept {
           KJ_FAIL_REQUIRE("JSG_SERIALIZABLE declaration tried to register a duplicate type tag");

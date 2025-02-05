@@ -203,7 +203,7 @@ kj_test(
     deps = [
         ":rtti",
         ":rtti_test_capnp",
-        # todo: move text encoding out
+        # TODO: move text encoding out
         "@capnp-cpp//src/capnp:capnpc",
     ],
 )

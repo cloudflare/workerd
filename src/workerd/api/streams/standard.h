@@ -313,7 +313,7 @@ class WritableImpl {
   // is equal to or above the highwatermark, then backpressure is applied.
   void updateBackpressure(jsg::Lock& js);
 
-  // Writes a chunk to the Writable, possibly queueing the chunk in the internal buffer
+  // Writes a chunk to the Writable, possibly queuing the chunk in the internal buffer
   // if there are already other writes pending.
   jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value);
 
@@ -620,7 +620,7 @@ class WritableStreamDefaultController: public jsg::Object {
 // JSG_VISITABLE_LAMBDAs. When those algorithms are cleared, the strong
 // references holding the TransformStreamDefaultController are freed.
 // However, user code can do silly things like hold the Transform controller
-// long after both the readable and writable sides have been gc'd.
+// long after both the readable and writable sides have been GC'ed.
 class TransformStreamDefaultController: public jsg::Object {
  public:
   TransformStreamDefaultController(jsg::Lock& js);

@@ -607,7 +607,7 @@ jsg::JsString BufferUtil::decode(
         getMissingBytes(state) + getBufferedBytes(state) <= BufferUtil::kIncompleteCharactersEnd,
         Error, "Invalid StringDecoder state");
     if (enc == Encoding::UTF8) {
-      // For UTF-8, we need special treatment to algin with the V8 decoder:
+      // For UTF-8, we need special treatment to align with the V8 decoder:
       // If an incomplete character is found at a chunk boundary, we use
       // its remainder and pass it to V8 as-is.
       for (size_t i = 0; i < nread && i < getMissingBytes(state); ++i) {

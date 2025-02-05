@@ -50,7 +50,7 @@ export const dh_test = {
         'The value of "generator" is out of range. ' +
         'It must be an integer. Received 13.37',
     });
-    // boringssl throws when key sizes > 10000 bits are requested, we proactively return a
+    // BoringSSL throws when key sizes > 10000 bits are requested, we proactively return a
     // RangeError instead which is more descriptive.
     assert.throws(() => crypto.createDiffieHellman(10001), {
       name: 'RangeError',
@@ -168,7 +168,7 @@ export const dh_constructor_test = {
 };
 ////////////////////
 
-// This test will fail if boringssl runs in FIPS mode and succeed otherwise; disable it for now.
+// This test will fail if BoringSSL runs in FIPS mode and succeed otherwise; disable it for now.
 
 /*
 function test() {
@@ -319,7 +319,7 @@ export const dh_padding_test = {
 
 export const dhKeygenTest = {
   test() {
-    // FIPS-mode boringssl mandates keys of at least 1024 bits. RFC 8270 recommends that sizes of
+    // FIPS-mode BoringSSL mandates keys of at least 1024 bits. RFC 8270 recommends that sizes of
     // at least 2048 bits should be used, 1024-bit primes are sufficient for these tests though.
     const size = 1024;
     const dh1 = crypto.createDiffieHellman(size);

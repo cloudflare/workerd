@@ -54,7 +54,7 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 
   // virtual CryptoKey::AlgorithmVariant getAlgorithm() = 0;
   // kj::StringPtr getAlgorithmName() const = 0;
-  // (inheritted from CryptoKey::Impl, needs to be implemented by subclass)
+  // (inherited from CryptoKey::Impl, needs to be implemented by subclass)
 
   // Determine the hash function to use. Some algorithms choose this at key import time while
   // others choose it at sign() or verify() time. `callTimeHash` is the hash name passed to the

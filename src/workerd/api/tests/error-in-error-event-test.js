@@ -14,7 +14,7 @@ export default {
     addEventListener(
       'error',
       () => {
-        // This error is not going to be catachable. The best we can do is to log it.
+        // This error is not going to be catchable. The best we can do is to log it.
         // Unfortunately, workerd currently does not give us any mechanism to verify
         // that it was logged in the test. Let's make sure the response is handled
         // correctly at least.

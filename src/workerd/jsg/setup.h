@@ -484,7 +484,7 @@ class Isolate: public IsolateBase {
 
    public:
     // `V8StackScope` must be provided to prove that one has been created on the stack before
-    // taking a lock. Any GC'd pointers stored on the stack must be kept within this scope in
+    // taking a lock. Any GC'ed pointers stored on the stack must be kept within this scope in
     // order for V8's stack-scanning GC to find them.
     Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr),

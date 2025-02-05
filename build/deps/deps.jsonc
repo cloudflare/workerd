@@ -15,9 +15,9 @@
       "owner": "google",
       "repo": "boringssl",
       "branch": "master",
-      // boringssl may subtly break backwards compatibility and behave differently than the latest
+      // BoringSSL may subtly break backwards compatibility and behave differently than the latest
       // FIPS version, often by rejecting key values that it considers invalid/unsafe even though
-      // they are still accepted by boringssl. Update with caution and only after confirming this
+      // they are still accepted by BoringSSL. Update with caution and only after confirming this
       // is compatible with the downstream build.
       "freeze_commit": "6abe18402eb2a5e9b00158c6459646a948c53060"
     },

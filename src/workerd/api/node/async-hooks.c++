@@ -67,7 +67,7 @@ AsyncResource::AsyncResource(jsg::Lock& js): frame(tryGetFrameRef(js)) {}
 jsg::Ref<AsyncResource> AsyncResource::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> type, jsg::Optional<Options> options) {
   // The type and options are required as part of the Node.js API compatibility
-  // but our implementation does not currently make use of them at all. It is ok
+  // but our implementation does not currently make use of them at all. It is OK
   // for us to silently ignore both here.
   return jsg::alloc<AsyncResource>(js);
 }

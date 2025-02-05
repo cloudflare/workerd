@@ -439,7 +439,7 @@ void FormData::forEach(jsg::Lock& js,
   }
   callback.setReceiver(js.v8Ref(receiver));
 
-  // On each iteration of the for loop, a JavaScript callback is invokved. If a new
+  // On each iteration of the for loop, a JavaScript callback is invoked. If a new
   // item is appended to the URLSearchParams within that function, the loop must pick
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items

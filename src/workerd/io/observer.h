@@ -355,7 +355,7 @@ class FeatureObserver {
   virtual void use(Feature feature) const {}
 
   using CollectCallback = kj::Function<void(Feature, const uint64_t)>;
-  // This method is called from the internal metrics collection mechanisn to harvest the
+  // This method is called from the internal metrics collection mechanism to harvest the
   // current features and counts that have been recorded by the observer.
   virtual void collect(CollectCallback&& callback) const {}
 

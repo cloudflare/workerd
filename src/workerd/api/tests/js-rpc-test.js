@@ -984,7 +984,7 @@ export let crossContextSharingDoesntWork = {
 
     // Sharing a property of a service binding works, because the service  binding itself is not
     // tied to an I/O context. Awaiting the property actually initiates a new RPC session from
-    // whatever context performed teh await.
+    // whatever context performed the await.
     globalRpcPromise = env.MyService.nonFunctionProperty;
     assert.strictEqual(
       JSON.stringify(await env.MyService.tryUseGlobalRpcPromise()),

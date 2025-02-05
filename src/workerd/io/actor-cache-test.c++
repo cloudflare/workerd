@@ -4802,7 +4802,7 @@ KJ_TEST("ActorCache list stream cancellation") {
 
   // Try get-multiple.
   {
-    // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
+    // We allocate `lru` on the heap to assist Valgrind in being able to detect when it is used
     // after free.
     auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options{options.softLimit,
       options.hardLimit, options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc});
@@ -4832,7 +4832,7 @@ KJ_TEST("ActorCache list stream cancellation") {
 
   // Try list().
   {
-    // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
+    // We allocate `lru` on the heap to assist Valgrind in being able to detect when it is used
     // after free.
     auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options{options.softLimit,
       options.hardLimit, options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc});
@@ -4862,7 +4862,7 @@ KJ_TEST("ActorCache list stream cancellation") {
 
   // Try listReverse().
   {
-    // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
+    // We allocate `lru` on the heap to assist Valgrind in being able to detect when it is used
     // after free.
     auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options{options.softLimit,
       options.hardLimit, options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc});

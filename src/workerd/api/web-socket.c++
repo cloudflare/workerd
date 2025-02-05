@@ -94,7 +94,7 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
           [this, self = JSG_THIS](jsg::Lock& js, PackedWebSocket packedSocket) mutable {
     auto& native = *farNative;
     KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
-      // We've succeessfully established our web socket, we do not need to cancel anything.
+      // We've successfully established our web socket, we do not need to cancel anything.
       pending.canceler.release();
     }
 
@@ -389,7 +389,7 @@ void WebSocket::accept(jsg::Lock& js) {
   KJ_IF_SOME(accepted, native.state.tryGet<Accepted>()) {
     JSG_REQUIRE(!accepted.isHibernatable(), TypeError,
         "Can't accept() WebSocket after enabling hibernation.");
-    // Technically, this means it's okay to invoke `accept()` once a `new WebSocket()` resolves to
+    // Technically, this means it's OK to invoke `accept()` once a `new WebSocket()` resolves to
     // an established connection. This is probably okay? It might spare the worker devs a class of
     // errors they do not care care about.
     return;
@@ -512,7 +512,7 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
   // TODO(cleanup): We have to use awaitIoLegacy() so that we can handle registerPendingEvent()
   //   manually. Ideally, we'd refactor things such that a WebSocketPair where both ends are
   //   accepted locally is implemented completely in JavaScript space, using jsg::Promise instead
-  //   of kj::Promise, and then only use awaitIo() on truely remote WebSockets.
+  //   of kj::Promise, and then only use awaitIo() on truly remote WebSockets.
   // TODO(cleanup): Should addWaitUntil() take jsg::Promise instead of kj::Promise?
   context.addWaitUntil(context.awaitJs(js,
       context.awaitIoLegacy(js, kj::mv(promise))
@@ -873,7 +873,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     if (!completed) {
       // We didn't make it to `completed = true` at the end of this function, so either an
-      // exception was thrown or the task was canceled. Either way, we cannot send any futher
+      // exception was thrown or the task was canceled. Either way, we cannot send any further
       // messages, because the connection is in a broken state and will just throw more exceptions.
       // Setting `outgoingAborted` stops us from even trying to queue any more messages.
       native.outgoingAborted = true;

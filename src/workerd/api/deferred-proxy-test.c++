@@ -267,7 +267,7 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: destroying inner PromiseNode before oute
   }
 
   // Destroy the outer promise. At one time, this caused a segfault ... or at least it produced
-  // invalid accesses under valgrind. :/
+  // invalid accesses under Valgrind. :/
   outerNode = nullptr;
 }
 

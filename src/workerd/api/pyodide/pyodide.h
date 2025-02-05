@@ -322,7 +322,7 @@ class ArtifactBundler: public jsg::Object {
   }
 
  private:
-  // A memory snapshot of the state of the Python interpreter after initialisation. Used to speed
+  // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
   // up cold starts.
   kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
   bool isValidating;

@@ -252,7 +252,7 @@ KJ_TEST("alarm scheduling starts synchronously before explicit local db commit")
         "no such savepoint: _cf_savepoint_0", test.db.run("RELEASE _cf_savepoint_0"));
 
     // We don't actually care what happens in the test after this point, but it's slightly simpler
-    // to readd the savepoint to allow the test to complete cleanly:
+    // to re-add the savepoint to allow the test to complete cleanly:
     test.db.run("SAVEPOINT _cf_savepoint_0");
 
     return kj::READY_NOW;

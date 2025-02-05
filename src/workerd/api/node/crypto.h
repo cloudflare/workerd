@@ -94,7 +94,7 @@ class CryptoImpl final: public jsg::Object {
 
     static jsg::Ref<HmacHandle> constructor(jsg::Lock& js, kj::String algorithm, KeyParam key);
 
-    // Efficiently implement one-shot hmac that avoids multiple calls
+    // Efficiently implement one-shot HMAC that avoids multiple calls
     // across the C++/JS boundary.
     static jsg::BufferSource oneshot(
         jsg::Lock& js, kj::String algorithm, KeyParam key, kj::Array<kj::byte> data);

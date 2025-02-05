@@ -5,7 +5,7 @@
 #pragma once
 // This file defines Event- and EventTarget-related APIs.
 //
-// TODO(cleanp): Rename to events.h?
+// TODO(cleanup): Rename to events.h?
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
@@ -311,7 +311,7 @@ class EventTarget: public jsg::Object {
     HandlerFunction handleEvent;
     JSG_STRUCT(handleEvent);
 
-    // TODO(cleanp): Get rid of this override and parse the type directly in param-extractor.rs
+    // TODO(cleanup): Get rid of this override and parse the type directly in param-extractor.rs
     JSG_STRUCT_TS_OVERRIDE({
       handleEvent: (event: Event) => any | undefined;
     });
@@ -407,8 +407,8 @@ class EventTarget: public jsg::Object {
       HandlerFunction callback;
 
       // If the event handler is registered with an AbortSignal, then the abortHandler points
-      // at the NativeHandler representing that registration, so that if this object is GC'd before
-      // the AbortSignal is signaleled, we unregister ourselves from listening on it. Note that
+      // at the NativeHandler representing that registration, so that if this object is GC'ed before
+      // the AbortSignal is signalled, we unregister ourselves from listening on it. Note that
       // this is Own<void> for the same reason newNativeHandler() returns Own<void>: We are not
       // supposed to do anything with this except drop it.
       kj::Maybe<kj::Own<void>> abortHandler;
@@ -639,7 +639,7 @@ class AbortController final: public jsg::Object {
   jsg::Ref<AbortSignal> signal;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    // We have to be careful with gc here. The event listeners added to the AbortSignal
+    // We have to be careful with GC here. The event listeners added to the AbortSignal
     // could hold a circular reference to the AbortController.
     visitor.visit(signal);
   }

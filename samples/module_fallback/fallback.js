@@ -3,7 +3,7 @@
 const { createServer } = require('http');
 
 const server = createServer((req, res) => {
-  // The response from the fallback service must be a vaid JSON
+  // The response from the fallback service must be a valid JSON
   // serialization of a Worker::Module config.
 
   // The x-resolve-method tells us if the module was imported or required.

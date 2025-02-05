@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/* todo: the following is adopted code, enabling linting one day */
+/* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
 import { default as internalTypes } from 'node-internal:internal_types';
@@ -177,9 +177,9 @@ export async function aborted(signal: AbortSignal, resource: object) {
   if (signal === undefined) {
     throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
   }
-  // Node.js defines that the resource is held weakly such that if it is gc'd, we
+  // Node.js defines that the resource is held weakly such that if it is GC'ed, we
   // will drop the event handler on the signal and the promise will remain pending
-  // forever. We don't want gc to be observable in the same way so we won't support
+  // forever. We don't want GC to be observable in the same way so we won't support
   // this additional option. Unfortunately Node.js does not make this argument optional.
   // We'll just ignore it.
   validateAbortSignal(signal, 'signal');

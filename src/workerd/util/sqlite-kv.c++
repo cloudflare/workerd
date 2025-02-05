@@ -17,7 +17,7 @@ void SqliteKvRegulator::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr me
         return;
       // We don't want to return other errors to the user since they're usually our fault.
       // In that case we do nothing because the contract of onError is not to handle the error in
-      // its entirity, but instead to optionally handle it, and do nothing otherwise.
+      // its entirety, but instead to optionally handle it, and do nothing otherwise.
       // When onError does nothing, the code calling into onError is still responsible for
       // handling the error by other means, usually by throwing a KJ exception itself.
       default:

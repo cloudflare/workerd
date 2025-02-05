@@ -322,7 +322,7 @@ export const tsCancel = {
 
 export const writableStreamGcTraceFinishes = {
   test() {
-    // TODO(soon): We really need better testing for gc visitation.
+    // TODO(soon): We really need better testing for GC visitation.
     const ws = new WritableStream();
     gc();
   },

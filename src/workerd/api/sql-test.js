@@ -711,7 +711,7 @@ async function test(state) {
       assert.equal(await storage.get('txnTest'), 5);
       throw new Error('txn failure');
     });
-    throw new Error('expected errror');
+    throw new Error('expected error');
   } catch (err) {
     assert.equal(err.message, 'txn failure');
   }
@@ -1026,7 +1026,7 @@ async function test(state) {
     assert.equal(true, isCached('SELECT 179321'));
     assert.equal(true, isCached('SELECT 179321'));
 
-    // Qeury based on computed string is cached.
+    // Query based on computed string is cached.
     assert.equal(false, isCached('SELECT "' + 'x'.repeat(4) + '"'));
     assert.equal(true, isCached('SELECT "' + 'x'.repeat(4) + '"'));
     assert.equal(true, isCached('SELECT "' + 'x'.repeat(4) + '"'));
@@ -1350,7 +1350,7 @@ export class DurableObjectExample extends DurableObject {
     // effect, but this is the one that we observed causing issues.)
     //
     // In particular, the prepared statement ActorSqlite::beginTxn, which is simply
-    // `BEGIN TRANSACTION`, will be invalidated and recomplied on the next invocation.
+    // `BEGIN TRANSACTION`, will be invalidated and recompiled on the next invocation.
     //
     // When we perform our multi-statement exec below, the first line will invoke the
     // `ActorSqlite::onWrite` callback, which will invoke `beginTxn`. Because `BEGIN TRANSACTION`

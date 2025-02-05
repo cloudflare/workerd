@@ -89,7 +89,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   // Disconnection handling is annoyingly complicated:
   //
   // We can't just context.awaitIo(connection->whenWriteDisconnected()) directly, because the
-  // Socket could be GC'd before `whenWriteDisconnected()` completes, causing the underlying
+  // Socket could be GC'ed before `whenWriteDisconnected()` completes, causing the underlying
   // `connection` to be destroyed. By KJ rules, we are required to cancel the promise returned by
   // `whenWriteDisconnected()` before destroying `connection`. But there's no way to cancel a
   // promise passed to `context.awaitIo()`. We have to hold the promise directly in `Socket`, so
@@ -113,7 +113,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   auto deferredCancelDisconnected =
       kj::defer([fulfiller = kj::mv(disconnectedPaf.fulfiller)]() mutable {
     // In case the `whenWriteDisconected()` listener task is canceled without fulfilling the
-    // fulfiller, we want to silently fulfill it. This will happen when the Socket is GC'd.
+    // fulfiller, we want to silently fulfill it. This will happen when the Socket is GC'ed.
     fulfiller->fulfill(true);
   });
 
@@ -140,7 +140,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
           js, [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, bool canceled) mutable {
     // We want to silently ignore the canceled case, without ever resolving anything. Note that
     // if the application actually fetches the `closed` promise, then the JSG glue will prevent
-    // the socket from being GC'd until that promise resolves, so it won't be canceled.
+    // the socket from being GC'ed until that promise resolves, so it won't be canceled.
     if (!canceled) {
       resolver.resolve(js);
     }
@@ -149,7 +149,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   });
 
   auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
-  // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
+  // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
   auto sysStreams = newSystemMultiStream(refcountedConnection->addWrappedRef(), ioContext);
   auto readable = jsg::alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
@@ -252,7 +252,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
 
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr), kj::mv(options),
       kj::mv(tlsStarter), httpConnectSettings.useTls, kj::mv(domain), isDefaultFetchPort);
-  // `handleProxyStatus` needs an initialised refcount to use `JSG_THIS`, hence it cannot be
+  // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
   // a `connect`.
   result->handleProxyStatus(js, kj::mv(request.status));
@@ -367,7 +367,7 @@ void Socket::handleProxyStatus(
       [this, self = JSG_THIS](
           jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) -> void {
     if (status.statusCode < 200 || status.statusCode >= 300) {
-      // If the status indicates an unsucessful connection we need to reject the `closeFulfiller`
+      // If the status indicates an unsuccessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
       auto msg = kj::str("proxy request failed, cannot connect to the specified address");
       if (isDefaultFetchPort) {

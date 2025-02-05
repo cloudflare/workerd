@@ -79,9 +79,9 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
  private:
   struct Initial {};
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
-  // WritableStream to prevent it from being GC'd so long as the Writer is available.
-  // Once the writer is closed, released, or GC'd the reference to the WritableStream
-  // is cleared and the WritableStream can be GC'd if there are no other references to
+  // WritableStream to prevent it from being GC'ed so long as the Writer is available.
+  // Once the writer is closed, released, or GC'ed the reference to the WritableStream
+  // is cleared and the WritableStream can be GC'ed if there are no other references to
   // it being held anywhere. If the writer is still attached to the WritableStream when
   // it is destroyed, the WritableStream's reference to the writer is cleared but the
   // WritableStream remains in the "writer locked" state, per the spec.

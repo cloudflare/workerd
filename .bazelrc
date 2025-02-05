@@ -366,7 +366,7 @@ build:release_windows --copt="-fstrict-aliasing"
 build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
 build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
-# The `/std:c++20` argument is unused during boringssl compilation and we don't
+# The `/std:c++20` argument is unused during BoringSSL compilation and we don't
 # want a warning when compiling each file.
 build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'
 

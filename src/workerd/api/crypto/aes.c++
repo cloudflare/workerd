@@ -842,7 +842,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(jsg::Lock& js,
     //     > The "use" and "key_ops" JWK members SHOULD NOT be used together;
     //     > however, if both are used, the information they convey MUST be
     //     > consistent
-    //   be interpreted? What constitutes "inconsistentcy"? Is that implicit in enforcing that "enc"
+    //   be interpreted? What constitutes "inconsistency"? Is that implicit in enforcing that "enc"
     //   must be the value for `use'? Or is there something else?
 
     KJ_IF_SOME(e, keyDataJwk.ext) {

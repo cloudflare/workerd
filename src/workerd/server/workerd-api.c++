@@ -605,7 +605,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     api::registerModules(*modules, featureFlags);
 
-    // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
+    // TODO(perf): we'd like to find a way to precompile these on server startup and use isolate
     // cloning for faster worker creation.
     for (auto extension: extensions) {
       for (auto module: extension.getModules()) {

@@ -133,7 +133,7 @@ export const pbkdf2_correctness_tests = {
 
 export const pbkdf2_no_callback_test = {
   test(ctrl, env, ctx) {
-    // Error path should not leak memory (check with valgrind).
+    // Error path should not leak memory (check with Valgrind).
     assert.throws(() => crypto.pbkdf2('password', 'salt', 1, 20, 'sha1'), {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
@@ -309,7 +309,7 @@ export const invalid_digest_tests = {
     });
 
     // TODO(soon): Enable this once crypto.getHashes() is available. Note that shake* is not
-    // supported by boringssl so there's no need to filter it out, but we may want to filter other
+    // supported by BoringSSL so there's no need to filter it out, but we may want to filter other
     // functions.
     // const kNotPBKDF2Supported = ['shake128', 'shake256'];
     // crypto.getHashes()

@@ -307,7 +307,7 @@ export const testPathToFileURL = {
         }
       );
 
-      // UNC paths on posix are considered a single path that has backslashes:
+      // UNC paths on Posix are considered a single path that has backslashes:
       const fileURL = pathToFileURL('\\\\nas\\share\\path.txt').href;
       match(fileURL, /file:\/\/.+%5C%5Cnas%5Cshare%5Cpath\.txt$/);
     }

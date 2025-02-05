@@ -79,7 +79,7 @@ wgpu::Extent3D parseGPUExtent3D(GPUExtent3D copySize) {
   wgpu::Extent3D size{};
   KJ_SWITCH_ONEOF(copySize) {
     KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
-      // if we have a sequence of coordinates we assume that the order is: width, heigth, depth, if
+      // if we have a sequence of coordinates we assume that the order is: width, height, depth, if
       // available, and ignore all the rest.
       switch (coords.size()) {
         default:

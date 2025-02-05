@@ -144,7 +144,7 @@ async function testD1ApiWithSessionsOldTokensSkipped(DB, envD1MockFetcher) {
       tokensFromEyeball[1],
       // We skip the commit token "------", since the previously received one was more recent.
       tokensFromEyeball[1],
-      // The binding then sents back the next largest value.
+      // The binding then sends back the next largest value.
       tokensFromEyeball[3],
     ];
     assert.deepEqual(tokensFromBinding, expectedTokensFromBinding);

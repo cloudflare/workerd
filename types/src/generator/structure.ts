@@ -268,7 +268,7 @@ function createClassMemberNode(
           name,
           questionToken,
           result,
-          /* initialiser */ undefined
+          /* initializer */ undefined
         );
       }
     case Member_Which.NESTED:
@@ -279,7 +279,7 @@ function createClassMemberNode(
         name,
         /* questionToken */ undefined,
         result,
-        /* initialiser */ undefined
+        /* initializer */ undefined
       );
     case Member_Which.CONSTANT:
       const constant = member.getConstant();
@@ -289,7 +289,7 @@ function createClassMemberNode(
         name,
         /* questionToken */ undefined,
         result,
-        /* initialiser */ undefined
+        /* initializer */ undefined
       );
     case Member_Which.CONSTRUCTOR:
       const constructor = member.getConstructor();

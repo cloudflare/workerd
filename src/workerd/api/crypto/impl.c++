@@ -78,7 +78,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   // Unfortunately BoringSSL's ERR_error_string() and friends produce unfriendly strings that
   // mostly just tell you the error constant name, which isn't what we want to throw at users.
   switch (ERR_GET_LIB(ERR_peek_last_error())) {
-    // The error code defines overlap between the different boringssl libraries (for example, we
+    // The error code defines overlap between the different BoringSSL libraries (for example, we
     // have EC_R_INVALID_ENCODING == RSA_R_CANNOT_RECOVER_MULTI_PRIME_KEY), so we must check the
     // library code.
     case ERR_LIB_EC:

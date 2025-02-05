@@ -760,7 +760,7 @@ struct TailEvent final {
   TraceId invocationId;
   SpanId spanId;
 
-  kj::Date timestamp;  // Unix epoch, spectre-mitigated resolution
+  kj::Date timestamp;  // Unix epoch, Spectre-mitigated resolution
   kj::uint sequence;
 
   Event event;

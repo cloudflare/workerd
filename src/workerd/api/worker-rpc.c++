@@ -85,7 +85,7 @@ class StreamSinkImpl final: public rpc::JsValue::StreamSink::Server, public kj::
   struct Consumed {};
 
   // Each slot starts out null (uninitialized). It becomes a Capability::Client if setSlot() is
-  // called first, or a StreamFulfiller if startStream() is called first. It becomse `Consumed`
+  // called first, or a StreamFulfiller if startStream() is called first. It becomes `Consumed`
   // when the other method is called.
   // HACK: Slots in the table take advantage of the little-known fact that OneOf has a "null"
   //   value, which is the value a OneOf has when default-initialized. This is useful because we
@@ -239,7 +239,7 @@ jsg::JsValue deserializeRpcReturnValue(
 
   KJ_IF_SOME(obj, value.tryCast<jsg::JsObject>()) {
     if (obj.isInstanceOf<JsRpcStub>(js)) {
-      // We're returning a plain stub. We don't need to override its `dispoose` method.
+      // We're returning a plain stub. We don't need to override its `dispose` method.
       disposalGroup->disownAll();
     } else {
       // Add a dispose method to the return object that disposes the DisposalGroup.
@@ -476,7 +476,7 @@ JsRpcPromiseAndPipleine callImpl(jsg::Lock& js,
       auto& ioContext = IoContext::current();
 
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-        // Replace the client with a promise client that will delay thecall until the output gate
+        // Replace the client with a promise client that will delay the call until the output gate
         // is open.
         client = lock.then([client = kj::mv(client)]() mutable { return kj::mv(client); });
       }
@@ -631,7 +631,7 @@ jsg::JsValue thenImpl(jsg::Lock& js,
     v8::Local<v8::Function> handler,
     jsg::Optional<v8::Local<v8::Function>> errorHandler) {
   KJ_IF_SOME(e, errorHandler) {
-    // Note that we intentionally propagate any exception from promise->Then() sychronously since
+    // Note that we intentionally propagate any exception from promise->Then() synchronously since
     // if V8's native Promise threw synchronously from `then()`, we might as well too. Anyway it's
     // probably a termination exception.
     return jsg::JsPromise(jsg::check(promise->Then(js.v8Context(), handler, e)));
@@ -740,11 +740,11 @@ RpcStubDisposalGroup::~RpcStubDisposalGroup() noexcept(false) {
   if (jsg::isInGcDestructor()) {
     // If the disposal group was dropped as a result of garbage collection, we should NOT actually
     // dispose any stubs. In particular:
-    // * If an application never invokes dispose() on an RPC result and the result is GC'd, the
+    // * If an application never invokes dispose() on an RPC result and the result is GC'ed, the
     //   app could still be holding onto stubs that came from that result. We don't want to
     //   dispose those unexpectedly.
     // * If an incoming RPC call does something like `await new Promise(() => {})` to hang
-    //   forever, the promise reaction can be GC'd even though the call didn't really complete.
+    //   forever, the promise reaction can be GC'ed even though the call didn't really complete.
     //   We don't want to dispose param stubs in this case.
     disownAll();
 
@@ -1019,7 +1019,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
                             jsg::Lock& js, jsg::Value value) mutable {
           jsg::JsValue resultValue(value.getHandle(js));
 
-          // Call makeCallPipeline before serializing becaues it may need to extract the disposer.
+          // Call makeCallPipeline before serializing because it may need to extract the disposer.
           auto maybePipeline = makeCallPipeline(js, resultValue);
 
           rpc::JsRpcTarget::CallResults::Builder results = nullptr;
@@ -1228,7 +1228,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           methodNameForTrace = "(this)"_kjc;
         } else {
           for (auto i: kj::zeroTo(n - 1)) {
-            // For each property name except the last, look up the proprety and replace `object`
+            // For each property name except the last, look up the property and replace `object`
             // with it.
             kj::StringPtr name = path[i];
             auto next = getProperty(name);
@@ -1876,7 +1876,7 @@ jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
     jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
   //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* delcare `ctx` and `env` params more explicitly just for the sake of type checking.
+  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
   jsg::JsObject self(args.This());
@@ -1891,7 +1891,7 @@ jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
     jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
   //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* delcare `ctx` and `env` params more explicitly just for the sake of type checking.
+  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
   jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
 
   jsg::JsObject self(args.This());

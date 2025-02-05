@@ -22,7 +22,7 @@ class HmacContext final {
   size_t size() const;
 
  private:
-  // Will be kj::Own<HMAC_CTX> while the hmac data is being updated,
+  // Will be kj::Own<HMAC_CTX> while the HMAC data is being updated,
   // and kj::Array<kj::byte> after the digest() has been called.
   kj::OneOf<kj::Own<HMAC_CTX>, jsg::BufferSource> state;
 };

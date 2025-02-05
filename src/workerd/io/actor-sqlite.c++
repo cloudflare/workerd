@@ -597,7 +597,7 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
     // is ongoing after the actor cache is shutting down, the output gate is only broken if they
     // had to send a flush after shutdown, either from a scheduled flush or a retry after failure.
   } else {
-    // We've already experienced a terminal exception either from shutdown or oom, there should
+    // We've already experienced a terminal exception either from shutdown or OOM, there should
     // already be a flush scheduled that will break the output gate.
   }
 }

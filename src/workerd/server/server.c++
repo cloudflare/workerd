@@ -886,7 +886,7 @@ class Server::NetworkService final: public Service, private WorkerInterface {
     TRACE_EVENT("workerd", "NetworkService::connect()");
     // This code is hit when the global `connect` function is called in a JS worker script.
     // It represents a proxy-less TCP connection, which means we can simply defer the handling of
-    // the connection to the service adapter (likely NetworkHttpClient). Its behaviour will be to
+    // the connection to the service adapter (likely NetworkHttpClient). Its behavior will be to
     // connect directly to the host over TCP.
     return serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
   }
@@ -1519,7 +1519,7 @@ struct TailStreamWriterState {
     }
 
     if (alive.size() == 0) {
-      // Oh! We have no active sessions. Well, nevermind then, let's
+      // Oh! We have no active sessions. Well, never mind then, let's
       // transition to a closed state and drop everything on the floor.
       inner = Closed{};
       return;
@@ -1546,7 +1546,7 @@ struct TailStreamWriterState {
     if (!current.onsetSeen) {
       // Our first event... yay! Our first job here will be to dispatch
       // the onset event to the tail worker. If the tail worker wishes
-      // to handle the remaining events in the strema, then it will return
+      // to handle the remaining events in the stream, then it will return
       // a new capability to which those would be reported. This is done
       // via the "result.getPipeline()" API below. If hasPipeline()
       // returns false then that means the tail worker did not return
@@ -1600,7 +1600,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
   }
   return kj::heap<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
-      // the TailStreamWriterState for this strema to actually handle the event.
+      // the TailStreamWriterState for this stream to actually handle the event.
       [state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks)](
           IoContext& ioContext, tracing::TailEvent&& event) mutable {
     KJ_SWITCH_ONEOF(state->inner) {
@@ -1927,7 +1927,7 @@ class Server::WorkerService final: public Service,
       streamingTailWorkers = streamingList.releaseAsArray();
     } else {
       legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
-        // Caution here... if the tail worker ends up have a cirular dependency
+        // Caution here... if the tail worker ends up have a circular dependency
         // on the worker we'll end up with an infinite loop trying to initialize.
         // We can test this directly but it's more difficult to test indirect
         // loops (dependency of dependency, etc). Here we're just going to keep
@@ -3345,7 +3345,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
                 KJ_LOG(ERROR, "Fallback service returned a redirect with no location", spec);
               }
             } else if (resp.statusCode != 200) {
-              // Failed! Log the body of the respnose, if any, and fall through without
+              // Failed! Log the body of the response, if any, and fall through without
               // setting jsonPayload to signal that the fallback service failed to return
               // a module for this specifier.
               auto payload = resp.body->readAllText().wait(io.waitScope);
@@ -3961,7 +3961,7 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
     // since that's what signals us to stop accepting incoming connections. So, we should not
     // co_await the promise returned by `drain()`. Technically, we don't actually have to wait
     // on it at all -- `drain()` returns the promise end of a promise-and-fulfiller, so simply
-    // dropping it won't acutally cancel anything. But since that's not documented in drain()'s
+    // dropping it won't actually cancel anything. But since that's not documented in drain()'s
     // doc comment, we instead add the promise to `tasks` to be safe.
     tasks.add(httpServer.httpServer.drain());
   }
@@ -4319,7 +4319,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   // But the `TaskSet` may have become empty at the same time. We want the error to win the race
   // against the success.
   //
-  // TODO(cleanup): A better solution wolud be for `TaskSet` to have a new variant of the
+  // TODO(cleanup): A better solution would be for `TaskSet` to have a new variant of the
   //   `onEmpty()` method like `onEmptyOrException()`, which propagates any exception thrown by
   //   any task.
   co_await kj::yieldUntilQueueEmpty();

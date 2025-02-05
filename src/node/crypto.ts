@@ -141,7 +141,7 @@ export function getCurves(): string[] {
 }
 
 export function getHashes(): string[] {
-  // Hardcoded list of hashes supported in boringssl, node's approach looks pretty clunky. This is
+  // Hardcoded list of hashes supported in BoringSSL, node's approach looks pretty clunky. This is
   // expected to change infrequently based of bssl's stability-focused approach.
 
   // prettier-ignore

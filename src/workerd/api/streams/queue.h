@@ -64,7 +64,7 @@ namespace workerd::api {
 //    consume some amount of data from the internal data buffer. If there is
 //    enough data in the internal buffer to immediately fulfill the read request
 //    when it is received, then we do so. Otherwise, the read is moved into the
-//    pending reads list and is fullfilled later once there is enough data provided
+//    pending reads list and is fulfilled later once there is enough data provided
 //    to the consumer to do so.
 //
 //  - When data is provided to a consumer by the queue, that data is added to
@@ -518,14 +518,14 @@ class ConsumerImpl final {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, Closed) {}
       KJ_CASE_ONEOF(errored, Errored) {
-        // Technically we shouldn't really have to gc visit the stored error here but there
+        // Technically we shouldn't really have to GC visit the stored error here but there
         // should not be any harm in doing so.
         visitor.visit(errored);
       }
       KJ_CASE_ONEOF(ready, Ready) {
-        // There's no reason to gc visit the promise resolver or buffer here and it is
+        // There's no reason to GC visit the promise resolver or buffer here and it is
         // potentially problematic if we do. Since the read requests are queued, if we
-        // gc visit it once, remove it from the queue, and gc happens to kick in before
+        // GC visit it once, remove it from the queue, and GC happens to kick in before
         // we access the resolver, then v8 could determine that the resolver or buffered
         // entries are no longer reachable via tracing and free them before we can
         // actually try to access the held resolver.

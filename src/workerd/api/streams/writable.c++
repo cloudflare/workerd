@@ -382,7 +382,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
 
     // If the stream was not explicitly ended and the writer still exists at this point,
     // then we should trigger calling the abort algorithm on the stream. Sadly, there's a
-    // bit of an incompetibility with kj::AsyncOutputStream and the standard definition of
+    // bit of an incompatibility with kj::AsyncOutputStream and the standard definition of
     // WritableStream in that AsyncOutputStream has no specific way to explicitly signal that
     // the stream is being aborted due to a particular reason.
     //
@@ -391,7 +391,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     // propagate the reason back to this side. So, we have to do the best we can here. Our
     // assumption is that once the stream is dropped, if it has not been explicitly ended and
     // the writer still exists, then the writer should be aborted. This is not perfect because
-    // we cannot propgate the actual reason why it was aborted.
+    // we cannot propagate the actual reason why it was aborted.
     //
     // Note also that there is no guarantee that the abort will actually run if the context
     // is being torn down. Some WritableStream implementations might use the abort algorithm

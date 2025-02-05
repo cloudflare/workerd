@@ -222,7 +222,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
-  // performed after this call begins. It could also include concurrent writes that haven't happned
+  // performed after this call begins. It could also include concurrent writes that haven't happened
   // yet, unless blockConcurrencyWhile() is used to prevent them.
   kj::Promise<kj::String> getCurrentBookmark();
 

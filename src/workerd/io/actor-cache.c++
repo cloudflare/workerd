@@ -254,14 +254,14 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
     // Add trace info sufficient to tell us which operation caused the failure.
     exception.addTraceHere();
     exception.addTrace(__builtin_return_address(0));
-    // We know this exeption happens due to user error. Let's add an exception detail so we can
+    // We know this exception happens due to user error. Let's add an exception detail so we can
     // parse it later.
     exception.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<byte>(0));
 
     if (maybeTerminalException == kj::none) {
       maybeTerminalException.emplace(kj::cp(exception));
     } else {
-      // We've already experienced a terminal exception either from shutdown or oom. Note that we
+      // We've already experienced a terminal exception either from shutdown or OOM. Note that we
       // still schedule the flush since shutdown does not.
     }
 
@@ -1943,7 +1943,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
   auto waiter = kj::heap<CountedDeleteWaiter>(*this, kj::addRef(*countedDelete));
   kj::Maybe<kj::Promise<void>> maybePromise;
   KJ_IF_SOME(p, getBackpressure()) {
-    // This might be more than one flush but that's okay as long as our state gets taken care of.
+    // This might be more than one flush but that's OK as long as our state gets taken care of.
     maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
   } else if (countedDelete->entries.size()) {
     maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
@@ -1973,7 +1973,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
   auto waiter = kj::heap<CountedDeleteWaiter>(*this, kj::addRef(*countedDelete));
   kj::Maybe<kj::Promise<void>> maybePromise;
   KJ_IF_SOME(p, getBackpressure()) {
-    // This might be more than one flush but that's okay as long as our state gets taken care of.
+    // This might be more than one flush but that's OK as long as our state gets taken care of.
     maybePromise = countedDelete->forgiveIfFinished(kj::mv(p));
   } else if (countedDelete->entries.size()) {
     maybePromise = countedDelete->forgiveIfFinished(lastFlush.addBranch());
@@ -2274,7 +2274,7 @@ void ActorCache::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
     // is ongoing after the actor cache is shutting down, the output gate is only broken if they
     // had to send a flush after shutdown, either from a scheduled flush or a retry after failure.
   } else {
-    // We've already experienced a terminal exception either from shutdown or oom, there should
+    // We've already experienced a terminal exception either from shutdown or OOM, there should
     // already be a flush scheduled that will break the output gate.
   }
 }

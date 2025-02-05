@@ -570,7 +570,7 @@ export default <ExportedHandler<Env>>{
         RpcStub<(p: string) => number>
       >(); // stubified
 
-      // Verify serializable composite objects defined with "inteface" keyword
+      // Verify serializable composite objects defined with "interface" keyword
       const oInterface = await s.methodReturnsInterfaceObject();
       expectTypeOf(oInterface).not.toBeNever();
       expectTypeOf(oInterface.fieldString).toEqualTypeOf<string>();

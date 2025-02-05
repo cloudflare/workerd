@@ -1233,7 +1233,7 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
 
 void RequestInitializerDict::validate(jsg::Lock& js) {
   KJ_IF_SOME(c, cache) {
-    // Check compatability flag
+    // Check compatibility flag
     JSG_REQUIRE(FeatureFlags::get(js).getCacheOptionEnabled(), Error,
         kj::str("The 'cache' field on 'RequestInitializerDict' is not implemented."));
 
@@ -2027,7 +2027,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
       return handleHttpRedirectResponse(
           js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), response.statusCode, l);
     } else {
-      // No Location header. That's okay, we just return the response as is.
+      // No Location header. That's OK, we just return the response as is.
       // See https://fetch.spec.whatwg.org/#http-redirect-fetch step 2.
     }
   }

@@ -166,7 +166,7 @@ struct BuildRtti<Configuration, jsg::JsValue> {
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsRegExp> {
   // This isn't really unknown but we currently do not expose these types at all, so
-  // this is ok for now.
+  // this is OK for now.
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     builder.setUnknown();
   }
@@ -175,7 +175,7 @@ struct BuildRtti<Configuration, jsg::JsRegExp> {
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsMap> {
   // This isn't really unknown but we currently do not expose these types at all, so
-  // this is ok for now.
+  // this is OK for now.
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     builder.setUnknown();
   }
@@ -184,7 +184,7 @@ struct BuildRtti<Configuration, jsg::JsMap> {
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsSet> {
   // This isn't really unknown but we currently do not expose these types at all, so
-  // this is ok for now.
+  // this is OK for now.
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     builder.setUnknown();
   }
@@ -193,7 +193,7 @@ struct BuildRtti<Configuration, jsg::JsSet> {
 template <typename Configuration>
 struct BuildRtti<Configuration, jsg::JsSymbol> {
   // This isn't really unknown but we currently do not expose these types at all, so
-  // this is ok for now.
+  // this is OK for now.
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     builder.setUnknown();
   }

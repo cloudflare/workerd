@@ -666,7 +666,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
           sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail);
 
       // If we had an auth error specifically, check if we recorded a better error message during
-      // the authorizor callback.
+      // the authorizer callback.
       if (prepareResult == SQLITE_AUTH) {
         KJ_IF_SOME(error, parseContext.authError) {
           // Throw the tailored auth error.
@@ -1015,7 +1015,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
               val = val.slice(1, val.size() - 1);
             }
 
-            // Compare against every possible representation. Case-insenstiive!
+            // Compare against every possible representation. Case-insensitive!
             return strncasecmp(val.begin(), "true", 4) == 0 ||
                 strncasecmp(val.begin(), "false", 5) == 0 ||
                 strncasecmp(val.begin(), "yes", 3) == 0 || strncasecmp(val.begin(), "no", 2) == 0 ||
@@ -1132,7 +1132,7 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   // We use the suggested limits from the web site. Note that sqlite3_limit() does NOT return an
   // error code; it returns the old limit.
 
-  // This limit is set highter than what is suggested on sqlite.org/security.html
+  // This limit is set higher than what is suggested on sqlite.org/security.html
   // because we want to allow storing values of 1MiB, and we added some extra
   // padding on top of that
   sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 2200000);
@@ -1679,7 +1679,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
 
     .xOpen = [](sqlite3_vfs* vfs, sqlite3_filename zName, sqlite3_file* file, int flags,
                  int* pOutFlags) -> int {
-    // We have to wrap xOpen explicitly because we need to furthder wrap each created file.
+    // We have to wrap xOpen explicitly because we need to further wrap each created file.
     //
     // My trick here is to prefix the native file with a second vtable. So the layout of the
     // `sqlite3_file` that we construct is actually a simple `struct sqlite_file` (which just

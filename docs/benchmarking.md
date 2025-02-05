@@ -5,7 +5,7 @@ We use a combination of micro and macro benchmarks for performance testing worke
 Benchmarks should be built using `--config=benchmark` configuration, which is builds a release
 binary with additional debug info.
 
-To obtain most consistent results it is recommended to disable cpu frequency scaling
+To obtain most consistent results it is recommended to disable CPU frequency scaling
 (use "performance" governor https://wiki.debian.org/CpuFrequencyScaling)
 
 # Micro benchmarks

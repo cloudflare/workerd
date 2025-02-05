@@ -66,7 +66,7 @@ export const testNetAfterClose = {
 // test/parallel/test-net-allow-half-open.js
 export const testNetAllowHalfOpen = {
   async test() {
-    // Verify that the socket closes propertly when the other end closes
+    // Verify that the socket closes properly when the other end closes
     // and allowHalfOpen is false.
 
     const { promise, resolve } = Promise.withResolvers();

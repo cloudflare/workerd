@@ -85,7 +85,7 @@ def wd_ts_bundle(
     )
 
     if lint:
-        # todo: lint js_srcs too, not just ts_srcs
+        # TODO: lint js_srcs too, not just ts_srcs
         eslint_bin.eslint_test(
             size = "large",
             name = name + "@eslint",

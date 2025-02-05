@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* todo: the following is adopted code, enabling linting one day */
+/* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
 import { default as cryptoImpl } from 'node-internal:crypto';
