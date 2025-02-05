@@ -39,7 +39,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
   enum Order { FORWARD, REVERSE };
 
-  // Search for all knows keys and values in a range, calling the callback (with KeyPtr and
+  // Search for all known keys and values in a range, calling the callback (with KeyPtr and
   // ValuePtr parameters) for each one seen. `end` and `limit` can be null to request no constraint
   // be enforced.
   template <typename Func>

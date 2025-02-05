@@ -255,7 +255,7 @@ data in memory without any backpressure controls.
 In our implementation, we have modified the `tee()` method implementation to avoid this
 issue.
 
-Each branch maintains it's own data buffer. But instead of those buffers containing a
+Each branch maintains its own data buffer. But instead of those buffers containing a
 copy of the data, they contain a collection of refcounted references to the data. The
 backpressure signaling to the trunk is based on the branch wait the most unconsumed data
 in its buffer.

@@ -932,7 +932,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
       if (consumerCount > 1) {
         // If there is more than 1 consumer, then we just return here with an
         // immediately resolved promise. The consumer will remove itself,
-        // canceling it's interest in the underlying source but we do not yet
+        // canceling its interest in the underlying source but we do not yet
         // want to cancel the underlying source since there are still other
         // consumers that want data.
         return js.resolvedPromise();
@@ -3140,7 +3140,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
   disturbed = true;
 
   // This operation will leave the ReadableStream locked and disturbed. It will consume
-  // the stream until it either closed or errors. If the deferred proxy promise or it's
+  // the stream until it either closed or errors. If the deferred proxy promise or its
   // inner promise is dropped, the PumpToReader (and sink) will be dropped and the stream
   // will be canceled. If the PumpToReader is dropped while there is a pending write on
   // the sink, the pending write will be canceled.

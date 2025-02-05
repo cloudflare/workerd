@@ -3542,7 +3542,7 @@ export const utilInspectProxy = {
     };
     proxyObj = new Proxy(target, handler);
 
-    // Inspecting the proxy should not actually walk it's properties
+    // Inspecting the proxy should not actually walk its properties
     util.inspect(proxyObj, opts);
 
     // Make sure inspecting object does not trigger any proxy traps.

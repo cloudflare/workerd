@@ -360,7 +360,7 @@ public:
     });
   }
 
-  // Detaches this ReadableStream from it's underlying controller state, returning a
+  // Detaches this ReadableStream from its underlying controller state, returning a
   // new ReadableStream instance that takes over the underlying state. This is used to
   // support the "create a proxy" of a ReadableStream algorithm in the streams spec
   // (see https://streams.spec.whatwg.org/#readablestream-create-a-proxy). In that

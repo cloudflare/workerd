@@ -354,7 +354,7 @@ class WritableImpl {
   struct Writable {};
 
   // Sadly, we have to use a weak ref here rather than jsg::Ref. This is because
-  // the jsg::Ref<WritableStream> (via it's internal WritableStreamJsController)
+  // the jsg::Ref<WritableStream> (via its internal WritableStreamJsController)
   // holds a strong reference to the jsg::Ref<WritableStreamDefaultController> that
   // uses this WritableImpl. This creates a strong circular reference between jsg::Refs
   // that isn't allowed. GcTracing ends up with a stack overflow as the two jsg::Refs

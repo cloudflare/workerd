@@ -55,7 +55,7 @@ float32Array[0] = -1; // 0xBF800000
 // check this with `os.endianness()` because that is determined at compile time.
 export const bigEndian = uInt8Float32Array[3] === 0;
 
-// Node.js caps it's max length at uint32_t max, we are very intentionally more
+// Node.js caps its max length at uint32_t max, we are very intentionally more
 // conservative here, capping at int32_t max.
 export const kMaxLength = 2147483647;
 export const kStringMaxLength = 536870888;

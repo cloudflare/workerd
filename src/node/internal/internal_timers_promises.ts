@@ -54,7 +54,7 @@ export async function setTimeout<T = void>(
     validateAbortSignal(signal, 'options.signal');
   }
 
-  // This is required due to consistency/compat reasons, even if it's no-op.
+  // This is required due to consistency/compat reasons, even if it's a no-op.
   if (ref !== undefined) {
     validateBoolean(ref, 'options.ref');
   }
@@ -97,7 +97,7 @@ export async function setImmediate<T>(
     validateAbortSignal(signal, 'options.signal');
   }
 
-  // This is required due to consistency/compat reasons, even if it's no-op.
+  // This is required due to consistency/compat reasons, even if it's a no-op.
   if (ref !== undefined) {
     validateBoolean(ref, 'options.ref');
   }

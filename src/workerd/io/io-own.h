@@ -166,7 +166,7 @@ class DeleteQueue: public kj::AtomicRefcounted {
   friend class IoContext;
 };
 
-// Object which can push actions into a specific DeleteQueue then signal it's
+// Object which can push actions into a specific DeleteQueue then signal its
 // owning IoContext to wake up to process the queue. This is a bit of a hack of
 // the DeleteQueue concept that allows us to use the same queue for more than
 // just deletions.

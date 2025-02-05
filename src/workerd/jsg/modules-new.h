@@ -160,7 +160,7 @@ struct ResolveContext final {
 // The abstraction of a module within the ModuleRegistry.
 // Importantly, a Module is immutable once created and must be thread-safe.
 // The Module class itself represents the definition of a module and not
-// it's actual instantiation.
+// its actual instantiation.
 class Module {
  public:
   enum class Type : uint8_t {
