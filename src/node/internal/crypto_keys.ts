@@ -72,6 +72,9 @@ import {
   validateString,
 } from 'node-internal:validators';
 
+import { inspect } from 'node-internal:internal_inspect';
+const kInspect = inspect.custom;
+
 // Key input contexts.
 enum KeyContext {
   kConsumePublic,
@@ -88,8 +91,6 @@ enum KeyContext {
 // Also in Node.js, CryptoKey is layered on top of KeyObject since KeyObject
 // existed first. We're, however, going to layer our KeyObject on top of
 // CryptoKey with a few augmentations.
-
-let isKeyObject: (obj: any) => boolean;
 
 function isStringOrBuffer(val: any) {
   return (
@@ -207,12 +208,10 @@ export abstract class KeyObject {
   get [Symbol.toStringTag]() {
     return 'KeyObject';
   }
+}
 
-  static {
-    isKeyObject = function (obj: any): obj is KeyObject {
-      return obj[kHandle] !== undefined;
-    };
-  }
+export function isKeyObject(obj: any): obj is KeyObject {
+  return obj[kHandle] !== undefined;
 }
 
 abstract class AsymmetricKeyObject extends KeyObject {
@@ -233,6 +232,23 @@ abstract class AsymmetricKeyObject extends KeyObject {
   toCryptoKey() {
     // TODO(soon): Implement the toCryptoKey API (added in Node.js 23.0.0)
     throw new ERR_METHOD_NOT_IMPLEMENTED('toCryptoKey');
+  }
+
+  [kInspect](depth: number, options: any) {
+    if (depth < 0) return this;
+
+    const opts = {
+      ...options,
+      depth: options.depth == null ? null : options.depth - 1,
+    };
+
+    return `${this.constructor.name} ${inspect(
+      {
+        type: this.asymmetricKeyType,
+        details: this.asymmetricKeyDetails,
+      },
+      opts
+    )}`;
   }
 }
 
@@ -267,6 +283,22 @@ export class SecretKeyObject extends KeyObject {
 
   get type(): KeyObjectType {
     return 'secret';
+  }
+
+  [kInspect](depth: number, options: any) {
+    if (depth < 0) return this;
+
+    const opts = {
+      ...options,
+      depth: options.depth == null ? null : options.depth - 1,
+    };
+
+    return `${this.constructor.name} ${inspect(
+      {
+        size: this.symmetricKeySize,
+      },
+      opts
+    )}`;
   }
 }
 
