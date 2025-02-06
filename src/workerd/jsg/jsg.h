@@ -14,6 +14,7 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/memory.h>
 
+#include <v8-external-memory-accounter.h>
 #include <v8-profiler.h>
 #include <v8.h>
 
@@ -2220,7 +2221,8 @@ class DOMException;
 // The allocation amount can be adjusted up or down during the lifetime of an object.
 class ExternalMemoryAdjustment final {
  public:
-  ExternalMemoryAdjustment() = default;
+  ExternalMemoryAdjustment(
+      v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount);
   ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount);
   ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
   ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
@@ -2243,10 +2245,12 @@ class ExternalMemoryAdjustment final {
   }
 
  private:
-  size_t amount = 0;
+  v8::ExternalMemoryAccounter& externalMemoryAccounter;
   v8::Isolate* isolate = nullptr;
+  size_t amount = 0;
 
-  static void maybeDeferAdjustment(v8::Isolate* isolate, size_t amount);
+  static void maybeDeferAdjustment(
+      v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount);
 };
 
 // Represents an isolate lock, which allows the current thread to execute JavaScript code within
