@@ -5,7 +5,6 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
-load("//:build/pyodide_bucket.bzl", "PYODIDE_PACKAGE_BUCKET_URL")
 load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
@@ -172,16 +171,6 @@ REPLACEMENTS = [
     ],
 ]
 
-PYODIDE_BUCKET_MODULE = json.encode({
-    "PYODIDE_PACKAGE_BUCKET_URL": PYODIDE_PACKAGE_BUCKET_URL,
-})
-
-write_file(
-    name = "pyodide-bucket.json@rule",
-    out = "generated/pyodide-bucket.json",
-    content = [PYODIDE_BUCKET_MODULE],
-)
-
 expand_template(
     name = "pyodide.asm.js@rule",
     out = "generated/pyodide.asm.js",
@@ -255,15 +244,11 @@ wd_ts_bundle(
     eslintrc_json = "eslint.config.mjs",
     import_name = "pyodide",
     internal_data_modules = INTERNAL_DATA_MODULES,
-    internal_json_modules = [
-        "generated/pyodide-bucket.json",
-    ],
     internal_modules = INTERNAL_MODULES,
     js_deps = [
         "generated/emscriptenSetup",
         "pyodide.asm.wasm@rule",
         "python_stdlib.zip@rule",
-        "pyodide-bucket.json@rule",
     ],
     lint = False,
     modules = MODULES,
@@ -298,7 +283,6 @@ genrule(
         ":pyodide-internal_generated_emscriptenSetup.js",
         ":pyodide-internal_generated_pyodide.asm.wasm",
         ":pyodide-internal_generated_python_stdlib.zip",
-        ":pyodide-internal_generated_pyodide-bucket.json",
     ],
     outs = ["pyodide.capnp.bin"],
     cmd = " ".join([
