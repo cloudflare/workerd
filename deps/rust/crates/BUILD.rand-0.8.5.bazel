@@ -56,16 +56,16 @@ rust_library(
         "@crates_vendor__rand_core-0.6.4//:rand_core",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.168//:libc",  # aarch64-apple-darwin
+            "@crates_vendor__libc-0.2.169//:libc",  # aarch64-apple-darwin
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.168//:libc",  # aarch64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.169//:libc",  # aarch64-unknown-linux-gnu
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.168//:libc",  # x86_64-apple-darwin
+            "@crates_vendor__libc-0.2.169//:libc",  # x86_64-apple-darwin
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.168//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.169//:libc",  # x86_64-unknown-linux-gnu
         ],
         "//conditions:default": [],
     }),

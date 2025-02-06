@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "2.2.0",
     deps = [
-        "@crates_vendor__bitflags-2.6.0//:bitflags",
+        "@crates_vendor__bitflags-2.8.0//:bitflags",
         "@crates_vendor__cfg-if-1.0.0//:cfg_if",
         "@crates_vendor__cssparser-0.29.6//:cssparser",
         "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
@@ -50,6 +50,6 @@ rust_library(
         "@crates_vendor__memchr-2.7.4//:memchr",
         "@crates_vendor__mime-0.3.17//:mime",
         "@crates_vendor__selectors-0.24.0//:selectors",
-        "@crates_vendor__thiserror-2.0.6//:thiserror",
+        "@crates_vendor__thiserror-2.0.11//:thiserror",
     ],
 )

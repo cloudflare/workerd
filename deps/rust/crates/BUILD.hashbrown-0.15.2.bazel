@@ -52,6 +52,6 @@ rust_library(
     deps = [
         "@crates_vendor__allocator-api2-0.2.21//:allocator_api2",
         "@crates_vendor__equivalent-1.0.1//:equivalent",
-        "@crates_vendor__foldhash-0.1.3//:foldhash",
+        "@crates_vendor__foldhash-0.1.4//:foldhash",
     ],
 )

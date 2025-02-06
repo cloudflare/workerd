@@ -45,6 +45,6 @@ rust_library(
         "@crates_vendor__itertools-0.13.0//:itertools",
         "@crates_vendor__ruff_source_file-0.0.0//:ruff_source_file",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
-        "@crates_vendor__unicode-ident-1.0.14//:unicode_ident",
+        "@crates_vendor__unicode-ident-1.0.16//:unicode_ident",
     ],
 )

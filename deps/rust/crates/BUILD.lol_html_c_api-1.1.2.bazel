@@ -48,10 +48,10 @@ rust_library(
     version = "1.1.2",
     deps = [
         "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
-        "@crates_vendor__libc-0.2.168//:libc",
+        "@crates_vendor__libc-0.2.169//:libc",
         "@crates_vendor__lol_html-2.2.0//:lol_html",
         "@crates_vendor__lol_html_c_api-1.1.2//:build_script_build",
-        "@crates_vendor__thiserror-2.0.6//:thiserror",
+        "@crates_vendor__thiserror-2.0.11//:thiserror",
     ],
 )
 
