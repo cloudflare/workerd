@@ -570,6 +570,7 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  exports: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;

@@ -565,6 +565,7 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  exports: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;

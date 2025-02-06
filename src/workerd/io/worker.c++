@@ -3454,7 +3454,10 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
       auto handler = info.cls(lock,
-          jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage), kj::mv(impl->container)),
+          jsg::alloc<api::DurableObjectState>(cloneId(),
+              jsg::JsRef<jsg::JsValue>(
+                  js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
+              kj::mv(storage), kj::mv(impl->container)),
           KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
