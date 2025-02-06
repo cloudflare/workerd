@@ -49,6 +49,6 @@ rust_library(
     version = "1.0.35",
     deps = [
         "@crates_vendor__crc32fast-1.4.2//:crc32fast",
-        "@crates_vendor__miniz_oxide-0.8.0//:miniz_oxide",
+        "@crates_vendor__miniz_oxide-0.8.3//:miniz_oxide",
     ],
 )

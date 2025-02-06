@@ -30,17 +30,10 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "macros",
-        "phf_macros",
-        "proc-macro-hack",
         "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
-    proc_macro_deps = [
-        "@crates_vendor__phf_macros-0.8.0//:phf_macros",
-        "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:proc_macro_hack",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

@@ -16,7 +16,6 @@ PACKAGES = {
     "cxx": crate.spec(version = "1"),
     "cxxbridge-cmd": crate.spec(version = "1"),
     "flate2": crate.spec(version = "1"),
-    # Tag refers to lol-html v2.2.0. We then access the nested lol_html_c_api crate within.
     "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", tag = "v2.2.0"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),

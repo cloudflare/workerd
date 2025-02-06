@@ -46,6 +46,6 @@ rust_library(
     ],
     version = "0.1.24",
     deps = [
-        "@crates_vendor__tinyvec-1.8.0//:tinyvec",
+        "@crates_vendor__tinyvec-1.8.1//:tinyvec",
     ],
 )
