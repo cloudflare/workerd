@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   internal-build:
-    if: "! ${{github.event.pull_request.head.repo.fork}}" # Don't run on forks
+    if: "${{! github.event.pull_request.head.repo.fork}}" # Don't run on forks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
         run: |
-          python3 ./tools/cross/internal_build.py \
+          python3 -u ./tools/cross/internal_build.py \
             ${{github.event.pull_request.number}} \
             ${{github.event.pull_request.head.sha}} \
             ${{github.run_attempt}} \
