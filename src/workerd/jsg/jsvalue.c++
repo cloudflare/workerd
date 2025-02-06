@@ -258,8 +258,8 @@ int JsString::length(jsg::Lock& js) const {
   return inner->Length();
 }
 
-int JsString::utf8Length(jsg::Lock& js) const {
-  return inner->Utf8Length(js.v8Isolate);
+size_t JsString::utf8Length(jsg::Lock& js) const {
+  return inner->Utf8LengthV2(js.v8Isolate);
 }
 
 kj::String JsString::toString(jsg::Lock& js) const {
