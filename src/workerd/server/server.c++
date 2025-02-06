@@ -1784,6 +1784,17 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
   void addActorClass(kj::StringPtr exportName) override {
     actorClasses.insert(kj::str(exportName));
   }
+
+  void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
+    // At runtime, we need to add it into the normal namedEntrypoints for Workflows to appear
+    // in `WorkerService`. This is a different method compared to `addEntrypoint` because we need to
+    // check for `WorkflowEntrypoint` inheritance at validation time.
+    kj::HashSet<kj::String> set;
+    for (auto& method: methods) {
+      set.insert(kj::mv(method));
+    }
+    namedEntrypoints.insert(kj::str(exportName), kj::mv(set));
+  }
 };
 
 // Implementation of ErrorReporter specifically for reporting errors in the top-level workerd

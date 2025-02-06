@@ -947,4 +947,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # This flag is intended to be a roll-up flag. That is, as additional APIs
   # reach EOL, new compat flags will be added for those that will have
   # `impliedByAfterDate(name = "removeNodeJsCompatEOL", ...` annotations.
+
+  enableWorkflowScriptValidation @109 :Bool
+      $compatEnableFlag("enable_validate_workflow_entrypoint")
+      $compatDisableFlag("disable_validate_workflow_entrypoint")
+      $compatEnableDate("2025-09-20");
+  # This flag enables additional checks in the control plane to validate that workflows are
+  # defined and used correctly
 }
