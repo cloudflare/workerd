@@ -261,19 +261,25 @@ export interface AsymmetricKeyDetails {
   namedCurve?: string;
 }
 
+// The user-provided options passed to createPrivateKey or createPublicKey.
+// This will be processed into an InnerCreateAsymmetricKeyOptions.
 export interface CreateAsymmetricKeyOptions {
   key: string | ArrayBuffer | ArrayBufferView | JsonWebKey;
   format?: AsymmetricKeyFormat;
   type?: PublicKeyEncoding | PrivateKeyEncoding;
-  passphrase?: string | Uint8Array;
+  passphrase?: string | Uint8Array | Buffer;
   encoding?: string;
 }
 
+// The processed key options. The key property will be one of either
+// an ArrayBuffer, an ArrayBufferView, a JWK, or a CryptoKey. The
+// format and type options will be validated to known good values,
+// and the passphrase will either be undefined or an ArrayBufferView.
 export interface InnerCreateAsymmetricKeyOptions {
-  key?: ArrayBuffer | ArrayBufferView | JsonWebKey | CryptoKey;
-  format?: AsymmetricKeyFormat;
-  type?: PublicKeyEncoding | PrivateKeyEncoding;
-  passphrase?: Uint8Array;
+  key: ArrayBuffer | ArrayBufferView | JsonWebKey;
+  format: AsymmetricKeyFormat;
+  type: PublicKeyEncoding | PrivateKeyEncoding | undefined;
+  passphrase: Buffer | ArrayBuffer | ArrayBufferView | undefined;
 }
 
 export interface GenerateKeyOptions {

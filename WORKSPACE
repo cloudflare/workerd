@@ -82,7 +82,7 @@ http_archive(
 
 http_archive(
     name = "ncrypto",
-    sha256 = "d0e4eadf1947cfa842012ba1f25d15946984af76549395f6c646c1b6d8aced9c",
+    sha256 = "0db79f221519fe00cf3c4574fb0275bbf035868542483aa7fca9eba8f7cf208b",
     strip_prefix = "ncrypto-initial-impl",
     type = "tgz",
     url = "https://github.com/nodejs/ncrypto/archive/refs/heads/initial-impl.tar.gz",

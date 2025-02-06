@@ -182,13 +182,10 @@ class CryptoImpl final: public jsg::Object {
   };
 
   struct CreateAsymmetricKeyOptions {
-    kj::OneOf<kj::Array<kj::byte>, SubtleCrypto::JsonWebKey, jsg::Ref<CryptoKey>> key;
-    // For a PrivateKey, the key is one of either kj::Array<kj::byte> or
-    // SubtleCrypto::JsonWebKey. For a PublicKey it can also be a CryptoKey
-    // containing a private key from which the public key will be derived.
-    jsg::Optional<kj::String> format;
+    kj::OneOf<jsg::BufferSource, SubtleCrypto::JsonWebKey> key;
+    kj::String format;
     jsg::Optional<kj::String> type;
-    jsg::Optional<kj::Array<kj::byte>> passphrase;
+    jsg::Optional<jsg::BufferSource> passphrase;
     // The passphrase is only used for private keys. The format, type, and passphrase
     // options are only used if the key is a kj::Array<kj::byte>.
     JSG_STRUCT(key, format, type, passphrase);

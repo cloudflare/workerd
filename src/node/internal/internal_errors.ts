@@ -658,6 +658,21 @@ export class ERR_SOCKET_CONNECTING extends NodeError {
   }
 }
 
+export class ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS extends NodeError {
+  constructor(arg0: string, arg1: string) {
+    super(
+      'ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS',
+      `The selected key encoding ${arg0} ${arg1}.`
+    );
+  }
+}
+
+export class ERR_CRYPTO_INVALID_JWK extends NodeTypeError {
+  constructor() {
+    super('ERR_CRYPTO_INVALID_JWK', 'Invalid JWK data');
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {

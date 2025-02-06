@@ -29,28 +29,28 @@
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
-  KeyData,
-  KeyObjectType,
-  KeyExportResult,
-  SecretKeyType,
-  SecretKeyExportOptions,
-  PublicKeyExportOptions,
-  PrivateKeyExportOptions,
-  ExportOptions,
-  AsymmetricKeyDetails,
-  AsymmetricKeyType,
-  CreateAsymmetricKeyOptions,
-  GenerateKeyOptions,
-  GenerateKeyPairOptions,
-  InnerExportOptions,
-  // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
-  // JsonWebKey,
-  // InnerCreateAsymmetricKeyOptions,
+  type KeyData,
+  type KeyObjectType,
+  type KeyExportResult,
+  type SecretKeyType,
+  type SecretKeyExportOptions,
+  type PublicKeyExportOptions,
+  type PrivateKeyExportOptions,
+  type ExportOptions,
+  type AsymmetricKeyDetails,
+  type AsymmetricKeyType,
+  type CreateAsymmetricKeyOptions,
+  type GenerateKeyOptions,
+  type GenerateKeyPairOptions,
+  type InnerExportOptions,
+  type InnerCreateAsymmetricKeyOptions,
+  type JsonWebKey,
   default as cryptoImpl,
 } from 'node-internal:crypto';
 
 import {
   arrayBufferToUnsignedBigInt,
+  getArrayBufferOrView,
   kHandle,
 } from 'node-internal:crypto_util';
 
@@ -59,18 +59,26 @@ import {
   isArrayBuffer,
   isArrayBufferView,
   isUint8Array,
-  // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
-  // isSharedArrayBuffer,
 } from 'node-internal:internal_types';
 
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
-  // TODO(soon): Uncomment these once createPrivateKey/createPublicKey are implemented.
-  // ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
-import { validateObject, validateString } from 'node-internal:validators';
+import {
+  validateObject,
+  validateOneOf,
+  validateString,
+} from 'node-internal:validators';
+
+// Key input contexts.
+enum KeyContext {
+  kConsumePublic,
+  kConsumePrivate,
+  kCreatePublic,
+  kCreatePrivate,
+}
 
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transferred via postMessage() and
@@ -80,6 +88,14 @@ import { validateObject, validateString } from 'node-internal:validators';
 // Also in Node.js, CryptoKey is layered on top of KeyObject since KeyObject
 // existed first. We're, however, going to layer our KeyObject on top of
 // CryptoKey with a few augmentations.
+
+let isKeyObject: (obj: any) => boolean;
+
+function isStringOrBuffer(val: any) {
+  return (
+    typeof val === 'string' || isArrayBufferView(val) || isAnyArrayBuffer(val)
+  );
+}
 
 export abstract class KeyObject {
   [kHandle]: CryptoKey;
@@ -191,6 +207,12 @@ export abstract class KeyObject {
   get [Symbol.toStringTag]() {
     return 'KeyObject';
   }
+
+  static {
+    isKeyObject = function (obj: any): obj is KeyObject {
+      return obj[kHandle] !== undefined;
+    };
+  }
 }
 
 abstract class AsymmetricKeyObject extends KeyObject {
@@ -206,6 +228,11 @@ abstract class AsymmetricKeyObject extends KeyObject {
 
   get asymmetricKeyType(): AsymmetricKeyType {
     return cryptoImpl.getAsymmetricKeyType(this[kHandle]);
+  }
+
+  toCryptoKey() {
+    // TODO(soon): Implement the toCryptoKey API (added in Node.js 23.0.0)
+    throw new ERR_METHOD_NOT_IMPLEMENTED('toCryptoKey');
   }
 }
 
@@ -300,97 +327,91 @@ export function createSecretKey(
   return KeyObject.from(cryptoImpl.createSecretKey(key)) as SecretKeyObject;
 }
 
-// TODO(soon): Fully implement createPrivateKey/createPublicKey. These are the
-// equivalent of the WebCrypto API's importKey() method but operate synchronously
-// and support a range of options not currently supported by WebCrypto. Implementing
-// these will require either duplicating or significantly refactoring the current
-// import key logic that supports Web Crypto now as the import logic is spread out
-// over several locations and makes a number of assumptions that Web Crypto is being
-// used.
-//
-// For now, users can use Web Crypto to import a CryptoKey then convert that into
-// a KeyObject using KeyObject.from().
-//
-// const kPrivateKey = Symbol('privateKey');
-// const kPublicKey = Symbol('publicKey');
+function prepareAsymmetricKey(
+  key: CreateAsymmetricKeyOptions | KeyData,
+  ctx: KeyContext
+): InnerCreateAsymmetricKeyOptions {
+  // Safety check... key should not be undefined or null here.
+  if ((key as any) == null) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'key',
+      ['ArrayBuffer', 'Buffer', 'TypedArray', 'DataView', 'string', 'object'],
+      key
+    );
+  }
 
-// function validateAsymmetricKeyOptions(
-//     key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject,
-//     type: Symbol) {
-//   validateKeyData(key, 'key', { allowObject: true });
-//   let inner : InnerCreateAsymmetricKeyOptions = {};
-//   inner.format = 'pem';
-//   if (typeof key === 'string') {
-//     inner.key = Buffer.from(key as string);
-//   } else if (isArrayBufferView(key)) {
-//     inner.key = key as ArrayBufferView;
-//   } else if (isArrayBuffer(key)) {
-//     inner.key = key as ArrayBuffer;
-//   } else if (isSharedArrayBuffer(key)) {
-//     inner.key = key as SharedArrayBuffer;
-//   } else if (type === kPublicKey && key instanceof KeyObject) {
-//     // Covers deriving public key from a private key.
-//     if (key.type !== 'private') {
-//       throw new ERR_INVALID_ARG_VALUE('key', key, 'must be a private key');
-//     }
-//     inner.key = (key as KeyObject)[kHandle];
-//   } else if (type === kPublicKey && key instanceof CryptoKey) {
-//     // Covers deriving public key from a private key.
-//     if ((key as CryptoKey).type !== 'private') {
-//       throw new ERR_INVALID_ARG_VALUE('key', key, 'must be a private key');
-//     }
-//     inner.key = key as CryptoKey;
-//   } else {
-//     const options = key as CreateAsymmetricKeyOptions;
-//     if (typeof options.key === 'string') {
-//       inner.key = Buffer.from(options.key as string, options.encoding);
-//     } else if (isArrayBufferView(options.key)) {
-//       inner.key = options.key as ArrayBufferView;
-//     } else if (isArrayBuffer(options.key)) {
-//       inner.key = options.key as ArrayBuffer;
-//     } else if (isSharedArrayBuffer(options.key)) {
-//       inner.key = options.key as SharedArrayBuffer;
-//     } else if (type === kPublicKey && key instanceof KeyObject) {
-//       if ((options.key as KeyObject).type !== 'private') {
-//         throw new ERR_INVALID_ARG_VALUE('options.key', options.key, 'must be a private key');
-//       }
-//       inner.key = (options.key as KeyObject)[kHandle];
-//     } else if (type === kPublicKey && key instanceof CryptoKey) {
-//       if ((options.key as CryptoKey).type !== 'private') {
-//         throw new ERR_INVALID_ARG_VALUE('options.key', options.key, 'must be a private key');
-//       }
-//       inner.key = options.key as CryptoKey;
-//     } else {
-//       inner.key = key as JsonWebKey;
-//     }
-//     validateKeyData(inner.key, 'options.key', { allowObject: true });
+  let normalized: CreateAsymmetricKeyOptions;
+  if (
+    isStringOrBuffer(key) ||
+    isAnyArrayBuffer(key) ||
+    isArrayBufferView(key)
+  ) {
+    normalized = { key, format: 'pem' } as CreateAsymmetricKeyOptions;
+  } else {
+    normalized = key as CreateAsymmetricKeyOptions;
+  }
 
-//     if (options.format !== undefined) {
-//       validateString(options.format, 'options.format');
-//       inner.format = options.format;
-//     }
-//     if (options.type !== undefined) {
-//       validateString(options.type, 'options.type');
-//       inner.type = options.type;
-//     }
-//     if (options.passphrase !== undefined) {
-//       if (typeof options.passphrase === 'string') {
-//         inner.passphrase = Buffer.from(options.passphrase, options.encoding);
-//       } else {
-//         if (!isUint8Array(options.passphrase)) {
-//           throw new ERR_INVALID_ARG_TYPE('options.passphrase', [
-//             'string', 'Uint8Array'
-//           ], options.passphrase);
-//         }
-//         inner.passphrase = options.passphrase;
-//       }
-//       if (inner.passphrase.byteLength > 1024) {
-//         throw new ERR_INVALID_ARG_VALUE('options.passphrase', options.passphrase.length, '<= 1024');
-//       }
-//     }
-//   }
-//   return inner;
-// }
+  const {
+    key: data,
+    encoding = 'utf8',
+    format = 'pem',
+    type,
+    passphrase,
+  } = normalized;
+
+  // The key data must be specified. The value has to be one of either a
+  // string, an ArrayBuffer, an ArrayBufferView, or a JWK object.
+  if ((data as any) == null || isKeyObject(data) || data instanceof CryptoKey) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'options.key',
+      ['ArrayBuffer', 'Buffer', 'TypedArray', 'DataView', 'string', 'object'],
+      data
+    );
+  }
+
+  if (isStringOrBuffer(data)) {
+    // When the key data is a string or buffer, the format must be
+    // one of either pem or der.
+    validateOneOf(format, 'format', ['pem', 'der']);
+    if (type !== undefined) {
+      if (ctx == KeyContext.kCreatePrivate) {
+        // When the key data is a string or buffer, the type must be
+        // one of either pkcs1, pkcs8, or sec1.
+        validateOneOf(type, 'type', ['pkcs1', 'pkcs8', 'sec1']);
+      } else if (ctx == KeyContext.kCreatePublic) {
+        validateOneOf(type, 'type', ['pkcs1', 'spki']);
+      }
+    }
+    return {
+      key: getArrayBufferOrView(data, 'key', encoding),
+      format,
+      type,
+      passphrase:
+        passphrase != null
+          ? getArrayBufferOrView(passphrase, 'passphrase', encoding)
+          : undefined,
+    };
+  }
+
+  // Final type check. The key data at this point has to be an object that
+  // we will interpret as a JWK.
+  if (typeof data !== 'object') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'key',
+      ['ArrayBuffer', 'Buffer', 'TypedArray', 'DataView', 'string', 'object'],
+      key
+    );
+  }
+
+  // At this point we ignore all remaining options and assume the key is a
+  // JSON Web Key.
+  return {
+    key: data as JsonWebKey,
+    format: 'jwk',
+    type: undefined,
+    passphrase: undefined,
+  };
+}
 
 export function createPrivateKey(key: string): PrivateKeyObject;
 export function createPrivateKey(
@@ -400,16 +421,12 @@ export function createPrivateKey(
   key: CreateAsymmetricKeyOptions
 ): PrivateKeyObject;
 export function createPrivateKey(
-  _key: CreateAsymmetricKeyOptions | KeyData
+  key: CreateAsymmetricKeyOptions | KeyData
 ): PrivateKeyObject {
-  // The options here are fairly complex. The key data can be a string,
-  // ArrayBuffer, or ArrayBufferView. The first argument can be one of
-  // these or an object with a key property that is one of these. If the
-  // key data is a string, then it will be decoded using an encoding
-  // (defaults to UTF8).
-  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.createPrivateKey');
-  // return KeyObject.from(cryptoImpl.createPrivateKey(
-  //     validateAsymmetricKeyOptions(key, kPrivateKey))) as PrivateKeyObject;
+  const cryptoKey = cryptoImpl.createPrivateKey(
+    prepareAsymmetricKey(key, KeyContext.kCreatePrivate)
+  );
+  return KeyObject.from(cryptoKey) as PrivateKeyObject;
 }
 
 export function createPublicKey(key: string): PublicKeyObject;
@@ -424,14 +441,6 @@ export function createPublicKey(
 export function createPublicKey(
   _key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject
 ): PublicKeyObject {
-  // The options here are a bit complicated. The key material itself can
-  // either be a string, ArrayBuffer, or ArrayBufferView. It is also
-  // possible to pass a private key in the form of either a CryptoKey
-  // or KeyObject. The first argument can be one of these, or an object
-  // whose key value is one of these. If the key data is a string, then
-  // it will be decoded using an encoding (defaults to UTF8). If a
-  // CryptoKey or KeyObject is passed, it will be used to derived the
-  // public key.
   throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.createPublicKey');
   // return KeyObject.from(cryptoImpl.createPublicKey(
   //     validateAsymmetricKeyOptions(key, kPublicKey))) as PublicKeyObject;
