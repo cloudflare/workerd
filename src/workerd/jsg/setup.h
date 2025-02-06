@@ -202,6 +202,10 @@ class IsolateBase {
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
+  v8::ExternalMemoryAccounter& getExternalMemoryAccounter() {
+    return externalMemoryAccounter;
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -265,6 +269,9 @@ class IsolateBase {
 
   // Polyfilled Symbol.asyncDispose.
   v8::Global<v8::Symbol> symbolAsyncDispose;
+
+  // Used to account for external memory
+  v8::ExternalMemoryAccounter externalMemoryAccounter;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.

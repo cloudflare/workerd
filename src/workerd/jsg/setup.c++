@@ -193,7 +193,9 @@ void IsolateBase::deferExternalMemoryDecrement(int64_t size) {
 void IsolateBase::clearPendingExternalMemoryDecrement() {
   KJ_ASSERT(v8::Locker::IsLocked(ptr));
   int64_t amount = pendingExternalMemoryDecrement.exchange(0, std::memory_order_relaxed);
-  if (amount > 0) ptr->AdjustAmountOfExternalAllocatedMemory(-amount);
+  if (amount > 0) {
+    externalMemoryAccounter.Decrease(ptr, amount);
+  }
 }
 
 void IsolateBase::terminateExecution() const {
