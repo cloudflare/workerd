@@ -53,23 +53,24 @@ function getFilenameOfPackage(requirement: string): string {
 async function loadBundleFromR2(requirement: string): Promise<Reader> {
   // first check if the disk cache has what we want
   const filename = getFilenameOfPackage(requirement);
-  const cached = DiskCache.get(filename);
-  if (cached) {
-    const decompressed = await decompressArrayBuffer(cached);
-    const reader = new ArrayBufferReader(decompressed);
-    return reader;
+  let original = DiskCache.get(filename);
+  if (!original) {
+    // we didn't find it in the disk cache, continue with original fetch
+    const url = new URL(WORKERD_INDEX_URL + filename);
+    const response = await fetch(url);
+
+    original = await response.arrayBuffer();
+    DiskCache.put(filename, original);
   }
 
-  // we didn't find it in the disk cache, continue with original fetch
-  const url = new URL(WORKERD_INDEX_URL + filename);
-  const response = await fetch(url);
-
-  const compressed = await response.arrayBuffer();
-  const decompressed = await decompressArrayBuffer(compressed);
-
-  DiskCache.put(filename, compressed);
-  const reader = new ArrayBufferReader(decompressed);
-  return reader;
+  if (filename.endsWith('.tar.gz')) {
+    const decompressed = await decompressArrayBuffer(original);
+    return new ArrayBufferReader(decompressed);
+  } else if (filename.endsWith('.tar')) {
+    return new ArrayBufferReader(original);
+  } else {
+    throw new Error('Unsupported package file type: ' + filename);
+  }
 }
 
 async function loadBundleFromArtifactBundler(
