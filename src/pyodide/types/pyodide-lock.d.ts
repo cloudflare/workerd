@@ -1,8 +1,9 @@
+type InstallDir = 'site' | 'stdlib' | 'dynlib';
 interface PackageDeclaration {
   depends: string[];
   file_name: string;
   imports: string[];
-  install_dir: 'site' | 'stdlib';
+  install_dir: InstallDir;
   name: string;
   package_type: string;
   sha256: string;
