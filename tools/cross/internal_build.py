@@ -42,10 +42,10 @@ if __name__ == "__main__":
 
         workflow_id = resp.json()["workflow_id"]
     except Exception as err:
-        print(f"Unexpected error {err=}, {type(err)=}")
+        print(f"Unexpected error {err=}, {type(err)=}, exiting.")
         sys.exit(1)
 
-    print("Internal build submitted")
+    print("Internal build submitted.")
 
     time.sleep(30)
 
@@ -60,7 +60,16 @@ if __name__ == "__main__":
 
             status = resp.json()["status"]
             if status == "errored":
-                print("Build failed")
+                print("Internal build failed.")
+                print(
+                    "If you are a Cloudflare employee, please check your internal"
+                    " branch and refer this doc for further details:"
+                    " https://cflare.co/workerd-internal-build"
+                )
+                print(
+                    "If you are an external contributor, please ask the auto-assigned"
+                    " reviewers to check the internal build failure."
+                )
                 sys.exit(1)
             elif status == "complete":
                 break
@@ -73,6 +82,7 @@ if __name__ == "__main__":
         time.sleep(30)
 
     if failed_requests == FAILED_REQUEST_LIMIT:
+        print(f"{failed_requests=} == {FAILED_REQUEST_LIMIT=}, exiting.")
         sys.exit(1)
 
-    print("Internal build succeeded")
+    print("Internal build succeeded.")
