@@ -232,7 +232,7 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
 class JsString final: public JsBase<v8::String, JsString> {
  public:
   int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  int utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   int hashCode() const;
 
