@@ -935,4 +935,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-08-11");
   # Disables adding `/session/metadata/vendor` to the Python Worker's sys.path. So Workers using
   # this flag will have to place their vendored modules in a `python_modules` directory.
+  
+  enableWorfkflowScriptValidation @108 :Bool
+      $compatEnableFlag("validate_workflow_entrypoint")
+      $compatEnableDate("2025-08-20");
+  # enables validation for workflow entrypoint without breaking workflows deployed without validation
 }
