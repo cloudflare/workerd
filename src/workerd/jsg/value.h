@@ -458,8 +458,7 @@ class StringWrapper {
     v8::Local<v8::String> str = check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
-    str->WriteUtf8(isolate, buf.begin(), buf.size());
-    buf[buf.size() - 1] = 0;
+    str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
     return kj::String(kj::mv(buf));
   }
 
@@ -1010,8 +1009,8 @@ class DictWrapper {
     // modified to return nullptr in the future.
     const auto convertToUtf8 = [isolate = context->GetIsolate()](v8::Local<v8::String> v8String) {
       auto buf = kj::heapArray<char>(v8String->Utf8LengthV2(isolate) + 1);
-      v8String->WriteUtf8(isolate, buf.begin(), buf.size());
-      buf[buf.size() - 1] = 0;
+      v8String->WriteUtf8V2(
+          isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
       return kj::String(kj::mv(buf));
     };
 
