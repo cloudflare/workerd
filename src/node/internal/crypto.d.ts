@@ -276,7 +276,9 @@ export interface CreateAsymmetricKeyOptions {
 // format and type options will be validated to known good values,
 // and the passphrase will either be undefined or an ArrayBufferView.
 export interface InnerCreateAsymmetricKeyOptions {
-  key: ArrayBuffer | ArrayBufferView | JsonWebKey;
+  // CryptoKey is only used when importing a public key derived from
+  // an existing private key.
+  key: ArrayBuffer | ArrayBufferView | JsonWebKey | CryptoKey;
   format: AsymmetricKeyFormat;
   type: PublicKeyEncoding | PrivateKeyEncoding | undefined;
   passphrase: Buffer | ArrayBuffer | ArrayBufferView | undefined;

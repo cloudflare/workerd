@@ -5,6 +5,7 @@ import {
   PrivateKeyObject,
   createSecretKey,
   createPrivateKey,
+  createPublicKey,
   createHmac,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -226,7 +227,6 @@ export const secret_key_test = {
     ok(!key3.equals(key1));
 
     strictEqual(key1.symmetricKeySize, 5);
-    //    console.log(key1.toCryptoKey());
 
     const jwk = key3.export({ format: 'jwk' });
     ok(jwk);
@@ -762,5 +762,312 @@ export const private_key_tocryptokey = {
     strictEqual(key2.asymmetricKeyDetails.publicExponent, 65537n);
     strictEqual(key2.asymmetricKeyType, 'rsa');
     strictEqual(key2.type, 'private');
+  },
+};
+
+export const createpublickey_from_private = {
+  test(_, env) {
+    const pvt = createPrivateKey(env['dsa_private.pem']);
+    throws(
+      () => {
+        const pub = createPublicKey(pvt);
+      },
+      {
+        message:
+          'Getting a public key from a private key is not yet implemented',
+      }
+    );
+  },
+};
+
+export const create_public_key = {
+  test(_, env) {
+    // TODO(later): These error messages are inconsistent with one another
+    // despite performing the same basic validation.
+    throws(() => createPublicKey(1), {
+      message: /The \"options.key\" property must be of type string/,
+    });
+    throws(() => createPublicKey(true), {
+      message: /The \"options.key\" property must be of type string/,
+    });
+    throws(() => createPublicKey({ key: 1 }), {
+      message: /The \"key\" argument/,
+    });
+    throws(() => createPublicKey({ key: true }), {
+      message: /The \"key\" argument/,
+    });
+
+    [
+      // These are the public key types that are not supported by boringssl
+      'dh_public.pem',
+      'ec_secp256k1_public.pem',
+      'ed448_public.pem',
+      'rsa_pss_public_2048.pem',
+      'rsa_pss_public_2048_sha1_sha1_20.pem',
+      'rsa_pss_public_2048_sha256_sha256_16.pem',
+      'rsa_pss_public_2048_sha512_sha256_20.pem',
+      'x448_public.pem',
+    ].forEach((i) => {
+      throws(() => createPublicKey(env[i]), {
+        message: 'Failed to parse public key',
+      });
+    });
+
+    [
+      'dsa_public_1025.pem',
+      'dsa_public.pem',
+      'ec_p256_public.pem',
+      'ec_p384_public.pem',
+      'ec_p521_public.pem',
+      'ed25519_public.pem',
+      'rsa_public_2048.pem',
+      'rsa_public_4096.pem',
+      'rsa_public_b.pem',
+      'rsa_public.pem',
+      'x25519_public.pem',
+
+      // It is also possible to use an X509 cert as the source of a public key
+      'agent1-cert.pem',
+
+      // It is possible to create a public key from a private key
+      'dsa_private.pem',
+      'dsa_private_1025.pem',
+      'dsa_private_pkcs8.pem',
+      'ed25519_private.pem',
+      'ec_p256_private.pem',
+      'ec_p384_private.pem',
+      'ec_p521_private.pem',
+      'rsa_private.pem',
+      'rsa_private_b.pem',
+      'rsa_private_2048.pem',
+      'rsa_private_pkcs8_bad.pem',
+      'rsa_private_4096.pem',
+      'rsa_private_pkcs8.pem',
+      'x25519_private.pem',
+    ].forEach((i) => {
+      const key = createPublicKey(env[i]);
+      strictEqual(key.type, 'public');
+
+      switch (i) {
+        case 'dsa_public_1025.pem': {
+          strictEqual(key.asymmetricKeyType, 'dsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 1088);
+          strictEqual(key.asymmetricKeyDetails.divisorLength, 160);
+          break;
+        }
+        case 'dsa_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'dsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.divisorLength, 256);
+          break;
+        }
+        case 'ec_p256_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'ec');
+          strictEqual(key.asymmetricKeyDetails.namedCurve, 'prime256v1');
+          break;
+        }
+        case 'ec_p384_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'ec');
+          strictEqual(key.asymmetricKeyDetails.namedCurve, 'secp384r1');
+          break;
+        }
+        case 'ec_p521_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'ec');
+          strictEqual(key.asymmetricKeyDetails.namedCurve, 'secp521r1');
+          break;
+        }
+        case 'ed25519_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'ed25519');
+          break;
+        }
+        case 'rsa_public_2048.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_public_4096.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 4096);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_public_b.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'x25519_public.pem': {
+          strictEqual(key.asymmetricKeyType, 'x25519');
+          break;
+        }
+        case 'dsa_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'dsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.divisorLength, 256);
+          break;
+        }
+        case 'dsa_private_1025.pem': {
+          strictEqual(key.asymmetricKeyType, 'dsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 1088);
+          strictEqual(key.asymmetricKeyDetails.divisorLength, 160);
+          break;
+        }
+        case 'dsa_private_pkcs8.pem': {
+          strictEqual(key.asymmetricKeyType, 'dsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.divisorLength, 256);
+          break;
+        }
+        case 'ed25519_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'ed25519');
+          break;
+        }
+        case 'ec_p256_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'ec');
+          strictEqual(key.asymmetricKeyDetails.namedCurve, 'prime256v1');
+          break;
+        }
+        case 'ec_p384_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'ec');
+          strictEqual(key.asymmetricKeyDetails.namedCurve, 'secp384r1');
+          break;
+        }
+        case 'ec_p521_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'ec');
+          strictEqual(key.asymmetricKeyDetails.namedCurve, 'secp521r1');
+          break;
+        }
+        case 'rsa_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_private_b.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_private_2048.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_private_pkcs8_bad.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_private_4096.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 4096);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'rsa_private_pkcs8.pem': {
+          strictEqual(key.asymmetricKeyType, 'rsa');
+          strictEqual(key.asymmetricKeyDetails.modulusLength, 2048);
+          strictEqual(key.asymmetricKeyDetails.publicExponent, 65537n);
+          break;
+        }
+        case 'x25519_private.pem': {
+          strictEqual(key.asymmetricKeyType, 'x25519');
+          break;
+        }
+      }
+
+      if (key.asymmetricKeyType === 'rsa') {
+        const exp = key.export({ format: 'pem', type: 'pkcs1' });
+        const key2 = createPublicKey(exp);
+        ok(key.equals(key2));
+
+        const exp2 = key.export({ format: 'der', type: 'pkcs1' });
+        const key3 = createPublicKey({
+          key: exp2,
+          format: 'der',
+          type: 'pkcs1',
+        });
+        ok(key.equals(key3));
+      }
+      {
+        const exp = key.export({ format: 'pem', type: 'spki' });
+        const key2 = createPublicKey(exp);
+        ok(key.equals(key2));
+      }
+      {
+        const exp = key.export({ format: 'der', type: 'spki' });
+        const key2 = createPublicKey({ key: exp, format: 'der', type: 'spki' });
+        ok(key.equals(key2));
+      }
+    });
+  },
+};
+
+export const public_key_tocryptokey = {
+  async test(_, env) {
+    const key = createPublicKey(env['dsa_public_1025.pem']);
+    // TODO(soon): Getting a CryptoKey from the KeyObject currently does not work.
+    // Will will implement this conversion as a follow up step.
+    throws(() => key.toCryptoKey(), {
+      message: 'The toCryptoKey method is not implemented',
+    });
+
+    // Getting the private key from a CryptoKey should generally work...
+    const { publicKey } = await crypto.subtle.generateKey(
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-256',
+      },
+      true,
+      ['sign', 'verify']
+    );
+
+    const key2 = KeyObject.from(publicKey);
+    strictEqual(key2.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(key2.asymmetricKeyDetails.publicExponent, 65537n);
+    strictEqual(key2.asymmetricKeyType, 'rsa');
+    strictEqual(key2.type, 'public');
+  },
+};
+
+export const public_key_jwk = {
+  test(_, env) {
+    [
+      'dsa_public_1025.pem',
+      'dsa_public.pem',
+      'ec_p256_public.pem',
+      'ec_p384_public.pem',
+      'ec_p521_public.pem',
+      'ed25519_public.pem',
+      'rsa_public_2048.pem',
+      'rsa_public_4096.pem',
+      'rsa_public_b.pem',
+      'rsa_public.pem',
+      'x25519_public.pem',
+    ].forEach((i) => {
+      const key = createPublicKey(env[i]);
+      // TODO(soon): Exporting a PublicKeyObject to JWK currently does not work.
+      // We will work on JWK export/import as a follow up step.
+      throws(() => key.export({ format: 'jwk' }), {
+        message: /Unrecognized or unsupported export/,
+      });
+    });
+
+    throws(() => createPublicKey({ key: {}, format: 'jwk' }), {
+      message: 'JWK public key import is not yet implemented',
+    });
   },
 };

@@ -182,7 +182,7 @@ class CryptoImpl final: public jsg::Object {
   };
 
   struct CreateAsymmetricKeyOptions {
-    kj::OneOf<jsg::BufferSource, SubtleCrypto::JsonWebKey> key;
+    kj::OneOf<jsg::BufferSource, SubtleCrypto::JsonWebKey, jsg::Ref<api::CryptoKey>> key;
     kj::String format;
     jsg::Optional<kj::String> type;
     jsg::Optional<jsg::BufferSource> passphrase;

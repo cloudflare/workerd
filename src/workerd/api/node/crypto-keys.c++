@@ -265,8 +265,14 @@ class AsymmetricKey final: public CryptoKey::Impl {
     // This branch should never be taken for JWK
     KJ_ASSERT(formatType != ncrypto::EVPKeyPointer::PKFormatType::JWK);
 
-    auto maybeBio = key.writePrivateKey(
-        ncrypto::EVPKeyPointer::PrivateKeyEncodingConfig(false, formatType, encType));
+    auto maybeBio = ([&] {
+      if (isPrivate) {
+        return key.writePrivateKey(
+            ncrypto::EVPKeyPointer::PrivateKeyEncodingConfig(false, formatType, encType));
+      }
+      return key.writePublicKey(
+          ncrypto::EVPKeyPointer::PublicKeyEncodingConfig(false, formatType, encType));
+    })();
     if (maybeBio.has_value) {
       BUF_MEM* mem = maybeBio.value;
       kj::ArrayPtr<kj::byte> source(reinterpret_cast<kj::byte*>(mem->data), mem->length);
@@ -369,6 +375,44 @@ jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::BufferSource
   return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::mv(keyData)));
 }
 
+namespace {
+std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(
+    const CryptoImpl::CreateAsymmetricKeyOptions& options, const jsg::BufferSource& buffer) {
+  // As a private key the format can be either 'pem' or 'der',
+  // while type can be one of `pkcs1`, `pkcs8`, or `sec1`.
+  // The type is only required when format is 'der'.
+
+  auto format =
+      trySelectKeyFormat(options.format).orDefault(ncrypto::EVPKeyPointer::PKFormatType::PEM);
+
+  auto enc = ncrypto::EVPKeyPointer::PKEncodingType::PKCS8;
+  KJ_IF_SOME(type, options.type) {
+    enc = trySelectKeyEncoding(type).orDefault(enc);
+  }
+
+  ncrypto::EVPKeyPointer::PrivateKeyEncodingConfig config(false, format, enc);
+
+  KJ_IF_SOME(passphrase, options.passphrase) {
+    // TODO(later): Avoid using DataPointer for passphrase... so we
+    // can avoid the copy...
+    auto dp = ncrypto::DataPointer::Alloc(passphrase.size());
+    kj::ArrayPtr<kj::byte> ptr(dp.get<kj::byte>(), dp.size());
+    ptr.copyFrom(passphrase.asArrayPtr());
+    config.passphrase = kj::mv(dp);
+  }
+
+  ncrypto::Buffer<const kj::byte> buf{
+    .data = buffer.asArrayPtr().begin(),
+    .len = buffer.size(),
+  };
+
+  auto result = ncrypto::EVPKeyPointer::TryParsePrivateKey(config, buf);
+
+  if (result.has_value) return kj::mv(result.value);
+  return std::nullopt;
+}
+}  // namespace
+
 jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
     jsg::Lock& js, CreateAsymmetricKeyOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
@@ -382,42 +426,19 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
       JSG_REQUIRE(options.format == "pem"_kj || options.format == "der"_kj, TypeError,
           "Invalid format for private key creation");
 
-      // As a private key the format can be either 'pem' or 'der',
-      // while type can be one of `pkcs1`, `pkcs8`, or `sec1`.
-      // The type is only required when format is 'der'.
-
-      auto format =
-          trySelectKeyFormat(options.format).orDefault(ncrypto::EVPKeyPointer::PKFormatType::PEM);
-
-      auto enc = ncrypto::EVPKeyPointer::PKEncodingType::PKCS8;
-      KJ_IF_SOME(type, options.type) {
-        enc = trySelectKeyEncoding(type).orDefault(enc);
+      if (auto maybePrivate = tryParsingPrivate(options, buffer)) {
+        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(maybePrivate.value())));
       }
 
-      ncrypto::EVPKeyPointer::PrivateKeyEncodingConfig config(true, format, enc);
-
-      KJ_IF_SOME(passphrase, options.passphrase) {
-        // TODO(later): Avoid using DataPointer for passphrase... so we
-        // can avoid the copy...
-        auto dp = ncrypto::DataPointer::Alloc(passphrase.size());
-        kj::ArrayPtr<kj::byte> ptr(dp.get<kj::byte>(), dp.size());
-        ptr.copyFrom(passphrase.asArrayPtr());
-        config.passphrase = kj::mv(dp);
-      }
-
-      ncrypto::Buffer<const kj::byte> buf{
-        .data = buffer.asArrayPtr().begin(),
-        .len = buffer.size(),
-      };
-
-      auto result = ncrypto::EVPKeyPointer::TryParsePrivateKey(config, buf);
-      JSG_REQUIRE(result.has_value, Error, "Failed to parse private key");
-
-      return jsg::alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(result.value)));
+      JSG_FAIL_REQUIRE(Error, "Failed to parse private key");
     }
     KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
       JSG_REQUIRE(options.format == "jwk"_kj, TypeError, "Invalid format for JWK key creation");
       JSG_FAIL_REQUIRE(Error, "JWK private key import is not yet implemented");
+    }
+    KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
+      // This path shouldn't be reachable.
+      JSG_FAIL_REQUIRE(TypeError, "Invalid key data");
     }
   }
 
@@ -425,7 +446,60 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
 }
 
 jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options) {
-  KJ_UNIMPLEMENTED("not implemented");
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  KJ_SWITCH_ONEOF(options.key) {
+    KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
+      JSG_REQUIRE(options.format == "pem"_kj || options.format == "der"_kj, TypeError,
+          "Invalid format for public key creation");
+
+      // As a public key the format can be either 'pem' or 'der',
+      // while type can be one of either `pkcs1` or `spki`
+
+      {
+        // It is necessary to pop the error on return before we attempt
+        // to try parsing as a private key if the public key parsing fails.
+        ncrypto::MarkPopErrorOnReturn markPopErrorOnReturn;
+
+        auto format =
+            trySelectKeyFormat(options.format).orDefault(ncrypto::EVPKeyPointer::PKFormatType::PEM);
+
+        auto enc = ncrypto::EVPKeyPointer::PKEncodingType::PKCS1;
+        KJ_IF_SOME(type, options.type) {
+          enc = trySelectKeyEncoding(type).orDefault(enc);
+        }
+
+        ncrypto::EVPKeyPointer::PublicKeyEncodingConfig config(true, format, enc);
+
+        ncrypto::Buffer<const kj::byte> buf{
+          .data = buffer.asArrayPtr().begin(),
+          .len = buffer.size(),
+        };
+
+        auto result = ncrypto::EVPKeyPointer::TryParsePublicKey(config, buf);
+
+        if (result.has_value) {
+          return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(result.value)));
+        }
+      }
+
+      // Otherwise, let's try parsing as a private key...
+      if (auto maybePrivate = tryParsingPrivate(options, buffer)) {
+        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(maybePrivate.value())));
+      }
+
+      JSG_FAIL_REQUIRE(Error, "Failed to parse public key");
+    }
+    KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+      JSG_REQUIRE(options.format == "jwk"_kj, TypeError, "Invalid format for JWK key creation");
+      JSG_FAIL_REQUIRE(Error, "JWK public key import is not yet implemented");
+    }
+    KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
+      JSG_FAIL_REQUIRE(Error, "Getting a public key from a private key is not yet implemented");
+    }
+  }
+
+  KJ_UNREACHABLE;
 }
 
 }  // namespace workerd::api::node

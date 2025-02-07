@@ -464,18 +464,51 @@ export function createPrivateKey(
 export function createPublicKey(key: string): PublicKeyObject;
 export function createPublicKey(key: ArrayBuffer): PublicKeyObject;
 export function createPublicKey(key: ArrayBufferView): PublicKeyObject;
-
 export function createPublicKey(key: KeyObject): PublicKeyObject;
 export function createPublicKey(key: CryptoKey): PublicKeyObject;
 export function createPublicKey(
   key: CreateAsymmetricKeyOptions
 ): PublicKeyObject;
 export function createPublicKey(
-  _key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject
+  key: CreateAsymmetricKeyOptions | KeyData | CryptoKey | KeyObject
 ): PublicKeyObject {
-  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.createPublicKey');
-  // return KeyObject.from(cryptoImpl.createPublicKey(
-  //     validateAsymmetricKeyOptions(key, kPublicKey))) as PublicKeyObject;
+  // Passing a KeyObject or a CryptoKey allows deriving the public key
+  // from an existing private key.
+
+  if (isKeyObject(key)) {
+    if (key.type !== 'private') {
+      throw new ERR_INVALID_ARG_TYPE('key', 'PrivateKeyObject', key);
+    }
+    return KeyObject.from(
+      cryptoImpl.createPublicKey({
+        key: (key as KeyObject)[kHandle],
+        // The following are ignored when key is a CryptoKey.
+        format: 'pem',
+        type: undefined,
+        passphrase: undefined,
+      })
+    ) as PublicKeyObject;
+  }
+
+  if (key instanceof CryptoKey) {
+    if (key.type !== 'private') {
+      throw new ERR_INVALID_ARG_TYPE('key', 'PrivateKeyObject', key);
+    }
+    return KeyObject.from(
+      cryptoImpl.createPublicKey({
+        key,
+        // The following are ignored when key is a CryptoKey.
+        format: 'pem',
+        type: undefined,
+        passphrase: undefined,
+      })
+    ) as PublicKeyObject;
+  }
+
+  const cryptoKey = cryptoImpl.createPublicKey(
+    prepareAsymmetricKey(key, KeyContext.kCreatePublic)
+  );
+  return KeyObject.from(cryptoKey) as PublicKeyObject;
 }
 
 // ======================================================================================
