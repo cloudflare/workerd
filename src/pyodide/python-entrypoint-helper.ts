@@ -131,9 +131,14 @@ function makeHandler(pyHandlerName: string): Handler {
         'prep_python',
         async () => await preparePython()
       );
-
+      const handler = mainModule[pyHandlerName];
+      if (!handler) {
+        throw new Error(
+          `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`
+        );
+      }
       const result = await enterJaegerSpan('python_code', () => {
-        return mainModule[pyHandlerName].callRelaxed(...args);
+        return handler.callRelaxed(...args);
       });
 
       // Support returning a pyodide.ffi.FetchResponse.
