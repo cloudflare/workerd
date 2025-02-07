@@ -3,7 +3,7 @@ import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import {
   FilePath,
-  SITE_PACKAGES,
+  VIRTUALIZED_DIR,
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
@@ -131,7 +131,7 @@ const PRELOADED_SO_FILES: string[] = [];
  * there.
  */
 export function preloadDynamicLibs(Module: Module): void {
-  let SO_FILES_TO_LOAD = SITE_PACKAGES.soFiles;
+  let SO_FILES_TO_LOAD = VIRTUALIZED_DIR.getSoFilesToLoad();
   if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
     SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
   }
@@ -143,9 +143,15 @@ export function preloadDynamicLibs(Module: Module): void {
   try {
     const sitePackages = getSitePackagesPath(Module);
     for (const soFile of SO_FILES_TO_LOAD) {
-      let node: TarFSInfo | undefined = SITE_PACKAGES.rootInfo;
+      let node: TarFSInfo | undefined = VIRTUALIZED_DIR.getSitePackagesRoot();
       for (const part of soFile) {
         node = node?.children?.get(part);
+      }
+      if (!node) {
+        node = VIRTUALIZED_DIR.getDynlibRoot();
+        for (const part of soFile) {
+          node = node?.children?.get(part);
+        }
       }
       if (!node) {
         throw Error('fs node could not be found for ' + soFile);

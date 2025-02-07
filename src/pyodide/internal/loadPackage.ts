@@ -18,7 +18,8 @@ import {
   USING_OLDEST_PACKAGES_VERSION,
 } from 'pyodide-internal:metadata';
 import {
-  SITE_PACKAGES,
+  DYNLIB_PATH,
+  VIRTUALIZED_DIR,
   STDLIB_PACKAGES,
   getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
@@ -40,20 +41,20 @@ async function decompressArrayBuffer(
   }
 }
 
-function getFilenameOfPackage(requirement: string): string {
+function getPackageMetadata(requirement: string): PackageDeclaration {
   const obj = LOCKFILE['packages'][requirement];
   if (!obj) {
     throw new Error('Requirement ' + requirement + ' not found in lockfile');
   }
 
-  return obj.file_name;
+  return obj;
 }
 
 // loadBundleFromR2 loads the package from the internet (through fetch) and uses the DiskCache as
 // a backing store. This is only used in local dev.
 async function loadBundleFromR2(requirement: string): Promise<Reader> {
   // first check if the disk cache has what we want
-  const filename = getFilenameOfPackage(requirement);
+  const filename = getPackageMetadata(requirement).file_name;
   let original = DiskCache.get(filename);
   if (!original) {
     // we didn't find it in the disk cache, continue with original fetch
@@ -85,7 +86,7 @@ async function loadBundleFromR2(requirement: string): Promise<Reader> {
 async function loadBundleFromArtifactBundler(
   requirement: string
 ): Promise<Reader> {
-  const filename = getFilenameOfPackage(requirement);
+  const filename = getPackageMetadata(requirement).file_name;
   const fullPath = 'python-package-bucket/' + PACKAGES_VERSION + '/' + filename;
   const reader = ArtifactBundler.getPackage(fullPath);
   if (!reader) {
@@ -127,7 +128,7 @@ async function loadPackagesImpl(
     if (req === 'test') {
       continue; // Skip the test package, it is only useful for internal Python regression testing.
     }
-    if (SITE_PACKAGES.loadedRequirements.has(req)) {
+    if (VIRTUALIZED_DIR.hasRequirementLoaded(req)) {
       continue;
     }
     loadPromises.push(loadBundle(req).then((r) => [req, r]));
@@ -139,15 +140,19 @@ async function loadPackagesImpl(
   const buffers = await Promise.all(loadPromises);
   for (const [requirement, reader] of buffers) {
     const [tarInfo, soFiles] = parseTarInfo(reader);
-    SITE_PACKAGES.addSmallBundle(tarInfo, soFiles, requirement);
+    const pkg = getPackageMetadata(requirement);
+    VIRTUALIZED_DIR.addSmallBundle(
+      tarInfo,
+      soFiles,
+      requirement,
+      pkg.install_dir
+    );
   }
 
   console.log('Loaded ' + loading.join(', '));
 
   const tarFS = createTarFS(Module);
-  const path = getSitePackagesPath(Module);
-  const info = SITE_PACKAGES.rootInfo;
-  Module.FS.mount(tarFS, { info }, path);
+  VIRTUALIZED_DIR.mount(Module, tarFS);
 }
 
 /**

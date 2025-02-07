@@ -1,6 +1,6 @@
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import {
-  SITE_PACKAGES,
+  VIRTUALIZED_DIR,
   TRANSITIVE_REQUIREMENTS,
   adjustSysPath,
   mountSitePackages,
@@ -80,10 +80,10 @@ export async function loadPyodide(
   Module.setUnsafeEval(UnsafeEval);
   Module.setGetRandomValues(getRandomValues);
 
-  mountSitePackages(Module, SITE_PACKAGES.rootInfo);
+  mountSitePackages(Module, VIRTUALIZED_DIR);
   entropyMountFiles(Module);
   await enterJaegerSpan('load_packages', () =>
-    // NB. loadPackages adds the packages to the `SITE_PACKAGES` global which then gets used in
+    // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
     // preloadDynamicLibs.
     loadPackages(Module, TRANSITIVE_REQUIREMENTS)
   );

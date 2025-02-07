@@ -121,6 +121,14 @@ if (typeof FinalizationRegistry === "undefined") {
         unregister(){}
     };
 }
+
+function patchDynlibLookup(Module, libName) {
+    try {
+        return Module.FS.readFile("/usr/lib/" + libName);
+    } catch(e) {
+        console.error("Failed to read ", libName, e);
+    }
+}
 """
 
 REPLACEMENTS = [
@@ -168,6 +176,10 @@ REPLACEMENTS = [
     [
         "eval(UTF8ToString(ptr))",
         "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "!libData&&flags.fs",
+        "!(libData ??= patchDynlibLookup(Module, libName))&&flags.fs",
     ],
 ]
 
