@@ -82,7 +82,7 @@ http_archive(
 
 http_archive(
     name = "ncrypto",
-    sha256 = "b1b6bc828dae946074a43ca749d8e3bd08195cd2eaef72b316782681846aa1a4",
+    sha256 = "f0d4bdbe13990ec3343911312477c9b0cc30c5717024f2d81e82acd1df23ec58",
     strip_prefix = "ncrypto-next-round",
     type = "tgz",
     url = "https://github.com/nodejs/ncrypto/archive/refs/heads/next-round.tar.gz",

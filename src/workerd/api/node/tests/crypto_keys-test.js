@@ -1055,21 +1055,6 @@ export const private_key_tocryptokey = {
   },
 };
 
-export const createpublickey_from_private = {
-  test(_, env) {
-    const pvt = createPrivateKey(env['dsa_private.pem']);
-    throws(
-      () => {
-        const pub = createPublicKey(pvt);
-      },
-      {
-        message:
-          'Getting a public key from a private key is not yet implemented',
-      }
-    );
-  },
-};
-
 export const create_public_key = {
   test(_, env) {
     // TODO(later): These error messages are inconsistent with one another
@@ -1301,6 +1286,13 @@ export const create_public_key = {
         ok(key.equals(key2));
       }
     });
+
+    const privateKey = createPrivateKey(env['rsa_private.pem']);
+    const publicKey = createPublicKey(privateKey);
+    strictEqual(publicKey.type, 'public');
+    strictEqual(publicKey.asymmetricKeyType, 'rsa');
+    strictEqual(publicKey.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(publicKey.asymmetricKeyDetails.publicExponent, 65537n);
   },
 };
 

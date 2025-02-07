@@ -315,6 +315,13 @@ class AsymmetricKey final: public CryptoKey::Impl {
     return isPrivate ? "private"_kj : "public"_kj;
   }
 
+  kj::Own<AsymmetricKey> cloneAsPublicKey() {
+    if (!key) return kj::Own<AsymmetricKey>();
+    auto cloned = key.clone();
+    if (!cloned) return kj::Own<AsymmetricKey>();
+    return NewPublic(kj::mv(cloned));
+  }
+
  private:
   ncrypto::EVPKeyPointer key;
   bool isPrivate;
@@ -508,8 +515,16 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
       JSG_FAIL_REQUIRE(Error, "JWK public key import is not implemented for this key type");
     }
     KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
-      // TODO(now): Implement this.
-      JSG_FAIL_REQUIRE(Error, "Getting a public key from a private key is not yet implemented");
+      JSG_REQUIRE(key->getType() == "private"_kj, TypeError,
+          "Cannot create public key from secret or public key");
+
+      // TODO(later): For now, this only works with crypto keys that are created using
+      // AsymmetricKey above. Web crypto private keys won't work here.
+      KJ_IF_SOME(impl, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl.get())) {
+        return jsg::alloc<CryptoKey>(impl.cloneAsPublicKey());
+      }
+
+      JSG_FAIL_REQUIRE(Error, "Failed to derive public key from private key");
     }
   }
 
