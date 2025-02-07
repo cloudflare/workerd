@@ -183,7 +183,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
   }
 
   {
-    KJ_LOG(INFO, "Loading Pyodide package from internet...");
+    KJ_LOG(INFO, "Loading Pyodide bundle from internet...");
     kj::Thread([&]() {
       kj::AsyncIoContext io = kj::setupAsyncIo();
       kj::HttpHeaderTable table;
@@ -200,6 +200,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
       kj::HttpHeaders headers(table);
 
+      // TODO: Point this at our production R2 bucket.
       kj::String url =
           kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide_",
               version, ".capnp.bin");
@@ -207,6 +208,9 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
       auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
       auto res = req.response.wait(io.waitScope);
+      KJ_ASSERT(res.statusCode == 200,
+          kj::str(
+              "Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
       auto body = res.body->readAllBytes().wait(io.waitScope);
 
       writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
