@@ -1228,7 +1228,7 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(kj::StringPtr name,
 // =======================================================================================
 
 // This class exists to update the InspectorService's table of isolates when a config
-// has multiple services. The InspectorService exists on the stack of it's own thread and
+// has multiple services. The InspectorService exists on the stack of its own thread and
 // initializes state that is bound to the thread, e.g. a http server and an event loop.
 // This class provides a small thread-safe interface to the InspectorService so <name>:<isolate>
 // mappings can be added after the InspectorService has started.

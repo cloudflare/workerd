@@ -1140,7 +1140,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // The PromiseCrossContextResolveCallback is used to ensure that promise reactions
     // are only scheduled on the microtask queue from the appropriate IoContext for the
     // promise. Huh? Yeah, that's not super clear... let me explain a bit more.
-    // Every request runs in it's own IoContext.
+    // Every request runs in its own IoContext.
     // Some I/O objects are bound to the IoContext when they are created.
     // If these objects are accessed from the wrong IoContext, things blow up.
     // If I create a promise in one request and pass the resolve/reject functions
@@ -2208,7 +2208,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       }
       for (auto& entry: worker.impl->statelessClasses) {
         // We want to report all of the stateless class's members. To do this, we examine its
-        // prototype, and it's prototype's prototype, and so on, until we get to Object's
+        // prototype, and its prototype's prototype, and so on, until we get to Object's
         // prototype, which we ignore.
         auto entrypointName = getEntrypointName(entry.key);
         js.withinHandleScope([&]() {

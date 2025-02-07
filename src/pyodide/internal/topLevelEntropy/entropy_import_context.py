@@ -96,7 +96,7 @@ def random_context(module):
     # Block calls to functions that use the bad random seed we produced from the
     # ten getentropy() calls. Instantiating Random with a given seed is fine,
     # instantiating it without a seed will call getentropy() and fail.
-    # Instantiating SystemRandom is fine, calling it's methods will call
+    # Instantiating SystemRandom is fine, calling its methods will call
     # getentropy() and fail.
     block_calls(module, allowlist=("Random", "SystemRandom"))
 

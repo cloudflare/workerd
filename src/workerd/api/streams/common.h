@@ -683,7 +683,7 @@ class WritableStreamController {
   // the only way to interact with the underlying sink.
   virtual kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) = 0;
 
-  // Detaches the WritableStreamController from it's underlying implementation, leaving the
+  // Detaches the WritableStreamController from its underlying implementation, leaving the
   // writable stream locked and in a state where no further writes can be made.
   virtual void detach(jsg::Lock& js) = 0;
 

@@ -30,7 +30,7 @@ namespace workerd::api {
 // separate calls.
 constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
 
-// ExternalHandler used when serializing RPC messages. Serialization functions which whish to
+// ExternalHandler used when serializing RPC messages. Serialization functions with which to
 // handle RPC specially should use this.
 class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler {
  public:
@@ -81,7 +81,7 @@ class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler
 class RpcStubDisposalGroup;
 class StreamSinkImpl;
 
-// ExternalHandler used when deserializing RPC messages. Deserialization functions which whish to
+// ExternalHandler used when deserializing RPC messages. Deserialization functions with which to
 // handle RPC specially should use this.
 class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
  public:
@@ -144,7 +144,7 @@ class JsRpcTarget: public jsg::Object {
 // Common superclass of JsRpcStub and Fetcher, the two types that may serve as the basis for
 // RPC calls.
 //
-// This class is NOT part of the JavaScript class heirarchy (it has no JSG_RESOURCE_TYPE block),
+// This class is NOT part of the JavaScript class hierarchy (it has no JSG_RESOURCE_TYPE block),
 // it's only a C++ class used to abstract how to get a capnp client out of the object.
 class JsRpcClientProvider: public jsg::Object {
  public:

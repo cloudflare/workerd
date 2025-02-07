@@ -15,7 +15,7 @@ namespace workerd::api {
 // The original URL implementation based on kj::Url is not compliant with the
 // WHATWG URL standard, but we can't get rid of it. This is an alternate
 // implementation that is based on the spec. It can be enabled using a
-// configuration flag. We put it in it's own namespace to keep it's classes
+// configuration flag. We put it in its own namespace to keep its classes
 // from conflicting with the old implementation.
 namespace url {
 

@@ -143,7 +143,7 @@ class AllReader final {
     uint64_t amountToRead =
         kj::min(limit, kj::min(MAX_BUFFER_CHUNK, maybeLength.orDefault(DEFAULT_BUFFER_CHUNK)));
     // amountToRead can be zero if the stream reported a zero-length. While the stream could
-    // be lying about it's length, let's skip reading anything in this case.
+    // be lying about its length, let's skip reading anything in this case.
     if (amountToRead > 0) {
       for (;;) {
         auto bytes = kj::heapArray<T>(amountToRead);

@@ -16,7 +16,7 @@ index 57db44234e2273476fe1cdcde31e1702bbabd61d..55af32087bdfa3fdee65ee3cfcc877ec
 + * PromiseCrossContextResolveCallback is called when resolving or rejecting a
 + * pending promise whose context tag is not strictly equal to the isolate's
 + * current promise context tag. The callback is called with the promise to be
-+ * resolved, it's context tag, and a function that when called, causes the
++ * resolved, its context tag, and a function that when called, causes the
 + * reactions to the resolved promise to be enqueued. The idea is that the
 + * embedder sets this callback in the case it needs to defer the actual
 + * scheduling of the reactions to the given promise to a later time.

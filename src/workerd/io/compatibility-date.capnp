@@ -156,7 +156,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2022-01-31")
       $compatDisableFlag("workers_api_getters_setters_on_instance");
   # Originally, JSG_PROPERTY registered getter/setters on an objects *instance*
-  # template as opposed to it's prototype template. This broke subclassing at
+  # template as opposed to its prototype template. This broke subclassing at
   # the JavaScript layer, preventing a subclass from correctly overriding the
   # superclasses getters/setters. This flag controls the breaking change made
   # to set those getters/setters on the prototype template instead.

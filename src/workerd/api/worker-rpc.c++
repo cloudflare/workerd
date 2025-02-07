@@ -432,7 +432,7 @@ rpc::JsRpcTarget::Client JsRpcProperty::getClientForOneCall(
 
 namespace {
 
-struct JsRpcPromiseAndPipleine {
+struct JsRpcPromiseAndPipeline {
   jsg::JsPromise promise;
   kj::Own<JsRpcPromise::WeakRef> weakRef;
   rpc::JsRpcTarget::CallResults::Pipeline pipeline;
@@ -444,7 +444,7 @@ struct JsRpcPromiseAndPipleine {
 };
 
 // Core implementation of making an RPC call, reusable for many cases below.
-JsRpcPromiseAndPipleine callImpl(jsg::Lock& js,
+JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
     JsRpcClientProvider& parent,
     kj::Maybe<const kj::String&> name,
     // If `maybeArgs` is provided, this is a call, otherwise it is a property access.
@@ -467,7 +467,7 @@ JsRpcPromiseAndPipleine callImpl(jsg::Lock& js,
   // less convenient.
 
   try {
-    return js.tryCatch([&]() -> JsRpcPromiseAndPipleine {
+    return js.tryCatch([&]() -> JsRpcPromiseAndPipeline {
       // `path` will be filled in with the path of property names leading from the stub represented by
       // `client` to the specific property / method that we're trying to invoke.
       kj::Vector<kj::StringPtr> path;
@@ -578,7 +578,7 @@ JsRpcPromiseAndPipleine callImpl(jsg::Lock& js,
         .weakRef = kj::mv(weakRef),
         .pipeline = kj::mv(callResult),
       };
-    }, [&](jsg::Value error) -> JsRpcPromiseAndPipleine {
+    }, [&](jsg::Value error) -> JsRpcPromiseAndPipeline {
       // Probably a serialization error. Need to convert to an async error since we never throw
       // synchronously from async functions.
       auto jsError = jsg::JsValue(error.getHandle(js));

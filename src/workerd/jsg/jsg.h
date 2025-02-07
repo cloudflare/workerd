@@ -521,7 +521,7 @@ using HasGetTemplateOverload =
   static constexpr decltype(jsgSerializeTag) jsgSerializeOldTags[] = {};                           \
   static constexpr auto jsgSerializeOneway = true
 
-// Declares a wildcart property getter. If a property is requested that isn't already present on
+// Declares a wildcard property getter. If a property is requested that isn't already present on
 // the object or its prototypes, the wildcard property getter will be given a chance to return the
 // property.
 //

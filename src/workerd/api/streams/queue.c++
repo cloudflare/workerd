@@ -498,7 +498,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
 
 bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
   // The idea here is that rather than filling the view that the controller was given,
-  // it chose to create it's own view and fill that, likely over the same ArrayBuffer.
+  // it chose to create its own view and fill that, likely over the same ArrayBuffer.
   // What we do here is perform some basic validations on what we were given, and if
   // those pass, we'll replace the backing store held in the req.pullInto with the one
   // given, then continue on issuing the respond as normal.

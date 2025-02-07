@@ -369,7 +369,7 @@ export const urlSearchParamsInit2 = {
 
 export const urlSearchParamsInit3 = {
   test() {
-    // If the initializer has a deleted iterator, then it's
+    // If the initializer has a deleted iterator, then its
     // contents are ignored but can still be interpreted as
     // a dictionary.
     const search1 = new URLSearchParams('a=b');

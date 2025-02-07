@@ -46,7 +46,7 @@ export function monotonicDateNow(): number {
  *
  * In particular, we specifically don't want to allow calls from places that
  * call arbitrary functions for the user like `JsvFunction_CallBound` or
- * `raw_call_js`; if a user somehow gets there hands on a reference to
+ * `raw_call_js`; if a user somehow gets their hands on a reference to
  * `newWasmModule` and tries to call it from Python the call would come from one
  * of these places. Currently we only need to allow `convertJsFunctionToWasm`
  * but if we enable JSPI we'll need to whitelist a few more locations.
