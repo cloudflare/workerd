@@ -58,6 +58,14 @@ async function loadBundleFromR2(requirement: string): Promise<Reader> {
     // we didn't find it in the disk cache, continue with original fetch
     const url = new URL(WORKERD_INDEX_URL + filename);
     const response = await fetch(url);
+    if (response.status != 200) {
+      throw new Error(
+        'Could not fetch package at url ' +
+          url +
+          ' received status ' +
+          response.status
+      );
+    }
 
     original = await response.arrayBuffer();
     DiskCache.put(filename, original);
