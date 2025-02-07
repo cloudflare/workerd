@@ -83,9 +83,8 @@ uint32_t writeInto(jsg::Lock& js,
     return 0;
   }
 
-  static constexpr jsg::JsString::WriteOptions flags =
-      static_cast<jsg::JsString::WriteOptions>(jsg::JsString::MANY_WRITES_EXPECTED |
-          jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
+  static constexpr jsg::JsString::WriteOptions flags = static_cast<jsg::JsString::WriteOptions>(
+      jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
 
   switch (encoding) {
     case Encoding::ASCII:

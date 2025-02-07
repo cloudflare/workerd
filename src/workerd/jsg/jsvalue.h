@@ -250,7 +250,6 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   enum WriteOptions {
     NONE = v8::String::NO_OPTIONS,
-    MANY_WRITES_EXPECTED = v8::String::HINT_MANY_WRITES_EXPECTED,
     NO_NULL_TERMINATION = v8::String::NO_NULL_TERMINATION,
     PRESERVE_ONE_BYTE_NULL = v8::String::PRESERVE_ONE_BYTE_NULL,
     REPLACE_INVALID_UTF8 = v8::String::REPLACE_INVALID_UTF8,
