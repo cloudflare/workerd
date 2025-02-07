@@ -622,6 +622,12 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
+    KJ_LOG(WARNING, "ExternalHttpService hasHandler()", handlerName);
+    if (rewriter->getCapnpConnectHost() != kj::none) {
+      KJ_LOG(WARNING, "forcing hasHandler to return true");
+      return true;
+    }
+
     return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
@@ -726,6 +732,7 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
     }
 
     kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+      KJ_LOG(WARNING, "customEvent()");
       // We'll use capnp RPC for custom events.
       auto bootstrap = parent.getOutgoingCapnp(*parent.inner);
       auto dispatcher =
@@ -1912,15 +1919,23 @@ class Server::WorkerService final: public Service,
     // one with services that only export the tail or trace handler (legacy tail
     // workers) and one that exports the tailStream handler. We'll check tailStreams
     // first.
+    KJ_LOG(WARNING, "startRequest()");
     if (util::Autogate::isEnabled(util::AutogateKey::STREAMING_TAIL_WORKERS)) {
       kj::Vector<kj::Own<WorkerInterface>> legacyList;
       kj::Vector<kj::Own<WorkerInterface>> streamingList;
+      KJ_LOG(WARNING, "new path");
+      KJ_LOG(WARNING, "channels.tails length", channels.tails.size());
       for (auto& service: channels.tails) {
         KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
         if (service->hasHandler("tailStream"_kj)) {
+          KJ_LOG(WARNING, "setting up tailStream");
           streamingList.add(service->startRequest({}));
         } else if (service->hasHandler("tail") || service->hasHandler("trace")) {
+          KJ_LOG(WARNING, "setting up a tailStream and a legacy handler");
+          streamingList.add(service->startRequest({}));
           legacyList.add(service->startRequest({}));
+        } else {
+          KJ_LOG(WARNING, "we shouldn't end up here");
         }
       }
       legacyTailWorkers = legacyList.releaseAsArray();
@@ -2504,6 +2519,11 @@ class Server::WorkerService final: public Service,
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
+      KJ_LOG(WARNING, "EntrypointService hasHandler()", handlerName);
+      KJ_LOG(WARNING, "handlers.size()", handlers.size());
+      for (auto& handler : handlers) {
+        KJ_LOG(WARNING, "handler", handler);
+      }
       return handlers.contains(handlerName);
     }
 
@@ -3771,6 +3791,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> sendTraces(SendTracesContext context) override {
+      KJ_LOG(WARNING, "sendTraces()");
       throwUnsupported();
     }
 
@@ -3791,6 +3812,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
+      KJ_LOG(WARNING, "jsRpcSession()");
       auto customEvent = kj::heap<api::JsRpcSessionCustomEventImpl>(
           api::JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
 
@@ -3805,6 +3827,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
+      KJ_LOG(WARNING, "tailStreamSession()");
       auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
