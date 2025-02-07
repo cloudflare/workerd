@@ -29,12 +29,10 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
     auto buffer = maybeBuffer.ToLocalChecked();
 
     auto bytes = jsg::asBytes(buffer).releaseAsChars();
-    [[maybe_unused]] int read = 0;
-    [[maybe_unused]] auto written = str->WriteUtf8(js.v8Isolate, bytes.begin(), bytes.size(), &read,
-        v8::String::NO_NULL_TERMINATION | v8::String::REPLACE_INVALID_UTF8);
+    [[maybe_unused]] auto written = str->WriteUtf8V2(
+        js.v8Isolate, bytes.begin(), bytes.size(), v8::String::WriteFlags::kReplaceInvalidUtf8);
 
     KJ_DASSERT(written == buffer->ByteLength());
-    KJ_DASSERT(read == str->Length());
     controller->enqueue(js, v8::Uint8Array::New(buffer, 0, buffer->ByteLength()));
     return js.resolvedPromise();
   })},
