@@ -78,6 +78,13 @@
       "build_file": "//deps/rust:BUILD.cxxbridge-cmd"
     },
     {
+      "name": "rules_cc",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_cc",
+      "file_regex": "^rules_cc-"
+    },
+    {
       "name": "aspect_rules_esbuild",
       "type": "github_release",
       "owner": "aspect-build",

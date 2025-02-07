@@ -32,8 +32,20 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
+    name = "anyhow-1.0.95",
+    actual = "@crates_vendor__anyhow-1.0.95//:anyhow",
+    tags = ["manual"],
+)
+
+alias(
     name = "anyhow",
     actual = "@crates_vendor__anyhow-1.0.95//:anyhow",
+    tags = ["manual"],
+)
+
+alias(
+    name = "capnp-0.20.3",
+    actual = "@crates_vendor__capnp-0.20.3//:capnp",
     tags = ["manual"],
 )
 
@@ -44,8 +56,20 @@ alias(
 )
 
 alias(
+    name = "capnpc-0.20.1",
+    actual = "@crates_vendor__capnpc-0.20.1//:capnpc",
+    tags = ["manual"],
+)
+
+alias(
     name = "capnpc",
     actual = "@crates_vendor__capnpc-0.20.1//:capnpc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "clang-ast-0.1.29",
+    actual = "@crates_vendor__clang-ast-0.1.29//:clang_ast",
     tags = ["manual"],
 )
 
@@ -56,14 +80,32 @@ alias(
 )
 
 alias(
+    name = "clap-4.5.28",
+    actual = "@crates_vendor__clap-4.5.28//:clap",
+    tags = ["manual"],
+)
+
+alias(
     name = "clap",
     actual = "@crates_vendor__clap-4.5.28//:clap",
     tags = ["manual"],
 )
 
 alias(
+    name = "codespan-reporting-0.11.1",
+    actual = "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
+    tags = ["manual"],
+)
+
+alias(
     name = "codespan-reporting",
     actual = "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxx-1.0.138",
+    actual = "@crates_vendor__cxx-1.0.138//:cxx",
     tags = ["manual"],
 )
 
@@ -80,8 +122,20 @@ alias(
 )
 
 alias(
+    name = "flate2-1.0.35",
+    actual = "@crates_vendor__flate2-1.0.35//:flate2",
+    tags = ["manual"],
+)
+
+alias(
     name = "flate2",
     actual = "@crates_vendor__flate2-1.0.35//:flate2",
+    tags = ["manual"],
+)
+
+alias(
+    name = "lol_html_c_api-1.1.2",
+    actual = "@crates_vendor__lol_html_c_api-1.1.2//:lolhtml",
     tags = ["manual"],
 )
 
@@ -92,8 +146,20 @@ alias(
 )
 
 alias(
+    name = "nix-0.29.0",
+    actual = "@crates_vendor__nix-0.29.0//:nix",
+    tags = ["manual"],
+)
+
+alias(
     name = "nix",
     actual = "@crates_vendor__nix-0.29.0//:nix",
+    tags = ["manual"],
+)
+
+alias(
+    name = "pico-args-0.5.0",
+    actual = "@crates_vendor__pico-args-0.5.0//:pico_args",
     tags = ["manual"],
 )
 
@@ -104,8 +170,20 @@ alias(
 )
 
 alias(
+    name = "proc-macro2-1.0.93",
+    actual = "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
+    tags = ["manual"],
+)
+
+alias(
     name = "proc-macro2",
     actual = "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
+    tags = ["manual"],
+)
+
+alias(
+    name = "quote-1.0.38",
+    actual = "@crates_vendor__quote-1.0.38//:quote",
     tags = ["manual"],
 )
 
@@ -116,8 +194,20 @@ alias(
 )
 
 alias(
+    name = "ruff_python_ast-0.0.0",
+    actual = "@crates_vendor__ruff_python_ast-0.0.0//:ruff_python_ast",
+    tags = ["manual"],
+)
+
+alias(
     name = "ruff_python_ast",
     actual = "@crates_vendor__ruff_python_ast-0.0.0//:ruff_python_ast",
+    tags = ["manual"],
+)
+
+alias(
+    name = "ruff_python_parser-0.0.0",
+    actual = "@crates_vendor__ruff_python_parser-0.0.0//:ruff_python_parser",
     tags = ["manual"],
 )
 
@@ -128,8 +218,20 @@ alias(
 )
 
 alias(
+    name = "serde-1.0.217",
+    actual = "@crates_vendor__serde-1.0.217//:serde",
+    tags = ["manual"],
+)
+
+alias(
     name = "serde",
     actual = "@crates_vendor__serde-1.0.217//:serde",
+    tags = ["manual"],
+)
+
+alias(
+    name = "serde_json-1.0.138",
+    actual = "@crates_vendor__serde_json-1.0.138//:serde_json",
     tags = ["manual"],
 )
 
@@ -140,8 +242,20 @@ alias(
 )
 
 alias(
+    name = "syn-2.0.98",
+    actual = "@crates_vendor__syn-2.0.98//:syn",
+    tags = ["manual"],
+)
+
+alias(
     name = "syn",
     actual = "@crates_vendor__syn-2.0.98//:syn",
+    tags = ["manual"],
+)
+
+alias(
+    name = "thiserror-2.0.11",
+    actual = "@crates_vendor__thiserror-2.0.11//:thiserror",
     tags = ["manual"],
 )
 
@@ -152,8 +266,20 @@ alias(
 )
 
 alias(
+    name = "tokio-1.43.0",
+    actual = "@crates_vendor__tokio-1.43.0//:tokio",
+    tags = ["manual"],
+)
+
+alias(
     name = "tokio",
     actual = "@crates_vendor__tokio-1.43.0//:tokio",
+    tags = ["manual"],
+)
+
+alias(
+    name = "tracing-0.1.41",
+    actual = "@crates_vendor__tracing-0.1.41//:tracing",
     tags = ["manual"],
 )
 
