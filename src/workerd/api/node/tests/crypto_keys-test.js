@@ -1,4 +1,4 @@
-import { strictEqual, ok, throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, ok, throws } from 'node:assert';
 import {
   KeyObject,
   SecretKeyObject,
@@ -695,30 +695,120 @@ export const private_key_import_rsa_der = {
 
 export const private_key_jwk = {
   test(_, env) {
+    // These are invalid for JWK export
     [
       'dsa_private.pem',
       'dsa_private_1025.pem',
       'dsa_private_pkcs8.pem',
-      'ed25519_private.pem',
-      'ec_p256_private.pem',
-      'ec_p384_private.pem',
-      'ec_p521_private.pem',
-      'rsa_private.pem',
-      'rsa_private_b.pem',
-      'rsa_private_2048.pem',
-      'rsa_private_pkcs8_bad.pem',
-      'rsa_private_4096.pem',
-      'rsa_private_pkcs8.pem',
-      'x25519_private.pem',
     ].forEach((i) => {
-      const key = createPrivateKey(env[i]);
-      // TODO(soon): Exporting a PrivateKeyObject to JWK currently does not work.
-      // We will work on JWK export/import as a follow up step.
-      throws(() => key.export({ format: 'jwk' }), {
-        message: /Unrecognized or unsupported export/,
+      throws(() => createPrivateKey(env[i]).export({ format: 'jwk' }), {
+        message: 'Key type is invalid for JWK export',
       });
     });
 
+    deepStrictEqual(
+      createPrivateKey(env['ed25519_private.pem']).export({ format: 'jwk' }),
+      {
+        alg: 'EdDSA',
+        crv: 'Ed25519',
+        d: 'wVK6M3SMhQh3NK-7GRrSV-BVWQx1FO5pW8hhQeu_NdA',
+        kty: 'OKP',
+        x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
+      }
+    );
+
+    deepStrictEqual(
+      createPrivateKey(env['x25519_private.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'X25519',
+        d: 'mL_IWm55RrALUGRfJYzw40gEYWMvtRkesP9mj8o8Omc',
+        kty: 'OKP',
+        x: 'aSb8Q-RndwfNnPeOYGYPDUN3uhAPnMLzXyfi-mqfhig',
+      }
+    );
+
+    deepStrictEqual(
+      createPrivateKey(env['ec_p256_private.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'P-256',
+        d: 'DxBsPQPIgMuMyQbxzbb9toew6Ev6e9O6ZhpxLNgmAEo',
+        kty: 'EC',
+        x: 'X0mMYR_uleZSIPjNztIkAS3_ud5LhNpbiIFp6fNf2Gs',
+        y: 'UbJuPy2Xi0lW7UYTBxPK3yGgDu9EAKYIecjkHX5s2lI',
+      }
+    );
+
+    deepStrictEqual(
+      createPrivateKey(env['ec_p384_private.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'P-384',
+        d: 'dwfuHuAtTlMRn7ZBCBm_0grpc1D_4hPeNAgevgelljuC0--k_LDFosDgBlLLmZsi',
+        kty: 'EC',
+        x: 'hON3nzGJgv-08fdHpQxgRJFZzlK-GZDGa5f3KnvM31cvvjJmsj4UeOgIdy3rDAjV',
+        y: 'fidHhtecNCGCfLqmrLjDena1NSzWzWH1u_oUdMKGo5XSabxzD7-8JZxjpc8sR9cl',
+      }
+    );
+
+    deepStrictEqual(
+      createPrivateKey(env['ec_p521_private.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'P-521',
+        d:
+          'ABIIbmn3Gm_Y11uIDkC3g2ijpRxIrJEBY4i_JJYo5OougzTl3BX2ifRluP' +
+          'JMaaHcNerbQH_WdVkLLX86ShlHrRyJ',
+        kty: 'EC',
+        x:
+          'AaLFgjwZtznM3N7qsfb86awVXe6c6djUYOob1FN-kllekv0KEXV0bwcDjPGQ' +
+          'z5f6MxLCbhMeHRavUS6P10rsTtBn',
+        y:
+          'Ad3flexBeAfXceNzRBH128kFbOWD6W41NjwKRqqIF26vmgW_8COldGKZjFkO' +
+          'SEASxPBcvA2iFJRUyQ3whC00j0Np',
+      }
+    );
+
+    deepStrictEqual(
+      createPrivateKey(env['rsa_private.pem']).export({ format: 'jwk' }),
+      {
+        d:
+          'ktnq2LvIMqBj4txP82IEOorIRQGVsw1khbm8A-cEpuEkgM71Yi_0WzupKktuc' +
+          'UeevQ5i0Yh8w9e1SJiTLDRAlJz66kdky9uejiWWl6zR4dyNZVMFYRM43ijLC-' +
+          'P8rPne9Fz16IqHFW5VbJqA1xCBhKmuPMsD71RNxZ4Hrsa7Kt_xglQTYsLbdGI' +
+          'wDmcZihId9VGXRzvmCPsDRf2fCkAj7HDeRxpUdEiEDpajADc-PWikra3r3b40' +
+          'tVHKWm8wxJLivOIN7GiYXKQIW6RhZgH-Rk45JIRNKxNagxdeXUqqyhnwhbTo1' +
+          'Hite0iBDexN9tgoZk0XmdYWBn6ElXHRZ7VCDQ',
+        dp:
+          'qS_Mdr5CMRGGMH0bKhPUWEtAixUGZhJaunX5wY71Xoc_Gh4cnO-b7BNJ_-5L' +
+          '8WZog0vr6PgiLhrqBaCYm2wjpyoG2o2wDHm-NAlzN_wp3G2EFhrSxdOux-S1' +
+          'c0kpRcyoiAO2n29rNDa-jOzwBBcU8ACEPdLOCQl0IEFFJO33tl8',
+        dq:
+          'WAziKpxLKL7LnL4dzDcx8JIPIuwnTxh0plCDdCffyLaT8WJ9lXbXHFTjOvt8' +
+          'WfPrlDP_Ylxmfkw5BbGZOP1VLGjZn2DkH9aMiwNmbDXFPdG0G3hzQovx_9fa' +
+          'jiRV4DWghLHeT9wzJfZabRRiI0VQR472300AVEeX4vgbrDBn600',
+        e: 'AQAB',
+        kty: 'RSA',
+        n:
+          't9xYiIonscC3vz_A2ceR7KhZZlDu_5bye53nCVTcKnWd2seY6UAdKersX6njr' +
+          '83Dd5OVe1BW_wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq-_8iBkrTi8mGN4' +
+          'YCytivE24YI0D4XZMPfkLSpab2y_Hy4DjQKBq1ThZ0UBnK-9IhX37Ju_ZoGYS' +
+          'lTIGIhzyaiYBh7wrZBoPczIEu6et_kN2VnnbRUtkYTF97ggcv5h-hDpUQjQW0' +
+          'ZgOMcTc8n-RkGpIt0_iM_bTjI3Tz_gsFdi6hHcpZgbopPL630296iByyigQCP' +
+          'JVzdusFrQN5DeC-zT_nGypQkZanLb4ZspSx9Q',
+        p:
+          '8UovlB4nrBm7xH-u7XXBMbqxADQm5vaEZxw9eluc-tP7cIAI4sglMIvL_FMpb' +
+          'd2pEeP_BkR76NTDzzDuPAZvUGRavgEjy0O9j2NAs_WPK4tZF-vFdunhnSh4EH' +
+          'AF4Ij9kbsUi90NOpbGfVqPdOaHqzgHKoR23Cuusk9wFQ2XTV8',
+        q:
+          'wxHdEYT9xrpfrHPqSBQPpO0dWGKJEkrWOb-76rSfuL8wGR4OBNmQdhLuU9zTI' +
+          'h22pog-XPnLPAecC-4yu_wtJ2SPCKiKDbJBre0CKPyRfGqzvA3njXwMxXazU4' +
+          'kGs-2Fg-xu_iKbaIjxXrclBLhkxhBtySrwAFhxxOk6fFcPLSs',
+        qi:
+          'k7czBCT9rHn_PNwCa17hlTy88C4vXkwbz83Oa-aX5L4e5gw5lhcR2ZuZHLb2' +
+          'r6oMt9rlD7EIDItSs-u21LOXWPTAlazdnpYUyw_CzogM_PN-qNwMRXn5uXFF' +
+          'hmlP2mVg2EdELTahXch8kWqHaCSX53yvqCtRKu_j76V31TfQZGM',
+      }
+    );
+
+    // TODO(now): JWK Import
     throws(() => createPrivateKey({ key: {}, format: 'jwk' }), {
       message: 'JWK private key import is not yet implemented',
     });
@@ -1045,27 +1135,86 @@ export const public_key_tocryptokey = {
 
 export const public_key_jwk = {
   test(_, env) {
+    // These are invalid for JWK export
     [
-      'dsa_public_1025.pem',
-      'dsa_public.pem',
-      'ec_p256_public.pem',
-      'ec_p384_public.pem',
-      'ec_p521_public.pem',
-      'ed25519_public.pem',
-      'rsa_public_2048.pem',
-      'rsa_public_4096.pem',
-      'rsa_public_b.pem',
-      'rsa_public.pem',
-      'x25519_public.pem',
+      'dsa_private.pem',
+      'dsa_private_1025.pem',
+      'dsa_private_pkcs8.pem',
     ].forEach((i) => {
-      const key = createPublicKey(env[i]);
-      // TODO(soon): Exporting a PublicKeyObject to JWK currently does not work.
-      // We will work on JWK export/import as a follow up step.
-      throws(() => key.export({ format: 'jwk' }), {
-        message: /Unrecognized or unsupported export/,
+      throws(() => createPrivateKey(env[i]).export({ format: 'jwk' }), {
+        message: 'Key type is invalid for JWK export',
       });
     });
 
+    deepStrictEqual(
+      createPublicKey(env['ec_p256_public.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'P-256',
+        kty: 'EC',
+        x: 'X0mMYR_uleZSIPjNztIkAS3_ud5LhNpbiIFp6fNf2Gs',
+        y: 'UbJuPy2Xi0lW7UYTBxPK3yGgDu9EAKYIecjkHX5s2lI',
+      }
+    );
+
+    deepStrictEqual(
+      createPublicKey(env['ec_p384_public.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'P-384',
+        kty: 'EC',
+        x: 'hON3nzGJgv-08fdHpQxgRJFZzlK-GZDGa5f3KnvM31cvvjJmsj4UeOgIdy3rDAjV',
+        y: 'fidHhtecNCGCfLqmrLjDena1NSzWzWH1u_oUdMKGo5XSabxzD7-8JZxjpc8sR9cl',
+      }
+    );
+
+    deepStrictEqual(
+      createPublicKey(env['ec_p521_public.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'P-521',
+        kty: 'EC',
+        x:
+          'AaLFgjwZtznM3N7qsfb86awVXe6c6djUYOob1FN-kllekv0KEXV0bwcDjPGQz5f' +
+          '6MxLCbhMeHRavUS6P10rsTtBn',
+        y:
+          'Ad3flexBeAfXceNzRBH128kFbOWD6W41NjwKRqqIF26vmgW_8COldGKZjFkOSEA' +
+          'SxPBcvA2iFJRUyQ3whC00j0Np',
+      }
+    );
+
+    deepStrictEqual(
+      createPublicKey(env['ed25519_public.pem']).export({ format: 'jwk' }),
+      {
+        alg: 'EdDSA',
+        crv: 'Ed25519',
+        kty: 'OKP',
+        x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
+      }
+    );
+
+    deepStrictEqual(
+      createPublicKey(env['x25519_public.pem']).export({ format: 'jwk' }),
+      {
+        crv: 'X25519',
+        kty: 'OKP',
+        x: 'aSb8Q-RndwfNnPeOYGYPDUN3uhAPnMLzXyfi-mqfhig',
+      }
+    );
+
+    deepStrictEqual(
+      createPublicKey(env['rsa_public_2048.pem']).export({ format: 'jwk' }),
+      {
+        e: 'AQAB',
+        kty: 'RSA',
+        n:
+          'rk4OqxBqU5_k0FoUDU7CpZpjz6YJEXUpyqeJmFRVZPMUv_Rc7U4seLY-Qp6k26' +
+          'T_wlQ2WJWuyY-VJcbQNWLvjJWks5HWknwDuVs6sjuTM8CfHWn1960JkK5Ec2Tj' +
+          'RhCQ1KJy-uc3GJLtWb4rWVgTbbaaC5fiR1_GeuJ8JH1Q50lB3mDsNGIk1U5jhN' +
+          'aYY82hYvlbErf6Ft5njHK0BOM5OTvQ6BBv7c363WNG7tYlNw1J40dup9OQPo5J' +
+          'mXN_h-sRbdgG8iUxrkRibuGv7loh52QQgq2snznuRMdKidRfUZjCDGgwbgK23Q' +
+          '7n8VZ9Y10j8PIvPTLJ83PX4lOEA37Jlw',
+      }
+    );
+
+    // TODO(now): JWK import
     throws(() => createPublicKey({ key: {}, format: 'jwk' }), {
       message: 'JWK public key import is not yet implemented',
     });

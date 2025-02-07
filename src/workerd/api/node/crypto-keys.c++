@@ -5,6 +5,7 @@
 #include "util.h"
 
 #include <workerd/api/crypto/impl.h>
+#include <workerd/api/crypto/jwk.h>
 
 #include <ncrypto.h>
 #include <openssl/crypto.h>
@@ -287,6 +288,16 @@ class AsymmetricKey final: public CryptoKey::Impl {
     }
 
     JSG_FAIL_REQUIRE(Error, "Failed to export key");
+  }
+
+  SubtleCrypto::ExportKeyData exportKey(jsg::Lock& js, kj::StringPtr format) const override final {
+    if (format == "jwk") {
+      auto res = toJwk(key, isPrivate ? KeyType::PRIVATE : KeyType::PUBLIC);
+      JSG_REQUIRE(res.kty != "INVALID"_kj, Error, "Key type is invalid for JWK export");
+      return kj::mv(res);
+    }
+
+    return exportKeyExt(js, format, "pkcs8"_kj);
   }
 
   bool equals(const CryptoKey::Impl& other) const override final {
