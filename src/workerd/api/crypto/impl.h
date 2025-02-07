@@ -442,6 +442,11 @@ ncrypto::Buffer<T> ToNcryptoBuffer(kj::ArrayPtr<T> array) {
   return ncrypto::Buffer<T>(array.begin(), array.size());
 }
 
+kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input);
+kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input);
+jsg::BufferSource simdutfBase64UrlDecodeChecked(
+    jsg::Lock& js, kj::StringPtr input, kj::StringPtr error);
+
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(DH);

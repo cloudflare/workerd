@@ -12,6 +12,7 @@ namespace workerd::api {
 SubtleCrypto::JsonWebKey toJwk(
     const ncrypto::EVPKeyPointer& key, KeyType keyType = KeyType::PUBLIC);
 
-ncrypto::EVPKeyPointer fromJwk(const SubtleCrypto::JsonWebKey& jwk);
+ncrypto::EVPKeyPointer fromJwk(
+    const SubtleCrypto::JsonWebKey& jwk, KeyType keyType = KeyType::PUBLIC);
 
 }  // namespace workerd::api

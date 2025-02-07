@@ -441,7 +441,12 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
     }
     KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
       JSG_REQUIRE(options.format == "jwk"_kj, TypeError, "Invalid format for JWK key creation");
-      JSG_FAIL_REQUIRE(Error, "JWK private key import is not yet implemented");
+
+      if (auto key = fromJwk(jwk, KeyType::PRIVATE)) {
+        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(key)));
+      }
+
+      JSG_FAIL_REQUIRE(Error, "JWK private key import is not implemented for this key type");
     }
     KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
       // This path shouldn't be reachable.
@@ -495,7 +500,12 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
     }
     KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
       JSG_REQUIRE(options.format == "jwk"_kj, TypeError, "Invalid format for JWK key creation");
-      JSG_FAIL_REQUIRE(Error, "JWK public key import is not yet implemented");
+
+      if (auto key = fromJwk(jwk, KeyType::PUBLIC)) {
+        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(key)));
+      }
+
+      JSG_FAIL_REQUIRE(Error, "JWK public key import is not implemented for this key type");
     }
     KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
       JSG_FAIL_REQUIRE(Error, "Getting a public key from a private key is not yet implemented");

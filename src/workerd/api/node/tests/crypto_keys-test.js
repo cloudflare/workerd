@@ -693,7 +693,7 @@ export const private_key_import_rsa_der = {
   },
 };
 
-export const private_key_jwk = {
+export const private_key_jwk_export = {
   test(_, env) {
     // These are invalid for JWK export
     [
@@ -807,11 +807,211 @@ export const private_key_jwk = {
           'hmlP2mVg2EdELTahXch8kWqHaCSX53yvqCtRKu_j76V31TfQZGM',
       }
     );
+  },
+};
 
-    // TODO(now): JWK Import
-    throws(() => createPrivateKey({ key: {}, format: 'jwk' }), {
-      message: 'JWK private key import is not yet implemented',
+export const rsa_private_key_jwk_import = {
+  test() {
+    const jwk = {
+      e: 'AQAB',
+      n:
+        't9xYiIonscC3vz_A2ceR7KhZZlDu_5bye53nCVTcKnWd2seY6UAdKersX6njr83Dd5OVe' +
+        '1BW_wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq-_8iBkrTi8mGN4YCytivE24YI0D4XZ' +
+        'MPfkLSpab2y_Hy4DjQKBq1ThZ0UBnK-9IhX37Ju_ZoGYSlTIGIhzyaiYBh7wrZBoPczIE' +
+        'u6et_kN2VnnbRUtkYTF97ggcv5h-hDpUQjQW0ZgOMcTc8n-RkGpIt0_iM_bTjI3Tz_gsF' +
+        'di6hHcpZgbopPL630296iByyigQCPJVzdusFrQN5DeC-zT_nGypQkZanLb4ZspSx9Q',
+      d:
+        'ktnq2LvIMqBj4txP82IEOorIRQGVsw1khbm8A-cEpuEkgM71Yi_0WzupKktucUeevQ5i0' +
+        'Yh8w9e1SJiTLDRAlJz66kdky9uejiWWl6zR4dyNZVMFYRM43ijLC-P8rPne9Fz16IqHFW' +
+        '5VbJqA1xCBhKmuPMsD71RNxZ4Hrsa7Kt_xglQTYsLbdGIwDmcZihId9VGXRzvmCPsDRf2' +
+        'fCkAj7HDeRxpUdEiEDpajADc-PWikra3r3b40tVHKWm8wxJLivOIN7GiYXKQIW6RhZgH-' +
+        'Rk45JIRNKxNagxdeXUqqyhnwhbTo1Hite0iBDexN9tgoZk0XmdYWBn6ElXHRZ7VCDQ',
+      p:
+        '8UovlB4nrBm7xH-u7XXBMbqxADQm5vaEZxw9eluc-tP7cIAI4sglMIvL_FMpbd2pEeP_B' +
+        'kR76NTDzzDuPAZvUGRavgEjy0O9j2NAs_WPK4tZF-vFdunhnSh4EHAF4Ij9kbsUi90NOp' +
+        'bGfVqPdOaHqzgHKoR23Cuusk9wFQ2XTV8',
+      q:
+        'wxHdEYT9xrpfrHPqSBQPpO0dWGKJEkrWOb-76rSfuL8wGR4OBNmQdhLuU9zTIh22pog-X' +
+        'PnLPAecC-4yu_wtJ2SPCKiKDbJBre0CKPyRfGqzvA3njXwMxXazU4kGs-2Fg-xu_iKbaI' +
+        'jxXrclBLhkxhBtySrwAFhxxOk6fFcPLSs',
+      dp:
+        'qS_Mdr5CMRGGMH0bKhPUWEtAixUGZhJaunX5wY71Xoc_Gh4cnO-b7BNJ_-5L8WZog0vr' +
+        '6PgiLhrqBaCYm2wjpyoG2o2wDHm-NAlzN_wp3G2EFhrSxdOux-S1c0kpRcyoiAO2n29rN' +
+        'Da-jOzwBBcU8ACEPdLOCQl0IEFFJO33tl8',
+      dq:
+        'WAziKpxLKL7LnL4dzDcx8JIPIuwnTxh0plCDdCffyLaT8WJ9lXbXHFTjOvt8WfPrlDP_' +
+        'Ylxmfkw5BbGZOP1VLGjZn2DkH9aMiwNmbDXFPdG0G3hzQovx_9fajiRV4DWghLHeT9wzJ' +
+        'fZabRRiI0VQR472300AVEeX4vgbrDBn600',
+      qi:
+        'k7czBCT9rHn_PNwCa17hlTy88C4vXkwbz83Oa-aX5L4e5gw5lhcR2ZuZHLb2r6oMt9rl' +
+        'D7EIDItSs-u21LOXWPTAlazdnpYUyw_CzogM_PN-qNwMRXn5uXFFhmlP2mVg2EdELTahX' +
+        'ch8kWqHaCSX53yvqCtRKu_j76V31TfQZGM',
+      kty: 'RSA',
+    };
+
+    const key = createPrivateKey({ key: jwk, format: 'jwk' });
+    strictEqual(key.asymmetricKeyType, 'rsa');
+    deepStrictEqual(key.asymmetricKeyDetails, {
+      modulusLength: 2048,
+      publicExponent: 65537n,
     });
+
+    // The fail due to missing information in the JWK
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'RSA',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'RSA JWK missing n parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'RSA',
+            n:
+              't9xYiIonscC3vz_A2ceR7KhZZlDu_5bye53nCVTcKnWd2seY6UAdKersX6njr83Dd5OVe' +
+              '1BW_wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq-_8iBkrTi8mGN4YCytivE24YI0D4XZ' +
+              'MPfkLSpab2y_Hy4DjQKBq1ThZ0UBnK-9IhX37Ju_ZoGYSlTIGIhzyaiYBh7wrZBoPczIE' +
+              'u6et_kN2VnnbRUtkYTF97ggcv5h-hDpUQjQW0ZgOMcTc8n-RkGpIt0_iM_bTjI3Tz_gsF' +
+              'di6hHcpZgbopPL630296iByyigQCPJVzdusFrQN5DeC-zT_nGypQkZanLb4ZspSx9Q',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'RSA JWK missing e parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'RSA',
+            n:
+              't9xYiIonscC3vz_A2ceR7KhZZlDu_5bye53nCVTcKnWd2seY6UAdKersX6njr83Dd5OVe' +
+              '1BW_wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq-_8iBkrTi8mGN4YCytivE24YI0D4XZ' +
+              'MPfkLSpab2y_Hy4DjQKBq1ThZ0UBnK-9IhX37Ju_ZoGYSlTIGIhzyaiYBh7wrZBoPczIE' +
+              'u6et_kN2VnnbRUtkYTF97ggcv5h-hDpUQjQW0ZgOMcTc8n-RkGpIt0_iM_bTjI3Tz_gsF' +
+              'di6hHcpZgbopPL630296iByyigQCPJVzdusFrQN5DeC-zT_nGypQkZanLb4ZspSx9Q',
+            e: 'AQAB',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'RSA JWK missing d parameter',
+      }
+    );
+  },
+};
+
+export const ec_private_key_jwk_import = {
+  test() {
+    const jwk = {
+      crv: 'P-256',
+      d: 'DxBsPQPIgMuMyQbxzbb9toew6Ev6e9O6ZhpxLNgmAEo',
+      kty: 'EC',
+      x: 'X0mMYR_uleZSIPjNztIkAS3_ud5LhNpbiIFp6fNf2Gs',
+      y: 'UbJuPy2Xi0lW7UYTBxPK3yGgDu9EAKYIecjkHX5s2lI',
+    };
+
+    const key = createPrivateKey({ key: jwk, format: 'jwk' });
+    strictEqual(key.asymmetricKeyType, 'ec');
+    deepStrictEqual(key.asymmetricKeyDetails, { namedCurve: 'prime256v1' });
+
+    // The fail due to missing information in the JWK
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'EC',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'EC JWK missing crv parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'EC',
+            crv: 'P-256',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'EC JWK missing x parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'EC',
+            crv: 'P-256',
+            x: 'X0mMYR_uleZSIPjNztIkAS3_ud5LhNpbiIFp6fNf2Gs',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'EC JWK missing y parameter',
+      }
+    );
+  },
+};
+
+export const ed_private_key_jwk_import = {
+  test() {
+    const jwk = {
+      crv: 'Ed25519',
+      x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
+      d: 'wVK6M3SMhQh3NK-7GRrSV-BVWQx1FO5pW8hhQeu_NdA',
+      kty: 'OKP',
+    };
+
+    const key = createPrivateKey({ key: jwk, format: 'jwk' });
+    strictEqual(key.asymmetricKeyType, 'ed25519');
+
+    const jwk2 = {
+      crv: 'X25519',
+      x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
+      d: 'wVK6M3SMhQh3NK-7GRrSV-BVWQx1FO5pW8hhQeu_NdA',
+      kty: 'OKP',
+    };
+
+    const key2 = createPrivateKey({ key: jwk2, format: 'jwk' });
+    strictEqual(key2.asymmetricKeyType, 'x25519');
+
+    // The fail due to missing information in the JWK
+    throws(
+      () => {
+        createPrivateKey({
+          key: {
+            kty: 'OKP',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'OKP JWK missing crv parameter',
+      }
+    );
   },
 };
 
@@ -1133,7 +1333,7 @@ export const public_key_tocryptokey = {
   },
 };
 
-export const public_key_jwk = {
+export const export_public_key_jwk = {
   test(_, env) {
     // These are invalid for JWK export
     [
@@ -1216,7 +1416,162 @@ export const public_key_jwk = {
 
     // TODO(now): JWK import
     throws(() => createPublicKey({ key: {}, format: 'jwk' }), {
-      message: 'JWK public key import is not yet implemented',
+      message: 'JWK public key import is not implemented for this key type',
     });
+  },
+};
+
+export const rsa_public_key_jwk_import = {
+  test() {
+    const jwk = {
+      e: 'AQAB',
+      n:
+        't9xYiIonscC3vz_A2ceR7KhZZlDu_5bye53nCVTcKnWd2seY6UAdKersX6njr83Dd5OVe' +
+        '1BW_wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq-_8iBkrTi8mGN4YCytivE24YI0D4XZ' +
+        'MPfkLSpab2y_Hy4DjQKBq1ThZ0UBnK-9IhX37Ju_ZoGYSlTIGIhzyaiYBh7wrZBoPczIE' +
+        'u6et_kN2VnnbRUtkYTF97ggcv5h-hDpUQjQW0ZgOMcTc8n-RkGpIt0_iM_bTjI3Tz_gsF' +
+        'di6hHcpZgbopPL630296iByyigQCPJVzdusFrQN5DeC-zT_nGypQkZanLb4ZspSx9Q',
+      kty: 'RSA',
+    };
+
+    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    strictEqual(key.asymmetricKeyType, 'rsa');
+    deepStrictEqual(key.asymmetricKeyDetails, {
+      modulusLength: 2048,
+      publicExponent: 65537n,
+    });
+
+    // The fail due to missing information in the JWK
+    throws(
+      () => {
+        createPublicKey({
+          key: {
+            kty: 'RSA',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'RSA JWK missing n parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPublicKey({
+          key: {
+            kty: 'RSA',
+            n:
+              't9xYiIonscC3vz_A2ceR7KhZZlDu_5bye53nCVTcKnWd2seY6UAdKersX6njr83Dd5OVe' +
+              '1BW_wJvp5EjWTAGYbFswlNmeD44edEGM939B6Lq-_8iBkrTi8mGN4YCytivE24YI0D4XZ' +
+              'MPfkLSpab2y_Hy4DjQKBq1ThZ0UBnK-9IhX37Ju_ZoGYSlTIGIhzyaiYBh7wrZBoPczIE' +
+              'u6et_kN2VnnbRUtkYTF97ggcv5h-hDpUQjQW0ZgOMcTc8n-RkGpIt0_iM_bTjI3Tz_gsF' +
+              'di6hHcpZgbopPL630296iByyigQCPJVzdusFrQN5DeC-zT_nGypQkZanLb4ZspSx9Q',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'RSA JWK missing e parameter',
+      }
+    );
+  },
+};
+
+export const ec_public_key_jwk_import = {
+  test() {
+    const jwk = {
+      crv: 'P-256',
+      kty: 'EC',
+      x: 'X0mMYR_uleZSIPjNztIkAS3_ud5LhNpbiIFp6fNf2Gs',
+      y: 'UbJuPy2Xi0lW7UYTBxPK3yGgDu9EAKYIecjkHX5s2lI',
+    };
+
+    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    strictEqual(key.asymmetricKeyType, 'ec');
+    deepStrictEqual(key.asymmetricKeyDetails, { namedCurve: 'prime256v1' });
+
+    // The fail due to missing information in the JWK
+    throws(
+      () => {
+        createPublicKey({
+          key: {
+            kty: 'EC',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'EC JWK missing crv parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPublicKey({
+          key: {
+            kty: 'EC',
+            crv: 'P-256',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'EC JWK missing x parameter',
+      }
+    );
+
+    throws(
+      () => {
+        createPublicKey({
+          key: {
+            kty: 'EC',
+            crv: 'P-256',
+            x: 'X0mMYR_uleZSIPjNztIkAS3_ud5LhNpbiIFp6fNf2Gs',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'EC JWK missing y parameter',
+      }
+    );
+  },
+};
+
+export const ed_public_key_jwk_import = {
+  test() {
+    const jwk = {
+      crv: 'Ed25519',
+      x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
+      kty: 'OKP',
+    };
+
+    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    strictEqual(key.asymmetricKeyType, 'ed25519');
+
+    const jwk2 = {
+      crv: 'X25519',
+      x: 'K1wIouqnuiA04b3WrMa-xKIKIpfHetNZRv3h9fBf768',
+      kty: 'OKP',
+    };
+
+    const key2 = createPublicKey({ key: jwk2, format: 'jwk' });
+    strictEqual(key2.asymmetricKeyType, 'x25519');
+
+    // The fail due to missing information in the JWK
+    throws(
+      () => {
+        createPublicKey({
+          key: {
+            kty: 'OKP',
+          },
+          format: 'jwk',
+        });
+      },
+      {
+        message: 'OKP JWK missing crv parameter',
+      }
+    );
   },
 };
