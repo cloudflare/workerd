@@ -6,6 +6,8 @@ import {
   LOAD_WHEELS_FROM_R2,
   LOCKFILE,
   LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
+  PACKAGES_VERSION,
+  USING_OLDEST_PACKAGES_VERSION,
 } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
@@ -24,7 +26,7 @@ function canonicalizePackageName(name: string): string {
 
 // The "name" field in the lockfile is not canonicalized
 export const STDLIB_PACKAGES: string[] = Object.values(LOCKFILE.packages)
-  .filter(({ install_dir }) => install_dir === 'stdlib')
+  .filter(({ package_type }) => package_type === 'cpython_module')
   .map(({ name }) => canonicalizePackageName(name));
 
 // Each item in the list is an element of the file path, for example
@@ -183,9 +185,26 @@ function disabledLoadPackage(): never {
  * Get the set of transitive requirements from the REQUIREMENTS metadata.
  */
 function getTransitiveRequirements(): Set<string> {
-  const requirements = REQUIREMENTS.map(canonicalizePackageName);
+  // TODO: Package snapshot built on '20240829.4' is broken when the stdlib packages are added
+  // here, so we disable this logic. We should remove this check once the next Python and packages
+  // versions are rolled out.
+  let requirements = REQUIREMENTS;
+  if (!USING_OLDEST_PACKAGES_VERSION) {
+    // We have had a regression where the lockfile format changed and so no stdlib packages were
+    // found. This created a strange and unfriendly error message, so we throw a nice error here if
+    // there are no stdlib packages to avoid this if it happens in the future.
+    if (STDLIB_PACKAGES.length == 0) {
+      throw new Error(
+        'Found no STDLIB_PACKAGES, expected at least 1. Lock file corrupted?'
+      );
+    }
+    requirements = Array.from(
+      new Set(requirements).union(new Set(STDLIB_PACKAGES)),
+      canonicalizePackageName
+    );
+  }
+
   // resolve transitive dependencies of requirements and if IN_WORKERD install them from the cdn.
-  // TODO(later): use current package's LOCKFILE instead of the global.
   const packageDatas = recursiveDependencies(LOCKFILE, requirements);
   return new Set(packageDatas.map(({ name }) => canonicalizePackageName(name)));
 }

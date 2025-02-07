@@ -15,6 +15,7 @@ import {
   LOAD_WHEELS_FROM_R2,
   LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
   PACKAGES_VERSION,
+  USING_OLDEST_PACKAGES_VERSION,
 } from 'pyodide-internal:metadata';
 import {
   SITE_PACKAGES,
@@ -149,8 +150,19 @@ async function loadPackagesImpl(
   Module.FS.mount(tarFS, { info }, path);
 }
 
+/**
+ * Downloads the requirements specified and loads them into Pyodide. Note that this does not
+ * do any dependency resolution, it just installs the requirements that are specified. See
+ * `getTransitiveRequirements` for the code that deals with this.
+ */
 export async function loadPackages(Module: Module, requirements: Set<string>) {
-  const pkgsToLoad = requirements.union(new Set(STDLIB_PACKAGES));
+  let pkgsToLoad = requirements;
+  // TODO: Package snapshot created with '20240829.4' needs the stdlib packages to be added here.
+  // We should remove this check once the next Python and packages versions are rolled
+  // out.
+  if (USING_OLDEST_PACKAGES_VERSION) {
+    pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
+  }
   if (LOAD_WHEELS_FROM_R2) {
     await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromR2);
   } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
