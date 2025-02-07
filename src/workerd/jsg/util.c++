@@ -17,6 +17,7 @@
 #include <cxxabi.h>
 #endif
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 namespace workerd::jsg {
@@ -125,12 +126,11 @@ InternalErrorId makeInternalErrorId() {
 }
 
 kj::String renderInternalError(InternalErrorId& internalErrorId) {
-  // TODO(now): put "internal error" change behind autogate or compatibility flag?
-  //
-  // It's possible that existing user error handling systems could rely on an exact match with the
-  // existing "internal error" string.  On the other hand, feature flags need a jsg::Lock to read,
-  // which may not be available in all contexts that generate internal errors?
-  return kj::str("internal error; reference = ", internalErrorId);
+  if (util::Autogate::isEnabled(util::AutogateKey::INTERNAL_ERROR_ID)) {
+    return kj::str("internal error; reference = ", internalErrorId);
+  } else {
+    return kj::str("internal error");
+  }
 }
 
 }  // namespace
