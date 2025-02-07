@@ -208,7 +208,7 @@ class BackingStore {
     return BackingStore(backingStore, byteLength, byteOffset, elementSize, ctor, integerType);
   }
 
-  template <typename T = v8::Uint8Array>
+  template <class T = v8::Uint8Array>
   inline BackingStore copy(jsg::Lock& js) {
     if (byteLength == 0) return BackingStore::alloc<T>(js, 0);
     auto dest = BackingStore::alloc<T>(js, byteLength);
@@ -394,7 +394,7 @@ class BufferSource {
     return BufferSource(js, KJ_ASSERT_NONNULL(maybeBackingStore).clone());
   }
 
-  template <typename T = v8::Uint8Array>
+  template <class T = v8::Uint8Array>
   inline BufferSource copy(jsg::Lock& js) {
     KJ_IF_SOME(backing, maybeBackingStore) {
       return BufferSource(js, backing.copy<T>(js));
@@ -404,7 +404,7 @@ class BufferSource {
 
   inline void setToZero() {
     KJ_IF_SOME(backing, maybeBackingStore) {
-      memset(backing.asArrayPtr().begin(), 0, backing.size());
+      backing.asArrayPtr().fill(0);
     }
   }
 

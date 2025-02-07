@@ -401,12 +401,8 @@ std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(
     config.passphrase = kj::mv(dp);
   }
 
-  ncrypto::Buffer<const kj::byte> buf{
-    .data = buffer.asArrayPtr().begin(),
-    .len = buffer.size(),
-  };
-
-  auto result = ncrypto::EVPKeyPointer::TryParsePrivateKey(config, buf);
+  auto result =
+      ncrypto::EVPKeyPointer::TryParsePrivateKey(config, ToNcryptoBuffer(buffer.asArrayPtr()));
 
   if (result.has_value) return kj::mv(result.value);
   return std::nullopt;
@@ -471,12 +467,8 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
 
         ncrypto::EVPKeyPointer::PublicKeyEncodingConfig config(true, format, enc);
 
-        ncrypto::Buffer<const kj::byte> buf{
-          .data = buffer.asArrayPtr().begin(),
-          .len = buffer.size(),
-        };
-
-        auto result = ncrypto::EVPKeyPointer::TryParsePublicKey(config, buf);
+        auto result = ncrypto::EVPKeyPointer::TryParsePublicKey(
+            config, ToNcryptoBuffer(buffer.asArrayPtr().asConst()));
 
         if (result.has_value) {
           return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(result.value)));

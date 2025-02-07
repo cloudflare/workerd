@@ -1,5 +1,7 @@
 #include "spkac.h"
 
+#include "impl.h"
+
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 
@@ -27,19 +29,11 @@ bool verifySpkac(kj::ArrayPtr<const kj::byte> input) {
         "return false even if the SPKAC signature is valid. This is a known limitation.");
   }
 
-  ncrypto::Buffer<const char> buf{
-    .data = reinterpret_cast<const char*>(input.begin()),
-    .len = input.size(),
-  };
-  return ncrypto::VerifySpkac(buf);
+  return ncrypto::VerifySpkac(ToNcryptoBuffer(input.asChars()));
 }
 
 kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
-  ncrypto::Buffer<const char> buf{
-    .data = reinterpret_cast<const char*>(input.begin()),
-    .len = input.size(),
-  };
-  if (auto bio = ncrypto::ExportPublicKey(buf)) {
+  if (auto bio = ncrypto::ExportPublicKey(ToNcryptoBuffer(input.asChars()))) {
     BUF_MEM* bptr = bio;
     auto buf = jsg::BackingStore::alloc(js, bptr->length);
     auto aptr = kj::arrayPtr(bptr->data, bptr->length);
@@ -50,11 +44,7 @@ kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::ArrayPtr<const k
 }
 
 kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
-  ncrypto::Buffer<const char> buf{
-    .data = reinterpret_cast<const char*>(input.begin()),
-    .len = input.size(),
-  };
-  if (auto dp = ncrypto::ExportChallenge(buf)) {
+  if (auto dp = ncrypto::ExportChallenge(ToNcryptoBuffer(input.asChars()))) {
     auto dest = jsg::BackingStore::alloc(js, dp.size());
     auto src = kj::arrayPtr(dp.get<kj::byte>(), dp.size());
     dest.asArrayPtr().copyFrom(src);

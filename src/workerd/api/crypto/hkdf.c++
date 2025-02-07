@@ -78,11 +78,6 @@ class HkdfKey final: public CryptoKey::Impl {
   ZeroOnFree keyData;
   CryptoKey::KeyAlgorithm keyAlgorithm;
 };
-
-template <typename T = const kj::byte>
-ncrypto::Buffer<T> ToBuffer(kj::ArrayPtr<T> array) {
-  return ncrypto::Buffer<T>(array.begin(), array.size());
-}
 }  // namespace
 
 kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
@@ -95,8 +90,9 @@ kj::Maybe<jsg::BufferSource> hkdf(jsg::Lock& js,
   // buffer in the v8 isolate heap then generate the HKDF result into that.
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
   auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  ncrypto::Buffer<kj::byte> buf(backing.asArrayPtr().begin(), backing.size());
-  if (ncrypto::hkdfInfo(digest, ToBuffer(key), ToBuffer(info), ToBuffer(salt), length, &buf)) {
+  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
+  if (ncrypto::hkdfInfo(digest, ToNcryptoBuffer(key), ToNcryptoBuffer(info), ToNcryptoBuffer(salt),
+          length, &buf)) {
     return jsg::BufferSource(js, kj::mv(backing));
   }
 

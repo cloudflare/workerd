@@ -98,11 +98,6 @@ class Pbkdf2Key final: public CryptoKey::Impl {
   ZeroOnFree keyData;
   CryptoKey::KeyAlgorithm keyAlgorithm;
 };
-
-template <typename T = const kj::byte>
-ncrypto::Buffer<T> ToBuffer(kj::ArrayPtr<T> array) {
-  return ncrypto::Buffer<T>(array.begin(), array.size());
-}
 }  // namespace
 
 kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
@@ -113,12 +108,9 @@ kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> salt) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
   auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  ncrypto::Buffer<kj::byte> buf(backing.asArrayPtr().begin(), backing.size());
-  ncrypto::Buffer<const char> passbuf{
-    .data = reinterpret_cast<const char*>(password.begin()),
-    .len = password.size(),
-  };
-  if (ncrypto::pbkdf2Into(digest, passbuf, ToBuffer(salt), iterations, length, &buf)) {
+  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
+  if (ncrypto::pbkdf2Into(digest, ToNcryptoBuffer(password.asChars()), ToNcryptoBuffer(salt),
+          iterations, length, &buf)) {
     return jsg::BufferSource(js, kj::mv(backing));
   }
   return kj::none;

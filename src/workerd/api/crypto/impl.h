@@ -11,6 +11,7 @@
 
 #include <workerd/api/util.h>
 
+#include <ncrypto.h>
 #include <openssl/base.h>
 #include <openssl/bn.h>
 #include <openssl/err.h>
@@ -435,6 +436,12 @@ kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key);
 
 // If the input bytes are a valid ASN.1 sequence, return them minus the prefix.
 kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetAsn1Sequence(kj::ArrayPtr<const kj::byte> data);
+
+template <typename T = const kj::byte>
+ncrypto::Buffer<T> ToNcryptoBuffer(kj::ArrayPtr<T> array) {
+  return ncrypto::Buffer<T>(array.begin(), array.size());
+}
+
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(DH);
