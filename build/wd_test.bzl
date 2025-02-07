@@ -57,16 +57,7 @@ def wd_test(
         **kwargs
     )
 
-def _wd_test_impl(ctx):
-    is_windows = ctx.target_platform_has_constraint(ctx.attr._platforms_os_windows[platform_common.ConstraintValueInfo])
-
-    # Bazel insists that the rule must actually create the executable that it intends to run; it
-    # can't just specify some other executable with some args. OK, fine, we'll use a script that
-    # just execs its args.
-    if is_windows:
-        # Batch script executables must end with ".bat"
-        executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
-        content = """
+WINDOWS_TEMPLATE = """
 @echo off
 setlocal EnableDelayedExpansion
 
@@ -87,10 +78,9 @@ if defined SIDECAR_PID (
 )
 
 exit /b !TEST_EXIT!
-""".replace("$(SIDECAR)", ctx.file.sidecar.path if ctx.file.sidecar else "")
-    else:
-        executable = ctx.outputs.executable
-        content = """#!/bin/sh
+"""
+
+SH_TEMPLATE = """#!/bin/sh
 set -e
 
 cleanup() {
@@ -110,7 +100,21 @@ fi
 
 # Run the actual test
 "$@" -dTEST_TMPDIR=$TEST_TMPDIR
-""".replace("$(SIDECAR)", ctx.file.sidecar.short_path if ctx.file.sidecar else "")
+"""
+
+def _wd_test_impl(ctx):
+    is_windows = ctx.target_platform_has_constraint(ctx.attr._platforms_os_windows[platform_common.ConstraintValueInfo])
+
+    # Bazel insists that the rule must actually create the executable that it intends to run; it
+    # can't just specify some other executable with some args. OK, fine, we'll use a script that
+    # just execs its args.
+    if is_windows:
+        # Batch script executables must end with ".bat"
+        executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
+        content = WINDOWS_TEMPLATE.replace("$(SIDECAR)", ctx.file.sidecar.path if ctx.file.sidecar else "")
+    else:
+        executable = ctx.outputs.executable
+        content = SH_TEMPLATE.replace("$(SIDECAR)", ctx.file.sidecar.short_path if ctx.file.sidecar else "")
 
     ctx.actions.write(
         output = executable,
