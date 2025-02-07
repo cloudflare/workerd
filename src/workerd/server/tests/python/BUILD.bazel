@@ -57,3 +57,5 @@ gen_import_tests(
         ],
     },
 )
+
+py_wd_test("numpy")
