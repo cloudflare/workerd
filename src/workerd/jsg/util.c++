@@ -6,6 +6,8 @@
 #include "ser.h"
 #include "setup.h"
 
+#include <openssl/rand.h>
+
 #include <kj/debug.h>
 
 #include <cstdlib>
@@ -15,6 +17,7 @@
 #include <cxxabi.h>
 #endif
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 namespace workerd::jsg {
@@ -90,9 +93,52 @@ kj::String typeName(const std::type_info& type) {
   return kj::mv(result);
 }
 
+namespace {
+
+// For internal errors, we generate an ID to include when rendering user-facing "internal error"
+// exceptions and writing internal exception logs, to make it easier to search for logs
+// corresponding to "internal error" exceptions reported by users.
+//
+// We'll use an ID of 24 base-32 encoded characters, just because its relatively simple to
+// generate from random bytes.  This should give us a value with 120 bits of uniqueness, which is
+// about as good as a UUID.
+//
+// (We're not using base-64 encoding to avoid issues with case insensitive search, as well as
+// ensuring that the id is easy to select and copy via double-clicking.)
+using InternalErrorId = kj::FixedArray<char, 24>;
+
+constexpr char BASE32_DIGITS[] = "0123456789abcdefghijklmnopqrstuv";
+
+InternalErrorId makeInternalErrorId() {
+  InternalErrorId id;
+  if (isPredictableModeForTest()) {
+    // In testing mode, use content that generates a "0123456789abcdefghijklm" ID:
+    for (auto i: kj::indices(id)) {
+      id[i] = i;
+    }
+  } else {
+    KJ_ASSERT(RAND_bytes(id.asPtr().asBytes().begin(), id.size()) == 1);
+  }
+  for (auto i: kj::indices(id)) {
+    id[i] = BASE32_DIGITS[static_cast<unsigned char>(id[i]) % 32];
+  }
+  return id;
+}
+
+kj::String renderInternalError(InternalErrorId& internalErrorId) {
+  if (util::Autogate::isEnabled(util::AutogateKey::INTERNAL_ERROR_ID)) {
+    return kj::str("internal error; reference = ", internalErrorId);
+  } else {
+    return kj::str("internal error");
+  }
+}
+
+}  // namespace
+
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage) {
-  KJ_LOG(ERROR, internalMessage);
-  return v8::Exception::Error(v8StrIntern(isolate, "internal error"));
+  auto wdErrId = makeInternalErrorId();
+  KJ_LOG(ERROR, internalMessage, wdErrId);
+  return v8::Exception::Error(v8Str(isolate, renderInternalError(wdErrId)));
 }
 
 namespace {
@@ -143,6 +189,8 @@ struct DecodedException {
   bool isInternal;
   bool isFromRemote;
   bool isDurableObjectReset;
+  // TODO(cleanup): Maybe<> is redundant with isInternal flag field?
+  kj::Maybe<InternalErrorId> internalErrorId;
 };
 
 DecodedException decodeTunneledException(
@@ -167,15 +215,17 @@ DecodedException decodeTunneledException(
   // TODO(someday): Support arbitrary user-defined error types, not just Error?
   auto tunneledInfo = tunneledErrorType(internalMessage);
 
+  DecodedException result;
   auto errorType = tunneledInfo.message;
-  auto appMessage = [&](kj::StringPtr errorString) -> kj::StringPtr {
+  auto appMessage = [&](kj::StringPtr errorString) -> kj::ConstString {
     if (tunneledInfo.isInternal) {
-      return "internal error"_kj;
+      result.internalErrorId = makeInternalErrorId();
+      return kj::ConstString(renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId)));
     } else {
-      return trimErrorMessage(errorString);
+      // .attach() to convert StringPtr to ConstString:
+      return trimErrorMessage(errorString).attach();
     }
   };
-  DecodedException result;
   result.isInternal = tunneledInfo.isInternal;
   result.isFromRemote = tunneledInfo.isFromRemote;
   result.isDurableObjectReset = tunneledInfo.isDurableObjectReset;
@@ -213,7 +263,9 @@ DecodedException decodeTunneledException(
       }
     }
     // unrecognized exception type
-    result.handle = v8::Exception::Error(v8StrIntern(isolate, "internal error"));
+    result.internalErrorId = makeInternalErrorId();
+    result.handle = v8::Exception::Error(
+        v8Str(isolate, renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId))));
     result.isInternal = true;
   } while (false);
 #undef HANDLE_V8_ERROR
@@ -240,6 +292,7 @@ DecodedException decodeTunneledException(
 kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
   auto tunneledError = tunneledErrorType(message);
   if (tunneledError.isInternal) {
+    // TODO(soon): Include an internal error ID in message, and also return the id.
     return "Error: internal error";
   } else {
     return tunneledError.message;
@@ -271,7 +324,11 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
     // DISCONNECTED exceptions as these are unlikely to represent bugs worth tracking.
     if (exception.getType() != kj::Exception::Type::DISCONNECTED &&
         !isDoNotLogException(exception.getDescription())) {
-      LOG_EXCEPTION("jsgInternalError", exception);
+      // LOG_EXCEPTION("jsgInternalError", ...), but with internal error ID:
+      auto& e = exception;
+      constexpr auto sentryErrorContext = "jsgInternalError";
+      auto& wdErrId = KJ_ASSERT_NONNULL(tunneledException.internalErrorId);
+      KJ_LOG(ERROR, e, sentryErrorContext, wdErrId);
     } else {
       KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
     }

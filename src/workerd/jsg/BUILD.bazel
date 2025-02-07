@@ -68,11 +68,13 @@ wd_cc_library(
         ":observer",
         ":url",
         "//src/workerd/util",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
         "@simdutf",
+        "@ssl",
         "@workerd-v8//:v8",
     ],
 )
@@ -176,6 +178,7 @@ wd_cc_library(
     src = f,
     deps = [
         ":jsg",
+        "//src/workerd/util:autogate",
     ],
 ) for f in glob(
     ["*-test.c++"],
