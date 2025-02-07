@@ -440,13 +440,13 @@ inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
 template <typename T>
 inline kj::Array<T> JsString::toArray(Lock& js, WriteOptions options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
-    KJ_ASSERT(inner->ContainsOnlyOneByte());
+    KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
-    inner->WriteOneByte(js.v8Isolate, buf.begin(), 0, buf.size(), options);
+    inner->WriteOneByteV2(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   } else {
     auto buf = kj::heapArray<uint16_t>(inner->Length());
-    inner->Write(js.v8Isolate, buf.begin(), 0, buf.size(), options);
+    inner->WriteV2(js.v8Isolate, 0, buf.size(), buf.begin(), options);
     return kj::mv(buf);
   }
 }
