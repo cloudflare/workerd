@@ -49,6 +49,7 @@ struct PythonConfig {
   const PyodideBundleManager pyodideBundleManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
+  bool loadSnapshotFromDisk;
 };
 
 // A function to read a segment of the tar file into a buffer

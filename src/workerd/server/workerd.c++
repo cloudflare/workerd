@@ -779,10 +779,15 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       server->setPythonCreateSnapshot();
       return true;
     }, "Save a dedicated snapshot to the disk cache")
-        .addOption({"python-save-baseline-snapshot"}, [this]() {
+        .addOption({"python-save-baseline-snapshot"},
+            [this]() {
       server->setPythonCreateBaselineSnapshot();
       return true;
-    }, "Save a baseline snapshot to the disk cache");
+    }, "Save a baseline snapshot to the disk cache")
+        .addOption({"python-load-snapshot"}, [this]() {
+      server->setPythonLoadSnapshot();
+      return true;
+    }, "Load a snapshot from the package disk cache");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {

@@ -53,6 +53,7 @@ def gen_import_tests(to_test, pkg_skip_versions = {}):
             directory = lib,
             src = wd_test_fname,
             skip_python_flags = pkg_skip_versions.get(lib, []),
+            make_snapshot = False,
             args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels"],
             data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
             size = "enormous",
