@@ -1,0 +1,37 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const undefinedHandler :Workerd.Worker = (
+  modules = [
+    (name = "undefined_handler.py", pythonModule = embed "undefined_handler.py")
+  ],
+  compatibilityDate = "2024-10-01",
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+);
+
+const server :Workerd.Worker = (
+  modules = [
+    (name = "server.js", esModule = embed "server.mjs")
+  ],
+  bindings = [
+    ( name = "pythonWorker", service = "undefinedHandler" ),
+  ],
+  compatibilityDate = "2024-10-01",
+  compatibilityFlags = ["nodejs_compat"],
+);
+
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "external",
+      network = (
+        tlsOptions = (trustBrowserCas = true)
+      )
+    ),
+    ( name = "server",
+      worker = .server
+    ),
+    ( name = "undefinedHandler",
+      worker = .undefinedHandler
+    ),
+  ],
+);

@@ -57,3 +57,12 @@ gen_import_tests(
         ],
     },
 )
+
+py_wd_test(
+    "undefined-handler",
+    # TODO: Requires a new bundle deploy
+    skip_python_flags = [
+        "0.26.0a2",
+        "0.27.1",
+    ],
+)
