@@ -148,6 +148,8 @@ export abstract class KeyObject {
     const opts = options as any;
     if (opts.format !== undefined) {
       validateString(opts.format, 'options.format');
+    } else {
+      options.format = 'buffer';
     }
     if (opts.type !== undefined) validateString(opts.type, 'options.type');
     if (this.type === 'private') {
@@ -165,8 +167,6 @@ export abstract class KeyObject {
         }
       }
     }
-
-    options.format ??= 'buffer';
 
     const ret = cryptoImpl.exportKey(
       this[kHandle],

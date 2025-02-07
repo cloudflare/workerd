@@ -67,7 +67,7 @@ jsg::BufferSource randomPrime(jsg::Lock& js,
         "options.add must not be bigger than size of the requested prime");
   }
 
-  // Generating random primes uses the prng internally.
+  // Generating random primes uses the PRNG internally.
   // Make sure the CSPRNG is properly seeded.
   JSG_REQUIRE(
       workerd::api::CSPRNG(nullptr), Error, "Error while generating prime (bad random state)");
