@@ -132,7 +132,10 @@ if !TEST_EXIT! EQ 0 (
 """
 
 SH_RUNTEST_SNAPSHOT = """
+echo Creating Python Snapshot
 "$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-snapshot
+echo ""
+echo Using Python Snapshot
 "$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot
 """
 
