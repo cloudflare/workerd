@@ -1,4 +1,4 @@
-#include "jwk.h">
+#include "jwk.h"
 
 #include <ncrypto.h>
 #include <openssl/curve25519.h>

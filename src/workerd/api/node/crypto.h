@@ -249,8 +249,3 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::KeyExportOptions, api::node::CryptoImpl::GenerateKeyPairOptions,      \
       api::node::CryptoImpl::CreateAsymmetricKeyOptions, EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
-
-// Known todos
-//
-// 1. Implement KeyObject.prototype.toCryptoKey(...)
-//

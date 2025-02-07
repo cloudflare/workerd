@@ -508,11 +508,11 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
       JSG_FAIL_REQUIRE(Error, "JWK public key import is not implemented for this key type");
     }
     KJ_CASE_ONEOF(key, jsg::Ref<api::CryptoKey>) {
+      // TODO(now): Implement this.
       JSG_FAIL_REQUIRE(Error, "Getting a public key from a private key is not yet implemented");
     }
   }
 
   KJ_UNREACHABLE;
 }
-
 }  // namespace workerd::api::node
