@@ -1,4 +1,4 @@
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, ok } from 'node:assert';
 
 export const timingSafeEqual = {
   test() {
@@ -217,5 +217,39 @@ export const deriveBitsNullLength = {
 
       strictEqual(bits.byteLength, 48);
     }
+  },
+};
+
+export const aesCounterOverflowTest = {
+  async test() {
+    // Regression test: Check that the input counter is not modified when it overflows in the
+    // internal computation.
+    const key = await crypto.subtle.generateKey(
+      {
+        name: 'AES-CTR',
+        length: 128,
+      },
+      false,
+      ['encrypt']
+    );
+
+    // Maximum counter value, will overflow and require processing in two parts if there is more
+    // than one input data block.
+    const counter = new Uint8Array([
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255,
+    ]);
+    const counter2 = counter.slice();
+
+    await crypto.subtle.encrypt(
+      {
+        name: 'AES-CTR',
+        length: 128,
+        counter,
+      },
+      key,
+      new TextEncoder().encode('A'.repeat(2 * 16))
+    );
+    ok(crypto.subtle.timingSafeEqual(counter, counter2));
   },
 };
