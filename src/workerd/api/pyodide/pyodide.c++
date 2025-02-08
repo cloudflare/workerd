@@ -335,31 +335,43 @@ kj::String importToModuleFilename(kj::StringPtr pkgImport) {
 }
 
 kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
-    kj::HashSet<kj::String> locals, kj::Array<kj::String> imports) {
-  kj::HashSet<kj::StringPtr> snapshotImportsSet;
+    kj::HashSet<kj::String> workerModules, kj::Array<kj::String> imports) {
+  auto baselineSnapshotImportsSet = kj::HashSet<kj::StringPtr>();
   for (auto& pkgImport: ArtifactBundler::getSnapshotImports()) {
-    snapshotImportsSet.insert(kj::mv(pkgImport));
+    baselineSnapshotImportsSet.insert(kj::mv(pkgImport));
   }
+  // baselineSnapshotImportsSet.insertAll(kj::mv(ArtifactBundler::getSnapshotImports()));
 
-  kj::HashSet<kj::String> filteredImports;
+  kj::HashSet<kj::String> filteredImportsSet;
+  filteredImportsSet.reserve(imports.size());
   for (auto& pkgImport: imports) {
-    if (filteredImports.contains(pkgImport)) [[unlikely]] {
-      continue;  // Skip duplicates.
+    // Skip duplicates
+    if (filteredImportsSet.contains(pkgImport)) [[unlikely]] {
+      continue;
     }
 
-    auto moduleFilename = importToModuleFilename(pkgImport);
-    if (!locals.contains(moduleFilename) && pkgImport != "js" &&
-        !snapshotImportsSet.contains(pkgImport)) {
-      filteredImports.insert(kj::mv(pkgImport));
+    // don't include js or pyodide.
+    if (pkgImport == "js" || pkgImport == "pyodide") {
+      continue;
     }
+
+    // Don't include anything that went into the baseline snapshot
+    if (baselineSnapshotImportsSet.contains(pkgImport)) {
+      continue;
+    }
+
+    // Don't include imports from worker files
+    if (workerModules.contains(importToModuleFilename(pkgImport))) {
+      continue;
+    }
+    filteredImportsSet.insert(kj::mv(pkgImport));
   }
 
-  kj::Vector<kj::String> filteredImportsVec;
-  for (auto& pkgImport: filteredImports) {
-    filteredImportsVec.add(kj::mv(pkgImport));
+  auto filteredImportsBuilder = kj::heapArrayBuilder<kj::String>(filteredImportsSet.size());
+  for (auto& pkgImport: filteredImportsSet) {
+    filteredImportsBuilder.add(kj::mv(pkgImport));
   }
-
-  return filteredImportsVec.releaseAsArray();
+  return filteredImportsBuilder.finish();
 }
 
 kj::Array<kj::String> ArtifactBundler::filterPythonScriptImportsJs(
