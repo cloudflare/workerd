@@ -67,12 +67,14 @@ import {
 } from 'node-internal:internal_errors';
 
 import {
+  validateInteger,
   validateObject,
   validateOneOf,
   validateString,
 } from 'node-internal:validators';
 
 import { inspect } from 'node-internal:internal_inspect';
+import { randomBytes } from 'node-internal:crypto_random';
 const kInspect = inspect.custom;
 
 // Key input contexts.
@@ -515,7 +517,7 @@ export function createPublicKey(
 
 export type PublicKeyResult = KeyExportResult | PublicKeyObject;
 export type PrivateKeyResult = KeyExportResult | PrivateKeyObject;
-export type GenerateKeyCallback = (err?: any, key?: KeyObject) => void;
+export type GenerateKeyCallback = (err?: any, key?: SecretKeyObject) => void;
 export type GenerateKeyPairCallback = (
   err?: any,
   publicKey?: PublicKeyResult,
@@ -532,16 +534,28 @@ export function generateKey(
   _options: GenerateKeyOptions,
   callback: GenerateKeyCallback
 ) {
-  // This API is not implemented yet.
-  callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync'));
-}
-
-export function generateKeySync(
-  _type: SecretKeyType,
-  _options: GenerateKeyOptions
-) {
-  // This API is not implemented yet.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync');
+  try {
+    // Unlike Node.js, which implements async crypto functions using the
+    // libuv thread pool, we don't actually perform async crypto operations.
+    // Here we just defer to the sync version of the function and then "fake"
+    // async by using queueMicrotask to call the callback.
+    const result = generateKeySync(_type, _options);
+    queueMicrotask(() => {
+      try {
+        callback(null, result);
+      } catch (err) {
+        reportError(err);
+      }
+    });
+  } catch (err) {
+    queueMicrotask(() => {
+      try {
+        callback(err);
+      } catch (otherErr) {
+        reportError(otherErr);
+      }
+    });
+  }
 }
 
 export function generateKeyPair(
@@ -549,8 +563,58 @@ export function generateKeyPair(
   _options: GenerateKeyPairOptions,
   callback: GenerateKeyPairCallback
 ) {
-  // This API is not implemented yet.
-  callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeyPair'));
+  try {
+    // Unlike Node.js, which implements async crypto functions using the
+    // libuv thread pool, we don't actually perform async crypto operations.
+    // Here we just defer to the sync version of the function and then "fake"
+    // async by using queueMicrotask to call the callback.
+    const { publicKey, privateKey } = generateKeyPairSync(_type, _options);
+    queueMicrotask(() => {
+      try {
+        callback(null, publicKey, privateKey);
+      } catch (err) {
+        reportError(err);
+      }
+    });
+  } catch (err) {
+    queueMicrotask(() => {
+      try {
+        callback(err);
+      } catch (otherErr) {
+        reportError(otherErr);
+      }
+    });
+  }
+}
+
+export function generateKeySync(
+  type: SecretKeyType,
+  options: GenerateKeyOptions
+): SecretKeyObject {
+  validateOneOf(type, 'type', ['hmac', 'aes']);
+  validateObject(options, 'options');
+  const { length } = options;
+
+  switch (type) {
+    case 'hmac': {
+      // The minimum is 8, and the maximum length is 65,536. If the length is
+      // not a multiple of 8, the generated key will be truncated to
+      // Math.floor(length / 8).
+      // Note that the upper bound of 65536 is intentionally more limited than
+      // what Node.js allows. This puts the maximum size limit on generated
+      // secret keys to 8192 bytes. We can adjust this up if necessary but
+      // it's a good starting point.
+      validateInteger(length, 'options.length', 8, 65536);
+      const buf = randomBytes(Math.floor(length / 8));
+      return createSecretKey(buf);
+    }
+    case 'aes': {
+      // The length must be one of 128, 192, or 256.
+      validateOneOf(length, 'options.length', [128, 192, 256]);
+      const buf = randomBytes(length / 8);
+      return createSecretKey(buf);
+    }
+  }
 }
 
 export function generateKeyPairSync(

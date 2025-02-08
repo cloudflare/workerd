@@ -7,6 +7,8 @@ import {
   createPrivateKey,
   createPublicKey,
   createHmac,
+  generateKey,
+  generateKeySync,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
@@ -1565,5 +1567,66 @@ export const ed_public_key_jwk_import = {
         message: 'OKP JWK missing crv parameter',
       }
     );
+  },
+};
+
+export const generate_hmac_secret_key = {
+  async test() {
+    // Length is intentionally not a multiple of 8
+    const key = generateKeySync('hmac', { length: 33 });
+    strictEqual(key.type, 'secret');
+    strictEqual(key.symmetricKeySize, 4);
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+    generateKey('hmac', { length: 33 }, (err, key) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      strictEqual(key.type, 'secret');
+      strictEqual(key.symmetricKeySize, 4);
+      resolve();
+    });
+    await promise;
+
+    throws(() => generateKeySync('hmac', { length: 0 }), {
+      message:
+        'The value of "options.length" is out of range. It must ' +
+        'be >= 8 && <= 65536. Received 0',
+    });
+    throws(() => generateKeySync('hmac', { length: 65537 }), {
+      message:
+        'The value of "options.length" is out of range. It must ' +
+        'be >= 8 && <= 65536. Received 65537',
+    });
+
+    const h = createHmac('sha256', key);
+    ok(h.update('test').digest());
+  },
+};
+
+export const generate_aes_secret_key = {
+  async test() {
+    const key = generateKeySync('aes', { length: 128 });
+    strictEqual(key.type, 'secret');
+    strictEqual(key.symmetricKeySize, 16);
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+    generateKey('aes', { length: 128 }, (err, key) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      strictEqual(key.type, 'secret');
+      strictEqual(key.symmetricKeySize, 16);
+      resolve();
+    });
+    await promise;
+
+    throws(() => generateKeySync('aes', { length: 0 }), {
+      message:
+        "The property 'options.length' must be one of: 128, 192, " +
+        '256. Received 0',
+    });
   },
 };
