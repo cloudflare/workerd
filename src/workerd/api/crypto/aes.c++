@@ -531,19 +531,20 @@ class AesCtrKey final: public AesKeyBase {
 
     process(&cipher, data.first(inputSizePart1), counter, result.asArrayPtr());
 
-    // Zero the counter bits of the block. Chromium creates a copy but we own our buffer.
+    // Zero the counter bits of the block in a copy of the input counter.
+    kj::Array<kj::byte> zeroed_counter = kj::heapArray(counter.asPtr());
     {
       KJ_DASSERT(counterBitLength / 8 <= expectedCounterByteSize);
 
       auto remainder = counterBitLength % 8;
       auto idx = expectedCounterByteSize - counterBitLength / 8;
-      counter.slice(idx).first(counterBitLength / 8).fill(0);
+      zeroed_counter.slice(idx).fill(0);
       if (remainder) {
-        counter[idx - 1] &= 0xFF << remainder;
+        zeroed_counter[idx - 1] &= 0xFF << remainder;
       }
     }
 
-    process(&cipher, data.slice(inputSizePart1, data.size()), counter,
+    process(&cipher, data.slice(inputSizePart1, data.size()), zeroed_counter,
         result.asArrayPtr().slice(inputSizePart1, result.size()));
 
     return jsg::BufferSource(js, kj::mv(result));
@@ -570,7 +571,7 @@ class AesCtrKey final: public AesKeyBase {
     // Convert the counter but zero out the topmost bits so that we can convert to bignum from a
     // byte stream. Chromium creates a copy here but that's because they only have a const only view
     // of the data but in our WebCrypto implementation we have a non-const view of the underlying
-    // counter buffer (in fact encrypt/decrypt explicitly gives us ownership of that buffer).
+    // counter buffer.
     auto byteLength = integerCeilDivision(counterBitLength, 8u);
     KJ_DASSERT(byteLength > 0, counterBitLength, remainderBits);
     KJ_DASSERT(byteLength <= expectedCounterByteSize, counterBitLength, counterBlock.size());
@@ -580,9 +581,8 @@ class AesCtrKey final: public AesKeyBase {
     auto previous = counterToProcess[0];
     counterToProcess[0] &= ~(0xFF << remainderBits);
     KJ_DEFER(counterToProcess[0] = previous);
-    // We temporarily modify the counter to construct the BIGNUM & this undoes it. It's a safe
-    // operation because we own the buffer. Technically the restoration isn't even strictly
-    // necessary because this buffer isn't used any more after this.
+    // We temporarily modified the counter to construct the BIGNUM, this undoes it to restore the
+    // input counter.
 
     return JSG_REQUIRE_NONNULL(toBignum(counterToProcess), InternalDOMOperationError,
         "Error doing ", getAlgorithmName(), " encrypt/decrypt", internalDescribeOpensslErrors());
