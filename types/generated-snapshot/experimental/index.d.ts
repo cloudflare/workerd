@@ -400,6 +400,7 @@ interface TestController {}
 interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  exports: any;
   props: any;
   abort(reason?: any): void;
 }
@@ -564,6 +565,7 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  exports: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;

@@ -4006,6 +4006,84 @@ KJ_TEST("Server: Entrypoint binding with props") {
   conn.httpGet200("/", "got: 123");
 }
 
+KJ_TEST("Server: ctx.exports self-referential bindings") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-02-23",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    // First set the actor state the old fashion way, to make sure we get
+                `    // reconnected to the same actor when using self-referential bindings.
+                `    {
+                `      let bindingActor = env.NS.get(env.NS.idFromName("qux"));
+                `      await bindingActor.setValue(234);
+                `    }
+                `
+                `    let actor = ctx.exports.MyActor.get(ctx.exports.MyActor.idFromName("qux"));
+                `    return new Response([
+                `      await ctx.exports.MyEntrypoint.foo(123),
+                `      await ctx.exports.AnotherEntrypoint.bar(321),
+                `      await actor.baz(),
+                `      await ctx.exports.default.corge(555),
+                `      await actor.grault(456),
+                `      "UnconfiguredActor" in ctx.exports,  // should be false
+                `    ].join(", "));
+                `  },
+                `  corge(i) { return `corge: ${i}` }
+                `}
+                `export class MyEntrypoint extends WorkerEntrypoint {
+                `  foo(i) { return `foo: ${i}` }
+                `  grault(i) { return `grault: ${i}` }
+                `}
+                `export class AnotherEntrypoint extends WorkerEntrypoint {
+                `  bar(i) { return `bar: ${i}` }
+                `}
+                `export class MyActor extends DurableObject {
+                `  setValue(i) { this.value = i; }
+                `  baz() { return `baz: ${this.value}` }
+                `  grault(i) { return this.ctx.exports.MyEntrypoint.grault(i); }
+                `}
+                `export class UnconfiguredActor extends DurableObject {
+                `  qux(i) { return `qux: ${i}` }
+                `}
+            )
+          ],
+          bindings = [
+            # A regular binding, just here to make sure it doesn't mess up self-referential
+            # channel numbers.
+            ( name = "INTERNET", service = "internet" ),
+
+            # Similarly, an actor namespace binding.
+            (name = "NS", durableObjectNamespace = "MyActor")
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActor",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, false");
+}
+
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)

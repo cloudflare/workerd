@@ -204,8 +204,12 @@ class TestController: public jsg::Object {
 
 class ExecutionContext: public jsg::Object {
  public:
-  ExecutionContext(jsg::Lock& js): props(js, js.obj()) {}
-  ExecutionContext(jsg::Lock& js, jsg::JsValue props): props(js, props) {}
+  ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
+      : exports(js, exports),
+        props(js, js.obj()) {}
+  ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
+      : exports(js, exports),
+        props(js, props) {}
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -214,6 +218,10 @@ class ExecutionContext: public jsg::Object {
   // and throwing an error at the client.
   void abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason);
 
+  jsg::JsValue getExports(jsg::Lock& js) {
+    return exports.getHandle(js);
+  }
+
   jsg::JsValue getProps(jsg::Lock& js) {
     return props.getHandle(js);
   }
@@ -221,6 +229,11 @@ class ExecutionContext: public jsg::Object {
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
+    if (flags.getWorkerdExperimental()) {
+      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
+      // this works in production.
+      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
 
     if (flags.getWorkerdExperimental()) {
@@ -243,6 +256,7 @@ class ExecutionContext: public jsg::Object {
   }
 
  private:
+  jsg::JsRef<jsg::JsValue> exports;
   jsg::JsRef<jsg::JsValue> props;
 
   void visitForGc(jsg::GcVisitor& visitor) {

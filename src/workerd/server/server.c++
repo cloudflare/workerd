@@ -1863,6 +1863,10 @@ class Server::WorkerService final: public Service,
     return kj::heap<EntrypointService>(*this, name, propsJson, *handlers);
   }
 
+  bool hasDefaultEntrypoint() {
+    return defaultEntrypointHandlers != kj::none;
+  }
+
   kj::Array<kj::StringPtr> getEntrypointNames() {
     return KJ_MAP(e, namedEntrypoints) -> kj::StringPtr { return e.key; };
   }
@@ -3437,25 +3441,83 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     }
   }
 
+  jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
   auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
-      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
+      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+          v8::Local<v8::Object> ctxExports) {
+    // We can't fill in ctx.exports yet because we need to run the validator first to discover
+    // entrypoints, which we cannot do until after the Worker constructor completes. We are
+    // permitted to hold a handle until then, though.
+    ctxExportsHandle = lock.v8Ref(ctxExports);
+
     return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
-  }, IsolateObserver::StartType::COLD,
+  },
+      IsolateObserver::StartType::COLD,
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
 
   {
-    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
-        [&](Worker::Lock& lock) { lock.validateHandlers(errorReporter); });
+    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
+      lock.validateHandlers(errorReporter);
+
+      // Build `ctx.exports` based on the entrypoints reported by `validateHandlers()`.
+      kj::Vector<Global> ctxExports(
+          errorReporter.namedEntrypoints.size() + localActorConfigs.size());
+
+      // Start numbering loopback channels for stateless entrypoints after the last subrequest
+      // channel used by bindings.
+      uint nextSubrequestChannel =
+          subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      if (errorReporter.defaultEntrypoint != kj::none) {
+        ctxExports.add(Global{.name = kj::str("default"),
+          .value = Global::Fetcher{
+            .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+      }
+      for (auto& ep: errorReporter.namedEntrypoints) {
+        ctxExports.add(Global{.name = kj::str(ep.key),
+          .value = Global::Fetcher{
+            .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+      }
+
+      // Start numbering loopback channels for actor classes after the last actor channel used by
+      // bindings.
+      uint nextActorChannel = actorChannels.size();
+      for (auto& ns: localActorConfigs) {
+        decltype(Global::value) value;
+        KJ_SWITCH_ONEOF(ns.value) {
+          KJ_CASE_ONEOF(durable, Durable) {
+            value = Global::DurableActorNamespace{
+              .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
+          }
+          KJ_CASE_ONEOF(ephemeral, Ephemeral) {
+            value = Global::EphemeralActorNamespace{
+              .actorChannel = nextActorChannel++,
+            };
+          }
+        }
+        ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+      }
+
+      JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+        WorkerdApi::from(worker->getIsolate().getApi())
+            .compileGlobals(lock, ctxExports, ctxExportsHandle.getHandle(js), 1);
+      });
+
+      // As an optimization, drop this now while we have the lock.
+      { auto drop = kj::mv(ctxExportsHandle); }
+    });
   }
 
   auto linkCallback = [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
-                          actorChannels = kj::mv(actorChannels)](
-                          WorkerService& workerService) mutable {
+                          actorChannels = kj::mv(actorChannels),
+                          &localActorConfigs](WorkerService& workerService) mutable {
     WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
-    auto services = kj::heapArrayBuilder<kj::Own<Service>>(
-        subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT);
+    auto entrypointNames = workerService.getEntrypointNames();
+
+    auto services = kj::heapArrayBuilder<kj::Own<Service>>(subrequestChannels.size() +
+        IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT + entrypointNames.size() +
+        workerService.hasDefaultEntrypoint());
 
     kj::Own<Service> globalService =
         lookupService(conf.getGlobalOutbound(), kj::str("Worker \"", name, "\"'s globalOutbound"));
@@ -3476,25 +3538,53 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       services.add(lookupService(channel.designator, kj::mv(channel.errorContext)));
     }
 
+    // Link the ctx.exports self-referential channels. Note that it's important these are added
+    // in exactyl the same order as the channels were allocated earlier when we compiled the
+    // ctx.exports bindings.
+    if (workerService.hasDefaultEntrypoint()) {
+      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(kj::none, kj::none)));
+    }
+    for (auto& ep: entrypointNames) {
+      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(ep, kj::none)));
+    }
+
     result.subrequest = services.finish();
 
-    result.actor = KJ_MAP(channel, actorChannels) -> kj::Maybe<WorkerService::ActorNamespace&> {
+    auto linkedActorChannels = kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(
+        actorChannels.size() + localActorConfigs.size());
+
+    for (auto& channel: actorChannels) {
       WorkerService* targetService = &workerService;
       if (channel.designator.hasServiceName()) {
         auto& svc = KJ_UNWRAP_OR(this->services.find(channel.designator.getServiceName()), {
           // error was reported earlier
-          return kj::none;
+          linkedActorChannels.add(kj::none);
+          continue;
         });
         targetService = dynamic_cast<WorkerService*>(svc.get());
         if (targetService == nullptr) {
           // error was reported earlier
-          return kj::none;
+          linkedActorChannels.add(kj::none);
+          continue;
         }
       }
 
       // (If getActorNamespace() returns null, an error was reported earlier.)
-      return targetService->getActorNamespace(channel.designator.getClassName());
+      linkedActorChannels.add(targetService->getActorNamespace(channel.designator.getClassName()));
     };
+
+    // Link the ctx.exports self-referential actor channels. Again, it's important that these
+    // be added in the same order as before. kj::HashMap iteration order is deterministic, and
+    // is exactly insertion order as long as no entries have been removed, so we can expect that
+    // `workerService.getActorNamespaces()` iterates in the same order as `localActorConfigs` did
+    // earlier.
+    auto& selfActorNamespaces = workerService.getActorNamespaces();
+    KJ_ASSERT(selfActorNamespaces.size() == localActorConfigs.size());
+    for (auto& ns: selfActorNamespaces) {
+      linkedActorChannels.add(*ns.value);
+    }
+
+    result.actor = linkedActorChannels.finish();
 
     if (conf.hasCacheApiOutbound()) {
       result.cache = lookupService(

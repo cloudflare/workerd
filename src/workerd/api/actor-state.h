@@ -464,10 +464,15 @@ class WebSocketRequestResponsePair: public jsg::Object {
 class DurableObjectState: public jsg::Object {
  public:
   DurableObjectState(Worker::Actor::Id actorId,
+      jsg::JsRef<jsg::JsValue> exports,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container);
 
   void waitUntil(kj::Promise<void> promise);
+
+  jsg::JsValue getExports(jsg::Lock& js) {
+    return exports.getHandle(js);
+  }
 
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
 
@@ -541,6 +546,11 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
+    if (flags.getWorkerdExperimental()) {
+      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
+      // this works in production.
+      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
@@ -581,6 +591,7 @@ class DurableObjectState: public jsg::Object {
 
  private:
   Worker::Actor::Id id;
+  jsg::JsRef<jsg::JsValue> exports;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
   kj::Maybe<jsg::Ref<Container>> container;
 

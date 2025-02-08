@@ -99,15 +99,19 @@ class Worker: public kj::AtomicRefcounted {
 
   explicit Worker(kj::Own<const Script> script,
       kj::Own<WorkerObserver> metrics,
-      kj::FunctionParam<void(jsg::Lock& lock, const Api& api, v8::Local<v8::Object> target)>
-          compileBindings,
+      kj::FunctionParam<void(jsg::Lock& lock,
+          const Api& api,
+          v8::Local<v8::Object> target,
+          v8::Local<v8::Object> ctxExports)> compileBindings,
       IsolateObserver::StartType startType,
       TraceParentContext spans,
       LockType lockType,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Duration&> startupTime = kj::none);
   // `compileBindings()` is a callback that constructs all of the bindings and adds them as
-  // properties to `target`.
+  // properties to `target`. It also compiles the `ctx.exports` object and writes it to
+  // `ctxExports`. Note that it is permissible for this callback to save a handle to `ctxExports`
+  // and fill it in later if needed, as long as it is filled in before any requests are started.
 
   ~Worker() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Worker);
