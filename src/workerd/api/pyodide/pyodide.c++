@@ -340,7 +340,6 @@ kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
   for (auto& pkgImport: ArtifactBundler::getSnapshotImports()) {
     baselineSnapshotImportsSet.insert(kj::mv(pkgImport));
   }
-  // baselineSnapshotImportsSet.insertAll(kj::mv(ArtifactBundler::getSnapshotImports()));
 
   kj::HashSet<kj::String> filteredImportsSet;
   filteredImportsSet.reserve(imports.size());
