@@ -67,11 +67,4 @@ py_wd_test(
     ],
 )
 
-py_wd_test(
-    "dont-snapshot-pyodide",
-    # TODO: Requires a new bundle deploy
-    skip_python_flags = [
-        "0.26.0a2",
-        "0.27.1",
-    ],
-)
+py_wd_test("dont-snapshot-pyodide")
