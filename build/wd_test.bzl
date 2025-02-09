@@ -125,7 +125,7 @@ SH_RUNTEST_NORMAL = """
 WINDOWS_RUNTEST_SNAPSHOT = """
 powershell -Command \"%* --python-save-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
 set TEST_EXIT=!ERRORLEVEL!
-if !TEST_EXIT! EQ 0 (
+if !TEST_EXIT! EQU 0 (
     powershell -Command \"%* --python-load-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
     set TEST_EXIT=!ERRORLEVEL!
 )
