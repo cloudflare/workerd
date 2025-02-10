@@ -1,6 +1,5 @@
 #include "setup-emscripten.h"
 
-#include <workerd/io/trace.h>
 #include <workerd/io/worker.h>
 
 namespace workerd::api::pyodide {

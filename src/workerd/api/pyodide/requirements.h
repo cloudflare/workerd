@@ -3,8 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <capnp/compat/json.h>
-#include <capnp/message.h>
+#include <capnp/compat/json.capnp.h>
+#include <capnp/list.h>
 #include <kj/common.h>
 #include <kj/map.h>
 

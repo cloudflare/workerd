@@ -19,6 +19,7 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
+#include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/r2.h>
@@ -35,11 +36,9 @@
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/rtti.h>
 
-#include <cloudflare/cloudflare.capnp.h>
-
-#include <capnp/serialize-packed.h>
-#include <kj/map.h>
+#include <kj/vector.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>

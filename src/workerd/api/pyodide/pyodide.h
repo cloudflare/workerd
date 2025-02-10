@@ -3,15 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include "workerd/util/wait-list.h"
-
 #include <workerd/api/pyodide/setup-emscripten.h>
-#include <workerd/io/io-context.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/url.h>
-#include <workerd/server/workerd.capnp.h>
-#include <workerd/util/autogate.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
@@ -457,14 +451,6 @@ class SetupEmscripten: public jsg::Object {
 };
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
-
-using Worker = server::config::Worker;
-
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
-    const PythonConfig& pythonConfig,
-    PythonSnapshotRelease::Reader pythonRelease);
-
-bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules);
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \

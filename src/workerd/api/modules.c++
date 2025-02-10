@@ -1,5 +1,6 @@
 #include "modules.h"
 
+#include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 

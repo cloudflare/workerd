@@ -1,6 +1,5 @@
 #pragma once
 
-#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::pyodide {

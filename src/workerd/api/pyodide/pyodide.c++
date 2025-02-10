@@ -6,8 +6,6 @@
 #include "requirements.h"
 
 #include <workerd/api/pyodide/setup-emscripten.h>
-#include <workerd/io/compatibility-date.h>
-#include <workerd/util/string-buffer.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
@@ -450,96 +448,6 @@ kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapsho
   return kj::none;
 }
 
-jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
-    const PythonConfig& pythonConfig,
-    PythonSnapshotRelease::Reader pythonRelease) {
-  auto modules = conf.getModules();
-  auto mainModule = kj::str(modules.begin()->getName());
-  int numFiles = 0;
-  int numRequirements = 0;
-  for (auto module: modules) {
-    switch (module.which()) {
-      case Worker::Module::TEXT:
-      case Worker::Module::DATA:
-      case Worker::Module::JSON:
-      case Worker::Module::PYTHON_MODULE:
-        numFiles++;
-        break;
-      case Worker::Module::PYTHON_REQUIREMENT:
-        numRequirements++;
-        break;
-      default:
-        break;
-    }
-  }
-
-  auto names = kj::heapArrayBuilder<kj::String>(numFiles);
-  auto contents = kj::heapArrayBuilder<kj::Array<kj::byte>>(numFiles);
-  auto requirements = kj::heapArrayBuilder<kj::String>(numRequirements);
-  for (auto module: modules) {
-    switch (module.which()) {
-      case Worker::Module::TEXT:
-        contents.add(kj::heapArray(module.getText().asBytes()));
-        break;
-      case Worker::Module::DATA:
-        contents.add(kj::heapArray(module.getData().asBytes()));
-        break;
-      case Worker::Module::JSON:
-        contents.add(kj::heapArray(module.getJson().asBytes()));
-        break;
-      case Worker::Module::PYTHON_MODULE:
-        KJ_REQUIRE(module.getName().endsWith(".py"));
-        contents.add(kj::heapArray(module.getPythonModule().asBytes()));
-        break;
-      case Worker::Module::PYTHON_REQUIREMENT:
-        requirements.add(kj::str(module.getName()));
-        continue;
-      default:
-        continue;
-    }
-    names.add(kj::str(module.getName()));
-  }
-  bool snapshotToDisk = pythonConfig.createSnapshot || pythonConfig.createBaselineSnapshot;
-  if (pythonConfig.loadSnapshotFromDisk && snapshotToDisk) {
-    KJ_FAIL_ASSERT(
-        "Doesn't make sense to pass both --python-save-snapshot and --python-load-snapshot");
-  }
-  kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
-  if (pythonConfig.loadSnapshotFromDisk) {
-    auto& root = KJ_REQUIRE_NONNULL(pythonConfig.packageDiskCacheRoot);
-    kj::Path path("snapshot.bin");
-    auto maybeFile = root->tryOpenFile(path);
-    if (maybeFile == kj::none) {
-      KJ_FAIL_REQUIRE("Expected to find snapshot.bin in the package cache directory");
-    }
-    memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
-  }
-  auto lock = KJ_ASSERT_NONNULL(getPyodideLock(pythonRelease),
-      kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
-  auto durableObjectClasses = KJ_MAP(objectNamespace, conf.getDurableObjectNamespaces()) {
-    return kj::str(objectNamespace.getClassName());
-  };
-
-  // clang-format off
-  return jsg::alloc<PyodideMetadataReader>(
-    kj::mv(mainModule),
-    names.finish(),
-    contents.finish(),
-    requirements.finish(),
-    kj::str(pythonRelease.getPyodide()),
-    kj::str(pythonRelease.getPackages()),
-    kj::mv(lock),
-    true      /* isWorkerd */,
-    false     /* isTracing */,
-    snapshotToDisk,
-    pythonConfig.createBaselineSnapshot,
-    false,    /* usePackagesInArtifactBundler */
-    kj::mv(memorySnapshot),
-    kj::mv(durableObjectClasses)
-  );
-  // clang-format on
-}
-
 const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;
 
 jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key) {
@@ -580,15 +488,6 @@ jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
 
 void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(const_cast<EmscriptenRuntime&>(emscriptenRuntime).emscriptenRuntime);
-}
-
-bool hasPythonModules(capnp::List<server::config::Worker::Module>::Reader modules) {
-  for (auto module: modules) {
-    if (module.isPythonModule()) {
-      return true;
-    }
-  }
-  return false;
 }
 
 }  // namespace workerd::api::pyodide
