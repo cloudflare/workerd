@@ -61,6 +61,7 @@ if __name__ == "__main__":
             status = resp.json()["status"]
             if status == "errored":
                 print("Internal build failed.")
+                print(resp.json()["error"]["message"])
                 print(
                     "If you are a Cloudflare employee, please check your internal"
                     " branch and refer this doc for further details:"
