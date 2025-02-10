@@ -663,6 +663,8 @@ struct ExternalServer {
   # `HttpOptions`.
 
   address @0 :Text;
+
+  addressFetch @7 :Text;
   # Address/port of the server. Optional; if not specified, then you will be required to specify
   # the address on the command line with with `--external-addr <name>=<addr>`.
   #
