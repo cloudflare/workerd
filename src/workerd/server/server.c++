@@ -1493,6 +1493,7 @@ struct TailStreamWriterState {
     // Every active tail worker target will have a queue.
     bool pumping = false;
     bool onsetSeen = false;
+    bool outcomeSeen = false;
     std::list<tracing::TailEvent> queue;
   };
 
@@ -1530,7 +1531,22 @@ struct TailStreamWriterState {
     for (auto& active: alive) {
       active->queue.push_back(event.clone());
       if (!active->pumping) {
-        waitUntilTasks.add(pump(*active));
+        waitUntilTasks.add(pump(*active).then([&]() -> kj::Promise<void> {
+          auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+          bool outcomesSeen = true;
+          for (auto& active: actives) {
+            if (active->capability != kj::none && !active->outcomeSeen) {
+              outcomesSeen = false;
+              break;
+            }
+          }
+          // All observers have received the outcome event, or are no longer active. Thus we have
+          // delivered all events that need to be delivered, Shut down inner.
+          if (outcomesSeen) {
+            inner = Closed{};
+          }
+          return kj::READY_NOW;
+        }));
       }
     }
 
@@ -1584,6 +1600,9 @@ struct TailStreamWriterState {
       auto eventsBuilder = builder.initEvents(current.queue.size());
       size_t n = 0;
       for (auto& event: current.queue) {
+        if (event.event.is<tracing::Outcome>()) {
+          KJ_DEFER(current.outcomeSeen = true;);
+        }
         event.copyTo(eventsBuilder[n++]);
       }
       current.queue.clear();
@@ -1644,10 +1663,15 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
           state->hadOutcome = true;
         }
         // TODO(streaming-tail-workers): Closing inner prevents delivery of events prior to the current event?
+        // This is dangerous: If we just shut down inner, we risk a UAF from actives that have an ongoing pump operation.
+        // Thus we need to only do this once pump() has ceased to be active.
         // KJ_DEFER({
         //   if (final) state->inner = TailStreamWriterState::Closed{};
         // });
         state->reportImpl(kj::mv(event));
+        if (final) {
+          return false;
+        }
       }
     }
     return !state->inner.is<TailStreamWriterState::Closed>();
