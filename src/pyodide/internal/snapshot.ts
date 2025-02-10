@@ -295,18 +295,12 @@ function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-function makeLinearMemorySnapshot(
-  Module: Module
-): ArtifactBundler.MemorySnapshotResult {
-  const importedModulesList = memorySnapshotDoImports(Module);
+function makeLinearMemorySnapshot(Module: Module): Uint8Array {
   const dsoJSON = recordDsoHandles(Module);
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // checkLoadedSoFiles(dsoJSON);
   }
-  return {
-    snapshot: encodeSnapshot(Module.HEAP8, dsoJSON),
-    importedModulesList,
-  };
+  return encodeSnapshot(Module.HEAP8, dsoJSON);
 }
 
 // "\x00snp"
@@ -420,10 +414,14 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
 }
 
 export function maybeCollectSnapshot(Module: Module): void {
+  // In order to surface any problems that occur in `memorySnapshotDoImports` to
+  // users in local development, always call it even if we aren't actually
+  const importedModulesList = memorySnapshotDoImports(Module);
   if (ArtifactBundler.isEwValidating()) {
-    ArtifactBundler.storeMemorySnapshot(makeLinearMemorySnapshot(Module));
+    const snapshot = makeLinearMemorySnapshot(Module);
+    ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    const { snapshot } = makeLinearMemorySnapshot(Module);
+    const snapshot = makeLinearMemorySnapshot(Module);
     DiskCache.put('snapshot.bin', snapshot);
   }
 }
