@@ -132,9 +132,8 @@ const PRELOADED_SO_FILES: string[] = [];
  */
 export function preloadDynamicLibs(Module: Module): void {
   let SO_FILES_TO_LOAD = VIRTUALIZED_DIR.getSoFilesToLoad();
-  if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
-    SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
-  }
+  // DO NOT MERGE THIS!
+  SO_FILES_TO_LOAD = [['_lzma.so']];
   // The order in which we load the SO_FILES matters. For example, if a snapshot was generated with
   // SO_FILES loaded in a certain way, then if we load that snapshot and load the SO_FILES
   // differently here then Python will crash.
