@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# This is a really slow way to test that PyodideMetadataReader::getWorkerFiles works.
+# TODO: replace with a unit test?
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "dont-snapshot-pyodide",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+          # a file with no `.py` extension to get filtered out
+          (name = "fake_shared_library.so", data = "This isn't really a shared library..."),
+          # We need a package dependency to trigger the package snapshot logic which we're trying to
+          # test.
+          (name = "numpy", pythonRequirement = "")
+        ],
+        compatibilityDate = "2024-01-15",
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+  ],
+);
