@@ -97,7 +97,7 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
-        "@ada-url",
+        "@ada",
     ],
     visibility = ["//visibility:public"],
     deps = [

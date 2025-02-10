@@ -22,13 +22,12 @@
       "freeze_commit": "6abe18402eb2a5e9b00158c6459646a948c53060"
     },
     {
-      "name": "ada-url",
-      "type": "github_release",
+      "name": "ada",
+      "type": "github_tarball",
       "owner": "ada-url",
       "repo": "ada",
-      "file_regex": "singleheader.zip",
-      "strip_prefix": "",
-      "build_file": "//:build/BUILD.ada-url"
+      "branch": "main",
+      "freeze_commit": "1492acb8a5911eadc0d1adf7f82140c3c2b536cf" // v3.0.1
     },
     {
       "name": "simdutf",

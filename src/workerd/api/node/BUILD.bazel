@@ -56,7 +56,7 @@ wd_cc_library(
         "util.h",
     ],
     implementation_deps = [
-        "@ada-url",
+        "@ada",
         "@nbytes",
         "@simdutf",
     ],
