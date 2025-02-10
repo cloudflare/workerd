@@ -45,6 +45,7 @@ import {
   type InnerExportOptions,
   type InnerCreateAsymmetricKeyOptions,
   type JsonWebKey,
+  type ParamEncoding,
   default as cryptoImpl,
 } from 'node-internal:crypto';
 
@@ -62,15 +63,20 @@ import {
 } from 'node-internal:internal_types';
 
 import {
+  ERR_INCOMPATIBLE_OPTION_PAIR,
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
+  ERR_MISSING_OPTION,
 } from 'node-internal:internal_errors';
 
 import {
+  validateFunction,
   validateInteger,
   validateObject,
   validateOneOf,
   validateString,
+  validateInt32,
+  validateUint32,
 } from 'node-internal:validators';
 
 import { inspect } from 'node-internal:internal_inspect';
@@ -98,6 +104,38 @@ function isStringOrBuffer(val: any) {
   return (
     typeof val === 'string' || isArrayBufferView(val) || isAnyArrayBuffer(val)
   );
+}
+
+function validateExportOptions(
+  options: ExportOptions,
+  type: KeyObjectType,
+  name = 'options'
+): asserts options is ExportOptions {
+  validateObject(options, name, {});
+  // Yes, converting to any is a bit of a cheat, but it allows us to check
+  // each option individually without having to do a bunch of type guards.
+  const opts = options as any;
+  if (opts.format !== undefined) {
+    validateString(opts.format, `${name}.format`);
+  } else {
+    options.format = 'buffer';
+  }
+  if (opts.type !== undefined) validateString(opts.type, `${name}.type`);
+  if (type === 'private') {
+    if (opts.cipher !== undefined) {
+      validateString(opts.cipher, `${name}.cipher`);
+      if (typeof opts.passphrase === 'string') {
+        opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
+      }
+      if (!isUint8Array(opts.passphrase)) {
+        throw new ERR_INVALID_ARG_TYPE(
+          `${name}.passphrase`,
+          ['string', 'Uint8Array'],
+          opts.passphrase
+        );
+      }
+    }
+  }
 }
 
 export abstract class KeyObject {
@@ -145,30 +183,7 @@ export abstract class KeyObject {
   export(options: ExportOptions = {}): KeyExportResult {
     validateObject(options, 'options', {});
 
-    // Yes, converting to any is a bit of a cheat, but it allows us to check
-    // each option individually without having to do a bunch of type guards.
-    const opts = options as any;
-    if (opts.format !== undefined) {
-      validateString(opts.format, 'options.format');
-    } else {
-      options.format = 'buffer';
-    }
-    if (opts.type !== undefined) validateString(opts.type, 'options.type');
-    if (this.type === 'private') {
-      if (opts.cipher !== undefined) {
-        validateString(opts.cipher, 'options.cipher');
-        if (typeof opts.passphrase === 'string') {
-          opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
-        }
-        if (!isUint8Array(opts.passphrase)) {
-          throw new ERR_INVALID_ARG_TYPE(
-            'options.passphrase',
-            ['string', 'Uint8Array'],
-            opts.passphrase
-          );
-        }
-      }
-    }
+    validateExportOptions(options, this.type);
 
     const ret = cryptoImpl.exportKey(
       this[kHandle],
@@ -563,6 +578,7 @@ export function generateKeyPair(
   _options: GenerateKeyPairOptions,
   callback: GenerateKeyPairCallback
 ) {
+  validateFunction(callback, 'callback');
   try {
     // Unlike Node.js, which implements async crypto functions using the
     // libuv thread pool, we don't actually perform async crypto operations.
@@ -618,9 +634,227 @@ export function generateKeySync(
 }
 
 export function generateKeyPairSync(
-  _type: AsymmetricKeyType,
-  _options: GenerateKeyPairOptions
+  type: AsymmetricKeyType,
+  options: GenerateKeyPairOptions = {}
 ): KeyObjectPair {
-  // This API is not implemented yet.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeyPairSync');
+  validateOneOf(type, 'type', [
+    'rsa',
+    'ec',
+    'ed25519',
+    'x25519',
+    'dh',
+    // BoringSSL does not support the 448 variants.
+    // 'dsa',
+    // 'rsa-pss',
+    // 'ed448',
+    // 'x448',
+  ]);
+
+  validateObject(options, 'options');
+
+  const {
+    modulusLength, // Used for RSA/DSA. number
+    publicExponent = 0x10001, // Used for RSA. number
+    // Historically Node.js had "hash" and "mgf1Hash" but these were deprecated.
+    // It is still possible to find uses of the old names in the wild.
+    // TODO(later): Uncomment the following when rsa-pss generation is supported.
+    // hashAlgorithm, // Used for RSA-PSS. string
+    // mgf1HashAlgorithm, // Used for RSA-PSS. string
+    // hash, // Deprecated, use hashAlgorithm instead. string
+    // mgf1Hash, // Deprecated, use mgf1HashAlgorithm instead. string
+    // saltLength, // Used for RSA-PSS. number
+    namedCurve, // Used for EC. string
+    prime, // Used for DH. Buffer/ArrayBufferView/ArrayBuffer
+    primeLength, // Used for DH. number
+    generator, // Used for DH. number
+    // This is fun... Node.js docs say the option is "groupName" while
+    // the code appears to check for "group".
+    group, // Used for DH (alias for groupName)
+    groupName, // Used for DH. string
+    paramEncoding = 'named', // For for EC. Value is 'named' or 'explicit'.
+    publicKeyEncoding, // value must be an object, same options as export
+    privateKeyEncoding, // value must be an object, same options as export
+  } = options;
+
+  // TODO(later): The divisorLength option is only used for generating DSA
+  // keypairs, which we currently do not support.
+  // let { divisorLength } = options;
+
+  if (publicKeyEncoding !== undefined) {
+    validateExportOptions(
+      publicKeyEncoding as ExportOptions,
+      'public',
+      'options.publicKeyEncoding'
+    );
+  }
+  if (privateKeyEncoding !== undefined) {
+    validateExportOptions(
+      privateKeyEncoding as ExportOptions,
+      'private',
+      'options.privateKeyEncoding'
+    );
+  }
+
+  const handleKeyEncoding = (pair: CryptoKeyPair) => {
+    let publicKey: KeyExportResult | KeyObject = KeyObject.from(
+      pair.publicKey
+    ) as KeyObject;
+    let privateKey: KeyExportResult | KeyObject = KeyObject.from(
+      pair.privateKey
+    ) as KeyObject;
+    if (publicKeyEncoding !== undefined) {
+      publicKey = publicKey.export(publicKeyEncoding as PublicKeyExportOptions);
+    }
+    if (privateKeyEncoding !== undefined) {
+      privateKey = privateKey.export(
+        privateKeyEncoding as PrivateKeyExportOptions
+      );
+    }
+    return { publicKey, privateKey };
+  };
+
+  // Validation of the specific options depends on the type of key being
+  // generated.
+
+  switch (type) {
+    case 'rsa': {
+      validateUint32(modulusLength, 'options.modulusLength');
+      validateUint32(publicExponent, 'options.publicExponent');
+      return handleKeyEncoding(
+        cryptoImpl.generateRsaKeyPair({
+          type,
+          modulusLength: modulusLength!,
+          publicExponent: publicExponent!,
+        })
+      ) as KeyObjectPair;
+    }
+    // TODO(later): BoringSSL does not support RSA-PSS key generation in the
+    // same way as Node.js. Later see if there's an alternative approach.
+    // case 'rsa-pss': {
+    //   validateUint32(modulusLength, 'options.modulusLength');
+    //   validateUint32(publicExponent, 'options.publicExponent');
+
+    //     if (saltLength !== undefined) {
+    //       validateInt32(saltLength, 'options.saltLength', 0);
+    //     }
+    //     if (hashAlgorithm !== undefined) {
+    //       validateString(hashAlgorithm, 'options.hashAlgorithm');
+    //     }
+    //     if (mgf1HashAlgorithm !== undefined) {
+    //       validateString(mgf1HashAlgorithm, 'options.mgf1HashAlgorithm');
+    //     }
+    //     if (hash !== undefined) {
+    //       validateString(hash, 'options.hash');
+    //       if (hashAlgorithm && hash !== hashAlgorithm) {
+    //         throw new ERR_INVALID_ARG_VALUE('options.hash', hash);
+    //       }
+    //     }
+    //     if (mgf1Hash !== undefined) {
+    //       validateString(mgf1Hash, 'options.mgf1Hash');
+    //       if (mgf1HashAlgorithm && mgf1Hash !== mgf1HashAlgorithm) {
+    //         throw new ERR_INVALID_ARG_VALUE('options.mgf1Hash', mgf1Hash);
+    //       }
+    //     }
+    //     return handleKeyEncoding(
+    //       cryptoImpl.generateRsaKeyPair({
+    //         type,
+    //         modulusLength: modulusLength!,
+    //         publicExponent: publicExponent!,
+    //         saltLength: saltLength!,
+    //         hashAlgorithm: hash || hashAlgorithm!,
+    //         mgf1HashAlgorithm: mgf1Hash || mgf1HashAlgorithm!,
+    //       })
+    //     ) as KeyObjectPair;
+    //  }
+    // TODO(later): BoringSSL does not support DSA key generation in the
+    // same way as Node.js. Later see if there's an alternative approach.
+    // case 'dsa': {
+    //   validateUint32(modulusLength, 'options.modulusLength');
+    //   if (divisorLength == null) {
+    //     divisorLength = undefined;
+    //   } else {
+    //     validateInt32(divisorLength, 'options.divisorLength', 0);
+    //   }
+    //   return handleKeyEncoding(
+    //     cryptoImpl.generateDsaKeyPair({
+    //       modulusLength: modulusLength!,
+    //       divisorLength: divisorLength as number,
+    //     })
+    //   ) as KeyObjectPair;
+    // }
+    case 'ec': {
+      validateString(namedCurve, 'options.namedCurve');
+      validateOneOf(paramEncoding, 'options.paramEncoding', [
+        'named',
+        'explicit',
+      ]);
+      return handleKeyEncoding(
+        cryptoImpl.generateEcKeyPair({
+          namedCurve: namedCurve!,
+          paramEncoding: paramEncoding as ParamEncoding,
+        })
+      ) as KeyObjectPair;
+    }
+    case 'ed25519':
+    // Fall-through
+    case 'x25519': {
+      // Nothing to validate...
+      return handleKeyEncoding(
+        cryptoImpl.generateEdKeyPair({ type })
+      ) as KeyObjectPair;
+    }
+    case 'dh': {
+      if (group != null || groupName != null) {
+        if (prime != null) {
+          throw new ERR_INCOMPATIBLE_OPTION_PAIR('group', 'prime');
+        }
+        if (primeLength != null) {
+          throw new ERR_INCOMPATIBLE_OPTION_PAIR('group', 'primeLength');
+        }
+        if (generator != null) {
+          throw new ERR_INCOMPATIBLE_OPTION_PAIR('group', 'generator');
+        }
+
+        let g = group || groupName;
+
+        validateString(g, 'options.group');
+
+        return handleKeyEncoding(
+          cryptoImpl.generateDhKeyPair(g)
+        ) as KeyObjectPair;
+      }
+
+      if (prime != null) {
+        if (primeLength != null) {
+          throw new ERR_INCOMPATIBLE_OPTION_PAIR('prime', 'primeLength');
+        }
+
+        if (!isArrayBufferView(prime) && !isAnyArrayBuffer(prime)) {
+          throw new ERR_INVALID_ARG_TYPE(
+            'options.prime',
+            ['Buffer', 'TypedArray', 'ArrayBuffer'],
+            prime
+          );
+        }
+      } else if (primeLength != null) {
+        validateInt32(primeLength, 'options.primeLength', 0);
+      } else {
+        throw new ERR_MISSING_OPTION(
+          'At least one of the group, prime, or primeLength options'
+        );
+      }
+
+      if (generator != null) {
+        validateInt32(generator, 'options.generator', 0);
+      }
+
+      return handleKeyEncoding(
+        cryptoImpl.generateDhKeyPair({
+          prime: prime as BufferSource,
+          primeLength: primeLength as number,
+          generator: generator as number,
+        })
+      ) as KeyObjectPair;
+    }
+  }
 }

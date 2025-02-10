@@ -530,4 +530,120 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
 
   KJ_UNREACHABLE;
 }
+
+CryptoKeyPair CryptoImpl::generateRsaKeyPair(RsaKeyPairOptions options) {
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(
+      options.type == "rsa-pss" ? EVP_PKEY_RSA_PSS : EVP_PKEY_RSA);
+
+  JSG_REQUIRE(ctx, Error, "Failed to create keygen context");
+  JSG_REQUIRE(ctx.initForKeygen(), Error, "Failed to initialize keygen context");
+  JSG_REQUIRE(ctx.setRsaKeygenBits(options.modulusLength), Error, "Failed to set modulus length");
+
+  if (options.publicExponent != ncrypto::EVPKeyCtxPointer::kDefaultRsaExponent) {
+    auto bn = ncrypto::BignumPointer::New();
+    JSG_REQUIRE(bn, Error, "Failed to initialize public exponent");
+    JSG_REQUIRE(bn.setWord(options.publicExponent) && ctx.setRsaKeygenPubExp(kj::mv(bn)), Error,
+        "Failed to set public exponent");
+  }
+
+  // TODO(later): BoringSSL does not support generating RSA-PSS this
+  // way... later see if there's an alternative approach.
+  // if (options.type == "rsa-pss") {
+
+  //   KJ_IF_SOME(hash, options.hashAlgorithm) {
+  //     std::string_view hashName(hash.begin(), hash.size());
+  //     auto nid = ncrypto::getDigestByName(hashName);
+  //     JSG_REQUIRE(nid != nullptr, Error, "Unsupported hash algorithm");
+  //     JSG_REQUIRE(ctx.setRsaPssKeygenMd(nid), Error, "Failed to set hash algorithm");
+  //   }
+
+  //   KJ_IF_SOME(hash, options.mgf1HashAlgorithm) {
+  //     std::string_view mgf1hashName(hash.begin(), hash.size());
+  //     auto mgf1_nid = ncrypto::getDigestByName(mgf1hashName);
+  //     if (mgf1_nid == nullptr) {
+  //       KJ_IF_SOME(hash, options.hashAlgorithm) {
+  //         std::string_view hashName(hash.begin(), hash.size());
+  //         mgf1_nid = ncrypto::getDigestByName(hashName);
+  //       }
+  //     }
+  //     if (mgf1_nid != nullptr) {
+  //       JSG_REQUIRE(ctx.setRsaPssKeygenMgf1Md(mgf1_nid), Error,
+  //                   "Failed to set MGF1 hash algorithm");
+  //     }
+  //   }
+
+  //   KJ_IF_SOME(len, options.saltLength) {
+  //     JSG_REQUIRE(ctx.setRsaPssSaltlen(len), Error, "Failed to set salt length");
+  //   }
+  // }
+
+  // Generate the key
+  EVP_PKEY* pkey = nullptr;
+  JSG_REQUIRE(EVP_PKEY_keygen(ctx.get(), &pkey), Error, "Failed to generate key");
+
+  auto generated = ncrypto::EVPKeyPointer(pkey);
+
+  auto publicKey = AsymmetricKey::NewPublic(generated.clone());
+  JSG_REQUIRE(publicKey, Error, "Failed to create public key");
+  auto privateKey = AsymmetricKey::NewPrivate(kj::mv(generated));
+  JSG_REQUIRE(privateKey, Error, "Failed to create private key");
+
+  return CryptoKeyPair{
+    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+  };
+}
+
+CryptoKeyPair CryptoImpl::generateDsaKeyPair(DsaKeyPairOptions options) {
+  // TODO(later): BoringSSL does not implement DSA key generation using
+  // EVP_PKEY_keygen. We would need to implement this using the DSA-specific
+  // APIs which get a bit complicated when it comes to using a user-provided
+  // modulus length and divisor length. For now, leave this un-implemented.
+
+  // auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(EVP_PKEY_DSA);
+
+  // JSG_REQUIRE(ctx, Error, "Failed to create keygen context");
+  // JSG_REQUIRE(ctx.initForKeygen(), Error, "Failed to initialize keygen context");
+
+  // uint32_t bits = options.modulusLength;
+  // std::optional<uint32_t> q_bits = std::nullopt;
+  // KJ_IF_SOME(d, options.divisorLength) {
+  //   q_bits = d;
+  // }
+
+  // JSG_REQUIRE(ctx.setDsaParameters(bits, q_bits), Error, "Failed to set DSA parameters");
+
+  // // Generate the key
+  // EVP_PKEY* pkey = nullptr;
+  // JSG_REQUIRE(EVP_PKEY_keygen(ctx.get(), &pkey), Error, "Failed to generate key");
+
+  // auto generated = ncrypto::EVPKeyPointer(pkey);
+
+  // auto publicKey = AsymmetricKey::NewPublic(generated.clone());
+  // JSG_REQUIRE(publicKey, Error, "Failed to create public key");
+  // auto privateKey = AsymmetricKey::NewPrivate(kj::mv(generated));
+  // JSG_REQUIRE(privateKey, Error, "Failed to create private key");
+
+  // return CryptoKeyPair {
+  //   .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
+  //   .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+  // };
+
+  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+}
+
+CryptoKeyPair CryptoImpl::generateEcKeyPair(EcKeyPairOptions options) {
+  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+}
+
+CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
+  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+}
+
+CryptoKeyPair CryptoImpl::generateDhKeyPair(kj::OneOf<DhKeyPairOptions, kj::String>) {
+  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+}
+
 }  // namespace workerd::api::node

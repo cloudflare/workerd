@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual, ok, throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, ok, rejects, throws } from 'node:assert';
 import {
   KeyObject,
   SecretKeyObject,
@@ -9,6 +9,8 @@ import {
   createHmac,
   generateKey,
   generateKeySync,
+  generateKeyPair,
+  generateKeyPairSync,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
@@ -1628,5 +1630,326 @@ export const generate_aes_secret_key = {
         "The property 'options.length' must be one of: 128, 192, " +
         '256. Received 0',
     });
+  },
+};
+
+export const generate_key_pair_arg_validation = {
+  async test() {
+    throws(() => generateKeyPairSync('invalid type'), {
+      message:
+        "The argument 'type' must be one of: 'rsa', " +
+        "'ec', 'ed25519', 'x25519', 'dh'. Received " +
+        "'invalid type'",
+    });
+
+    throws(() => generateKeyPairSync('rsa', { modulusLength: -1 }), {
+      message:
+        'The value of "options.modulusLength" is out of range. ' +
+        'It must be >= 0 && < 4294967296. Received -1',
+    });
+
+    throws(() => generateKeyPairSync('rsa', { modulusLength: 'foo' }), {
+      message:
+        'The "options.modulusLength" property must be of type number. ' +
+        "Received type string ('foo')",
+    });
+
+    throws(
+      () =>
+        generateKeyPairSync('rsa', {
+          modulusLength: 512,
+          publicExponent: 'foo',
+        }),
+      {
+        message:
+          'The "options.publicExponent" property must be of type number. ' +
+          "Received type string ('foo')",
+      }
+    );
+
+    // TODO(later): BoringSSL does not currently support rsa-pss key generation
+    // in the way Node.js does. Uncomment these later when it does.
+    // throws(
+    //   () =>
+    //     generateKeyPairSync('rsa-pss', {
+    //       modulusLength: 512,
+    //       hashAlgorithm: false,
+    //     }),
+    //   {
+    //     message:
+    //       'The "options.hashAlgorithm" property must be of type string. ' +
+    //       'Received type boolean (false)',
+    //   }
+    // );
+
+    // throws(
+    //   () =>
+    //     generateKeyPairSync('rsa-pss', {
+    //       modulusLength: 512,
+    //       mgf1HashAlgorithm: false,
+    //     }),
+    //   {
+    //     message:
+    //       'The "options.mgf1HashAlgorithm" property must be of type ' +
+    //       'string. Received type boolean (false)',
+    //   }
+    // );
+
+    // throws(
+    //   () =>
+    //     generateKeyPairSync('rsa-pss', {
+    //       modulusLength: 512,
+    //       saltLength: 'foo',
+    //     }),
+    //   {
+    //     message:
+    //       'The "options.saltLength" property must be of type number. ' +
+    //       "Received type string ('foo')",
+    //   }
+    // );
+
+    // TODO(later): BoringSSL currently does not support dsa key generation
+    // in the same way Node.js does. Uncomment this when it does.
+    // throws(
+    //   () =>
+    //     generateKeyPairSync('dsa', {
+    //       modulusLength: 512,
+    //       divisorLength: 'foo',
+    //     }),
+    //   {
+    //     message:
+    //       'The "options.divisorLength" property must be of type number. ' +
+    //       "Received type string ('foo')",
+    //   }
+    // );
+
+    throws(() => generateKeyPairSync('dh', { prime: 'foo' }), {
+      message:
+        'The "options.prime" property must be an instance of Buffer, ' +
+        "TypedArray, or ArrayBuffer. Received type string ('foo')",
+    });
+
+    throws(() => generateKeyPairSync('dh', { primeLength: 'foo' }), {
+      message:
+        'The "options.primeLength" property must be of type number. ' +
+        "Received type string ('foo')",
+    });
+
+    throws(() => generateKeyPairSync('dh', { primeLength: -1 }), {
+      message:
+        'The value of "options.primeLength" is out of range. It ' +
+        'must be >= 0 && <= 2147483647. Received -1',
+    });
+
+    throws(
+      () => generateKeyPairSync('dh', { primeLength: 10, generator: -1 }),
+      {
+        message:
+          'The value of "options.generator" is out of range. It must ' +
+          'be >= 0 && <= 2147483647. Received -1',
+      }
+    );
+
+    throws(() => generateKeyPairSync('dh', { groupName: 123 }), {
+      message:
+        'The "options.group" property must be of type string. ' +
+        'Received type number (123)',
+    });
+
+    throws(
+      () =>
+        generateKeyPairSync('ec', { namedCurve: 'foo', paramEncoding: 'foo' }),
+      {
+        message:
+          "The property 'options.paramEncoding' must be one of: " +
+          "'named', 'explicit'. Received 'foo'",
+      }
+    );
+
+    throws(() => generateKeyPairSync('ed25519', { publicKeyEncoding: 'foo' }), {
+      message:
+        'The "options.publicKeyEncoding" property must be of type ' +
+        "object. Received type string ('foo')",
+    });
+
+    throws(() => generateKeyPairSync('x25519', { privateKeyEncoding: 'foo' }), {
+      message:
+        'The "options.privateKeyEncoding" property must be of type ' +
+        "object. Received type string ('foo')",
+    });
+
+    // ====
+    async function wrapped(...args) {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      generateKeyPair(...args, (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+      await promise;
+    }
+
+    await rejects(wrapped('invalid type', {}), {
+      message:
+        "The argument 'type' must be one of: 'rsa', " +
+        "'ec', 'ed25519', 'x25519', 'dh'. Received " +
+        "'invalid type'",
+    });
+
+    await rejects(wrapped('rsa', { modulusLength: -1 }), {
+      message:
+        'The value of "options.modulusLength" is out of range. ' +
+        'It must be >= 0 && < 4294967296. Received -1',
+    });
+
+    await rejects(wrapped('rsa', { modulusLength: 'foo' }), {
+      message:
+        'The "options.modulusLength" property must be of type number. ' +
+        "Received type string ('foo')",
+    });
+
+    await rejects(
+      wrapped('rsa', { modulusLength: 512, publicExponent: 'foo' }),
+      {
+        message:
+          'The "options.publicExponent" property must be of type number. ' +
+          "Received type string ('foo')",
+      }
+    );
+
+    // TODO(later): BoringSSL currently does not support rsa-pss key generation
+    // in the same way Node.js does. Uncomment these later when it does.
+    // await rejects(
+    //   wrapped('rsa-pss', { modulusLength: 512, hashAlgorithm: false }),
+    //   {
+    //     message:
+    //       'The "options.hashAlgorithm" property must be of type string. ' +
+    //       'Received type boolean (false)',
+    //   }
+    // );
+
+    // await rejects(
+    //   wrapped('rsa-pss', { modulusLength: 512, mgf1HashAlgorithm: false }),
+    //   {
+    //     message:
+    //       'The "options.mgf1HashAlgorithm" property must be of type ' +
+    //       'string. Received type boolean (false)',
+    //   }
+    // );
+
+    // await rejects(
+    //   wrapped('rsa-pss', { modulusLength: 512, saltLength: 'foo' }),
+    //   {
+    //     message:
+    //       'The "options.saltLength" property must be of type number. ' +
+    //       "Received type string ('foo')",
+    //   }
+    // );
+
+    // TODO(later): BoringSSL currently does not support dsa key generation
+    // in the same way Node.js does. Uncomment this later when it does.
+    // await rejects(
+    //   wrapped('dsa', { modulusLength: 512, divisorLength: 'foo' }),
+    //   {
+    //     message:
+    //       'The "options.divisorLength" property must be of type number. ' +
+    //       "Received type string ('foo')",
+    //   }
+    // );
+
+    await rejects(wrapped('dh', { prime: 'foo' }), {
+      message:
+        'The "options.prime" property must be an instance of Buffer, ' +
+        "TypedArray, or ArrayBuffer. Received type string ('foo')",
+    });
+
+    await rejects(wrapped('dh', { primeLength: 'foo' }), {
+      message:
+        'The "options.primeLength" property must be of type number. ' +
+        "Received type string ('foo')",
+    });
+
+    await rejects(wrapped('dh', { primeLength: -1 }), {
+      message:
+        'The value of "options.primeLength" is out of range. It ' +
+        'must be >= 0 && <= 2147483647. Received -1',
+    });
+
+    await rejects(wrapped('dh', { primeLength: 10, generator: -1 }), {
+      message:
+        'The value of "options.generator" is out of range. It must ' +
+        'be >= 0 && <= 2147483647. Received -1',
+    });
+
+    await rejects(wrapped('dh', { groupName: 123 }), {
+      message:
+        'The "options.group" property must be of type string. ' +
+        'Received type number (123)',
+    });
+
+    await rejects(wrapped('ec', { namedCurve: 'foo', paramEncoding: 'foo' }), {
+      message:
+        "The property 'options.paramEncoding' must be one of: " +
+        "'named', 'explicit'. Received 'foo'",
+    });
+
+    await rejects(wrapped('ed25519', { publicKeyEncoding: 'foo' }), {
+      message:
+        'The "options.publicKeyEncoding" property must be of type ' +
+        "object. Received type string ('foo')",
+    });
+
+    await rejects(wrapped('x25519', { privateKeyEncoding: 'foo' }), {
+      message:
+        'The "options.privateKeyEncoding" property must be of type ' +
+        "object. Received type string ('foo')",
+    });
+  },
+};
+
+export const generate_rsa_key_pair = {
+  test() {
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+    });
+    strictEqual(publicKey.type, 'public');
+    strictEqual(publicKey.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(publicKey.asymmetricKeyDetails.publicExponent, 65537n);
+
+    strictEqual(privateKey.type, 'private');
+    strictEqual(privateKey.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(privateKey.asymmetricKeyDetails.publicExponent, 65537n);
+  },
+};
+
+export const generate_rsa_key_pair_enc = {
+  test() {
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: {
+        format: 'der',
+        type: 'pkcs1',
+      },
+      privateKeyEncoding: {
+        format: 'pem',
+        type: 'pkcs8',
+      },
+    });
+
+    const pubImported = createPublicKey({
+      key: publicKey,
+      format: 'der',
+      type: 'pkcs1',
+    });
+    strictEqual(pubImported.type, 'public');
+    strictEqual(pubImported.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(pubImported.asymmetricKeyDetails.publicExponent, 65537n);
+
+    const imported = createPrivateKey(privateKey);
+    strictEqual(imported.type, 'private');
+    strictEqual(imported.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(imported.asymmetricKeyDetails.publicExponent, 65537n);
   },
 };

@@ -673,6 +673,30 @@ export class ERR_CRYPTO_INVALID_JWK extends NodeTypeError {
   }
 }
 
+export class ERR_INCOMPATIBLE_OPTION_PAIR extends NodeError {
+  constructor(a: string, b: string) {
+    super(
+      'ERR_INCOMPATIBLE_OPTION_PAIR',
+      `The options "${a}" and "${b}" are mutually exclusive.`
+    );
+  }
+}
+
+export class ERR_MISSING_OPTION extends NodeError {
+  constructor(name: string) {
+    super('ERR_MISSING_OPTION', name);
+  }
+}
+
+export class ERR_UNSUPPORTED_OPERATION extends NodeError {
+  constructor() {
+    super(
+      'ERR_UNSUPPORTED_OPERATION',
+      'The requested operation is unsupported'
+    );
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {

@@ -206,6 +206,46 @@ class CryptoImpl final: public jsg::Object {
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
+  struct RsaKeyPairOptions {
+    kj::String type;
+    uint32_t modulusLength;
+    uint32_t publicExponent;
+    jsg::Optional<uint32_t> saltLength;
+    jsg::Optional<kj::String> hashAlgorithm;
+    jsg::Optional<kj::String> mgf1HashAlgorithm;
+    JSG_STRUCT(type, modulusLength, publicExponent, saltLength, hashAlgorithm, mgf1HashAlgorithm);
+  };
+
+  struct DsaKeyPairOptions {
+    uint32_t modulusLength;
+    jsg::Optional<uint32_t> divisorLength;
+    JSG_STRUCT(modulusLength, divisorLength);
+  };
+
+  struct EcKeyPairOptions {
+    kj::String namedCurve;
+    kj::String paramEncoding;
+    JSG_STRUCT(namedCurve, paramEncoding);
+  };
+
+  struct EdKeyPairOptions {
+    kj::String type;
+    JSG_STRUCT(type);
+  };
+
+  struct DhKeyPairOptions {
+    jsg::Optional<jsg::BufferSource> prime;
+    jsg::Optional<uint32_t> primeLength;
+    jsg::Optional<uint32_t> generator;
+    JSG_STRUCT(prime, primeLength, generator);
+  };
+
+  CryptoKeyPair generateRsaKeyPair(RsaKeyPairOptions options);
+  CryptoKeyPair generateDsaKeyPair(DsaKeyPairOptions options);
+  CryptoKeyPair generateEcKeyPair(EcKeyPairOptions options);
+  CryptoKeyPair generateEdKeyPair(EdKeyPairOptions options);
+  CryptoKeyPair generateDhKeyPair(kj::OneOf<DhKeyPairOptions, kj::String>);
+
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
@@ -240,6 +280,12 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(exportChallenge);
     // X509
     JSG_NESTED_TYPE(X509Certificate);
+    // Key generation
+    JSG_METHOD(generateRsaKeyPair);
+    JSG_METHOD(generateDsaKeyPair);
+    JSG_METHOD(generateEcKeyPair);
+    JSG_METHOD(generateEdKeyPair);
+    JSG_METHOD(generateDhKeyPair);
   }
 };
 
@@ -247,5 +293,8 @@ class CryptoImpl final: public jsg::Object {
   api::node::CryptoImpl, api::node::CryptoImpl::DiffieHellmanHandle,                               \
       api::node::CryptoImpl::HashHandle, api::node::CryptoImpl::HmacHandle,                        \
       api::node::CryptoImpl::KeyExportOptions, api::node::CryptoImpl::GenerateKeyPairOptions,      \
-      api::node::CryptoImpl::CreateAsymmetricKeyOptions, EW_CRYPTO_X509_ISOLATE_TYPES
+      api::node::CryptoImpl::CreateAsymmetricKeyOptions, api::node::CryptoImpl::RsaKeyPairOptions, \
+      api::node::CryptoImpl::DsaKeyPairOptions, api::node::CryptoImpl::EcKeyPairOptions,           \
+      api::node::CryptoImpl::EdKeyPairOptions, api::node::CryptoImpl::DhKeyPairOptions,            \
+      EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
