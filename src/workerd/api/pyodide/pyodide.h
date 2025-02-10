@@ -303,9 +303,9 @@ class ArtifactBundler: public jsg::Object {
   // Takes in a list of imported modules and filters them in such a way to avoid local imports and
   // redundant imports in the package snapshot list.
   static kj::Array<kj::String> filterPythonScriptImports(
-      kj::HashSet<kj::String> locals, kj::Array<kj::String> imports);
+      kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);
   static kj::Array<kj::String> filterPythonScriptImportsJs(
-      kj::Array<kj::String> locals, kj::Array<kj::String> imports);
+      kj::Array<kj::String> workerModules, kj::Array<kj::String> imports);
   static kj::Array<kj::StringPtr> getSnapshotImports();
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
