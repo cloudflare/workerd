@@ -47,6 +47,9 @@ export const itShould = async (description, ...assertions) => {
 const meta = (values) => ({
   duration: anything,
   served_by: anything,
+  served_by_primary: anything,
+  served_by_region: anything,
+  timings: anything,
   changes: anything,
   last_row_id: anything,
   changed_db: anything,
