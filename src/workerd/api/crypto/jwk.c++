@@ -26,7 +26,6 @@ kj::String getCurveName(int nid) {
     default:
       return kj::String();
   }
-  KJ_UNREACHABLE;
 }
 
 int getCurveFromName(kj::StringPtr name) {
@@ -284,6 +283,7 @@ JsonWebKey toJwk(const EVPKeyPointer& key, KeyType keyType) {
         return jwkFromRsaKey(key, keyType);
       case EVP_PKEY_DSA: {
         // DSA keys are not supported for JWK export.
+        break;
       }
     }
   }
