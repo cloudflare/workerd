@@ -18,6 +18,7 @@ filegroup(
             "hyperdrive.c++",
             "pyodide/pyodide.c++",
             "pyodide/setup-emscripten.c++",
+            "pyodide/requirements.c++",
             "memory-cache.c++",
             "modules.c++",
             "r2*.c++",
@@ -45,6 +46,7 @@ filegroup(
             "memory-cache.h",
             "pyodide/pyodide.h",
             "pyodide/setup-emscripten.h",
+            "pyodide/requirements.h",
             "modules.h",
             "r2*.h",
             "rtti.h",
@@ -94,22 +96,22 @@ wd_cc_library(
     hdrs = [
         "modules.h",
         "rtti.h",
-        "//src/pyodide:generated/pyodide_extra.capnp.h",
+    ],
+    implementation_deps = [
+        ":pyodide",
+        "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
         ":hyperdrive",
         ":memory-cache",
-        ":pyodide",
         ":r2",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
-        "//src/pyodide:pyodide_extra_capnp",
         "//src/workerd/api/node",
         "//src/workerd/io",
-        "//src/workerd/jsg:rtti",
     ],
 )
 
@@ -149,21 +151,18 @@ wd_cc_library(
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
-    implementation_deps = ["//src/workerd/util:string-buffer"],
+    implementation_deps = ["//src/workerd/io"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
-        "//src/workerd/io",
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/server:workerd_capnp",
     ],
 )
 
 kj_test(
     src = "pyodide/pyodide-test.c++",
-    deps = [
-        ":pyodide",
-    ],
+    deps = [":pyodide"],
 )
 
 wd_cc_library(

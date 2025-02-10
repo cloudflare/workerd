@@ -3,6 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "requirements.h"
 
+#include <capnp/compat/json.h>
+#include <capnp/message.h>
+
 #include <cctype>
 
 namespace workerd::api::pyodide {

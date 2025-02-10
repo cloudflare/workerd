@@ -6,7 +6,6 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/rtti.h>
 #include <workerd/jsg/url.h>
 
 #include <kj/array.h>

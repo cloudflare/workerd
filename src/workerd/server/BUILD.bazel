@@ -150,8 +150,6 @@ wd_capnp_library(
     src = "workerd.capnp",
     # Limit visibility to avoid accidental usage – there should be no need to use this outside of
     # test-fixture and the workerd binary.
-    # TODO(cleanup): Resolve exception for api/pyodide by moving affected pyodide code into server
-    # target. This will allow downstream to not depend on workerd.capnp.
     visibility = [
         ":__pkg__",
         "//src/workerd/api:__pkg__",
