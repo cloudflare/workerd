@@ -16,6 +16,11 @@ export function randomPrime(
   rem?: ArrayBufferView
 ): ArrayBuffer;
 
+export function statelessDH(
+  privateKey: CryptoKey,
+  publicKey: CryptoKey
+): ArrayBuffer;
+
 // X509Certificate
 export interface CheckOptions {
   subject?: string;

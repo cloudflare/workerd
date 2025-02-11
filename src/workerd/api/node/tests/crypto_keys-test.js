@@ -1,4 +1,11 @@
-import { deepStrictEqual, strictEqual, ok, rejects, throws } from 'node:assert';
+import {
+  notDeepStrictEqual,
+  deepStrictEqual,
+  strictEqual,
+  ok,
+  rejects,
+  throws,
+} from 'node:assert';
 import {
   KeyObject,
   SecretKeyObject,
@@ -12,9 +19,10 @@ import {
   generateKeyPair,
   generateKeyPairSync,
   generatePrimeSync,
-  getDiffieHellman,
+  diffieHellman,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+import { promisify } from 'node:util';
 
 export const secret_key_equals_test = {
   async test() {
@@ -1997,17 +2005,75 @@ export const generate_dh_key_pair = {
     strictEqual(privateKey.type, 'private');
     strictEqual(publicKey.asymmetricKeyType, 'dh');
     strictEqual(privateKey.asymmetricKeyType, 'dh');
+
+    const res = diffieHellman({ privateKey, publicKey });
+    ok(res instanceof Buffer);
+    strictEqual(res.byteLength, 256);
   },
 };
 
 export const generate_dh_from_fixed_prime = {
   test() {
     const prime = generatePrimeSync(1024);
-    const { privateKey, publicKey } = generateKeyPairSync('dh', { prime });
-    strictEqual(publicKey.type, 'public');
-    strictEqual(privateKey.type, 'private');
-    strictEqual(publicKey.asymmetricKeyType, 'dh');
-    strictEqual(privateKey.asymmetricKeyType, 'dh');
+
+    const { privateKey: privateKey1, publicKey: publicKey1 } =
+      generateKeyPairSync('dh', {
+        prime,
+      });
+    strictEqual(publicKey1.type, 'public');
+    strictEqual(privateKey1.type, 'private');
+    strictEqual(publicKey1.asymmetricKeyType, 'dh');
+    strictEqual(privateKey1.asymmetricKeyType, 'dh');
+
+    const { privateKey: privateKey2, publicKey: publicKey2 } =
+      generateKeyPairSync('dh', {
+        prime,
+      });
+    strictEqual(publicKey2.type, 'public');
+    strictEqual(privateKey2.type, 'private');
+    strictEqual(publicKey2.asymmetricKeyType, 'dh');
+    strictEqual(privateKey2.asymmetricKeyType, 'dh');
+
+    ok(!publicKey1.equals(publicKey2));
+    ok(!privateKey1.equals(privateKey2));
+
+    // Once we generate the keys, let's make sure they are usable.
+
+    const res1 = diffieHellman({
+      privateKey: privateKey2,
+      publicKey: publicKey1,
+    });
+    ok(res1 instanceof Buffer);
+    strictEqual(res1.byteLength, 128);
+
+    const res2 = diffieHellman({
+      privateKey: privateKey2,
+      publicKey: publicKey1,
+    });
+    ok(res2 instanceof Buffer);
+    strictEqual(res2.byteLength, 128);
+
+    deepStrictEqual(res1, res2);
+    // It's actual data and not just zeroes right?
+    notDeepStrictEqual(res1, Buffer.alloc(128, 0));
+
+    // Keys generated from different prime groups aren't compatible and should throw.
+    const prime2 = generatePrimeSync(1024);
+    const { privateKey: privateKey3, publicKey: publicKey3 } =
+      generateKeyPairSync('dh', {
+        prime: prime2,
+      });
+    strictEqual(publicKey3.type, 'public');
+    strictEqual(privateKey3.type, 'private');
+    strictEqual(publicKey3.asymmetricKeyType, 'dh');
+    strictEqual(privateKey3.asymmetricKeyType, 'dh');
+
+    throws(
+      () => diffieHellman({ publicKey: publicKey1, privateKey: privateKey3 }),
+      {
+        message: 'Failed to derive shared diffie-hellman secret',
+      }
+    );
   },
 };
 
@@ -2023,5 +2089,17 @@ export const generate_dh_key_pair_by_length = {
           'Generating DH keys from a prime length is not yet implemented',
       }
     );
+  },
+};
+
+export const generate_ed_keypair_promisified = {
+  async test() {
+    const promisifiedGenKeyPair = promisify(generateKeyPair);
+    const { publicKey, privateKey } = await promisifiedGenKeyPair(
+      'ed25519',
+      {}
+    );
+    strictEqual(publicKey.asymmetricKeyType, 'ed25519');
+    strictEqual(privateKey.asymmetricKeyType, 'ed25519');
   },
 };

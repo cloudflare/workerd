@@ -51,6 +51,9 @@ class CryptoImpl final: public jsg::Object {
 
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
 
+  jsg::BufferSource statelessDH(
+      jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey);
+
   // Primes
   jsg::BufferSource randomPrime(jsg::Lock& js,
       uint32_t size,
@@ -253,6 +256,7 @@ class CryptoImpl final: public jsg::Object {
     // DH
     JSG_NESTED_TYPE(DiffieHellmanHandle);
     JSG_METHOD(DiffieHellmanGroupHandle);
+    JSG_METHOD(statelessDH);
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);

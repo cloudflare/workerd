@@ -82,10 +82,10 @@ http_archive(
 
 http_archive(
     name = "ncrypto",
-    sha256 = "c8284e4719130916cbce340989a59249e605dfbdecd496910d6ed2d1ecaf69ad",
-    strip_prefix = "ncrypto-main",
+    sha256 = "ed1a4f33222c7778c439b223c9e538e705031a95678303e4527289855c586aa4",
+    strip_prefix = "ncrypto-1.0.0",
     type = "tgz",
-    url = "https://github.com/nodejs/ncrypto/archive/refs/heads/main.tar.gz",
+    url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.0.tar.gz",
 )
 
 http_archive(

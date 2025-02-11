@@ -83,6 +83,10 @@ import { inspect } from 'node-internal:internal_inspect';
 import { randomBytes } from 'node-internal:crypto_random';
 const kInspect = inspect.custom;
 
+const kCustomPromisifyArgsSymbol = Symbol.for(
+  'nodejs.util.promisify.custom.args'
+);
+
 // Key input contexts.
 enum KeyContext {
   kConsumePublic,
@@ -229,6 +233,10 @@ export abstract class KeyObject {
 
 export function isKeyObject(obj: any): obj is KeyObject {
   return obj[kHandle] !== undefined;
+}
+
+export function getKeyObjectHandle(obj: KeyObject): CryptoKey {
+  return obj[kHandle];
 }
 
 abstract class AsymmetricKeyObject extends KeyObject {
@@ -602,6 +610,11 @@ export function generateKeyPair(
     });
   }
 }
+
+Object.defineProperty(generateKeyPair, kCustomPromisifyArgsSymbol, {
+  value: ['publicKey', 'privateKey'],
+  enumerable: false,
+});
 
 export function generateKeySync(
   type: SecretKeyType,

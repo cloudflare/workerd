@@ -322,6 +322,10 @@ class AsymmetricKey final: public CryptoKey::Impl {
     return NewPublic(kj::mv(cloned));
   }
 
+  operator const ncrypto::EVPKeyPointer&() const {
+    return key;
+  }
+
  private:
   ncrypto::EVPKeyPointer key;
   bool isPrivate;
@@ -775,6 +779,23 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
     .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
     .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
   };
+}
+
+jsg::BufferSource CryptoImpl::statelessDH(
+    jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey) {
+  KJ_ASSERT(privateKey->getAlgorithmName() == "dh"_kj, "Invalid private key algorithm");
+  KJ_ASSERT(publicKey->getAlgorithmName() == "dh"_kj, "Invalid public key algorithm");
+  KJ_IF_SOME(pubKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*publicKey->impl)) {
+    KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
+      auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
+      JSG_REQUIRE(data, Error, "Failed to derive shared diffie-hellman secret");
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
+      kj::ArrayPtr<kj::byte> ptr(static_cast<kj::byte*>(data.get()), data.size());
+      backing.asArrayPtr().copyFrom(ptr);
+      return jsg::BufferSource(js, kj::mv(backing));
+    }
+  }
+  JSG_FAIL_REQUIRE(Error, "Unsupported keys for stateless diffie-hellman");
 }
 
 }  // namespace workerd::api::node
