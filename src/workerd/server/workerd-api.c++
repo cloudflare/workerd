@@ -35,6 +35,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
+#include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/promise-wrapper.h>
@@ -107,6 +108,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_URL_ISOLATE_TYPES,
     EW_URL_STANDARD_ISOLATE_TYPES,
     EW_URLPATTERN_ISOLATE_TYPES,
+    EW_URLPATTERN_STANDARD_ISOLATE_TYPES,
     EW_WEBSOCKET_ISOLATE_TYPES,
     EW_SQL_ISOLATE_TYPES,
     EW_NODE_ISOLATE_TYPES,

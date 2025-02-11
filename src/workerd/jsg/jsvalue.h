@@ -281,6 +281,8 @@ class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
   kj::Maybe<JsArray> operator()(Lock& js, const JsString& input) const KJ_WARN_UNUSED_RESULT;
   kj::Maybe<JsArray> operator()(Lock& js, kj::StringPtr input) const KJ_WARN_UNUSED_RESULT;
   using JsBase<v8::RegExp, JsRegExp>::JsBase;
+
+  bool match(Lock& js, kj::StringPtr input);
 };
 
 class JsDate final: public JsBase<v8::Date, JsDate> {
