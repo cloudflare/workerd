@@ -409,6 +409,7 @@ enum class PragmaSignature {
   BOOLEAN,
   OBJECT_NAME,
   OPTIONAL_OBJECT_NAME,
+  NULL_OR_NUMBER,
   NULL_NUMBER_OR_OBJECT_NAME
 };
 struct PragmaInfo {
@@ -438,7 +439,10 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
   {"index_xinfo"_kj, PragmaSignature::OBJECT_NAME},
 
   // Takes an argument of table name/index name OR a max number of results, or nothing
-  {"quick_check"_kj, PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME}};
+  {"quick_check"_kj, PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME},
+
+  // Takes a number representing a bit mask or nothing to use the default mask.
+  {"optimize"_kj, PragmaSignature::NULL_OR_NUMBER}};
 
 }  // namespace
 
@@ -899,12 +903,30 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     case SQLITE_DELETE:       /* Table Name      NULL            */
     case SQLITE_DROP_TABLE:   /* Table Name      NULL            */
     case SQLITE_INSERT:       /* Table Name      NULL            */
-    case SQLITE_ANALYZE:      /* Table Name      NULL            */
     case SQLITE_CREATE_VIEW:  /* View Name       NULL            */
     case SQLITE_DROP_VIEW:    /* View Name       NULL            */
     case SQLITE_REINDEX:      /* Index Name      NULL            */
       KJ_ASSERT(param2 == kj::none);
       return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+
+    case SQLITE_ANALYZE: /* Table Name      NULL            */
+      KJ_ASSERT(param2 == kj::none);
+      // We allow all names (including names where isAllowedName() would return false) because
+      // `PRAGMA optimize` issues an ANALYZE statement with no arguments and a SQLite ANALYZE
+      // statement with no parameters will analyze all tables, including otherwise restricted
+      // tables.
+      //
+      // The ANALYZE statement records information about the distribution of rows in each index in
+      // the database in a special sqlite_stat1 table.  While the sqlite_stat1 table leaks metadata
+      // about restricted tables (like the names of indices and the sizes of those tables), the
+      // sqlite_stat1 does not contain data from the restricted tables.  As such, it's OK to allow
+      // users to ANALYZE restricted tables.
+      //
+      // Note that users can *modify* the sqlite_stat1 table, which means that they can make the
+      // query planner work in suboptimal ways by writing bogus data to the table.
+      //
+      // See https://www.sqlite.org/fileformat2.html#stat1tab for more details.
+      return true;
 
     case SQLITE_ALTER_TABLE: /* Table Name      NULL (modified) */
       return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
@@ -1030,6 +1052,12 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           case PragmaSignature::OPTIONAL_OBJECT_NAME: {
             auto val = KJ_UNWRAP_OR(param2, return true);
             return regulator.isAllowedName(val);
+          }
+          case PragmaSignature::NULL_OR_NUMBER: {
+            // Argument is not required
+            auto val = KJ_UNWRAP_OR(param2, return true);
+            // val is allowed if it parses to an integer
+            return val.tryParseAs<uint>() != kj::none;
           }
           case PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME: {
             // Argument is not required
