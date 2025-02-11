@@ -30,6 +30,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
+#include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
@@ -76,6 +77,7 @@
   F("url", EW_URL_ISOLATE_TYPES)                                                                   \
   F("url-standard", EW_URL_STANDARD_ISOLATE_TYPES)                                                 \
   F("url-pattern", EW_URLPATTERN_ISOLATE_TYPES)                                                    \
+  F("url-pattern-standard", EW_URLPATTERN_STANDARD_ISOLATE_TYPES)                                  \
   F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                                       \
   F("sql", EW_SQL_ISOLATE_TYPES)                                                                   \
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                                           \
