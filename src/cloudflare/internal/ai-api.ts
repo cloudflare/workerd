@@ -151,10 +151,6 @@ export class Ai {
       throw await this._parseError(res);
     }
 
-    if (inputs['stream']) {
-      return res.body;
-    }
-
     if (!res.body) {
       throw await this._parseError(res);
     }
