@@ -1,11 +1,6 @@
 
 on:
-  pull_request: {}
   workflow_dispatch: {}
-  push: 
-    branches:
-      - main
-      - master
   schedule:
     - cron: '0 0 * * *'
 name: Semgrep config
