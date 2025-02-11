@@ -17,7 +17,7 @@
     "capnpc-ts": "^0.7.0",
     "chrome-remote-interface": "^0.33.2",
     "esbuild": "^0.24.2",
-    "eslint": "^9.19.0",
+    "eslint": "^9.20.1",
     "eslint-plugin-import": "^2.31.0",
     "expect-type": "^1.1.0",
     "typescript-eslint": "^8.22.0"
