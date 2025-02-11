@@ -9164,8 +9164,8 @@ export const w3cTestURLSearchParamsSort = {
       {
         input: 'ﬃ&🌈', // 🌈 > code point, but < code unit because two code units
         output: [
-          ['ﬃ', ''],
           ['🌈', ''],
+          ['ﬃ', ''],
         ],
       },
       {

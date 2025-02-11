@@ -154,9 +154,6 @@ export default {
   'urlsearchparams-has.any.js': {},
   'urlsearchparams-set.any.js': {},
   'urlsearchparams-size.any.js': {},
-  'urlsearchparams-sort.any.js': {
-    comment: 'Investigate url_search_params::sort in ada-url',
-    expectedFailures: ['Parse and sort: ﬃ&🌈', 'URL parse and sort: ﬃ&🌈'],
-  },
+  'urlsearchparams-sort.any.js': {},
   'urlsearchparams-stringifier.any.js': {},
 } satisfies TestRunnerConfig;
