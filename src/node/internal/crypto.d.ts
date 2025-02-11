@@ -137,8 +137,7 @@ export interface EdKeyPairOptions {
 }
 
 export interface DhKeyPairOptions {
-  prime?: BufferSource;
-  primeLength?: number;
+  primeOrGroup: BufferSource | number | string;
   generator?: number;
 }
 
@@ -146,9 +145,7 @@ export function generateRsaKeyPair(options: RsaKeyPairOptions): CryptoKeyPair;
 export function generateDsaKeyPair(options: DsaKeyPairOptions): CryptoKeyPair;
 export function generateEcKeyPair(options: EcKeyPairOptions): CryptoKeyPair;
 export function generateEdKeyPair(options: EdKeyPairOptions): CryptoKeyPair;
-export function generateDhKeyPair(
-  options: string | DhKeyPairOptions
-): CryptoKeyPair;
+export function generateDhKeyPair(options: DhKeyPairOptions): CryptoKeyPair;
 
 // Spkac
 export function verifySpkac(input: ArrayBufferView | ArrayBuffer): boolean;

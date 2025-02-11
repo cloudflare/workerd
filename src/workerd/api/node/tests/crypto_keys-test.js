@@ -11,6 +11,8 @@ import {
   generateKeySync,
   generateKeyPair,
   generateKeyPairSync,
+  generatePrimeSync,
+  getDiffieHellman,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
@@ -1951,5 +1953,75 @@ export const generate_rsa_key_pair_enc = {
     strictEqual(imported.type, 'private');
     strictEqual(imported.asymmetricKeyDetails.modulusLength, 2048);
     strictEqual(imported.asymmetricKeyDetails.publicExponent, 65537n);
+  },
+};
+
+export const generate_ec_key_pair = {
+  test() {
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+    });
+    strictEqual(publicKey.type, 'public');
+    strictEqual(publicKey.asymmetricKeyDetails.namedCurve, 'prime256v1');
+    strictEqual(privateKey.type, 'private');
+    strictEqual(privateKey.asymmetricKeyDetails.namedCurve, 'prime256v1');
+  },
+};
+
+export const generate_ed25519_key_pair = {
+  test() {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519', {});
+    strictEqual(publicKey.type, 'public');
+    strictEqual(privateKey.type, 'private');
+    strictEqual(publicKey.asymmetricKeyType, 'ed25519');
+    strictEqual(privateKey.asymmetricKeyType, 'ed25519');
+  },
+};
+
+export const generate_x25519_key_pair = {
+  test() {
+    const { privateKey, publicKey } = generateKeyPairSync('x25519', {});
+    strictEqual(publicKey.type, 'public');
+    strictEqual(privateKey.type, 'private');
+    strictEqual(publicKey.asymmetricKeyType, 'x25519');
+    strictEqual(privateKey.asymmetricKeyType, 'x25519');
+  },
+};
+
+export const generate_dh_key_pair = {
+  test() {
+    const { privateKey, publicKey } = generateKeyPairSync('dh', {
+      group: 'modp14',
+    });
+    strictEqual(publicKey.type, 'public');
+    strictEqual(privateKey.type, 'private');
+    strictEqual(publicKey.asymmetricKeyType, 'dh');
+    strictEqual(privateKey.asymmetricKeyType, 'dh');
+  },
+};
+
+export const generate_dh_from_fixed_prime = {
+  test() {
+    const prime = generatePrimeSync(1024);
+    const { privateKey, publicKey } = generateKeyPairSync('dh', { prime });
+    strictEqual(publicKey.type, 'public');
+    strictEqual(privateKey.type, 'private');
+    strictEqual(publicKey.asymmetricKeyType, 'dh');
+    strictEqual(privateKey.asymmetricKeyType, 'dh');
+  },
+};
+
+export const generate_dh_key_pair_by_length = {
+  test() {
+    throws(
+      () =>
+        generateKeyPairSync('dh', {
+          primeLength: 1048,
+        }),
+      {
+        message:
+          'Generating DH keys from a prime length is not yet implemented',
+      }
+    );
   },
 };

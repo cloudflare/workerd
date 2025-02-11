@@ -234,17 +234,16 @@ class CryptoImpl final: public jsg::Object {
   };
 
   struct DhKeyPairOptions {
-    jsg::Optional<jsg::BufferSource> prime;
-    jsg::Optional<uint32_t> primeLength;
+    kj::OneOf<jsg::BufferSource, uint32_t, kj::String> primeOrGroup;
     jsg::Optional<uint32_t> generator;
-    JSG_STRUCT(prime, primeLength, generator);
+    JSG_STRUCT(primeOrGroup, generator);
   };
 
   CryptoKeyPair generateRsaKeyPair(RsaKeyPairOptions options);
   CryptoKeyPair generateDsaKeyPair(DsaKeyPairOptions options);
   CryptoKeyPair generateEcKeyPair(EcKeyPairOptions options);
   CryptoKeyPair generateEdKeyPair(EdKeyPairOptions options);
-  CryptoKeyPair generateDhKeyPair(kj::OneOf<DhKeyPairOptions, kj::String>);
+  CryptoKeyPair generateDhKeyPair(DhKeyPairOptions options);
 
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);

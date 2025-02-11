@@ -804,6 +804,10 @@ export function generateKeyPairSync(
       ) as KeyObjectPair;
     }
     case 'dh': {
+      if (generator != null) {
+        validateInt32(generator, 'options.generator', 0);
+      }
+
       if (group != null || groupName != null) {
         if (prime != null) {
           throw new ERR_INCOMPATIBLE_OPTION_PAIR('group', 'prime');
@@ -820,7 +824,10 @@ export function generateKeyPairSync(
         validateString(g, 'options.group');
 
         return handleKeyEncoding(
-          cryptoImpl.generateDhKeyPair(g)
+          cryptoImpl.generateDhKeyPair({
+            primeOrGroup: g,
+            generator: generator! as number,
+          })
         ) as KeyObjectPair;
       }
 
@@ -844,14 +851,18 @@ export function generateKeyPairSync(
         );
       }
 
-      if (generator != null) {
-        validateInt32(generator, 'options.generator', 0);
+      if (prime) {
+        return handleKeyEncoding(
+          cryptoImpl.generateDhKeyPair({
+            primeOrGroup: prime as BufferSource,
+            generator: generator as number,
+          })
+        ) as KeyObjectPair;
       }
 
       return handleKeyEncoding(
         cryptoImpl.generateDhKeyPair({
-          prime: prime as BufferSource,
-          primeLength: primeLength as number,
+          primeOrGroup: primeLength as number,
           generator: generator as number,
         })
       ) as KeyObjectPair;

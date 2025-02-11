@@ -326,6 +326,12 @@ class AsymmetricKey final: public CryptoKey::Impl {
   ncrypto::EVPKeyPointer key;
   bool isPrivate;
 };
+
+int getCurveFromName(kj::StringPtr name) {
+  int nid = EC_curve_nist2nid(name.begin());
+  if (nid == NID_undef) nid = OBJ_sn2nid(name.begin());
+  return nid;
+}
 }  // namespace
 
 kj::OneOf<kj::String, jsg::BufferSource, SubtleCrypto::JsonWebKey> CryptoImpl::exportKey(
@@ -635,15 +641,140 @@ CryptoKeyPair CryptoImpl::generateDsaKeyPair(DsaKeyPairOptions options) {
 }
 
 CryptoKeyPair CryptoImpl::generateEcKeyPair(EcKeyPairOptions options) {
-  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  auto nid = getCurveFromName(options.namedCurve);
+  JSG_REQUIRE(nid != NID_undef, Error, "Invalid or unsupported curve");
+
+  auto paramEncoding =
+      options.paramEncoding == "named"_kj ? OPENSSL_EC_NAMED_CURVE : OPENSSL_EC_EXPLICIT_CURVE;
+
+  auto ecPrivateKey = ncrypto::ECKeyPointer::NewByCurveName(nid);
+  JSG_REQUIRE(ecPrivateKey, Error, "Failed to initialize key");
+  JSG_REQUIRE(ecPrivateKey.generate(), Error, "Failed to generate private key");
+
+  EC_KEY_set_enc_flags(ecPrivateKey, paramEncoding);
+
+  auto ecPublicKey = ncrypto::ECKeyPointer::NewByCurveName(nid);
+  JSG_REQUIRE(EC_KEY_set_public_key(ecPublicKey, EC_KEY_get0_public_key(ecPrivateKey)), Error,
+      "Failed to derive public key");
+
+  auto privateKey = ncrypto::EVPKeyPointer::New();
+  JSG_REQUIRE(privateKey.assign(ecPrivateKey), Error, "Failed to assign private key");
+
+  auto publicKey = ncrypto::EVPKeyPointer::New();
+  JSG_REQUIRE(publicKey.assign(ecPublicKey), Error, "Failed to assign public key");
+
+  ecPrivateKey.release();
+  ecPublicKey.release();
+
+  auto pubKey = AsymmetricKey::NewPublic(kj::mv(publicKey));
+  JSG_REQUIRE(pubKey, Error, "Failed to create public key");
+  auto pvtKey = AsymmetricKey::NewPrivate(kj::mv(privateKey));
+  JSG_REQUIRE(pvtKey, Error, "Failed to create private key");
+
+  return CryptoKeyPair{
+    .publicKey = jsg::alloc<CryptoKey>(kj::mv(pubKey)),
+    .privateKey = jsg::alloc<CryptoKey>(kj::mv(pvtKey)),
+  };
 }
 
 CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
-  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  auto nid = ([&] {
+    if (options.type == "ed25519") {
+      return EVP_PKEY_ED25519;
+    }
+    if (options.type == "x25519") {
+      return EVP_PKEY_X25519;
+    }
+    return NID_undef;
+  })();
+  JSG_REQUIRE(nid != NID_undef, Error, "Invalid or unsupported curve");
+
+  auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(nid);
+  JSG_REQUIRE(ctx, Error, "Failed to create keygen context");
+  JSG_REQUIRE(ctx.initForKeygen(), Error, "Failed to initialize keygen");
+
+  // Generate the key
+  EVP_PKEY* pkey = nullptr;
+  JSG_REQUIRE(EVP_PKEY_keygen(ctx.get(), &pkey), Error, "Failed to generate key");
+
+  auto generated = ncrypto::EVPKeyPointer(pkey);
+
+  auto publicKey = AsymmetricKey::NewPublic(generated.clone());
+  JSG_REQUIRE(publicKey, Error, "Failed to create public key");
+  auto privateKey = AsymmetricKey::NewPrivate(kj::mv(generated));
+  JSG_REQUIRE(privateKey, Error, "Failed to create private key");
+
+  return CryptoKeyPair{
+    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+  };
 }
 
-CryptoKeyPair CryptoImpl::generateDhKeyPair(kj::OneOf<DhKeyPairOptions, kj::String>) {
-  JSG_FAIL_REQUIRE(Error, "Not yet implemented");
+CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  static constexpr uint32_t kStandardizedGenerator = 2;
+
+  ncrypto::EVPKeyPointer key_params;
+  auto generator = options.generator.orDefault(kStandardizedGenerator);
+
+  KJ_SWITCH_ONEOF(options.primeOrGroup) {
+    KJ_CASE_ONEOF(group, kj::String) {
+      std::string_view group_name(group.begin(), group.size());
+      auto found = ncrypto::DHPointer::FindGroup(group_name);
+      JSG_REQUIRE(found, Error, "Invalid or unsupported group");
+
+      auto bn_g = ncrypto::BignumPointer::New();
+      JSG_REQUIRE(bn_g && bn_g.setWord(generator), Error, "Failed to set generator");
+
+      auto dh = ncrypto::DHPointer::New(kj::mv(found), kj::mv(bn_g));
+      JSG_REQUIRE(dh, Error, "Failed to create DH key");
+
+      key_params = ncrypto::EVPKeyPointer::NewDH(kj::mv(dh));
+    }
+    KJ_CASE_ONEOF(prime, jsg::BufferSource) {
+      ncrypto::BignumPointer bn(prime.asArrayPtr().begin(), prime.size());
+
+      auto bn_g = ncrypto::BignumPointer::New();
+      JSG_REQUIRE(bn_g && bn_g.setWord(generator), Error, "Failed to set generator");
+
+      auto dh = ncrypto::DHPointer::New(kj::mv(bn), kj::mv(bn_g));
+      JSG_REQUIRE(dh, Error, "Failed to create DH key");
+
+      key_params = ncrypto::EVPKeyPointer::NewDH(kj::mv(dh));
+    }
+    KJ_CASE_ONEOF(length, uint32_t) {
+      // TODO(later): BoringSSL appears to not implement DH key generation
+      // from a prime length the same way Node.js does. For now, defer this
+      // and come back to implement later.
+      JSG_FAIL_REQUIRE(Error, "Generating DH keys from a prime length is not yet implemented");
+    }
+  }
+
+  JSG_REQUIRE(key_params, Error, "Failed to create keygen context");
+  auto ctx = key_params.newCtx();
+  JSG_REQUIRE(ctx, Error, "Failed to create keygen context");
+  JSG_REQUIRE(ctx.initForKeygen(), Error, "Failed to initialize keygen context");
+
+  // Generate the key
+  EVP_PKEY* pkey = nullptr;
+  JSG_REQUIRE(EVP_PKEY_keygen(ctx.get(), &pkey), Error, "Failed to generate key");
+
+  auto generated = ncrypto::EVPKeyPointer(pkey);
+
+  auto publicKey = AsymmetricKey::NewPublic(generated.clone());
+  JSG_REQUIRE(publicKey, Error, "Failed to create public key");
+  auto privateKey = AsymmetricKey::NewPrivate(kj::mv(generated));
+  JSG_REQUIRE(privateKey, Error, "Failed to create private key");
+
+  return CryptoKeyPair{
+    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+  };
 }
 
 }  // namespace workerd::api::node
