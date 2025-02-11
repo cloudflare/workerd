@@ -8,6 +8,7 @@ interface PyodideConfig {
   jsglobals: any;
   resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
+  stdout?: (msg: string) => void;
 }
 
 interface API {
@@ -43,6 +44,7 @@ interface EmscriptenSettings {
   ) => WebAssembly.Exports;
   reportUndefinedSymbolsNoOp: () => void;
   noInitialRun?: boolean;
+  print?: (args: any) => void;
   API: {
     config: API['config'];
   };
@@ -72,4 +74,5 @@ interface Module {
   setGetRandomValues(
     func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
   ): void;
+  print?: (args: any) => void;
 }

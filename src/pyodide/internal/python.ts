@@ -73,6 +73,11 @@ export async function loadPyodide(
     SetupEmscripten.getModule()
   );
   Module.API.config.jsglobals = globalThis;
+  globalThis.console.log("Hello");
+  // Module.API.config.stdout = (args) => {
+  //   globalThis.console.log("uasidas ", args);
+  // };
+
   if (isWorkerd) {
     Module.API.config.indexURL = indexURL;
     Module.API.config.resolveLockFilePromise!(lockfile);
@@ -102,5 +107,12 @@ export async function loadPyodide(
   const pyodide = Module.API.public_api;
 
   finishSnapshotSetup(pyodide);
+
+  API.initializeStreams(config.stdin, config.stdout, config.stderr);
+
+  pyodide.setStdout({
+    batched: (msg: any) => console.log("???", msg)
+  })
+
   return pyodide;
 }

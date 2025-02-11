@@ -149,12 +149,18 @@ function getEmscriptenSettings(
   const prepareFileSystem = getPrepareFileSystem(pythonStdlib);
   const instantiateWasm = getInstantiateWasm(pyodideWasmModule);
 
+  globalThis.console.log("test");
+
   // Emscripten settings to control runtime instantiation.
   return {
     // preRun hook to set up the file system before running main
     // The preRun hook gets run independently of noInitialRun, which is
     // important because the file system lives outside of linear memory.
     preRun: [prepareFileSystem, setEnv, waitForDynlibs],
+    // print: (args) => {
+    //   // @ts-ignore
+    //   globalThis.console.log("Printing ", args, this);
+    // },
     instantiateWasm,
     reportUndefinedSymbolsNoOp() {},
     readyPromise,
