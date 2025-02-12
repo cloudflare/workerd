@@ -656,7 +656,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     t.setEventInfo(context.now(), tracing::TraceEventInfo(traces));
   }
 
-  metrics.reportTailEvent(context, [&] {
+  metrics.reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(tracing::TraceEventInfo(traces), tracing::Onset::WorkerInfo{}, kj::none);
   });
 

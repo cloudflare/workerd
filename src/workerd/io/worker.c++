@@ -1028,7 +1028,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
                 error, api->getErrorInterfaceTypeHandler(js));
           }
 
-          ioContext.getMetrics().reportTailEvent(ioContext, [&] {
+          ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(), [&] {
             KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
               auto name = obj.get(js, "name"_kj);
               auto message = obj.get(js, "message"_kj);
@@ -1860,8 +1860,8 @@ void Worker::handleLog(jsg::Lock& js,
       tracer.addLog(timestamp, level, message());
     }
 
-    ioContext.getMetrics().reportTailEvent(
-        ioContext, [&] { return tracing::Mark(tracing::Log(ioContext.now(), level, message())); });
+    ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(),
+        [&] { return tracing::Mark(tracing::Log(ioContext.now(), level, message())); });
   }
 
   if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
@@ -2066,7 +2066,7 @@ void Worker::Lock::logUncaughtException(
       });
     }
 
-    ioContext.getMetrics().reportTailEvent(ioContext, [&] {
+    ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(), [&] {
       KJ_IF_SOME(obj, exception.tryCast<jsg::JsObject>()) {
         auto name = obj.get(*this, "name"_kj);
         auto message = obj.get(*this, "message"_kj);
