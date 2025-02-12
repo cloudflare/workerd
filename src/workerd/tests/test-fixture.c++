@@ -224,6 +224,7 @@ struct MockErrorReporter final: public Worker::ValidationErrorReporter {
 
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {}
   void addActorClass(kj::StringPtr exportName) override {}
+  void addWorkflowClass(kj::StringPtr exportName) override {}
 };
 
 inline server::config::Worker::Reader buildConfig(
