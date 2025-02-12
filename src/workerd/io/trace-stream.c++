@@ -571,108 +571,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
   return obj;
 }
 
-// See the documentation for the identically named class in worker-rpc.c++ for details.
-// TODO(cleanup): Combine this and the worker-rpc.c++ class into a single utility.
-class ServerTopLevelMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
- public:
-  explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
-      : doneFulfiller(kj::mv(doneFulfiller)) {}
-  ~ServerTopLevelMembrane() noexcept(false) {
-    KJ_IF_SOME(f, doneFulfiller) {
-      f->reject(
-          KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled without handling any events."));
-    }
-  }
-
-  kj::Maybe<capnp::Capability::Client> inboundCall(
-      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
-    auto f = kj::mv(JSG_REQUIRE_NONNULL(
-        doneFulfiller, Error, "Only one tailStream method call is allowed on this object."));
-    doneFulfiller = kj::none;
-    return capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
-  }
-
-  kj::Maybe<capnp::Capability::Client> outboundCall(
-      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
-    KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
-  }
-
- private:
-  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
-};
-
-class TailStreamTargetBase: public rpc::TailStreamTarget::Server {
- public:
-  TailStreamTargetBase(IoContext& ioContext): weakIoContext(ioContext.getWeakRef()) {}
-  KJ_DISALLOW_COPY_AND_MOVE(TailStreamTargetBase);
-  virtual ~TailStreamTargetBase() = default;
-
-  virtual kj::Promise<void> runImpl(Worker::Lock& lock,
-      IoContext& ioContext,
-      kj::ArrayPtr<tracing::TailEvent> events,
-      rpc::TailStreamTarget::TailStreamResults::Builder results) = 0;
-
-  kj::Promise<void> report(ReportContext reportContext) override {
-    IoContext& ioContext = JSG_REQUIRE_NONNULL(weakIoContext->tryGet(), Error,
-        "The destination object for this tail session no longer exists.");
-
-    ioContext.getLimitEnforcer().topUpActor();
-
-    auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
-
-    auto promise =
-        ioContext
-            .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
-                     Worker::Lock& lock) mutable -> kj::Promise<void> {
-      auto params = reportContext.getParams();
-      KJ_ASSERT(params.hasEvents(), "Events are required.");
-      auto eventReaders = params.getEvents();
-      kj::Vector<tracing::TailEvent> events(eventReaders.size());
-      for (auto reader: eventReaders) {
-        events.add(tracing::TailEvent(reader));
-      }
-      auto result = runImpl(lock, ioContext, events.releaseAsArray(), reportContext.initResults());
-
-      if (ioContext.hasOutputGate()) {
-        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
-          return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
-        });
-      } else {
-        return kj::mv(result);
-      }
-    }).catch_([](kj::Exception&& e) {
-      if (jsg::isTunneledException(e.getDescription())) {
-        auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
-        if (!description.startsWith("remote.")) {
-          e.setDescription(kj::str("remote.", description));
-        }
-      }
-      kj::throwFatalException(kj::mv(e));
-    });
-
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&fulfiller = *paf.fulfiller](kj::Exception&& e) { fulfiller.reject(kj::mv(e)); });
-    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
-      if (fulfiller->isWaiting()) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-            "The destination execution context for this tail session was canceled while the "
-            "call was still running."));
-      }
-    }));
-    ioContext.addTask(kj::mv(promise));
-
-    return kj::mv(paf.promise);
-  }
-
- private:
-  kj::Own<IoContext::WeakRef> weakIoContext;
-};
-
 // Returns the name of the handler function for this type of event.
 kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
@@ -717,29 +615,204 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   return kj::none;
 }
 
-// The TailStreamEntrypoint class handles the initial onset event and the determination
-// of whether additional events should be handled in this stream. If a handler is
-// returned then a capability to access the TailStreamHandler is returned. This class
-// takes over and handles the remaining events in the stream.
-class TailStreamHandler final: public TailStreamTargetBase {
+class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
-  TailStreamHandler(IoContext& ioContext, jsg::JsRef<jsg::JsValue> handler)
-      : TailStreamTargetBase(ioContext),
-        handler(kj::mv(handler)) {}
+  TailStreamTarget(
+      IoContext& ioContext, Frankenvalue props, kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+      : weakIoContext(ioContext.getWeakRef()),
+        props(kj::mv(props)),
+        doneFulfiller(kj::mv(doneFulfiller)) {}
 
-  kj::Promise<void> runImpl(Worker::Lock& lock,
+  KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
+  ~TailStreamTarget() {
+    if (doneFulfiller->isWaiting()) {
+      doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
+    }
+  }
+
+  kj::Promise<void> report(ReportContext reportContext) override {
+    IoContext& ioContext = KJ_REQUIRE_NONNULL(
+        weakIoContext->tryGet(), "The destination object for this tail session no longer exists.");
+
+    ioContext.getLimitEnforcer().topUpActor();
+
+    auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
+
+    auto promise =
+        ioContext
+            .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
+                     Worker::Lock& lock) mutable -> kj::Promise<void> {
+      auto params = reportContext.getParams();
+      KJ_ASSERT(params.hasEvents(), "Events are required.");
+      auto eventReaders = params.getEvents();
+      kj::Vector<tracing::TailEvent> events(eventReaders.size());
+      for (auto reader: eventReaders) {
+        events.add(tracing::TailEvent(reader));
+      }
+
+      // If we have not yet received the onset event, the first event in the
+      // received collection must be an Onset event and must be handled separately.
+      // We will only dispatch the remaining events if a handler is returned.
+      auto result = ([&]() -> kj::Promise<void> {
+        KJ_IF_SOME(handler, maybeHandler) {
+          auto h = handler.getHandle(lock);
+          return handleEvents(
+              lock, h, ioContext, events.releaseAsArray(), reportContext.initResults());
+        } else {
+          return handleOnset(lock, ioContext, events.releaseAsArray(), reportContext.initResults());
+        }
+      })();
+
+      if (ioContext.hasOutputGate()) {
+        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
+          return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
+        });
+      } else {
+        return kj::mv(result);
+      }
+    }).catch_([](kj::Exception&& e) {
+      if (jsg::isTunneledException(e.getDescription())) {
+        auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
+        if (!description.startsWith("remote.")) {
+          e.setDescription(kj::str("remote.", description));
+        }
+      }
+      kj::throwFatalException(kj::mv(e));
+    });
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
+        [&fulfiller = *paf.fulfiller](kj::Exception&& e) { fulfiller.reject(kj::mv(e)); });
+    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
+      if (fulfiller->isWaiting()) {
+        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
+            "The destination execution context for this tail session was canceled while the "
+            "call was still running."));
+      }
+    }));
+    ioContext.addTask(kj::mv(promise));
+
+    return kj::mv(paf.promise);
+  }
+
+ private:
+  // Handles the very first (onset) event in the tail stream. This will cause
+  // the exported tailStream handler to be called, passing the onset event
+  // as the initial argument. If the tail stream wishes to continue receiving
+  // events for this invocation, it will return a handler in the form of an
+  // object or a function. If no handler is returned, the tail session is
+  // shutdown.
+  kj::Promise<void> handleOnset(Worker::Lock& lock,
+      IoContext& ioContext,
+      kj::ArrayPtr<tracing::TailEvent> events,
+      rpc::TailStreamTarget::TailStreamResults::Builder results) {
+    // There should be only a single onset event in this batch.
+    KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
+        "Expected only a single onset event");
+    auto& event = events[0];
+
+    // TODO(later): This assumes the tail worker is on the default export.
+    // Should we allow other named exports to provide the tailStream handler?
+    auto handler = KJ_REQUIRE_NONNULL(
+        lock.getExportedHandler("default"_kj, kj::mv(props), ioContext.getActor()),
+        "Failed to get handler to worker.");
+    StringCache stringCache;
+
+    jsg::Lock& js = lock;
+    auto target = jsg::JsObject(handler->self.getHandle(js));
+    v8::Local<v8::Value> maybeFn = target.get(js, "tailStream"_kj);
+
+    // If there's no actual tailStream handler, or if the tailStream export is
+    // something other than a function, we will emit a warning for the user
+    // then immediately return.
+    if (!maybeFn->IsFunction()) {
+      ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
+                               "not export a tailStream() handler.");
+      results.setStop(true);
+      doneFulfiller->fulfill();
+      return kj::READY_NOW;
+    }
+
+    // Invoke the tailStream handler function.
+    v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
+    v8::Local<v8::Value> obj = ToJs(js, event, stringCache);
+    auto result = jsg::check(fn->Call(js.v8Context(), target, 1, &obj));
+
+    // We need to be able to access the results builder from both the
+    // success and failure branches of the promise we set up below.
+    struct SharedResults: public kj::Refcounted {
+      rpc::TailStreamTarget::TailStreamResults::Builder results;
+      rpc::TailStreamTarget::TailStreamResults::Builder& get() {
+        return results;
+      }
+      SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
+          : results(kj::mv(results)) {}
+    };
+    auto sharedResults = kj::rc<SharedResults>(kj::mv(results));
+
+    // The handler can return a function, an object, undefined, or a promise
+    // for any of these. We will convert the result to a promise for consistent
+    // handling...
+    return ioContext.awaitJs(js,
+        js.toPromise(result).then(js,
+            ioContext.addFunctor([this, results = sharedResults.addRef(), &ioContext](
+                                     jsg::Lock& js, jsg::Value value) mutable {
+      // The value here can be one of a function, an object, or undefined.
+      // Any value other than these will result in a warning but will otherwise
+      // be treated like undefined.
+
+      // If a function or object is returned, then our tail worker wishes to
+      // keep receiving events! Yay! Otherwise, we will stop the stream by
+      // setting the stop field in the results.
+      auto handle = value.getHandle(js);
+      if (handle->IsFunction() || handle->IsObject()) {
+        // Sweet! Our tail worker wants to keep receiving events. Let's store
+        // the handler and return.
+        maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
+        return;
+      }
+
+      // If the handler returned any other kind of value, let's be nice and
+      // at least warn the user about it.
+      if (!handle->IsUndefined()) {
+        ioContext.logWarningOnce(
+            kj::str("tailStream() handler returned an unusable value. "
+                    "The tailStream() handler is expected to return either a function, an "
+                    "object, or undefined. Received ",
+                jsg::JsValue(handle).typeOf(js)));
+      }
+      // And finally, we'll stop the stream since the tail worker did not return
+      // a handler for us to continue with.
+      results->get().setStop(true);
+      doneFulfiller->fulfill();
+    }),
+            ioContext.addFunctor([this, results = sharedResults.addRef()](
+                                     jsg::Lock& js, jsg::Value&& error) mutable {
+      results->get().setStop(true);
+      doneFulfiller->fulfill();
+      js.throwException(kj::mv(error));
+    })));
+  }
+
+  kj::Promise<void> handleEvents(Worker::Lock& lock,
+      const jsg::JsValue& handler,
       IoContext& ioContext,
       kj::ArrayPtr<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
     jsg::Lock& js = lock;
 
+    // Should not ever happen but let's handle it anyway.
     if (events.size() == 0) return kj::READY_NOW;
 
     // Take the received set of events and dispatch them to the correct handler.
 
-    v8::Local<v8::Value> h = handler.getHandle(js);
+    v8::Local<v8::Value> h = handler;
     v8::LocalVector<v8::Value> returnValues(js.v8Isolate);
     StringCache stringCache;
+
+    // If any of the events delivered are an outcome event, we will signal that
+    // the stream should be stopped and will will fulfill the done promise.
+    bool finishing = false;
 
     if (h->IsFunction()) {
       // If the handler is a function, then we'll just pass all of the events to that
@@ -749,6 +822,14 @@ class TailStreamHandler final: public TailStreamTargetBase {
       // kj promise.
       auto fn = h.As<v8::Function>();
       for (auto& event: events) {
+        // If we already received an outcome event, we will stop processing any
+        // further events.
+        if (finishing) break;
+        if (event.event.is<tracing::Outcome>()) {
+          finishing = true;
+          results.setStop(true);
+          doneFulfiller->fulfill();
+        };
         v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
         returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
       }
@@ -758,6 +839,14 @@ class TailStreamHandler final: public TailStreamTargetBase {
       KJ_ASSERT(h->IsObject());
       jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
       for (auto& event: events) {
+        // If we already received an outcome event, we will stop processing any
+        // further events.
+        if (finishing) break;
+        if (event.event.is<tracing::Outcome>()) {
+          finishing = true;
+          results.setStop(true);
+          doneFulfiller->fulfill();
+        };
         // It is technically an error not to have a handler name here as we shouldn't
         // be reporting any events we don't know! But, there's no reason to treat it
         // as an error here.
@@ -792,81 +881,16 @@ class TailStreamHandler final: public TailStreamTargetBase {
     return kj::READY_NOW;
   }
 
- private:
-  jsg::JsRef<jsg::JsValue> handler;
-};
-
-// The TailStreamEntrypoint class handles the initial onset event and the determination
-// of whether additional events should be handled in this stream.
-class TailStreamEntrypoint final: public TailStreamTargetBase {
- public:
-  TailStreamEntrypoint(IoContext& ioContext, Frankenvalue props)
-      : TailStreamTargetBase(ioContext),
-        props(kj::mv(props)) {}
-
-  kj::Promise<void> runImpl(Worker::Lock& lock,
-      IoContext& ioContext,
-      kj::ArrayPtr<tracing::TailEvent> events,
-      rpc::TailStreamTarget::TailStreamResults::Builder results) {
-    jsg::Lock& js = lock;
-    // There should be only a single onset event in this one.
-    KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
-        "Expected only a single onset event");
-    auto& event = events[0];
-
-    auto handler = KJ_REQUIRE_NONNULL(
-        lock.getExportedHandler("default"_kj, kj::mv(props), ioContext.getActor()),
-        "Failed to get handler to worker.");
-    StringCache stringCache;
-
-    auto target = jsg::JsObject(handler->self.getHandle(lock));
-    v8::Local<v8::Value> maybeFn = target.get(lock, "tailStream"_kj);
-    if (!maybeFn->IsFunction()) {
-      // If there's no actual tailStream handler we will emit a warning for the user
-      // then immediately return.
-      ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
-                               "not export a tailStream() handler.");
-      return kj::READY_NOW;
-    }
-
-    v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
-
-    v8::Local<v8::Value> obj = ToJs(js, event, stringCache);
-    auto result = jsg::check(fn->Call(js.v8Context(), target, 1, &obj));
-
-    return ioContext.awaitJs(js,
-        js.toPromise(result).then(js,
-            ioContext.addFunctor(
-                [results = kj::mv(results), &ioContext](jsg::Lock& js, jsg::Value value) mutable {
-      // The value here can be one of a function, an object, or undefined.
-      // Any value other than these will result in a warning but will otherwise
-      // be treated like undefined.
-      //
-      // If a function or object is returned, we will pass a new capability
-      // back to the caller that can be used to keep pushing events.
-      //
-      auto handle = value.getHandle(js);
-      if (handle->IsFunction() || handle->IsObject()) {
-        // Sweet! We'll take the handle and pass it off to a new TailStreamHandler
-        // that we will use to initialize a new capability to return to the user.
-        results.setPipeline(rpc::TailStreamTarget::Client(
-            kj::heap<TailStreamHandler>(ioContext, jsg::JsRef(js, jsg::JsValue(handle)))));
-        return;
-      }
-
-      if (!handle->IsUndefined()) {
-        ioContext.logWarningOnce(
-            "tailStream() handler returned an unusable value. "
-            "The tailStream() handler is expected to return either a function, an "
-            "object, or undefined.");
-      }
-    }),
-            ioContext.addFunctor(
-                [](jsg::Lock& js, jsg::Value&& error) { js.throwException(kj::mv(error)); })));
-  }
-
- private:
+  kj::Own<IoContext::WeakRef> weakIoContext;
   Frankenvalue props;
+  // The done fulfiller is resolved when we receive the outcome event
+  // or rejected if the capability is dropped before receiving the outcome
+  // event.
+  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+
+  // The maybeHandler will be empty until we receive and process the
+  // onset event.
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
 };
 }  // namespace
 
@@ -879,8 +903,26 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(capnp::membrane(kj::heap<TailStreamEntrypoint>(ioContext, kj::mv(props)),
-      kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+  capFulfiller->fulfill(
+      kj::heap<TailStreamTarget>(ioContext, kj::mv(props), kj::mv(doneFulfiller)));
+
+  // What is happening here? I'm glad you asked! When this method is called we are
+  // starting a tail stream session. Our TailStreamTarget created above is an RPC
+  // server that accepts events over time as individual RPC calls. Those always
+  // start with an onset event and should always end with an outcome event. It is
+  // possible for the client stub to be dropped early before the outcome event
+  // is delivered.
+  //
+  // When either the outcome event is received, or if the client stub is dropped
+  // early, the donePromise should be fulfilled or rejected. Below we arrange for
+  // the IoContext for the tail stream request to remain alive until the donePromise
+  // is settled. We also block completion of the call to run on the same condition.
+  //
+  // Attaching the registerPendingEvent() to the promise is necessary to keep the
+  // IoContet alive during the times our tail worker is idle waiting for more
+  // events to be delivered.
+  kj::ForkedPromise<void> forked = donePromise.fork();
+  ioContext.addWaitUntil(forked.addBranch().attach(ioContext.registerPendingEvent()));
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -888,10 +930,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  // `donePromise` resolves once there are no longer any capabilities pointing between the client
-  // and server as part of this session.
-  co_await donePromise.exclusiveJoin(ioContext.onAbort());
-
+  co_await forked.addBranch().exclusiveJoin(ioContext.onAbort());
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
@@ -933,24 +972,26 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
-tracing::TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
+tracing::TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
+    : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
 
-void tracing::TailStreamWriter::report(IoContext& ioContext, TailEvent::Event&& event) {
+void tracing::TailStreamWriter::report(
+    const InvocationSpanContext& context, TailEvent::Event&& event) {
+  // Becomes a non-op if a terminal event (close or hibernate) has been reported.
   auto& s = KJ_UNWRAP_OR_RETURN(state);
-  bool ending = event.tryGet<tracing::Outcome>() != kj::none ||
-      event.tryGet<tracing::Hibernate>() != kj::none;
-  KJ_DEFER({
-    if (ending) state = kj::none;
-  });
-  if (event.tryGet<tracing::Onset>() != kj::none) {
+
+  // The onset set must be first and most only happen once.
+  if (event.is<tracing::Onset>()) {
     KJ_ASSERT(!s.onsetSeen, "Tail stream onset already provided");
     s.onsetSeen = true;
+  } else {
+    KJ_ASSERT(s.onsetSeen, "Tail stream onset was not reported");
   }
-  tracing::TailEvent tailEvent(
-      ioContext.getInvocationSpanContext(), ioContext.now(), s.sequence++, kj::mv(event));
+
+  tracing::TailEvent tailEvent(context, s.timeSource(), s.sequence++, kj::mv(event));
 
   // If the reporter returns false, then we will treat it as a close signal.
-  ending = !s.reporter(ioContext, kj::mv(tailEvent));
+  if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
 }
 
 }  // namespace workerd::tracing

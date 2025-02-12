@@ -98,7 +98,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     t.setEventInfo(context.now(), tracing::HibernatableWebSocketEventInfo(getType()));
   }
 
-  context.getMetrics().reportTailEvent(context, [&] {
+  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(
         tracing::HibernatableWebSocketEventInfo(getType()), tracing::Onset::WorkerInfo{}, kj::none);
   });
