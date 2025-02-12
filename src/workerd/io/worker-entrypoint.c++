@@ -380,7 +380,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // listener.
       KJ_IF_SOME(ctrl, abortController) {
         context.addWaitUntil(context.run(
-            [ctrl = kj::mv(ctrl)](Worker::Lock& lock) mutable { ctrl->abort(lock, kj::none); }));
+            [ctrl = ctrl.addRef()](Worker::Lock& lock) mutable { ctrl->abort(lock, kj::none); }));
       }
     }
 

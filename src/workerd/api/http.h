@@ -787,14 +787,14 @@ public:
       // that the cancel machinery is not used but the request.signal accessor will still
       // do the right thing.
       if (s->getNeverAborts()) {
-        this->thisSignal = kj::mv(s);
+        this->thisSignal = s.addRef();
       } else {
-        this->signal = kj::mv(s);
+        this->signal = s.addRef();
       }
     }
 
     KJ_IF_SOME(s, thisSignal) {
-      this->thisSignal = kj::mv(s);
+      this->thisSignal = s.addRef();
     }
   }
   // TODO(conform): Technically, the request's URL should be parsed immediately upon Request
