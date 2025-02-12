@@ -21,6 +21,38 @@
 namespace workerd {
 
 namespace {
+// At the conclusion of an invocation we need to dispatch the outcome
+// event to the streaming tail worker (if any). We essentially have a race
+// between the completion of waitUntil tasks and the completion of the
+// deferred proxy (if any). The request is done whenever both of these are
+// finished. However, those end up being two separate (and unrelated) branches
+// of the promise tree set up by an invocation.
+//
+// So to handle this case, we will create a refcounted object that will
+// trigger the emission of the outcome event when it is destroyed. Each
+// of our promise branches will hold a reference. Whichever branch finishes
+// last will be the one to trigger the outcome event.
+//
+// Critically, the RequestObserver (e.g. incomingRequest->getMetrics()) must
+// be kept alive until the outcome event is emitted. This is because it is
+// the RequestObserver that actually receives and processes that event. This
+// should be fine as strong references to the RequestObserver are held by
+// the final then/catch steps in the promise chain below, both of which
+// ought to outlive the actual outcome event emission.
+struct OutcomeObserver final: public kj::Refcounted {
+  kj::Own<RequestObserver> metrics;
+  tracing::InvocationSpanContext invocationContext;
+
+  OutcomeObserver(
+      kj::Own<RequestObserver> metrics, const tracing::InvocationSpanContext& invocationContext)
+      : metrics(kj::mv(metrics)),
+        invocationContext(invocationContext.clone()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(OutcomeObserver);
+  ~OutcomeObserver() noexcept(false) {
+    metrics->reportOutcome(invocationContext);
+  }
+};
+
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -279,10 +311,18 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
-  context.getMetrics().reportTailEvent(context, [&] {
+  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(tracing::FetchEventInfo(method, kj::str(url), kj::str("{}"), nullptr),
         tracing::Onset::WorkerInfo{}, kj::none);
   });
+
+  // The outcome observer arranges to send the streaming tail session outcome event.
+  // References to this will be added to each of the promise completion branches
+  // set up below to ensure that the outcome is correctly reported for both waitUntil
+  // and deferred proxy cases (the outcome should be sent after either waitUntil tasks
+  // complete or the deferred proxy completes, whichever occurs *last*).
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
@@ -315,6 +355,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::cp(exception));
 
+    // At this point we know that the request has failed.
+    context.getMetrics().reportFailure(exception);
+
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
     return context.waitForOutputLocks().then(
@@ -324,7 +367,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return kj::mv(exception);
     });
   })
-      .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest), &context]() mutable {
+      .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest), &context,
+                            outcomeObserver = outcomeObserver.addRef()]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
     if (context.isFailOpen()) {
       // Fail-open behavior has been chosen, we'd better save an interface that we can use for
@@ -332,10 +376,12 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       failOpenService = context.getSubrequestChannelNoChecks(
           IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
     }
-    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+    auto promise =
+        incomingRequest->drain().attach(kj::mv(incomingRequest).attach(kj::mv(outcomeObserver)));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
   }))
-      .then([this, metrics = kj::mv(metricsForProxyTask)]() mutable -> kj::Promise<void> {
+      .then([this, metrics = kj::mv(metricsForProxyTask),
+                outcomeObserver = kj::mv(outcomeObserver)]() mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() finish proxying",
         PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
@@ -478,6 +524,8 @@ kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "prewarm() can only be called once"));
   incomingRequest->getMetrics().setIsPrewarm();
 
+  // TODO(streaming-tail): Should prewarm be reflected in the tail stream somehow?
+
   // Intentionally don't call incomingRequest->delivered() for prewarm requests.
 
   // TODO(someday): Ideally, middleware workers would forward prewarm() to the next stage. At
@@ -506,7 +554,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     t.setEventInfo(context.now(), tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
-  context.getMetrics().reportTailEvent(context, [&] {
+  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(tracing::ScheduledEventInfo(eventTime, kj::str(cron)),
         tracing::Onset::WorkerInfo{}, kj::none);
   });
@@ -532,7 +580,12 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
   };
 
-  return maybeAddGcPassForTest(context, waitForFinished(context, kj::mv(incomingRequest)));
+  // TODO(streaming-tail): When the scheduled task is done, we need to arrange
+  // for the outcome event to be reported to any tail streaming sessions that may
+  // be waiting.
+  auto promise = waitForFinished(context, kj::mv(incomingRequest));
+
+  return maybeAddGcPassForTest(context, kj::mv(promise));
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
@@ -568,10 +621,12 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(context.now(), tracing::AlarmEventInfo(scheduledTime));
   }
-  context.getMetrics().reportTailEvent(context, [&] {
+  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(
         tracing::AlarmEventInfo(scheduledTime), tracing::Onset::WorkerInfo{}, kj::none);
   });
+
+  // TODO(streaming-tail): We need to arrange for the outcome event to be sent here.
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {
