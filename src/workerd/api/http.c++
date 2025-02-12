@@ -1051,6 +1051,7 @@ jsg::Ref<Request> Request::constructor(
           // explicitly say `signal: null`, they must want to drop the signal that was on the
           // original request.
           signal = kj::mv(s);
+          initDict.signal = kj::none;
         }
 
         KJ_IF_SOME(newCf, initDict.cf) {
