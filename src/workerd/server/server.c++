@@ -1833,11 +1833,14 @@ class Server::WorkerService final: public Service,
         name = entry.key;  // replace with more-permanent string
         handlers = &entry.value;
       } else KJ_IF_SOME(className, actorClassEntrypoints.find(n)) {
-        KJ_LOG(WARNING,
-            kj::str("A ServiceDesignator in the config referenced the entrypoint \"", n,
-                "\", but this class does not extend 'WorkerEntrypoint'. Attempts to call this "
-                "entrypoint will fail at runtime, but historically this was not a startup-time "
-                "error. Future versions of workerd may make this a startup-time error."));
+        // TODO(soon): Restore this warning once miniflare no longer generates config that causes
+        //   it to log spuriously.
+        //
+        // KJ_LOG(WARNING,
+        //     kj::str("A ServiceDesignator in the config referenced the entrypoint \"", n,
+        //         "\", but this class does not extend 'WorkerEntrypoint'. Attempts to call this "
+        //         "entrypoint will fail at runtime, but historically this was not a startup-time "
+        //         "error. Future versions of workerd may make this a startup-time error."));
 
         const kj::HashSet<kj::String> EMPTY_HANDLERS;
         name = className;  // replace with more-permanent string

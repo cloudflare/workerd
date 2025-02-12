@@ -1538,11 +1538,14 @@ KJ_TEST("Server: referencing DO class as entrypoint is not an error") {
 
   // We see a log warning at config time, but config otherwise completes successfully.
   {
-    KJ_EXPECT_LOG(WARNING,
-        "A ServiceDesignator in the config referenced the entrypoint \"SomeActor\", but this "
-        "class does not extend 'WorkerEntrypoint'. Attempts to call this entrypoint will "
-        "fail at runtime, but historically this was not a startup-time error. Future "
-        "versions of workerd may make this a startup-time error.");
+    // TODO(soon): Restore this warning once miniflare no longer generates config that causes
+    //   it to log spuriously.
+    //
+    // KJ_EXPECT_LOG(WARNING,
+    //     "A ServiceDesignator in the config referenced the entrypoint \"SomeActor\", but this "
+    //     "class does not extend 'WorkerEntrypoint'. Attempts to call this entrypoint will "
+    //     "fail at runtime, but historically this was not a startup-time error. Future "
+    //     "versions of workerd may make this a startup-time error.");
     test.start();
   }
 
