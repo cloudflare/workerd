@@ -1996,86 +1996,90 @@ export const generate_x25519_key_pair = {
   },
 };
 
-export const generate_dh_key_pair = {
-  test() {
-    const { privateKey, publicKey } = generateKeyPairSync('dh', {
-      group: 'modp14',
-    });
-    strictEqual(publicKey.type, 'public');
-    strictEqual(privateKey.type, 'private');
-    strictEqual(publicKey.asymmetricKeyType, 'dh');
-    strictEqual(privateKey.asymmetricKeyType, 'dh');
+// TODO(later): BoringSSL with fips does not support generating DH keys
+// this way. Uncomment this later when it does.
+// export const generate_dh_key_pair = {
+//   test() {
+//     const { privateKey, publicKey } = generateKeyPairSync('dh', {
+//       group: 'modp14',
+//     });
+//     strictEqual(publicKey.type, 'public');
+//     strictEqual(privateKey.type, 'private');
+//     strictEqual(publicKey.asymmetricKeyType, 'dh');
+//     strictEqual(privateKey.asymmetricKeyType, 'dh');
 
-    const res = diffieHellman({ privateKey, publicKey });
-    ok(res instanceof Buffer);
-    strictEqual(res.byteLength, 256);
-  },
-};
+//     const res = diffieHellman({ privateKey, publicKey });
+//     ok(res instanceof Buffer);
+//     strictEqual(res.byteLength, 256);
+//   },
+// };
 
-export const generate_dh_from_fixed_prime = {
-  test() {
-    const prime = generatePrimeSync(1024);
+// TODO(later): BoringSSL with fips does not support generating DH keys
+// this way. Uncomment this later when it does.
+// export const generate_dh_from_fixed_prime = {
+//   test() {
+//     const prime = generatePrimeSync(1024);
 
-    const { privateKey: privateKey1, publicKey: publicKey1 } =
-      generateKeyPairSync('dh', {
-        prime,
-      });
-    strictEqual(publicKey1.type, 'public');
-    strictEqual(privateKey1.type, 'private');
-    strictEqual(publicKey1.asymmetricKeyType, 'dh');
-    strictEqual(privateKey1.asymmetricKeyType, 'dh');
+//     const { privateKey: privateKey1, publicKey: publicKey1 } =
+//       generateKeyPairSync('dh', {
+//         prime,
+//       });
+//     strictEqual(publicKey1.type, 'public');
+//     strictEqual(privateKey1.type, 'private');
+//     strictEqual(publicKey1.asymmetricKeyType, 'dh');
+//     strictEqual(privateKey1.asymmetricKeyType, 'dh');
 
-    const { privateKey: privateKey2, publicKey: publicKey2 } =
-      generateKeyPairSync('dh', {
-        prime,
-      });
-    strictEqual(publicKey2.type, 'public');
-    strictEqual(privateKey2.type, 'private');
-    strictEqual(publicKey2.asymmetricKeyType, 'dh');
-    strictEqual(privateKey2.asymmetricKeyType, 'dh');
+//     const { privateKey: privateKey2, publicKey: publicKey2 } =
+//       generateKeyPairSync('dh', {
+//         prime,
+//       });
+//     strictEqual(publicKey2.type, 'public');
+//     strictEqual(privateKey2.type, 'private');
+//     strictEqual(publicKey2.asymmetricKeyType, 'dh');
+//     strictEqual(privateKey2.asymmetricKeyType, 'dh');
 
-    ok(!publicKey1.equals(publicKey2));
-    ok(!privateKey1.equals(privateKey2));
+//     ok(!publicKey1.equals(publicKey2));
+//     ok(!privateKey1.equals(privateKey2));
 
-    // Once we generate the keys, let's make sure they are usable.
+//     // Once we generate the keys, let's make sure they are usable.
 
-    const res1 = diffieHellman({
-      privateKey: privateKey2,
-      publicKey: publicKey1,
-    });
-    ok(res1 instanceof Buffer);
-    strictEqual(res1.byteLength, 128);
+//     const res1 = diffieHellman({
+//       privateKey: privateKey2,
+//       publicKey: publicKey1,
+//     });
+//     ok(res1 instanceof Buffer);
+//     strictEqual(res1.byteLength, 128);
 
-    const res2 = diffieHellman({
-      privateKey: privateKey2,
-      publicKey: publicKey1,
-    });
-    ok(res2 instanceof Buffer);
-    strictEqual(res2.byteLength, 128);
+//     const res2 = diffieHellman({
+//       privateKey: privateKey2,
+//       publicKey: publicKey1,
+//     });
+//     ok(res2 instanceof Buffer);
+//     strictEqual(res2.byteLength, 128);
 
-    deepStrictEqual(res1, res2);
-    // It's actual data and not just zeroes right?
-    notDeepStrictEqual(res1, Buffer.alloc(128, 0));
+//     deepStrictEqual(res1, res2);
+//     // It's actual data and not just zeroes right?
+//     notDeepStrictEqual(res1, Buffer.alloc(128, 0));
 
-    // Keys generated from different prime groups aren't compatible and should throw.
-    const prime2 = generatePrimeSync(1024);
-    const { privateKey: privateKey3, publicKey: publicKey3 } =
-      generateKeyPairSync('dh', {
-        prime: prime2,
-      });
-    strictEqual(publicKey3.type, 'public');
-    strictEqual(privateKey3.type, 'private');
-    strictEqual(publicKey3.asymmetricKeyType, 'dh');
-    strictEqual(privateKey3.asymmetricKeyType, 'dh');
+//     // Keys generated from different prime groups aren't compatible and should throw.
+//     const prime2 = generatePrimeSync(1024);
+//     const { privateKey: privateKey3, publicKey: publicKey3 } =
+//       generateKeyPairSync('dh', {
+//         prime: prime2,
+//       });
+//     strictEqual(publicKey3.type, 'public');
+//     strictEqual(privateKey3.type, 'private');
+//     strictEqual(publicKey3.asymmetricKeyType, 'dh');
+//     strictEqual(privateKey3.asymmetricKeyType, 'dh');
 
-    throws(
-      () => diffieHellman({ publicKey: publicKey1, privateKey: privateKey3 }),
-      {
-        message: 'Failed to derive shared diffie-hellman secret',
-      }
-    );
-  },
-};
+//     throws(
+//       () => diffieHellman({ publicKey: publicKey1, privateKey: privateKey3 }),
+//       {
+//         message: 'Failed to derive shared diffie-hellman secret',
+//       }
+//     );
+//   },
+// };
 
 export const generate_dh_key_pair_by_length = {
   test() {

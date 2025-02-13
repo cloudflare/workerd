@@ -176,8 +176,10 @@ class AsymmetricKey final: public CryptoKey::Impl {
         return "dsa"_kj;
       case EVP_PKEY_DH:
         return "dh"_kj;
+#ifndef NCRYPTO_NO_KDF_H
       case EVP_PKEY_HKDF:
         return "hkdf"_kj;
+#endif
       default:
         return nullptr;
     }
@@ -215,9 +217,11 @@ class AsymmetricKey final: public CryptoKey::Impl {
         case EVP_PKEY_DH:
           alg.name = "NODE-DH"_kj;
           break;
+#ifndef NCRYPTO_NO_KDF_H
         case EVP_PKEY_HKDF:
           alg.name = "NODE-HKDF"_kj;
           break;
+#endif
       }
     }
     return alg;
