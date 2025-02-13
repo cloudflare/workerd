@@ -73,7 +73,7 @@ def py_wd_test(
         "--pyodide-package-disk-cache-dir",
         ".",
     ]
-    tags = tags + ["py_wd_test"]
+    tags = tags + ["py_wd_test", "python"]
 
     for python_flag in python_flags:
         _py_wd_test_helper(
