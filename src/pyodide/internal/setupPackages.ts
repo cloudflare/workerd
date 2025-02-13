@@ -6,11 +6,11 @@ import {
   LOAD_WHEELS_FROM_R2,
   LOCKFILE,
   LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
-  PACKAGES_VERSION,
   USING_OLDEST_PACKAGES_VERSION,
 } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
+import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 const canonicalizeNameRegex = /[-_.]+/g;
 
@@ -215,34 +215,6 @@ function disabledLoadPackage(): never {
   );
 }
 
-/**
- * Get the set of transitive requirements from the REQUIREMENTS metadata.
- */
-function getTransitiveRequirements(): Set<string> {
-  // TODO: Package snapshot built on '20240829.4' is broken when the stdlib packages are added
-  // here, so we disable this logic. We should remove this check once the next Python and packages
-  // versions are rolled out.
-  let requirements = REQUIREMENTS;
-  if (!USING_OLDEST_PACKAGES_VERSION) {
-    // We have had a regression where the lockfile format changed and so no stdlib packages were
-    // found. This created a strange and unfriendly error message, so we throw a nice error here if
-    // there are no stdlib packages to avoid this if it happens in the future.
-    if (STDLIB_PACKAGES.length == 0) {
-      throw new Error(
-        'Found no STDLIB_PACKAGES, expected at least 1. Lock file corrupted?'
-      );
-    }
-    requirements = Array.from(
-      new Set(requirements).union(new Set(STDLIB_PACKAGES)),
-      canonicalizePackageName
-    );
-  }
-
-  // resolve transitive dependencies of requirements and if IN_WORKERD install them from the cdn.
-  const packageDatas = recursiveDependencies(LOCKFILE, requirements);
-  return new Set(packageDatas.map(({ name }) => canonicalizePackageName(name)));
-}
-
 export function getSitePackagesPath(Module: Module): string {
   const pymajor = Module._py_version_major();
   const pyminor = Module._py_version_minor();
@@ -340,5 +312,7 @@ function addPackageToLoad(
 }
 
 export { REQUIREMENTS };
-export const TRANSITIVE_REQUIREMENTS = getTransitiveRequirements();
+export const TRANSITIVE_REQUIREMENTS = new Set(
+  MetadataReader.getTransitiveRequirements()
+);
 export const VIRTUALIZED_DIR = buildVirtualizedDir(TRANSITIVE_REQUIREMENTS);

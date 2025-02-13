@@ -175,6 +175,8 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::str(packagesLock);
   }
 
+  kj::Array<kj::String> getTransitiveRequirements();
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -193,6 +195,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
+    JSG_METHOD(getTransitiveRequirements);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

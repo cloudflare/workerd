@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
+#include "requirements.h"
+
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/util/string-buffer.h>
@@ -121,6 +123,18 @@ int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> bu
     return 0;
   }
   return readToTarget(KJ_REQUIRE_NONNULL(memorySnapshot), offset, buf);
+}
+
+kj::Array<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
+  auto packages = parseLockFile(packagesLock);
+  auto depMap = getDepMapFromPackagesLock(*packages);
+
+  auto allRequirements = getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
+  auto result = kj::heapArrayBuilder<kj::String>(allRequirements.size());
+  for (const auto& r: allRequirements) {
+    result.add(kj::str(r));
+  }
+  return result.finish();
 }
 
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
