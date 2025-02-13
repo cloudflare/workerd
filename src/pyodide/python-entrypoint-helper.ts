@@ -13,6 +13,7 @@ import {
   LOCKFILE,
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
+  USING_OLDEST_PYODIDE_VERSION,
 } from 'pyodide-internal:metadata';
 import { reportError } from 'pyodide-internal:util';
 import { default as Limiter } from 'pyodide-internal:limiter';
@@ -79,8 +80,13 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
 
     // Inject modules that enable JS features to be used idiomatically from Python.
-    pyodide.FS.mkdir(`${pyodide.site_packages}/cloudflare`);
-    await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
+    if (USING_OLDEST_PYODIDE_VERSION) {
+      // Inject at cloudflare.workers for backwards compatibility
+      pyodide.FS.mkdir(`${pyodide.site_packages}/cloudflare`);
+      await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
+    }
+    // The SDK was moved from `cloudflare.workers` to just `workers`.
+    await injectSitePackagesModule(pyodide, 'workers', 'workers');
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
