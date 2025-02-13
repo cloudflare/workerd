@@ -10,6 +10,6 @@ export default {
       return env.PYTHON.fetch(req);
     }
 
-    throw new Error('Invalid url: ' + url);
+    throw new Error('Invalid url in proxy.js: ' + url);
   },
 };
