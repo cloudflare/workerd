@@ -692,4 +692,21 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental
       $neededByFl;
   # Enables cache settings specified request in fetch api cf object to override cache rules. (only for user owned or grey-clouded sites)
+
+  memoryCacheDelete @73 :Bool
+      $compatEnableFlag("memory_cache_delete")
+      $experimental;
+  # Enables delete operations on memory cache if enabled.
+
+  uniqueCtxPerInvocation @74: Bool
+      $compatEnableFlag("unique_ctx_per_invocation")
+      $compatDisableFlag("nonclass_entrypoint_reuses_ctx_across_invocations")
+      $compatEnableDate("2025-03-10");
+  # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx per invocation
+
+  cacheApiRequestCfOverridesCacheRules @75 :Bool
+      $compatEnableFlag("cache_api_request_cf_overrides_cache_rules")
+      $experimental
+      $neededByFl;
+  # Enables cache settings specified request in cache api cf object to override cache rules. (only for user owned or grey-clouded sites)
 }
