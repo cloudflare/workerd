@@ -201,6 +201,8 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
         const kj::String& key, SpanBuilder& span) const;
 
+    void delete_(const kj::String& key) const;
+
    private:
     // Creates a new FallbackDoneCallback associated with the given
     // InProgress struct. This is called whenever getWithFallback() wants to
@@ -482,8 +484,12 @@ class MemoryCache: public jsg::Object {
       jsg::NonCoercible<kj::String> key,
       jsg::Optional<FallbackFunction> optionalFallback);
 
+  // Delete a value from the cache.
+  void delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key);
+
   JSG_RESOURCE_TYPE(MemoryCache) {
     JSG_METHOD(read);
+    JSG_METHOD_NAMED(delete, delete_);
   }
 
  private:
