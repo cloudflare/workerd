@@ -82,10 +82,11 @@ http_archive(
 
 http_archive(
     name = "ncrypto",
-    sha256 = "ed1a4f33222c7778c439b223c9e538e705031a95678303e4527289855c586aa4",
-    strip_prefix = "ncrypto-1.0.0",
+    sha256 = "9a42a7516c9f8040c1dcc90ebc072bd24ab4701f5278e165c8acf09197665444",
+    strip_prefix = "ncrypto-jasnell-fixups-for-older-boringssl-fips",
     type = "tgz",
-    url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.0.tar.gz",
+    #url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.0.tar.gz",
+    url = "https://github.com/nodejs/ncrypto/archive/refs/heads/jasnell/fixups-for-older-boringssl-fips.tar.gz",
 )
 
 http_archive(
