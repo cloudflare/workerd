@@ -47,6 +47,9 @@ py_wd_test("seek-metadatafs")
         #
         # TODO: The packages below don't currently work in the latest package/python versions. Need
         # to fix them.
+        #
+        # TODO: pydantic_core started to fail with "no module named typing_extensions" after 0.27.1
+        # was rebuilt and backport bumped.
         pkg_skip_versions = {
             "0.27.1": [
                 "micropip",
@@ -63,6 +66,9 @@ py_wd_test("seek-metadatafs")
                 "sqlalchemy",
                 "starlette",
                 "tblib",
+                "pydantic_core",
+                "requests",
+                "urllib3",
             ],
         },
     )
