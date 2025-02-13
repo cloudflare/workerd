@@ -476,7 +476,7 @@ declare abstract class Navigator {
       | URLSearchParams,
   ): boolean;
   readonly userAgent: string;
-  readonly gpu: GPU;
+  readonly gpu?: GPU;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
