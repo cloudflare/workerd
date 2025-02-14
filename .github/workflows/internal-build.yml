@@ -8,6 +8,8 @@ on:
       - '.devcontainer'
       - '**/*.md'
       - '.gitignore'
+      - '.github/*'
+      - '!.github/workflows/internal-build.yml'
 
 concurrency:
   # Cancel existing builds for the same PR.
