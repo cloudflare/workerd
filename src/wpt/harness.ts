@@ -33,10 +33,11 @@ import {
   type AssertPredicate,
 } from 'node:assert';
 
+import { default as path } from 'node:path';
+
 type CommonOptions = {
   comment?: string;
   verbose?: boolean;
-  includeFile?: string;
 };
 
 type SuccessOptions = {
@@ -263,6 +264,74 @@ class Test {
 }
 /* eslint-enable @typescript-eslint/no-this-alias */
 
+// Singleton object used to pass test state between the runner and the harness functions available
+// to the evaled  WPT test code.
+class RunnerState {
+  // Filename of the current test. Used in error messages.
+  public testFileName: string;
+
+  // The worker environment. Used to allow fetching resources in the test.
+  public env: Env;
+
+  // Makes test options available from assertion functions
+  public options: TestRunnerOptions;
+
+  // List of failed assertions occuring in the test
+  public errors: Error[] = [];
+
+  // Promises returned in the test. The test is done once all promises have resolved.
+  public promises: Promise<unknown>[] = [];
+
+  public constructor(
+    testFileName: string,
+    env: Env,
+    options: TestRunnerOptions
+  ) {
+    this.testFileName = testFileName;
+    this.env = env;
+    this.options = options;
+  }
+
+  public async validate(): Promise<void> {
+    // Exception handling is set up on every promise in the test function that created it.
+    await Promise.all(this.promises);
+
+    const expectedFailures = new Set(this.options.expectedFailures ?? []);
+    const unexpectedFailures = [];
+
+    for (const err of this.errors) {
+      if (!expectedFailures.delete(err.message)) {
+        err.message = sanitize_unpaired_surrogates(err.message);
+        console.error(err);
+        unexpectedFailures.push(err.message);
+      } else if (this.options.verbose) {
+        err.message = sanitize_unpaired_surrogates(err.message);
+        console.warn('Expected failure: ', err);
+      }
+    }
+
+    if (unexpectedFailures.length > 0) {
+      console.info(
+        'The following tests unexpectedly failed:',
+        unexpectedFailures
+      );
+    }
+
+    if (expectedFailures.size > 0) {
+      console.info(
+        'The following tests were expected to fail but instead succeeded:',
+        [...expectedFailures]
+      );
+    }
+
+    if (unexpectedFailures.length > 0 || expectedFailures.size > 0) {
+      throw new Error(
+        `${this.testFileName} failed. Please update the test config.`
+      );
+    }
+  }
+}
+
 type TestRunnerFn = (callback: TestFn | PromiseTestFn, message: string) => void;
 type TestFn = UnknownFunc;
 type PromiseTestFn = () => Promise<unknown>;
@@ -270,11 +339,8 @@ type ThrowingFn = () => unknown;
 
 declare global {
   /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
-  var errors: Error[];
-  var testOptions: TestRunnerOptions;
+  var state: RunnerState;
   var GLOBAL: { isWindow(): boolean };
-  var env: Env;
-  var promises: Promise<unknown>[];
   /* eslint-enable no-var */
 
   function test(func: TestFn, name: string, properties?: unknown): void;
@@ -389,7 +455,7 @@ globalThis.fetch = async (
 ): Promise<Response> => {
   const url =
     input instanceof Request ? input.url.toString() : input.toString();
-  const exports: unknown = env[url];
+  const exports: unknown = globalThis.state.env[url];
   const response = new Response();
   // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
   response.json = async (): Promise<unknown> => exports;
@@ -435,9 +501,9 @@ globalThis.promise_test = (func, name, properties): void => {
     // an error immediately when run.
 
     if (testCase.error) {
-      globalThis.errors.push(testCase.error);
+      globalThis.state.errors.push(testCase.error);
     } else {
-      globalThis.errors.push(
+      globalThis.state.errors.push(
         new Error('Unexpected value returned from promise_test')
       );
     }
@@ -445,9 +511,9 @@ globalThis.promise_test = (func, name, properties): void => {
     return;
   }
 
-  globalThis.promises.push(
+  globalThis.state.promises.push(
     promise.catch((err: unknown) => {
-      globalThis.errors.push(new AggregateError([err], name));
+      globalThis.state.errors.push(new AggregateError([err], name));
     })
   );
 };
@@ -460,10 +526,10 @@ globalThis.async_test = (func, name, properties): void => {
   const testCase = new Test(name, properties);
   testCase.step(func, testCase, testCase);
 
-  globalThis.promises.push(
+  globalThis.state.promises.push(
     testCase.isDone.then(() => {
       if (testCase.error) {
-        globalThis.errors.push(testCase.error);
+        globalThis.state.errors.push(testCase.error);
       }
     })
   );
@@ -490,7 +556,7 @@ globalThis.test = (func, name, properties): void => {
   testCase.done();
 
   if (testCase.error) {
-    globalThis.errors.push(testCase.error);
+    globalThis.state.errors.push(testCase.error);
   }
 };
 
@@ -685,67 +751,115 @@ globalThis.assert_not_own_property = (
   );
 };
 
-globalThis.errors = [];
-
 function shouldRunTest(message: string): boolean {
-  if ((globalThis.testOptions.skippedTests ?? []).includes(message)) {
+  if ((globalThis.state.options.skippedTests ?? []).includes(message)) {
     return false;
   }
 
-  if (globalThis.testOptions.verbose) {
+  if (globalThis.state.options.verbose) {
     console.log('run', message);
   }
 
   return true;
 }
 
-function prepare(env: Env, options: TestRunnerOptions): void {
-  globalThis.errors = [];
-  globalThis.testOptions = options;
-  globalThis.env = env;
-  globalThis.promises = [];
+class WPTMetadata {
+  // Specifies the Javascript global scopes for the test. (Not currently supported)
+  public global: string[] = [];
+  // Specifies additional JS scripts to execute.
+  public scripts: string[] = [];
+  // Adjusts the timeout for the tests in this file. (Not currently supported)
+  public timeout?: string;
+  // Sets a human-readable title for the entire test file. (Not currently supported.)
+  public title?: string;
+  // Specifies a variant of this test, which can be used in subsetTestByKey (Not currently supported.)
+  public variants: URLSearchParams[] = [];
 }
 
-async function validate(
-  testFileName: string,
-  options: TestRunnerOptions
-): Promise<void> {
-  // Exception handling is set up on every promise in the test function that created it.
-  await Promise.all(globalThis.promises);
+function parseWptMetadata(code: string): WPTMetadata {
+  const meta = new WPTMetadata();
 
-  const expectedFailures = new Set(options.expectedFailures ?? []);
+  for (const { groups } of code.matchAll(
+    /\/\/ META: (?<key>\w+)=(?<value>.+)/g
+  )) {
+    if (!groups || !groups.key || !groups.value) {
+      continue;
+    }
 
-  let failing = false;
-  for (const err of globalThis.errors) {
-    if (!expectedFailures.delete(err.message)) {
-      err.message = sanitize_unpaired_surrogates(err.message);
-      console.error(err);
-      failing = true;
-    } else if (options.verbose) {
-      err.message = sanitize_unpaired_surrogates(err.message);
-      console.warn('Expected failure: ', err);
+    switch (groups.key) {
+      case 'global':
+        meta.global = groups.value.split(',');
+        break;
+
+      case 'script': {
+        meta.scripts.push(path.normalize(groups.value));
+        break;
+      }
+
+      case 'timeout':
+        meta.timeout = groups.value;
+        break;
+
+      case 'title':
+        meta.title = groups.value;
+        break;
+
+      case 'variant':
+        meta.variants.push(new URLSearchParams(groups.value));
+        break;
     }
   }
 
-  if (failing) {
-    throw new Error(`${testFileName} failed`);
+  return meta;
+}
+
+function evalOnce(includedFiles: Set<string>, env: Env, path: string): void {
+  if (path === '/common/subset-tests-by-key.js') {
+    // The functionality in this file is directly implemented in harness.ts
+    return;
   }
 
-  if (expectedFailures.size > 0) {
-    console.info('Expected failures', expectedFailures);
+  if (includedFiles.has(path)) {
+    return;
+  }
+
+  if (typeof env[path] != 'string') {
+    // We only have access to the files explicitly declared in the .wd-test, not the full WPT
+    // checkout, so it's possible for tests to include things we can't load.
     throw new Error(
-      'Expected failures but test succeeded. Please update the test config file.'
+      `Test file ${path} not found. Update wpt_test.bzl to handle this case.`
     );
   }
+
+  includedFiles.add(path);
+  env.unsafe.eval(env[path]);
 }
 
 export function createRunner(
-  config: TestRunnerConfig
+  config: TestRunnerConfig,
+  allTestFiles: string[]
 ): (file: string) => TestCase {
+  const testsNotFound = new Set(Object.keys(config)).difference(
+    new Set(allTestFiles)
+  );
+
+  if (testsNotFound.size > 0) {
+    throw new Error(
+      `Configuration was provided for the following tests that have not been found in the WPT repo: ${[...testsNotFound].join(', ')}`
+    );
+  }
+
+  // Keeps track of test files which have been included, to avoid loading the same file more
+  // than once. Test files are executed in the global scope using unsafeEval, so executing the same
+  // file again could cause redefinition errors depending on what is in the file.
+  const includedFiles = new Set<string>();
+
   return (file: string): TestCase => {
     return {
       async test(_: unknown, env: Env): Promise<void> {
         const options = config[file];
+        const mainCode = String(env[file]);
+
         if (!options) {
           throw new Error(
             `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
@@ -757,15 +871,16 @@ export function createRunner(
           return;
         }
 
-        prepare(env, options);
+        globalThis.state = new RunnerState(file, env, options);
+        const meta = parseWptMetadata(mainCode);
 
-        if (options.includeFile) {
-          env.unsafe.eval(String(env[options.includeFile]));
+        for (const script of meta.scripts) {
+          evalOnce(includedFiles, env, script);
         }
 
-        env.unsafe.eval(String(env[file]));
+        evalOnce(includedFiles, env, file);
 
-        await validate(file, options);
+        await globalThis.state.validate();
       },
     };
   };

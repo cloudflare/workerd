@@ -6,14 +6,6 @@ import { type TestRunnerConfig } from 'wpt:harness';
 
 export default {
   'IdnaTestV2.window.js': {},
-  'a-element-origin.js': {
-    comment: 'Implement globalThis.document',
-    skipAllTests: true,
-  },
-  'a-element.js': {
-    comment: 'Implement globalThis.document',
-    skipAllTests: true,
-  },
   'historical.any.js': {
     comment: 'Fix this eventually',
     expectedFailures: [
