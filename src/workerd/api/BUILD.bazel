@@ -324,6 +324,34 @@ wd_test(
 )
 
 wd_test(
+    src = "tail-worker-test.wd-test",
+    args = [
+        "--experimental",
+    ],
+    data = [
+        # To reduce complexity, tail-worker-test calls into other tests to get traces from them.
+        "actor-alarms-test.js",
+        "http-test.js",
+        "queue-test.js",
+        "tail-worker-test.js",
+        "tail-worker-test-receiver.js",
+        "tail-worker-test-dummy.js",
+        "tests/websocket-hibernation.js",
+    ],
+)
+
+wd_test(
+    src = "tail-worker-test-invalid.wd-test",
+    args = [
+        "--experimental",
+    ],
+    data = [
+        "http-test.js",
+        "tail-worker-test-invalid.js",
+    ],
+)
+
+wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],
     data = ["analytics-engine-test.js"],

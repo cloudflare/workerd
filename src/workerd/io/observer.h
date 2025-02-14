@@ -163,6 +163,19 @@ class RequestObserver: public kj::Refcounted {
   }
 };
 
+struct OutcomeObserver final: public kj::Refcounted {
+  kj::Own<RequestObserver> metrics;
+  tracing::InvocationSpanContext invocationContext;
+  OutcomeObserver(
+      kj::Own<RequestObserver> metrics, const tracing::InvocationSpanContext& invocationContext)
+      : metrics(kj::mv(metrics)),
+        invocationContext(invocationContext.clone()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(OutcomeObserver);
+  ~OutcomeObserver() noexcept(false) {
+    metrics->reportOutcome(invocationContext);
+  }
+};
+
 class JsgIsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {};
 
 class IsolateObserver: public kj::AtomicRefcounted {
