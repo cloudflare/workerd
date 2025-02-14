@@ -908,6 +908,37 @@ KJ_TEST("Array Values") {
 
 // ========================================================================================
 
+struct SetContext: public ContextGlobalObject {
+  kj::HashSet<kj::String> takeSet(kj::HashSet<kj::String> set) {
+    KJ_ASSERT(set.contains("42"_kj));
+    return kj::mv(set);
+  }
+  kj::HashSet<kj::String> returnStrings(int i, int j, int k) {
+    auto result = kj::HashSet<kj::String>();
+    result.insert(kj::str(i));
+    result.insert(kj::str(j));
+    result.insert(kj::str(k));
+    return kj::mv(result);
+  }
+  JSG_RESOURCE_TYPE(SetContext) {
+    JSG_METHOD(takeSet);
+    JSG_METHOD(returnStrings);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(SetIsolate, SetContext);
+
+KJ_TEST("Set Values") {
+  Evaluator<SetContext, SetIsolate> e(v8System);
+  e.expectEval("m = new Set(); m.add('42'); takeSet(m).has('42')", "boolean", "true");
+  e.expectEval(
+      "const toString = () => '42'; takeSet(new Set([{ toString }, { toString }])).has('42')",
+      "throws", "TypeError: Duplicate values in the set after unwrapping.");
+
+  e.expectEval("returnStrings(123, 1024, 456).has('1024')", "boolean", "true");
+}
+
+// ========================================================================================
+
 struct SequenceContext: public ContextGlobalObject {
   Sequence<kj::String> testSequence(Sequence<kj::String> sequence) {
     KJ_ASSERT(sequence.size() == 2);
