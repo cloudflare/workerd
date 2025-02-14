@@ -16,6 +16,11 @@ export function randomPrime(
   rem?: ArrayBufferView
 ): ArrayBuffer;
 
+export function statelessDH(
+  privateKey: CryptoKey,
+  publicKey: CryptoKey
+): ArrayBuffer;
+
 // X509Certificate
 export interface CheckOptions {
   subject?: string;
@@ -113,6 +118,40 @@ export function createPublicKey(
   key: InnerCreateAsymmetricKeyOptions
 ): CryptoKey;
 
+export interface RsaKeyPairOptions {
+  type: string;
+  modulusLength: number;
+  publicExponent: number;
+  saltLength?: number;
+  hashAlgorithm?: string;
+  mgf1HashAlgorithm?: string;
+}
+
+export interface DsaKeyPairOptions {
+  modulusLength: number;
+  divisorLength: number;
+}
+
+export interface EcKeyPairOptions {
+  namedCurve: string;
+  paramEncoding: ParamEncoding;
+}
+
+export interface EdKeyPairOptions {
+  type: string;
+}
+
+export interface DhKeyPairOptions {
+  primeOrGroup: BufferSource | number | string;
+  generator?: number;
+}
+
+export function generateRsaKeyPair(options: RsaKeyPairOptions): CryptoKeyPair;
+export function generateDsaKeyPair(options: DsaKeyPairOptions): CryptoKeyPair;
+export function generateEcKeyPair(options: EcKeyPairOptions): CryptoKeyPair;
+export function generateEdKeyPair(options: EdKeyPairOptions): CryptoKeyPair;
+export function generateDhKeyPair(options: DhKeyPairOptions): CryptoKeyPair;
+
 // Spkac
 export function verifySpkac(input: ArrayBufferView | ArrayBuffer): boolean;
 export function exportPublicKey(
@@ -206,14 +245,7 @@ export type SecretKeyFormat = 'buffer' | 'jwk';
 export type AsymmetricKeyFormat = 'pem' | 'der' | 'jwk';
 export type PublicKeyEncoding = 'pkcs1' | 'spki';
 export type PrivateKeyEncoding = 'pkcs1' | 'pkcs8' | 'sec1';
-export type AsymmetricKeyType =
-  | 'rsa'
-  | 'rsa-pss'
-  | 'dsa'
-  | 'ec'
-  | 'x25519'
-  | 'ed25519'
-  | 'dh';
+export type AsymmetricKeyType = 'rsa' | 'ec' | 'x25519' | 'ed25519' | 'dh';
 export type SecretKeyType = 'hmac' | 'aes';
 export type ParamEncoding = 'named' | 'explicit';
 
@@ -261,19 +293,27 @@ export interface AsymmetricKeyDetails {
   namedCurve?: string;
 }
 
+// The user-provided options passed to createPrivateKey or createPublicKey.
+// This will be processed into an InnerCreateAsymmetricKeyOptions.
 export interface CreateAsymmetricKeyOptions {
   key: string | ArrayBuffer | ArrayBufferView | JsonWebKey;
   format?: AsymmetricKeyFormat;
   type?: PublicKeyEncoding | PrivateKeyEncoding;
-  passphrase?: string | Uint8Array;
+  passphrase?: string | Uint8Array | Buffer;
   encoding?: string;
 }
 
+// The processed key options. The key property will be one of either
+// an ArrayBuffer, an ArrayBufferView, a JWK, or a CryptoKey. The
+// format and type options will be validated to known good values,
+// and the passphrase will either be undefined or an ArrayBufferView.
 export interface InnerCreateAsymmetricKeyOptions {
-  key?: ArrayBuffer | ArrayBufferView | JsonWebKey | CryptoKey;
-  format?: AsymmetricKeyFormat;
-  type?: PublicKeyEncoding | PrivateKeyEncoding;
-  passphrase?: Uint8Array;
+  // CryptoKey is only used when importing a public key derived from
+  // an existing private key.
+  key: ArrayBuffer | ArrayBufferView | JsonWebKey | CryptoKey;
+  format: AsymmetricKeyFormat;
+  type: PublicKeyEncoding | PrivateKeyEncoding | undefined;
+  passphrase: Buffer | ArrayBuffer | ArrayBufferView | undefined;
 }
 
 export interface GenerateKeyOptions {
@@ -283,7 +323,9 @@ export interface GenerateKeyOptions {
 export interface GenerateKeyPairOptions {
   modulusLength?: number;
   publicExponent?: number | bigint;
+  hash?: string;
   hashAlgorithm?: string;
+  mgf1Hash?: string;
   mgf1HashAlgorithm?: string;
   saltLength?: number;
   divisorLength?: number;
@@ -291,6 +333,7 @@ export interface GenerateKeyPairOptions {
   prime?: Uint8Array;
   primeLength?: number;
   generator?: number;
+  group?: string;
   groupName?: string;
   paramEncoding?: ParamEncoding;
   publicKeyEncoding?: PublicKeyExportOptions;

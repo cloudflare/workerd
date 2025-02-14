@@ -3,15 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include "kdf.h"
 
-#include <workerd/api/crypto/kdf.h>
-
-#include <openssl/evp.h>
-#include <openssl/mem.h>
+#include <ncrypto.h>
 
 namespace workerd::api {
 namespace {
 
+// The underlying implementation of PBKDF2 for WebCrypto.
+// The CryptoKey::Impl here is used only for web crypto uses.
 class Pbkdf2Key final: public CryptoKey::Impl {
  public:
   explicit Pbkdf2Key(kj::Array<kj::byte> keyData,
@@ -98,7 +98,6 @@ class Pbkdf2Key final: public CryptoKey::Impl {
   ZeroOnFree keyData;
   CryptoKey::KeyAlgorithm keyAlgorithm;
 };
-
 }  // namespace
 
 kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
@@ -107,12 +106,14 @@ kj::Maybe<jsg::BufferSource> pbkdf2(jsg::Lock& js,
     const EVP_MD* digest,
     kj::ArrayPtr<const kj::byte> password,
     kj::ArrayPtr<const kj::byte> salt) {
-  auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  if (PKCS5_PBKDF2_HMAC(password.asChars().begin(), password.size(), salt.begin(), salt.size(),
-          iterations, digest, length, buf.asArrayPtr().begin()) != 1) {
-    return kj::none;
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
+  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
+  if (ncrypto::pbkdf2Into(digest, ToNcryptoBuffer(password.asChars()), ToNcryptoBuffer(salt),
+          iterations, length, &buf)) {
+    return jsg::BufferSource(js, kj::mv(backing));
   }
-  return jsg::BufferSource(js, kj::mv(buf));
+  return kj::none;
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(jsg::Lock& js,

@@ -81,6 +81,14 @@ http_archive(
 )
 
 http_archive(
+    name = "ncrypto",
+    sha256 = "b438cf71b1c24036e388f191a348cdc76aca75310eabca0fef5d81d5032a5d20",
+    strip_prefix = "ncrypto-1.0.1",
+    type = "tgz",
+    url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.1.tar.gz",
+)
+
+http_archive(
     name = "pyodide",
     build_file = "//:build/BUILD.pyodide",
     sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
