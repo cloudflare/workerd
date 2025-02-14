@@ -6,39 +6,17 @@ import { type TestRunnerConfig } from 'wpt:harness';
 
 export default {
   'urlpattern-compare-tests.tentative.js': {
-    comment: 'urlpattern implementation will soon be replaced with ada-url',
-    expectedFailures: [
-      // Each of these *ought* to pass. They are included here because we
-      // know they currently do not. Each needs to be investigated.
-      'Component: pathname Left: {"pathname":"/foo/a"} Right: {"pathname":"/foo/b"}',
-      'Component: pathname Left: {"pathname":"/foo/b"} Right: {"pathname":"/foo/bar"}',
-      'Component: pathname Left: {"pathname":"/foo/bar"} Right: {"pathname":"/foo/:bar"}',
-      'Component: pathname Left: {"pathname":"/foo/"} Right: {"pathname":"/foo/:bar"}',
-      'Component: pathname Left: {"pathname":"/foo/:bar"} Right: {"pathname":"/foo/*"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/(bar)"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/{bar}+"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}+"} Right: {"pathname":"/foo/{bar}?"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}?"} Right: {"pathname":"/foo/{bar}*"}',
-      'Component: pathname Left: {"pathname":"/foo/(123)"} Right: {"pathname":"/foo/(12)"}',
-      'Component: pathname Left: {"pathname":"/foo/:b"} Right: {"pathname":"/foo/:a"}',
-      'Component: pathname Left: {"pathname":"*/foo"} Right: {"pathname":"*"}',
-      'Component: port Left: {"port":"9"} Right: {"port":"100"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo/{:bar}?/baz"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar}?/baz"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"fo{o/:bar}?/baz"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar/}?baz"}',
-      'Component: pathname Left: "https://a.example.com/b?a" Right: "https://b.example.com/a?b"',
-      'Component: pathname Left: {"pathname":"/foo/{bar}/baz"} Right: {"pathname":"/foo/bar/baz"}',
-      'Component: protocol Left: {"protocol":"a"} Right: {"protocol":"b"}',
-      'Component: username Left: {"username":"a"} Right: {"username":"b"}',
-      'Component: password Left: {"password":"a"} Right: {"password":"b"}',
-      'Component: hostname Left: {"hostname":"a"} Right: {"hostname":"b"}',
-      'Component: search Left: {"search":"a"} Right: {"search":"b"}',
-      'Component: hash Left: {"hash":"a"} Right: {"hash":"b"}',
-    ],
+    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
+    skipAllTests: true,
   },
-  'urlpattern-compare.tentative.any.js': {},
-  'urlpattern-compare.tentative.https.any.js': {},
+  'urlpattern-compare.tentative.any.js': {
+    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
+    skipAllTests: true,
+  },
+  'urlpattern-compare.tentative.https.any.js': {
+    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
+    skipAllTests: true,
+  },
   'urlpattern-hasregexpgroups-tests.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [
