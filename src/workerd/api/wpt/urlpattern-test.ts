@@ -175,7 +175,6 @@ export default {
       'Pattern: [{"pathname":":foo./"}] Inputs: [{"pathname":"bar./"}]',
       'Pattern: [{"pathname":":foo../"}] Inputs: [{"pathname":"bar../"}]',
       'Pattern: [{"pathname":"/:foo\\\\bar"}] Inputs: [{"pathname":"/bazbar"}]',
-      'Pattern: [{"pathname":"/foo/bar"},{"ignoreCase":true}] Inputs: [{"pathname":"/FOO/BAR"}]',
       'Pattern: ["https://example.com:8080/foo?bar#baz",{"ignoreCase":true}] Inputs: [{"pathname":"/FOO","search":"BAR","hash":"BAZ","baseURL":"https://example.com:8080"}]',
       'Pattern: ["/foo?bar#baz","https://example.com:8080",{"ignoreCase":true}] Inputs: [{"pathname":"/FOO","search":"BAR","hash":"BAZ","baseURL":"https://example.com:8080"}]',
       'Pattern: [{"search":"foo","baseURL":"https://example.com/a/+/b"}] Inputs: [{"search":"foo","baseURL":"https://example.com/a/+/b"}]',

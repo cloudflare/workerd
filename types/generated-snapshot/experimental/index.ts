@@ -2764,7 +2764,7 @@ export declare class URLSearchParams {
 export declare class URLPattern {
   constructor(
     input?: string | URLPatternURLPatternInit,
-    baseURL?: string,
+    baseURL?: string | URLPatternURLPatternOptions,
     patternOptions?: URLPatternURLPatternOptions,
   );
   get protocol(): string;
