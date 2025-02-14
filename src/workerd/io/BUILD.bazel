@@ -122,6 +122,7 @@ wd_cc_library(
         "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:encoding",
         "//src/workerd/api:url",
+        "//src/workerd/api:urlpattern",
         "//src/workerd/jsg",
         "//src/workerd/util:autogate",
         "//src/workerd/util:completion-membrane",

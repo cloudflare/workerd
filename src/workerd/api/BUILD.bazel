@@ -9,7 +9,7 @@ filegroup(
         ["**/*.c++"],
         exclude = [
             # TODO(cleanup): Continue shrinking the io target: Create independent targets for
-            # analytics-engine, kv, urlpattern and streams/compression, which either do not depend
+            # analytics-engine, kv and streams/compression, which either do not depend
             # on io or do not have io depending on them.
             "**/*test*.c++",
             "data-url.c++",
@@ -22,6 +22,7 @@ filegroup(
             "r2*.c++",
             "rtti.c++",
             "url.c++",
+            "urlpattern.c++",
             "util.c++",
         ],
     ),
@@ -46,6 +47,7 @@ filegroup(
             "r2*.h",
             "rtti.h",
             "url.h",
+            "urlpattern.h",
             "util.h",
         ],
     ),
@@ -223,6 +225,18 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern",
+    srcs = ["urlpattern.c++"],
+    hdrs = ["urlpattern.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":url",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
