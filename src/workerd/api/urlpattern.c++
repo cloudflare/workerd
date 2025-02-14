@@ -137,15 +137,34 @@ URLPattern::URLPatternInit::operator jsg::UrlPattern::Init() {
 
 jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     jsg::Optional<URLPatternInput> input,
-    jsg::Optional<kj::String> baseURL,
+    jsg::Optional<kj::OneOf<kj::String, URLPatternOptions>> baseURL,
     jsg::Optional<URLPatternOptions> patternOptions) {
-  auto options = patternOptions.orDefault({});
+  kj::Maybe<kj::String> base;
+  kj::Maybe<bool> ignoreCase;
+
+  KJ_IF_SOME(b, baseURL) {
+    KJ_SWITCH_ONEOF(b) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        base = kj::str(str);
+      }
+      KJ_CASE_ONEOF(o, URLPatternOptions) {
+        ignoreCase = o.ignoreCase.orDefault(false);
+      }
+    }
+  }
+
+  if (ignoreCase == kj::none) {
+    KJ_IF_SOME(o, patternOptions) {
+      ignoreCase = o.ignoreCase.orDefault(false);
+    }
+  }
+
   KJ_SWITCH_ONEOF(kj::mv(input).orDefault(URLPatternInit{})) {
     KJ_CASE_ONEOF(str, kj::String) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(),
                           jsg::UrlPattern::CompileOptions{
-                            .baseUrl = baseURL.map([](kj::String& str) { return str.asPtr(); }),
-                            .ignoreCase = options.ignoreCase.orDefault(false),
+                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
+                            .ignoreCase = ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
           JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
@@ -158,7 +177,8 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
     KJ_CASE_ONEOF(init, URLPatternInit) {
       KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init,
                           jsg::UrlPattern::CompileOptions{
-                            .ignoreCase = options.ignoreCase.orDefault(false),
+                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
+                            .ignoreCase = ignoreCase.orDefault(false),
                           })) {
         KJ_CASE_ONEOF(err, kj::String) {
           JSG_FAIL_REQUIRE(TypeError, kj::mv(err));

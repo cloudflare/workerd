@@ -2678,7 +2678,7 @@ declare class URLSearchParams {
 declare class URLPattern {
   constructor(
     input?: string | URLPatternURLPatternInit,
-    baseURL?: string,
+    baseURL?: string | URLPatternURLPatternOptions,
     patternOptions?: URLPatternURLPatternOptions,
   );
   get protocol(): string;
