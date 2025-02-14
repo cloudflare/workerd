@@ -182,15 +182,9 @@ jsg::UrlSearchParams initSearchParams(const URLSearchParams::Initializer& init) 
       return kj::mv(params);
     }
     KJ_CASE_ONEOF(dict, jsg::Dict<jsg::USVString, jsg::USVString>) {
-      // TODO(soon): jsg::Dict<jsg::USVString, V> is a bit of a footgun. It doesn't really work like a dict.
-      kj::HashMap<kj::StringPtr, kj::StringPtr> paramsMap;
-      for (auto& item: dict.fields) {
-        paramsMap.upsert(item.name, item.value);
-      }
-
       jsg::UrlSearchParams params;
-      for (auto& item: paramsMap) {
-        params.append(item.key, item.value);
+      for (auto& item: dict.fields) {
+        params.append(item.name, item.value);
       }
       return kj::mv(params);
     }

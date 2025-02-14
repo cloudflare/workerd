@@ -1045,7 +1045,12 @@ class DictWrapper {
     auto object = handle.As<v8::Object>();
     v8::Local<v8::Array> names = check(object->GetOwnPropertyNames(context));
     auto length = names->Length();
-    auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(length);
+
+    // Use a HashMap during construction because the conversion to the string type K could
+    // produce duplicate keys.
+    kj::HashMap<K, V> entries;
+    entries.reserve(length);
+
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::String> name = check(check(names->Get(context, i))->ToString(context));
       v8::Local<v8::Value> value = check(object->Get(context, name));
@@ -1053,9 +1058,9 @@ class DictWrapper {
       if constexpr (kj::isSameType<K, kj::String>()) {
         auto strName = convertToUtf8(name);
         const char* cstrName = strName.cStr();
-        builder.add(typename Dict<V, K>::Field{kj::mv(strName),
-          wrapper.template unwrap<V>(
-              context, value, TypeErrorContext::dictField(cstrName), object)});
+        entries.upsert(kj::mv(strName),
+            wrapper.template unwrap<V>(
+                context, value, TypeErrorContext::dictField(cstrName), object));
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
@@ -1072,9 +1077,14 @@ class DictWrapper {
           throwTypeError(context->GetIsolate(), TypeErrorContext::dictField(strName.cStr()),
               TypeWrapper::getName((V*)nullptr));
         }
-        builder.add(typename Dict<V, K>::Field{
-          KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});
+        entries.upsert(
+            KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue)));
       }
+    }
+
+    auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(entries.size());
+    for (auto& [k, v]: entries) {
+      builder.add(typename Dict<V, K>::Field{kj::mv(k), kj::mv(v)});
     }
     return Dict<V, K>{builder.finish()};
   }
