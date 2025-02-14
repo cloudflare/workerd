@@ -659,6 +659,8 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   metrics.reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(tracing::TraceEventInfo(traces), tracing::Onset::WorkerInfo{}, kj::none);
   });
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
 
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
@@ -695,7 +697,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
   };
 
-  co_await incomingRequest->drain();
+  co_await incomingRequest->drain().attach(kj::mv(outcomeObserver));
 }
 }  // namespace
 

@@ -466,7 +466,8 @@ jsg::Ref<QueueEvent> startQueueEvent(EventTarget& globalEventTarget,
     IoPtr<QueueEventResult> result,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
-    const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
+    const jsg::TypeHandler<QueueExportedHandler>& handlerHandler,
+    kj::Rc<OutcomeObserver> outcomeObserver) {
   jsg::Lock& js = lock;
   // Start a queue event (called from C++, not JS). Similar to startScheduled(), the caller must
   // wait for waitUntil()s to produce the final QueueResult.
@@ -485,9 +486,12 @@ jsg::Ref<QueueEvent> startQueueEvent(EventTarget& globalEventTarget,
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise = f(lock, jsg::alloc<QueueController>(event.addRef()),
           jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx());
-      event->waitUntil(promise.then([event = event.addRef()]() mutable {
+      event->waitUntil(promise.then(
+          [outcomeObserver = outcomeObserver.addRef(), event = event.addRef()]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
-      }, [event = event.addRef()](kj::Exception&& e) mutable {
+      },
+          [outcomeObserver = outcomeObserver.addRef(), event = event.addRef()](
+              kj::Exception&& e) mutable {
         event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
         return kj::mv(e);
       }));
@@ -540,6 +544,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
         tracing::Onset::WorkerInfo{}, kj::none);
   });
 
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
+
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
   // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.
   struct QueueEventHolder: public kj::Refcounted {
@@ -552,14 +559,15 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // can't just wait on their addEventListener handler to resolve because it can't be async).
   context.addWaitUntil(context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
-          &metrics = incomingRequest->getMetrics(),
+          &metrics = incomingRequest->getMetrics(), outcomeObserver = kj::mv(outcomeObserver),
           props = kj::mv(props)](Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
-    queueEvent->event = startQueueEvent(lock.getGlobalScope(), kj::mv(params),
-        context.addObject(result), lock,
-        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
+    queueEvent->event =
+        startQueueEvent(lock.getGlobalScope(), kj::mv(params), context.addObject(result), lock,
+            lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler,
+            kj::mv(outcomeObserver));
   }));
 
   // TODO(soon): There's a good chance we'll want a different wall-clock timeout for queue handlers

@@ -1476,7 +1476,7 @@ namespace {
 // The TailStreamWriterState holds the current client-side state for a collection
 // of streaming tail workers that a worker is reporting events to.
 // TODO(streaming-tail): It's possible that this class can be used for the internal
-// implementation of streaming tail workers as well. If that is the ase, then will
+// implementation of streaming tail workers as well. If that is the case, then it
 // will likely be moved out to a separate file to allow reuse. For now tho, it's
 // only used here so we'll keep it here.
 struct TailStreamWriterState {

@@ -197,7 +197,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SCHEDULED_STR));
-  obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
+  // TODO (streaming-tail-worker): Make timestamp available again, except when running tests
+  obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
   obj.set(js, CRON_STR, js.str(info.cron));
   return obj;
 }
@@ -205,7 +206,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, String
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ALARM_STR));
-  obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
+  // TODO (streaming-tail-worker): Make timestamp available again, except when running tests
+  obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
   return obj;
 }
 
@@ -736,62 +738,72 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // Invoke the tailStream handler function.
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
     v8::Local<v8::Value> obj = ToJs(js, event, stringCache);
-    auto result = jsg::check(fn->Call(js.v8Context(), target, 1, &obj));
 
-    // We need to be able to access the results builder from both the
-    // success and failure branches of the promise we set up below.
-    struct SharedResults: public kj::Refcounted {
-      rpc::TailStreamTarget::TailStreamResults::Builder results;
-      rpc::TailStreamTarget::TailStreamResults::Builder& get() {
-        return results;
-      }
-      SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
-          : results(kj::mv(results)) {}
-    };
-    auto sharedResults = kj::rc<SharedResults>(kj::mv(results));
+    try {
+      auto result = jsg::check(fn->Call(js.v8Context(), target, 1, &obj));
 
-    // The handler can return a function, an object, undefined, or a promise
-    // for any of these. We will convert the result to a promise for consistent
-    // handling...
-    return ioContext.awaitJs(js,
-        js.toPromise(result).then(js,
-            ioContext.addFunctor([this, results = sharedResults.addRef(), &ioContext](
-                                     jsg::Lock& js, jsg::Value value) mutable {
-      // The value here can be one of a function, an object, or undefined.
-      // Any value other than these will result in a warning but will otherwise
-      // be treated like undefined.
+      // We need to be able to access the results builder from both the
+      // success and failure branches of the promise we set up below.
+      struct SharedResults: public kj::Refcounted {
+        rpc::TailStreamTarget::TailStreamResults::Builder results;
+        rpc::TailStreamTarget::TailStreamResults::Builder& get() {
+          return results;
+        }
+        SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
+            : results(kj::mv(results)) {}
+      };
+      auto sharedResults = kj::rc<SharedResults>(kj::mv(results));
 
-      // If a function or object is returned, then our tail worker wishes to
-      // keep receiving events! Yay! Otherwise, we will stop the stream by
-      // setting the stop field in the results.
-      auto handle = value.getHandle(js);
-      if (handle->IsFunction() || handle->IsObject()) {
-        // Sweet! Our tail worker wants to keep receiving events. Let's store
-        // the handler and return.
-        maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
-        return;
-      }
+      // The handler can return a function, an object, undefined, or a promise
+      // for any of these. We will convert the result to a promise for consistent
+      // handling...
+      return ioContext.awaitJs(js,
+          js.toPromise(result).then(js,
+              ioContext.addFunctor([this, results = sharedResults.addRef(), &ioContext](
+                                       jsg::Lock& js, jsg::Value value) mutable {
+        // The value here can be one of a function, an object, or undefined.
+        // Any value other than these will result in a warning but will otherwise
+        // be treated like undefined.
 
-      // If the handler returned any other kind of value, let's be nice and
-      // at least warn the user about it.
-      if (!handle->IsUndefined()) {
-        ioContext.logWarningOnce(
-            kj::str("tailStream() handler returned an unusable value. "
-                    "The tailStream() handler is expected to return either a function, an "
-                    "object, or undefined. Received ",
-                jsg::JsValue(handle).typeOf(js)));
-      }
-      // And finally, we'll stop the stream since the tail worker did not return
-      // a handler for us to continue with.
-      results->get().setStop(true);
+        // If a function or object is returned, then our tail worker wishes to
+        // keep receiving events! Yay! Otherwise, we will stop the stream by
+        // setting the stop field in the results.
+        auto handle = value.getHandle(js);
+        if (handle->IsFunction() || handle->IsObject()) {
+          // Sweet! Our tail worker wants to keep receiving events. Let's store
+          // the handler and return.
+          maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
+          return;
+        }
+
+        // If the handler returned any other kind of value, let's be nice and
+        // at least warn the user about it.
+        if (!handle->IsUndefined()) {
+          ioContext.logWarningOnce(
+              kj::str("tailStream() handler returned an unusable value. "
+                      "The tailStream() handler is expected to return either a function, an "
+                      "object, or undefined. Received ",
+                  jsg::JsValue(handle).typeOf(js)));
+        }
+        // And finally, we'll stop the stream since the tail worker did not return
+        // a handler for us to continue with.
+        results->get().setStop(true);
+        doneFulfiller->fulfill();
+      }),
+              ioContext.addFunctor([this, results = sharedResults.addRef()](
+                                       jsg::Lock& js, jsg::Value&& error) mutable {
+        results->get().setStop(true);
+        doneFulfiller->fulfill();
+        js.throwException(kj::mv(error));
+      })));
+    } catch (...) {
+      ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
+                               "not return a valid tailStream() handler.");
+      results.setStop(true);
       doneFulfiller->fulfill();
-    }),
-            ioContext.addFunctor([this, results = sharedResults.addRef()](
-                                     jsg::Lock& js, jsg::Value&& error) mutable {
-      results->get().setStop(true);
-      doneFulfiller->fulfill();
-      js.throwException(kj::mv(error));
-    })));
+      return kj::READY_NOW;
+    }
+    KJ_UNREACHABLE;
   }
 
   kj::Promise<void> handleEvents(Worker::Lock& lock,
@@ -811,7 +823,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     StringCache stringCache;
 
     // If any of the events delivered are an outcome event, we will signal that
-    // the stream should be stopped and will will fulfill the done promise.
+    // the stream should be stopped and will fulfill the done promise.
     bool finishing = false;
 
     if (h->IsFunction()) {
@@ -902,6 +914,19 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(ioContext.now(), TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+  }
+
+  ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(), [&] {
+    return Onset(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)), Onset::WorkerInfo{},
+        kj::none);
+  });
+
+  // TODO: Does lifetime need to be extended here?
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), ioContext.getInvocationSpanContext());
+
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(
       kj::heap<TailStreamTarget>(ioContext, kj::mv(props), kj::mv(doneFulfiller)));
@@ -919,7 +944,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   // is settled. We also block completion of the call to run on the same condition.
   //
   // Attaching the registerPendingEvent() to the promise is necessary to keep the
-  // IoContet alive during the times our tail worker is idle waiting for more
+  // IoContext alive during the times our tail worker is idle waiting for more
   // events to be delivered.
   kj::ForkedPromise<void> forked = donePromise.fork();
   ioContext.addWaitUntil(forked.addBranch().attach(ioContext.registerPendingEvent()));

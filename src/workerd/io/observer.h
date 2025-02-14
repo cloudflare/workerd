@@ -163,6 +163,37 @@ class RequestObserver: public kj::Refcounted {
   }
 };
 
+// At the conclusion of an invocation we need to dispatch the outcome
+// event to the streaming tail worker (if any). We essentially have a race
+// between the completion of waitUntil tasks and the completion of the
+// deferred proxy (if any). The request is done whenever both of these are
+// finished. However, those end up being two separate (and unrelated) branches
+// of the promise tree set up by an invocation.
+//
+// So to handle this case, we will create a refcounted object that will
+// trigger the emission of the outcome event when it is destroyed. Each
+// of our promise branches will hold a reference. Whichever branch finishes
+// last will be the one to trigger the outcome event.
+//
+// Critically, the RequestObserver (e.g. incomingRequest->getMetrics()) must
+// be kept alive until the outcome event is emitted. This is because it is
+// the RequestObserver that actually receives and processes that event. This
+// should be fine as strong references to the RequestObserver are held by
+// the final then/catch steps in the promise chain below, both of which
+// ought to outlive the actual outcome event emission.
+struct OutcomeObserver final: public kj::Refcounted {
+  kj::Own<RequestObserver> metrics;
+  tracing::InvocationSpanContext invocationContext;
+  OutcomeObserver(
+      kj::Own<RequestObserver> metrics, const tracing::InvocationSpanContext& invocationContext)
+      : metrics(kj::mv(metrics)),
+        invocationContext(invocationContext.clone()) {}
+  KJ_DISALLOW_COPY_AND_MOVE(OutcomeObserver);
+  ~OutcomeObserver() noexcept(false) {
+    metrics->reportOutcome(invocationContext);
+  }
+};
+
 class JsgIsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {};
 
 class IsolateObserver: public kj::AtomicRefcounted {
