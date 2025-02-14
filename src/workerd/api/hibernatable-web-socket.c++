@@ -98,15 +98,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     t.setEventInfo(context.now(), tracing::HibernatableWebSocketEventInfo(getType()));
   }
 
+  // TODO(streaming-tail-workers): Support Hibernate and Resume events properly.
   context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
     return tracing::Onset(
         tracing::HibernatableWebSocketEventInfo(getType()), tracing::Onset::WorkerInfo{}, kj::none);
   });
 
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
+
   try {
     co_await context.run(
         [entrypointName = entrypointName, &context, eventParameters = kj::mv(eventParameters),
-            props = kj::mv(props)](Worker::Lock& lock) mutable {
+            props = kj::mv(props),
+            outcomeObserver = outcomeObserver.addRef()](Worker::Lock& lock) mutable {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(kj::mv(text.message),
@@ -139,7 +144,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     outcome = EventOutcome::EXCEPTION;
   }
 
-  waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+  waitUntilTasks.add(
+      incomingRequest->drain().attach(kj::mv(incomingRequest)).attach(outcomeObserver.addRef()));
 
   co_return Result{
     .outcome = outcome,

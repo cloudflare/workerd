@@ -21,38 +21,6 @@
 namespace workerd {
 
 namespace {
-// At the conclusion of an invocation we need to dispatch the outcome
-// event to the streaming tail worker (if any). We essentially have a race
-// between the completion of waitUntil tasks and the completion of the
-// deferred proxy (if any). The request is done whenever both of these are
-// finished. However, those end up being two separate (and unrelated) branches
-// of the promise tree set up by an invocation.
-//
-// So to handle this case, we will create a refcounted object that will
-// trigger the emission of the outcome event when it is destroyed. Each
-// of our promise branches will hold a reference. Whichever branch finishes
-// last will be the one to trigger the outcome event.
-//
-// Critically, the RequestObserver (e.g. incomingRequest->getMetrics()) must
-// be kept alive until the outcome event is emitted. This is because it is
-// the RequestObserver that actually receives and processes that event. This
-// should be fine as strong references to the RequestObserver are held by
-// the final then/catch steps in the promise chain below, both of which
-// ought to outlive the actual outcome event emission.
-struct OutcomeObserver final: public kj::Refcounted {
-  kj::Own<RequestObserver> metrics;
-  tracing::InvocationSpanContext invocationContext;
-
-  OutcomeObserver(
-      kj::Own<RequestObserver> metrics, const tracing::InvocationSpanContext& invocationContext)
-      : metrics(kj::mv(metrics)),
-        invocationContext(invocationContext.clone()) {}
-  KJ_DISALLOW_COPY_AND_MOVE(OutcomeObserver);
-  ~OutcomeObserver() noexcept(false) {
-    metrics->reportOutcome(invocationContext);
-  }
-};
-
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
 // - Creating a IoContext and making it current.
@@ -316,6 +284,25 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         tracing::Onset::WorkerInfo{}, kj::none);
   });
 
+  // At the conclusion of an invocation we need to dispatch the outcome
+  // event to the streaming tail worker (if any). We essentially have a race
+  // between the completion of waitUntil tasks and the completion of the
+  // deferred proxy (if any). The request is done whenever both of these are
+  // finished. However, those end up being two separate (and unrelated) branches
+  // of the promise tree set up by an invocation.
+  //
+  // So to handle this case, we will create a refcounted object that will
+  // trigger the emission of the outcome event when it is destroyed. Each
+  // of our promise branches will hold a reference. Whichever branch finishes
+  // last will be the one to trigger the outcome event.
+  //
+  // Critically, the RequestObserver (e.g. incomingRequest->getMetrics()) must
+  // be kept alive until the outcome event is emitted. This is because it is
+  // the RequestObserver that actually receives and processes that event. This
+  // should be fine as strong references to the RequestObserver are held by
+  // the final then/catch steps in the promise chain below, both of which
+  // ought to outlive the actual outcome event emission.
+  //
   // The outcome observer arranges to send the streaming tail session outcome event.
   // References to this will be added to each of the promise completion branches
   // set up below to ensure that the outcome is correctly reported for both waitUntil
@@ -559,6 +546,9 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
         tracing::Onset::WorkerInfo{}, kj::none);
   });
 
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
+
   // Scheduled handlers run entirely in waitUntil() tasks.
   context.addWaitUntil(context.run(
       [scheduledTime, cron, entrypointName = entrypointName, props = kj::mv(props), &context,
@@ -580,10 +570,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
   };
 
-  // TODO(streaming-tail): When the scheduled task is done, we need to arrange
-  // for the outcome event to be reported to any tail streaming sessions that may
-  // be waiting.
-  auto promise = waitForFinished(context, kj::mv(incomingRequest));
+  auto promise = waitForFinished(context, kj::mv(incomingRequest)).attach(kj::mv(outcomeObserver));
 
   return maybeAddGcPassForTest(context, kj::mv(promise));
 }
@@ -626,7 +613,9 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         tracing::AlarmEventInfo(scheduledTime), tracing::Onset::WorkerInfo{}, kj::none);
   });
 
-  // TODO(streaming-tail): We need to arrange for the outcome event to be sent here.
+  // TODO(streaming-tail): Ensure that lifetime of outcomeObserver is handled correctly.
+  auto outcomeObserver = kj::rc<OutcomeObserver>(
+      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {
@@ -662,6 +651,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
         // run again.
+        outcomeObserver = nullptr;
         if (result.outcome == EventOutcome::OK) {
           // When an alarm handler completes its execution, the alarm is marked ready for deletion in
           // actor-cache. This alarm change will only be reflected in the alarmsXX table, once cache
@@ -679,7 +669,9 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         cancellationGuard.cancel();
         co_return result;
       } catch (const kj::Exception& e) {
-        // We failed, inform any other entrypoints that may be waiting upon us.
+        // We failed, clear the outcome observer and inform any other entrypoints that may be
+        // waiting upon us.
+        outcomeObserver = nullptr;
         af.reject(e);
         cancellationGuard.cancel();
         throw;
@@ -687,6 +679,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     }
     KJ_CASE_ONEOF(result, WorkerInterface::AlarmResult) {
       // The alarm was cancelled while we were waiting to run, go ahead and return the result.
+      outcomeObserver = nullptr;
       co_return result;
     }
   }
