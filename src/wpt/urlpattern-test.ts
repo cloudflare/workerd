@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'wpt:harness';
+import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'urlpattern-compare.tentative.any.js': {
