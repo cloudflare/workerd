@@ -12,6 +12,18 @@
 
 #include <map>
 
+// TODO(soon): This implements most of node:crypto key import, export, and
+// generation with a number of notable exceptions.
+//
+// 1. While it is possible to import DSA keys, it is currently not possible
+//    to generate a new DSA key pair. This is due entirely to limitations
+//    currently in boringssl+fips that we use in production.
+// 2. It is currently not possible to generate or import diffie-hellman
+//    keys or use the stateless diffie-hellman API. The older DH apis are
+//    still functional, but the stateless DH and DH keys currently rely on
+//    the EVP DH APIs that are not implementing by boringssl+fips. An
+//    alternative approach is possible but requires a bit more effort.
+// 3.
 namespace workerd::api::node {
 
 namespace {
@@ -723,6 +735,16 @@ CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
 }
 
 CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
+
+  // TODO(soon): Older versions of boringssl+fips do not support EVP with
+  // DH key pairs that are required to make the following work. A compile
+  // flag is used to disable the mechanism in ncrypto, causing the calls
+  // to `ncrypto::EVPKeyPointer::NewDH to return an empty EVPKeyPointer.
+  // While the ideal situation would be for us to adopt a newer version
+  // of boringssl+fips that *does* support EVP+DH, we can possibly work
+  // around the issue by implementing an alternative that uses the older
+  // DH_* specific APIs like the rest of our DH implementation does.
+
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   static constexpr uint32_t kStandardizedGenerator = 2;
