@@ -485,7 +485,7 @@ class MemoryCache: public jsg::Object {
       jsg::Optional<FallbackFunction> optionalFallback);
 
   // Delete a value from the cache.
-  void delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key);
+  jsg::Promise<void> delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key);
 
   JSG_RESOURCE_TYPE(MemoryCache) {
     JSG_METHOD(read);

@@ -449,13 +449,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   }
 }
 
-void MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
-  // Ignore operations on keys exceeding key max size.
+jsg::Promise<void> MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
   if (key.value.size() > MAX_KEY_SIZE) {
-    return;
+    return js.rejectedPromise<void>(js.rangeError("Key too large."_kj));
   }
 
+  auto deleteSpan = IoContext::current().makeTraceSpan("memory_cache_delete"_kjc);
+
   cacheUse.delete_(key.value);
+  return js.resolvedPromise();
 }
 
 // ======================================================================================
