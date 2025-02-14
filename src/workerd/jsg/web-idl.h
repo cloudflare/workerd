@@ -114,8 +114,9 @@ constexpr bool isNumericType =
 
 template <typename T>
 constexpr bool isStringType = kj::isSameType<T, kj::String>() || kj::isSameType<T, ByteString>() ||
-    kj::isSameType<T, v8::Local<v8::String>>() || kj::isSameType<T, jsg::V8Ref<v8::String>>() ||
-    kj::isSameType<T, NonCoercible<kj::String>>() || kj::isSameType<T, jsg::JsString>();
+    kj::isSameType<T, USVString>() || kj::isSameType<T, v8::Local<v8::String>>() ||
+    kj::isSameType<T, jsg::V8Ref<v8::String>>() || kj::isSameType<T, NonCoercible<kj::String>>() ||
+    kj::isSameType<T, jsg::JsString>();
 
 template <typename T>
 constexpr bool isObjectType =

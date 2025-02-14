@@ -44,12 +44,7 @@ export default {
     comment: 'Implement document',
     skipAllTests: true,
   },
-  'url-constructor.any.js': {
-    comment: 'Fix this eventually',
-    expectedFailures: [
-      'Parsing: <http://example.com/\uD800\uD801\uDFFE\uDFFF\uFDD0\uFDCF\uFDEF\uFDF0\uFFFE\uFFFF?\uD800\uD801\uDFFE\uDFFF\uFDD0\uFDCF\uFDEF\uFDF0\uFFFE\uFFFF> without base',
-    ],
-  },
+  'url-constructor.any.js': {},
   'url-origin.any.js': {},
   'url-searchparams.any.js': {},
   'url-setters-a-area.window.js': {
@@ -140,12 +135,7 @@ export default {
   'urlsearchparams-append.any.js': {},
   'urlsearchparams-constructor.any.js': {
     comment: 'Fix this eventually',
-    expectedFailures: [
-      'URLSearchParams constructor, DOMException as argument',
-      'Construct with 2 unpaired surrogates (no trailing)',
-      'Construct with 3 unpaired surrogates (no leading)',
-      'Construct with object with NULL, non-ASCII, and surrogate keys',
-    ],
+    expectedFailures: ['URLSearchParams constructor, DOMException as argument'],
   },
   'urlsearchparams-delete.any.js': {},
   'urlsearchparams-foreach.any.js': {},

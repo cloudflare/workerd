@@ -247,6 +247,7 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
   F(kj::StringPtr)                                                                                 \
   F(v8::String)                                                                                    \
   F(ByteString)                                                                                    \
+  F(USVString)                                                                                     \
   F(jsg::JsString)
 
 FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)
