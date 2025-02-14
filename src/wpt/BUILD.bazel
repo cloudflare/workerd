@@ -1,17 +1,30 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
+load("//:build/wpt_test.bzl", "wpt_test")
 
-srcs = glob(
+harness_srcs = glob(
     [
-        "*.ts",
+        "harness/*.ts",
     ],
 )
 
+test_srcs = glob(["**/*-test.ts"])
+
+srcs = harness_srcs + test_srcs
+
+[wpt_test(
+    name = file.replace("-test.ts", ""),
+    test_config = file,
+    wpt_directory = "@wpt//:{}".format(file.replace("-test.ts", "")),
+) for file in test_srcs]
+
 ts_project(
-    name = "wpt-test-harness",
+    name = "wpt-all@tsproject",
     srcs = srcs,
     allow_js = True,
+    composite = True,
     declaration = True,
+    source_map = True,
     tsconfig = "tsconfig.json",
     visibility = ["//visibility:public"],
     deps = [
@@ -20,7 +33,7 @@ ts_project(
 )
 
 eslint_bin.eslint_test(
-    name = "wpt-test-harness@eslint",
+    name = "wpt-all@eslint",
     size = "large",
     args = [
         "--config $(location {})".format("eslint.config.mjs"),
