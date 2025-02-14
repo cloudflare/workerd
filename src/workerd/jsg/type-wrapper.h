@@ -378,6 +378,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public MaybeWrapper<Self>,
                    public OneOfWrapper<Self>,
                    public ArrayWrapper<Self>,
+                   public SetWrapper<Self>,
                    public SequenceWrapper<Self>,
                    public GeneratorWrapper<Self>,
                    public ArrayBufferWrapper<Self>,
@@ -435,6 +436,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(MaybeWrapper<Self>);
   USING_WRAPPER(OneOfWrapper<Self>);
   USING_WRAPPER(ArrayWrapper<Self>);
+  USING_WRAPPER(SetWrapper<Self>);
   USING_WRAPPER(SequenceWrapper<Self>);
   USING_WRAPPER(GeneratorWrapper<Self>);
   USING_WRAPPER(ArrayBufferWrapper<Self>);
