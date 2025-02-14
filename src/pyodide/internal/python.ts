@@ -102,5 +102,14 @@ export async function loadPyodide(
   const pyodide = Module.API.public_api;
 
   finishSnapshotSetup(pyodide);
+
+  // Need to set these here so that the logs go to the right context. If we don't they will go
+  // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
+  Module.API.initializeStreams(
+    null,
+    (msg) => console.log(msg),
+    (msg) => console.error(msg)
+  );
+
   return pyodide;
 }

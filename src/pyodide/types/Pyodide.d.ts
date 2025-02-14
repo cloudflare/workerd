@@ -13,4 +13,6 @@ interface Pyodide {
   FS: FS;
   site_packages: string;
   loadPackage: (names: string | string[], options: object) => Promise<any[]>;
+  setStdout: (options?: any) => void;
+  setStderr: (options?: any) => void;
 }
