@@ -130,6 +130,10 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   v8::V8::SetFlagsFromString("--single-threaded-gc");
 #endif  // __APPLE__
 
+  if (isPredictableModeForTest()) {
+    v8::V8::SetFlagsFromString("--expose-gc");
+  }
+
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
   // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
