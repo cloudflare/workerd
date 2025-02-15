@@ -66,16 +66,26 @@ build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALI
 build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma,-Wno-deprecated-this-capture
 build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma,-Wno-deprecated-this-capture
 
-# Increasing the optimization level of some portions of V8 significantly speeds up Python tests
-# in GitHub Actions. This is an optional performance hack and shouly only be used in CI.
-build:v8-codegen-opt --per_file_copt=v8/src/compiler@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/common@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/builtins@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/heap@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/snapshot@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
+# Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
+# GitHub Actions. This is an optional performance hack intended for CI, although it might also be
+# useful for local development.
+build:v8-codegen-opt --per_file_copt=v8/src/api@-O2
 build:v8-codegen-opt --per_file_copt=v8/src/base@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/builtins@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/codegen@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/common@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/compiler@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/execution@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/heap@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/parsing@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/roots@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/runtime@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/parsing@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/snapshot@-O2
+build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
+# V8 is heavily using absl for hashing now, optimize it too.
+build:v8-codegen-opt --per_file_copt=external/com_google_absl@-O2
 
 # Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
 # performance improvements but makes code size worse. This will be the default in LLVM19.
