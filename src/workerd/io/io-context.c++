@@ -1103,11 +1103,6 @@ void IoContext::runImpl(Runnable& runnable,
       // Running the microtask queue can itself trigger a pending exception in the isolate.
       v8::TryCatch tryCatch(workerLock.getIsolate());
 
-      // Just trying out stuff
-      auto& system = const_cast<jsg::V8System&>(js.getV8System());
-      while (v8::platform::PumpMessageLoop(&system.getDefaultPlatform(), js.v8Isolate, v8::platform::MessageLoopBehavior::kDoNotWait)) {}
-
-
       js.runMicrotasks();
 
       if (tryCatch.HasCaught()) {
@@ -1170,6 +1165,17 @@ void IoContext::runImpl(Runnable& runnable,
       }
     }
   });
+
+  if (!isCurrentNull()) {
+    KJ_LOG(ERROR, "IoContext not-null before running PumpMessageLoop()");
+  } else {
+    worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
+        jsg::Lock& js = lock;
+        auto& system = const_cast<jsg::V8System&>(js.getV8System());
+        KJ_DBG(js.v8Isolate);
+        while (v8::platform::PumpMessageLoop(&system.getDefaultPlatform(), js.v8Isolate, v8::platform::MessageLoopBehavior::kDoNotWait)) {}
+    });
+  }
 }
 
 static constexpr auto kAsyncIoErrorMessage =
@@ -1192,6 +1198,10 @@ IoContext& IoContext::current() {
 
 bool IoContext::hasCurrent() {
   return threadLocalRequest != nullptr;
+}
+
+bool IoContext::isCurrentNull() {
+  return threadLocalRequest == nullptr;
 }
 
 bool IoContext::isCurrent() {

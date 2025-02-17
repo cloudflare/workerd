@@ -82,6 +82,9 @@ V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr
 V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags, v8::Platform* defaultPlatformPtr)
     : platformInner(kj::mv(platformParam)),
       platformWrapper(*platformInner), defaultPlatformPtr_{defaultPlatformPtr} {
+    if (!defaultPlatformPtr_) {
+      defaultPlatformPtr_ = platformInner.get();
+    }
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
