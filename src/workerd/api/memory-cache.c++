@@ -449,6 +449,12 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
   }
 }
 
+jsg::Promise<void> MemoryCache::put(jsg::Lock& js,
+    jsg::NonCoercible<kj::String> key,
+    jsg::Value value) {
+  return 
+}
+
 jsg::Promise<void> MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
   if (key.value.size() > MAX_KEY_SIZE) {
     return js.rejectedPromise<void>(js.rangeError("Key too large."_kj));
