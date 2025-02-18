@@ -1493,12 +1493,14 @@ struct TailStreamWriterState {
     // Every active tail worker target will have a queue.
     bool pumping = false;
     bool onsetSeen = false;
+    bool outcomeSeen = false;
     std::list<tracing::TailEvent> queue;
   };
 
   struct Closed {};
 
   kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
+  bool hadOutcome = false;
   kj::TaskSet& waitUntilTasks;
 
   TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
@@ -1529,7 +1531,22 @@ struct TailStreamWriterState {
     for (auto& active: alive) {
       active->queue.push_back(event.clone());
       if (!active->pumping) {
-        waitUntilTasks.add(pump(*active));
+        waitUntilTasks.add(pump(*active).then([&]() -> kj::Promise<void> {
+          auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+          bool outcomesSeen = true;
+          for (auto& active: actives) {
+            if (active->capability != kj::none && !active->outcomeSeen) {
+              outcomesSeen = false;
+              break;
+            }
+          }
+          // All observers have received the outcome event, or are no longer active. Thus we have
+          // delivered all events that need to be delivered, Shut down inner.
+          if (outcomesSeen) {
+            inner = Closed{};
+          }
+          return kj::READY_NOW;
+        }));
       }
     }
 
@@ -1583,6 +1600,9 @@ struct TailStreamWriterState {
       auto eventsBuilder = builder.initEvents(current.queue.size());
       size_t n = 0;
       for (auto& event: current.queue) {
+        if (event.event.is<tracing::Outcome>()) {
+          KJ_DEFER(current.outcomeSeen = true;);
+        }
         event.copyTo(eventsBuilder[n++]);
       }
       current.queue.clear();
@@ -1608,7 +1628,8 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // The tail stream has already been closed because we have received either
         // an outcome or hibernate event. The writer should have failed and we
         // actually shouldn't get here. Assert!
-        KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback evoked after close");
+        KJ_LOG(WARNING, "tracing::TailStreamWriter report callback evoked after close");
+        //KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback evoked after close");
       }
       KJ_CASE_ONEOF(pending, TailStreamWriterState::Pending) {
         // This is our first event! It has to be an onset event, which the writer
@@ -1632,12 +1653,25 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       }
       KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
         // Event cannot be a onset, which should have been validated by the writer.
+        KJ_LOG(WARNING, "reporting event");
         KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
+        // Reject events after outcome event
+        KJ_ASSERT(!state->hadOutcome, "tail worker received event after outcome");
+
         auto final = event.event.is<tracing::Outcome>() || event.event.is<tracing::Hibernate>();
-        KJ_DEFER({
-          if (final) state->inner = TailStreamWriterState::Closed{};
-        });
+        if (final) {
+          state->hadOutcome = true;
+        }
+        // TODO(streaming-tail-workers): Closing inner prevents delivery of events prior to the current event?
+        // This is dangerous: If we just shut down inner, we risk a UAF from actives that have an ongoing pump operation.
+        // Thus we need to only do this once pump() has ceased to be active.
+        // KJ_DEFER({
+        //   if (final) state->inner = TailStreamWriterState::Closed{};
+        // });
         state->reportImpl(kj::mv(event));
+        if (final) {
+          return false;
+        }
       }
     }
     return !state->inner.is<TailStreamWriterState::Closed>();
@@ -1654,6 +1688,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
             initializeTailStreamWriter(kj::mv(streamingTailWorkers), waitUntilTasks)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
+    KJ_LOG(WARNING, "observer shutdown");
     KJ_IF_SOME(t, tracer) {
       if (fetchStatus != 0) {
         t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
@@ -1678,11 +1713,18 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   void reportTailEvent(
       IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) override {
     KJ_IF_SOME(writer, maybeTailStreamWriter) {
+      static int blah = 0;
+      blah++;
+      KJ_LOG(WARNING, "reporting event", blah);
       writer->report(ioContext, fn());
+      if (blah == 4) {
+        reportOutcome(ioContext);
+      }
     }
   }
 
   void reportOutcome(IoContext& ioContext) override {
+    KJ_LOG(WARNING, "reporting outcome event", maybeTailStreamWriter != kj::none);
     KJ_IF_SOME(writer, maybeTailStreamWriter) {
       writer->report(
           ioContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
@@ -1941,7 +1983,7 @@ class Server::WorkerService final: public Service,
       streamingTailWorkers = streamingList.releaseAsArray();
     } else {
       legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
-        // Caution here... if the tail worker ends up have a circular dependency
+        // Caution here... if the tail worker ends up having a circular dependency
         // on the worker we'll end up with an infinite loop trying to initialize.
         // We can test this directly but it's more difficult to test indirect
         // loops (dependency of dependency, etc). Here we're just going to keep

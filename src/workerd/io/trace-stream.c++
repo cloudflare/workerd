@@ -940,7 +940,8 @@ void tracing::TailStreamWriter::report(IoContext& ioContext, TailEvent::Event&& 
   bool ending = event.tryGet<tracing::Outcome>() != kj::none ||
       event.tryGet<tracing::Hibernate>() != kj::none;
   KJ_DEFER({
-    if (ending) state = kj::none;
+    // TODO(streaming-tail-workers): Closing state prevents delivery of events prior to the current event?
+    // if (ending) state = kj::none;
   });
   if (event.tryGet<tracing::Onset>() != kj::none) {
     KJ_ASSERT(!s.onsetSeen, "Tail stream onset already provided");
@@ -951,6 +952,7 @@ void tracing::TailStreamWriter::report(IoContext& ioContext, TailEvent::Event&& 
 
   // If the reporter returns false, then we will treat it as a close signal.
   ending = !s.reporter(ioContext, kj::mv(tailEvent));
+  (void)ending;
 }
 
 }  // namespace workerd::tracing
