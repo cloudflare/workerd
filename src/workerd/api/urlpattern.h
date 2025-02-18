@@ -4,8 +4,12 @@
 
 #pragma once
 
+#include "ada.h"
+
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/url.h>
+
+#include <optional>
+#include <string_view>
 
 namespace workerd::api {
 
@@ -26,13 +30,23 @@ namespace workerd::api {
 // https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
 class URLPattern final: public jsg::Object {
  public:
+  class URLPatternRegexEngine {
+   public:
+    URLPatternRegexEngine() = default;
+    using regex_type = jsg::JsRef<jsg::JsRegExp>;
+    static std::optional<regex_type> create_instance(std::string_view pattern, bool ignore_case);
+    static std::optional<std::vector<std::optional<std::string>>> regex_search(
+        std::string_view input, const regex_type& pattern);
+    static bool regex_match(std::string_view input, const regex_type& pattern);
+  };
+
   // A structure providing matching patterns for individual components
   // of a URL. When a URLPattern is created, or when a URLPattern is
   // used to match or test against a URL, the input can be given as
   // either a string or a URLPatternInit struct. If a string is given,
   // it will be parsed to create a URLPatternInit. The URLPatternInit
   // API is defined as part of the URLPattern specification.
-  struct URLPatternInit final {
+  struct URLPatternInit {
 #define V(_, name) jsg::Optional<kj::String> name;
     URL_PATTERN_COMPONENTS(V)
 #undef V
@@ -40,10 +54,8 @@ class URLPattern final: public jsg::Object {
 
     JSG_STRUCT(protocol, username, password, hostname, port, pathname, search, hash, baseURL);
 
-    operator jsg::UrlPattern::Init();
+    ada::url_pattern_init toAdaType() const;
   };
-
-  using URLPatternInput = kj::OneOf<kj::String, URLPatternInit>;
 
   // A struct providing the URLPattern matching results for a single
   // URL component. The URLPatternComponentResult is only ever used
@@ -51,17 +63,21 @@ class URLPattern final: public jsg::Object {
   // URLPatternComponentResult API is defined as part of the URLPattern
   // specification.
   struct URLPatternComponentResult final {
-    kj::String input;
-    jsg::Dict<kj::String, kj::String> groups;
+    jsg::JsString input;
+    jsg::JsObject groups;
 
     JSG_STRUCT(input, groups);
+    JSG_STRUCT_TS_OVERRIDE({
+      input: string;
+      groups: Record<string, string>;
+    });
   };
 
   // A struct providing the URLPattern matching results for all
   // components of a URL. The URLPatternResult API is defined as
   // part of the URLPattern specification.
   struct URLPatternResult final {
-    kj::Array<URLPatternInput> inputs;
+    kj::Array<kj::OneOf<jsg::JsString, URLPatternInit>> inputs;
 #define V(_, name) URLPatternComponentResult name;
     URL_PATTERN_COMPONENTS(V)
 #undef V
@@ -73,25 +89,27 @@ class URLPattern final: public jsg::Object {
     jsg::Optional<bool> ignoreCase;
 
     JSG_STRUCT(ignoreCase);
+
+    ada::url_pattern_options toAdaType() const;
   };
 
-  explicit URLPattern(jsg::UrlPattern inner
-#define V(_, name) , jsg::JsRef<jsg::JsRegExp> name##Regex
-          URL_PATTERN_COMPONENTS(V)
-#undef V
-  );
+  explicit URLPattern(ada::url_pattern<URLPatternRegexEngine> i): inner(std::move(i)) {};
 
   static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
-      jsg::Optional<URLPatternInput> input,
+      jsg::Optional<kj::OneOf<kj::String, URLPatternInit>> input,
       jsg::Optional<kj::OneOf<kj::String, URLPatternOptions>> baseURL,
       jsg::Optional<URLPatternOptions> patternOptions);
 
-  kj::Maybe<URLPatternResult> exec(
-      jsg::Lock& js, jsg::Optional<URLPatternInput> input, jsg::Optional<kj::String> baseURL);
+  kj::Maybe<URLPatternResult> exec(jsg::Lock& js,
+      jsg::Optional<kj::OneOf<kj::String, URLPatternInit>> input,
+      jsg::Optional<kj::String> baseURL);
 
-  bool test(jsg::Lock& js, jsg::Optional<URLPatternInput> input, jsg::Optional<kj::String> baseURL);
+  bool test(jsg::Optional<kj::OneOf<kj::String, URLPatternInit>> input,
+      jsg::Optional<kj::String> baseURL);
 
-#define V(name, _) kj::StringPtr get##name();
+  bool getHasRegExpGroups() const;
+
+#define V(name, _) kj::StringPtr get##name() const;
   URL_PATTERN_COMPONENTS(V)
 #undef V
 
@@ -99,21 +117,19 @@ class URLPattern final: public jsg::Object {
 #define V(Name, name) JSG_READONLY_PROTOTYPE_PROPERTY(name, get##Name);
     URL_PATTERN_COMPONENTS(V)
 #undef V
+    JSG_READONLY_PROTOTYPE_PROPERTY(hasRegExpGroups, getHasRegExpGroups);
     JSG_METHOD(test);
     JSG_METHOD(exec);
   }
 
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("inner", inner);
-  }
-
  private:
-  jsg::UrlPattern inner;
-#define V(_, name) jsg::JsRef<jsg::JsRegExp> name##Regex;
-  URL_PATTERN_COMPONENTS(V)
-#undef V
+  ada::url_pattern<URLPatternRegexEngine> inner;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  static URLPatternInit createURLPatternInit(const ada::url_pattern_init& other);
+  static URLPatternComponentResult createURLPatternComponentResult(
+      jsg::Lock& js, const ada::url_pattern_component_result& other);
+  static URLPatternResult createURLPatternResult(
+      jsg::Lock& js, const ada::url_pattern_result& other);
 };
 
 #define EW_URLPATTERN_ISOLATE_TYPES                                                                \
