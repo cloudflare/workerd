@@ -131,20 +131,23 @@ class RequestObserver: public kj::Refcounted {
   // If the worker is configured to support streaming tail workers, reportTailEvent
   // will forward the given event on to the collection of streaming tail workers
   // that are configured with this observer. Otherwise, this is a non-op.
-  virtual void reportTailEvent(IoContext& ioContext, tracing::TailEvent::Event&& event) {
-    reportTailEvent(ioContext, [event = kj::mv(event)]() mutable { return kj::mv(event); });
+  virtual void reportTailEvent(
+      const tracing::InvocationSpanContext& context, tracing::TailEvent::Event&& event) {
+    reportTailEvent(context, [event = kj::mv(event)]() mutable { return kj::mv(event); });
   }
 
   // If the worker is configured to support streaming tail workers, reportTailEvent
   // will forward the event returned by the callback on to the collection of streaming
   // fail workers that are configured with this observer. The callback will only be
   // invoked if there are tail workers.
-  virtual void reportTailEvent(
-      IoContext& ioContext, kj::FunctionParam<tracing::TailEvent::Event()> fn) {}
+  virtual void reportTailEvent(const tracing::InvocationSpanContext& context,
+      kj::FunctionParam<tracing::TailEvent::Event()> fn) {}
 
   // Reports the outcome event to any configured streaming tail workers, signalizing that the
   // request has completed and will not produce any more events.
-  virtual void reportOutcome(IoContext& ioContext) {}
+  virtual void reportOutcome(const tracing::InvocationSpanContext& context) {}
+
+  virtual void setOutcome(EventOutcome outcome) {}
 
   virtual kj::Own<void> addedContextTask() {
     return kj::Own<void>();
