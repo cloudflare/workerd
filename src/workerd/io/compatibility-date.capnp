@@ -692,4 +692,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental
       $neededByFl;
   # Enables cache settings specified request in fetch api cf object to override cache rules. (only for user owned or grey-clouded sites)
+
+  uniqueCtxPerInvocation @73: Bool
+      $compatEnableFlag("unique_ctx_per_invocation")
+      $compatDisableFlag("nonclass_entrypoint_reuses_ctx_accros_invocations")
+      $compatEnableDate("2025-02-24");
+  # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx per invocation
 }
