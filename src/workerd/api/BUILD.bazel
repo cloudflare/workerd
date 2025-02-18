@@ -236,8 +236,8 @@ wd_cc_library(
     hdrs = ["urlpattern.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":url",
         "//src/workerd/jsg",
+        "@ada-url",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -249,6 +249,7 @@ wd_cc_library(
     kj_test(
         src = f,
         deps = [
+            ":urlpattern",
             "//src/workerd/io",
         ],
     )
@@ -298,6 +299,7 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        ":urlpattern",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],

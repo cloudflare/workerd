@@ -4,309 +4,253 @@
 
 #include "urlpattern.h"
 
-#include <kj/vector.h>
+#include "ada.h"
 
 namespace workerd::api {
+std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatternRegexEngine::
+    create_instance(std::string_view pattern, bool ignore_case) {
+  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE;
+  if (ignore_case) {
+    flags = static_cast<jsg::Lock::RegExpFlags>(
+        flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
+  }
 
-namespace {
-jsg::JsRef<jsg::JsRegExp> compileRegex(
-    jsg::Lock& js, const jsg::UrlPattern::Component& component, bool ignoreCase) {
-  return js.tryCatch([&] {
-    jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE;
-    if (ignoreCase) {
-      flags = static_cast<jsg::Lock::RegExpFlags>(
-          flags | static_cast<int>(jsg::Lock::RegExpFlags::kIGNORE_CASE));
-    }
-    return jsg::JsRef<jsg::JsRegExp>(js, js.regexp(component.getRegex(), flags));
-  }, [&](auto reason) -> jsg::JsRef<jsg::JsRegExp> {
-    JSG_FAIL_REQUIRE(TypeError, "Invalid regular expression syntax.");
-  });
+  return js.tryCatch([&]() -> std::optional<regex_type> {
+    return jsg::JsRef(js, js.regexp(kj::StringPtr(pattern.data(), pattern.size()), flags));
+  }, [&](auto reason) -> std::optional<regex_type> { return std::nullopt; });
 }
 
-jsg::Ref<URLPattern> create(jsg::Lock& js, jsg::UrlPattern pattern) {
-  bool ignoreCase = pattern.getIgnoreCase();
+bool URLPattern::URLPatternRegexEngine::regex_match(
+    std::string_view input, const regex_type& pattern) {
+  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  return pattern.getHandle(js).match(js, kj::str(input.data(), input.size()));
+}
 
-  // Might look a bit confusing here. The URL_PATTERN_COMPONENTS macro
-  // is used also to define the constructor for URLPattern so to make
-  // sure things line up right we reuse that pattern here also. Because
-  // we are moving the pattern into the constructor, we need to make sure
-  // the regex patterns are compiled first so we use the macro twice.
-#define V(Name, var) auto var = compileRegex(js, pattern.get##Name(), ignoreCase);
+std::optional<std::vector<std::optional<std::string>>> URLPattern::URLPatternRegexEngine::
+    regex_search(std::string_view input, const regex_type& pattern) {
+  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  KJ_IF_SOME(matches, pattern.getHandle(js)(js, kj::str(input.data(), input.size()))) {
+    std::vector<std::optional<std::string>> results;
+    results.reserve(matches.size());
+    for (size_t i = 1; i < matches.size(); i++) {
+      auto value = matches.get(js, i);
+      if (value.isNullOrUndefined()) {
+        results.emplace_back(std::nullopt);
+      } else {
+        KJ_DASSERT(value.isString());
+        auto str = value.toString(js);
+        results.emplace_back(std::string(str.begin(), str.size()));
+      }
+    }
+    return kj::mv(results);
+  }
+  return std::nullopt;
+}
+
+ada::url_pattern_options URLPattern::URLPatternOptions::toAdaType() const {
+  ada::url_pattern_options options{};
+  options.ignore_case = ignoreCase.orDefault(false);
+  return options;
+}
+
+ada::url_pattern_init URLPattern::URLPatternInit::toAdaType() const {
+  ada::url_pattern_init init{};
+#define V(_, name)                                                                                 \
+  KJ_IF_SOME(v, name) {                                                                            \
+    init.name = std::string(v.cStr(), v.size());                                                   \
+  }
+  URL_PATTERN_COMPONENTS(V)
+#undef V
+  KJ_IF_SOME(b, baseURL) {
+    init.base_url = std::string(b.cStr(), b.size());
+  }
+  return init;
+}
+
+URLPattern::URLPatternInit URLPattern::createURLPatternInit(const ada::url_pattern_init& other) {
+  URLPatternInit result{};
+#define V(_, name)                                                                                 \
+  if (auto v = other.name) {                                                                       \
+    result.name = kj::str(v->c_str(), v->size());                                                  \
+  }
   URL_PATTERN_COMPONENTS(V)
 #undef V
 
-#define V(_, var) , kj::mv(var)
-  return jsg::alloc<URLPattern>(kj::mv(pattern) URL_PATTERN_COMPONENTS(V));
-#undef V
-}
-
-kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(jsg::Lock& js,
-    jsg::JsRef<jsg::JsRegExp>& regex,
-    kj::ArrayPtr<const kj::String> nameList,
-    kj::StringPtr input) {
-  using Groups = jsg::Dict<kj::String, kj::String>;
-
-  KJ_IF_SOME(array, regex.getHandle(js)(js, input)) {
-    // Starting at 1 here looks a bit odd but it is intentional. The result of the regex
-    // is an array and we're skipping the first element.
-    uint32_t index = 1;
-    uint32_t length = array.size();
-    kj::Vector<Groups::Field> fields(length - 1);
-
-    while (index < length) {
-      auto value = array.get(js, index);
-      fields.add(Groups::Field{
-        .name = kj::str(nameList[index - 1]),
-        .value = value.isUndefined() ? kj::String() : kj::str(value),
-      });
-      index++;
-    }
-
-    return URLPattern::URLPatternComponentResult{
-      .input = kj::str(input),
-      .groups = Groups{.fields = fields.releaseAsArray()},
-    };
+  if (auto v = other.base_url) {
+    result.baseURL = kj::str(v->c_str(), v->size());
   }
-
-  return kj::none;
-}
-}  // namespace
-
-URLPattern::URLPattern(jsg::UrlPattern inner,
-    jsg::JsRef<jsg::JsRegExp> protocolRegex,
-    jsg::JsRef<jsg::JsRegExp> usernameRegex,
-    jsg::JsRef<jsg::JsRegExp> passwordRegex,
-    jsg::JsRef<jsg::JsRegExp> hostnameRegex,
-    jsg::JsRef<jsg::JsRegExp> portRegex,
-    jsg::JsRef<jsg::JsRegExp> pathnameRegex,
-    jsg::JsRef<jsg::JsRegExp> searchRegex,
-    jsg::JsRef<jsg::JsRegExp> hashRegex)
-    : inner(kj::mv(inner)),
-      protocolRegex(kj::mv(protocolRegex)),
-      usernameRegex(kj::mv(usernameRegex)),
-      passwordRegex(kj::mv(passwordRegex)),
-      hostnameRegex(kj::mv(hostnameRegex)),
-      portRegex(kj::mv(portRegex)),
-      pathnameRegex(kj::mv(pathnameRegex)),
-      searchRegex(kj::mv(searchRegex)),
-      hashRegex(kj::mv(hashRegex)) {}
-
-void URLPattern::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(protocolRegex, usernameRegex, passwordRegex, hostnameRegex, portRegex,
-      pathnameRegex, searchRegex, hashRegex);
+  return result;
 }
 
-kj::StringPtr URLPattern::getProtocol() {
-  return inner.getProtocol().getPattern();
-}
-kj::StringPtr URLPattern::getUsername() {
-  return inner.getUsername().getPattern();
-}
-kj::StringPtr URLPattern::getPassword() {
-  return inner.getPassword().getPattern();
-}
-kj::StringPtr URLPattern::getHostname() {
-  return inner.getHostname().getPattern();
-}
-kj::StringPtr URLPattern::getPort() {
-  return inner.getPort().getPattern();
-}
-kj::StringPtr URLPattern::getPathname() {
-  return inner.getPathname().getPattern();
-}
-kj::StringPtr URLPattern::getSearch() {
-  return inner.getSearch().getPattern();
-}
-kj::StringPtr URLPattern::getHash() {
-  return inner.getHash().getPattern();
-}
-
-URLPattern::URLPatternInit::operator jsg::UrlPattern::Init() {
-  return {
-    .protocol = this->protocol.map([](kj::String& str) { return kj::str(str); }),
-    .username = this->username.map([](kj::String& str) { return kj::str(str); }),
-    .password = this->password.map([](kj::String& str) { return kj::str(str); }),
-    .hostname = this->hostname.map([](kj::String& str) { return kj::str(str); }),
-    .port = this->port.map([](kj::String& str) { return kj::str(str); }),
-    .pathname = this->pathname.map([](kj::String& str) { return kj::str(str); }),
-    .search = this->search.map([](kj::String& str) { return kj::str(str); }),
-    .hash = this->hash.map([](kj::String& str) { return kj::str(str); }),
-    .baseUrl = this->baseURL.map([](kj::String& str) { return kj::str(str); }),
+URLPattern::URLPatternComponentResult URLPattern::createURLPatternComponentResult(
+    jsg::Lock& js, const ada::url_pattern_component_result& other) {
+  auto result = URLPatternComponentResult{
+    .input = js.str(kj::ArrayPtr(other.input.c_str(), other.input.size())),
+    .groups = js.obj(),
   };
+
+  for (auto& [key, value]: other.groups) {
+    auto k = js.str(kj::ArrayPtr(key.c_str(), key.size()));
+
+    if (value) {
+      result.groups.set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
+    } else {
+      result.groups.set(js, k, js.null());
+    }
+  }
+  return result;
 }
+
+bool URLPattern::getHasRegExpGroups() const {
+  return inner.has_regexp_groups();
+}
+
+URLPattern::URLPatternResult URLPattern::createURLPatternResult(
+    jsg::Lock& js, const ada::url_pattern_result& other) {
+  URLPatternResult result{
+#define V(_, name) .name = URLPattern::createURLPatternComponentResult(js, other.name),
+    URL_PATTERN_COMPONENTS(V)
+#undef V
+  };
+
+  auto vecInputs = kj::heapArray<kj::OneOf<jsg::JsString, URLPatternInit>>(other.inputs.size());
+  size_t i = 0;
+  for (const auto& input: other.inputs) {
+    if (std::holds_alternative<std::string_view>(input)) {
+      auto raw = std::get<std::string_view>(input);
+      vecInputs[i] = js.str(kj::ArrayPtr(raw.data(), raw.size()));
+    } else {
+      KJ_DASSERT(std::holds_alternative<ada::url_pattern_init>(input));
+      auto obj = std::get<ada::url_pattern_init>(input);
+      vecInputs[i] = createURLPatternInit(obj);
+    }
+    i++;
+  }
+  result.inputs = mv(vecInputs);
+  return result;
+}
+
+#define V(uppercase, lowercase)                                                                    \
+  kj::StringPtr URLPattern::get##uppercase() const {                                               \
+    auto value = inner.get_##lowercase();                                                          \
+    return kj::StringPtr(value.data(), value.size());                                              \
+  }
+URL_PATTERN_COMPONENTS(V)
+#undef V
 
 jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
-    jsg::Optional<URLPatternInput> input,
-    jsg::Optional<kj::OneOf<kj::String, URLPatternOptions>> baseURL,
-    jsg::Optional<URLPatternOptions> patternOptions) {
-  kj::Maybe<kj::String> base;
-  kj::Maybe<bool> ignoreCase;
+    jsg::Optional<kj::OneOf<kj::String, URLPatternInit>> maybeInput,
+    jsg::Optional<kj::OneOf<kj::String, URLPatternOptions>> maybeBase,
+    jsg::Optional<URLPatternOptions> maybeOptions) {
+  ada::url_pattern_input input;
+  std::optional<std::string_view> base{};
+  std::optional<ada::url_pattern_options> options{};
 
-  KJ_IF_SOME(b, baseURL) {
+  KJ_IF_SOME(mi, maybeInput) {
+    KJ_SWITCH_ONEOF(mi) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        input = std::string_view(str.begin(), str.size());
+      }
+      KJ_CASE_ONEOF(init, URLPatternInit) {
+        input = init.toAdaType();
+      }
+    }
+  } else {
+    input = ada::url_pattern_init{};
+  }
+
+  KJ_IF_SOME(b, maybeBase) {
     KJ_SWITCH_ONEOF(b) {
       KJ_CASE_ONEOF(str, kj::String) {
-        base = kj::str(str);
+        base = std::string_view(str.begin(), str.size());
       }
       KJ_CASE_ONEOF(o, URLPatternOptions) {
-        ignoreCase = o.ignoreCase.orDefault(false);
+        options = o.toAdaType();
       }
     }
   }
 
-  if (ignoreCase == kj::none) {
-    KJ_IF_SOME(o, patternOptions) {
-      ignoreCase = o.ignoreCase.orDefault(false);
+  if (!options.has_value()) {
+    KJ_IF_SOME(o, maybeOptions) {
+      options = o.toAdaType();
     }
   }
 
-  KJ_SWITCH_ONEOF(kj::mv(input).orDefault(URLPatternInit{})) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(str.asPtr(),
-                          jsg::UrlPattern::CompileOptions{
-                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
-                            .ignoreCase = ignoreCase.orDefault(false),
-                          })) {
-        KJ_CASE_ONEOF(err, kj::String) {
-          JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
-        }
-        KJ_CASE_ONEOF(pattern, jsg::UrlPattern) {
-          return create(js, kj::mv(pattern));
-        }
-      }
-    }
-    KJ_CASE_ONEOF(init, URLPatternInit) {
-      KJ_SWITCH_ONEOF(jsg::UrlPattern::tryCompile(init,
-                          jsg::UrlPattern::CompileOptions{
-                            .baseUrl = base.map([](kj::String& str) { return str.asPtr(); }),
-                            .ignoreCase = ignoreCase.orDefault(false),
-                          })) {
-        KJ_CASE_ONEOF(err, kj::String) {
-          JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
-        }
-        KJ_CASE_ONEOF(pattern, jsg::UrlPattern) {
-          return create(js, kj::mv(pattern));
-        }
-      }
-    }
+  std::string_view* base_opt = base ? &(*base) : nullptr;
+  auto result =
+      ada::parse_url_pattern<URLPatternRegexEngine>(input, base_opt, options ? &*options : nullptr);
+  if (result.has_value()) {
+    return jsg::alloc<URLPattern>(std::move(*result));
   }
-  KJ_UNREACHABLE;
+
+  JSG_FAIL_REQUIRE(TypeError, "Failed to construct URLPattern");
 }
 
-bool URLPattern::test(
-    jsg::Lock& js, jsg::Optional<URLPatternInput> input, jsg::Optional<kj::String> baseURL) {
-  return exec(js, kj::mv(input), kj::mv(baseURL)) != kj::none;
+bool URLPattern::test(jsg::Optional<kj::OneOf<kj::String, URLPatternInit>> maybeInput,
+    jsg::Optional<kj::String> maybeBase) {
+  ada::result<bool> result;
+  std::optional<std::string_view> base_url{};
+  std::string base_url_base;
+
+  KJ_IF_SOME(b, maybeBase) {
+    base_url_base = std::string(b.begin(), b.size());
+    base_url = std::string_view(base_url_base);
+  }
+
+  KJ_IF_SOME(mi, maybeInput) {
+    KJ_SWITCH_ONEOF(mi) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        result = inner.test(
+            std::string_view(str.begin(), str.size()), base_url ? &(*base_url) : nullptr);
+      }
+      KJ_CASE_ONEOF(pi, URLPattern::URLPatternInit) {
+        result = inner.test(pi.toAdaType(), base_url ? &(*base_url) : nullptr);
+      }
+    }
+  } else {
+    result = inner.test(ada::url_pattern_init{}, base_url ? &(*base_url) : nullptr);
+  }
+
+  JSG_REQUIRE(result.has_value(), TypeError, "Failed to test URLPattern");
+
+  return *result;
 }
 
-kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
-    jsg::Lock& js, jsg::Optional<URLPatternInput> maybeInput, jsg::Optional<kj::String> maybeBase) {
-  auto input = kj::mv(maybeInput).orDefault(URLPattern::URLPatternInit());
-  kj::Vector<URLPattern::URLPatternInput> inputs(2);
+kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(jsg::Lock& js,
+    jsg::Optional<kj::OneOf<kj::String, URLPatternInit>> maybeInput,
+    jsg::Optional<kj::String> maybeBase) {
+  ada::result<std::optional<ada::url_pattern_result>> result;
+  std::optional<std::string_view> base_url{};
+  std::string base_url_base;
 
-  kj::String protocol = nullptr;
-  kj::String username = nullptr;
-  kj::String password = nullptr;
-  kj::String hostname = nullptr;
-  kj::String port = nullptr;
-  kj::String pathname = nullptr;
-  kj::String search = nullptr;
-  kj::String hash = nullptr;
-
-  KJ_SWITCH_ONEOF(input) {
-    KJ_CASE_ONEOF(string, kj::String) {
-      KJ_IF_SOME(url, jsg::Url::tryParse(string.asPtr(), maybeBase.map([](kj::String& s) {
-        return s.asPtr();
-      }))) {
-        auto p = url.getProtocol();
-        protocol = kj::str(p.first(p.size() - 1));
-        username = kj::str(url.getUsername());
-        password = kj::str(url.getPassword());
-        hostname = kj::str(url.getHostname());
-        port = kj::str(url.getPort());
-        pathname = kj::str(url.getPathname());
-        search = url.getSearch().size() > 0 ? kj::str(url.getSearch().slice(1)) : kj::String();
-        hash = url.getHash().size() > 0 ? kj::str(url.getHash().slice(1)) : kj::String();
-      } else {
-        return kj::none;
-      }
-      inputs.add(kj::mv(string));
-      KJ_IF_SOME(base, maybeBase) {
-        inputs.add(kj::mv(base));
-      }
-    }
-    KJ_CASE_ONEOF(i, URLPattern::URLPatternInit) {
-      JSG_REQUIRE(
-          maybeBase == kj::none, TypeError, "A baseURL is not allowed when input is an object.");
-      inputs.add(URLPattern::URLPatternInit{
-        .protocol = i.protocol.map([](kj::String& str) { return kj::str(str); }),
-        .username = i.username.map([](kj::String& str) { return kj::str(str); }),
-        .password = i.password.map([](kj::String& str) { return kj::str(str); }),
-        .hostname = i.hostname.map([](kj::String& str) { return kj::str(str); }),
-        .port = i.port.map([](kj::String& str) { return kj::str(str); }),
-        .pathname = i.pathname.map([](kj::String& str) { return kj::str(str); }),
-        .search = i.search.map([](kj::String& str) { return kj::str(str); }),
-        .hash = i.hash.map([](kj::String& str) { return kj::str(str); }),
-        .baseURL = i.baseURL.map([](kj::String& str) { return kj::str(str); }),
-      });
-
-      jsg::UrlPattern::Init init = {
-        .protocol = kj::mv(i.protocol),
-        .username = kj::mv(i.username),
-        .password = kj::mv(i.password),
-        .hostname = kj::mv(i.hostname),
-        .port = kj::mv(i.port),
-        .pathname = kj::mv(i.pathname),
-        .search = kj::mv(i.search),
-        .hash = kj::mv(i.hash),
-        .baseUrl = kj::mv(i.baseURL),
-      };
-
-      jsg::UrlPattern::ProcessInitOptions options = {
-        .mode = jsg::UrlPattern::ProcessInitOptions::Mode::URL};
-
-      KJ_SWITCH_ONEOF(jsg::UrlPattern::processInit(kj::mv(init), kj::mv(options))) {
-        KJ_CASE_ONEOF(err, kj::String) {
-          JSG_FAIL_REQUIRE(TypeError, kj::mv(err));
-        }
-        KJ_CASE_ONEOF(init, jsg::UrlPattern::Init) {
-          protocol = kj::mv(init.protocol).orDefault(kj::String());
-          username = kj::mv(init.username).orDefault(kj::String());
-          password = kj::mv(init.password).orDefault(kj::String());
-          hostname = kj::mv(init.hostname).orDefault(kj::String());
-          port = kj::mv(init.port).orDefault(kj::String());
-          pathname = kj::mv(init.pathname).orDefault(kj::String());
-          search = kj::mv(init.search).orDefault(kj::String());
-          hash = kj::mv(init.hash).orDefault(kj::String());
-        }
-      }
-    }
+  KJ_IF_SOME(b, maybeBase) {
+    base_url_base = std::string(b.begin(), b.size());
+    base_url = std::string_view(base_url_base);
   }
 
-  auto protocolExecResult = execRegex(js, protocolRegex, inner.getProtocol().getNames(), protocol);
-  auto usernameExecResult = execRegex(js, usernameRegex, inner.getUsername().getNames(), username);
-  auto passwordExecResult = execRegex(js, passwordRegex, inner.getPassword().getNames(), password);
-  auto hostnameExecResult = execRegex(js, hostnameRegex, inner.getHostname().getNames(), hostname);
-  auto portExecResult = execRegex(js, portRegex, inner.getPort().getNames(), port);
-  auto pathnameExecResult = execRegex(js, pathnameRegex, inner.getPathname().getNames(), pathname);
-  auto searchExecResult = execRegex(js, searchRegex, inner.getSearch().getNames(), search);
-  auto hashExecResult = execRegex(js, hashRegex, inner.getHash().getNames(), hash);
-
-  if (protocolExecResult == kj::none || usernameExecResult == kj::none ||
-      passwordExecResult == kj::none || hostnameExecResult == kj::none ||
-      portExecResult == kj::none || pathnameExecResult == kj::none ||
-      searchExecResult == kj::none || hashExecResult == kj::none) {
-    return kj::none;
+  KJ_IF_SOME(mi, maybeInput) {
+    KJ_SWITCH_ONEOF(mi) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        result = inner.exec(
+            std::string_view(str.begin(), str.size()), base_url ? &(*base_url) : nullptr);
+      }
+      KJ_CASE_ONEOF(pi, URLPattern::URLPatternInit) {
+        result = inner.exec(pi.toAdaType(), base_url ? &(*base_url) : nullptr);
+      }
+    }
+  } else {
+    result = inner.exec(ada::url_pattern_init{}, base_url ? &(*base_url) : nullptr);
   }
 
-  return URLPattern::URLPatternResult{
-    .inputs = inputs.releaseAsArray(),
-    .protocol = kj::mv(KJ_REQUIRE_NONNULL(protocolExecResult)),
-    .username = kj::mv(KJ_REQUIRE_NONNULL(usernameExecResult)),
-    .password = kj::mv(KJ_REQUIRE_NONNULL(passwordExecResult)),
-    .hostname = kj::mv(KJ_REQUIRE_NONNULL(hostnameExecResult)),
-    .port = kj::mv(KJ_REQUIRE_NONNULL(portExecResult)),
-    .pathname = kj::mv(KJ_REQUIRE_NONNULL(pathnameExecResult)),
-    .search = kj::mv(KJ_REQUIRE_NONNULL(searchExecResult)),
-    .hash = kj::mv(KJ_REQUIRE_NONNULL(hashExecResult)),
-  };
+  // If result does not exist, we should throw.
+  JSG_REQUIRE(result.has_value(), TypeError, "Failed to exec URLPattern");
+
+  if (result->has_value()) {
+    return createURLPatternResult(js, **result);
+  }
+
+  // Return null
+  return kj::none;
 }
 }  // namespace workerd::api
