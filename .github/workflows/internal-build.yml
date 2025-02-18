@@ -4,6 +4,12 @@ on:
   pull_request:
     paths-ignore:
       - 'doc/**'
+      - 'justfile'
+      - '.devcontainer'
+      - '**/*.md'
+      - '.gitignore'
+      - '.github/*'
+      - '!.github/workflows/internal-build.yml'
 
 concurrency:
   # Cancel existing builds for the same PR.
