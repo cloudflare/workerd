@@ -8,6 +8,7 @@ using Workerd = import "/workerd/workerd.capnp";
 # instance of the workerd runtime. A single config file can contain multiple
 # Workerd.Config definitions and must have at least one.
 const helloWorldExample :Workerd.Config = (
+  v8Flags = [ "--expose-gc" ],
 
   # Every workerd instance consists of a set of named services. A worker, for instance,
   # is a type of service. Other types of services can include external servers, the

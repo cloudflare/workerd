@@ -4,11 +4,15 @@
 
 #include "io-context.h"
 
+#include "libplatform/libplatform.h"
+#include "v8-platform.h"  // NOLINT(build/include_directory)
+#include "v8config.h"     // NOLINT(build/include_directory)
 #include <workerd/io/io-gate.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/jsg/setup.h>
 
 #include <kj/debug.h>
 
@@ -1155,6 +1159,17 @@ void IoContext::runImpl(Runnable& runnable,
       }
     }
   });
+
+  if (!isCurrentNull()) {
+    KJ_LOG(ERROR, "IoContext not-null before running PumpMessageLoop()");
+  } else {
+    worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
+        jsg::Lock& js = lock;
+        auto& system = const_cast<jsg::V8System&>(js.getV8System());
+        KJ_DBG(js.v8Isolate);
+        while (v8::platform::PumpMessageLoop(&system.getDefaultPlatform(), js.v8Isolate, v8::platform::MessageLoopBehavior::kDoNotWait)) {}
+    });
+  }
 }
 
 static constexpr auto kAsyncIoErrorMessage =
@@ -1180,6 +1195,10 @@ IoContext& IoContext::current() {
 
 bool IoContext::hasCurrent() {
   return threadLocalRequest != nullptr;
+}
+
+bool IoContext::isCurrentNull() {
+  return threadLocalRequest == nullptr;
 }
 
 bool IoContext::isCurrent() {
