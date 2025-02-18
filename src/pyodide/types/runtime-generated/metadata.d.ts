@@ -19,6 +19,7 @@ declare namespace MetadataReader {
   const getPackagesVersion: () => string;
   const getPackagesLock: () => string;
   const read: (index: number, position: number, buffer: Uint8Array) => number;
+  const getTransitiveRequirements: () => string[];
 }
 
 export default MetadataReader;
