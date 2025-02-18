@@ -2,12 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-export interface Pipeline {
+import { PipelineRecord } from "./pipeline-transform";
+
+export interface Pipeline<T> {
   /**
-   * send takes an array of javascript objects which are
-   * then received by the pipeline for processing
+   * The Pipeline interface represents the type of a binding to a Pipeline
    *
-   * @param data The data to be sent
+   * @param records The records to send to the pipeline
    */
-  send(data: object[]): Promise<void>
+  send(records: PipelineRecord<T>[]): Promise<void>
 }
