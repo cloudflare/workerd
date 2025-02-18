@@ -1394,6 +1394,17 @@ export class DurableObjectExample extends DurableObject {
 
     assert.deepEqual([...cursor], [{ i: 123 }]);
   }
+
+  async testSessionsAPIBookmark(previousBookmark) {
+    if (previousBookmark) {
+      await this.state.storage.waitForBookmark(previousBookmark);
+    }
+    let bookmark = await this.state.storage.getCurrentBookmark();
+    if (previousBookmark) {
+      assert.ok(previousBookmark < bookmark, "new bookmark didn't advance!");
+    }
+    return bookmark;
+  }
 }
 
 export default {
@@ -1495,3 +1506,13 @@ const INSERT_36_ROWS = ['a', 'b', 'c', 'd', 'e', 'f']
         .join(',')};`
   )
   .join(' ');
+
+export let testSessionsAPIBookmark = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('sessions-api-bookmark-test'));
+    let bookmark = undefined;
+    for (let i = 0; i < 20; ++i) {
+      bookmark = await stub.testSessionsAPIBookmark(bookmark);
+    }
+  },
+};

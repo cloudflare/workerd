@@ -54,6 +54,22 @@ void SqliteMetadata::setAlarmUncached(kj::Maybe<kj::Date> currentTime) {
   }
 }
 
+kj::Maybe<uint64_t> SqliteMetadata::getLocalDevelopmentBookmark() {
+  auto query = ensureInitialized().stmtGetLocalDevelopmentBookmark.run();
+  if (query.isDone() || query.isNull(0)) {
+    return kj::none;
+  } else {
+    auto bookmark = query.getInt64(0);
+    KJ_REQUIRE(bookmark >= 0);
+    return bookmark;
+  }
+}
+
+void SqliteMetadata::setLocalDevelopmentBookmark(uint64_t bookmark) {
+  KJ_REQUIRE(bookmark <= static_cast<int64_t>(kj::maxValue));
+  ensureInitialized().stmtSetLocalDevelopmentBookmark.run(static_cast<int64_t>(bookmark));
+}
+
 SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized() {
   if (!tableCreated) {
     db.run(R"(
