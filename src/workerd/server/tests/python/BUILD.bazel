@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("//:build/pyodide_bucket.bzl", "PYODIDE_IMPORTS_TO_TEST")
+load("//:build/python_metadata.bzl", "PYTHON_IMPORTS_TO_TEST", "PYTHON_LOCKFILES", "PYTHON_VERSION_TO_PACKAGES")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
@@ -39,24 +39,35 @@ py_wd_test(
 
 py_wd_test("seek-metadatafs")
 
-gen_import_tests(
-    PYODIDE_IMPORTS_TO_TEST,
-    # TODO: Micropip version mismatch for 0.27.0
-    pkg_skip_versions = {
-        "micropip": [
-            "0.27.1",
-        ],
-        "langchain-core": [
-            "0.27.1",
-        ],
-        "langchain_openai": [
-            "0.27.1",
-        ],
-        "langsmith": [
-            "0.27.1",
-        ],
-    },
-)
+[
+    gen_import_tests(
+        PYTHON_IMPORTS_TO_TEST[package_version],
+        python_version,
+        # TODO: Micropip version mismatch for 0.27.0
+        #
+        # TODO: The packages below don't currently work in the latest package/python versions. Need
+        # to fix them.
+        pkg_skip_versions = {
+            "0.27.1": [
+                "micropip",
+                "langchain-core",
+                "langchain_openai",
+                "langsmith",
+                "PyJWT",
+                "beautifulsoup4",
+                "cffi",
+                "cryptography",
+                "pycparser",
+                "python-multipart",
+                "soupsieve",
+                "sqlalchemy",
+                "starlette",
+                "tblib",
+            ],
+        },
+    )
+    for python_version, package_version in PYTHON_VERSION_TO_PACKAGES.items()
+]
 
 py_wd_test(
     "undefined-handler",
