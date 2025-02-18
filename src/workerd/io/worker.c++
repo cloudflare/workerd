@@ -483,11 +483,6 @@ struct Worker::Impl {
   kj::Maybe<jsg::Value> env;
   kj::Maybe<jsg::Value> ctxExports;
 
-  struct ActorClassInfo {
-    EntrypointClass cls;
-    bool missingSuperclass;
-  };
-
   // Note: The default export is given the string name "default", because that's what V8 tells us,
   // and so it's easiest to go with it. I guess that means that you can't actually name an export
   // "default"?
@@ -1687,7 +1682,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                           for (;;) {
                             if (handle == entrypointClasses.durableObject) {
                               impl->actorClasses.insert(kj::mv(handler.name),
-                                  Impl::ActorClassInfo{
+                                  ActorClassInfo{
                                     .cls = kj::mv(cls),
                                     .missingSuperclass = false,
                                   });
@@ -1708,7 +1703,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                               // TODO(someday): Log a warning suggesting extending DurableObject.
                               // TODO(someday): Introduce a compat flag that makes this required.
                               impl->actorClasses.insert(kj::mv(handler.name),
-                                  Impl::ActorClassInfo{
+                                  ActorClassInfo{
                                     .cls = kj::mv(cls),
                                     .missingSuperclass = true,
                                   });
@@ -3207,11 +3202,11 @@ struct Worker::Actor::Impl {
 
   // If the actor is backed by a class, this field tracks the instance through its stages. The
   // instance is constructed as part of the first request to be delivered.
-  kj::OneOf<NoClass,                  // not class-based
-      Worker::Impl::ActorClassInfo*,  // constructor not run yet
-      Initializing,                   // constructor currently running
-      api::ExportedHandler,           // fully constructed
-      kj::Exception                   // constructor threw
+  kj::OneOf<NoClass,            // not class-based
+      Worker::ActorClassInfo*,  // constructor not run yet
+      Initializing,             // constructor currently running
+      api::ExportedHandler,     // fully constructed
+      kj::Exception             // constructor threw
       >
       classInstance;
 
@@ -3444,7 +3439,7 @@ Worker::Actor::Actor(const Worker& worker,
 }
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
-  KJ_IF_SOME(info, impl->classInstance.tryGet<Worker::Impl::ActorClassInfo*>()) {
+  KJ_IF_SOME(info, impl->classInstance.tryGet<Worker::ActorClassInfo*>()) {
     context.addWaitUntil(context
                              .run([this, &info = *info](Worker::Lock& lock) {
       jsg::Lock& js = lock;
@@ -3606,7 +3601,7 @@ void Worker::Actor::assertCanSetAlarm() {
       JSG_FAIL_REQUIRE(
           TypeError, "Your Durable Object must be class-based in order to call setAlarm()");
     }
-    KJ_CASE_ONEOF(_, Worker::Impl::ActorClassInfo*) {
+    KJ_CASE_ONEOF(_, Worker::ActorClassInfo*) {
       KJ_FAIL_ASSERT("setAlarm() invoked before Durable Object ctor");
     }
     KJ_CASE_ONEOF(_, Impl::Initializing) {
@@ -3750,7 +3745,7 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
     KJ_CASE_ONEOF(_, Impl::NoClass) {
       return kj::none;
     }
-    KJ_CASE_ONEOF(_, Worker::Impl::ActorClassInfo*) {
+    KJ_CASE_ONEOF(_, Worker::ActorClassInfo*) {
       KJ_FAIL_ASSERT("ensureConstructed() wasn't called");
     }
     KJ_CASE_ONEOF(_, Impl::Initializing) {
