@@ -412,8 +412,10 @@ class StringWrapper {
   static constexpr const char* getName(kj::String*) {
     return "string";
   }
-  // TODO(someday): This conflates USVStrings, which must have valid code points, with DOMStrings,
-  //   which needn't have valid code points.
+  // TODO(someday): The conversion to kj::String represents DOMStrings, which needn't have valid
+  // code points. It's now also possible to convert to USVStrings, which must have valid code
+  // points, but there may be existing cases which use kj::String without considering this
+  // difference.
 
   static constexpr const char* getName(kj::ArrayPtr<const char>*) {
     return "string";
@@ -426,6 +428,10 @@ class StringWrapper {
     return "ByteString";
   }
   // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+
+  static constexpr const char* getName(USVString*) {
+    return "USVString";
+  }
 
   v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -448,6 +454,12 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const USVString& value) {
     return wrap(context, creator, value.asPtr());
   }
 
@@ -486,6 +498,18 @@ class StringWrapper {
     }
 
     return kj::mv(result);
+  }
+
+  kj::Maybe<USVString> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      USVString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Isolate* isolate = context->GetIsolate();
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
+    str->WriteUtf8V2(isolate, buf.begin(), buf.size(),
+        v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
+    return USVString(kj::mv(buf));
   }
 };
 
@@ -1021,7 +1045,12 @@ class DictWrapper {
     auto object = handle.As<v8::Object>();
     v8::Local<v8::Array> names = check(object->GetOwnPropertyNames(context));
     auto length = names->Length();
-    auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(length);
+
+    // Use a HashMap during construction because the conversion to the string type K could
+    // produce duplicate keys.
+    kj::HashMap<K, V> entries;
+    entries.reserve(length);
+
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::String> name = check(check(names->Get(context, i))->ToString(context));
       v8::Local<v8::Value> value = check(object->Get(context, name));
@@ -1029,9 +1058,9 @@ class DictWrapper {
       if constexpr (kj::isSameType<K, kj::String>()) {
         auto strName = convertToUtf8(name);
         const char* cstrName = strName.cStr();
-        builder.add(typename Dict<V, K>::Field{kj::mv(strName),
-          wrapper.template unwrap<V>(
-              context, value, TypeErrorContext::dictField(cstrName), object)});
+        entries.upsert(kj::mv(strName),
+            wrapper.template unwrap<V>(
+                context, value, TypeErrorContext::dictField(cstrName), object));
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
@@ -1048,9 +1077,14 @@ class DictWrapper {
           throwTypeError(context->GetIsolate(), TypeErrorContext::dictField(strName.cStr()),
               TypeWrapper::getName((V*)nullptr));
         }
-        builder.add(typename Dict<V, K>::Field{
-          KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});
+        entries.upsert(
+            KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue)));
       }
+    }
+
+    auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(entries.size());
+    for (auto& [k, v]: entries) {
+      builder.add(typename Dict<V, K>::Field{kj::mv(k), kj::mv(v)});
     }
     return Dict<V, K>{builder.finish()};
   }
