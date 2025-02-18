@@ -4,6 +4,10 @@ on:
   pull_request:
     paths-ignore:
       - 'doc/**'
+      - 'justfile'
+      - '.devcontainer'
+      - '**/*.md'
+      - '.gitignore'
   merge_group:
   push:
     branches:

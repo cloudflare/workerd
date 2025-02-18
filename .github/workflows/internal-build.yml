@@ -2,8 +2,15 @@ name: Run internal build
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - 'doc/**'
+      - 'justfile'
+      - '.devcontainer'
+      - '**/*.md'
+      - '.gitignore'
+      - '.github/*'
+      - '!.github/workflows/internal-build.yml'
 
 concurrency:
   # Cancel existing builds for the same PR.
