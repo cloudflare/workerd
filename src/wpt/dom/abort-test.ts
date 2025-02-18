@@ -2,11 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'wpt:harness';
+import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'AbortSignal.any.js': {},
-  'abort-signal-any-tests.js': {},
   'abort-signal-any.any.js': {
     comment:
       '(1, 2) Target should be set to signal. (3) Should be investigated.',
@@ -15,7 +14,6 @@ export default {
       'AbortSignal.any() follows multiple signals (using AbortController)',
       'Abort events for AbortSignal.any() signals fire in the right order (using AbortController)',
     ],
-    includeFile: 'abort-signal-any-tests.js',
   },
   'event.any.js': {
     comment: 'Target should be set to signal',

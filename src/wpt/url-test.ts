@@ -2,18 +2,10 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'wpt:harness';
+import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'IdnaTestV2.window.js': {},
-  'a-element-origin.js': {
-    comment: 'Implement globalThis.document',
-    skipAllTests: true,
-  },
-  'a-element.js': {
-    comment: 'Implement globalThis.document',
-    skipAllTests: true,
-  },
   'historical.any.js': {
     comment: 'Fix this eventually',
     expectedFailures: [
