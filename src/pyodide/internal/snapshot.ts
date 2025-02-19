@@ -259,7 +259,7 @@ function memorySnapshotDoImports(Module: Module): string[] {
   // grab them and put them into a set for fast filtering.
   const importedModules: string[] =
     ArtifactBundler.constructor.filterPythonScriptImportsJs(
-      MetadataReader.getNames(),
+      MetadataReader.getNames('py'),
       ArtifactBundler.constructor.parsePythonScriptImports(
         MetadataReader.getWorkerFiles('py')
       )
