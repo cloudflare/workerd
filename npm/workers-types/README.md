@@ -1,5 +1,12 @@
 # Cloudflare Workers Types
 
+> **Note**
+>
+> We now recommend using the [Wrangler CLI](https://www.npmjs.com/package/wrangler) and the `wrangler types` command to generate types based on your compatibility date _and_ compatibility flags. You can learn more about this, and how to migrate from @cloudflare/workers-types [here in our docs](https://developers.cloudflare.com/workers/languages/typescript/#generate-types).
+>
+> @cloudflare/workers-types will continue to be published on the same schedule.
+
+
 ## Install
 
 ```bash
