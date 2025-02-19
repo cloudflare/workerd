@@ -179,6 +179,11 @@ class Worker: public kj::AtomicRefcounted {
 
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
+  struct ActorClassInfo {
+    EntrypointClass cls;
+    bool missingSuperclass;
+  };
+
   class InspectorClient;
   class AsyncWaiter;
   friend constexpr bool _kj_internal_isPolymorphic(AsyncWaiter*);
@@ -874,6 +879,8 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Maybe<api::ExportedHandler&> getHandler();
   friend class Worker;
+
+  kj::Promise<void> ensureConstructedImpl(IoContext&, ActorClassInfo& info);
 };
 
 // =======================================================================================

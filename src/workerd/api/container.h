@@ -21,7 +21,7 @@ class Fetcher;
 // etc.
 class Container: public jsg::Object {
  public:
-  Container(rpc::Container::Client rpcClient);
+  Container(rpc::Container::Client rpcClient, bool running);
 
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
@@ -60,9 +60,7 @@ class Container: public jsg::Object {
 
  private:
   IoOwn<rpc::Container::Client> rpcClient;
-
-  // TODO(containers): Actually check if the container is already running when the DO starts.
-  bool running = false;
+  bool running;
 
   kj::Maybe<jsg::Value> destroyReason;
 
