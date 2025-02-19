@@ -692,4 +692,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental
       $neededByFl;
   # Enables cache settings specified request in fetch api cf object to override cache rules. (only for user owned or grey-clouded sites)
+
+  memoryCacheDelete @73 :Bool
+      $compatEnableFlag("memory_cache_delete")
+      $experimental;
+  # Enables delete operations on memory cache if enabled.
 }

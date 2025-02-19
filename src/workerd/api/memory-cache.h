@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 
@@ -487,9 +488,11 @@ class MemoryCache: public jsg::Object {
   // Delete a value from the cache.
   void delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key);
 
-  JSG_RESOURCE_TYPE(MemoryCache) {
+  JSG_RESOURCE_TYPE(MemoryCache, CompatibilityFlags::Reader flags) {
     JSG_METHOD(read);
-    JSG_METHOD_NAMED(delete, delete_);
+    if (flags.getMemoryCacheDelete()) {
+      JSG_METHOD_NAMED(delete, delete_);
+    }
   }
 
  private:
