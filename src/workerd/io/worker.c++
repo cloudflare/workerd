@@ -3446,7 +3446,22 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 }
 
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
-  co_await context.run([this, &info](Worker::Lock& lock) {
+  InputGate::Lock inputLock = co_await impl->inputGate.wait();
+
+  bool containerRunning = false;
+  KJ_IF_SOME(c, impl->container) {
+    // We need to do an RPC to check if the container is running.
+    // TODO(perf): It would be nice if we could have started this RPC earlier, e.g. in parallel
+    //   with starting the script, and also if we could save the status across hibernations. But
+    //   that would require some refactoring, and this RPC should (eventally) be local, so it's
+    //   not a huge deal.
+    auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
+    containerRunning = status.getRunning();
+  }
+
+  co_await context
+      .run(
+          [this, &info, containerRunning](Worker::Lock& lock) {
     jsg::Lock& js = lock;
 
     kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
@@ -3457,7 +3472,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
         jsg::alloc<api::DurableObjectState>(cloneId(),
             jsg::JsRef<jsg::JsValue>(
                 js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-            kj::mv(storage), kj::mv(impl->container)),
+            kj::mv(storage), kj::mv(impl->container), containerRunning),
         KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
     // HACK: We set handler.env to undefined because we already passed the real env into the
@@ -3469,7 +3484,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
     handler.missingSuperclass = info.missingSuperclass;
 
     impl->classInstance = kj::mv(handler);
-  }).catch_([this](kj::Exception&& e) {
+  }, kj::mv(inputLock))
+      .catch_([this](kj::Exception&& e) {
     auto msg = e.getDescription();
 
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
