@@ -3,7 +3,7 @@ name: Run internal build
 on:
   pull_request:
     paths-ignore:
-      - 'doc/**'
+      - 'docs/**'
       - 'justfile'
       - '.devcontainer'
       - '**/*.md'

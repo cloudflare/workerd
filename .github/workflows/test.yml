@@ -3,7 +3,7 @@ name: Tests
 on:
   pull_request:
     paths-ignore:
-      - 'doc/**'
+      - 'docs/**'
       - 'justfile'
       - '.devcontainer'
       - '**/*.md'
