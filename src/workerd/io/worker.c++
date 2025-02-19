@@ -3439,47 +3439,49 @@ Worker::Actor::Actor(const Worker& worker,
 }
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
-  KJ_IF_SOME(info, impl->classInstance.tryGet<Worker::ActorClassInfo*>()) {
-    context.addWaitUntil(context
-                             .run([this, &info = *info](Worker::Lock& lock) {
-      jsg::Lock& js = lock;
-
-      kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
-      KJ_IF_SOME(c, impl->actorCache) {
-        storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
-      }
-      auto handler = info.cls(lock,
-          jsg::alloc<api::DurableObjectState>(cloneId(),
-              jsg::JsRef<jsg::JsValue>(
-                  js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-              kj::mv(storage), kj::mv(impl->container)),
-          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
-
-      // HACK: We set handler.env to undefined because we already passed the real env into the
-      //   constructor, and we want the handler methods to act like they take just one parameter.
-      //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
-      //   on the actor's state field instead.
-      handler.env = js.v8Ref(js.v8Undefined());
-      handler.ctx = kj::none;
-      handler.missingSuperclass = info.missingSuperclass;
-
-      impl->classInstance = kj::mv(handler);
-    }).catch_([this](kj::Exception&& e) {
-      auto msg = e.getDescription();
-
-      if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
-        // If we already set up a brokenness reason, we shouldn't override it.
-
-        auto description = jsg::annotateBroken(msg, "broken.constructorFailed");
-        e.setDescription(kj::mv(description));
-      }
-
-      impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
-      impl->classInstance = kj::mv(e);
-    }));
-
+  KJ_IF_SOME(info, impl->classInstance.tryGet<ActorClassInfo*>()) {
+    context.addWaitUntil(ensureConstructedImpl(context, *info));
     impl->classInstance = Impl::Initializing();
   }
+}
+
+kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
+  co_await context.run([this, &info](Worker::Lock& lock) {
+    jsg::Lock& js = lock;
+
+    kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
+    KJ_IF_SOME(c, impl->actorCache) {
+      storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
+    }
+    auto handler = info.cls(lock,
+        jsg::alloc<api::DurableObjectState>(cloneId(),
+            jsg::JsRef<jsg::JsValue>(
+                js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
+            kj::mv(storage), kj::mv(impl->container)),
+        KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+    // HACK: We set handler.env to undefined because we already passed the real env into the
+    //   constructor, and we want the handler methods to act like they take just one parameter.
+    //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
+    //   on the actor's state field instead.
+    handler.env = js.v8Ref(js.v8Undefined());
+    handler.ctx = kj::none;
+    handler.missingSuperclass = info.missingSuperclass;
+
+    impl->classInstance = kj::mv(handler);
+  }).catch_([this](kj::Exception&& e) {
+    auto msg = e.getDescription();
+
+    if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
+      // If we already set up a brokenness reason, we shouldn't override it.
+
+      auto description = jsg::annotateBroken(msg, "broken.constructorFailed");
+      e.setDescription(kj::mv(description));
+    }
+
+    impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
+    impl->classInstance = kj::mv(e);
+  });
 }
 
 Worker::Actor::~Actor() noexcept(false) {

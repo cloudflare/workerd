@@ -879,6 +879,8 @@ class Worker::Actor final: public kj::Refcounted {
 
   kj::Maybe<api::ExportedHandler&> getHandler();
   friend class Worker;
+
+  kj::Promise<void> ensureConstructedImpl(IoContext&, ActorClassInfo& info);
 };
 
 // =======================================================================================
