@@ -7,7 +7,7 @@ on:
     branches:
       - main
     paths-ignore:
-      - 'doc/**'
+      - 'docs/**'
       - 'justfile'
       - '.devcontainer'
       - '**/*.md'
