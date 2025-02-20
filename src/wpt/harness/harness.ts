@@ -702,7 +702,7 @@ globalThis.assert_throws_exactly = (exception, fn, description): void => {
  *
  */
 globalThis.assert_throws_dom = (
-  _type,
+  type,
   funcOrConstructor,
   descriptionOrFunc,
   maybeDescription
@@ -716,8 +716,7 @@ globalThis.assert_throws_dom = (
     func = descriptionOrFunc as ThrowingFn;
     description = maybeDescription as string;
   } else {
-    // @ts-expect-error This code is copied as is from the WPT harness
-    constructor = this.DOMException as typeof DOMException;
+    constructor = DOMException;
     func = funcOrConstructor as ThrowingFn;
     description = descriptionOrFunc as string;
     ok(
@@ -730,8 +729,18 @@ globalThis.assert_throws_dom = (
     () => {
       func.call(this);
     },
-    constructor,
-    description
+    (err: DOMException) => {
+      strictEqual(err.constructor, constructor);
+      if (typeof type === 'string') {
+        strictEqual(err.name, type, description);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- WPT allows tests to check the deprecated 'code' property so we must support this
+        strictEqual(err.code, type, description);
+      }
+
+      return true;
+    },
+    `Failed to throw: ${description}`
   );
 };
 
