@@ -13,6 +13,10 @@ build --test_timeout=1,15,60,240
 # Not using bzlmod for dependencies yet
 common --noenable_bzlmod
 
+# Use plus in repo names for Bazel 7 as long as it's used to address some resolution issues
+# Bazel 8 brings this behavior by default and this line can be removed after Bazel upgrade.
+common --incompatible_use_plus_in_repo_names
+
 # bazel7 enables Build without the Bytes (BwoB) by default. This significantly speeds up builds
 # using the remote cache since less data needs to be fetched. Set remote_cache_eviction_retries
 # which is required to fully support a "dumb" cache. Bazel 8 already sets this value by default.
