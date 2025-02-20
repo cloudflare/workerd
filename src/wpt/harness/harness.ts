@@ -38,6 +38,9 @@ import { default as path } from 'node:path';
 type CommonOptions = {
   comment?: string;
   verbose?: boolean;
+  before?: () => void;
+  after?: () => void;
+  replace?: (code: string) => string;
 };
 
 type SuccessOptions = {
@@ -813,7 +816,12 @@ function parseWptMetadata(code: string): WPTMetadata {
   return meta;
 }
 
-function evalOnce(includedFiles: Set<string>, env: Env, path: string): void {
+function evalOnce(
+  includedFiles: Set<string>,
+  env: Env,
+  path: string,
+  replace?: (code: string) => string
+): void {
   if (path === '/common/subset-tests-by-key.js') {
     // The functionality in this file is directly implemented in harness.ts
     return;
@@ -832,7 +840,8 @@ function evalOnce(includedFiles: Set<string>, env: Env, path: string): void {
   }
 
   includedFiles.add(path);
-  env.unsafe.eval(env[path]);
+  const code = replace ? replace(env[path]) : env[path];
+  env.unsafe.eval(code);
 }
 
 export function createRunner(
@@ -874,11 +883,19 @@ export function createRunner(
         globalThis.state = new RunnerState(file, env, options);
         const meta = parseWptMetadata(mainCode);
 
+        if (options.before) {
+          options.before();
+        }
+
         for (const script of meta.scripts) {
           evalOnce(includedFiles, env, script);
         }
 
-        evalOnce(includedFiles, env, file);
+        evalOnce(includedFiles, env, file, options.replace);
+
+        if (options.after) {
+          options.after();
+        }
 
         await globalThis.state.validate();
       },
