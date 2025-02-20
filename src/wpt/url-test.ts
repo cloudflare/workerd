@@ -6,13 +6,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'IdnaTestV2.window.js': {},
-  'historical.any.js': {
-    comment: 'Fix this eventually',
-    expectedFailures: [
-      'URL: no structured serialize/deserialize support',
-      'URLSearchParams: no structured serialize/deserialize support',
-    ],
-  },
+  'historical.any.js': {},
   'idlharness.any.js': {
     comment: 'Does not contain any relevant tests',
     skipAllTests: true,
@@ -53,7 +47,8 @@ export default {
   'url-origin.any.js': {},
   'url-searchparams.any.js': {},
   'url-setters-a-area.window.js': {
-    comment: 'Implement globalThis.document',
+    comment: 'Skipped because it uses the same test data as url-setters.any.js',
+    // Node does the same: https://github.com/nodejs/node/blob/5ab7c4c5b01e7579fd436000232f0f0484289d44/test/wpt/status/url.json#L24
     skipAllTests: true,
   },
   'url-setters-stripping.any.js': {},
