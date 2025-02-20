@@ -77,7 +77,7 @@ interface Console {
   clear(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static) */
   count(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countReset_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countreset_static) */
   countReset(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static) */
   debug(...data: any[]): void;
@@ -89,9 +89,9 @@ interface Console {
   error(...data: any[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static) */
   group(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupCollapsed_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupcollapsed_static) */
   groupCollapsed(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupEnd_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupend_static) */
   groupEnd(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static) */
   info(...data: any[]): void;
@@ -101,9 +101,9 @@ interface Console {
   table(tabularData?: any, properties?: string[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static) */
   time(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeEnd_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeend_static) */
   timeEnd(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeLog_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timelog_static) */
   timeLog(label?: string, ...data: any[]): void;
   timeStamp(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/trace_static) */
@@ -325,9 +325,9 @@ declare function removeEventListener<
 declare function dispatchEvent(
   event: WorkerGlobalScopeEventMap[keyof WorkerGlobalScopeEventMap],
 ): boolean;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/btoa) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/btoa) */
 declare function btoa(data: string): string;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/atob) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 declare function atob(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
 declare function setTimeout(
@@ -1351,15 +1351,10 @@ interface TextEncoderEncodeIntoResult {
  */
 declare class ErrorEvent extends Event {
   constructor(type: string, init?: ErrorEventErrorEventInit);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/filename) */
   get filename(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/message) */
   get message(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/lineno) */
   get lineno(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/colno) */
   get colno(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/error) */
   get error(): any;
 }
 interface ErrorEventErrorEventInit {
@@ -1692,11 +1687,7 @@ interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
   integrity: string;
-  /**
-   * Returns a boolean indicating whether or not request can outlive the global in which it was created.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
-   */
+  /* Returns a boolean indicating whether or not request can outlive the global in which it was created. */
   keepalive: boolean;
 }
 interface RequestInit<Cf = CfProperties> {
@@ -2607,6 +2598,7 @@ declare class URL {
   toString(): string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static) */
   static canParse(url: string, base?: string): boolean;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static) */
   static parse(url: string, base?: string): URL | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static) */
   static createObjectURL(object: File | Blob): string;
