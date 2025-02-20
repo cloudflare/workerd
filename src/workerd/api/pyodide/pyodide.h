@@ -133,7 +133,10 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::str(this->mainModule);
   }
 
-  kj::Array<jsg::JsRef<jsg::JsString>> getNames(jsg::Lock& js);
+  // Returns the filenames of the files inside of the WorkerBundle that end with the specified
+  // file extension.
+  kj::Array<jsg::JsRef<jsg::JsString>> getNames(
+      jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
 
   // Returns files inside the WorkerBundle that end with the specified file extension.
   // Usually called to get all the Python source files with a `py` extension.

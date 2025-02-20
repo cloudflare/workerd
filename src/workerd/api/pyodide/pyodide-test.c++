@@ -248,5 +248,13 @@ KJ_TEST("Filter worker module/__init__.py") {
   KJ_REQUIRE(result.size() == 1);
   KJ_REQUIRE(result[0] == "c");
 }
+
+KJ_TEST("Filters out subdir/submodule") {
+  auto workerModules = strArray("subdir/submodule.py");
+  auto imports = strArray("subdir.submodule");
+  auto result =
+      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
 }  // namespace
 }  // namespace workerd::api

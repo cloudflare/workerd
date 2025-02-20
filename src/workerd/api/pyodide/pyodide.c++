@@ -67,12 +67,18 @@ int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
 }
 
-kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->names.size());
+kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(
+    jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter) {
+  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
+    KJ_IF_SOME(ext, maybeExtFilter) {
+      if (!this->names[i].endsWith(ext)) {
+        continue;
+      }
+    }
     builder.add(js, js.str(this->names[i]));
   }
-  return builder.finish();
+  return builder.releaseAsArray();
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getWorkerFiles(
@@ -343,13 +349,32 @@ kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
-bool isWorkerModuleImport(
-    kj::HashSet<kj::String>& workerModules, kj::ArrayPtr<const char> firstComponent) {
+// This is equivalent to `pkgImport.replace('.', '/') + ".py"`.
+kj::String importToModuleFilename(kj::StringPtr pkgImport) {
+  auto result = kj::heapString(pkgImport.size() + 3);
+  for (auto i = 0; i < pkgImport.size(); i++) {
+    if (pkgImport[i] == '.') {
+      result[i] = '/';
+    } else {
+      result[i] = pkgImport[i];
+    }
+  }
+
+  result[pkgImport.size()] = '.';
+  result[pkgImport.size() + 1] = 'p';
+  result[pkgImport.size() + 2] = 'y';
+  return result;
+}
+
+bool isWorkerModuleImport(kj::HashSet<kj::String>& workerModules,
+    kj::ArrayPtr<const char> firstComponent,
+    kj::StringPtr pkgImport) {
   // TODO: handling for:
   // 1. namespace packages
   // 2. shared libraries
   return workerModules.contains(kj::str(firstComponent, ".py")) ||
-      workerModules.contains(kj::str(firstComponent, "/__init__.py"));
+      workerModules.contains(kj::str(firstComponent, "/__init__.py")) ||
+      workerModules.contains(importToModuleFilename(pkgImport));
 }
 
 kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
@@ -380,7 +405,7 @@ kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
     }
 
     // Don't include imports from worker files
-    if (isWorkerModuleImport(workerModules, firstComponent)) {
+    if (isWorkerModuleImport(workerModules, firstComponent, pkgImport)) {
       continue;
     }
     filteredImportsSet.insert(kj::mv(pkgImport));
