@@ -731,6 +731,8 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 }
 #endif
 
+// TODO(soon): Replace this with Isolate::GetHashSeed() once current v8 release supports it.
+// Ref: https://chromium-review.googlesource.com/c/v8/v8/+/6286748
 kj::StringPtr IsolateBase::getUuid() {
   // Lazily create a random UUID for this isolate.
   KJ_IF_SOME(u, uuid) {
