@@ -88,7 +88,7 @@ class Worker: public kj::AtomicRefcounted {
     virtual void addActorClass(kj::StringPtr exportName) = 0;
 
     // Report that the Worker exports a Workflow class with the given name.
-    virtual void addWorkflowClass(kj::StringPtr exportName) = 0;
+    virtual void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) = 0;
   };
 
   class LockType;
@@ -908,7 +908,7 @@ struct SimpleWorkerErrorReporter final: public Worker::ValidationErrorReporter {
     KJ_UNREACHABLE;
   }
 
-  void addWorkflowClass(kj::StringPtr exportName) override {
+  void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
     KJ_UNREACHABLE;
   }
 

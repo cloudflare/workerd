@@ -3165,7 +3165,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       actorClasses.insert(kj::str(exportName));
     }
 
-    void addWorkflowClass(kj::StringPtr exportName) override {
+    void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
       // This is only used for validation and has no runtime implications, at least for now.
     }
   };
