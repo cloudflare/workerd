@@ -2,7 +2,10 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
+
+#include <list>
 
 namespace workerd::tracing {
 
@@ -50,39 +53,52 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
   uint16_t typeId;
 };
 
-// A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
- public:
-  // If the Reporter returns false, then the writer should transition into a
-  // closed state.
-  using Reporter = kj::Function<bool(TailEvent&&)>;
+// The TailStreamWriterState holds the current client-side state for a collection
+// of streaming tail workers that a worker is reporting events to.
+struct TailStreamWriterState {
+  // The initial state of our tail worker writer is that it is pending the first
+  // onset event. During this time we will only have a collection of WorkerInterface
+  // instances. When our first event is reported (the onset) we will arrange to acquire
+  // tailStream capabilities from each then use those to report the initial onset.
+  using Pending = kj::Array<kj::Own<WorkerInterface>>;
 
-  // A callback that provides the timestamps for tail stream events.
-  // Ideally this uses the same time context as IoContext:now().
-  using TimeSource = kj::Function<kj::Date()>;
-  TailStreamWriter(Reporter reporter, TimeSource timeSource);
-  KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
-
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event);
-  inline void report(const InvocationSpanContext& context, Mark&& event) {
-    report(context, TailEvent::Event(kj::mv(event)));
-  }
-
-  inline bool isClosed() const {
-    return state == kj::none;
-  }
-
- private:
-  struct State {
-    Reporter reporter;
-    TimeSource timeSource;
-    uint32_t sequence = 0;
+  // Instances of Active are refcounted. The TailStreamWriterState itself
+  // holds the initial ref. Whenever events are being dispatched, an additional
+  // ref will be held by the outstanding pump promise in order to keep the
+  // client stub alive long enough for the rpc calls to complete. It is possible
+  // that the TailStreamWriterState will be dropped while pump promises are still
+  // pending.
+  struct Active: public kj::Refcounted {
+    // Reference to keep the worker interface instance alive.
+    kj::Maybe<rpc::TailStreamTarget::Client> capability;
+    bool pumping = false;
     bool onsetSeen = false;
-    State(Reporter reporter, TimeSource timeSource)
-        : reporter(kj::mv(reporter)),
-          timeSource(kj::mv(timeSource)) {}
+    std::list<tracing::TailEvent> queue;
+
+    Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
   };
-  kj::Maybe<State> state;
+
+  struct Closed {};
+
+  // The closing flag will be set when the Outcome event has been reported.
+  // Once closing is true, no further events will be accepted and the state
+  // will transition to closed once the currently active pump completes.
+  bool closing = false;
+  kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
+  kj::TaskSet& waitUntilTasks;
+
+  TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
+      : inner(kj::mv(pending)),
+        waitUntilTasks(waitUntilTasks) {}
+  KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriterState);
+
+  void reportImpl(tracing::TailEvent&& event);
+
+  // Delivers the queued tail events to a streaming tail worker.
+  kj::Promise<void> pump(kj::Own<Active> current);
 };
+
+kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks);
 
 }  // namespace workerd::tracing
