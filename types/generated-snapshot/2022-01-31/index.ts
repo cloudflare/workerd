@@ -5662,26 +5662,31 @@ export type PagesPluginFunction<
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-export declare abstract class PipelineTransform {
+export type PipelineRecord = Record<string, unknown>;
+export type PipelineBatchMetadata = {
+  pipelineId: string;
+  pipelineName: string;
+};
+export declare abstract class PipelineTransformationEntrypoint<
+  I extends PipelineRecord,
+  O extends PipelineRecord,
+> {
   /**
-   * transformJson recieves an array of javascript objects which can be
+   * run recieves an array of PipelineRecord which can be
    * mutated and returned to the pipeline
-   * @param data The data to be mutated
-   * @returns A promise containing the mutated data
+   * @param records Incoming records from the pipeline to be transformed
+   * @param metadata Information about the specific pipeline calling the transformation entrypoint
+   * @returns A promise containing the transformed PipelineRecord array
    */
-  public transformJson(data: object[]): Promise<object[]>;
+  public run(records: I[], metadata: PipelineBatchMetadata): Promise<O[]>;
 }
-// Copyright (c) 2022-2023 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-export interface Pipeline {
+export interface Pipeline<T extends PipelineRecord> {
   /**
-   * send takes an array of javascript objects which are
-   * then received by the pipeline for processing
+   * The Pipeline interface represents the type of a binding to a Pipeline
    *
-   * @param data The data to be sent
+   * @param records The records to send to the pipeline
    */
-  send(data: object[]): Promise<void>;
+  send(records: T[]): Promise<void>;
 }
 // PubSubMessage represents an incoming PubSub message.
 // The message includes metadata about the broker, the client, and the payload

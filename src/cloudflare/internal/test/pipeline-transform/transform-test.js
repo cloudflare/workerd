@@ -4,22 +4,22 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { PipelineTransform } from 'cloudflare:pipeline-transform';
+import { PipelineTransformationEntrypoint } from 'cloudflare:pipeline-transform';
 
 // this is how "Pipeline" would be implemented by the user
-const customTransform = class MyEntrypoint extends PipelineTransform {
+const customTransform = class MyEntrypoint extends PipelineTransformationEntrypoint {
   /**
    * @param {any} batch
    * @override
    */
-  async transformJson(batch) {
-    for (const obj of batch) {
-      obj.dispatcher = 'was here!';
+  async run(records, _) {
+    for (const record of records) {
+      record.dispatcher = 'was here!';
       await new Promise((resolve) => setTimeout(resolve, 50));
-      obj.wait = 'happened!';
+      record.wait = 'happened!';
     }
 
-    return batch;
+    return records;
   }
 };
 
@@ -52,11 +52,11 @@ export const tests = {
   async test(ctr, env, ctx) {
     {
       // should fail dispatcher test call when PipelineTransform class not extended
-      const transformer = new PipelineTransform(ctx, env);
+      const transformer = new PipelineTransformationEntrypoint(ctx, env);
       await assert.rejects(transformer._ping(), (err) => {
         assert.strictEqual(
           err.message,
-          'the transformJson method must be overridden by the PipelineTransform subclass'
+          'the run method must be overridden by the PipelineTransformationEntrypoint subclass'
         );
         return true;
       });
@@ -73,7 +73,10 @@ export const tests = {
       const transformer = new customTransform(ctx, env);
       const batch = newBatch();
 
-      const result = await transformer._transform(batch);
+      const result = await transformer._run(batch, {
+        id: 'abc',
+        name: 'mypipeline',
+      });
       assert.equal(true, result.data instanceof ReadableStream);
 
       const reader = result.data
