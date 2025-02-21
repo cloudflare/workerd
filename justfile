@@ -21,7 +21,7 @@ build *args="//...":
   bazel build {{args}}
 
 build-asan *args="//...":
-  just build {{args}} --config=asan --sandbox_debug
+  just build {{args}} --config=asan
 
 test *args="//...":
   bazel test {{args}}
@@ -36,6 +36,16 @@ stream-test args:
 # e.g. just node-test zlib
 node-test test_name:
   just stream-test //src/workerd/api/node:tests/{{test_name}}-nodejs-test
+
+# e.g. just wpt-test urlpattern
+wpt-test test_name:
+  just stream-test //src/wpt:{{test_name}}
+
+lldb-wpt-test test_name: build
+  cd bazel-bin/src/wpt/{{test_name}}.runfiles/workerd/src/wpt; lldb ../workerd/server/workerd  -- test {{test_name}}.wd-test --experimental --directory-path=TEST_TMPDIR=/tmp
+
+asan-wpt-test test_name:
+  bazel test //src/workerd/api/wpt:{{test_name}} --config=asan
 
 format: rustfmt
   python3 tools/cross/format.py
