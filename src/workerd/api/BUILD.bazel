@@ -135,10 +135,12 @@ wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide/pyodide.c++",
+        "pyodide/requirements.c++",
         "pyodide/setup-emscripten.c++",
     ],
     hdrs = [
         "pyodide/pyodide.h",
+        "pyodide/requirements.h",
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
