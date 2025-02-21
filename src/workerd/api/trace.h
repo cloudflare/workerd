@@ -174,6 +174,8 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(executionModel, getExecutionModel);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(truncated, getTruncated);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(cpuTime, getCpuTime);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(wallTime, getWallTime);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;

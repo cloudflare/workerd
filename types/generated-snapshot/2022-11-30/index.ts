@@ -2479,6 +2479,8 @@ export interface TraceItem {
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
+  readonly cpuTime: number;
+  readonly wallTime: number;
 }
 export interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
