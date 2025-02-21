@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/uuid.h>
 
@@ -200,6 +201,8 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     //    invoke the fallback function.
     kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
         const kj::String& key, SpanBuilder& span) const;
+
+    void delete_(const kj::String& key) const;
 
    private:
     // Creates a new FallbackDoneCallback associated with the given
@@ -482,8 +485,14 @@ class MemoryCache: public jsg::Object {
       jsg::NonCoercible<kj::String> key,
       jsg::Optional<FallbackFunction> optionalFallback);
 
-  JSG_RESOURCE_TYPE(MemoryCache) {
+  // Delete a value from the cache.
+  void delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key);
+
+  JSG_RESOURCE_TYPE(MemoryCache, CompatibilityFlags::Reader flags) {
     JSG_METHOD(read);
+    if (flags.getMemoryCacheDelete()) {
+      JSG_METHOD_NAMED(delete, delete_);
+    }
   }
 
  private:
