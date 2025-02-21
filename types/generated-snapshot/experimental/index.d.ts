@@ -749,6 +749,12 @@ declare class Event {
    */
   get currentTarget(): EventTarget | undefined;
   /**
+   * Returns the object to which event is dispatched (its target).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
+   */
+  get target(): EventTarget | undefined;
+  /**
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)

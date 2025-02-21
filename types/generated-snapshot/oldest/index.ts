@@ -721,6 +721,12 @@ export declare class Event {
    */
   readonly currentTarget?: EventTarget;
   /**
+   * Returns the object to which event is dispatched (its target).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
+   */
+  readonly target?: EventTarget;
+  /**
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
