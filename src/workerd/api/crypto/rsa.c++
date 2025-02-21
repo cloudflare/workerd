@@ -44,26 +44,6 @@ jsg::BufferSource bioToArray(jsg::Lock& js, BIO* bio) {
   buf.asArrayPtr().copyFrom(aptr.asBytes());
   return jsg::BufferSource(js, kj::mv(buf));
 }
-
-kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input) {
-  auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
-  ;
-  auto buf = kj::heapArray<kj::byte>(size);
-  auto result = simdutf::base64_to_binary(
-      input.begin(), input.size(), buf.asChars().begin(), simdutf::base64_url);
-  if (result.error != simdutf::SUCCESS) return kj::none;
-  KJ_ASSERT(result.count <= size);
-
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, result.count);
-  auto src = kj::arrayPtr(buf.begin(), result.count);
-  backing.asArrayPtr().copyFrom(src);
-  return jsg::BufferSource(js, kj::mv(backing));
-}
-
-jsg::BufferSource simdutfBase64UrlDecodeChecked(
-    jsg::Lock& js, kj::StringPtr input, kj::StringPtr error) {
-  return JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(js, input), Error, error);
-}
 }  // namespace
 
 kj::Maybe<Rsa> Rsa::tryGetRsa(const EVP_PKEY* key) {

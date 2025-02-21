@@ -131,6 +131,10 @@ class Event: public jsg::Object {
   // successfully and will remain set after dispatching is completed.
   jsg::Optional<jsg::Ref<EventTarget>> getCurrentTarget();
 
+  // Because we don't support hierarchical EventTargets, this function
+  // will always return the same value as getCurrentTarget().
+  jsg::Optional<jsg::Ref<EventTarget>> getTarget();
+
   // For our implementation, since we do not support hierarchical EventTargets,
   // the composedPath is always either an empty array if the Event is currently
   // not being dispatched, or an array containing only the currentTarget if
@@ -151,6 +155,7 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
       JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      JSG_READONLY_PROTOTYPE_PROPERTY(target, getTarget);
       JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getCurrentTarget);
       JSG_READONLY_PROTOTYPE_PROPERTY(timeStamp, getTimestamp);
       JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
@@ -165,6 +170,7 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
       JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      JSG_READONLY_INSTANCE_PROPERTY(target, getTarget);
       JSG_READONLY_INSTANCE_PROPERTY(srcElement, getCurrentTarget);
       JSG_READONLY_INSTANCE_PROPERTY(timeStamp, getTimestamp);
       JSG_READONLY_INSTANCE_PROPERTY(isTrusted, getIsTrusted);

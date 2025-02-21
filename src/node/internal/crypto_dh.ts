@@ -34,11 +34,18 @@ import { default as cryptoImpl } from 'node-internal:crypto';
 type ArrayLike = cryptoImpl.ArrayLike;
 
 import {
+  isKeyObject,
+  getKeyObjectHandle,
+  type PrivateKeyObject,
+  type PublicKeyObject,
+} from 'node-internal:crypto_keys';
+
+import {
   ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY,
   ERR_INVALID_ARG_TYPE,
 } from 'node-internal:internal_errors';
 
-import { validateInt32 } from 'node-internal:validators';
+import { validateInt32, validateObject } from 'node-internal:validators';
 
 import {
   isArrayBufferView,
@@ -256,4 +263,49 @@ export function createDiffieHellmanGroup(name: string): DiffieHellmanGroup {
 
 export function getDiffieHellman(name: string): DiffieHellmanGroup {
   return createDiffieHellmanGroup(name);
+}
+
+export interface DiffieHellmanKeyPair {
+  publicKey: PublicKeyObject;
+  privateKey: PrivateKeyObject;
+}
+
+export function diffieHellman(options: DiffieHellmanKeyPair) {
+  validateObject(options, 'options');
+  const { publicKey, privateKey } = options;
+  if (!isKeyObject(publicKey)) {
+    throw new ERR_INVALID_ARG_TYPE('options.publicKey', 'KeyObject', publicKey);
+  }
+  if (!isKeyObject(privateKey)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'options.privateKey',
+      'KeyObject',
+      privateKey
+    );
+  }
+  if (publicKey.type !== 'public') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'options.publicKey',
+      'public key',
+      publicKey
+    );
+  }
+  if (privateKey.type !== 'private') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'options.privateKey',
+      'private key',
+      privateKey
+    );
+  }
+  if (
+    publicKey.asymmetricKeyType !== 'dh' ||
+    privateKey.asymmetricKeyType !== 'dh'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE('options', 'DiffieHellman keys', options);
+  }
+  const res = cryptoImpl.statelessDH(
+    getKeyObjectHandle(privateKey),
+    getKeyObjectHandle(publicKey)
+  );
+  return Buffer.from(res);
 }

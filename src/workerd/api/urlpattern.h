@@ -83,7 +83,7 @@ class URLPattern final: public jsg::Object {
 
   static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
-      jsg::Optional<kj::String> baseURL,
+      jsg::Optional<kj::OneOf<kj::String, URLPatternOptions>> baseURL,
       jsg::Optional<URLPatternOptions> patternOptions);
 
   kj::Maybe<URLPatternResult> exec(

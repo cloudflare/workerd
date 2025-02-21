@@ -3,10 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "impl.h"
+#include "kdf.h"
 
-#include <workerd/api/crypto/kdf.h>
-
-#include <openssl/evp.h>
+#include <ncrypto.h>
 
 namespace workerd::api {
 
@@ -18,20 +17,14 @@ kj::Maybe<jsg::BufferSource> scrypt(jsg::Lock& js,
     uint32_t maxmem,
     kj::ArrayPtr<const kj::byte> pass,
     kj::ArrayPtr<const kj::byte> salt) {
-  ClearErrorOnReturn clearErrorOnReturn;
-  auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
-  if (!EVP_PBE_scrypt(pass.asChars().begin(), pass.size(), salt.begin(), salt.size(), N, r, p,
-          maxmem, buf.asArrayPtr().begin(), length)) {
-    // This does not currently handle the errors in exactly the same way as
-    // the Node.js implementation but that's probably ok? We can update the
-    // error thrown to match Node.js more closely later if necessary. There
-    // are lots of places in the API currently where the errors do not match.
-    if (clearErrorOnReturn.peekError()) {
-      throwOpensslError(__FILE__, __LINE__, "crypto::scrypt");
-    }
-    return kj::none;
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, length);
+  auto buf = ToNcryptoBuffer(backing.asArrayPtr());
+  if (ncrypto::scryptInto(
+          ToNcryptoBuffer(pass.asChars()), ToNcryptoBuffer(salt), N, r, p, maxmem, length, &buf)) {
+    return jsg::BufferSource(js, kj::mv(backing));
   }
-  return jsg::BufferSource(js, kj::mv(buf));
+  return kj::none;
 }
 
 }  // namespace workerd::api

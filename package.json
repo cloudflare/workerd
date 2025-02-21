@@ -7,20 +7,20 @@
   },
   "dependencies": {
     "capnp-ts": "^0.7.0",
-    "prettier": "^3.3.4",
-    "typescript": "5.5.4"
+    "prettier": "^3.5.1",
+    "typescript": "5.6.2"
   },
   "devDependencies": {
-    "@eslint/js": "^9.19.0",
+    "@eslint/js": "^9.20.0",
     "@types/debug": "^4.1.12",
-    "@types/node": "^20.16.5",
+    "@types/node": "^22.7.5",
     "capnpc-ts": "^0.7.0",
-    "chrome-remote-interface": "^0.33.2",
-    "esbuild": "^0.24.2",
-    "eslint": "^9.19.0",
+    "chrome-remote-interface": "^0.33.3",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.20.1",
     "eslint-plugin-import": "^2.31.0",
     "expect-type": "^1.1.0",
-    "typescript-eslint": "^8.22.0"
+    "typescript-eslint": "^8.23.0"
   },
   "pnpm": {
     "overrides": {

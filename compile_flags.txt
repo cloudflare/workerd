@@ -20,6 +20,7 @@
 -isystem/usr/lib/llvm-16/include/c++/v1
 -isystem/usr/lib/llvm-16/lib/clang/16/include
 -isystem/usr/include/x86_64-linux-gnu
+-isystem/usr/include/aarch64-linux-gnu
 -isystem/usr/include
 -isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1
 -isystem/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/16/include

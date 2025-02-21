@@ -828,12 +828,14 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId() {
 DurableObjectState::DurableObjectState(Worker::Actor::Id actorId,
     jsg::JsRef<jsg::JsValue> exports,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
-    kj::Maybe<rpc::Container::Client> container)
+    kj::Maybe<rpc::Container::Client> container,
+    bool containerRunning)
     : id(kj::mv(actorId)),
       exports(kj::mv(exports)),
       storage(kj::mv(storage)),
-      container(container.map(
-          [&](rpc::Container::Client& cap) { return jsg::alloc<Container>(kj::mv(cap)); })) {}
+      container(container.map([&](rpc::Container::Client& cap) {
+        return jsg::alloc<Container>(kj::mv(cap), containerRunning);
+      })) {}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));

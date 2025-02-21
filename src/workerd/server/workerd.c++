@@ -881,6 +881,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     },
             "Disable INFO-level logging for this test. Otherwise, INFO logging is enabled by "
             "default for tests in order to show uncaught exceptions, but it can be noisey.")
+        .addOption({"predictable"},
+            [this]() {
+      predictable = true;
+      return true;
+    },
+            "Enable predictable mode. This makes workerd behave more deterministically by using "
+            "pre-set values instead of random data or timestamps to facilitate testing.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
         .callAfterParsing(CLI_METHOD(test))
         .build();
@@ -1372,6 +1379,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       // TODO(beta): This can be removed once we improve our error logging story.
       kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
     }
+    if (predictable) {
+      setPredictableModeForTest();
+    }
 
     // Enable loopback sockets in tests only.
     network.enableLoopback();
@@ -1439,6 +1449,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool binaryConfig = false;
   bool configOnly = false;
   bool noVerbose = false;
+  bool predictable = false;
   kj::Maybe<FileWatcher> watcher;
 
   kj::Own<kj::Filesystem> fs = kj::newDiskFilesystem();

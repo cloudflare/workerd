@@ -10,7 +10,12 @@
 #include <workerd/api/crypto/spkac.h>
 #include <workerd/jsg/jsg.h>
 
+#include <ncrypto.h>
+
 namespace workerd::api::node {
+
+// ======================================================================================
+#pragma region KDF
 
 jsg::BufferSource CryptoImpl::getHkdf(jsg::Lock& js,
     kj::String hash,
@@ -27,24 +32,15 @@ jsg::BufferSource CryptoImpl::getHkdf(jsg::Lock& js,
   // salt, and info parameters. Fourth, the Web Crypto API relies on the key
   // being a CryptoKey object, whereas the Node.js implementation here takes a
   // raw byte array.
-  ClearErrorOnReturn clearErrorOnReturn;
-  const EVP_MD* digest = EVP_get_digestbyname(hash.begin());
-  JSG_REQUIRE(digest != nullptr, TypeError, "Invalid Hkdf digest: ", hash);
+  auto digest = ncrypto::getDigestByName(hash.begin());
 
+  JSG_REQUIRE_NONNULL(digest, TypeError, "Invalid Hkdf digest: ", hash);
   JSG_REQUIRE(info.size() <= INT32_MAX, RangeError, "Hkdf failed: info is too large");
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Hkdf failed: salt is too large");
   JSG_REQUIRE(key.size() <= INT32_MAX, RangeError, "Hkdf failed: key is too large");
+  JSG_REQUIRE(ncrypto::checkHkdfLength(digest, length), RangeError, "Invalid Hkdf key length");
 
-  // HKDF-Expand computes up to 255 HMAC blocks, each having as many bits as the
-  // output of the hash function. 255 is a hard limit because HKDF appends an
-  // 8-bit counter to each HMAC'd message, starting at 1. What this means in a
-  // practical sense is that the maximum value of length is 255 * hash size for
-  // the specific hash algorithm specified.
-  static constexpr size_t kMaxDigestMultiplier = 255;
-  JSG_REQUIRE(
-      length <= EVP_MD_size(digest) * kMaxDigestMultiplier, RangeError, "Invalid Hkdf key length");
-
-  return JSG_REQUIRE_NONNULL(hkdf(js, length, digest, key, salt, info), Error, "Hkdf failed");
+  return JSG_REQUIRE_NONNULL(api::hkdf(js, length, digest, key, salt, info), Error, "Hkdf failed");
 }
 
 jsg::BufferSource CryptoImpl::getPbkdf(jsg::Lock& js,
@@ -58,20 +54,18 @@ jsg::BufferSource CryptoImpl::getPbkdf(jsg::Lock& js,
   // digest algorithms whereas the Web Crypto API only allows for a few specific ones.
   // Second, the Node.js implementation enforces max size limits on the password and
   // salt parameters.
-  ClearErrorOnReturn clearErrorOnReturn;
-  const EVP_MD* digest = EVP_get_digestbyname(name.begin());
-  JSG_REQUIRE(digest != nullptr, TypeError, "Invalid Pbkdf2 digest: ", name,
-      internalDescribeOpensslErrors());
+  auto digest = ncrypto::getDigestByName(name.begin());
 
+  JSG_REQUIRE_NONNULL(
+      digest, TypeError, "Invalid Pbkdf2 digest: ", name, internalDescribeOpensslErrors());
   JSG_REQUIRE(password.size() <= INT32_MAX, RangeError, "Pbkdf2 failed: password is too large");
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Pbkdf2 failed: salt is too large");
   // Note: The user could DoS us by selecting a very high iteration count. As with the Web Crypto
   // API, intentionally limit the maximum iteration count.
   checkPbkdfLimits(js, num_iterations);
 
-  // Both pass and salt may be zero length here.
   return JSG_REQUIRE_NONNULL(
-      pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
+      api::pbkdf2(js, keylen, num_iterations, digest, password, salt), Error, "Pbkdf2 failed");
 }
 
 jsg::BufferSource CryptoImpl::getScrypt(jsg::Lock& js,
@@ -82,13 +76,16 @@ jsg::BufferSource CryptoImpl::getScrypt(jsg::Lock& js,
     uint32_t p,
     uint32_t maxmem,
     uint32_t keylen) {
-  ClearErrorOnReturn clearErrorOnReturn;
   JSG_REQUIRE(password.size() <= INT32_MAX, RangeError, "Scrypt failed: password is too large");
   JSG_REQUIRE(salt.size() <= INT32_MAX, RangeError, "Scrypt failed: salt is too large");
 
   return JSG_REQUIRE_NONNULL(
-      scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
+      api::scrypt(js, keylen, N, r, p, maxmem, password, salt), Error, "Scrypt failed");
 }
+#pragma endregion  // KDF
+
+// ======================================================================================
+#pragma region SPKAC
 
 bool CryptoImpl::verifySpkac(kj::Array<const kj::byte> input) {
   return workerd::api::verifySpkac(input);
@@ -103,6 +100,10 @@ kj::Maybe<jsg::BufferSource> CryptoImpl::exportChallenge(
     jsg::Lock& js, kj::Array<const kj::byte> input) {
   return workerd::api::exportChallenge(js, input);
 }
+#pragma endregion  // SPKAC
+
+// ======================================================================================
+#pragma region Primes
 
 jsg::BufferSource CryptoImpl::randomPrime(jsg::Lock& js,
     uint32_t size,
@@ -117,8 +118,10 @@ jsg::BufferSource CryptoImpl::randomPrime(jsg::Lock& js,
 bool CryptoImpl::checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks) {
   return workerd::api::checkPrime(bufferView.asPtr(), num_checks);
 }
+#pragma endregion  // Primes
 
 // ======================================================================================
+#pragma region Hmac
 jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
     jsg::Lock& js, kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
   KJ_SWITCH_ONEOF(key) {
@@ -163,8 +166,10 @@ jsg::BufferSource CryptoImpl::HmacHandle::oneshot(jsg::Lock& js,
 void CryptoImpl::HmacHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackFieldWithSize("digest", ctx.size());
 }
+#pragma endregion  // Hmac
 
 // ======================================================================================
+#pragma region Hash
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
     kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
   return jsg::alloc<HashHandle>(HashContext(algorithm, xofLen));
@@ -194,9 +199,10 @@ jsg::BufferSource CryptoImpl::HashHandle::oneshot(
   ctx.update(data);
   return ctx.digest(js);
 }
+#pragma endregion Hash
 
 // ======================================================================================
-// DiffieHellman
+#pragma region DiffieHellman
 
 jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
   return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(name));
@@ -249,5 +255,6 @@ jsg::BufferSource CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
   return verifyError;
 }
+#pragma endregion  // DiffieHellman
 
 }  // namespace workerd::api::node

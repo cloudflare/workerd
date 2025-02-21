@@ -2,19 +2,12 @@
 
 #include <workerd/io/io-context.h>
 
+#include <ncrypto.h>
 #include <openssl/bn.h>
 #include <openssl/dh.h>
 
 #include <kj/one-of.h>
 #include <kj/string.h>
-
-#if WORKERD_BSSL_NEED_DH_PRIMES
-#include <workerd/api/crypto/dh-primes.h>
-#endif  // WORKERD_BSSL_NEED_DH_PRIMES
-
-#if !_WIN32
-#include <strings.h>
-#endif
 
 namespace workerd::api {
 

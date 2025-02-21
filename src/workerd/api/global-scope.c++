@@ -880,16 +880,19 @@ double Performance::now() {
 }
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-jsg::Ref<api::gpu::GPU> Navigator::getGPU(CompatibilityFlags::Reader flags) {
+jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(CompatibilityFlags::Reader flags) {
   // is this a durable object?
   KJ_IF_SOME(actor, IoContext::current().getActor()) {
-    JSG_REQUIRE(actor.getPersistent() != kj::none, TypeError,
-        "webgpu api is only available in Durable Objects (no storage)");
+    if (actor.getPersistent() == kj::none) {
+      return kj::none;
+    }
   } else {
-    JSG_FAIL_REQUIRE(TypeError, "webgpu api is only available in Durable Objects");
+    return kj::none;
   };
 
-  JSG_REQUIRE(flags.getWebgpu(), TypeError, "webgpu needs the webgpu compatibility flag set");
+  if (!flags.getWebgpu()) {
+    return kj::none;
+  }
 
   return jsg::alloc<api::gpu::GPU>();
 }

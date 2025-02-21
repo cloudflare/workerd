@@ -168,6 +168,10 @@ jsg::Optional<jsg::Ref<EventTarget>> Event::getCurrentTarget() {
   return target.map([&](jsg::Ref<EventTarget>& t) { return t.addRef(); });
 }
 
+jsg::Optional<jsg::Ref<EventTarget>> Event::getTarget() {
+  return getCurrentTarget();
+}
+
 kj::Array<jsg::Ref<EventTarget>> Event::composedPath() {
   if (isBeingDispatched) {
     // When isBeingDispatched is true, target should always be non-null.

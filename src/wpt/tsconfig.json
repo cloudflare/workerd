@@ -20,9 +20,12 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "declaration": true,
+    "composite": true,
+    "sourceMap": true,
     "paths": {
-      "wpt:*": ["./*"]
+      "harness/*": ["./harness/*"]
     }
   },
+  "include": ["**/*.ts"],
   "exclude": []
 }

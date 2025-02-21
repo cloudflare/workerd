@@ -208,6 +208,14 @@ class BackingStore {
     return BackingStore(backingStore, byteLength, byteOffset, elementSize, ctor, integerType);
   }
 
+  template <class T = v8::Uint8Array>
+  inline BackingStore copy(jsg::Lock& js) {
+    if (byteLength == 0) return BackingStore::alloc<T>(js, 0);
+    auto dest = BackingStore::alloc<T>(js, byteLength);
+    memcpy(dest.asArrayPtr().begin(), asArrayPtr().begin(), byteLength);
+    return dest;
+  }
+
   JSG_MEMORY_INFO(BackingStore) {
     tracker.trackFieldWithSize("buffer", size());
   }
@@ -382,8 +390,22 @@ class BufferSource {
     handle = js.v8Ref(backing.createHandle(js));
   }
 
-  BufferSource clone(jsg::Lock& js) {
+  inline BufferSource clone(jsg::Lock& js) {
     return BufferSource(js, KJ_ASSERT_NONNULL(maybeBackingStore).clone());
+  }
+
+  template <class T = v8::Uint8Array>
+  inline BufferSource copy(jsg::Lock& js) {
+    KJ_IF_SOME(backing, maybeBackingStore) {
+      return BufferSource(js, backing.copy<T>(js));
+    }
+    return BufferSource(js, BackingStore::alloc<T>(js, 0));
+  }
+
+  inline void setToZero() {
+    KJ_IF_SOME(backing, maybeBackingStore) {
+      backing.asArrayPtr().fill(0);
+    }
   }
 
   template <BufferSourceType T = v8::Uint8Array>

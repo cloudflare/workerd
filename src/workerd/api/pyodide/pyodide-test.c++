@@ -196,5 +196,65 @@ w["h
   KJ_REQUIRE(result.size() == 0);
 }
 
+using pyodide::ArtifactBundler;
+
+template <typename... Params>
+kj::Array<kj::String> strArray(Params&&... params) {
+  return kj::arr(kj::str(params)...);
+}
+
+KJ_TEST("Simple pass through") {
+  auto imports = strArray("b", "c");
+  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 2);
+  KJ_REQUIRE(result[0] == "b");
+  KJ_REQUIRE(result[1] == "c");
+}
+
+KJ_TEST("pyodide and submodules") {
+  auto imports = strArray("pyodide", "pyodide.ffi");
+  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("js and submodules") {
+  auto imports = strArray("js", "js.crypto");
+  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("importlib and submodules") {
+  // importlib and importlib.metadata are imported into the baseline snapshot, but importlib.resources is not.
+  auto imports = strArray("importlib", "importlib.metadata", "importlib.resources");
+  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "importlib.resources");
+}
+
+KJ_TEST("Filter worker .py files") {
+  auto workerModules = strArray("b.py", "c.py");
+  auto imports = strArray("b", "c", "d");
+  auto result =
+      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "d");
+}
+
+KJ_TEST("Filter worker module/__init__.py") {
+  auto workerModules = strArray("a/__init__.py", "b/__init__.py", "c/a.py");
+  auto imports = strArray("a", "b", "c");
+  auto result =
+      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "c");
+}
+
+KJ_TEST("Filters out subdir/submodule") {
+  auto workerModules = strArray("subdir/submodule.py");
+  auto imports = strArray("subdir.submodule");
+  auto result =
+      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
 }  // namespace
 }  // namespace workerd::api

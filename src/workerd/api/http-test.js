@@ -234,6 +234,7 @@ export const inspect = {
   defaultPrevented: false,
   returnValue: true,
   currentTarget: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
+  target: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
   srcElement: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
   timeStamp: 0,
   isTrusted: true,

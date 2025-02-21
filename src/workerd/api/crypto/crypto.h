@@ -271,16 +271,19 @@ class CryptoKey: public jsg::Object {
   struct AsymmetricKeyDetails {
     jsg::Optional<uint32_t> modulusLength;
     jsg::Optional<kj::Array<kj::byte>> publicExponent;
-    jsg::Optional<kj::String> hashAlgorithm;
-    jsg::Optional<kj::String> mgf1HashAlgorithm;
-    jsg::Optional<uint32_t> saltLength;
+    // TODO(later): BoringSSL does not currently support getting the RSA-PSS
+    // details for an RSA key. Once it does, we can update our impl and add
+    // these fields.
+    // jsg::Optional<kj::String> hashAlgorithm;
+    // jsg::Optional<kj::String> mgf1HashAlgorithm;
+    // jsg::Optional<uint32_t> saltLength;
     jsg::Optional<uint32_t> divisorLength;
     jsg::Optional<kj::String> namedCurve;
     JSG_STRUCT(modulusLength,
         publicExponent,
-        hashAlgorithm,
-        mgf1HashAlgorithm,
-        saltLength,
+        // hashAlgorithm,
+        // mgf1HashAlgorithm,
+        // saltLength,
         divisorLength,
         namedCurve);
   };
@@ -333,6 +336,8 @@ class CryptoKey: public jsg::Object {
 
  private:
   kj::Own<Impl> impl;
+
+  void visitForGc(jsg::GcVisitor& visitor);
 
   friend class SubtleCrypto;
   friend class EllipticKey;
