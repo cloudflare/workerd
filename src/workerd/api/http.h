@@ -805,19 +805,24 @@ public:
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
           kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
-          kj::Maybe<Body::ExtractedBody> body, CacheMode cacheMode = CacheMode::NONE)
+          kj::Maybe<Body::ExtractedBody> body, kj::Maybe<jsg::Ref<AbortSignal>> thisSignal,
+          CacheMode cacheMode = CacheMode::NONE)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
       cacheMode(cacheMode), cf(kj::mv(cf)) {
     KJ_IF_SOME(s, signal) {
-      // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
+     // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
       // that the cancel machinery is not used but the request.signal accessor will still
       // do the right thing.
       if (s->getNeverAborts()) {
-        this->thisSignal = kj::mv(s);
+        this->thisSignal = s.addRef();
       } else {
-        this->signal = kj::mv(s);
+        this->signal = s.addRef();
       }
+    }
+
+    KJ_IF_SOME(s, thisSignal) {
+      this->thisSignal = s.addRef();
     }
   }
   // TODO(conform): Technically, the request's URL should be parsed immediately upon Request
@@ -871,7 +876,10 @@ public:
   // used on this request.
   kj::Maybe<jsg::Ref<AbortSignal>> getSignal();
 
-  jsg::Ref<AbortSignal> getThisSignal(jsg::Lock& js);
+  jsg::Ref<AbortSignal> getThisSignal();
+
+  void clearSignalIfIgnoredForSubrequest();
+
 
   // Returns the `cf` field containing Cloudflare feature flags.
   jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);

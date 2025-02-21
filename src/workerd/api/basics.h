@@ -602,9 +602,21 @@ class AbortSignal final: public EventTarget {
     tracker.trackField("reason", reason);
   }
 
+  bool isIgnoredForSubrequests() {
+    return ignoreForSubrequests;
+  }
+
+  void setIgnoredForSubrequests() {
+    ignoreForSubrequests = true;
+  }
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
+
+  // If set, this AbortSignal will not be used when constructing a Request from an existing Request
+  bool ignoreForSubrequests = false;
+
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
