@@ -27,6 +27,13 @@ interface Container @0x9aaceefc06523bca {
     # Set true to enable the container to talk directly to the public internet. Otherwise, the
     # public internet will not be accessible -- but it's still possible to intercept connection
     # attempts and handle them in the DO, using the "listen" methods below.
+
+    environmentVariables @2 :List(Text);
+    # Specifies the environment variables of the container.
+    # It will spread over the existing defined environment variables of the container image.
+    # If null, the container will start with the environment variables defined in its image.
+    # The format is defined as a list of `NAME=VALUE`.
+    # The container runtime should validate the environment variables input.
   }
 
   monitor @2 ();
