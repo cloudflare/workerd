@@ -309,18 +309,23 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
     // V8 takes ownership of the v8::CppHeap.
     params.cpp_heap = cppHeap;
 
-    if (params.array_buffer_allocator == nullptr &&
-        params.array_buffer_allocator_shared == nullptr) {
-      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-          v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-    }
 #if ((V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION > 2) || V8_MAJOR_VERSION > 13) &&                 \
     V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
     // Create new isolate group so that isolate is in its own group and not in a shared group. That
     // way the isolates don't all use the same pointer cage.
     v8::IsolateGroup group = v8::IsolateGroup::Create();
+    if (params.array_buffer_allocator == nullptr &&
+        params.array_buffer_allocator_shared == nullptr) {
+      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+          v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
+    }
     return v8::Isolate::New(group, params);
 #else
+    if (params.array_buffer_allocator == nullptr &&
+        params.array_buffer_allocator_shared == nullptr) {
+      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+          v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+    }
     return v8::Isolate::New(params);
 #endif
   });
