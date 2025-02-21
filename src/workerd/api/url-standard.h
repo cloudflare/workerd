@@ -35,12 +35,12 @@ class URLSearchParams: public jsg::Object {
     }
   };
 public:
-  using StringPair = jsg::Sequence<kj::String>;
+  using StringPair = jsg::Sequence<jsg::USVString>;
   using StringPairs = jsg::Sequence<StringPair>;
 
   using Initializer = kj::OneOf<StringPairs,
-                                jsg::Dict<kj::String, kj::String>,
-                                kj::String>;
+                                jsg::Dict<jsg::USVString, jsg::USVString>,
+                                jsg::USVString>;
 
   // Constructor called by the static constructor method.
   URLSearchParams(Initializer init);
@@ -50,12 +50,12 @@ public:
 
   static jsg::Ref<URLSearchParams> constructor(jsg::Optional<Initializer> init);
 
-  void append(kj::String name, kj::String value);
-  void delete_(jsg::Lock& js, kj::String name, jsg::Optional<kj::String> value);
-  kj::Maybe<kj::ArrayPtr<const char>> get(kj::String name);
-  kj::Array<kj::ArrayPtr<const char>> getAll(kj::String name);
-  bool has(jsg::Lock& js, kj::String name, jsg::Optional<kj::String> value);
-  void set(kj::String name, kj::String value);
+  void append(jsg::USVString name, jsg::USVString value);
+  void delete_(jsg::Lock& js, jsg::USVString name, jsg::Optional<jsg::USVString> value);
+  kj::Maybe<kj::ArrayPtr<const char>> get(jsg::USVString name);
+  kj::Array<kj::ArrayPtr<const char>> getAll(jsg::USVString name);
+  bool has(jsg::Lock& js, jsg::USVString name, jsg::Optional<jsg::USVString> value);
+  void set(jsg::USVString name, jsg::USVString value);
   void sort();
 
   JSG_ITERATOR(EntryIterator, entries,
@@ -162,9 +162,9 @@ public:
   URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base = kj::none);
   ~URL() noexcept(false) override;
 
-  static jsg::Ref<URL> constructor(kj::String url, jsg::Optional<kj::String> base);
+  static jsg::Ref<URL> constructor(jsg::USVString url, jsg::Optional<jsg::USVString> base);
 
-  static kj::Maybe<jsg::Ref<URL>> parse(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base) {
+  static kj::Maybe<jsg::Ref<URL>> parse(jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base) {
     // Method should not throw if the parse fails
     return js.tryCatch([&]() -> kj::Maybe<jsg::Ref<URL>> {
       return constructor(kj::mv(url), kj::mv(base));
@@ -172,36 +172,36 @@ public:
   }
 
   kj::ArrayPtr<const char> getHref();
-  void setHref(jsg::Lock& js, kj::String value);
+  void setHref(jsg::Lock& js, jsg::USVString value);
 
   kj::Array<const char> getOrigin();
 
   kj::ArrayPtr<const char> getProtocol();
-  void setProtocol(kj::String value);
+  void setProtocol(jsg::USVString value);
 
   kj::ArrayPtr<const char> getUsername();
-  void setUsername(kj::String value);
+  void setUsername(jsg::USVString value);
 
   kj::ArrayPtr<const char> getPassword();
-  void setPassword(kj::String value);
+  void setPassword(jsg::USVString value);
 
   kj::ArrayPtr<const char> getHost();
-  void setHost(kj::String value);
+  void setHost(jsg::USVString value);
 
   kj::ArrayPtr<const char> getHostname();
-  void setHostname(kj::String value);
+  void setHostname(jsg::USVString value);
 
   kj::ArrayPtr<const char> getPort();
-  void setPort(kj::String value);
+  void setPort(jsg::USVString value);
 
   kj::ArrayPtr<const char> getPathname();
-  void setPathname(kj::String value);
+  void setPathname(jsg::USVString value);
 
   kj::ArrayPtr<const char> getSearch();
-  void setSearch(kj::String value);
+  void setSearch(jsg::USVString value);
 
   kj::ArrayPtr<const char> getHash();
-  void setHash(kj::String value);
+  void setHash(jsg::USVString value);
 
   jsg::Ref<URLSearchParams> getSearchParams();
 
@@ -215,9 +215,9 @@ public:
   //   'not a url'
   // ].filter((test) => URL.canParse(test));
   //
-  static bool canParse(kj::String url, jsg::Optional<kj::String> base = kj::none);
+  static bool canParse(jsg::USVString url, jsg::Optional<jsg::USVString> base = kj::none);
   static jsg::JsString createObjectURL(jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object);
-  static void revokeObjectURL(jsg::Lock& js, kj::String object_url);
+  static void revokeObjectURL(jsg::Lock& js, jsg::USVString object_url);
 
   JSG_RESOURCE_TYPE(URL) {
     JSG_READONLY_PROTOTYPE_PROPERTY(origin, getOrigin);
