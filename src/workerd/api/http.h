@@ -1097,13 +1097,7 @@ public:
   //
   // A network error is a response whose status is always 0, status message is always the empty
   // byte sequence, header list is always empty, body is always null, and trailer is always empty.
-  static jsg::Unimplemented error() { return {}; };
-  // TODO(conform): implementation is missing; two approaches where tested:
-  //  - returning a HTTP 5xx response but that doesn't match the spec and we didn't
-  //    find it useful.
-  //  - throwing/propagating a DISCONNECTED kj::Exception to actually disconnect the
-  //    client. However, we were concerned about possible side-effects and incorrect
-  //    error reporting.
+  static jsg::Ref<Response> error(jsg::Lock& js);
 
   jsg::Ref<Response> clone(jsg::Lock& js);
 
@@ -1136,9 +1130,13 @@ public:
 
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was
-  // determined that just have this property as undefined is the best option.
-  // jsg::JsValue getType(jsg::Lock& js) { return js.v8Undefined(); }
-  // TODO(conform): Won't implement?
+  // determined that only the `'default'` and `'error'` properties should be implemented.
+  // We currently due not implement Response.error() so "default" is the only value we
+  // currently support.
+  kj::StringPtr getType() {
+    if (statusCode == 0) return "error"_kj;
+    return "default"_kj;
+  }
 
   JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
@@ -1161,9 +1159,7 @@ public:
 
       JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
 
-      // TODO(conform): This is a standard properties that we do not implement (see description
-      // above).
-      // JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
+      JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(status, getStatus);
       JSG_READONLY_INSTANCE_PROPERTY(statusText, getStatusText);
@@ -1177,9 +1173,7 @@ public:
 
       JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
 
-      // TODO(conform): This is a standard properties that we do not implement (see description
-      // above).
-      // JSG_READONLY_INSTANCE_PROPERTY(type, getType);
+      JSG_READONLY_INSTANCE_PROPERTY(type, getType);
     }
 
     JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
