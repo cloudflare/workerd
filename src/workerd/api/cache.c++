@@ -154,6 +154,9 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
     jsg::Ref<Response> jsResponse,
     CompatibilityFlags::Reader flags) {
 
+  JSG_REQUIRE(
+      jsResponse->getType() != "error"_kj, TypeError, "Cache is unble to store an error response");
+
   // Fake kj::HttpService::Response implementation that allows us to reuse jsResponse->send() to
   // serialize the response (headers + body) in the format needed to serve as the payload of
   // our cache PUT request.

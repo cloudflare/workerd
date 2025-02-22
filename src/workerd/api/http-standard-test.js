@@ -1,4 +1,4 @@
-import { strictEqual } from 'node:assert';
+import { strictEqual, rejects, throws } from 'node:assert';
 
 export default {
   async fetch(req) {
@@ -11,7 +11,16 @@ export default {
       });
     } else if (req.url.endsWith('/2')) {
       return new Response('ok');
+    } else if (req.url.endsWith('/error')) {
+      const resp = Response.error();
+      strictEqual(resp.type, 'error');
+      strictEqual(resp.status, 0);
+      return resp;
     }
+  },
+
+  foo() {
+    return Response.error();
   },
 };
 
@@ -31,5 +40,26 @@ export const typeTest = {
   test() {
     const resp = new Response('ok');
     strictEqual(resp.type, 'default');
+  },
+};
+
+export const error = {
+  async test(_, env) {
+    await rejects(env.SERVICE.fetch('http://example/error'), {
+      message:
+        'Return value from serve handler must not be an error ' +
+        'response (like Response.error())',
+    });
+
+    const errorResp = Response.error();
+    throws(() => new Response('', errorResp), {
+      message:
+        'Responses may only be constructed with status codes in ' +
+        'the range 200 to 599, inclusive.',
+    });
+
+    const errorRespRpc = await env.SERVICE.foo(null);
+    strictEqual(errorRespRpc.type, 'error');
+    strictEqual(errorRespRpc.ok, false);
   },
 };
