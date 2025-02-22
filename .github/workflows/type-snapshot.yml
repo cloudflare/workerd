@@ -67,7 +67,7 @@ jobs:
           path: bazel-bin/types/definitions/
       - name: 'Comment on PR with error details'
         if: failure()
-        uses: marocchino/sticky-pull-request-comment@daa4a82a0a3f6c162c02b83fa44b3ab83946f7cb
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
         with:
           message: |
             The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `bazel build //types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}
@@ -82,7 +82,7 @@ jobs:
             </details>
       - name: 'Comment on PR with error details'
         if: success()
-        uses: marocchino/sticky-pull-request-comment@daa4a82a0a3f6c162c02b83fa44b3ab83946f7cb
+        uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
         with:
           only_update: true
           message: |
