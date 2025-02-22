@@ -1620,6 +1620,8 @@ export interface Response extends Body {
   url: string;
   webSocket: WebSocket | null;
   cf: any | undefined;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  type: "default" | "error";
 }
 export interface ResponseInit {
   status?: number;
@@ -5685,6 +5687,18 @@ export type PagesPluginFunction<
 > = (
   context: EventPluginContext<Env, Params, Data, PluginArgs>,
 ) => Response | Promise<Response>;
+// Copyright (c) 2022-2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+export declare abstract class PipelineTransform {
+  /**
+   * transformJson recieves an array of javascript objects which can be
+   * mutated and returned to the pipeline
+   * @param data The data to be mutated
+   * @returns A promise containing the mutated data
+   */
+  public transformJson(data: object[]): Promise<object[]>;
+}
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0

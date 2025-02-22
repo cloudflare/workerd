@@ -26,3 +26,10 @@ export const test = {
     strictEqual(await resp.text(), 'ok');
   },
 };
+
+export const typeTest = {
+  test() {
+    const resp = new Response('ok');
+    strictEqual(resp.type, 'default');
+  },
+};

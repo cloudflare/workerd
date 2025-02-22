@@ -1591,6 +1591,8 @@ interface Response extends Body {
   readonly url: string;
   readonly webSocket: WebSocket | null;
   readonly cf?: any;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  type: "default" | "error";
 }
 interface ResponseInit {
   status?: number;

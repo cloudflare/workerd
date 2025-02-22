@@ -1627,6 +1627,8 @@ export interface Response extends Body {
   url: string;
   webSocket: WebSocket | null;
   cf: any | undefined;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  type: "default" | "error";
 }
 export interface ResponseInit {
   status?: number;
