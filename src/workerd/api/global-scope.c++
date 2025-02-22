@@ -247,6 +247,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
     }
   } else KJ_IF_SOME(promise, event->getResponsePromise(lock)) {
+
     auto body2 = kj::addRef(*ownRequestBody);
 
     // HACK: If the client disconnects, the `response` reference is no longer valid. But our
