@@ -267,6 +267,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
                         canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+      JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
+          "Return value from serve handler must not be an error response (like Response.error())");
+
       auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;

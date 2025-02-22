@@ -1334,6 +1334,10 @@ Response::Response(jsg::Lock& js,
 // Defined later in this file.
 static kj::StringPtr defaultStatusText(uint statusCode);
 
+jsg::Ref<Response> Response::error(jsg::Lock& js) {
+  return jsg::alloc<Response>(js, 0, kj::String(), jsg::alloc<Headers>(), CfProperty(), kj::none);
+};
+
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
     jsg::Optional<Initializer> maybeInit) {
@@ -1732,6 +1736,15 @@ jsg::Ref<Response> Response::deserialize(jsg::Lock& js,
     const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
   auto body = KJ_ASSERT_NONNULL(streamHandler.tryUnwrap(js, deserializer.readValue(js)));
   auto init = KJ_ASSERT_NONNULL(initDictHandler.tryUnwrap(js, deserializer.readValue(js)));
+
+  // If the status code is zero, then it was an error response. We cannot
+  // use the Response::constructor.
+  KJ_IF_SOME(status, init.status) {
+    if (status == 0) {
+      return Response::error(js);
+    }
+  }
+
   return Response::constructor(js, kj::mv(body), kj::mv(init));
 }
 
@@ -2388,7 +2401,7 @@ jsg::Promise<Fetcher::GetResult> Fetcher::get(
     uint status = response->getStatus();
     if (status == 404 || status == 410) {
       return js.resolvedPromise(GetResult(js.v8Ref(js.v8Null())));
-    } else if (status < 200 || status >= 300) {
+    } else if (!response->getOk()) {
       // Manually construct exception so that we can incorporate method and status into the text
       // that JavaScript sees.
       // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
@@ -2680,6 +2693,10 @@ static kj::StringPtr defaultStatusText(uint statusCode) {
         return "Client Error"_kj;
       } else if (statusCode >= 500 && statusCode < 600) {
         return "Server Error"_kj;
+      } else if (statusCode == 0) {
+        // Status code 0 is used exclusively with error responses
+        // created using Response.error()
+        return ""_kj;
       } else {
         KJ_UNREACHABLE;
       }

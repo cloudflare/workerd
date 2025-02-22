@@ -448,6 +448,11 @@ void EventSource::run(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher) {
   notifyOpen(js);
 
+  KJ_IF_SOME(resp, response) {
+    JSG_REQUIRE(resp->getType() != "error"_kj, TypeError,
+        "Error responses are unsupported with EventSource");
+  }
+
   auto onSuccess =
       JSG_VISITABLE_LAMBDA((self = JSG_THIS, readable = readable.addRef(), withReconnection,
                                response = addRef(response), fetcher = addRef(fetcher)),
