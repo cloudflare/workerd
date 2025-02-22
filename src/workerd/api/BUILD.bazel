@@ -24,6 +24,7 @@ filegroup(
             "url.c++",
             "urlpattern.c++",
             "util.c++",
+            "message-channel.c++",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -49,6 +50,7 @@ filegroup(
             "url.h",
             "urlpattern.h",
             "util.h",
+            "message-channel.h",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -202,6 +204,18 @@ wd_cc_library(
         "//src/workerd/jsg:url",
         "//src/workerd/util",
         "//src/workerd/util:mimetype",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "message-channel",
+    srcs = ["message-channel.c++"],
+    hdrs = ["message-channel.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
     ],
 )
