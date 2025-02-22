@@ -151,6 +151,7 @@ class TraceItem final: public jsg::Object {
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
   kj::StringPtr getExecutionModel();
   kj::ArrayPtr<jsg::Ref<OTelSpan>> getSpans();
+  kj::StringPtr getTraceId();
   kj::StringPtr getOutcome();
 
   uint getCpuTime();
@@ -163,6 +164,7 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(logs, getLogs);
     if (flags.getTailWorkerUserSpans()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(spans, getSpans);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(traceId, getTraceId);
     }
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticsChannelEvents, getDiagnosticChannelEvents);
@@ -191,6 +193,7 @@ class TraceItem final: public jsg::Object {
   jsg::Optional<kj::Array<kj::String>> scriptTags;
   kj::String executionModel;
   kj::Array<jsg::Ref<OTelSpan>> spans;
+  kj::Maybe<kj::String> traceId;
   kj::String outcome;
   uint cpuTime;
   uint wallTime;
