@@ -55,14 +55,17 @@ class TailStreamWriter final {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
-  using Reporter = kj::Function<bool(IoContext&, TailEvent&&)>;
+  using Reporter = kj::Function<bool(TailEvent&&)>;
 
-  TailStreamWriter(Reporter reporter);
+  // A callback that provides the timestamps for tail stream events.
+  // Ideally this uses the same time context as IoContext:now().
+  using TimeSource = kj::Function<kj::Date()>;
+  TailStreamWriter(Reporter reporter, TimeSource timeSource);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(IoContext& ioContext, TailEvent::Event&& event);
-  inline void report(IoContext& ioContext, Mark&& event) {
-    report(ioContext, TailEvent::Event(kj::mv(event)));
+  void report(const InvocationSpanContext& context, TailEvent::Event&& event);
+  inline void report(const InvocationSpanContext& context, Mark&& event) {
+    report(context, TailEvent::Event(kj::mv(event)));
   }
 
   inline bool isClosed() const {
@@ -72,9 +75,12 @@ class TailStreamWriter final {
  private:
   struct State {
     Reporter reporter;
+    TimeSource timeSource;
     uint32_t sequence = 0;
     bool onsetSeen = false;
-    State(Reporter reporter): reporter(kj::mv(reporter)) {}
+    State(Reporter reporter, TimeSource timeSource)
+        : reporter(kj::mv(reporter)),
+          timeSource(kj::mv(timeSource)) {}
   };
   kj::Maybe<State> state;
 };

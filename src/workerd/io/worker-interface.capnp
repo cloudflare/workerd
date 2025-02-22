@@ -567,11 +567,10 @@ interface TailStreamTarget $Cxx.allowCancellation {
   }
 
   struct TailStreamResults {
-    pipeline @0 :TailStreamTarget;
-    # For an initial tailStream call, the pipeline would be expected to return
-    # a TailStreamTarget that would handle all the remaining events. Each of
-    # those subsequent calls to TailStreamTarget would not be expected to
-    # return a pipeline field at all.
+    stop @0 :Bool;
+    # For an initial tailStream call, the stop flag indicates that the tail worker does
+    # not wish to continue receiving events. If the stop field is not set, or the value
+    # is false, then events will be delivered to the tail worker until stop is indicated.
   }
 
   report @0 TailStreamParams -> TailStreamResults;

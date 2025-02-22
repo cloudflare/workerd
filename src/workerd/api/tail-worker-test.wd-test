@@ -1,0 +1,114 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    # Embedded tests we get traces from
+    ( name = "http-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "http-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test" ),
+          ( name = "CACHE_ENABLED", json = "false" ),
+        ],
+        compatibilityDate = "2023-08-01",
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled"],
+        tails = ["log"],
+      ),
+    ),
+    ( name = "queue-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "queue-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-test" ),
+          ( name = "SERVICE", service = "queue-test" ),
+        ],
+        compatibilityDate = "2023-07-24",
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+        tails = ["log"],
+      )
+    ),
+    (name = "alarms", worker = .alarmsWorker),
+    (name = "hiber", worker = .hiberWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+    # Receives trace events from STW, used to check that STW produces trace events properly.
+    (name = "receiver", worker = .logReceiver, ),
+    # Dummy legacy tail worker (gets traces from alarms worker and produces trace for main tracer)
+    (name = "legacy", worker = .logLegacy, ),
+    # Unified tail worker with tests
+    # tests are executed in order, so logWorker needs to be last to have all traces available
+    (name = "log", worker = .logWorker, ),
+  ],
+  autogates = [
+    "workerd-autogate-streaming-tail-workers",
+  ],
+);
+
+const alarmsWorker :Workerd.Worker = (
+  compatibilityDate = "2022-09-16",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-alarms-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+  # tailed by the main tail worker and the dummy legacy tail worker, to get traces for it too.
+  tails = ["log", "legacy"],
+);
+
+const hiberWorker :Workerd.Worker = (
+  compatibilityDate = "2023-12-18",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "tests/websocket-hibernation.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+  tails = ["log"],
+);
+
+const logWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+  tails = ["receiver"],
+);
+
+const logReceiver :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-receiver.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);
+
+const logLegacy :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-dummy.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  tails = ["log"],
+);
