@@ -1591,6 +1591,8 @@ interface Response extends Body {
   readonly url: string;
   readonly webSocket: WebSocket | null;
   readonly cf?: any;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  readonly type: string;
 }
 interface ResponseInit {
   status?: number;
@@ -5616,6 +5618,18 @@ type PagesPluginFunction<
 ) => Response | Promise<Response>;
 declare module "assets:*" {
   export const onRequest: PagesFunction;
+}
+// Copyright (c) 2022-2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+declare abstract class PipelineTransform {
+  /**
+   * transformJson receives an array of javascript objects which can be
+   * mutated and returned to the pipeline
+   * @param data The data to be mutated
+   * @returns A promise containing the mutated data
+   */
+  public transformJson(data: object[]): Promise<object[]>;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
