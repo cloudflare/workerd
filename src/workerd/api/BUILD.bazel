@@ -342,6 +342,11 @@ wd_test(
 )
 
 wd_test(
+    src = "ctx-props-test.wd-test",
+    args = ["--experimental"],
+)
+
+wd_test(
     src = "queue-test.wd-test",
     args = ["--experimental"],
     data = ["queue-test.js"],
