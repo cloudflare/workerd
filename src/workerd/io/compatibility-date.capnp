@@ -701,6 +701,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   uniqueCtxPerInvocation @74: Bool
       $compatEnableFlag("unique_ctx_per_invocation")
       $compatDisableFlag("nonclass_entrypoint_reuses_ctx_across_invocations")
-      $compatEnableDate("2025-02-28");
+      $compatEnableDate("2025-03-10");
   # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx per invocation
 }

@@ -397,30 +397,7 @@ struct ExportedHandler {
     return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });
   }
 
-  ExportedHandler clone(jsg::Lock& js) {
-    return ExportedHandler{
-      .fetch{mapAddRef(js, fetch)},
-      .tail{mapAddRef(js, tail)},
-      .trace{mapAddRef(js, trace)},
-      .tailStream{mapAddRef(js, tailStream)},
-      .scheduled{mapAddRef(js, scheduled)},
-      .alarm{mapAddRef(js, alarm)},
-      .test{mapAddRef(js, test)},
-      .webSocketMessage{mapAddRef(js, webSocketMessage)},
-      .webSocketClose{mapAddRef(js, webSocketClose)},
-      .webSocketError{mapAddRef(js, webSocketError)},
-      .self{js.v8Isolate, self.getHandle(js.v8Isolate)},
-      .env{env.addRef(js)},
-      .ctx{getCtx()},
-      .missingSuperclass = missingSuperclass,
-    };
-  }
-
- private:
-  template <typename T>
-  static jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& function) {
-    return function.map([&](T& a) { return a.addRef(js); });
-  }
+  ExportedHandler clone(jsg::Lock& js);
 };
 
 // An approximation of Node.js setImmediate `Immediate` object.

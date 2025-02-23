@@ -9,12 +9,12 @@ const unitTests :Workerd.Config = (
             `import assert from 'node:assert';
             `export default {
             ` async fetch(request, env, ctx) {
-            `   return new Response(ctx.props);
+            `   return new Response(JSON.stringify(ctx.props));
             ` },
             ` async test(request, env, ctx) {
             `   const resp = await env.SERVICE.fetch(new Request("https://placeholder/hello"));
             `   const body = await resp.json();
-            `   assert(body == false);
+            `   assert.strictEqual(JSON.stringify(body), '{}');
             ` },
             `};
           )
@@ -33,18 +33,18 @@ const unitTests :Workerd.Config = (
             `import assert from 'node:assert';
             `export default {
             ` async fetch(request, env, ctx) {
-            `   return new Response(ctx.props);
+            `   return new Response(JSON.stringify(ctx.props));
             ` },
             ` async test(request, env, ctx) {
             `   const resp = await env.SERVICE.fetch(new Request("https://placeholder/hello"));
             `   const body = await resp.json();
-            `   assert(body);
+            `   assert.deepStrictEqual(body, {foo: 123});
             ` },
             `};
           )
         ],
         bindings = [
-          ( name = "SERVICE", service = (name = "ctx-props-test-enabled", props = (json = "true"))),
+          ( name = "SERVICE", service = (name = "ctx-props-test-enabled", props = (json = "{\"foo\" : 123}"))),
         ],
         compatibilityDate = "2025-02-14",
         compatibilityFlags = ["nodejs_compat", "unique_ctx_per_invocation"],

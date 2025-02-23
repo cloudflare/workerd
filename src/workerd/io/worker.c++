@@ -1971,13 +1971,13 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   kj::StringPtr n = name.orDefault("default"_kj);
   KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
     jsg::Lock& js = *this;
-    // if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
-    api::ExportedHandler constructedHandler = h.clone(js);
+    if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
+      api::ExportedHandler constructedHandler = h.clone(js);
 
-    constructedHandler.ctx = jsg::alloc<api::ExecutionContext>(
-        js, jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
-    return kj::heap(kj::mv(constructedHandler));
-    //}
+      constructedHandler.ctx = jsg::alloc<api::ExecutionContext>(js,
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
+      return kj::heap(kj::mv(constructedHandler));
+    }
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     jsg::Lock& js = *this;
