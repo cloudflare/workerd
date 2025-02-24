@@ -1057,7 +1057,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
             // Argument is not required
             auto val = KJ_UNWRAP_OR(param2, return true);
             // val is allowed if it parses to an integer
-            return val.tryParseAs<uint>() != kj::none;
+            return val.tryParseAs<int32_t>() != kj::none;
           }
           case PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME: {
             // Argument is not required
