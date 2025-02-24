@@ -703,4 +703,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("nonclass_entrypoint_reuses_ctx_across_invocations")
       $compatEnableDate("2025-03-10");
   # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx per invocation
+
+  queueConsumerNoWaitForWaitUntil @75 :Bool
+      $compatEnableFlag("queue_consumer_no_wait_for_wait_until")
+      $compatDisableFlag("queue_consumer_wait_for_wait_until");
+  # If enabled, does not require all waitUntil'ed promises to resolve successfully before reporting
+  # succeeded/failed messages/batches back from a queue consumer to the Queues service. This
+  # prevents a slow waitUntil'ed promise from slowing down consumption of messages from a queue,
+  # which has been a recurring problem for the prior behavior (which did wait for all waitUntil'ed
+  # tasks to complete.
 }
