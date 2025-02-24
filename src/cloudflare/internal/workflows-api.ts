@@ -103,6 +103,18 @@ class WorkflowImpl {
 
     return new InstanceImpl(result.id, this.fetcher);
   }
+
+  public async createBatch(
+    options: WorkflowInstanceCreateOptions[]
+  ): Promise<WorkflowInstance[]> {
+    const results = await callFetcher<
+      {
+        id: string;
+      }[]
+    >(this.fetcher, '/createBatch', options);
+
+    return results.map((result) => new InstanceImpl(result.id, this.fetcher));
+  }
 }
 
 export function makeBinding(env: { fetcher: Fetcher }): Workflow {
