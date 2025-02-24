@@ -712,4 +712,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # prevents a slow waitUntil'ed promise from slowing down consumption of messages from a queue,
   # which has been a recurring problem for the prior behavior (which did wait for all waitUntil'ed
   # tasks to complete.
+  # This intentionally doesn't have a compatEnableDate yet until so we can let some users opt-in to
+  # try it before enabling it for all new scripts, but will eventually need one.
 }
