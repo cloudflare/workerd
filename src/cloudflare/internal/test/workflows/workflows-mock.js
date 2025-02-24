@@ -37,5 +37,19 @@ export default {
         }
       );
     }
+
+    if (request.url.includes('/batchCreate') && request.method === 'POST') {
+      return Response.json(
+        {
+          result: data.map((val) => ({ id: val.id })),
+        },
+        {
+          status: 201,
+          headers: {
+            'content-type': 'application/json',
+          },
+        }
+      );
+    }
   },
 };
