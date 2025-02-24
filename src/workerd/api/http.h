@@ -1066,13 +1066,7 @@ public:
   //
   // A network error is a response whose status is always 0, status message is always the empty
   // byte sequence, header list is always empty, body is always null, and trailer is always empty.
-  static jsg::Unimplemented error() { return {}; };
-  // TODO(conform): implementation is missing; two approaches where tested:
-  //  - returning a HTTP 5xx response but that doesn't match the spec and we didn't
-  //    find it useful.
-  //  - throwing/propagating a DISCONNECTED kj::Exception to actually disconnect the
-  //    client. However, we were concerned about possible side-effects and incorrect
-  //    error reporting.
+  static jsg::Ref<Response> error(jsg::Lock& js);
 
   jsg::Ref<Response> clone(jsg::Lock& js);
 
@@ -1108,7 +1102,10 @@ public:
   // determined that only the `'default'` and `'error'` properties should be implemented.
   // We currently due not implement Response.error() so "default" is the only value we
   // currently support.
-  kj::StringPtr getType() { return "default"_kj; }
+  kj::StringPtr getType() {
+    if (statusCode == 0) return "error"_kj;
+    return "default"_kj;
+  }
 
   JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
