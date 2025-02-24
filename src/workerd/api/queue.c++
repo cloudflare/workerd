@@ -356,9 +356,7 @@ QueueMessage::QueueMessage(
       attempts(message.attempts),
       result(result) {}
 
-jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
-  return body.getHandle(js);
-}
+jsg::JsValue QueueMessage::getBody(jsg::Lock& js) { return body.getHandle(js); }
 
 void QueueMessage::retry(jsg::Optional<QueueRetryOptions> options) {
   if (result->ackAll) {
@@ -550,7 +548,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // It's a little ugly, but the usage of waitUntil (and finishScheduled) down below are here so
   // that users can write queue handlers in the old addEventListener("queue", ...) syntax (where we
   // can't just wait on their addEventListener handler to resolve because it can't be async).
-  context.addWaitUntil(context.run(
+  auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(),
           props = kj::mv(props)](Worker::Lock& lock) mutable {
@@ -560,60 +558,70 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     queueEvent->event = startQueueEvent(lock.getGlobalScope(), kj::mv(params),
         context.addObject(result), lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
-  }));
+  });
 
-  // TODO(soon): There's a good chance we'll want a different wall-clock timeout for queue handlers
-  // than for scheduled workers, but it's not at all clear yet to me what it should be, so just
-  // reuse the scheduled worker logic and timeout for now.
-  auto result = co_await incomingRequest->finishScheduled();
-  bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
+  auto compatFlags = context.getWorker().getIsolate().getApi().getFeatureFlags();
+  if (compatFlags.getQueueConsumerNoWaitForWaitUntil()) {
+    // The user has opted in to only waiting on their event handler rather than all waitUntil'd
+    // promises.
+    KJ_UNIMPLEMENTED("TODO(now)");
+  } else {
+    // The user has not opted in to the new waitUntil behavior, so we need to add the queue()
+    // handler's promise to the waitUntil promises and then wait on them all to finish.
+    context.addWaitUntil(kj::mv(runProm));
 
-  // Log some debug info if the request timed out or was aborted.
-  // In particular, detect whether or not the users queue() handler function completed
-  // and include info about other waitUntil tasks that may have caused the request to timeout.
-  if (!completed) {
-    kj::String status;
-    if (queueEventHolder->event.get() == nullptr) {
-      status = kj::str("Empty");
-    } else {
-      KJ_SWITCH_ONEOF(queueEventHolder->event->getCompletionStatus()) {
-        KJ_CASE_ONEOF(i, QueueEvent::Incomplete) {
-          status = kj::str("Incomplete");
-          break;
-        }
-        KJ_CASE_ONEOF(s, QueueEvent::CompletedSuccessfully) {
-          status = kj::str("Completed Succesfully");
-          break;
-        }
-        KJ_CASE_ONEOF(e, QueueEvent::CompletedWithError) {
-          status = kj::str("Completed with error:", e.error);
-          break;
+    // We reuse the finishScheduled() method for convenience, since queues use the same wall clock
+    // timeout as scheduled workers.
+    auto result = co_await incomingRequest->finishScheduled();
+    bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
+
+    // Log some debug info if the request timed out or was aborted.
+    // In particular, detect whether or not the users queue() handler function completed
+    // and include info about other waitUntil tasks that may have caused the request to timeout.
+    if (!completed) {
+      kj::String status;
+      if (queueEventHolder->event.get() == nullptr) {
+        status = kj::str("Empty");
+      } else {
+        KJ_SWITCH_ONEOF(queueEventHolder->event->getCompletionStatus()) {
+          KJ_CASE_ONEOF(i, QueueEvent::Incomplete) {
+            status = kj::str("Incomplete");
+            break;
+          }
+          KJ_CASE_ONEOF(s, QueueEvent::CompletedSuccessfully) {
+            status = kj::str("Completed Succesfully");
+            break;
+          }
+          KJ_CASE_ONEOF(e, QueueEvent::CompletedWithError) {
+            status = kj::str("Completed with error:", e.error);
+            break;
+          }
         }
       }
+      auto& ioContext = incomingRequest->getContext();
+      auto scriptId = ioContext.getWorker().getScript().getId();
+      auto tasks = ioContext.getWaitUntilTasks().trace();
+      if (result == IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT) {
+        KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);
+      } else if (result == IoContext_IncomingRequest::FinishScheduledResult::ABORTED) {
+        // Attempt to grab the error message to understand the reason for the abort.
+        // Include a timeout just in case for some unexpected reason the onAbort promise hasn't
+        // already rejected.
+        kj::String abortError;
+        co_await ioContext.onAbort()
+            .then([] {}, [&abortError](kj::Exception&& e) {
+          abortError = kj::str(e);
+        }).exclusiveJoin(ioContext.afterLimitTimeout(1 * kj::MICROSECONDS).then([&abortError]() {
+          abortError = kj::str("onAbort() promise has unexpectedly not yet been rejected");
+        }));
+        KJ_LOG(WARNING, "NOSENTRY queue event aborted", abortError, scriptId, status, tasks);
+      }
     }
-    auto& ioContext = incomingRequest->getContext();
-    auto scriptId = ioContext.getWorker().getScript().getId();
-    auto tasks = ioContext.getWaitUntilTasks().trace();
-    if (result == IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT) {
-      KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);
-    } else if (result == IoContext_IncomingRequest::FinishScheduledResult::ABORTED) {
-      // Attempt to grab the error message to understand the reason for the abort.
-      // Include a timeout just in case for some unexpected reason the onAbort promise hasn't
-      // already rejected.
-      kj::String abortError;
-      co_await ioContext.onAbort()
-          .then([] {}, [&abortError](kj::Exception&& e) {
-        abortError = kj::str(e);
-      }).exclusiveJoin(ioContext.afterLimitTimeout(1 * kj::MICROSECONDS).then([&abortError]() {
-        abortError = kj::str("onAbort() promise has unexpectedly not yet been rejected");
-      }));
-      KJ_LOG(WARNING, "NOSENTRY queue event aborted", abortError, scriptId, status, tasks);
-    }
-  }
 
-  co_return WorkerInterface::CustomEvent::Result{
-    .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
-  };
+    co_return WorkerInterface::CustomEvent::Result{
+      .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
+    };
+  }
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
