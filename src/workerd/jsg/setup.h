@@ -267,6 +267,9 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
+  // Object that is used as the underlying target of process.env when nodejs-compat mode is used.
+  v8::Global<v8::Object> envObj;
+
   // Polyfilled Symbol.asyncDispose.
   v8::Global<v8::Symbol> symbolAsyncDispose;
 
@@ -672,6 +675,24 @@ class Isolate: public IsolateBase {
         jsgIsolate.reportError(
             *this, value.toString(*this), value, JsMessage::create(*this, value));
       }
+    }
+
+    // Sets an env value that will be expressed on the process.env
+    // if/when nodejs-compat mode is used.
+    void setEnvField(const JsValue& name, const JsValue& value) override {
+      getEnv().set(*this, name, value);
+    }
+
+    // Returns the env base object.
+    JsObject getEnv(bool release = false) override {
+      KJ_DEFER({
+        if (release) jsgIsolate.envObj.Reset();
+      });
+      if (jsgIsolate.envObj.IsEmpty()) {
+        v8::Local<v8::Object> env = obj();
+        jsgIsolate.envObj.Reset(v8Isolate, env);
+      }
+      return JsObject(jsgIsolate.envObj.Get(v8Isolate));
     }
 
    private:

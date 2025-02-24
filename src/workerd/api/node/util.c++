@@ -241,6 +241,10 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
   return js.undefined();
 }
 
+jsg::JsObject UtilModule::getEnvObject(jsg::Lock& js) {
+  return js.getEnv(true);
+}
+
 namespace {
 [[noreturn]] void handleProcessExit(jsg::Lock& js, int code) {
   // There are a few things happening here. First, we abort the current IoContext

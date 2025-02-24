@@ -714,4 +714,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # tasks to complete.
   # This intentionally doesn't have a compatEnableDate yet until so we can let some users opt-in to
   # try it before enabling it for all new scripts, but will eventually need one.
+
+  populateProcessEnv @76 :Bool
+      $compatEnableFlag("nodejs_compat_populate_process_env")
+      $compatDisableFlag("nodejs_compat_do_not_populate_process_env")
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2025-04-01");
+  # Automatically populate process.env from text bindings only
+  # when nodejs_compat is being used.
 }
