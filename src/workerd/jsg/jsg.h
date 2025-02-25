@@ -2679,6 +2679,13 @@ class Lock {
   // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
 
+  // Sets an env value that will be expressed on the process.env
+  // if/when nodejs-compat mode is used.
+  virtual void setEnvField(const JsValue& name, const JsValue& value) = 0;
+
+  // Returns the env base object.
+  virtual JsObject getEnv(bool release = false) = 0;
+
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock
