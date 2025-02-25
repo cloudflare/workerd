@@ -26,10 +26,11 @@ class Container: public jsg::Object {
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
+    jsg::Optional<jsg::Dict<kj::String>> env;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
-    JSG_STRUCT(entrypoint, enableInternet);
+    JSG_STRUCT(entrypoint, enableInternet, env);
   };
 
   bool getRunning() {

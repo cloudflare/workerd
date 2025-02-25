@@ -30,6 +30,23 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
   req.setEnableInternet(options.enableInternet);
 
+  KJ_IF_SOME(env, options.env) {
+    auto list = req.initEnvironmentVariables(env.fields.size());
+    for (auto i: kj::indices(env.fields)) {
+      auto field = &env.fields[i];
+      JSG_REQUIRE(field->name.findFirst('=') == kj::none, Error,
+          "Environment variable names cannot contain '=': ", field->name);
+
+      JSG_REQUIRE(field->name.findFirst('\0') == kj::none, Error,
+          "Environment variable names cannot contain '\\0': ", field->name);
+
+      JSG_REQUIRE(field->value.findFirst('\0') == kj::none, Error,
+          "Environment variable values cannot contain '\\0': ", field->name);
+
+      list.set(i, str(field->name, "=", field->value));
+    }
+  }
+
   IoContext::current().addTask(req.send().ignoreResult());
 
   running = true;
