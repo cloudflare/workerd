@@ -9,9 +9,13 @@
 // arrays, buffers, dicts.
 
 #include "simdutf.h"
-#include "util.h"
-#include "web-idl.h"
-#include "wrappable.h"
+
+#include <workerd/jsg/util.h>
+#include <workerd/jsg/web-idl.h>
+#include <workerd/jsg/wrappable.h>
+
+#include <v8-container.h>
+#include <v8-date.h>
 
 #include <kj/debug.h>
 #include <kj/one-of.h>

@@ -2,7 +2,8 @@
 
 #include "jsg.h"
 
-#include <v8.h>
+#include <v8-container.h>
+#include <v8-external.h>
 
 namespace workerd::jsg {
 

@@ -3,11 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include "jsg.h"
-#include "setup.h"
+#include <v8-script.h>
 
-#include <v8.h>
-
+#include <kj/map.h>
+#include <kj/mutex.h>
 #include <kj/string.h>
 
 namespace workerd::jsg {

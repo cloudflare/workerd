@@ -7,7 +7,6 @@
 
 #include "async-context.h"
 #include "jsg.h"
-#include "type-wrapper.h"
 #include "v8-platform-wrapper.h"
 
 #include <workerd/jsg/observer.h>
@@ -19,7 +18,12 @@
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
+#include <typeindex>
+
 namespace workerd::jsg {
+
+class Deserializer;
+class Serializer;
 
 // Construct a default V8 platform, with the given background thread pool size.
 //
@@ -763,25 +767,5 @@ class Isolate: public IsolateBase {
   // GetAlignedPointerFromEmbedderData and just return wrappers[0].
   bool hasExtraWrappers = false;
 };
-
-// This macro helps cut down on template spam in error messages. Instead of instantiating Isolate
-// directly, do:
-//
-//     JSG_DECLARE_ISOLATE_TYPE(MyIsolate, SomeApiType, AnotherApiType, ...);
-//
-// `MyIsolate` becomes your custom Isolate type, which will support wrapping all of the listed
-// API types.
-#define JSG_DECLARE_ISOLATE_TYPE(Type, ...)                                                        \
-  class Type##_TypeWrapper;                                                                        \
-  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>        \
-      Type##_TypeWrapperBase;                                                                      \
-  class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
-   public:                                                                                         \
-    using Type##_TypeWrapperBase::TypeWrapper;                                                     \
-  };                                                                                               \
-  class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
-   public:                                                                                         \
-    using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
-  }
 
 }  // namespace workerd::jsg

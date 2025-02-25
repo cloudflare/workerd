@@ -23,6 +23,7 @@ wd_cc_library(
     deps = [
         "//src/rust/cxx-integration",
         "//src/workerd/jsg",
+        "//src/workerd/jsg:compile-cache",
         "@capnp-cpp//src/kj",
     ],
 )

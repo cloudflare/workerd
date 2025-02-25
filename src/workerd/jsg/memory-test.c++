@@ -4,6 +4,7 @@
 
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/jsg/type-wrapper.h>
 
 #include <v8-profiler.h>
 

@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "commonjs.h"
-#include "compile-cache.h"
 #include "jsg.h"
 #include "setup.h"
+
+#include <v8-wasm.h>
 
 #include <kj/mutex.h>
 

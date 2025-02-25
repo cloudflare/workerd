@@ -7,24 +7,25 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
-#include "macro-meta.h"
 #include "util.h"
 #include "wrappable.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
 
 #include <v8-external-memory-accounter.h>
+#include <v8-forward.h>
+#include <v8-locker.h>
 #include <v8-profiler.h>
-#include <v8.h>
+#include <v8-regexp.h>
 
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
-
-#include <type_traits>
+#include <kj/time.h>
 
 using kj::byte;
 using kj::uint;
@@ -587,7 +588,7 @@ using HasGetTemplateOverload =
       JSG_STRING_LITERAL(__VA_ARGS__)
 
 // Like JSG_STRUCT_TS_OVERRIDE, however it enables dynamic selection of TS_OVERRIDE.
-// Should be placed adjacent to the JSG_STRUCT delcaration, inside the same struct definition.
+// Should be placed adjacent to the JSG_STRUCT declaration, inside the same struct definition.
 #define JSG_STRUCT_TS_OVERRIDE_DYNAMIC(...)                                                        \
   static void jsgConfiguration(__VA_ARGS__);                                                       \
   template <typename Registry>                                                                     \
@@ -2839,14 +2840,16 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 }  // namespace workerd::jsg
 
 // clang-format off
-// These two includes are needed for the JSG type glue macros to work.
-#include "buffersource.h"
+// These includes are needed for the JSG type glue macros to work.
 #include "modules.h"
 #include "resource.h"
-#include "dom-exception.h"
-#include "struct.h"
-#include "promise.h"
-#include "function.h"
-#include "iterator.h"
 #include "jsvalue.h"
 // clang-format on
+
+// The main JSG API no longer depends on the Type Wrapper, but to avoid extensive changes in
+// external code using JSG we still want it to be available when including jsg.h. This technically
+// violates Bazel's encapsulation philosophy (type-wrapper.h should not be visible from jsg.h), so
+// we only make jsg.h available for external code as part of the main jsg target including type-wrapper.h.
+#ifndef JSG_IMPLEMENTATION
+#include <workerd/jsg/type-wrapper.h>
+#endif  // JSG_IMPLEMENTATION

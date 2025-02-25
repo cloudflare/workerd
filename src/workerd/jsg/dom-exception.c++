@@ -4,6 +4,7 @@
 
 #include "dom-exception.h"
 
+#include "jsvalue.h"
 #include "ser.h"
 
 #include <workerd/jsg/memory.h>

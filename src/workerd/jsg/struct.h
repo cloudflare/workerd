@@ -8,9 +8,9 @@
 // Translates between C++ struct types and JavaScript objects. This translation is by value: the
 // struct is translated to/from a native JS object with the same field names.
 
-#include "util.h"
-#include "value.h"
-#include "web-idl.h"
+#include <workerd/jsg/util.h>
+#include <workerd/jsg/value.h>
+#include <workerd/jsg/web-idl.h>
 
 namespace workerd::jsg {
 

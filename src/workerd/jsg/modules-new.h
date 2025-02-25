@@ -5,8 +5,11 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/jsvalue.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/modules.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
 

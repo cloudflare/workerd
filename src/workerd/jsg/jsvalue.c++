@@ -3,6 +3,11 @@
 #include "buffersource.h"
 #include "ser.h"
 
+#include <v8.h>
+
+#include <kj/string-tree.h>
+#include <kj/string.h>
+
 namespace workerd::jsg {
 
 JsValue::JsValue(v8::Local<v8::Value> inner): inner(inner) {

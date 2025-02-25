@@ -6,6 +6,8 @@
 
 #include "jsg.h"
 
+#include <v8-typed-array.h>
+
 namespace workerd::jsg {
 
 #define JSG_ARRAY_BUFFER_VIEW_TYPES(V)                                                             \

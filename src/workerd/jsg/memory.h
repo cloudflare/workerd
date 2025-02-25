@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include <v8-array-buffer.h>
 #include <v8-profiler.h>
 
 #include <kj/common.h>
@@ -21,6 +20,10 @@
 
 #include <stack>
 #include <string>
+
+namespace v8 {
+class BackingStore;
+}
 
 namespace workerd::jsg {
 
@@ -341,11 +344,6 @@ void MemoryTracker::trackFieldWithSize(
 void MemoryTracker::trackInlineFieldWithSize(
     kj::StringPtr edgeName, size_t size, kj::Maybe<kj::StringPtr> nodeName) {
   if (size > 0) addNode(nodeName.orDefault(edgeName), size, edgeName);
-}
-
-void MemoryTracker::trackField(
-    kj::StringPtr edgeName, const v8::BackingStore* value, kj::Maybe<kj::StringPtr> nodeName) {
-  trackFieldWithSize(edgeName, value->ByteLength(), "BackingStore"_kjc);
 }
 
 void MemoryTracker::trackField(

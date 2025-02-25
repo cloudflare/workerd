@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "observer.h"
+#include "type-wrapper.h"
 #include "url.h"
 
 #include <workerd/jsg/modules-new.h>
