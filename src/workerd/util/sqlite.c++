@@ -1291,8 +1291,10 @@ SqliteDatabase::Query::~Query() noexcept(false) {
 }
 
 void SqliteDatabase::Query::destroy() {
-  //Update the db stats that we have collected for the query
-  db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
+  if (regulator.shouldAddQueryStats()) {
+    //Update the db stats that we have collected for the query
+    db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
+  }
 
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
   // destroyed anyway.
