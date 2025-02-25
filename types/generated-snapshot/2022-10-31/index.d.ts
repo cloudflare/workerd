@@ -4295,6 +4295,13 @@ type AiOptions = {
   prefix?: string;
   extraHeaders?: object;
 };
+type ConversionResponse = {
+  name: string;
+  mimeType: string;
+  format: "markdown";
+  tokens: number;
+  data: string;
+};
 type AiModelsSearchParams = {
   author?: string;
   hide_experimental?: boolean;
@@ -4338,6 +4345,24 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
       : AiModelList[Name]["postProcessedOutputs"]
   >;
   public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  public toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    }[],
+    options?: {
+      gateway?: GatewayOptions;
+    },
+  ): Promise<ConversionResponse[]>;
+  public toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    },
+    options?: {
+      gateway?: GatewayOptions;
+    },
+  ): Promise<ConversionResponse>;
 }
 type GatewayOptions = {
   id: string;

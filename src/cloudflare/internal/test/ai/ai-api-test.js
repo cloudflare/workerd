@@ -207,5 +207,60 @@ export const tests = {
 
       assert.ok(resp instanceof Response);
     }
+
+    {
+      // Test toMarkdown with single file
+      const resp = await env.ai.toMarkdown(
+        {
+          name: 'random.md',
+          blob: new Blob([`# Random Markdown`], { type: 'text/markdown' }),
+        },
+        { gateway: { id: 'my-gateway' } }
+      );
+
+      assert.deepStrictEqual(resp, {
+        name: 'random.md',
+        mimeType: 'text/markdown',
+        format: 'markdown',
+        tokens: 0,
+        data: '# Random Markdown',
+      });
+    }
+
+    {
+      // Test toMarkdown with multiple file
+      const resp = await env.ai.toMarkdown([
+        {
+          name: 'random.md',
+          blob: new Blob([`# Random Markdown`], { type: 'text/markdown' }),
+        },
+        {
+          name: 'cat.png',
+          blob: new Blob(
+            [
+              `The image shows a white and orange cat standing on a beige floor`,
+            ],
+            { type: 'image/png' }
+          ),
+        },
+      ]);
+
+      assert.deepStrictEqual(resp, [
+        {
+          name: 'random.md',
+          mimeType: 'text/markdown',
+          format: 'markdown',
+          tokens: 0,
+          data: '# Random Markdown',
+        },
+        {
+          name: 'cat.png',
+          mimeType: 'image/png',
+          format: 'markdown',
+          tokens: 0,
+          data: 'The image shows a white and orange cat standing on a beige floor',
+        },
+      ]);
+    }
   },
 };
