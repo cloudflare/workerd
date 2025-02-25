@@ -1100,8 +1100,6 @@ public:
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was
   // determined that only the `'default'` and `'error'` properties should be implemented.
-  // We currently due not implement Response.error() so "default" is the only value we
-  // currently support.
   kj::StringPtr getType() {
     if (statusCode == 0) return "error"_kj;
     return "default"_kj;
