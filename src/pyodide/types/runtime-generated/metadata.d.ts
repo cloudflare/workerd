@@ -6,7 +6,7 @@ declare namespace MetadataReader {
   const getRequirements: () => string[];
   const getMainModule: () => string;
   const hasMemorySnapshot: () => boolean;
-  const getNames: () => string[];
+  const getNames: (maybeExtFilter?: string) => string[];
   const getWorkerFiles: (ext: string) => string[];
   const getSizes: () => number[];
   const readMemorySnapshot: (
@@ -19,6 +19,7 @@ declare namespace MetadataReader {
   const getPackagesVersion: () => string;
   const getPackagesLock: () => string;
   const read: (index: number, position: number, buffer: Uint8Array) => number;
+  const getTransitiveRequirements: () => string[];
 }
 
 export default MetadataReader;

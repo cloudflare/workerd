@@ -1,9 +1,10 @@
 #include "prime.h"
 
-#include <workerd/api/crypto/impl.h>
+#include "impl.h"
+
 #include <workerd/jsg/jsg.h>
 
-#include <openssl/bn.h>
+#include <ncrypto.h>
 
 namespace workerd::api {
 
@@ -12,29 +13,27 @@ jsg::BufferSource randomPrime(jsg::Lock& js,
     bool safe,
     kj::Maybe<kj::ArrayPtr<kj::byte>> add_buf,
     kj::Maybe<kj::ArrayPtr<kj::byte>> rem_buf) {
-  ClearErrorOnReturn clearErrorOnReturn;
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   // Use mapping to have kj::Own work with optional buffer
-  const auto maybeOwnBignum = [](kj::Maybe<kj::ArrayPtr<kj::byte>>& maybeBignum) {
-    return maybeBignum.map([](kj::ArrayPtr<kj::byte>& a) {
-      return JSG_REQUIRE_NONNULL(toBignum(a), RangeError, "Error importing add parameter",
-          internalDescribeOpensslErrors());
-    });
+  static const auto toBignum =
+      [](kj::Maybe<kj::ArrayPtr<kj::byte>>& maybeBignum) -> ncrypto::BignumPointer {
+    KJ_IF_SOME(a, maybeBignum) {
+      if (auto bn = ncrypto::BignumPointer(a.begin(), a.size())) {
+        return bn;
+      }
+      JSG_FAIL_REQUIRE(
+          RangeError, "Error importing add parameter", internalDescribeOpensslErrors());
+    };
+    return {};
   };
 
-  BIGNUM* add = nullptr;
-  auto _add = maybeOwnBignum(add_buf);
-  KJ_IF_SOME(a, _add) {
-    add = a.get();
-  }
+  auto add = toBignum(add_buf);
+  auto rem = toBignum(rem_buf);
+  // The JS interface already ensures that the (positive) size fits into an int.
+  int bits = static_cast<int>(size);
 
-  BIGNUM* rem = nullptr;
-  auto _rem = maybeOwnBignum(rem_buf);
-  KJ_IF_SOME(r, _rem) {
-    rem = r.get();
-  }
-
-  if (add != nullptr) {
+  if (add) {
     // Currently, we only allow certain values for add and rem due to a bug in
     // the BN_generate_prime_ex that allows invalid values to enter an infinite
     // loop. This diverges from the Node.js implementation a bit but that's OK.
@@ -45,63 +44,57 @@ jsg::BufferSource randomPrime(jsg::Lock& js,
     // If users complain about this, we can always remove this check and try
     // to get the infinite loop bug fixed.
 
-    auto addCheck = OSSL_NEW(BIGNUM);
-    auto remCheck = OSSL_NEW(BIGNUM);
+    auto addCheck = ncrypto::BignumPointer::New();
+    auto remCheck = ncrypto::BignumPointer::New();
     const auto checkAddRem = [&](auto anum, auto bnum) {
-      BN_set_word(addCheck.get(), anum);
-      BN_set_word(remCheck.get(), bnum);
-      return BN_cmp(add, addCheck.get()) == 0 && BN_cmp(rem, remCheck.get()) == 0;
+      addCheck.setWord(anum);
+      remCheck.setWord(bnum);
+      return BN_cmp(add.get(), addCheck.get()) == 0 && BN_cmp(rem.get(), remCheck.get()) == 0;
     };
 
-    JSG_REQUIRE(
-        rem != nullptr && (checkAddRem(12, 11) || checkAddRem(24, 23) || checkAddRem(60, 59)),
+    JSG_REQUIRE(rem && (checkAddRem(12, 11) || checkAddRem(24, 23) || checkAddRem(60, 59)),
         RangeError, "Invalid values for add and rem");
-  }
 
-  // The JS interface already ensures that the (positive) size fits into an int.
-  int bits = static_cast<int>(size);
+    // This would definitely lead to an infinite loop if allowed since
+    // OpenSSL does not check this condition.
+    JSG_REQUIRE(add > rem, RangeError, "options.rem must be smaller than options.add");
 
-  if (add) {
     // If we allowed this, the best case would be returning a static prime
     // that wasn't generated randomly. The worst case would be an infinite
     // loop within OpenSSL, blocking the main thread or one of the threads
     // in the thread pool.
-    JSG_REQUIRE(BN_num_bits(add) <= bits, RangeError,
+    JSG_REQUIRE(add.bitLength() <= bits, RangeError,
         "options.add must not be bigger than size of the requested prime");
-
-    if (rem) {
-      // This would definitely lead to an infinite loop if allowed since
-      // OpenSSL does not check this condition.
-      JSG_REQUIRE(
-          BN_cmp(add, rem) == 1, RangeError, "options.rem must be smaller than options.add");
-    }
   }
 
-  // BN_generate_prime_ex() calls RAND_bytes_ex() internally.
+  // Generating random primes uses the PRNG internally.
   // Make sure the CSPRNG is properly seeded.
   JSG_REQUIRE(
       workerd::api::CSPRNG(nullptr), Error, "Error while generating prime (bad random state)");
 
-  auto prime = OSSL_NEW(BIGNUM);
+  if (auto prime = ncrypto::BignumPointer::NewPrime({
+        .bits = bits,
+        .safe = safe,
+        .add = kj::mv(add),
+        .rem = kj::mv(rem),
+      })) {
+    return JSG_REQUIRE_NONNULL(
+        bignumToArrayPadded(js, *prime.get()), Error, "Error while generating prime");
+  }
 
-  int ret = BN_generate_prime_ex(prime.get(), bits, safe ? 1 : 0, add, rem, nullptr);
-  JSG_REQUIRE(ret == 1, Error, "Error while generating prime");
-
-  return JSG_REQUIRE_NONNULL(
-      bignumToArrayPadded(js, *prime), Error, "Error while generating prime");
+  JSG_FAIL_REQUIRE(Error, "Error while generating prime");
 }
 
 bool checkPrime(kj::ArrayPtr<kj::byte> bufferView, uint32_t num_checks) {
-  ClearErrorOnReturn clearErrorOnReturn;
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
   static constexpr int32_t kMaxChecks = kj::maxValue;
   // Strictly upper bound the number of checks. If this proves to be too expensive
   // then we may need to consider lowering this limit further.
   JSG_REQUIRE(num_checks <= kMaxChecks, RangeError, "Invalid number of checks");
-  auto candidate = JSG_REQUIRE_NONNULL(toBignum(bufferView), Error, "Error while checking prime");
-  auto ctx = OSSL_NEW(BN_CTX);
-  int ret = BN_is_prime_ex(candidate.get(), num_checks, ctx.get(), nullptr);
-  JSG_REQUIRE(ret >= 0, Error, "Error while checking prime");
-  return ret > 0;
+
+  auto candidate = ncrypto::BignumPointer(bufferView.begin(), bufferView.size());
+  JSG_REQUIRE(candidate, Error, "Error while checking prime");
+  return candidate.isPrime(num_checks);
 }
 
 }  // namespace workerd::api

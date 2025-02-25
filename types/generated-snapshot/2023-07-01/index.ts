@@ -77,7 +77,7 @@ export interface Console {
   clear(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static) */
   count(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countReset_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countreset_static) */
   countReset(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static) */
   debug(...data: any[]): void;
@@ -89,9 +89,9 @@ export interface Console {
   error(...data: any[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static) */
   group(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupCollapsed_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupcollapsed_static) */
   groupCollapsed(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupEnd_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupend_static) */
   groupEnd(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static) */
   info(...data: any[]): void;
@@ -101,9 +101,9 @@ export interface Console {
   table(tabularData?: any, properties?: string[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static) */
   time(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeEnd_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeend_static) */
   timeEnd(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeLog_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timelog_static) */
   timeLog(label?: string, ...data: any[]): void;
   timeStamp(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/trace_static) */
@@ -327,9 +327,9 @@ export declare function removeEventListener<
 export declare function dispatchEvent(
   event: WorkerGlobalScopeEventMap[keyof WorkerGlobalScopeEventMap],
 ): boolean;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/btoa) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/btoa) */
 export declare function btoa(data: string): string;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/atob) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 export declare function atob(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
 export declare function setTimeout(
@@ -479,7 +479,7 @@ export declare abstract class Navigator {
       | URLSearchParams,
   ): boolean;
   readonly userAgent: string;
-  readonly gpu: GPU;
+  readonly gpu?: GPU;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -743,6 +743,12 @@ export declare class Event {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
    */
   get currentTarget(): EventTarget | undefined;
+  /**
+   * Returns the object to which event is dispatched (its target).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
+   */
+  get target(): EventTarget | undefined;
   /**
    * @deprecated
    *
@@ -1356,15 +1362,10 @@ export interface TextEncoderEncodeIntoResult {
  */
 export declare class ErrorEvent extends Event {
   constructor(type: string, init?: ErrorEventErrorEventInit);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/filename) */
   get filename(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/message) */
   get message(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/lineno) */
   get lineno(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/colno) */
   get colno(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/error) */
   get error(): any;
 }
 export interface ErrorEventErrorEventInit {
@@ -1601,6 +1602,7 @@ export declare abstract class Body {
 export declare var Response: {
   prototype: Response;
   new (body?: BodyInit | null, init?: ResponseInit): Response;
+  error(): Response;
   redirect(url: string, status?: number): Response;
   json(any: any, maybeInit?: ResponseInit | Response): Response;
 };
@@ -1626,6 +1628,8 @@ export interface Response extends Body {
   url: string;
   webSocket: WebSocket | null;
   cf: any | undefined;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  type: "default" | "error";
 }
 export interface ResponseInit {
   status?: number;
@@ -1700,11 +1704,7 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
   integrity: string;
-  /**
-   * Returns a boolean indicating whether or not request can outlive the global in which it was created.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
-   */
+  /* Returns a boolean indicating whether or not request can outlive the global in which it was created. */
   keepalive: boolean;
 }
 export interface RequestInit<Cf = CfProperties> {
@@ -2619,6 +2619,7 @@ export declare class URL {
   toString(): string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static) */
   static canParse(url: string, base?: string): boolean;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static) */
   static parse(url: string, base?: string): URL | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static) */
   static createObjectURL(object: File | Blob): string;
@@ -2692,7 +2693,7 @@ export declare class URLSearchParams {
 export declare class URLPattern {
   constructor(
     input?: string | URLPatternURLPatternInit,
-    baseURL?: string,
+    baseURL?: string | URLPatternURLPatternOptions,
     patternOptions?: URLPatternURLPatternOptions,
   );
   get protocol(): string;
@@ -5701,26 +5702,31 @@ export type PagesPluginFunction<
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-export declare abstract class PipelineTransform {
+export type PipelineRecord = Record<string, unknown>;
+export type PipelineBatchMetadata = {
+  pipelineId: string;
+  pipelineName: string;
+};
+export declare abstract class PipelineTransformationEntrypoint<
+  I extends PipelineRecord,
+  O extends PipelineRecord,
+> {
   /**
-   * transformJson recieves an array of javascript objects which can be
+   * run recieves an array of PipelineRecord which can be
    * mutated and returned to the pipeline
-   * @param data The data to be mutated
-   * @returns A promise containing the mutated data
+   * @param records Incoming records from the pipeline to be transformed
+   * @param metadata Information about the specific pipeline calling the transformation entrypoint
+   * @returns A promise containing the transformed PipelineRecord array
    */
-  public transformJson(data: object[]): Promise<object[]>;
+  public run(records: I[], metadata: PipelineBatchMetadata): Promise<O[]>;
 }
-// Copyright (c) 2022-2023 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-export interface Pipeline {
+export interface Pipeline<T extends PipelineRecord> {
   /**
-   * send takes an array of javascript objects which are
-   * then received by the pipeline for processing
+   * The Pipeline interface represents the type of a binding to a Pipeline
    *
-   * @param data The data to be sent
+   * @param records The records to send to the pipeline
    */
-  send(data: object[]): Promise<void>;
+  send(records: T[]): Promise<void>;
 }
 // PubSubMessage represents an incoming PubSub message.
 // The message includes metadata about the broker, the client, and the payload

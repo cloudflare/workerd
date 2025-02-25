@@ -351,4 +351,34 @@ kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetAsn1Sequence(kj::ArrayPtr<const kj
   auto end = start + kj::min(data.size() - 2, data[1]);
   return data.slice(start, end);
 }
+
+kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input) {
+  auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
+  auto buf = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(
+      input.begin(), input.size(), buf.asChars().begin(), simdutf::base64_url);
+  if (result.error != simdutf::SUCCESS) return kj::none;
+  KJ_ASSERT(result.count <= size);
+  return buf.slice(0, result.count).attach(kj::mv(buf));
+}
+
+kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input) {
+  auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
+  ;
+  auto buf = kj::heapArray<kj::byte>(size);
+  auto result = simdutf::base64_to_binary(
+      input.begin(), input.size(), buf.asChars().begin(), simdutf::base64_url);
+  if (result.error != simdutf::SUCCESS) return kj::none;
+  KJ_ASSERT(result.count <= size);
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, result.count);
+  auto src = kj::arrayPtr(buf.begin(), result.count);
+  backing.asArrayPtr().copyFrom(src);
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+jsg::BufferSource simdutfBase64UrlDecodeChecked(
+    jsg::Lock& js, kj::StringPtr input, kj::StringPtr error) {
+  return JSG_REQUIRE_NONNULL(simdutfBase64UrlDecode(js, input), Error, error);
+}
 }  // namespace workerd::api

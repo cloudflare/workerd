@@ -81,6 +81,14 @@ http_archive(
 )
 
 http_archive(
+    name = "ncrypto",
+    sha256 = "b438cf71b1c24036e388f191a348cdc76aca75310eabca0fef5d81d5032a5d20",
+    strip_prefix = "ncrypto-1.0.1",
+    type = "tgz",
+    url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.1.tar.gz",
+)
+
+http_archive(
     name = "pyodide",
     build_file = "//:build/BUILD.pyodide",
     sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
@@ -172,10 +180,10 @@ bind(
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "81f285cb337f445276f37c308cb90120f8ba4311d1be9daf3b93dccf4bfdba7d",
-    strip_prefix = "google-tcmalloc-69c409c",
+    integrity = "sha256-8joG3SxfLYqR2liUznBAcMkHKYMmUtsO1qGr505VBMY=",
+    strip_prefix = "google-tcmalloc-91765c1",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/69c409c344bdf894fc7aab83e2d9e280b009b2f3",
+    url = "https://github.com/google/tcmalloc/tarball/91765c11461a01579fcbdddf430a556b818818c4",
 )
 
 # ========================================================================================
@@ -226,6 +234,13 @@ rust_analyzer_dependencies()
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
+
+# rules_shell
+load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")
+
+rules_shell_dependencies()
+
+rules_shell_toolchains()
 
 # ========================================================================================
 # Node.js bootstrap

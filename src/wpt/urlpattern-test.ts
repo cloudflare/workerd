@@ -2,44 +2,18 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'wpt:harness';
+import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
-  'urlpattern-compare-tests.tentative.js': {
-    comment: 'urlpattern implementation will soon be replaced with ada-url',
-    expectedFailures: [
-      // Each of these *ought* to pass. They are included here because we
-      // know they currently do not. Each needs to be investigated.
-      'Component: pathname Left: {"pathname":"/foo/a"} Right: {"pathname":"/foo/b"}',
-      'Component: pathname Left: {"pathname":"/foo/b"} Right: {"pathname":"/foo/bar"}',
-      'Component: pathname Left: {"pathname":"/foo/bar"} Right: {"pathname":"/foo/:bar"}',
-      'Component: pathname Left: {"pathname":"/foo/"} Right: {"pathname":"/foo/:bar"}',
-      'Component: pathname Left: {"pathname":"/foo/:bar"} Right: {"pathname":"/foo/*"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/(bar)"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}"} Right: {"pathname":"/foo/{bar}+"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}+"} Right: {"pathname":"/foo/{bar}?"}',
-      'Component: pathname Left: {"pathname":"/foo/{bar}?"} Right: {"pathname":"/foo/{bar}*"}',
-      'Component: pathname Left: {"pathname":"/foo/(123)"} Right: {"pathname":"/foo/(12)"}',
-      'Component: pathname Left: {"pathname":"/foo/:b"} Right: {"pathname":"/foo/:a"}',
-      'Component: pathname Left: {"pathname":"*/foo"} Right: {"pathname":"*"}',
-      'Component: port Left: {"port":"9"} Right: {"port":"100"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo/{:bar}?/baz"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar}?/baz"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"fo{o/:bar}?/baz"}',
-      'Component: pathname Left: {"pathname":"foo/:bar?/baz"} Right: {"pathname":"foo{/:bar/}?baz"}',
-      'Component: pathname Left: "https://a.example.com/b?a" Right: "https://b.example.com/a?b"',
-      'Component: pathname Left: {"pathname":"/foo/{bar}/baz"} Right: {"pathname":"/foo/bar/baz"}',
-      'Component: protocol Left: {"protocol":"a"} Right: {"protocol":"b"}',
-      'Component: username Left: {"username":"a"} Right: {"username":"b"}',
-      'Component: password Left: {"password":"a"} Right: {"password":"b"}',
-      'Component: hostname Left: {"hostname":"a"} Right: {"hostname":"b"}',
-      'Component: search Left: {"search":"a"} Right: {"search":"b"}',
-      'Component: hash Left: {"hash":"a"} Right: {"hash":"b"}',
-    ],
+  'urlpattern-compare.tentative.any.js': {
+    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
+    skipAllTests: true,
   },
-  'urlpattern-compare.tentative.any.js': {},
-  'urlpattern-compare.tentative.https.any.js': {},
-  'urlpattern-hasregexpgroups-tests.js': {
+  'urlpattern-compare.tentative.https.any.js': {
+    comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
+    skipAllTests: true,
+  },
+  'urlpattern-hasregexpgroups.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [
       // Each of these *ought* to pass. They are included here because we
@@ -47,10 +21,7 @@ export default {
       '', // This file consists of one unnamed subtest
     ],
   },
-  'urlpattern-hasregexpgroups.any.js': {},
-  'urlpattern.any.js': {},
-  'urlpattern.https.any.js': {},
-  'urlpatterntests.js': {
+  'urlpattern.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [
       // Each of these *ought* to pass. They are included here because we
@@ -175,7 +146,6 @@ export default {
       'Pattern: [{"pathname":":foo./"}] Inputs: [{"pathname":"bar./"}]',
       'Pattern: [{"pathname":":foo../"}] Inputs: [{"pathname":"bar../"}]',
       'Pattern: [{"pathname":"/:foo\\\\bar"}] Inputs: [{"pathname":"/bazbar"}]',
-      'Pattern: [{"pathname":"/foo/bar"},{"ignoreCase":true}] Inputs: [{"pathname":"/FOO/BAR"}]',
       'Pattern: ["https://example.com:8080/foo?bar#baz",{"ignoreCase":true}] Inputs: [{"pathname":"/FOO","search":"BAR","hash":"BAZ","baseURL":"https://example.com:8080"}]',
       'Pattern: ["/foo?bar#baz","https://example.com:8080",{"ignoreCase":true}] Inputs: [{"pathname":"/FOO","search":"BAR","hash":"BAZ","baseURL":"https://example.com:8080"}]',
       'Pattern: [{"search":"foo","baseURL":"https://example.com/a/+/b"}] Inputs: [{"search":"foo","baseURL":"https://example.com/a/+/b"}]',
@@ -186,5 +156,9 @@ export default {
       'Pattern: [{"pathname":"/([\\\\d&&[0-1]])"}] Inputs: [{"pathname":"/0"}]',
       'Pattern: [{"pathname":"/([\\\\d&&[0-1]])"}] Inputs: [{"pathname":"/3"}]',
     ],
+  },
+  'urlpattern.https.any.js': {
+    comment:
+      'No test cases will run because urlpatterntests.js is already loaded.',
   },
 } satisfies TestRunnerConfig;

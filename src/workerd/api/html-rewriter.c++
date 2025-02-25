@@ -1216,6 +1216,10 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::onDocument(DocumentContentHandlers&& handle
 }
 
 jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> response) {
+
+  JSG_REQUIRE(response->getType() != "error"_kj, TypeError,
+      "HTMLRewriter cannot transform an error response");
+
   auto maybeInput = response->getBody();
 
   if (maybeInput == kj::none) {

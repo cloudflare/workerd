@@ -3,7 +3,11 @@ name: Check @cloudflare/workers-types snapshot
 on:
   pull_request:
     paths-ignore:
-      - 'doc/**'
+      - 'docs/**'
+      - 'justfile'
+      - '.devcontainer'
+      - '**/*.md'
+      - '.gitignore'
   merge_group:
   push:
     branches:

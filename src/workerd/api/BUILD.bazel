@@ -9,7 +9,7 @@ filegroup(
         ["**/*.c++"],
         exclude = [
             # TODO(cleanup): Continue shrinking the io target: Create independent targets for
-            # analytics-engine, kv, urlpattern and streams/compression, which either do not depend
+            # analytics-engine, kv and streams/compression, which either do not depend
             # on io or do not have io depending on them.
             "**/*test*.c++",
             "data-url.c++",
@@ -22,6 +22,7 @@ filegroup(
             "r2*.c++",
             "rtti.c++",
             "url.c++",
+            "urlpattern.c++",
             "util.c++",
         ],
     ),
@@ -46,6 +47,7 @@ filegroup(
             "r2*.h",
             "rtti.h",
             "url.h",
+            "urlpattern.h",
             "util.h",
         ],
     ),
@@ -74,6 +76,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:uuid",
     ],
@@ -133,10 +136,12 @@ wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide/pyodide.c++",
+        "pyodide/requirements.c++",
         "pyodide/setup-emscripten.c++",
     ],
     hdrs = [
         "pyodide/pyodide.h",
+        "pyodide/requirements.h",
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
@@ -223,6 +228,18 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern",
+    srcs = ["urlpattern.c++"],
+    hdrs = ["urlpattern.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":url",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
     ],
@@ -322,6 +339,11 @@ wd_test(
     src = "http-test.wd-test",
     args = ["--experimental"],
     data = ["http-test.js"],
+)
+
+wd_test(
+    src = "ctx-props-test.wd-test",
+    args = ["--experimental"],
 )
 
 wd_test(

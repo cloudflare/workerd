@@ -2,25 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { type TestRunnerConfig } from 'wpt:harness';
+import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'IdnaTestV2.window.js': {},
-  'a-element-origin.js': {
-    comment: 'Implement globalThis.document',
-    skipAllTests: true,
-  },
-  'a-element.js': {
-    comment: 'Implement globalThis.document',
-    skipAllTests: true,
-  },
-  'historical.any.js': {
-    comment: 'Fix this eventually',
-    expectedFailures: [
-      'URL: no structured serialize/deserialize support',
-      'URLSearchParams: no structured serialize/deserialize support',
-    ],
-  },
+  'historical.any.js': {},
   'idlharness.any.js': {
     comment: 'Does not contain any relevant tests',
     skipAllTests: true,
@@ -41,8 +27,16 @@ export default {
     skipAllTests: true,
   },
   'toascii.window.js': {
-    comment: 'Implement document',
-    skipAllTests: true,
+    comment:
+      'Replacer disables tests involving document.createElement. Expected failures are due to Unicode 15.1',
+    expectedFailures: [
+      // Taken from https://github.com/nodejs/node/blob/5ab7c4c5b01e7579fd436000232f0f0484289d44/test/wpt/status/url.json#L13
+      '\uD87E\uDC68.com (using URL)',
+      '\uD87E\uDC68.com (using URL.host)',
+      '\uD87E\uDC68.com (using URL.hostname)',
+    ],
+    replace: (code): string =>
+      code.replace(/\["url", "a", "area"\]/, '[ "url" ]'),
   },
   'url-constructor.any.js': {
     comment: 'Fix this eventually',
@@ -53,7 +47,8 @@ export default {
   'url-origin.any.js': {},
   'url-searchparams.any.js': {},
   'url-setters-a-area.window.js': {
-    comment: 'Implement globalThis.document',
+    comment: 'Skipped because it uses the same test data as url-setters.any.js',
+    // Node does the same: https://github.com/nodejs/node/blob/5ab7c4c5b01e7579fd436000232f0f0484289d44/test/wpt/status/url.json#L24
     skipAllTests: true,
   },
   'url-setters-stripping.any.js': {},

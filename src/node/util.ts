@@ -36,7 +36,9 @@ export const types = internalTypes;
 export const { MIMEParams, MIMEType } = utilImpl;
 
 const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
-const kCustomPromisifyArgsSymbol = Symbol('customPromisifyArgs');
+const kCustomPromisifyArgsSymbol = Symbol.for(
+  'nodejs.util.promisify.custom.args'
+);
 
 // TODO(later): Proper type signature for promisify.
 export function promisify(original: Function): Function {

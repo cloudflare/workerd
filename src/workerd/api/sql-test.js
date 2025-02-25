@@ -411,6 +411,21 @@ async function test(state) {
   // The following sequence of calls is mentioned by https://www.sqlite.org/lang_analyze.html as how
   // one might optmize the query planner.
   {
+    // Dry-run.  SQLite's documentation uses -1 as the debug example.
+    assert.deepEqual(Array.from(sql.exec('PRAGMA optimize(-1);')), [
+      { optimize: 'ANALYZE "main"."myTable"' },
+      { optimize: 'ANALYZE "main"."_cf_KV"' },
+    ]);
+  }
+  {
+    // Dry-run.  This sets all of the bits except for the sign bit because SQLite's optimize
+    // function doesn't parse hex numbers into negative integers.
+    assert.deepEqual(Array.from(sql.exec('PRAGMA optimize(0x7fffffff);')), [
+      { optimize: 'ANALYZE "main"."myTable"' },
+      { optimize: 'ANALYZE "main"."_cf_KV"' },
+    ]);
+  }
+  {
     let info = [...sql.exec('PRAGMA optimize=0x10002;')];
     assert.equal(info.length, 0);
   }
@@ -1394,6 +1409,17 @@ export class DurableObjectExample extends DurableObject {
 
     assert.deepEqual([...cursor], [{ i: 123 }]);
   }
+
+  async testSessionsAPIBookmark(previousBookmark) {
+    if (previousBookmark) {
+      await this.state.storage.waitForBookmark(previousBookmark);
+    }
+    let bookmark = await this.state.storage.getCurrentBookmark();
+    if (previousBookmark) {
+      assert.ok(previousBookmark < bookmark, "new bookmark didn't advance!");
+    }
+    return bookmark;
+  }
 }
 
 export default {
@@ -1495,3 +1521,13 @@ const INSERT_36_ROWS = ['a', 'b', 'c', 'd', 'e', 'f']
         .join(',')};`
   )
   .join(' ');
+
+export let testSessionsAPIBookmark = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('sessions-api-bookmark-test'));
+    let bookmark = undefined;
+    for (let i = 0; i < 20; ++i) {
+      bookmark = await stub.testSessionsAPIBookmark(bookmark);
+    }
+  },
+};

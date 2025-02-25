@@ -15,6 +15,11 @@ interface API {
   finalizeBootstrap: () => void;
   public_api: Pyodide;
   rawRun: (code: string) => [status: number, err: string];
+  initializeStreams: (
+    stdin?: any,
+    stdout?: (a: string) => void,
+    stderr?: (a: string) => void
+  ) => void;
 }
 
 interface LDSO {

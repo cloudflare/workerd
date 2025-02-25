@@ -96,6 +96,32 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   }
 }
 
+namespace {
+template <typename T>
+jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& function) {
+  return function.map([&](T& a) { return a.addRef(js); });
+}
+}  // namespace
+
+ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
+  return ExportedHandler{
+    .fetch{mapAddRef(js, fetch)},
+    .tail{mapAddRef(js, tail)},
+    .trace{mapAddRef(js, trace)},
+    .tailStream{mapAddRef(js, tailStream)},
+    .scheduled{mapAddRef(js, scheduled)},
+    .alarm{mapAddRef(js, alarm)},
+    .test{mapAddRef(js, test)},
+    .webSocketMessage{mapAddRef(js, webSocketMessage)},
+    .webSocketClose{mapAddRef(js, webSocketClose)},
+    .webSocketError{mapAddRef(js, webSocketError)},
+    .self{js.v8Isolate, self.getHandle(js.v8Isolate)},
+    .env{env.addRef(js)},
+    .ctx{getCtx()},
+    .missingSuperclass = missingSuperclass,
+  };
+}
+
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
     : unhandledRejections([this](jsg::Lock& js,
                               v8::PromiseRejectEvent event,
@@ -267,6 +293,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
                         canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+      JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
+          "Return value from serve handler must not be an error response (like Response.error())");
+
       auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
@@ -880,16 +909,19 @@ double Performance::now() {
 }
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-jsg::Ref<api::gpu::GPU> Navigator::getGPU(CompatibilityFlags::Reader flags) {
+jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(CompatibilityFlags::Reader flags) {
   // is this a durable object?
   KJ_IF_SOME(actor, IoContext::current().getActor()) {
-    JSG_REQUIRE(actor.getPersistent() != kj::none, TypeError,
-        "webgpu api is only available in Durable Objects (no storage)");
+    if (actor.getPersistent() == kj::none) {
+      return kj::none;
+    }
   } else {
-    JSG_FAIL_REQUIRE(TypeError, "webgpu api is only available in Durable Objects");
+    return kj::none;
   };
 
-  JSG_REQUIRE(flags.getWebgpu(), TypeError, "webgpu needs the webgpu compatibility flag set");
+  if (!flags.getWebgpu()) {
+    return kj::none;
+  }
 
   return jsg::alloc<api::gpu::GPU>();
 }

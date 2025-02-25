@@ -21,6 +21,7 @@ import {
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  diffieHellman,
 } from 'node-internal:crypto_dh';
 
 import {
@@ -77,6 +78,7 @@ export {
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  diffieHellman,
   // Random
   randomBytes,
   randomFillSync,

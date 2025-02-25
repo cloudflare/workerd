@@ -112,6 +112,7 @@ export const cacheMode = {
   url: 'http://placeholder/not-found',
   webSocket: null,
   cf: undefined,
+  type: 'default',
   body: ReadableStream {
     locked: false,
     [state]: 'readable',

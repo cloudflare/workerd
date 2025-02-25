@@ -31,7 +31,10 @@ def wd_test(
 
     if len(ts_srcs) != 0:
         # Generated declarations are currently not being used, but required based on https://github.com/aspect-build/rules_ts/issues/719
-        # TODO When TypeScript 5.6 comes out use noCheck so the test fails throwing a type error.
+        # TODO(build perf): Consider adopting isolated_typecheck to avoid bottlebecks in TS
+        # compilation, see https://github.com/aspect-build/rules_ts/blob/f1b7b83/docs/performance.md#isolated-typecheck.
+        # This will require extensive refactoring and we may only want to enable it for some
+        # targets, but might be useful if we end up transpiling more code later on.
         ts_project(
             name = name + "@ts_project",
             srcs = ts_srcs,
