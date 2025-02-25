@@ -5,8 +5,10 @@
 #pragma once
 // Common JSG testing infrastructure
 
-#include "jsg.h"
-#include "setup.h"
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/resource.h>
+#include <workerd/jsg/setup.h>
+#include <workerd/jsg/type-wrapper.h>
 
 #include <kj/test.h>
 

@@ -7,7 +7,7 @@
 //
 // Type traits to help us map between C++ and Web IDL types/concepts.
 
-#include "jsg.h"
+#include <workerd/jsg/jsg.h>
 
 #include <kj/array.h>
 #include <kj/common.h>

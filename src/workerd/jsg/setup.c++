@@ -14,6 +14,7 @@
 #include <workerd/util/uuid.h>
 
 #include <v8-cppgc.h>
+#include <v8-initialization.h>
 
 #if !_WIN32
 #include <cxxabi.h>

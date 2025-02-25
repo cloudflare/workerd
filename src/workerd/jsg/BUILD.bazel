@@ -9,20 +9,85 @@ exports_files(["modules.capnp"])
 wd_cc_library(
     name = "jsg",
     srcs = [
+        "modules-new.c++",
+    ],
+    hdrs = [
+        "jsg-test.h",
+        "modules-new.h",
+        "type-wrapper.h",
+    ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":exception",
+        ":iterator",
+        ":jsg-core",
+        ":memory-tracker",
+        ":url",
+        "//src/workerd/util",
+        "//src/workerd/util:sentry",
+        "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "iterator",
+    srcs = [
+        "iterator.c++",
+    ],
+    hdrs = [
+        "iterator.h",
+        "struct.h",
+        "value.h",
+        "web-idl.h",
+    ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":exception",
+        ":jsg-core",
+        ":memory-tracker",
+        "//src/workerd/util",
+        "//src/workerd/util:sentry",
+        "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/kj",
+        "@simdutf",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "script",
+    srcs = ["script.c++"],
+    hdrs = ["script.h"],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":jsg-core",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+# Subset of JSG that includes core JSG interfaces, but does not depend on type-wrapper API.
+# Factoring this out reduces the need for circular includes and will make future refactoring of JSG
+# much easier.
+# This is only visible in this package for now – to avoid extensive include changes in code using
+# the JSG type wrapper, the main JSG target should be used instead for now.
+# Avoid adding dependencies or new files to this when possible.
+wd_cc_library(
+    name = "jsg-core",
+    srcs = [
         "async-context.c++",
         "buffersource.c++",
         "commonjs.c++",
-        "compile-cache.c++",
         "dom-exception.c++",
-        "inspector.c++",
-        "iterator.c++",
         "jsg.c++",
         "jsvalue.c++",
         "modules.c++",
-        "modules-new.c++",
         "promise.c++",
         "resource.c++",
-        "script.c++",
         "ser.c++",
         "setup.c++",
         "util.c++",
@@ -33,48 +98,71 @@ wd_cc_library(
         "async-context.h",
         "buffersource.h",
         "commonjs.h",
-        "compile-cache.h",
         "dom-exception.h",
         "function.h",
-        "inspector.h",
-        "iterator.h",
         "jsg.h",
-        "jsg-test.h",
         "jsvalue.h",
-        "macro-meta.h",
-        "meta.h",
         "modules.h",
-        "modules-new.h",
         "promise.h",
         "resource.h",
-        "script.h",
         "ser.h",
         "setup.h",
-        "struct.h",
-        "type-wrapper.h",
         "util.h",
         "v8-platform-wrapper.h",
-        "value.h",
-        "web-idl.h",
         "wrappable.h",
     ],
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
-    visibility = ["//visibility:public"],
+    local_defines = ["JSG_IMPLEMENTATION"],
     deps = [
         ":exception",
+        ":macro-meta",
         ":memory-tracker",
+        ":meta",
         ":modules_capnp",
         ":observer",
-        ":url",
         "//src/workerd/util",
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
-        "@simdutf",
         "@ssl",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "compile-cache",
+    srcs = [
+        "compile-cache.c++",
+    ],
+    hdrs = [
+        "compile-cache.h",
+    ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "inspector",
+    srcs = [
+        "inspector.c++",
+    ],
+    hdrs = [
+        "inspector.h",
+    ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Some JSG headers can't be compiled on their own
+    visibility = ["//visibility:public"],
+    deps = [
+        ":jsg-core",
+        "@capnp-cpp//src/kj",
+        "@simdutf",
         "@workerd-v8//:v8",
     ],
 )
@@ -83,6 +171,16 @@ wd_cc_library(
     name = "memory-tracker",
     srcs = ["memory.c++"],
     hdrs = ["memory.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "meta",
+    hdrs = ["meta.h"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
@@ -176,6 +274,7 @@ wd_cc_library(
 
 [kj_test(
     src = f,
+    local_defines = ["JSG_IMPLEMENTATION"],
     deps = [
         ":jsg",
         "//src/workerd/util:autogate",
@@ -243,7 +342,7 @@ kj_test(
 kj_test(
     src = "multiple-typewrappers-test.c++",
     deps = [
-        "//src/workerd/io",
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
     ],
 )

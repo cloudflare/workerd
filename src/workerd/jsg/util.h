@@ -7,9 +7,10 @@
 //
 // This file contains misc utility functions used elsewhere.
 
-#include <workerd/util/sentry.h>
-
-#include <v8.h>
+#include <v8-array-buffer.h>
+#include <v8-exception.h>
+#include <v8-primitive.h>
+#include <v8-promise.h>
 
 #include <kj/debug.h>
 #include <kj/exception.h>
@@ -17,6 +18,9 @@
 
 #include <typeinfo>
 
+namespace v8 {
+class Isolate;
+}
 namespace workerd::jsg {
 
 class Lock;

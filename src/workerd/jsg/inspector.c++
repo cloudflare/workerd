@@ -1,6 +1,7 @@
 #include "inspector.h"
 
 #include "jsg.h"
+#include "jsvalue.h"
 #include "simdutf.h"
 #include "util.h"
 

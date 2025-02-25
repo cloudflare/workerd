@@ -1,5 +1,7 @@
 #include "script.h"
 
+#include <workerd/jsg/jsvalue.h>
+
 namespace workerd::jsg {
 
 jsg::JsValue NonModuleScript::runAndReturn(jsg::Lock& js) const {

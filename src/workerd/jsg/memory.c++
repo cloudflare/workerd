@@ -1,5 +1,7 @@
 #include "memory.h"
 
+#include <v8-array-buffer.h>
+
 #include <kj/one-of.h>
 
 namespace workerd::jsg {
@@ -208,6 +210,11 @@ int HeapSnapshotWriter::GetChunkSize() {
 v8::OutputStream::WriteResult HeapSnapshotWriter::WriteAsciiChunk(char* data, int size) {
   return callback(kj::ArrayPtr<char>(data, size)) ? v8::OutputStream::WriteResult::kContinue
                                                   : v8::OutputStream::WriteResult::kAbort;
+}
+
+void MemoryTracker::trackField(
+    kj::StringPtr edgeName, const v8::BackingStore* value, kj::Maybe<kj::StringPtr> nodeName) {
+  trackFieldWithSize(edgeName, value->ByteLength(), "BackingStore"_kjc);
 }
 
 }  // namespace workerd::jsg

@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "dom-exception.h"
 #include "jsg.h"  // can't include util.h directly due to weird cyclic dependency...
 #include "ser.h"
 #include "setup.h"
@@ -18,7 +19,6 @@
 #endif
 
 #include <workerd/util/autogate.h>
-#include <workerd/util/sentry.h>
 
 namespace workerd::jsg {
 
