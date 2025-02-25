@@ -1666,11 +1666,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                     KJ_SWITCH_ONEOF(handler.value) {
                       KJ_CASE_ONEOF(obj, api::ExportedHandler) {
                         obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
-                        // TODO(cleanup): Unfortunately, for non-class-based handlers, we have
-                        //   always created only a single `ctx` object and reused it for all
-                        //   requests. This is weird and obviously wrong but changing it probably
-                        //   requires a compat flag. Until then, connection properties will not be
-                        //   available for non-class handlers.
+                        // Historically, non-class-based handlers reused the same ctx object for all requests.
+                        // This was an accident, but some Workers depend on it.
+                        // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
                         obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
                         impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
@@ -1972,6 +1970,14 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
 
   kj::StringPtr n = name.orDefault("default"_kj);
   KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
+    jsg::Lock& js = *this;
+    if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
+      api::ExportedHandler constructedHandler = h.clone(js);
+
+      constructedHandler.ctx = jsg::alloc<api::ExecutionContext>(js,
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
+      return kj::heap(kj::mv(constructedHandler));
+    }
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     jsg::Lock& js = *this;

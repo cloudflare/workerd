@@ -396,6 +396,8 @@ struct ExportedHandler {
   jsg::Optional<jsg::Ref<ExecutionContext>> getCtx() {
     return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });
   }
+
+  ExportedHandler clone(jsg::Lock& js);
 };
 
 // An approximation of Node.js setImmediate `Immediate` object.

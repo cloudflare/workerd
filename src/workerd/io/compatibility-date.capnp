@@ -697,4 +697,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("memory_cache_delete")
       $experimental;
   # Enables delete operations on memory cache if enabled.
+
+  uniqueCtxPerInvocation @74: Bool
+      $compatEnableFlag("unique_ctx_per_invocation")
+      $compatDisableFlag("nonclass_entrypoint_reuses_ctx_across_invocations")
+      $compatEnableDate("2025-03-10");
+  # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx per invocation
 }
