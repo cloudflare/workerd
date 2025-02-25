@@ -61,7 +61,7 @@ import {
 // import { ALL_PROPERTIES, ONLY_ENUMERABLE, getOwnNonIndexProperties } from "node-internal:internal_utils";
 import { validateObject, validateString } from 'node-internal:validators';
 
-// // Simplified assertions to avoid `Assertions require every name in the call target to be
+// Simplified assertions to avoid `Assertions require every name in the call target to be
 // declared with an explicit type` TypeScript error
 function assert(value: boolean, message = 'Assertion failed'): asserts value {
   if (!value) throw new Error(message);
