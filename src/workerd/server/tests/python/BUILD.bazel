@@ -78,10 +78,13 @@ py_wd_test("seek-metadatafs")
 py_wd_test(
     "undefined-handler",
     # TODO: Requires a new bundle deploy
-    skip_python_flags = [
-        "0.26.0a2",
-        "0.27.1",
-    ],
+    python_flags = ["development"],
+)
+
+py_wd_test(
+    "vendor_dir",
+    # TODO: Requires a new bundle deploy
+    python_flags = ["development"],
 )
 
 py_wd_test("dont-snapshot-pyodide")
