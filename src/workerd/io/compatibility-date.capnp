@@ -721,4 +721,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $impliedByAfterDate(name = "nodeJsCompat", date = "2025-04-01");
   # Automatically populate process.env from text bindings only
   # when nodejs_compat is being used.
+  
+  cacheApiRequestCfOverridesCacheRules @77 :Bool
+      $compatEnableFlag("cache_api_request_cf_overrides_cache_rules")
+      $experimental
+      $neededByFl;
+  # Enables cache settings specified request in cache api cf object to override cache rules. (only for user owned or grey-clouded sites)
 }
