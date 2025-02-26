@@ -35,7 +35,7 @@ export const test = {
       '{"type":"onset","info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":""}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":"* * * * 30"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","info":{"type":"fetch","method":"GET","url":"http://placeholder/not-found","cfJson":"{}","headers":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","info":{"type":"fetch","method":"GET","url":"http://placeholder/web-socket","cfJson":"{}","headers":[]}}{"type":"outcome","outcome":"exception","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","info":{"type":"fetch","method":"GET","url":"http://placeholder/web-socket","cfJson":"{}","headers":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
       // queue-test.js: queue events
       '{"type":"onset","info":{"type":"fetch","method":"POST","url":"https://fake-host/message","cfJson":"{}","headers":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
