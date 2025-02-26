@@ -23,11 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-'use strict';
-
 import { Buffer } from 'node-internal:internal_buffer';
 
 import { default as cryptoImpl } from 'node-internal:crypto';
@@ -60,19 +55,38 @@ import {
 
 const DH_GENERATOR = 2;
 
-interface DiffieHellman {
-  [kHandle]: cryptoImpl.DiffieHellmanHandle;
+declare class SharedDiffieHellman {
+  public generateKeys: typeof dhGenerateKeys;
+  public computeSecret: typeof dhComputeSecret;
+  public getPrime: typeof dhGetPrime;
+  public getGenerator: typeof dhGetGenerator;
+  public getPublicKey: typeof dhGetPublicKey;
+  public getPrivateKey: typeof dhGetPrivateKey;
+  public setPrivateKey: typeof dhSetPrivateKey;
+  public setPublicKey: typeof dhSetPublicKey;
 }
 
-let DiffieHellman = function (
-  this: DiffieHellman,
+declare class DiffieHellman extends SharedDiffieHellman {
+  public [kHandle]: cryptoImpl.DiffieHellmanHandle;
+
+  public constructor(
+    sizeOrKey: number | ArrayLike,
+    keyEncoding?: number | string,
+    generator?: number | ArrayLike,
+    genEncoding?: string
+  );
+}
+
+function DiffieHellman(
+  this: unknown,
   sizeOrKey: number | ArrayLike,
   keyEncoding?: number | string,
   generator?: number | ArrayLike,
   genEncoding?: string
 ): DiffieHellman {
-  if (!(this instanceof DiffieHellman))
+  if (!(this instanceof DiffieHellman)) {
     return new DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding);
+  }
   if (
     typeof sizeOrKey !== 'number' &&
     typeof sizeOrKey !== 'string' &&
@@ -97,7 +111,7 @@ let DiffieHellman = function (
     keyEncoding !== 'buffer' &&
     !Buffer.isEncoding(keyEncoding)
   ) {
-    genEncoding = generator as any;
+    genEncoding = generator as string;
     generator = keyEncoding;
     keyEncoding = 'utf-8'; // default encoding
   }
@@ -122,50 +136,39 @@ let DiffieHellman = function (
     );
   }
 
-  this[kHandle] = new cryptoImpl.DiffieHellmanHandle(
-    sizeOrKey as any,
-    generator as any
-  );
+  this[kHandle] = new cryptoImpl.DiffieHellmanHandle(sizeOrKey, generator);
   Object.defineProperty(DiffieHellman.prototype, 'verifyError', {
-    get: function () {
+    get: function (this: DiffieHellman) {
       return this[kHandle].getVerifyError();
     },
     configurable: true,
     enumerable: true,
   });
   return this;
-} as any as {
-  new (
-    sizeOrKey: number | ArrayLike,
-    keyEncoding?: number | string,
-    generator?: number | ArrayLike,
-    genEncoding?: string
-  ): DiffieHellman;
-};
-
-interface DiffieHellmanGroup {
-  [kHandle]: cryptoImpl.DiffieHellmanHandle;
 }
 
-let DiffieHellmanGroup = function (
-  this: DiffieHellmanGroup,
-  name: string
-): DiffieHellmanGroup {
-  if (!(this instanceof DiffieHellmanGroup))
+declare class DiffieHellmanGroup extends SharedDiffieHellman {
+  public [kHandle]: cryptoImpl.DiffieHellmanHandle;
+  public constructor(name: string);
+}
+
+function DiffieHellmanGroup(this: unknown, name: string): DiffieHellmanGroup {
+  if (!(this instanceof DiffieHellmanGroup)) {
     return new DiffieHellmanGroup(name);
+  }
 
   // The C++-based handle is shared between both classes, so DiffieHellmanGroupHandle() is merely
   // a different constructor for a DiffieHellmanHandle.
   this[kHandle] = cryptoImpl.DiffieHellmanGroupHandle(name);
   Object.defineProperty(DiffieHellmanGroup.prototype, 'verifyError', {
-    get: function () {
+    get: function (this: DiffieHellmanGroup): number {
       return this[kHandle].getVerifyError();
     },
     configurable: true,
     enumerable: true,
   });
   return this;
-} as any as { new (name: string): DiffieHellmanGroup };
+}
 
 DiffieHellmanGroup.prototype.generateKeys =
   DiffieHellman.prototype.generateKeys = dhGenerateKeys;
@@ -270,7 +273,7 @@ export interface DiffieHellmanKeyPair {
   privateKey: PrivateKeyObject;
 }
 
-export function diffieHellman(options: DiffieHellmanKeyPair) {
+export function diffieHellman(options: DiffieHellmanKeyPair): Buffer {
   validateObject(options, 'options');
   const { publicKey, privateKey } = options;
   if (!isKeyObject(publicKey)) {
