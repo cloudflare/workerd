@@ -19,6 +19,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/script.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
@@ -1648,6 +1649,10 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             SpanBuilder currentUserSpan =
                 spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
 
+            jsg::AsyncContextFrame::StorageScope envStorageScope(js,
+                jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey(),
+                js.v8Ref(bindingsScope.As<v8::Value>()));
+
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
@@ -2027,8 +2032,8 @@ jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
 }
 
 jsg::AsyncContextFrame::StorageKey& Worker::Lock::getEnvAsyncContextKey() {
-  auto& isolate = const_cast<Isolate&>(worker.getIsolate());
-  return *(isolate.envAsyncContextKey);
+  auto& isolate = jsg::IsolateBase::from(getIsolate());
+  return isolate.getEnvAsyncContextKey();
 }
 
 bool Worker::Lock::isInspectorEnabled() {

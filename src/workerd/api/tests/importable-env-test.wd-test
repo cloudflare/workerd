@@ -5,7 +5,8 @@ const unitTests :Workerd.Config = (
     ( name = "importable-env-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "importable-env-test.js")
+          (name = "worker", esModule = embed "importable-env-test.js"),
+          (name = "child", esModule = "export {env} from 'cloudflare:workers'"),
         ],
         compatibilityDate = "2025-02-01",
         compatibilityFlags = [

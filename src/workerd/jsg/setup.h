@@ -210,6 +210,10 @@ class IsolateBase {
     return externalMemoryAccounter;
   }
 
+  AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
+    return *envAsyncContextKey;
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -279,6 +283,9 @@ class IsolateBase {
 
   // Used to account for external memory
   v8::ExternalMemoryAccounter externalMemoryAccounter;
+
+  // A shared async context key for accessing env
+  kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.

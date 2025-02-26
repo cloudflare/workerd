@@ -20,6 +20,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
@@ -231,7 +232,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
       jsg::AsyncContextFrame::StorageScope envStorageScope(
-          js, lock.getEnvAsyncContextKey(), h.env.addRef(js));
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;

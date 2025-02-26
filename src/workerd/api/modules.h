@@ -13,6 +13,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/setup.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 
@@ -21,10 +22,20 @@ namespace workerd::api {
 class EnvModule final: public jsg::Object {
  public:
   kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js) {
-    if (!FeatureFlags::get(js).getImportableEnv() || !IoContext::hasCurrent()) {
+    if (!FeatureFlags::get(js).getImportableEnv()) {
       return kj::none;
     }
-    return IoContext::current().getCurrentEnv();
+
+    auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+      KJ_IF_SOME(value, frame.get(key)) {
+        auto handle = value.getHandle(js);
+        if (handle->IsObject()) {
+          return jsg::JsObject(handle.As<v8::Object>());
+        }
+      }
+    }
+    return kj::none;
   }
 
   JSG_RESOURCE_TYPE(EnvModule) {

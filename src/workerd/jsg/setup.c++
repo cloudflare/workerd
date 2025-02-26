@@ -338,6 +338,7 @@ IsolateBase::IsolateBase(const V8System& system,
 #else
       ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
 #endif
+      envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
