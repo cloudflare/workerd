@@ -23,11 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-'use strict';
-
 import { default as cryptoImpl } from 'node-internal:crypto';
 
 import {
@@ -61,7 +56,13 @@ function validateParameters(
   salt: ArrayLike,
   info: ArrayLike,
   length: number
-) {
+): {
+  hash: string;
+  key: ArrayLike;
+  salt: ArrayLike;
+  info: ArrayLike;
+  length: number;
+} {
   // TODO(soon): Add support for KeyObject input.
   if (key instanceof KeyObject) {
     throw new NodeError(
@@ -137,13 +138,17 @@ export function hkdf(
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
-      res(cryptoImpl.getHkdf(hash, key as ArrayLike, salt, info, length));
+      res(cryptoImpl.getHkdf(hash, key, salt, info, length));
     } catch (err) {
-      rej(err);
+      rej(err as Error);
     }
   }).then(
-    (val: ArrayBuffer) => callback(null, val),
-    (err) => callback(err)
+    (val: ArrayBuffer): void => {
+      callback(null, val);
+    },
+    (err: unknown): void => {
+      callback(err);
+    }
   );
 }
 
