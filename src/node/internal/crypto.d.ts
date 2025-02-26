@@ -296,7 +296,7 @@ export interface AsymmetricKeyDetails {
 // The user-provided options passed to createPrivateKey or createPublicKey.
 // This will be processed into an InnerCreateAsymmetricKeyOptions.
 export interface CreateAsymmetricKeyOptions {
-  key: string | ArrayBuffer | ArrayBufferView | JsonWebKey;
+  key: string | ArrayBuffer | ArrayBufferView | JsonWebKey | null | undefined;
   format?: AsymmetricKeyFormat;
   type?: PublicKeyEncoding | PrivateKeyEncoding;
   passphrase?: string | Uint8Array | Buffer;
