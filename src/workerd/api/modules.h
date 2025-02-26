@@ -10,12 +10,27 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/features.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
+
+class EnvModule final: public jsg::Object {
+ public:
+  kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js) {
+    if (!FeatureFlags::get(js).getImportableEnv() || !IoContext::hasCurrent()) {
+      return kj::none;
+    }
+    return IoContext::current().getCurrentEnv();
+  }
+
+  JSG_RESOURCE_TYPE(EnvModule) {
+    JSG_METHOD(getCurrent);
+  }
+};
 
 template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
@@ -30,6 +45,8 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerSocketsModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerRpcModules(registry, featureFlags);
+  registry.template addBuiltinModule<EnvModule>(
+      "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 template <class TypeWrapper>
@@ -61,6 +78,8 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }
+
+  // TODO(later): Add the internal env module also.
 }
 
 }  // namespace workerd::api

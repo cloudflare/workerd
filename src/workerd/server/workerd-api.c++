@@ -116,6 +116,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     EW_WEBGPU_ISOLATE_TYPES,
 #endif
+    workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,

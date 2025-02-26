@@ -476,6 +476,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   size_t nextRequestId = 0;
   kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
+  kj::Own<jsg::AsyncContextFrame::StorageKey> envAsyncContextKey;
 
   friend class Worker;
 };
@@ -653,6 +654,9 @@ class Worker::Lock {
 
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
+
+  // Get the opaque storage key to use for accessing the env
+  jsg::AsyncContextFrame::StorageKey& getEnvAsyncContextKey();
 
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);

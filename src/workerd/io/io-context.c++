@@ -952,6 +952,20 @@ SpanParent IoContext::getCurrentTraceSpan() {
   return getMetrics().getSpan();
 }
 
+kj::Maybe<jsg::JsObject> IoContext::getCurrentEnv() {
+  KJ_IF_SOME(lock, currentLock) {
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+      KJ_IF_SOME(value, frame.get(lock.getEnvAsyncContextKey())) {
+        auto handle = value.getHandle(lock);
+        if (handle->IsObject()) {
+          return jsg::JsObject(handle.As<v8::Object>());
+        }
+      }
+    }
+  }
+  return kj::none;
+}
+
 SpanParent IoContext::getCurrentUserTraceSpan() {
   // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
   // context, as with Jaeger spans.

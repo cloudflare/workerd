@@ -230,6 +230,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          js, lock.getEnvAsyncContextKey(), h.env.addRef(js));
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
@@ -345,10 +347,14 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.tail) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
       auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_SOME(f, h.trace) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
       auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
       traceEvent->waitUntil(kj::mv(promise));
@@ -383,6 +389,8 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.scheduled) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       auto promise = f(
           lock, jsg::alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx());
       event->waitUntil(kj::mv(promise));
@@ -428,6 +436,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       }
 
       auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
+
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), handler.env.addRef(lock));
 
       return context
           .run([exportedHandler, &context, timeout, retryCount, &alarm,
@@ -573,6 +584,8 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   auto& testHandler =
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
+  jsg::AsyncContextFrame::StorageScope envStorageScope(
+      lock, lock.getEnvAsyncContextKey(), eh.env.addRef(lock));
   return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
@@ -611,6 +624,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketMessage) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), kj::mv(message)), eventTimeoutMs));
     }
@@ -635,6 +650,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(HibernatableSocket
       kj::mv(releasePackage.tags), api::WebSocket::HibernatableReleaseState::CLOSE);
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketClose) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), close.code, kj::mv(close.reason), close.wasClean),
           eventTimeoutMs));
@@ -662,6 +679,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(kj::Exception e,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketError) {
+      jsg::AsyncContextFrame::StorageScope envStorageScope(
+          lock, lock.getEnvAsyncContextKey(), h.env.addRef(lock));
       event->waitUntil(setHibernatableEventTimeout(
           handler(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e))), eventTimeoutMs));
     }

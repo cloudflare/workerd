@@ -781,6 +781,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
+  kj::Maybe<jsg::JsObject> getCurrentEnv() KJ_WARN_UNUSED_RESULT;
+
   tracing::InvocationSpanContext& getInvocationSpanContext() {
     return getCurrentIncomingRequest().invocationSpanContext;
   }
