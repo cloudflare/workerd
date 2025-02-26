@@ -30,6 +30,23 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
   req.setEnableInternet(options.enableInternet);
 
+  KJ_IF_SOME(env, options.env) {
+    auto list = req.initEnvironmentVariables(env.fields.size());
+    for (auto i: kj::indices(env.fields)) {
+      auto field = &env.fields[i];
+      JSG_REQUIRE(field->name.findFirst('=') == kj::none, Error,
+          "Environment variable names cannot contain '=': ", field->name);
+
+      JSG_REQUIRE(field->name.findFirst('\0') == kj::none, Error,
+          "Environment variable names cannot contain '\\0': ", field->name);
+
+      JSG_REQUIRE(field->value.findFirst('\0') == kj::none, Error,
+          "Environment variable values cannot contain '\\0': ", field->name);
+
+      list.set(i, str(field->name, "=", field->value));
+    }
+  }
+
   IoContext::current().addTask(req.send().ignoreResult());
 
   running = true;
@@ -82,9 +99,11 @@ void Container::signal(jsg::Lock& js, int signo) {
 class Container::TcpPortWorkerInterface final: public WorkerInterface {
  public:
   TcpPortWorkerInterface(capnp::ByteStreamFactory& byteStreamFactory,
+      kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
       rpc::Container::Port::Client port)
       : byteStreamFactory(byteStreamFactory),
+        entropySource(entropySource),
         headerTable(headerTable),
         port(kj::mv(port)) {}
 
@@ -120,7 +139,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
         connectImpl(*pipe.ends[1]).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
 
     // ... and then stack an HttpClient on it ...
-    auto client = kj::newHttpClient(headerTable, *pipe.ends[0]);
+    auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
 
     // ... and then adapt that to an HttpService ...
     auto service = kj::newHttpService(*client);
@@ -167,6 +186,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
   rpc::Container::Port::Client port;
 
@@ -209,19 +229,22 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   TcpPortOutgoingFactory(capnp::ByteStreamFactory& byteStreamFactory,
+      kj::EntropySource& entropySource,
       const kj::HttpHeaderTable& headerTable,
       rpc::Container::Port::Client port)
       : byteStreamFactory(byteStreamFactory),
+        entropySource(entropySource),
         headerTable(headerTable),
         port(kj::mv(port)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     // At present we have no use for `cfStr`.
-    return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, headerTable, port);
+    return kj::heap<TcpPortWorkerInterface>(byteStreamFactory, entropySource, headerTable, port);
   }
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::EntropySource& entropySource;
   const kj::HttpHeaderTable& headerTable;
   rpc::Container::Port::Client port;
 };
@@ -234,8 +257,9 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
 
   auto& ioctx = IoContext::current();
 
-  kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<TcpPortOutgoingFactory>(
-      ioctx.getByteStreamFactory(), ioctx.getHeaderTable(), req.send().getPort());
+  kj::Own<Fetcher::OutgoingFactory> factory =
+      kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
+          ioctx.getHeaderTable(), req.send().getPort());
 
   return jsg::alloc<Fetcher>(
       ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);

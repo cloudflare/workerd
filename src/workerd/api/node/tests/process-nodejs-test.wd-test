@@ -5,10 +5,21 @@ const unitTests :Workerd.Config = (
     ( name = "nodejs-process-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "process-nodejs-test.js")
+          (name = "worker", esModule = embed "process-nodejs-test.js"),
+          (name = "mod", esModule = "export const { FOO } = process.env;")
         ],
-        compatibilityDate = "2024-10-11",
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityDate = "2024-12-28",
+        compatibilityFlags = [
+          "nodejs_compat",
+          "nodejs_compat_populate_process_env"
+        ],
+        bindings = [
+          (name = "FOO", text = "BAR"),
+          (name = "BAR", json = "{}"),
+          (name = "BAZ", json = "\"abc\""),
+          (name = "DUB", json = "\"\\\"abc\\\"\""),
+          (name = "NON", data = "abcdef")
+        ],
       )
     ),
   ],

@@ -1,4 +1,4 @@
-from cloudflare.workers import Blob, FormData, Response
+from workers import Blob, FormData, Response
 
 
 async def on_fetch(request):

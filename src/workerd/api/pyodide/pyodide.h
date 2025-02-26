@@ -78,6 +78,7 @@ class PyodideMetadataReader: public jsg::Object {
   kj::Array<kj::String> names;
   kj::Array<kj::Array<kj::byte>> contents;
   kj::Array<kj::String> requirements;
+  kj::String pyodideVersion;
   kj::String packagesVersion;
   kj::String packagesLock;
   bool isWorkerdFlag;
@@ -92,6 +93,7 @@ class PyodideMetadataReader: public jsg::Object {
       kj::Array<kj::String> names,
       kj::Array<kj::Array<kj::byte>> contents,
       kj::Array<kj::String> requirements,
+      kj::String pyodideVersion,
       kj::String packagesVersion,
       kj::String packagesLock,
       bool isWorkerd,
@@ -104,6 +106,7 @@ class PyodideMetadataReader: public jsg::Object {
         names(kj::mv(names)),
         contents(kj::mv(contents)),
         requirements(kj::mv(requirements)),
+        pyodideVersion(kj::mv(pyodideVersion)),
         packagesVersion(kj::mv(packagesVersion)),
         packagesLock(kj::mv(packagesLock)),
         isWorkerdFlag(isWorkerd),
@@ -167,6 +170,10 @@ class PyodideMetadataReader: public jsg::Object {
     return usePackagesInArtifactBundler;
   }
 
+  kj::String getPyodideVersion() {
+    return kj::str(pyodideVersion);
+  }
+
   kj::String getPackagesVersion() {
     return kj::str(packagesVersion);
   }
@@ -192,6 +199,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(shouldUsePackagesInArtifactBundler);
+    JSG_METHOD(getPyodideVersion);
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);

@@ -3474,6 +3474,7 @@ interface Container {
 interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
+  env?: Record<string, string>;
 }
 type AiImageClassificationInput = {
   image: number[];
