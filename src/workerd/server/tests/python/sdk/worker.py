@@ -2,9 +2,9 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
+from workers import Blob, File, FormData, Response, fetch
 
 import pyodide.http
-from cloudflare.workers import Blob, File, FormData, Response, fetch
 from pyodide.ffi import to_js
 
 
