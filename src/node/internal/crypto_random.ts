@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { default as cryptoImpl } from 'node-internal:crypto';
 
 import {
@@ -50,17 +47,21 @@ import { Buffer, kMaxLength } from 'node-internal:internal_buffer';
 
 import { arrayBufferToUnsignedBigInt } from 'node-internal:crypto_util';
 
-export type RandomBytesCallback = (err: any | null, buffer: Uint8Array) => void;
+export type RandomBytesCallback = (
+  err: Error | null,
+  buffer: Uint8Array
+) => void;
 export function randomBytes(size: number, callback: RandomBytesCallback): void;
 export function randomBytes(size: number): Uint8Array;
 export function randomBytes(
   size: number,
   callback?: RandomBytesCallback
-): Uint8Array | void {
+): Uint8Array | undefined {
   validateInteger(size, 'size', 0, kMaxLength);
   const buf = Buffer.alloc(size);
   if (callback !== undefined) {
     randomFill(buf, callback as RandomFillCallback);
+    return undefined;
   } else {
     randomFillSync(buf);
     return buf;
@@ -71,7 +72,7 @@ export function randomFillSync(
   buffer: NodeJS.ArrayBufferView,
   offset?: number,
   size?: number
-) {
+): Uint8Array {
   if (!isAnyArrayBuffer(buffer) && !isArrayBufferView(buffer)) {
     throw new ERR_INVALID_ARG_TYPE(
       'buffer',
@@ -81,10 +82,10 @@ export function randomFillSync(
   }
   const maxLength = (buffer as Uint8Array).length;
   if (offset !== undefined) {
-    validateInteger(offset!, 'offset', 0, kMaxLength);
+    validateInteger(offset, 'offset', 0, kMaxLength);
   } else offset = 0;
   if (size !== undefined) {
-    validateInteger(size!, 'size', 0, maxLength - offset);
+    validateInteger(size, 'size', 0, maxLength - offset);
   } else size = maxLength;
   if (isAnyArrayBuffer(buffer)) {
     buffer = Buffer.from(buffer);
@@ -94,7 +95,7 @@ export function randomFillSync(
 }
 
 export type RandomFillCallback = (
-  err: any | null,
+  err: Error | null,
   buf?: NodeJS.ArrayBufferView
 ) => void;
 export function randomFill(
@@ -117,7 +118,7 @@ export function randomFill(
   offsetOrCallback?: number | RandomFillCallback,
   sizeOrCallback?: number | RandomFillCallback,
   callback?: RandomFillCallback
-) {
+): void {
   if (!isAnyArrayBuffer(buffer) && !isArrayBufferView(buffer)) {
     throw new ERR_INVALID_ARG_TYPE(
       'buffer',
@@ -131,19 +132,19 @@ export function randomFill(
   const maxLength = (buffer as Uint8Array).length;
   if (typeof callback === 'function') {
     validateInteger(offsetOrCallback, 'offset', 0, maxLength);
-    offset = offsetOrCallback as number;
+    offset = offsetOrCallback;
 
     validateInteger(sizeOrCallback, 'size', 0, maxLength - offset);
-    size = sizeOrCallback as number;
+    size = sizeOrCallback;
   } else if (typeof sizeOrCallback === 'function') {
     validateInteger(offsetOrCallback, 'offset', 0, maxLength);
-    offset = offsetOrCallback as number;
+    offset = offsetOrCallback;
     size = maxLength - offset;
-    callback = sizeOrCallback as RandomFillCallback;
+    callback = sizeOrCallback;
   } else if (typeof offsetOrCallback === 'function') {
     offset = 0;
     size = maxLength;
-    callback = offsetOrCallback as RandomFillCallback;
+    callback = offsetOrCallback;
   }
   validateFunction(callback, 'callback');
 
@@ -153,8 +154,8 @@ export function randomFill(
     randomFillSync(buffer, offset, size);
     res();
   }).then(
-    () => callback!(null, buffer),
-    (err: any) => callback!(err)
+    (): unknown => callback(null, buffer),
+    (err: unknown): unknown => callback(err as Error)
   );
 }
 
@@ -165,7 +166,7 @@ const randomCache = Buffer.alloc(6 * 1024);
 let randomCacheOffset = 0;
 let initialized = false;
 
-function getRandomInt(min: number, max: number) {
+function getRandomInt(min: number, max: number): number {
   if (!initialized) {
     randomFillSync(randomCache);
     initialized = true;
@@ -198,14 +199,13 @@ function getRandomInt(min: number, max: number) {
     const x = randomCache.readUIntBE(randomCacheOffset, 6);
     randomCacheOffset += 6;
     if (x < randLimit) {
-      const n = (x % range) + min;
-      return n;
+      return (x % range) + min;
     }
   }
   return 0; // Should be unreachable.
 }
 
-export type RandomIntCallback = (err: any | null, n?: number) => void;
+export type RandomIntCallback = (err: Error | null, n?: number) => void;
 export function randomInt(max: number): number;
 export function randomInt(min: number, max: number): number;
 export function randomInt(max: number, callback: RandomIntCallback): void;
@@ -218,24 +218,24 @@ export function randomInt(
   minOrMax: number,
   maxOrCallback?: number | RandomIntCallback,
   callback?: RandomIntCallback
-) {
+): number | undefined {
   let min = 0;
   let max = 0;
   if (typeof callback === 'function') {
     validateInteger(minOrMax, 'min');
     validateInteger(maxOrCallback, 'max');
     min = minOrMax;
-    max = maxOrCallback as number;
+    max = maxOrCallback;
   } else if (typeof maxOrCallback === 'function') {
     min = 0;
     validateInteger(minOrMax, 'max');
     max = minOrMax;
-    callback = maxOrCallback as RandomIntCallback;
+    callback = maxOrCallback;
   } else if (arguments.length === 2) {
     validateInteger(minOrMax, 'min');
     validateInteger(maxOrCallback, 'max');
     min = minOrMax;
-    max = maxOrCallback as number;
+    max = maxOrCallback;
   } else {
     min = 0;
     validateInteger(minOrMax, 'max');
@@ -246,24 +246,29 @@ export function randomInt(
     throw new ERR_OUT_OF_RANGE('min', 'min <= max', min);
   }
 
-  if (callback !== undefined) {
+  if (callback != null) {
     new Promise<number>((res) => {
       res(getRandomInt(min, max));
     }).then(
-      (n: number) => callback!(null, n),
-      (err: any) => callback!(err)
+      (n: number): void => {
+        callback(null, n);
+      },
+      (err: unknown): void => {
+        callback(err as Error);
+      }
     );
-    return;
   } else {
     return getRandomInt(min, max);
   }
+
+  return undefined;
 }
 
-export function randomUUID(options?: any) {
+export function randomUUID(options: unknown): string {
   // While we do not actually use the entropy cache, we go ahead and validate
   // the input parameters as Node.js does.
   if (options !== undefined) {
-    validateObject(options, 'options', options);
+    validateObject(options, 'options');
     if (options.disableEntropyCache !== undefined) {
       validateBoolean(
         options.disableEntropyCache,
@@ -287,10 +292,10 @@ export interface CheckPrimeOptions {
 }
 
 export type GeneratePrimeCallback = (
-  err?: any,
+  err: Error | null,
   prime?: bigint | ArrayBuffer
 ) => void;
-export type CheckPrimeCallback = (err?: any, prime?: boolean) => void;
+export type CheckPrimeCallback = (err: Error | null, prime?: boolean) => void;
 
 function processGeneratePrimeOptions(options: GeneratePrimeOptions): {
   add: ArrayBufferView;
@@ -339,11 +344,11 @@ function processGeneratePrimeOptions(options: GeneratePrimeOptions): {
 export function generatePrimeSync(
   size: number,
   options: GeneratePrimeOptions = {}
-) {
+): bigint | ArrayBuffer {
   validateInt32(size, 'size', 1);
   const { safe, bigint, add, rem } = processGeneratePrimeOptions(options);
 
-  let primeBuf = cryptoImpl.randomPrime(size, safe, add, rem);
+  const primeBuf = cryptoImpl.randomPrime(size, safe, add, rem);
   return bigint ? arrayBufferToUnsignedBigInt(primeBuf) : primeBuf;
 }
 
@@ -368,24 +373,26 @@ export function generatePrime(
   }
   validateFunction(callback, 'callback');
 
-  const { safe, bigint, add, rem } = processGeneratePrimeOptions(
-    options as GeneratePrimeOptions
-  );
+  const { safe, bigint, add, rem } = processGeneratePrimeOptions(options);
 
   new Promise<bigint | ArrayBuffer>((res, rej) => {
     try {
       const primeBuf = cryptoImpl.randomPrime(size, safe, add, rem);
       res(bigint ? arrayBufferToUnsignedBigInt(primeBuf) : primeBuf);
     } catch (err) {
-      rej(err);
+      rej(err as Error);
     }
   }).then(
-    (val) => callback!(null, val),
-    (err) => callback!(err)
+    (val: bigint | ArrayBuffer): void => {
+      callback(null, val);
+    },
+    (err: unknown): void => {
+      callback(err as Error);
+    }
   );
 }
 
-function unsignedBigIntToBuffer(bigint: bigint, name: string) {
+function unsignedBigIntToBuffer(bigint: bigint, name: string): Buffer {
   if (bigint < 0) {
     throw new ERR_OUT_OF_RANGE(name, '>= 0', bigint);
   }
@@ -418,7 +425,7 @@ function validateChecks(options: CheckPrimeOptions): number {
 export function checkPrimeSync(
   candidate: PrimeNum,
   options: CheckPrimeOptions = {}
-) {
+): boolean {
   candidate = validateCandidate(candidate);
   validateObject(options, 'options', {});
   const checks = validateChecks(options);
@@ -451,10 +458,14 @@ export function checkPrime(
     try {
       res(cryptoImpl.checkPrimeSync(candidate as ArrayBufferView, checks));
     } catch (err) {
-      rej(err);
+      rej(err as Error);
     }
   }).then(
-    (val) => callback!(null, val),
-    (err) => callback!(err)
+    (val: boolean): void => {
+      callback(null, val);
+    },
+    (err: unknown): void => {
+      callback(err);
+    }
   );
 }
