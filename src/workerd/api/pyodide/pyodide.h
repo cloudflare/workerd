@@ -138,12 +138,17 @@ class PyodideMetadataReader: public jsg::Object {
 
   // Returns the filenames of the files inside of the WorkerBundle that end with the specified
   // file extension.
+  // TODO: Remove this.
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(
       jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
 
   // Returns files inside the WorkerBundle that end with the specified file extension.
   // Usually called to get all the Python source files with a `py` extension.
+  // TODO: Remove this.
   kj::Array<jsg::JsRef<jsg::JsString>> getWorkerFiles(jsg::Lock& js, kj::String ext);
+
+  // Return the list of names to import into a package snapshot.
+  kj::Array<kj::String> getPackageSnapshotImports(jsg::Lock& js);
 
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
 
@@ -191,6 +196,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getRequirements);
     JSG_METHOD(getNames);
     JSG_METHOD(getWorkerFiles);
+    JSG_METHOD(getPackageSnapshotImports);
     JSG_METHOD(getSizes);
     JSG_METHOD(read);
     JSG_METHOD(hasMemorySnapshot);
@@ -316,6 +322,7 @@ class ArtifactBundler: public jsg::Object {
   static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
   // Takes in a list of imported modules and filters them in such a way to avoid local imports and
   // redundant imports in the package snapshot list.
+  // TODO: Remove this
   static kj::Array<kj::String> filterPythonScriptImports(
       kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);
   static kj::Array<kj::String> filterPythonScriptImportsJs(
