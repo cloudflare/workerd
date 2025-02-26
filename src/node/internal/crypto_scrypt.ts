@@ -23,11 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-'use strict';
-
 import { default as cryptoImpl } from 'node-internal:crypto';
 
 import {
@@ -77,7 +72,7 @@ function validateParameters(
   password: ArrayLike,
   salt: ArrayLike,
   keylen: number,
-  options: ScryptOptions
+  options?: ScryptOptions
 ): ValidatedScryptOptions {
   // TODO(soon): Add support for KeyObject input.
   password = getArrayBufferOrView(password, 'password');
@@ -151,7 +146,7 @@ export function scrypt(
   keylen: number,
   options: OptionsOrCallback,
   callback: OptionsOrCallback = defaults
-) {
+): void {
   if (callback === defaults) {
     callback = options;
     options = defaults;
@@ -174,13 +169,15 @@ export function scrypt(
     try {
       res(cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen));
     } catch (err) {
-      rej(err);
+      rej(err as Error);
     }
   }).then(
     (val: ArrayBuffer) => {
       (callback as Callback)(null, Buffer.from(val));
     },
-    (err) => (callback as Callback)(err)
+    (err: unknown) => {
+      (callback as Callback)(err as Error);
+    }
   );
 }
 
