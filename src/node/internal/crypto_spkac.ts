@@ -23,38 +23,34 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { default as cryptoImpl } from 'node-internal:crypto';
-import { StringLike, Buffer } from 'node-internal:internal_buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 
 import { getArrayBufferOrView } from 'node-internal:crypto_util';
 
-type ArrayLike = cryptoImpl.ArrayLike;
-
-export function verifySpkac(spkac: StringLike | ArrayLike, encoding?: string) {
-  return cryptoImpl.verifySpkac(
-    getArrayBufferOrView(spkac as any, 'spkac', encoding)
-  );
+export function verifySpkac(
+  spkac: Buffer | ArrayBuffer | ArrayBufferView | string,
+  encoding?: string
+): boolean {
+  return cryptoImpl.verifySpkac(getArrayBufferOrView(spkac, 'spkac', encoding));
 }
 
 export function exportPublicKey(
-  spkac: StringLike | ArrayLike,
+  spkac: Buffer | ArrayBuffer | ArrayBufferView | string,
   encoding?: string
-) {
+): Buffer {
   const ret = cryptoImpl.exportPublicKey(
-    getArrayBufferOrView(spkac as any, 'spkac', encoding)
+    getArrayBufferOrView(spkac, 'spkac', encoding)
   );
   return ret ? Buffer.from(ret) : Buffer.alloc(0);
 }
 
 export function exportChallenge(
-  spkac: StringLike | ArrayLike,
+  spkac: Buffer | ArrayBuffer | ArrayBufferView | string,
   encoding?: string
-) {
+): Buffer {
   const ret = cryptoImpl.exportChallenge(
-    getArrayBufferOrView(spkac as any, 'spkac', encoding)
+    getArrayBufferOrView(spkac, 'spkac', encoding)
   );
   return ret ? Buffer.from(ret) : Buffer.alloc(0);
 }
@@ -65,10 +61,23 @@ export function exportChallenge(
 // deprecated, however, as the method implementations do not
 // rely on any object state.
 
+export declare class Certificate {
+  public constructor();
+  public verifySpkac: typeof verifySpkac;
+  public exportPublicKey: typeof exportPublicKey;
+  public exportChallenge: typeof exportChallenge;
+  public static verifySpkac: typeof verifySpkac;
+  public static exportPublicKey: typeof exportPublicKey;
+  public static exportChallenge: typeof exportChallenge;
+}
+
 // For backwards compatibility reasons, this cannot be converted into a
 // ES6 Class.
-export function Certificate(this: any) {
-  if (!(this instanceof Certificate)) return new (Certificate as any)();
+export function Certificate(this: unknown): Certificate {
+  if (!(this instanceof Certificate)) {
+    return new Certificate();
+  }
+  return this;
 }
 
 Certificate.prototype.verifySpkac = verifySpkac;
