@@ -89,7 +89,7 @@ const TIMEOUT_MAX = 2 ** 31 - 1;
 
 // ======================================================================================
 
-type SocketOptions = {
+export type SocketOptions = {
   timeout?: number;
   writable?: boolean;
   readable?: boolean;
@@ -111,45 +111,57 @@ type SocketOptions = {
 
 import type {
   IpcSocketConnectOpts,
-  Socket as SocketType,
   SocketConnectOpts,
   TcpSocketConnectOpts,
   AddressInfo,
+  Socket as SocketType,
 } from 'node:net';
 
-type SocketClass = SocketType & {
-  timeout: number;
-  connecting: boolean;
-  _aborted: boolean;
-  _hadError: boolean;
-  _parent: null | SocketClass;
-  _host: null | string;
-  _peername: null | string;
-  _getsockname():
+export function BlockList(): void {
+  throw new Error('BlockList is not implemented');
+}
+
+export function SocketAddress(): void {
+  throw new Error('SocketAddress is not implemented');
+}
+
+export function Server(): void {
+  throw new Error('Server is not implemented');
+}
+
+declare class SocketImpl extends SocketType {
+  public timeout: number;
+  public connecting: boolean;
+  public _aborted: boolean;
+  public _hadError: boolean;
+  public _parent: null | SocketImpl;
+  public _host: null | string;
+  public _peername: null | string;
+  public _getsockname():
     | {}
     | {
         address?: string;
         port?: number;
         family?: string;
       };
-  [kLastWriteQueueSize]: number | null | undefined;
-  [kTimeout]: SocketClass | null | undefined;
-  [kBuffer]: null | boolean | Uint8Array;
-  [kBufferCb]:
+  public [kLastWriteQueueSize]: number | null | undefined;
+  public [kTimeout]: SocketImpl | null | undefined;
+  public [kBuffer]: null | boolean | Uint8Array;
+  public [kBufferCb]:
     | null
     | undefined
     | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
-  [kBufferGen]: null | (() => undefined | Uint8Array);
-  [kSocketInfo]: null | {
+  public [kBufferGen]: null | (() => undefined | Uint8Array);
+  public [kSocketInfo]: null | {
     address?: string;
     port?: number;
     family?: number | string;
     remoteAddress?: Record<string, unknown>;
   };
-  [kBytesRead]: number;
-  [kBytesWritten]: number;
-  _closeAfterHandlingError: boolean;
-  _handle: null | {
+  public [kBytesRead]: number;
+  public [kBytesWritten]: number;
+  public _closeAfterHandlingError: boolean;
+  public _handle: null | {
     writeQueueSize?: number;
     lastWriteQueueSize?: number;
     reading?: boolean;
@@ -165,45 +177,29 @@ type SocketClass = SocketType & {
       write(data: string | ArrayBufferView): Promise<void>;
     };
   };
-  _sockname?: null | AddressInfo;
-  _onTimeout(): void;
-  _unrefTimer(): void;
-  _writeGeneric(
+  public _sockname?: null | AddressInfo;
+  public _onTimeout(): void;
+  public _unrefTimer(): void;
+  public _writeGeneric(
     writev: boolean,
     data: { chunk: string | ArrayBufferView; encoding: string }[],
     encoding: string,
     cb: (err?: Error) => void
   ): void;
-  _final(cb: (err?: Error) => void): void;
-  _read(n: number): void;
-  _reset(): void;
-  _getpeername(): Record<string, unknown>;
-  _writableState: null | unknown[];
+  public _final(cb: (err?: Error) => void): void;
+  public _read(n: number): void;
+  public _reset(): void;
+  public _getpeername(): Record<string, unknown>;
+  public _writableState: null | unknown[];
 
-  new (): SocketClass;
-  prototype: SocketClass;
-};
-
-export function BlockList(): void {
-  throw new Error('BlockList is not implemented');
+  public constructor(options?: SocketOptions);
 }
 
-export function SocketAddress(): void {
-  throw new Error('SocketAddress is not implemented');
-}
+export const Socket = SocketImpl;
 
-export function Server(): void {
-  throw new Error('Server is not implemented');
-}
-
-export const Socket = function Socket(
-  this: SocketClass,
-  options?: SocketOptions
-) {
-  if (!(this instanceof Socket)) {
-    // @ts-expect-error TS7009 Required due to types
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return new Socket(options);
+function SocketImpl(this: unknown, options?: SocketOptions): SocketImpl {
+  if (!(this instanceof SocketImpl)) {
+    return new SocketImpl(options);
   }
 
   if (options?.objectMode) {
@@ -319,19 +315,21 @@ export const Socket = function Socket(
     this[kBufferGen] = (): Uint8Array => new Uint8Array(4096);
     this[kBufferCb] = undefined;
   }
-} as unknown as SocketClass;
 
-Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
-Object.setPrototypeOf(Socket, Duplex);
+  return this;
+}
 
-Socket.prototype._unrefTimer = function _unrefTimer(
-  this: SocketClass | null
+Object.setPrototypeOf(SocketImpl.prototype, Duplex.prototype);
+Object.setPrototypeOf(SocketImpl, Duplex);
+
+SocketImpl.prototype._unrefTimer = function _unrefTimer(
+  this: SocketImpl | null
 ): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s = this; s != null; s = s._parent) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = (this as SocketClass).setTimeout(
+      s[kTimeout] = (this as SocketImpl).setTimeout(
         s.timeout,
         s._onTimeout.bind(s)
       );
@@ -339,11 +337,11 @@ Socket.prototype._unrefTimer = function _unrefTimer(
   }
 };
 
-Socket.prototype.setTimeout = function (
-  this: SocketClass,
+SocketImpl.prototype.setTimeout = function (
+  this: SocketImpl,
   msecs: number,
   callback?: () => void
-): SocketClass {
+): SocketImpl {
   if (this.destroyed) return this;
 
   this.timeout = msecs;
@@ -368,7 +366,7 @@ Socket.prototype.setTimeout = function (
   return this;
 };
 
-Socket.prototype._onTimeout = function (this: SocketClass): void {
+SocketImpl.prototype._onTimeout = function (this: SocketImpl): void {
   const handle = this._handle;
   const lastWriteQueueSize = this[kLastWriteQueueSize] as number;
   if (lastWriteQueueSize > 0 && handle) {
@@ -384,8 +382,8 @@ Socket.prototype._onTimeout = function (this: SocketClass): void {
   this.emit('timeout');
 };
 
-Socket.prototype._getpeername = function (
-  this: SocketClass
+SocketImpl.prototype._getpeername = function (
+  this: SocketImpl
 ): Record<string, unknown> {
   if (this._handle == null) {
     return {};
@@ -395,7 +393,9 @@ Socket.prototype._getpeername = function (
   }
 };
 
-Socket.prototype._getsockname = function (this: SocketClass): AddressInfo | {} {
+SocketImpl.prototype._getsockname = function (
+  this: SocketImpl
+): AddressInfo | {} {
   if (this._handle == null) {
     return {};
   }
@@ -407,7 +407,7 @@ Socket.prototype._getsockname = function (this: SocketClass): AddressInfo | {} {
   return this._sockname;
 };
 
-Socket.prototype.address = function (this: SocketClass): {} | AddressInfo {
+SocketImpl.prototype.address = function (this: SocketImpl): {} | AddressInfo {
   if (this.destroyed) return {};
   return this._getsockname();
 };
@@ -415,8 +415,8 @@ Socket.prototype.address = function (this: SocketClass): {} | AddressInfo {
 // ======================================================================================
 // Writable side ...
 
-Socket.prototype._writeGeneric = function (
-  this: SocketClass,
+SocketImpl.prototype._writeGeneric = function (
+  this: SocketImpl,
   writev: boolean,
   data: { chunk: string | ArrayBufferView; encoding: string }[],
   encoding: string,
@@ -529,16 +529,16 @@ Socket.prototype._writeGeneric = function (
   }
 };
 
-Socket.prototype._writev = function (
-  this: SocketClass,
+SocketImpl.prototype._writev = function (
+  this: SocketImpl,
   chunks: { chunk: string | ArrayBufferView; encoding: string }[],
   cb: () => void
 ): void {
   this._writeGeneric(true, chunks, '', cb);
 };
 
-Socket.prototype._write = function (
-  this: SocketClass,
+SocketImpl.prototype._write = function (
+  this: SocketImpl,
   data: { chunk: string | ArrayBufferView; encoding: string }[],
   encoding: string,
   cb: (err?: Error) => void
@@ -546,8 +546,8 @@ Socket.prototype._write = function (
   this._writeGeneric(false, data, encoding, cb);
 };
 
-Socket.prototype._final = function (
-  this: SocketClass,
+SocketImpl.prototype._final = function (
+  this: SocketImpl,
   cb: (err?: Error) => void
 ): void {
   if (this.connecting) {
@@ -574,12 +574,12 @@ Socket.prototype._final = function (
 };
 
 // @ts-expect-error TS2322 No easy way to enable this.
-Socket.prototype.end = function (
-  this: SocketClass,
+SocketImpl.prototype.end = function (
+  this: SocketImpl,
   data: string | Uint8Array,
   encoding?: NodeJS.BufferEncoding,
   cb?: () => void
-): SocketClass {
+): SocketImpl {
   Duplex.prototype.end.call(this, data, encoding, cb);
   return this;
 };
@@ -587,22 +587,22 @@ Socket.prototype.end = function (
 // ======================================================================================
 // Readable side
 
-Socket.prototype.pause = function (this: SocketClass): SocketClass {
+SocketImpl.prototype.pause = function (this: SocketImpl): SocketImpl {
   if (this.destroyed) return this;
   // If the read loop is already running, setting reading to false
   // will interrupt it after the current read completes (if any)
   if (this._handle) this._handle.reading = false;
-  return Duplex.prototype.pause.call(this) as unknown as SocketClass;
+  return Duplex.prototype.pause.call(this) as unknown as SocketImpl;
 };
 
-Socket.prototype.resume = function (this: SocketClass): SocketClass {
+SocketImpl.prototype.resume = function (this: SocketImpl): SocketImpl {
   if (this.destroyed) return this;
   maybeStartReading(this);
-  return Duplex.prototype.resume.call(this) as unknown as SocketClass;
+  return Duplex.prototype.resume.call(this) as unknown as SocketImpl;
 };
 
-Socket.prototype.read = function (
-  this: SocketClass,
+SocketImpl.prototype.read = function (
+  this: SocketImpl,
   n: number
 ): ReturnType<typeof Duplex.prototype.read> {
   if (this.destroyed) return;
@@ -611,7 +611,7 @@ Socket.prototype.read = function (
   return Duplex.prototype.read.call(this, n);
 };
 
-Socket.prototype._read = function (this: SocketClass, n: number): void {
+SocketImpl.prototype._read = function (this: SocketImpl, n: number): void {
   if (this.connecting || !this._handle) {
     this.once('connect', () => {
       this._read(n);
@@ -624,11 +624,11 @@ Socket.prototype._read = function (this: SocketClass, n: number): void {
 // ======================================================================================
 // Destroy and reset
 
-Socket.prototype._reset = function (this: SocketClass): SocketClass {
+SocketImpl.prototype._reset = function (this: SocketImpl): SocketImpl {
   return this.destroy();
 };
 
-Socket.prototype.resetAndDestroy = function (this: SocketClass): SocketClass {
+SocketImpl.prototype.resetAndDestroy = function (this: SocketImpl): SocketImpl {
   // In Node.js, the resetAndDestroy method is used to "[close] the TCP connection by
   // sending an RST packet and destroy the stream. If this TCP socket is in connecting
   // status, it will send an RST packet and destroy this TCP socket once it is connected.
@@ -653,7 +653,7 @@ Socket.prototype.resetAndDestroy = function (this: SocketClass): SocketClass {
   return this;
 };
 
-Socket.prototype.destroySoon = function (this: SocketClass): void {
+SocketImpl.prototype.destroySoon = function (this: SocketImpl): void {
   if (this.destroyed) return;
   if (this.writable) {
     this.end();
@@ -666,8 +666,8 @@ Socket.prototype.destroySoon = function (this: SocketClass): void {
   }
 };
 
-Socket.prototype._destroy = function (
-  this: SocketClass,
+SocketImpl.prototype._destroy = function (
+  this: SocketImpl,
   exception: Error,
   cb: (err?: Error) => void
 ): void {
@@ -693,10 +693,10 @@ Socket.prototype._destroy = function (
 // ======================================================================================
 // Connection
 
-Socket.prototype.connect = function (
-  this: SocketClass,
+SocketImpl.prototype.connect = function (
+  this: SocketImpl,
   ...args: unknown[]
-): SocketClass {
+): SocketImpl {
   if (this.connecting) {
     throw new ERR_SOCKET_CONNECTING();
   }
@@ -730,9 +730,9 @@ Socket.prototype.connect = function (
     throw new ERR_MISSING_ARGS(['options', 'port', 'path']);
   }
 
-  if (this.write !== Socket.prototype.write) {
+  if (this.write !== SocketImpl.prototype.write) {
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    this.write = Socket.prototype.write;
+    this.write = SocketImpl.prototype.write;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -758,20 +758,20 @@ Socket.prototype.connect = function (
 // ======================================================================================
 // Socket methods that are not no-ops or nominal impls
 
-Socket.prototype.setNoDelay = function (
-  this: SocketClass,
+SocketImpl.prototype.setNoDelay = function (
+  this: SocketImpl,
   _enable?: boolean
-): SocketClass {
+): SocketImpl {
   // Ignore this for now.
   // Cloudflare connect() does not support this.
   return this;
 };
 
-Socket.prototype.setKeepAlive = function (
-  this: SocketClass,
+SocketImpl.prototype.setKeepAlive = function (
+  this: SocketImpl,
   _enable?: boolean,
   _initialDelay?: number
-): SocketClass {
+): SocketImpl {
   // Ignore this for now.
   // This is used by services like mySQL.
   // TODO(soon): Investigate supporting this.
@@ -779,27 +779,27 @@ Socket.prototype.setKeepAlive = function (
 };
 
 // @ts-expect-error TS2322 Intentionally no-op
-Socket.prototype.ref = function (this: SocketClass): void {
+SocketImpl.prototype.ref = function (this: SocketImpl): void {
   // Intentional no-op
 };
 
 // @ts-expect-error TS2322 Intentionally no-op
-Socket.prototype.unref = function (this: SocketClass): void {
+SocketImpl.prototype.unref = function (this: SocketImpl): void {
   // Intentional no-op
 };
 
-Object.defineProperties(Socket.prototype, {
+Object.defineProperties(SocketImpl.prototype, {
   _connecting: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
-    get(this: SocketClass): boolean {
+    get(this: SocketImpl): boolean {
       return this.connecting;
     },
   },
   pending: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
-    get(this: SocketClass): boolean {
+    get(this: SocketImpl): boolean {
       return !this._handle || this.connecting;
     },
     configurable: true,
@@ -807,7 +807,7 @@ Object.defineProperties(Socket.prototype, {
   readyState: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
-    get(this: SocketClass): string {
+    get(this: SocketImpl): string {
       if (this.connecting) {
         return 'opening';
       } else if (this.readable && this.writable) {
@@ -825,14 +825,14 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): number {
+    get(this: SocketImpl): number {
       return this._writableState?.length ?? 0;
     },
   },
   bufferSize: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
-    get(this: SocketClass): number | undefined {
+    get(this: SocketImpl): number | undefined {
       if (this._handle) {
         return this.writableLength;
       }
@@ -842,7 +842,7 @@ Object.defineProperties(Socket.prototype, {
   [kUpdateTimer]: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
-    get(this: SocketClass): VoidFunction {
+    get(this: SocketImpl): VoidFunction {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       return this._unrefTimer;
     },
@@ -852,7 +852,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): number {
+    get(this: SocketImpl): number {
       return this._handle ? this._handle.bytesRead : this[kBytesRead];
     },
   },
@@ -861,7 +861,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): number {
+    get(this: SocketImpl): number {
       const flushed =
         this._handle != null ? this._handle.bytesWritten : this[kBytesWritten];
       const pending =
@@ -874,7 +874,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): unknown {
+    get(this: SocketImpl): unknown {
       return this._getpeername().address;
     },
   },
@@ -883,7 +883,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): unknown {
+    get(this: SocketImpl): unknown {
       return this._getpeername().family;
     },
   },
@@ -892,7 +892,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): unknown {
+    get(this: SocketImpl): unknown {
       return this._getpeername().port;
     },
   },
@@ -910,7 +910,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): number {
+    get(this: SocketImpl): number {
       return 0;
     },
   },
@@ -919,7 +919,7 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: SocketClass): string {
+    get(this: SocketImpl): string {
       return 'IPv4';
     },
   },
@@ -929,7 +929,7 @@ Object.defineProperties(Socket.prototype, {
 // Helper/utility methods
 
 function cleanupAfterDestroy(
-  socket: SocketClass,
+  socket: SocketImpl,
   cb: (err?: Error) => void,
   error?: Error
 ): void {
@@ -948,7 +948,7 @@ function cleanupAfterDestroy(
 }
 
 function initializeConnection(
-  socket: SocketClass,
+  socket: SocketImpl,
   options: TcpSocketConnectOpts
 ): void {
   // options.localAddress, options.localPort, and options.family are ignored.
@@ -1081,7 +1081,7 @@ function initializeConnection(
   continueConnection(host, port, addressType);
 }
 
-function onConnectionOpened(this: SocketClass): void {
+function onConnectionOpened(this: SocketImpl): void {
   try {
     // The info.remoteAddress property is going to give the
     // address in the form of a string like `${host}:{port}`. We can choose
@@ -1100,12 +1100,12 @@ function onConnectionOpened(this: SocketClass): void {
   }
 }
 
-function onConnectionClosed(this: SocketClass): void {
+function onConnectionClosed(this: SocketImpl): void {
   if (this[kTimeout] != null) clearTimeout(this[kTimeout] as unknown as number);
   // TODO(later): What else should we do here? Anything?
 }
 
-async function startRead(socket: SocketClass): Promise<void> {
+async function startRead(socket: SocketImpl): Promise<void> {
   if (!socket._handle) return;
   const reader = socket._handle.reader;
   try {
@@ -1189,7 +1189,7 @@ async function startRead(socket: SocketClass): Promise<void> {
   }
 }
 
-function maybeStartReading(socket: SocketClass): void {
+function maybeStartReading(socket: SocketImpl): void {
   if (
     socket[kBuffer] &&
     !socket.connecting &&
@@ -1202,7 +1202,7 @@ function maybeStartReading(socket: SocketClass): void {
 }
 
 function writeAfterFIN(
-  this: SocketClass,
+  this: SocketImpl,
   chunk: Uint8Array | string,
   encoding?: NodeJS.BufferEncoding,
   cb?: (err?: Error) => void
@@ -1224,7 +1224,7 @@ function writeAfterFIN(
   return false;
 }
 
-function onReadableStreamEnd(this: SocketClass): void {
+function onReadableStreamEnd(this: SocketImpl): void {
   if (!this.allowHalfOpen) {
     // @ts-expect-error TS2554 Required due to @types/node
     this.write = writeAfterFIN;
@@ -1294,7 +1294,7 @@ function normalizeArgs(args: unknown[]): unknown[] {
 }
 
 function addClientAbortSignalOption(
-  self: SocketClass,
+  self: SocketImpl,
   options: { signal?: AbortSignal }
 ): void {
   validateAbortSignal(options.signal, 'options.signal');
@@ -1349,11 +1349,10 @@ function addAbortListener(
 // ======================================================================================
 // The rest of the exports
 
-export function connect(...args: unknown[]): SocketClass {
+export function connect(...args: unknown[]): SocketImpl {
   const normalized = normalizeArgs(args);
   const options = normalized[0] as SocketOptions;
-  // @ts-expect-error TS7009 Required for type usage
-  const socket: SocketClass = new Socket(options);
+  const socket: SocketImpl = new SocketImpl(options);
   if (options.timeout) {
     socket.setTimeout(options.timeout);
   }
@@ -1412,9 +1411,9 @@ export function isIPv6(input: unknown): boolean {
 export default {
   BlockList,
   SocketAddress,
-  Stream: Socket,
+  Stream: SocketImpl,
   Server,
-  Socket,
+  Socket: SocketImpl,
   connect,
   createConnection,
   createServer,
