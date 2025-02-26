@@ -10,12 +10,30 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/io/features.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
+
+class EnvModule final: public jsg::Object {
+ public:
+  EnvModule() = default;
+  EnvModule(jsg::Lock&, const jsg::Url&) {}
+
+  kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js);
+
+  // Arranges to propagate the given newEnv in the async context.
+  jsg::JsRef<jsg::JsValue> withEnv(
+      jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsRef<jsg::JsValue>()> fn);
+
+  JSG_RESOURCE_TYPE(EnvModule) {
+    JSG_METHOD(getCurrent);
+    JSG_METHOD(withEnv);
+  }
+};
 
 template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
@@ -30,6 +48,8 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerSocketsModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerRpcModules(registry, featureFlags);
+  registry.template addBuiltinModule<EnvModule>(
+      "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 template <class TypeWrapper>
@@ -58,6 +78,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
         jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+    builtinsBuilder.addObject<EnvModule, TypeWrapper>("cloudflare-internal:env"_url);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }

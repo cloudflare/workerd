@@ -242,7 +242,7 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
 }
 
 jsg::JsObject UtilModule::getEnvObject(jsg::Lock& js) {
-  return js.getEnv(true);
+  return js.getProcessEnv(true);
 }
 
 namespace {
