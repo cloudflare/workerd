@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { default as cryptoImpl } from 'node-internal:crypto';
 type ArrayLike = cryptoImpl.ArrayLike;
 
@@ -70,9 +67,21 @@ interface _kState {
   [kFinalized]: boolean;
 }
 
-interface Hash extends Transform {
-  [kHandle]: cryptoImpl.HashHandle;
-  [kState]: _kState;
+declare class Hash extends Transform {
+  public [kHandle]: cryptoImpl.HashHandle;
+  public [kState]: _kState;
+
+  public constructor(
+    algorithm: string | cryptoImpl.HashHandle,
+    options?: HashOptions
+  );
+
+  public copy(options?: HashOptions): Hash;
+  public update(
+    data: string | Buffer | ArrayBufferView,
+    encoding?: string
+  ): Hash | Hmac;
+  public digest(outputEncoding?: string): Buffer | string;
 }
 
 // These helper functions are needed because the constructors can
@@ -81,12 +90,14 @@ export function createHash(algorithm: string, options?: HashOptions): Hash {
   return new Hash(algorithm, options);
 }
 
-let Hash = function (
-  this: Hash,
+function Hash(
+  this: unknown,
   algorithm: string | cryptoImpl.HashHandle,
   options?: HashOptions
 ): Hash {
-  if (!(this instanceof Hash)) return new Hash(algorithm, options);
+  if (!(this instanceof Hash)) {
+    return new Hash(algorithm, options);
+  }
 
   const xofLen = typeof options === 'object' ? options.outputLength : undefined;
   if (xofLen !== undefined) validateUint32(xofLen, 'options.outputLength');
@@ -102,9 +113,7 @@ let Hash = function (
 
   Transform.call(this, options);
   return this;
-} as any as {
-  new (algorithm: string | cryptoImpl.HashHandle, options?: HashOptions): Hash;
-};
+}
 
 Object.setPrototypeOf(Hash.prototype, Transform.prototype);
 Object.setPrototypeOf(Hash, Transform);
@@ -183,20 +192,31 @@ Hash.prototype.digest = function (
 
 ///////////////////////////
 
-interface Hmac extends Transform {
-  [kHandle]: cryptoImpl.HmacHandle;
-  [kState]: _kState;
+declare class Hmac extends Transform {
+  public [kHandle]: cryptoImpl.HmacHandle;
+  public [kState]: _kState;
+  public constructor(
+    hmac: string,
+    key: ArrayLike | KeyObject | CryptoKey,
+    options?: TransformOptions
+  );
+  public copy(options?: HashOptions): Hash;
+  public update(
+    data: string | Buffer | ArrayBufferView,
+    encoding?: string
+  ): Hash | Hmac;
+  public digest(outputEncoding?: string): Buffer | string;
 }
 
 export function createHmac(
   hmac: string,
-  key: ArrayLike | KeyObject | CryptoKey,
+  key: CryptoKey,
   options?: TransformOptions
 ): Hmac {
   return new Hmac(hmac, key, options);
 }
 
-let Hmac = function (
+function Hmac(
   this: Hmac,
   hmac: string,
   key: CryptoKey,
@@ -247,17 +267,11 @@ let Hmac = function (
   };
   Transform.call(this, options);
   return this;
-} as any as {
-  new (
-    hmac: string,
-    key: ArrayLike | KeyObject | CryptoKey,
-    options?: TransformOptions
-  ): Hmac;
-};
-
+}
 Object.setPrototypeOf(Hmac.prototype, Transform.prototype);
 Object.setPrototypeOf(Hmac, Transform);
 
+// eslint-disable-next-line @typescript-eslint/unbound-method
 Hmac.prototype.update = Hash.prototype.update;
 
 Hmac.prototype.digest = function (
@@ -281,7 +295,9 @@ Hmac.prototype.digest = function (
   }
 };
 
+// eslint-disable-next-line @typescript-eslint/unbound-method
 Hmac.prototype._flush = Hash.prototype._flush;
+// eslint-disable-next-line @typescript-eslint/unbound-method
 Hmac.prototype._transform = Hash.prototype._transform;
 
 export { Hash, Hmac };

@@ -46,7 +46,7 @@ export const kHandle = Symbol('kHandle');
 export const kFinalized = Symbol('kFinalized');
 export const kState = Symbol('kFinalized');
 
-export function getStringOption(options: any, key: string) {
+export function getStringOption(options: any, key: string): string {
   let value;
   if (options && (value = options[key]) != null)
     validateString(value, `options.${key}`);
