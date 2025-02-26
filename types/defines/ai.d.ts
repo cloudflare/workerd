@@ -100,7 +100,12 @@ export declare abstract class BaseAiTextEmbeddings {
   postProcessedOutputs: AiTextEmbeddingsOutput;
 }
 export type RoleScopedChatInput = {
-  role: "user" | "assistant" | "system" | "tool" | (string & NonNullable<unknown>);
+  role:
+    | "user"
+    | "assistant"
+    | "system"
+    | "tool"
+    | (string & NonNullable<unknown>);
   content: string;
   name?: string;
 };
@@ -139,6 +144,10 @@ export type AiTextGenerationFunctionsInput = {
   name: string;
   code: string;
 };
+export type AiTextGenerationResponseFormat = {
+  type: string;
+  json_schema?: any;
+};
 export type AiTextGenerationInput = {
   prompt?: string;
   raw?: boolean;
@@ -152,7 +161,11 @@ export type AiTextGenerationInput = {
   frequency_penalty?: number;
   presence_penalty?: number;
   messages?: RoleScopedChatInput[];
-  tools?: AiTextGenerationToolInput[] | AiTextGenerationToolLegacyInput[] | (object & NonNullable<unknown>);
+  response_format?: AiTextGenerationResponseFormat;
+  tools?:
+    | AiTextGenerationToolInput[]
+    | AiTextGenerationToolLegacyInput[]
+    | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
 export type AiTextGenerationOutput =
@@ -670,6 +683,73 @@ export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
   inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
 }
+export interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender must alternate between 'user' and 'assistant'.
+     */
+    role: "user" | "assistant";
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Dictate the output format of the generated response.
+   */
+  response_format?: {
+    /**
+     * Set to json_object to process and output generated text as JSON.
+     */
+    type?: string;
+  };
+}
+export interface Ai_Cf_Meta_Llama_Guard_3_8B_Output {
+  response?:
+    | string
+    | {
+        /**
+         * Whether the conversation is safe or not.
+         */
+        safe?: boolean;
+        /**
+         * A list of what hazard categories predicted for the conversation, if the conversation is deemed unsafe.
+         */
+        categories?: string[];
+      };
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+}
+export declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
+  inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -732,6 +812,7 @@ export interface AiModels {
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
+  "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
 }
 export type AiOptions = {
   gateway?: GatewayOptions;
@@ -740,42 +821,46 @@ export type AiOptions = {
   extraHeaders?: object;
 };
 export type AiModelsSearchParams = {
-  author?: string,
-  hide_experimental?: boolean
-  page?: number
-  per_page?: number
-  search?: string
-  source?: number
-  task?: string
-}
+  author?: string;
+  hide_experimental?: boolean;
+  page?: number;
+  per_page?: number;
+  search?: string;
+  source?: number;
+  task?: string;
+};
 export type AiModelsSearchObject = {
-  id: string,
-  source: number,
-  name: string,
-  description: string,
+  id: string;
+  source: number;
+  name: string;
+  description: string;
   task: {
-    id: string,
-    name: string,
-    description: string,
-  },
-  tags: string[],
+    id: string;
+    name: string;
+    description: string;
+  };
+  tags: string[];
   properties: {
-    property_id: string,
-    value: string,
-  }[],
-}
+    property_id: string;
+    value: string;
+  }[];
+};
 export interface InferenceUpstreamError extends Error {}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
-export declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
+export declare abstract class Ai<
+  AiModelList extends AiModelListType = AiModels,
+> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
   run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
-    options?: Options
+    options?: Options,
   ): Promise<
-    Options extends { returnRawResponse: true }
+    Options extends {
+      returnRawResponse: true;
+    }
       ? Response
       : AiModelList[Name]["postProcessedOutputs"]
   >;
