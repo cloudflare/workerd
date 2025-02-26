@@ -2316,8 +2316,6 @@ class Lock {
     return context;
   }
 
-  virtual const V8System& getV8System() = 0;
-
   // Get the current Lock for the given V8 isolate. Segfaults if the isolate is not locked.
   //
   // This method is intended to be used in callbacks from V8 that pass an isolate pointer but
@@ -2704,6 +2702,7 @@ class Lock {
 
   void runMicrotasks();
   void terminateExecution();
+  void pumpMessageLoop();
 
   // Logs and reports the error to tail workers (if called within an request),
   // the inspector (if attached), or to KJ_LOG(Info).
@@ -2729,6 +2728,9 @@ class Lock {
   // Resolve a module namespace from the given specifier.
   // This variation includes modules from the worker bundle.
   kj::Maybe<JsObject> resolveModule(kj::StringPtr specifier);
+
+protected:
+  virtual const V8System& getV8System() = 0;
 
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into

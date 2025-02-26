@@ -75,8 +75,6 @@ class WorkerdPlatform final: public v8::Platform {
     return inner.GetTracingController();
   }
 
-  auto& getInner() { return inner; }
-
  private:
   v8::Platform& inner;
 };

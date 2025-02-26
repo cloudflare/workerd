@@ -381,9 +381,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // True if there is a current IoContext for the thread (current() will not throw).
   static bool hasCurrent();
 
-  // True if there is no IoContext for this thread
-  static bool isCurrentNull();
-
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
 
@@ -832,6 +829,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   IoChannelFactory& getIoChannelFactory() {
     return *getCurrentIncomingRequest().ioChannelFactory;
   }
+
+  void pumpMessageLoop();
 
  private:
   ThreadContext& thread;
