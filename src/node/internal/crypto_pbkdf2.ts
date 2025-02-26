@@ -23,14 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-'use strict';
-
 import { default as cryptoImpl } from 'node-internal:crypto';
-type ArrayLike = cryptoImpl.ArrayLike;
-export { ArrayLike };
 
 import { Buffer } from 'node-internal:internal_buffer';
 
@@ -41,6 +34,9 @@ import {
 } from 'node-internal:validators';
 
 import { getArrayBufferOrView } from 'node-internal:crypto_util';
+
+type ArrayLike = cryptoImpl.ArrayLike;
+export { ArrayLike };
 
 export function pbkdf2Sync(
   password: ArrayLike,
@@ -93,11 +89,11 @@ export function pbkdf2(
     try {
       res(cryptoImpl.getPbkdf(password, salt, iterations, keylen, digest));
     } catch (err) {
-      rej(err);
+      rej(err as Error);
     }
   }).then(
-    (val) => callback(null, Buffer.from(val)),
-    (err) => callback(err)
+    (val: ArrayBuffer): unknown => callback(null, Buffer.from(val)),
+    (err: unknown): unknown => callback(err as Error)
   );
 }
 
@@ -107,7 +103,13 @@ function check(
   iterations: number,
   keylen: number,
   digest: string
-): any {
+): {
+  password: ArrayLike | ArrayBufferView;
+  salt: ArrayLike | ArrayBufferView;
+  iterations: number;
+  keylen: number;
+  digest: string;
+} {
   validateString(digest, 'digest');
 
   password = getArrayBufferOrView(password, 'password');
