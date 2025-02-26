@@ -9,6 +9,8 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#include "libplatform/libplatform.h"
+
 namespace workerd::jsg {
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
@@ -268,6 +270,11 @@ void Lock::runMicrotasks() {
 
 void Lock::terminateExecution() {
   v8Isolate->TerminateExecution();
+}
+
+void Lock::pumpMessageLoop() {
+  auto& system = const_cast<jsg::V8System&>(this->getV8System());
+  while (v8::platform::PumpMessageLoop(&system.getDefaultPlatform(), v8Isolate)) {}
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {

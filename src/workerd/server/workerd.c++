@@ -14,7 +14,6 @@
 #include <workerd/server/workerd-meta.capnp.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
-#include <v8-debug.h>
 
 #include <fcntl.h>
 #include <openssl/rand.h>

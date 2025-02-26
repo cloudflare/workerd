@@ -56,7 +56,7 @@ class V8System {
   explicit V8System(v8::Platform& platform);
 
   // Use a possibly-custom v8::Platform implementation, and apply flags.
-  explicit V8System(v8::Platform& platform, kj::ArrayPtr<const kj::StringPtr> flags, v8::Platform* defuaultPlatformPtr = nullptr);
+  explicit V8System(v8::Platform& platform, kj::ArrayPtr<const kj::StringPtr> flags, v8::Platform* defaultPlatformPtr = nullptr);
 
   ~V8System() noexcept(false);
 
@@ -528,10 +528,6 @@ class Isolate: public IsolateBase {
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
     KJ_DISALLOW_AS_COROUTINE_PARAM;
 
-    virtual const V8System& getV8System() override {
-      return jsgIsolate.getV8System();
-    }
-
     // Creates a `TypeHandler` for the given type. You can use this to convert between the type
     // and V8 handles, as well as to allocate instances of the type on the V8 heap (if it is
     // a resource type).
@@ -700,6 +696,10 @@ class Isolate: public IsolateBase {
         jsgIsolate.reportError(
             *this, value.toString(*this), value, JsMessage::create(*this, value));
       }
+    }
+  protected:
+    virtual const V8System& getV8System() override {
+      return jsgIsolate.getV8System();
     }
 
     // Sets an env value that will be expressed on the process.env
