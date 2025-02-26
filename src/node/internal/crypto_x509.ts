@@ -23,10 +23,11 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-import { default as cryptoImpl, CheckOptions } from 'node-internal:crypto';
+import {
+  default as cryptoImpl,
+  CheckOptions,
+  type KeyObjectType,
+} from 'node-internal:crypto';
 
 import {
   validateString,
@@ -47,8 +48,10 @@ import { kHandle } from 'node-internal:crypto_util';
 
 import { PublicKeyObject, PrivateKeyObject } from 'node-internal:crypto_keys';
 
-function translatePeerCertificate(c: any) {
-  if (!c) return null;
+function translatePeerCertificate(c?: X509Certificate): X509Certificate | null {
+  if (!c) {
+    return null;
+  }
 
   if (c.issuerCertificate != null && c.issuerCertificate !== c) {
     c.issuerCertificate = translatePeerCertificate(c.issuerCertificate);
@@ -59,23 +62,33 @@ function translatePeerCertificate(c: any) {
 
     // XXX: More key validation?
     const regex = /([^\n:]*):([^\n]*)(?:\n|$)/g;
-    regex[Symbol.replace](info, (_: any, key: any, val: any): any => {
-      if (val.charCodeAt(0) === 0x22) {
-        // The translatePeerCertificate function is only
-        // used on internally created legacy certificate
-        // objects, and any value that contains a quote
-        // will always be a valid JSON string literal,
-        // so this should never throw.
-        val = JSON.parse(val);
+    regex[Symbol.replace](
+      // @ts-expect-error TS2769 Investigate this.
+      info,
+      (_: unknown, key: string, val: string): void => {
+        let parsedVal: unknown = val;
+        if (val.charCodeAt(0) === 0x22) {
+          // The translatePeerCertificate function is only
+          // used on internally created legacy certificate
+          // objects, and any value that contains a quote
+          // will always be a valid JSON string literal,
+          // so this should never throw.
+          parsedVal = JSON.parse(val) as unknown;
+        }
+        if (c.infoAccess) {
+          if (key in c.infoAccess) {
+            (c.infoAccess[key] as unknown[]).push(parsedVal);
+          } else {
+            c.infoAccess[key] = [parsedVal];
+          }
+        }
       }
-      if (key in c.infoAccess) c.infoAccess[key].push(val);
-      else c.infoAccess[key] = [val];
-    });
+    );
   }
   return c;
 }
 
-function checkOptions(options?: CheckOptions) {
+function checkOptions(options?: CheckOptions): void {
   if (options == null) return;
   validateObject(options, 'options');
   if (options.multiLabelWildcards !== undefined)
@@ -95,9 +108,9 @@ function checkOptions(options?: CheckOptions) {
 
 export class X509Certificate {
   #handle?: cryptoImpl.X509Certificate = undefined;
-  #state = new Map();
+  #state = new Map<string, unknown>();
 
-  constructor(
+  public constructor(
     buffer: ArrayBufferView | ArrayBuffer | cryptoImpl.X509Certificate | string
   ) {
     if (buffer instanceof cryptoImpl.X509Certificate) {
@@ -117,130 +130,144 @@ export class X509Certificate {
     this.#handle = cryptoImpl.X509Certificate.parse(buffer);
   }
 
-  get subject() {
-    let value = this.#state.get('subject');
+  public get subject(): string | undefined {
+    let value = this.#state.get('subject') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.subject;
+      value = this.#handle?.subject;
       this.#state.set('subject', value);
     }
     return value ?? undefined;
   }
 
-  get subjectAltName() {
-    let value = this.#state.get('subjectAltName');
+  public get subjectAltName(): string | undefined {
+    let value = this.#state.get('subjectAltName') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.subjectAltName;
+      value = this.#handle?.subjectAltName;
       this.#state.set('subjectAltName', value);
     }
     return value ?? undefined;
   }
 
-  get issuer() {
-    let value = this.#state.get('issuer');
+  public get issuer(): string | undefined {
+    let value = this.#state.get('issuer') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.issuer;
+      value = this.#handle?.issuer;
       this.#state.set('issuer', value);
     }
     return value ?? undefined;
   }
 
-  get issuerCertificate() {
-    let value = this.#state.get('issuerCertificate');
+  public get issuerCertificate(): X509Certificate | undefined {
+    let value = this.#state.get('issuerCertificate') as
+      | X509Certificate
+      | undefined;
     if (value === undefined) {
-      const cert = this.#handle!.issuerCert;
+      const cert = this.#handle?.issuerCert;
       if (cert) value = new X509Certificate(cert);
       this.#state.set('issuerCertificate', value);
     }
     return value ?? undefined;
   }
 
-  get infoAccess() {
-    let value = this.#state.get('infoAccess');
+  public set issuerCertificate(value: unknown) {
+    this.#state.set('issuerCertificate', value);
+  }
+
+  public get infoAccess(): Record<string, unknown> | undefined {
+    let value = this.#state.get('infoAccess') as
+      | Record<string, unknown>
+      | undefined;
     if (value === undefined) {
-      value = this.#handle!.infoAccess;
+      value = this.#handle?.infoAccess as unknown as
+        | Record<string, unknown>
+        | undefined;
       this.#state.set('infoAccess', value);
     }
     return value ?? undefined;
   }
 
-  get validFrom() {
-    let value = this.#state.get('validFrom');
+  public set infoAccess(value: unknown) {
+    this.#state.set('infoAccess', value);
+  }
+
+  public get validFrom(): string | undefined {
+    let value = this.#state.get('validFrom') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.validFrom;
+      value = this.#handle?.validFrom;
       this.#state.set('validFrom', value);
     }
     return value ?? undefined;
   }
 
-  get validTo() {
-    let value = this.#state.get('validTo');
+  public get validTo(): string | undefined {
+    let value = this.#state.get('validTo') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.validTo;
+      value = this.#handle?.validTo;
       this.#state.set('validTo', value);
     }
     return value ?? undefined;
   }
 
-  get fingerprint() {
-    let value = this.#state.get('fingerprint');
+  public get fingerprint(): string | undefined {
+    let value = this.#state.get('fingerprint') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.fingerprint;
+      value = this.#handle?.fingerprint;
       this.#state.set('fingerprint', value);
     }
     return value ?? undefined;
   }
 
-  get fingerprint256() {
-    let value = this.#state.get('fingerprint256');
+  public get fingerprint256(): string | undefined {
+    let value = this.#state.get('fingerprint256') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.fingerprint256;
+      value = this.#handle?.fingerprint256;
       this.#state.set('fingerprint256', value);
     }
     return value ?? undefined;
   }
 
-  get fingerprint512() {
-    let value = this.#state.get('fingerprint512');
+  public get fingerprint512(): string | undefined {
+    let value = this.#state.get('fingerprint512') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.fingerprint512;
+      value = this.#handle?.fingerprint512;
       this.#state.set('fingerprint512', value);
     }
     return value ?? undefined;
   }
 
-  get keyUsage() {
-    let value = this.#state.get('keyUsage');
+  public get keyUsage(): string[] | undefined {
+    let value = this.#state.get('keyUsage') as string[] | undefined;
     if (value === undefined) {
-      value = this.#handle!.keyUsage;
+      value = this.#handle?.keyUsage;
       this.#state.set('keyUsage', value);
     }
     return value ?? undefined;
   }
 
-  get serialNumber() {
-    let value = this.#state.get('serialNumber');
+  public get serialNumber(): string | undefined {
+    let value = this.#state.get('serialNumber') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.serialNumber;
+      value = this.#handle?.serialNumber;
       if (value != null) value = value.toUpperCase();
       this.#state.set('serialNumber', value);
     }
     return value ?? undefined;
   }
 
-  get raw() {
-    let value = this.#state.get('raw');
+  public get raw(): ArrayBuffer | undefined {
+    let value = this.#state.get('raw') as ArrayBuffer | undefined;
     if (value === undefined) {
-      value = this.#handle!.raw;
+      value = this.#handle?.raw;
       if (value != null) value = Buffer.from(value);
       this.#state.set('raw', value);
     }
     return value ?? undefined;
   }
 
-  get publicKey() {
-    let value = this.#state.get('publicKey');
+  public get publicKey(): KeyObjectType | undefined {
+    let value = this.#state.get('publicKey') as KeyObjectType | undefined;
     if (value === undefined) {
-      const inner = this.#handle!.publicKey;
+      const inner = this.#handle?.publicKey;
       if (inner !== undefined) {
         value = PublicKeyObject.from(inner);
         this.#state.set('publicKey', value);
@@ -249,10 +276,10 @@ export class X509Certificate {
     return value ?? undefined;
   }
 
-  toString() {
-    let value = this.#state.get('pem');
+  public toString(): string | undefined {
+    let value = this.#state.get('pem') as string | undefined;
     if (value === undefined) {
-      value = this.#handle!.pem;
+      value = this.#handle?.pem;
       this.#state.set('pem', value);
     }
     return value ?? undefined;
@@ -260,32 +287,32 @@ export class X509Certificate {
 
   // There's no standardized JSON encoding for X509 certs so we
   // fallback to providing the PEM encoding as a string.
-  toJSON() {
+  public toJSON(): string | undefined {
     return this.toString();
   }
 
-  get ca() {
-    let value = this.#state.get('ca');
+  public get ca(): boolean {
+    let value = this.#state.get('ca') as boolean | undefined | null;
     if (value === undefined) {
-      value = this.#handle!.isCA;
+      value = this.#handle?.isCA;
       this.#state.set('ca', value);
     }
     return value ?? false;
   }
 
-  checkHost(name: string, options?: CheckOptions) {
+  public checkHost(name: string, options?: CheckOptions): string | undefined {
     validateString(name, 'name');
     checkOptions(options);
-    return this.#handle!.checkHost(name, options) ?? undefined;
+    return this.#handle?.checkHost(name, options) ?? undefined;
   }
 
-  checkEmail(email: string, options?: CheckOptions) {
+  public checkEmail(email: string, options?: CheckOptions): string | undefined {
     validateString(email, 'email');
     checkOptions(options);
-    return this.#handle!.checkEmail(email, options) ?? undefined;
+    return this.#handle?.checkEmail(email, options) ?? undefined;
   }
 
-  checkIP(ip: string, options?: CheckOptions) {
+  public checkIP(ip: string, options?: CheckOptions): string | undefined {
     validateString(ip, 'ip');
     checkOptions(options);
     // The options argument is currently undocumented since none of the options
@@ -293,30 +320,30 @@ export class X509Certificate {
     // the options argument in case OpenSSL adds flags in the future that do
     // affect the behavior of X509_check_ip. This ensures that no invalid values
     // are passed as the second argument in the meantime.
-    return this.#handle!.checkIp(ip, options) ?? undefined;
+    return this.#handle?.checkIp(ip, options) ?? undefined;
   }
 
-  checkIssued(otherCert: X509Certificate) {
+  public checkIssued(otherCert: X509Certificate): boolean | undefined {
     if (!(otherCert instanceof X509Certificate))
       throw new ERR_INVALID_ARG_TYPE('otherCert', 'X509Certificate', otherCert);
-    return this.#handle!.checkIssued(otherCert.#handle!) ?? undefined;
+    return this.#handle?.checkIssued(otherCert.#handle!) ?? undefined;
   }
 
-  checkPrivateKey(pkey: PrivateKeyObject) {
+  public checkPrivateKey(pkey: PrivateKeyObject): boolean | undefined {
     if (!(pkey instanceof PrivateKeyObject))
       throw new ERR_INVALID_ARG_TYPE('pkey', 'KeyObject', pkey);
     if (pkey.type !== 'private') throw new ERR_INVALID_ARG_VALUE('pkey', pkey);
-    return this.#handle!.checkPrivateKey(pkey[kHandle]) ?? undefined;
+    return this.#handle?.checkPrivateKey(pkey[kHandle]) ?? undefined;
   }
 
-  verify(pkey: PublicKeyObject) {
+  public verify(pkey: PublicKeyObject): boolean {
     if (!(pkey instanceof PublicKeyObject))
       throw new ERR_INVALID_ARG_TYPE('pkey', 'KeyObject', pkey);
     if (pkey.type !== 'public') throw new ERR_INVALID_ARG_VALUE('pkey', pkey);
-    return this.#handle!.verify(pkey[kHandle]);
+    return this.#handle?.verify(pkey[kHandle]) ?? false;
   }
 
-  toLegacyObject() {
+  public toLegacyObject(): unknown {
     let value = this.#state.get('legacy');
     if (value === undefined) {
       let {
@@ -339,7 +366,7 @@ export class X509Certificate {
         serialNumber,
         ext_key_usage,
         raw,
-      } = this.#handle!.toLegacyObject() as any;
+      } = this.#handle?.toLegacyObject() ?? {};
       if (raw != null) raw = Buffer.from(raw);
       if (pubkey != null) pubkey = Buffer.from(pubkey);
       if (modulus != null) modulus = modulus.toUpperCase();
