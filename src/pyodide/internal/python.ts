@@ -64,6 +64,21 @@ function prepareWasmLinearMemory(Module: Module): void {
   adjustSysPath(Module);
 }
 
+function maybeAddVendorDirectoryToPath(pyodide: Pyodide) {
+  pyodide.runPython(`
+    def _tmp():
+      import sys
+      from pathlib import Path
+
+      VENDOR_PATH = "/session/metadata/vendor"
+      if Path(VENDOR_PATH).is_dir():
+        sys.path.append(VENDOR_PATH)
+
+    _tmp()
+    del _tmp
+  `);
+}
+
 export async function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
@@ -110,6 +125,6 @@ export async function loadPyodide(
     (msg) => console.log(msg),
     (msg) => console.error(msg)
   );
-
+  maybeAddVendorDirectoryToPath(pyodide);
   return pyodide;
 }

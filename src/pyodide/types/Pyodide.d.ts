@@ -8,6 +8,7 @@ interface PyModule {
 
 interface Pyodide {
   _module: Module;
+  runPython: (code: string) => void;
   registerJsModule: (handle: string, mod: object) => void;
   pyimport: (moduleName: string) => PyModule;
   FS: FS;
