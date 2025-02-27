@@ -68,7 +68,6 @@ py_wd_test("seek-metadatafs")
                 "tblib",
                 "pydantic_core",
                 "requests",
-                "urllib3",
             ],
         },
     )
