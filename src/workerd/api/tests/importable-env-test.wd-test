@@ -6,7 +6,8 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker", esModule = embed "importable-env-test.js"),
-          (name = "child", esModule = "export {env} from 'cloudflare:workers'"),
+          (name = "child", esModule = "import {env as live} from 'cloudflare:workers'; export const env = {...live};"),
+          (name = "child2", esModule = "import {env as live} from 'cloudflare:workers'; export const env = {...live};"),
         ],
         compatibilityDate = "2025-02-01",
         compatibilityFlags = [
@@ -15,6 +16,14 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           (name = "FOO", text = "BAR"),
+          (name = "CACHE", memoryCache = (
+            id = "abc123",
+            limits = (
+              maxKeys = 10,
+              maxValueSize = 1024,
+              maxTotalValueSize = 1024,
+            ),
+          ))
         ],
       )
     ),

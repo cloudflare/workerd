@@ -19,6 +19,11 @@ export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;
 // is intentional.
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+export function withEnv(newEnv: any, fn: () => any): any {
+  return innerEnv.withEnv(newEnv, fn);
+}
+
 // A proxy for the workers env/bindings. The proxy is io-context
 // aware in that it will only return values when there is an active
 // IoContext. Mutations to the env via this proxy propagate to the

@@ -38,8 +38,15 @@ class EnvModule final: public jsg::Object {
     return kj::none;
   }
 
+  jsg::JsValue withEnv(jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsValue()> fn) {
+    auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
+    jsg::AsyncContextFrame::StorageScope storage(js, key, kj::mv(newEnv));
+    return fn(js);
+  }
+
   JSG_RESOURCE_TYPE(EnvModule) {
     JSG_METHOD(getCurrent);
+    JSG_METHOD(withEnv);
   }
 };
 
