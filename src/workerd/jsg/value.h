@@ -416,8 +416,10 @@ class StringWrapper {
   static constexpr const char* getName(kj::String*) {
     return "string";
   }
-  // TODO(someday): This conflates USVStrings, which must have valid code points, with DOMStrings,
-  //   which needn't have valid code points.
+
+  // TODO(someday): The conversion to kj::String doesn't explicitly consider the distinction
+  // between DOMString (~ WTF-8; could contain invalid code points) and USVString (invalid code
+  // points are always replaced with U+FFFD). Code should make an explict choice between the two.
 
   static constexpr const char* getName(kj::ArrayPtr<const char>*) {
     return "string";
@@ -430,6 +432,14 @@ class StringWrapper {
     return "ByteString";
   }
   // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+
+  static constexpr const char* getName(USVString*) {
+    return "USVString";
+  }
+
+  static constexpr const char* getName(DOMString*) {
+    return "DOMString";
+  }
 
   v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -452,6 +462,18 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const USVString& value) {
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const DOMString& value) {
     return wrap(context, creator, value.asPtr());
   }
 
@@ -490,6 +512,29 @@ class StringWrapper {
     }
 
     return kj::mv(result);
+  }
+
+  kj::Maybe<USVString> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      USVString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Isolate* isolate = context->GetIsolate();
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
+    str->WriteUtf8V2(isolate, buf.begin(), buf.size(),
+        v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
+    return USVString(kj::mv(buf));
+  }
+
+  kj::Maybe<DOMString> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      DOMString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Isolate* isolate = context->GetIsolate();
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
+    str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+    return DOMString(kj::mv(buf));
   }
 };
 
@@ -1134,7 +1179,8 @@ class NonCoercibleWrapper {
       NonCoercible<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto& wrapper = static_cast<TypeWrapper&>(*this);
-    if constexpr (kj::isSameType<kj::String, T>()) {
+    if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
+        kj::isSameType<jsg::DOMString, T>()) {
       if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
         return NonCoercible<T>{

@@ -1051,6 +1051,31 @@ class ByteString: public kj::String {
   //   We default the enum to NONE so that ByteString(kj::str(otherHeader)) works as expected.
 };
 
+// A USVString has the exact same representation as a kj::String, but we guarantee that it meets
+// the WHATWG definition of a "scalar value string". Particularly, a USVString will never contain
+// invalid surrogate characters. A USVString should be used when implementing a Web API that
+// requires this behaviour.
+// See <https://infra.spec.whatwg.org/#scalar-value-string>
+class USVString: public kj::String {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
+};
+
+// A DOMString has the exact same representation as a kj::String, but may contain WTF-8 encoded
+// data like unpaired surrogate characters, that are not strictly valid in UTF-8. A DOMString
+// should be used when implementing a Web API that requires this behaviour, or when an explicit
+// decision is made to accept potentially invalid strings.
+class DOMString: public kj::String {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  explicit DOMString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
+};
+
 // A Dict<V, K> in C++ corresponds to a JavaScript object that is being used as a string -> value
 // map, where all the values are of type T.
 //
@@ -2007,8 +2032,8 @@ class PropertyReflection {
 };
 
 template <typename T>
-concept CoercibleType =
-    kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>();
+concept CoercibleType = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>() ||
+    kj::isSameType<DOMString, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>();
 // When updating this list, be sure to keep the corresponding checks in the NonCoercibleWrapper
 // class in value.h updated as well.
 
@@ -2020,7 +2045,7 @@ concept CoercibleType =
 //
 // Here, T can be only one of several types that support coercion:
 //
-// * kj::String (value must be a string)
+// * kj::String, jsg::USVString, jsg::DOMString (value must be a string)
 // * bool (value must be a boolean)
 // * double (value must be a number)
 //
