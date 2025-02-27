@@ -3,7 +3,11 @@ import type { Buffer } from 'node-internal:internal_buffer';
 declare namespace sockets {
   function connect(
     input: string,
-    options: Record<string, unknown>
+    options: {
+      allowHalfOpen?: boolean | undefined;
+      highWatermark?: number | undefined;
+      secureTransport: 'on' | 'off' | 'starttls';
+    }
   ): {
     opened: Promise<void>;
     closed: Promise<void>;
