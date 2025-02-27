@@ -1,7 +1,7 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.3.415.18"
+VERSION = "13.4.114.14"
 
 INTEGRITY = "sha256-irTC8837o+iRvTVx6YatlscLn3+nJcr5RumtHCMUhW0="
 
