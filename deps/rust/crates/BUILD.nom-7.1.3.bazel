@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "itertools",
+    name = "nom",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,9 +29,8 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "use_alloc",
-        "use_std",
+        "alloc",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
@@ -40,13 +39,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=itertools",
+        "crate-name=nom",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.13.0",
+    version = "7.1.3",
     deps = [
-        "@crates_vendor__either-1.14.0//:either",
+        "@crates_vendor__memchr-2.7.4//:memchr",
+        "@crates_vendor__minimal-lexical-0.2.1//:minimal_lexical",
     ],
 )

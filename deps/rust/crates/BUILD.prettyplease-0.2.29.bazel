@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "libc",
+    name = "prettyplease",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,9 +30,7 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "extra_traits",
-        "std",
+        "verbatim",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -41,14 +39,16 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=prettyplease",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.169",
+    version = "0.2.29",
     deps = [
-        "@crates_vendor__libc-0.2.169//:build_script_build",
+        "@crates_vendor__prettyplease-0.2.29//:build_script_build",
+        "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
+        "@crates_vendor__syn-2.0.98//:syn",
     ],
 )
 
@@ -72,9 +72,7 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "default",
-        "extra_traits",
-        "std",
+        "verbatim",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -91,18 +89,19 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "libc",
+    links = "prettyplease02",
+    pkg_name = "prettyplease",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=prettyplease",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.169",
+    version = "0.2.29",
     visibility = ["//visibility:private"],
 )
 

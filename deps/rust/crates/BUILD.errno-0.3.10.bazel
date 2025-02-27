@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "itertools",
+    name = "errno",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,9 +29,7 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "use_alloc",
-        "use_std",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
@@ -40,13 +38,28 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=itertools",
+        "crate-name=errno",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.13.0",
-    deps = [
-        "@crates_vendor__either-1.14.0//:either",
-    ],
+    version = "0.3.10",
+    deps = select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": [
+            "@crates_vendor__libc-0.2.170//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.170//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-apple-darwin": [
+            "@crates_vendor__libc-0.2.170//:libc",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(windows)
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.170//:libc",  # cfg(unix)
+        ],
+        "//conditions:default": [],
+    }),
 )

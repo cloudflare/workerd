@@ -28,6 +28,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": [
+            "std",  # aarch64-apple-darwin
+        ],
+        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
+            "std",  # aarch64-unknown-linux-gnu
+        ],
+        "@rules_rust//rust/platform:x86_64-apple-darwin": [
+            "std",  # x86_64-apple-darwin
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
+            "std",  # x86_64-unknown-linux-gnu
+        ],
+        "//conditions:default": [],
+    }),
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
