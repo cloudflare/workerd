@@ -94,6 +94,35 @@ kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getWorkerFiles(
   return builder.releaseAsArray();
 }
 
+kj::Array<kj::String> _getWorkerFiles(
+    kj::ArrayPtr<kj::String> names, kj::ArrayPtr<kj::Array<kj::byte>> contents) {
+  auto builder = kj::Vector<kj::String>(names.size());
+  for (auto i: kj::zeroTo(names.size())) {
+    if (names[i].endsWith(".py")) {
+      builder.add(kj::str(contents[i]));
+    }
+  }
+  return builder.releaseAsArray();
+}
+
+kj::HashSet<kj::String> _getNames(kj::ArrayPtr<kj::String> names) {
+  auto result = kj::HashSet<kj::String>();
+  for (auto& name: names) {
+    if (!name.endsWith(".py")) {
+      continue;
+    }
+    result.insert(kj::str(name));
+  }
+  return result;
+}
+
+kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports(jsg::Lock& js) {
+  auto workerFiles = _getWorkerFiles(this->names, this->contents);
+  auto imports = ArtifactBundler::parsePythonScriptImports(kj::mv(workerFiles));
+  auto names = _getNames(this->names);
+  return ArtifactBundler::filterPythonScriptImports(kj::mv(names), kj::mv(imports));
+}
+
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
   auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->requirements.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
