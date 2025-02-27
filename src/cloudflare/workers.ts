@@ -20,7 +20,7 @@ export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export function withEnv(newEnv: any, fn: () => any): any {
+export function withEnv(newEnv: unknown, fn: () => unknown): unknown {
   return innerEnv.withEnv(newEnv, fn);
 }
 
