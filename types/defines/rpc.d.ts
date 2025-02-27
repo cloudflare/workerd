@@ -86,6 +86,7 @@ declare namespace Rpc {
     : T extends Set<infer V> ? Set<Stubify<V>>
     : T extends Array<infer V> ? Array<Stubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Stubify<V>>
+    : T extends Rpc.Serializable<T> ? T
     // When using "unknown" instead of "any", interfaces are not stubified.
     : T extends { [key: string | number]: any } ? { [K in keyof T]: Stubify<T[K]> }
     : T;
@@ -100,6 +101,7 @@ declare namespace Rpc {
     : T extends Set<infer V> ? Set<Unstubify<V>>
     : T extends Array<infer V> ? Array<Unstubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Unstubify<V>>
+    : T extends Rpc.Serializable<T> ? T
     : T extends { [key: string | number]: unknown } ? { [K in keyof T]: Unstubify<T[K]> }
     : T;
   type UnstubifyAll<A extends any[]> = { [I in keyof A]: Unstubify<A[I]> };
@@ -243,8 +245,15 @@ declare module "cloudflare:workers" {
   };
 
   export abstract class WorkflowStep {
-    do<T extends Rpc.Serializable<T>>(name: string, callback: () => Promise<T>): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      callback: () => Promise<T>
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: () => Promise<T>
+    ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
   }
@@ -261,7 +270,10 @@ declare module "cloudflare:workers" {
 
     constructor(ctx: ExecutionContext, env: Env);
 
-    run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
+    run(
+      event: Readonly<WorkflowEvent<T>>,
+      step: WorkflowStep
+    ): Promise<unknown>;
   }
 
   export const env: Cloudflare.Env;
