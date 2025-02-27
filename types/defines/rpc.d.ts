@@ -245,15 +245,8 @@ declare module "cloudflare:workers" {
   };
 
   export abstract class WorkflowStep {
-    do<T extends Rpc.Serializable<T>>(
-      name: string,
-      callback: () => Promise<T>
-    ): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(
-      name: string,
-      config: WorkflowStepConfig,
-      callback: () => Promise<T>
-    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(name: string, callback: () => Promise<T>): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
   }
@@ -270,10 +263,7 @@ declare module "cloudflare:workers" {
 
     constructor(ctx: ExecutionContext, env: Env);
 
-    run(
-      event: Readonly<WorkflowEvent<T>>,
-      step: WorkflowStep
-    ): Promise<unknown>;
+    run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
   }
 
   export const env: Cloudflare.Env;
