@@ -20,7 +20,6 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
@@ -231,7 +230,6 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
@@ -347,12 +345,10 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.tail) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
       auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_SOME(f, h.trace) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
       auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
       traceEvent->waitUntil(kj::mv(promise));
@@ -387,7 +383,6 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.scheduled) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       auto promise = f(
           lock, jsg::alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx());
       event->waitUntil(kj::mv(promise));
@@ -433,8 +428,6 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       }
 
       auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
-
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(handler.env.addRef(lock));
 
       return context
           .run([exportedHandler, &context, timeout, retryCount, &alarm,
@@ -580,7 +573,6 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   auto& testHandler =
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
-  auto envStorageScope = lock.maybeStoreEnvAsyncContext(eh.env.addRef(lock));
   return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
@@ -619,7 +611,6 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketMessage) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), kj::mv(message)), eventTimeoutMs));
     }
@@ -644,7 +635,6 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(HibernatableSocket
       kj::mv(releasePackage.tags), api::WebSocket::HibernatableReleaseState::CLOSE);
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketClose) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), close.code, kj::mv(close.reason), close.wasClean),
           eventTimeoutMs));
@@ -672,7 +662,6 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(kj::Exception e,
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketError) {
-      auto envStorageScope = lock.maybeStoreEnvAsyncContext(h.env.addRef(lock));
       event->waitUntil(setHibernatableEventTimeout(
           handler(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e))), eventTimeoutMs));
     }

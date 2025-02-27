@@ -7,6 +7,9 @@ import {
 } from 'node:assert';
 import { env, withEnv } from 'cloudflare:workers';
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+const check = new AsyncLocalStorage();
+
 // The env is populated at the top level scope.
 strictEqual(env.FOO, 'BAR');
 
@@ -60,5 +63,39 @@ export const importableEnv = {
 
     // Original env is unmodified
     strictEqual(env.BAZ, undefined);
+
+    // Verify that JSRPC calls appropriately see the environment.
+    const remote = await argEnv.RPC.rpcTarget(undefined);
+    await Promise.all([remote.test(), remote.test2()]);
+  },
+
+  get fetch() {
+    // It's a weird edge case, yes, but let's make sure that the env is
+    // available in getters when extracting the default handlers.
+    strictEqual(env.FOO, 'BAR');
+    return async () => {};
+  },
+
+  // Verifies that the environment is available and correctly propagated
+  // in custom events like jsrpc.
+  rpcTarget() {
+    strictEqual(env.FOO, 'BAR');
+    return withEnv({ FOO: 'BAZ' }, () => {
+      // Arguably, returned RPC targets should probably automatically capture
+      // the current async context and propagate that on subsequent calls,
+      // but they currently do not... therefore we have to manually capture
+      // the async context and be sure to enter it ourselves below.
+      const runInAsyncContext = AsyncLocalStorage.snapshot();
+      return {
+        test() {
+          // This one runs with the modified env
+          runInAsyncContext(() => strictEqual(env.FOO, 'BAZ'));
+        },
+        test2() {
+          // This one runs with the original env
+          strictEqual(env.FOO, 'BAR');
+        },
+      };
+    });
   },
 };

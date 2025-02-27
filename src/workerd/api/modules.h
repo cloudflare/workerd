@@ -13,7 +13,6 @@
 #include <workerd/io/features.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
-#include <workerd/jsg/setup.h>
 
 #include <cloudflare/cloudflare.capnp.h>
 
@@ -21,24 +20,9 @@ namespace workerd::api {
 
 class EnvModule final: public jsg::Object {
  public:
-  kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js) {
-    auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
-    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
-      KJ_IF_SOME(value, frame.get(key)) {
-        auto handle = value.getHandle(js);
-        if (handle->IsObject()) {
-          return jsg::JsObject(handle.As<v8::Object>());
-        }
-      }
-    }
-    return kj::none;
-  }
+  kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js);
 
-  jsg::JsValue withEnv(jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsValue()> fn) {
-    auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
-    jsg::AsyncContextFrame::StorageScope storage(js, key, kj::mv(newEnv));
-    return fn(js);
-  }
+  jsg::JsValue withEnv(jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsValue()> fn);
 
   JSG_RESOURCE_TYPE(EnvModule) {
     JSG_METHOD(getCurrent);

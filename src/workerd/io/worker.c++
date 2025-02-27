@@ -481,7 +481,6 @@ struct Worker::Impl {
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
 
   // The environment blob to pass to handlers.
-  kj::Maybe<jsg::Value> env;
   kj::Maybe<jsg::Value> ctxExports;
 
   // Note: The default export is given the string name "default", because that's what V8 tells us,
@@ -1629,6 +1628,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             if (script->isModular()) {
               // Use `env` variable.
               bindingsScope = v8::Object::New(lock.v8Isolate);
+              lock.setWorkerEnv(lock.v8Ref(bindingsScope.As<v8::Value>()));
             } else {
               // Use global-scope bindings.
               bindingsScope = context->Global();
@@ -1649,14 +1649,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             SpanBuilder currentUserSpan =
                 spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
 
-            auto envStorageScope =
-                ([&]() -> kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> {
-              if (FeatureFlags::get(js).getDisableImportableEnv()) return kj::none;
-              return kj::heap<jsg::AsyncContextFrame::StorageScope>(js,
-                  jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey(),
-                  js.v8Ref(bindingsScope.As<v8::Value>()));
-            })();
-
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
@@ -1666,7 +1658,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               KJ_CASE_ONEOF(mainModule, kj::Path) {
                 KJ_IF_SOME(ns,
                     tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
-                  impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
                   impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
 
                   auto& api = script->isolate->getApi();
@@ -1995,7 +1986,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     auto handler = kj::heap(cls(js,
         jsg::alloc<api::ExecutionContext>(js,
             jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js)),
-        KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
+        KJ_ASSERT_NONNULL(js.getWorkerEnv())));
 
     // HACK: We set handler.env and handler.ctx to undefined because we already passed the real
     //   env and ctx into the constructor, and we want the handler methods to act like they take
@@ -2038,13 +2029,6 @@ jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
 jsg::AsyncContextFrame::StorageKey& Worker::Lock::getEnvAsyncContextKey() {
   auto& isolate = jsg::IsolateBase::from(getIsolate());
   return isolate.getEnvAsyncContextKey();
-}
-
-kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> Worker::Lock::maybeStoreEnvAsyncContext(
-    jsg::Value env) {
-  if (FeatureFlags::get(*this).getDisableImportableEnv()) return kj::none;
-  return kj::heap<jsg::AsyncContextFrame::StorageScope>(
-      *this, getEnvAsyncContextKey(), kj::mv(env));
 }
 
 bool Worker::Lock::isInspectorEnabled() {
@@ -3502,7 +3486,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
             jsg::JsRef<jsg::JsValue>(
                 js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
             kj::mv(storage), kj::mv(impl->container), containerRunning),
-        KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+        KJ_ASSERT_NONNULL(js.getWorkerEnv()));
 
     // HACK: We set handler.env to undefined because we already passed the real env into the
     //   constructor, and we want the handler methods to act like they take just one parameter.

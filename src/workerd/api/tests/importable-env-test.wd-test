@@ -14,6 +14,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat_v2",
         ],
         bindings = [
+          (name = "RPC", service = ( name = "importable-env-test", entrypoint="importableEnv")),
           (name = "FOO", text = "BAR"),
           (name = "CACHE", memoryCache = (
             id = "abc123",

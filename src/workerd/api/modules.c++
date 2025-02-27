@@ -1,0 +1,36 @@
+#include "modules.h"
+
+#include <workerd/jsg/setup.h>
+
+namespace workerd::api {
+
+kj::Maybe<jsg::JsObject> EnvModule::getCurrent(jsg::Lock& js) {
+  auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    KJ_IF_SOME(value, frame.get(key)) {
+      auto handle = value.getHandle(js);
+      if (handle->IsObject()) {
+        return jsg::JsObject(handle.As<v8::Object>());
+      }
+    }
+  }
+  // If the compat flag is set to disable importable env, then this
+  // will return nothing.
+  if (FeatureFlags::get(js).getDisableImportableEnv()) return kj::none;
+
+  // Otherwise, fallback to provide the stored environment.
+  return js.getWorkerEnv().map([&](const jsg::Value& val) -> jsg::JsObject {
+    auto handle = val.getHandle(js);
+    JSG_REQUIRE(handle->IsObject(), TypeError, "Expected environment to be an object.");
+    return jsg::JsObject(handle.As<v8::Object>());
+  });
+}
+
+jsg::JsValue EnvModule::withEnv(
+    jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsValue()> fn) {
+  auto& key = jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey();
+  jsg::AsyncContextFrame::StorageScope storage(js, key, kj::mv(newEnv));
+  return fn(js);
+}
+
+}  // namespace workerd::api
