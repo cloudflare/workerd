@@ -75,17 +75,9 @@ py_wd_test("seek-metadatafs")
     for python_version, package_version in PYTHON_VERSION_TO_PACKAGES.items()
 ]
 
-py_wd_test(
-    "undefined-handler",
-    # TODO: Requires a new bundle deploy
-    python_flags = ["development"],
-)
+py_wd_test("undefined-handler")
 
-py_wd_test(
-    "vendor_dir",
-    # TODO: Requires a new bundle deploy
-    python_flags = ["development"],
-)
+py_wd_test("vendor_dir")
 
 py_wd_test("dont-snapshot-pyodide")
 
