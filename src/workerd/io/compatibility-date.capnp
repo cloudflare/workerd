@@ -728,9 +728,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $neededByFl;
   # Enables cache settings specified request in cache api cf object to override cache rules. (only for user owned or grey-clouded sites)
 
-  importableEnv @78 :Bool
-      $compatEnableFlag("allow_importable_env")
-      $compatDisableFlag("disallow_importable_env");
+  disableImportableEnv @78 :Bool
+      $compatEnableFlag("disallow_importable_env")
+      $compatDisableFlag("allow_importable_env");
   # When enabled, `import { env } from 'cloudflare:workers'` will provide access
   # the per-request environment/bindings.
 }

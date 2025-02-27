@@ -656,6 +656,8 @@ class Worker::Lock {
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
 
   jsg::AsyncContextFrame::StorageKey& getEnvAsyncContextKey();
+  kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> maybeStoreEnvAsyncContext(
+      jsg::Value env);
 
  private:
   explicit Lock(const Worker& worker, LockType lockType, jsg::V8StackScope&);

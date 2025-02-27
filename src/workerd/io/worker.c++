@@ -1649,9 +1649,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             SpanBuilder currentUserSpan =
                 spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
 
-            jsg::AsyncContextFrame::StorageScope envStorageScope(js,
-                jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey(),
-                js.v8Ref(bindingsScope.As<v8::Value>()));
+            auto envStorageScope =
+                ([&]() -> kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> {
+              if (FeatureFlags::get(js).getDisableImportableEnv()) return kj::none;
+              return kj::heap<jsg::AsyncContextFrame::StorageScope>(js,
+                  jsg::IsolateBase::from(js.v8Isolate).getEnvAsyncContextKey(),
+                  js.v8Ref(bindingsScope.As<v8::Value>()));
+            })();
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
@@ -2034,6 +2038,13 @@ jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
 jsg::AsyncContextFrame::StorageKey& Worker::Lock::getEnvAsyncContextKey() {
   auto& isolate = jsg::IsolateBase::from(getIsolate());
   return isolate.getEnvAsyncContextKey();
+}
+
+kj::Maybe<kj::Own<jsg::AsyncContextFrame::StorageScope>> Worker::Lock::maybeStoreEnvAsyncContext(
+    jsg::Value env) {
+  if (FeatureFlags::get(*this).getDisableImportableEnv()) return kj::none;
+  return kj::heap<jsg::AsyncContextFrame::StorageScope>(
+      *this, getEnvAsyncContextKey(), kj::mv(env));
 }
 
 bool Worker::Lock::isInspectorEnabled() {
