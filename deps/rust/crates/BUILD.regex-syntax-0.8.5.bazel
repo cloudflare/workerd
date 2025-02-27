@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "log",
+    name = "regex_syntax",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "std",
+        "unicode-perl",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,10 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=log",
+        "crate-name=regex-syntax",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.4.25",
+    version = "0.8.5",
 )

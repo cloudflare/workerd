@@ -29,7 +29,15 @@ rust_library(
         ],
     ),
     crate_features = [
+        "alloc",
         "dfa-search",
+        "meta",
+        "nfa-pikevm",
+        "nfa-thompson",
+        "std",
+        "syntax",
+        "unicode-perl",
+        "unicode-word-boundary",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -44,4 +52,7 @@ rust_library(
         "norustfmt",
     ],
     version = "0.4.9",
+    deps = [
+        "@crates_vendor__regex-syntax-0.8.5//:regex_syntax",
+    ],
 )

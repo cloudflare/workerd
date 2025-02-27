@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "smallvec",
+    name = "libloading",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,16 +29,34 @@ rust_library(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2015",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=smallvec",
+        "crate-name=libloading",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.13.2",
+    version = "0.8.6",
+    deps = select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": [
+            "@crates_vendor__cfg-if-1.0.0//:cfg_if",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
+            "@crates_vendor__cfg-if-1.0.0//:cfg_if",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-apple-darwin": [
+            "@crates_vendor__cfg-if-1.0.0//:cfg_if",  # cfg(unix)
+        ],
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-targets-0.52.6//:windows_targets",  # cfg(windows)
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
+            "@crates_vendor__cfg-if-1.0.0//:cfg_if",  # cfg(unix)
+        ],
+        "//conditions:default": [],
+    }),
 )

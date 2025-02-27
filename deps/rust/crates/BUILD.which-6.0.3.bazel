@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "tokio",
+    name = "which",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,20 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "libc",
-        "mio",
-        "net",
-        "rt",
-        "rt-multi-thread",
-        "socket2",
-        "time",
-    ] + select({
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "windows-sys",  # x86_64-pc-windows-msvc
-        ],
-        "//conditions:default": [],
-    }),
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -49,31 +35,34 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=tokio",
+        "crate-name=which",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.43.0",
+    version = "6.0.3",
     deps = [
-        "@crates_vendor__mio-1.0.3//:mio",
-        "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
-        "@crates_vendor__socket2-0.5.8//:socket2",
+        "@crates_vendor__either-1.14.0//:either",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.170//:libc",  # aarch64-apple-darwin
+            "@crates_vendor__home-0.5.11//:home",  # cfg(any(windows, unix, target_os = "redox"))
+            "@crates_vendor__rustix-0.38.44//:rustix",  # cfg(any(unix, target_os = "wasi", target_os = "redox"))
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.170//:libc",  # aarch64-unknown-linux-gnu
+            "@crates_vendor__home-0.5.11//:home",  # cfg(any(windows, unix, target_os = "redox"))
+            "@crates_vendor__rustix-0.38.44//:rustix",  # cfg(any(unix, target_os = "wasi", target_os = "redox"))
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.170//:libc",  # x86_64-apple-darwin
+            "@crates_vendor__home-0.5.11//:home",  # cfg(any(windows, unix, target_os = "redox"))
+            "@crates_vendor__rustix-0.38.44//:rustix",  # cfg(any(unix, target_os = "wasi", target_os = "redox"))
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.52.0//:windows_sys",  # x86_64-pc-windows-msvc
+            "@crates_vendor__home-0.5.11//:home",  # cfg(any(windows, unix, target_os = "redox"))
+            "@crates_vendor__winsafe-0.0.19//:winsafe",  # cfg(windows)
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.170//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__home-0.5.11//:home",  # cfg(any(windows, unix, target_os = "redox"))
+            "@crates_vendor__rustix-0.38.44//:rustix",  # cfg(any(unix, target_os = "wasi", target_os = "redox"))
         ],
         "//conditions:default": [],
     }),

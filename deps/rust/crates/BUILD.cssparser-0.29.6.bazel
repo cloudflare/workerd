@@ -51,7 +51,7 @@ rust_library(
         "@crates_vendor__itoa-1.0.14//:itoa",
         "@crates_vendor__matches-0.1.10//:matches",
         "@crates_vendor__phf-0.10.1//:phf",
-        "@crates_vendor__smallvec-1.13.2//:smallvec",
+        "@crates_vendor__smallvec-1.14.0//:smallvec",
     ],
 )
 

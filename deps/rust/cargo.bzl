@@ -30,4 +30,17 @@ PACKAGES = {
     # tokio is huge, let's enable only features when we actually need them.
     "tokio": crate.spec(version = "1", default_features = False, features = ["net", "rt", "rt-multi-thread", "time"]),
     "tracing": crate.spec(version = "0", default_features = False, features = ["std"]),
+    "v8": crate.spec(version = "134"),
+}
+
+ANNOTATIONS = {
+    "v8": [
+        crate.annotation(
+            build_script_env = {
+                #                "RUSTY_V8_ARCHIVE": "$(location @v8//:v8_noicu)",
+                "RUSTY_V8_ARCHIVE": "v8/libv8_icu.so",
+            },
+            build_script_data = ["@v8//:v8_icu"],
+        ),
+    ],
 }

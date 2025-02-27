@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "itertools",
+    name = "flate2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,9 +29,10 @@ rust_library(
         ],
     ),
     crate_features = [
+        "any_impl",
         "default",
-        "use_alloc",
-        "use_std",
+        "miniz_oxide",
+        "rust_backend",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
@@ -40,13 +41,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=itertools",
+        "crate-name=flate2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.13.0",
+    version = "1.1.0",
     deps = [
-        "@crates_vendor__either-1.14.0//:either",
+        "@crates_vendor__crc32fast-1.4.2//:crc32fast",
+        "@crates_vendor__miniz_oxide-0.8.5//:miniz_oxide",
     ],
 )

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "itertools",
+    name = "regex",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,24 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "use_alloc",
-        "use_std",
+        "std",
+        "unicode-perl",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=itertools",
+        "crate-name=regex",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.13.0",
+    version = "1.11.1",
     deps = [
-        "@crates_vendor__either-1.14.0//:either",
+        "@crates_vendor__regex-automata-0.4.9//:regex_automata",
+        "@crates_vendor__regex-syntax-0.8.5//:regex_syntax",
     ],
 )
