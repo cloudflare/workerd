@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "cxxbridge_flags",
+    name = "either",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,7 +29,7 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
+        "use_std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -38,10 +38,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cxxbridge-flags",
+        "crate-name=either",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.138",
+    version = "1.14.0",
 )

@@ -47,6 +47,6 @@ rust_library(
     ],
     version = "0.13.0",
     deps = [
-        "@crates_vendor__either-1.13.0//:either",
+        "@crates_vendor__either-1.14.0//:either",
     ],
 )

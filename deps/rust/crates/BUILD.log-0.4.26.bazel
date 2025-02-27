@@ -6,12 +6,12 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "cxxbridge_macro",
+rust_library(
+    name = "log",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,23 +30,15 @@ rust_proc_macro(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__rustversion-1.0.19//:rustversion",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cxxbridge-macro",
+        "crate-name=log",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.138",
-    deps = [
-        "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
-        "@crates_vendor__quote-1.0.38//:quote",
-        "@crates_vendor__syn-2.0.98//:syn",
-    ],
+    version = "0.4.26",
 )
