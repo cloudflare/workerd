@@ -92,7 +92,7 @@ class PythonModuleInfo {
   //
   // Package relative imports are ignored.
   static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
-  kj::HashSet<kj::String> getPythonFileNamesSet();
+  kj::HashSet<kj::String> getWorkerModuleSet();
   kj::Array<kj::String> getPythonFileContents();
   static kj::Array<kj::String> filterPythonScriptImports(
       kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);

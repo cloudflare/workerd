@@ -6,7 +6,8 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
-          (name = "vendor/a.py", pythonModule = embed "vendor/a.py")
+          (name = "vendor/a.py", pythonModule = embed "vendor/a.py"),
+          (name = "numpy", pythonRequirement = "")
         ],
         compatibilityDate = "2024-01-15",
         compatibilityFlags = [%PYTHON_FEATURE_FLAGS],

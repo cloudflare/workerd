@@ -219,57 +219,6 @@ kj::HashSet<kj::String> strSet(Params&&... params) {
   return set;
 }
 
-KJ_TEST("Simple pass through") {
-  auto imports = strArray("b", "c");
-  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
-  KJ_REQUIRE(result.size() == 2);
-  KJ_REQUIRE(result[0] == "b");
-  KJ_REQUIRE(result[1] == "c");
-}
-
-KJ_TEST("pyodide and submodules") {
-  auto imports = strArray("pyodide", "pyodide.ffi");
-  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
-  KJ_REQUIRE(result.size() == 0);
-}
-
-KJ_TEST("js and submodules") {
-  auto imports = strArray("js", "js.crypto");
-  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
-  KJ_REQUIRE(result.size() == 0);
-}
-
-KJ_TEST("importlib and submodules") {
-  // importlib and importlib.metadata are imported into the baseline snapshot, but importlib.resources is not.
-  auto imports = strArray("importlib", "importlib.metadata", "importlib.resources");
-  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
-  KJ_REQUIRE(result.size() == 1);
-  KJ_REQUIRE(result[0] == "importlib.resources");
-}
-
-KJ_TEST("Filter worker .py files") {
-  auto workerModules = strSet("b.py", "c.py");
-  auto imports = strArray("b", "c", "d");
-  auto result = PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
-  KJ_REQUIRE(result.size() == 1);
-  KJ_REQUIRE(result[0] == "d");
-}
-
-KJ_TEST("Filter worker module/__init__.py") {
-  auto workerModules = strSet("a/__init__.py", "b/__init__.py", "c/a.py");
-  auto imports = strArray("a", "b", "c");
-  auto result = PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
-  KJ_REQUIRE(result.size() == 1);
-  KJ_REQUIRE(result[0] == "c");
-}
-
-KJ_TEST("Filters out subdir/submodule") {
-  auto workerModules = strSet("subdir/submodule.py");
-  auto imports = strArray("subdir.submodule");
-  auto result = PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
-  KJ_REQUIRE(result.size() == 0);
-}
-
 KJ_TEST("basic test of getPackageSnapshotImports") {
   auto a = pyodide::PythonModuleInfo(strArray("a.py"),
       bytesArray("from js import Response\n"
@@ -293,5 +242,85 @@ KJ_TEST("basic test of getPackageSnapshotImports user module") {
   auto result = a.getPackageSnapshotImports();
   KJ_REQUIRE(result.size() == 0);
 };
+
+kj::Array<kj::String> filterPythonScriptImports(
+    kj::Array<kj::String> names, kj::ArrayPtr<kj::String> imports) {
+  auto contentsBuilder = kj::heapArrayBuilder<kj::Array<kj::byte>>(names.size());
+  for (auto _: kj::zeroTo(names.size())) {
+    (void)_;
+    contentsBuilder.add(kj::Array<kj::byte>(0));
+  }
+  auto modInfo = pyodide::PythonModuleInfo(kj::mv(names), contentsBuilder.finish());
+  auto modSet = modInfo.getWorkerModuleSet();
+  return PythonModuleInfo::filterPythonScriptImports(kj::mv(modSet), kj::mv(imports));
+}
+
+KJ_TEST("Simple pass through") {
+  auto imports = strArray("b", "c");
+  auto result = filterPythonScriptImports({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 2);
+  KJ_REQUIRE(result[0] == "b");
+  KJ_REQUIRE(result[1] == "c");
+}
+
+KJ_TEST("pyodide and submodules") {
+  auto imports = strArray("pyodide", "pyodide.ffi");
+  auto result = filterPythonScriptImports({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("js and submodules") {
+  auto imports = strArray("js", "js.crypto");
+  auto result = filterPythonScriptImports({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("importlib and submodules") {
+  // importlib and importlib.metadata are imported into the baseline snapshot, but importlib.resources is not.
+  auto imports = strArray("importlib", "importlib.metadata", "importlib.resources");
+  auto result = filterPythonScriptImports({}, kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "importlib.resources");
+}
+
+KJ_TEST("Filter worker .py files") {
+  auto workerModules = strArray("b.py", "c.py");
+  auto imports = strArray("b", "c", "d");
+  auto result = filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "d");
+}
+
+KJ_TEST("Filter worker module/__init__.py") {
+  auto workerModules = strArray("a/__init__.py", "b/__init__.py", "c/a.py");
+  auto imports = strArray("a", "b", "c");
+  auto result = filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("Filters out subdir/submodule") {
+  auto workerModules = strArray("subdir/submodule.py");
+  auto imports = strArray("subdir.submodule");
+  auto result = filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 0);
+}
+
+KJ_TEST("Filters out so") {
+  auto workerModules = strArray("a.so", "b.txt");
+  auto imports = strArray("a", "b");
+  auto result = filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "b");
+}
+
+KJ_TEST("Filters out vendor stuff") {
+  auto workerModules =
+      strArray("vendor/a.py", "vendor/package/b.py", "vendor/c.so", "vendor/x.txt");
+  auto imports = strArray("a", "package", "x");
+  auto result = filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "x");
+}
+
 }  // namespace
 }  // namespace workerd::api
