@@ -22,12 +22,14 @@ PATCHES = [
     "0014-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
     "0015-Update-illegal-invocation-error-message-in-v8.patch",
     "0016-Implement-cross-request-context-promise-resolve-hand.patch",
-    "0017-Modify-where-to-look-for-fast_float-dependency.patch",
-    "0018-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0019-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0020-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0021-Enable-V8-shared-linkage.patch",
-    "0022-Fix-macOS-build.patch",
+    "0017-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0018-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0019-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0020-Enable-V8-shared-linkage.patch",
+    "0021-Fix-macOS-build.patch",
+    "0022-Delete-IsolateGroup-in-V8-Dispose.patch",
+    "0023-Reset-code_range_-before-pointer-compression-cage.patch",
+    "0024-Move-tear-down-in-IsolateGroup-Release-into-destruct.patch",
 ]
 
 # V8 and its dependencies
