@@ -13,7 +13,7 @@ KJ_TEST("basic `import` tests") {
   auto files = kj::heapArrayBuilder<kj::String>(2);
   files.add(kj::str("import a\nimport z"));
   files.add(kj::str("import b"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 3);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "z");
@@ -23,7 +23,7 @@ KJ_TEST("basic `import` tests") {
 KJ_TEST("supports whitespace") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import      a\nimport    \n\tz"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "z");
@@ -32,7 +32,7 @@ KJ_TEST("supports whitespace") {
 KJ_TEST("supports windows newlines") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import      a\r\nimport    \r\n\tz"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "z");
@@ -41,7 +41,7 @@ KJ_TEST("supports windows newlines") {
 KJ_TEST("basic `from` test") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("from x import a,b\nfrom z import y"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "x");
   KJ_REQUIRE(result[1] == "z");
@@ -50,7 +50,7 @@ KJ_TEST("basic `from` test") {
 KJ_TEST("ignores indented blocks") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import a\nif True:\n  import x\nimport y"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "y");
@@ -59,7 +59,7 @@ KJ_TEST("ignores indented blocks") {
 KJ_TEST("supports nested imports") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import a.b\nimport z.x.y.i"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "a.b");
   KJ_REQUIRE(result[1] == "z.x.y.i");
@@ -68,7 +68,7 @@ KJ_TEST("supports nested imports") {
 KJ_TEST("nested `from` test") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("from x.y.z import a,b\nfrom z import y"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "x.y.z");
   KJ_REQUIRE(result[1] == "z");
@@ -77,7 +77,7 @@ KJ_TEST("nested `from` test") {
 KJ_TEST("ignores trailing period") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import a.b.\nimport z.x.y.i."));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 0);
 }
 
@@ -86,14 +86,14 @@ KJ_TEST("ignores relative import") {
   // input below.
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import .a.b\nimport ..z.x\nfrom .y import x"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 0);
 }
 
 KJ_TEST("supports commas") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str("import a,b"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "b");
@@ -105,7 +105,7 @@ KJ_TEST("supports backslash") {
   files.add(kj::str("import\\\n q,w"));
   files.add(kj::str("from \\\nx import y"));
   files.add(kj::str("from \\\n   c import y"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 6);
   KJ_REQUIRE(result[0] == "a");
   KJ_REQUIRE(result[1] == "b");
@@ -135,7 +135,7 @@ import b \
   files.add(kj::str("FOO=\"\"\"  \n", R"SCRIPT(import x
 from y import z
 """)SCRIPT"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 0);
 }
 
@@ -151,7 +151,7 @@ BAR="""
 import e
 """
 from t import u)SCRIPT"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "w");
   KJ_REQUIRE(result[1] == "t");
@@ -161,7 +161,7 @@ KJ_TEST("import after string literal") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str(R"SCRIPT(import a
 "import b)SCRIPT"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 1);
   KJ_REQUIRE(result[0] == "a");
 }
@@ -170,7 +170,7 @@ KJ_TEST("import after `i`") {
   auto files = kj::heapArrayBuilder<kj::String>(1);
   files.add(kj::str(R"SCRIPT(import a
 iimport b)SCRIPT"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 1);
   KJ_REQUIRE(result[0] == "a");
 }
@@ -180,7 +180,7 @@ KJ_TEST("langchain import") {
   files.add(kj::str(R"SCRIPT(from js import Response, console, URL
 from langchain.chat_models import ChatOpenAI
 import openai)SCRIPT"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 3);
   KJ_REQUIRE(result[0] == "js");
   KJ_REQUIRE(result[1] == "langchain.chat_models");
@@ -192,11 +192,12 @@ KJ_TEST("quote in multiline string") {
   files.add(kj::str(R"SCRIPT(temp = """
 w["h
 """)SCRIPT"));
-  auto result = pyodide::ArtifactBundler::parsePythonScriptImports(files.finish());
+  auto result = pyodide::PythonModuleInfo::parsePythonScriptImports(files.finish());
   KJ_REQUIRE(result.size() == 0);
 }
 
 using pyodide::ArtifactBundler;
+using pyodide::PythonModuleInfo;
 
 template <typename... Params>
 kj::Array<kj::String> strArray(Params&&... params) {
@@ -208,9 +209,19 @@ kj::Array<kj::Array<kj::byte>> bytesArray(Params&&... params) {
   return kj::arr(kj::heapArray<kj::byte>(kj::str(params).asBytes())...);
 }
 
+template <typename... Params>
+kj::HashSet<kj::String> strSet(Params&&... params) {
+  auto array = strArray(params...);
+  kj::HashSet<kj::String> set;
+  for (auto& str: array) {
+    set.insert(kj::mv(str));
+  }
+  return set;
+}
+
 KJ_TEST("Simple pass through") {
   auto imports = strArray("b", "c");
-  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
   KJ_REQUIRE(result.size() == 2);
   KJ_REQUIRE(result[0] == "b");
   KJ_REQUIRE(result[1] == "c");
@@ -218,47 +229,44 @@ KJ_TEST("Simple pass through") {
 
 KJ_TEST("pyodide and submodules") {
   auto imports = strArray("pyodide", "pyodide.ffi");
-  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
   KJ_REQUIRE(result.size() == 0);
 }
 
 KJ_TEST("js and submodules") {
   auto imports = strArray("js", "js.crypto");
-  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
   KJ_REQUIRE(result.size() == 0);
 }
 
 KJ_TEST("importlib and submodules") {
   // importlib and importlib.metadata are imported into the baseline snapshot, but importlib.resources is not.
   auto imports = strArray("importlib", "importlib.metadata", "importlib.resources");
-  auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports({}, kj::mv(imports));
   KJ_REQUIRE(result.size() == 1);
   KJ_REQUIRE(result[0] == "importlib.resources");
 }
 
 KJ_TEST("Filter worker .py files") {
-  auto workerModules = strArray("b.py", "c.py");
+  auto workerModules = strSet("b.py", "c.py");
   auto imports = strArray("b", "c", "d");
-  auto result =
-      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
   KJ_REQUIRE(result.size() == 1);
   KJ_REQUIRE(result[0] == "d");
 }
 
 KJ_TEST("Filter worker module/__init__.py") {
-  auto workerModules = strArray("a/__init__.py", "b/__init__.py", "c/a.py");
+  auto workerModules = strSet("a/__init__.py", "b/__init__.py", "c/a.py");
   auto imports = strArray("a", "b", "c");
-  auto result =
-      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
   KJ_REQUIRE(result.size() == 1);
   KJ_REQUIRE(result[0] == "c");
 }
 
 KJ_TEST("Filters out subdir/submodule") {
-  auto workerModules = strArray("subdir/submodule.py");
+  auto workerModules = strSet("subdir/submodule.py");
   auto imports = strArray("subdir.submodule");
-  auto result =
-      ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
+  auto result = PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports));
   KJ_REQUIRE(result.size() == 0);
 }
 
