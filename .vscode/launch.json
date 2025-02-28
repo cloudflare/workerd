@@ -306,6 +306,7 @@
         "src/workerd/api/node/path-test.wd-test",
         "src/workerd/api/node/streams-test.wd-test",
         "src/workerd/api/node/string-decoder-test.wd-test",
+        "src/workerd/api/kv-test.wd-test",
         "src/workerd/api/queue-test.wd-test",
         "src/workerd/api/rtti-test.wd-test",
         "src/workerd/api/sql-test.wd-test",
