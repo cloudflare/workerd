@@ -20,5 +20,6 @@ export const test = {
     });
     strictEqual(otherEnv2.FOO, undefined);
     strictEqual(otherEnv2.BAZ, 1);
+    strictEqual(argEnv.BAZ, undefined);
   },
 };
