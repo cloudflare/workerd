@@ -18,8 +18,6 @@
 #include <cxxabi.h>
 #endif
 
-#include <workerd/util/autogate.h>
-
 namespace workerd::jsg {
 
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate) {
@@ -126,11 +124,7 @@ InternalErrorId makeInternalErrorId() {
 }
 
 kj::String renderInternalError(InternalErrorId& internalErrorId) {
-  if (util::Autogate::isEnabled(util::AutogateKey::INTERNAL_ERROR_ID)) {
-    return kj::str("internal error; reference = ", internalErrorId);
-  } else {
-    return kj::str("internal error");
-  }
+  return kj::str("internal error; reference = ", internalErrorId);
 }
 
 }  // namespace
