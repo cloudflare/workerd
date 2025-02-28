@@ -381,6 +381,7 @@ FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
 #define FOR_EACH_ARRAY_TYPE(F)                                                                     \
   F(kj::Array)                                                                                     \
   F(kj::ArrayPtr)                                                                                  \
+  F(kj::HashSet)                                                                                   \
   F(jsg::Sequence)                                                                                 \
   F(jsg::AsyncGenerator)
 

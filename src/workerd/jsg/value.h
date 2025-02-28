@@ -901,6 +901,62 @@ class ArrayWrapper {
 };
 
 // =======================================================================================
+// Sets
+
+// TypeWrapper mixin for sets.
+template <typename TypeWrapper>
+class SetWrapper {
+ public:
+  static auto constexpr MAX_STACK = 64;
+  template <typename U>
+  static constexpr const char* getName(kj::HashSet<U>*) {
+    return "Set";
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::HashSet<U> set) {
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+
+    auto out = v8::Set::New(isolate);
+    for (auto& item: set) {
+      v8::HandleScope scope(isolate);
+      check(
+          out->Add(context, static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(item))));
+    }
+
+    return handleScope.Escape(out);
+  }
+
+  template <typename U>
+  kj::Maybe<kj::HashSet<U>> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::HashSet<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsSet()) {
+      return kj::none;
+    }
+
+    auto set = handle.As<v8::Set>();
+    auto array = set->AsArray();
+    auto length = array->Length();
+    auto builder = kj::HashSet<U>();
+    builder.reserve(length);
+    for (auto i: kj::zeroTo(length)) {
+      v8::Local<v8::Value> element = check(array->Get(context, i));
+      auto value = static_cast<TypeWrapper*>(this)->template unwrap<U>(
+          context, element, TypeErrorContext::other());
+      builder.upsert(kj::mv(value), [&](U& existing, U&& replacement) {
+        JSG_FAIL_REQUIRE(TypeError, "Duplicate values in the set after unwrapping.");
+      });
+    }
+    return kj::mv(builder);
+  }
+};
+
+// =======================================================================================
 // ArrayBuffers / ArrayBufferViews
 //
 // This wrapper implements the following wrapping conversions:

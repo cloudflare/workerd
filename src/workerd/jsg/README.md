@@ -170,6 +170,21 @@ void doSomething(kj::Array<kj::String> strings) {
 doSomething(['a', 'b', 'c']);
 ```
 
+### Set type (`kj::HashSet<T>`)
+
+The `kj::HashSet<T>` type maps to JavaScript sets. The `T` can be any value, though there are
+currently some restrictions. For example, you cannot have a `kj::HashSet<CustomStruct>`.
+
+```cpp
+void doSomething(kj::HashSet<kj::String> strings) {
+  KJ_DBG(strings.has("a"));
+}
+```
+
+```js
+doSomething(new Set(['a', 'b', 'c']));
+```
+
 ### Sequence types (`jsg::Sequence<T>`)
 
 A [Sequence][] is any JavaScript object that implements `Symbol.iterator`. These are
