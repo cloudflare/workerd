@@ -348,3 +348,15 @@ wd_test(
         "tests/fixtures/rsa_public.pem",
     ],
 )
+
+wd_test(
+    src = "tests/crypto_cipher-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/crypto_cipher-test.js",
+        "tests/fixtures/ed25519_private.pem",
+        "tests/fixtures/ed25519_public.pem",
+        "tests/fixtures/rsa_private.pem",
+        "tests/fixtures/rsa_public.pem",
+    ],
+)

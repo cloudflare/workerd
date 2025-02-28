@@ -106,6 +106,52 @@ export function verifyOneShot(
   dsaSigEnc?: number
 ): boolean;
 
+export class CipherHandle {
+  public constructor(
+    mode: 'cipher' | 'decipher',
+    algorithm: string,
+    key: CryptoKey,
+    iv: ArrayBuffer | ArrayBufferView,
+    authTagLength?: number
+  );
+  public update(data: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+  public final(): ArrayBuffer;
+  public setAAD(
+    data: ArrayBuffer | ArrayBufferView,
+    plaintextLength?: number
+  ): void;
+  public setAutoPadding(autoPadding: boolean): void;
+  public getAuthTag(): ArrayBuffer | undefined;
+  public setAuthTag(tag: ArrayBuffer | ArrayBufferView): void;
+}
+
+export interface PublicPrivateCipherOptions {
+  padding: number;
+  oaepHash: string;
+  oaepLabel: ArrayBuffer | ArrayBufferView | undefined;
+}
+
+export function publicEncrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+export function publicDecrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+export function privateEncrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+export function privateDecrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {

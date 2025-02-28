@@ -56,6 +56,17 @@ import {
   Verify,
 } from 'node-internal:crypto_sign';
 
+import {
+  Cipheriv,
+  Decipheriv,
+  createCipheriv,
+  createDecipheriv,
+  publicDecrypt,
+  publicEncrypt,
+  privateDecrypt,
+  privateEncrypt,
+} from 'node-internal:crypto_cipher';
+
 import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
 
 import { pbkdf2, pbkdf2Sync, ArrayLike } from 'node-internal:crypto_pbkdf2';
@@ -141,6 +152,15 @@ export {
   verify,
   Sign,
   Verify,
+  // Cipher/Decipher
+  Cipheriv,
+  Decipheriv,
+  createCipheriv,
+  createDecipheriv,
+  publicDecrypt,
+  publicEncrypt,
+  privateDecrypt,
+  privateEncrypt,
 };
 
 export function getCiphers(): string[] {
@@ -268,6 +288,15 @@ export default {
   verify,
   Sign,
   Verify,
+  // Cipher/Decipher
+  Cipheriv,
+  Decipheriv,
+  createCipheriv,
+  createDecipheriv,
+  publicDecrypt,
+  publicEncrypt,
+  privateDecrypt,
+  privateEncrypt,
 };
 
 // Classes

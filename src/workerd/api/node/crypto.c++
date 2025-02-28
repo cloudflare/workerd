@@ -604,4 +604,468 @@ bool CryptoImpl::verifyOneShot(jsg::Lock& js,
 
 #pragma endregion  // SignVerify
 
+// ======================================================================================
+#pragma region Cipher/Decipher
+
+namespace {
+constexpr unsigned kNoAuthTagLength = static_cast<unsigned>(-1);
+
+CryptoImpl::CipherHandle::AuthenticatedInfo initAuthenticated(ncrypto::CipherCtxPointer& ctx,
+    bool encrypt,
+    kj::StringPtr cipher_type,
+    int iv_len,
+    unsigned int auth_tag_len) {
+  ncrypto::MarkPopErrorOnReturn mark_pop_error_on_return;
+
+  JSG_REQUIRE(ctx.setIvLength(iv_len), Error, "Invalid initialization vector");
+
+  CryptoImpl::CipherHandle::AuthenticatedInfo info;
+  info.auth_tag_len = auth_tag_len;
+
+  const int mode = ctx.getMode();
+  if (mode == EVP_CIPH_GCM_MODE) {
+    if (info.auth_tag_len != kNoAuthTagLength) {
+      JSG_REQUIRE(ncrypto::Cipher::IsValidGCMTagLength(auth_tag_len), Error,
+          "Invalid authentication tag length");
+    }
+  } else {
+    if (auth_tag_len == kNoAuthTagLength) {
+      // We treat ChaCha20-Poly1305 specially. Like GCM, the authentication tag
+      // length defaults to 16 bytes when encrypting. Unlike GCM, the
+      // authentication tag length also defaults to 16 bytes when decrypting,
+      // whereas GCM would accept any valid authentication tag length.
+      if (ctx.getNid() == NID_chacha20_poly1305) {
+        info.auth_tag_len = 16;
+      } else {
+        JSG_FAIL_REQUIRE(
+            Error, kj::str("The auth tag length is required for cipher ", cipher_type));
+      }
+    }
+
+    if (mode == EVP_CIPH_CCM_MODE && !encrypt && FIPS_mode()) {
+      JSG_FAIL_REQUIRE(Error, "CCM encryption not supported in FIPS mode");
+    }
+
+    JSG_REQUIRE(
+        ctx.setAeadTagLength(info.auth_tag_len), Error, "Invalid authentication tag length");
+
+    if (mode == EVP_CIPH_CCM_MODE) {
+      JSG_REQUIRE(iv_len >= 7 && iv_len <= 13, Error, "Invalid authentication tag length");
+      if (iv_len == 12) info.max_message_size = 16777215;
+      if (iv_len == 13) info.max_message_size = 65535;
+    }
+  }
+
+  return info;
+}
+
+bool isAuthenticatedMode(const ncrypto::CipherCtxPointer& ctx) {
+  return ncrypto::Cipher::FromCtx(ctx).isSupportedAuthenticatedMode();
+}
+
+bool passAuthTagToOpenSSL(ncrypto::CipherCtxPointer& ctx, kj::ArrayPtr<const kj::byte> authTag) {
+  ncrypto::Buffer<const char> buffer{
+    .data = reinterpret_cast<const char*>(authTag.begin()),
+    .len = authTag.size(),
+  };
+  return ctx.setAeadTag(buffer);
+}
+}  // namespace
+
+CryptoImpl::CipherHandle::CipherHandle(Mode mode,
+    ncrypto::CipherCtxPointer ctx,
+    jsg::Ref<CryptoKey> key,
+    jsg::BufferSource iv,
+    kj::Maybe<AuthenticatedInfo> maybeAuthInfo)
+    : mode(mode),
+      ctx(kj::mv(ctx)),
+      key(kj::mv(key)),
+      iv(kj::mv(iv)),
+      maybeAuthInfo(kj::mv(maybeAuthInfo)) {}
+
+jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::constructor(jsg::Lock& js,
+    kj::String mode,
+    kj::String algorithm,
+    jsg::Ref<CryptoKey> key,
+    jsg::BufferSource iv,
+    jsg::Optional<uint32_t> maybeAuthTagLength) {
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  JSG_REQUIRE(key->getType() == "secret"_kj, TypeError, "Invalid key type for cipher");
+
+  std::string_view name(algorithm.begin(), algorithm.size());
+  auto cipher = ncrypto::Cipher::FromName(name);
+  JSG_REQUIRE(cipher, Error, kj::str("Unknown or unsupported cipher: ", algorithm));
+
+  auto keyData =
+      JSG_REQUIRE_NONNULL(tryGetSecretKeyData(key), Error, "Failed to get raw secret key data");
+
+  int expectedIvLength = cipher.getIvLength();
+
+  if ((expectedIvLength && !iv.size()) ||
+      (!cipher.isSupportedAuthenticatedMode() && iv.size() &&
+          static_cast<int>(iv.size()) != expectedIvLength)) {
+    JSG_FAIL_REQUIRE(Error, "Invalid initialization vector");
+  }
+
+  if (cipher.getNid() == NID_chacha20_poly1305) {
+    JSG_REQUIRE(iv.size(), Error, "ChaCha20-Polcy1305 requires an initialization vector");
+    JSG_REQUIRE(iv.size() <= 12, Error, "Invalid initialization vector");
+  }
+
+  auto ctx = ncrypto::CipherCtxPointer::New();
+  JSG_REQUIRE(ctx, Error, "Failed to create cipher/decipher context");
+
+  if (cipher.getMode() == EVP_CIPH_WRAP_MODE) {
+    ctx.setFlags(EVP_CIPHER_CTX_FLAG_WRAP_ALLOW);
+  }
+
+  bool encrypt = mode == "cipher"_kj;
+
+  JSG_REQUIRE(ctx.init(cipher, encrypt), Error, "Failed to initialize cipher/decipher context");
+
+  kj::Maybe<CryptoImpl::CipherHandle::AuthenticatedInfo> maybeAuthInfo = kj::none;
+  if (cipher.isSupportedAuthenticatedMode()) {
+    maybeAuthInfo = initAuthenticated(
+        ctx, encrypt, algorithm, iv.size(), maybeAuthTagLength.orDefault(kNoAuthTagLength));
+  }
+
+  JSG_REQUIRE(ctx.setKeyLength(keyData.size()), Error, "Invalid key length");
+
+  JSG_REQUIRE(ctx.init(ncrypto::Cipher(), encrypt, keyData.begin(), iv.asArrayPtr().begin()), Error,
+      "Failed to initialize cipher/cipher context");
+
+  return jsg::alloc<CipherHandle>(mode == "cipher" ? Mode::CIPHER : Mode::DECIPHER, kj::mv(ctx),
+      kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
+}
+
+jsg::BufferSource CryptoImpl::CipherHandle::update(jsg::Lock& js, jsg::BufferSource data) {
+
+  JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
+  JSG_REQUIRE(data.size() <= INT_MAX, Error, "Data too large");
+
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  const int ctxMode = ctx.getMode();
+
+  if (ctxMode == EVP_CIPH_CCM_MODE) {
+    auto max = KJ_ASSERT_NONNULL(maybeAuthInfo).max_message_size;
+    JSG_REQUIRE(data.size() <= max, Error, "Invalid message length");
+  }
+
+  if (mode == Mode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
+    authTagPassed = true;
+    auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    JSG_REQUIRE(
+        passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
+  }
+
+  const int block_size = ctx.getBlockSize();
+  KJ_ASSERT(block_size > 0);
+  JSG_REQUIRE(data.size() + block_size <= INT_MAX, Error, "Data too large");
+  int buf_len = data.size() + block_size;
+
+  ncrypto::Buffer<const unsigned char> buffer = {
+    .data = data.asArrayPtr().begin(),
+    .len = data.size(),
+  };
+  if (mode == Mode::CIPHER && ctxMode == EVP_CIPH_WRAP_MODE &&
+      !ctx.update(buffer, nullptr, &buf_len)) {
+    JSG_FAIL_REQUIRE(Error, "Failed to process data");
+  }
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, buf_len);
+  buffer.data = data.asArrayPtr().begin();
+  buffer.len = data.size();
+  bool r = ctx.update(buffer, backing.asArrayPtr().begin(), &buf_len);
+
+  if (buf_len != backing.size()) {
+    JSG_REQUIRE(buf_len < backing.size(), Error, "Invalid buffer length");
+    auto newBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, buf_len);
+    if (buf_len > 0) {
+      newBacking.asArrayPtr().copyFrom(backing.asArrayPtr().slice(0, buf_len));
+    }
+    backing = kj::mv(newBacking);
+  }
+
+  // When in CCM mode, EVP_CipherUpdate will fail if the authentication tag is
+  // invalid. In that case, remember the error and throw in final().
+  if (!r && mode == Mode::DECIPHER && ctxMode == EVP_CIPH_CCM_MODE) {
+    pendingAuthFailed = true;
+  }
+
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+jsg::BufferSource CryptoImpl::CipherHandle::final(jsg::Lock& js) {
+  JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
+
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  int ctxMode = ctx.getMode();
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, ctx.getBlockSize());
+
+  if (mode == Mode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
+    authTagPassed = true;
+    auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+    JSG_REQUIRE(
+        passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
+  }
+
+  if (ctx.getNid() == NID_chacha20_poly1305 && mode == Mode::DECIPHER) {
+    JSG_REQUIRE(authTagPassed, Error, "An auth tag is required");
+  }
+
+  // In CCM mode, final() only checks whether authentication failed in update().
+  // EVP_CipherFinal_ex must not be called and will fail.
+  bool ok;
+  if (mode == Mode::DECIPHER && ctxMode == EVP_CIPH_CCM_MODE) {
+    ok = !pendingAuthFailed;
+    backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+  } else {
+    int out_len = backing.size();
+    ok = ctx.update({}, backing.asArrayPtr().begin(), &out_len, true);
+
+    if (out_len != backing.size()) {
+      JSG_REQUIRE(out_len < backing.size(), Error, "Invalid buffer length");
+      auto newBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, out_len);
+      if (out_len > 0) {
+        newBacking.asArrayPtr().copyFrom(backing.asArrayPtr().slice(0, out_len));
+      }
+      backing = kj::mv(newBacking);
+    }
+
+    if (ok && mode == Mode::CIPHER && isAuthenticatedMode(ctx)) {
+      auto& info = JSG_REQUIRE_NONNULL(maybeAuthInfo, Error, "Missing required auth info");
+      // In GCM mode, the authentication tag length can be specified in advance,
+      // but defaults to 16 bytes when encrypting. In CCM and OCB mode, it must
+      // always be given by the user.
+      if (info.auth_tag_len == kNoAuthTagLength) {
+        info.auth_tag_len = 16;
+      }
+      auto authTagBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, info.auth_tag_len);
+      ok = ctx.getAeadTag(info.auth_tag_len, authTagBacking.asArrayPtr().begin());
+      maybeAuthTag = jsg::BufferSource(js, kj::mv(authTagBacking));
+    }
+  }
+
+  JSG_REQUIRE(ok, Error, "Authentication failed");
+
+  ctx.reset();
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+void CryptoImpl::CipherHandle::setAAD(
+    jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength) {
+
+  JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
+  JSG_REQUIRE(isAuthenticatedMode(ctx), Error, "Cipher does not support authenticated mode");
+
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  int outlen;
+  const int ctxMode = ctx.getMode();
+
+  // When in CCM mode, we need to set the authentication tag and the plaintext
+  // length in advance.
+  if (ctxMode == EVP_CIPH_CCM_MODE) {
+    auto plaintextLength = JSG_REQUIRE_NONNULL(
+        maybePlaintextLength, Error, "options.plaintextLength is required for CCM mode with AAD");
+
+    auto& info = JSG_REQUIRE_NONNULL(maybeAuthInfo, Error, "Required auth info is not available");
+
+    JSG_REQUIRE(plaintextLength <= info.max_message_size, Error, "Data too large");
+
+    if (mode == Mode::DECIPHER && isAuthenticatedMode(ctx) && !authTagPassed) {
+      authTagPassed = true;
+      auto& tag = JSG_REQUIRE_NONNULL(maybeAuthTag, Error, "No auth tag provided");
+      JSG_REQUIRE(
+          passAuthTagToOpenSSL(ctx, tag.asArrayPtr().asConst()), Error, "Failed to set auth tag");
+    }
+
+    ncrypto::Buffer<const unsigned char> buffer{
+      .data = nullptr,
+      .len = plaintextLength,
+    };
+    // Specify the plaintext length.
+    JSG_REQUIRE(ctx.update(buffer, nullptr, &outlen), Error, "Failed to set plaintext length");
+  }
+
+  ncrypto::Buffer<const unsigned char> buffer{
+    .data = aad.asArrayPtr().begin(),
+    .len = aad.size(),
+  };
+  JSG_REQUIRE(ctx.update(buffer, nullptr, &outlen), Error, "Failed to set AAD");
+}
+
+void CryptoImpl::CipherHandle::setAutoPadding(jsg::Lock& js, bool autoPadding) {
+  JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+  JSG_REQUIRE(ctx.setPadding(autoPadding), Error, "Failed to set autopadding");
+}
+
+void CryptoImpl::CipherHandle::setAuthTag(jsg::Lock& js, jsg::BufferSource authTag) {
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+  JSG_REQUIRE(ctx, Error, "Cipher/decipher context has already been finalized");
+  JSG_REQUIRE(isAuthenticatedMode(ctx), Error, "Cipher does not support authenticated mode");
+  JSG_REQUIRE(mode == Mode::DECIPHER, Error, "Setting auth tag only support in decipher mode");
+  JSG_REQUIRE(maybeAuthTag == kj::none, Error, "Auth tag is already set");
+  JSG_REQUIRE(authTag.size() <= INT_MAX, Error, "Auth tag is too big");
+
+  int ctxMode = ctx.getMode();
+  bool is_valid = false;
+
+  auto& info = JSG_REQUIRE_NONNULL(maybeAuthInfo, Error, "Required auth info is not available");
+
+  if (ctxMode == EVP_CIPH_GCM_MODE) {
+    // Restrict GCM tag lengths according to NIST 800-38d, page 9.
+    is_valid = (info.auth_tag_len == kNoAuthTagLength || info.auth_tag_len == authTag.size()) &&
+        ncrypto::Cipher::IsValidGCMTagLength(authTag.size());
+  } else {
+    is_valid = info.auth_tag_len == authTag.size();
+  }
+
+  JSG_REQUIRE(is_valid, Error, "Invalid authentication tag length");
+
+  info.auth_tag_len = authTag.size();
+
+  // We defensively copy the auth tag here to prevent modification.
+  maybeAuthTag = authTag.copy(js);
+}
+
+jsg::BufferSource CryptoImpl::CipherHandle::getAuthTag(jsg::Lock& js) {
+  JSG_REQUIRE(!ctx, Error, "Auth tag is only available once cipher context has been finalized");
+  JSG_REQUIRE(mode == Mode::CIPHER, Error, "Getting the auth tag is only support for cipher");
+
+  KJ_IF_SOME(tag, maybeAuthTag) {
+    KJ_DEFER(maybeAuthTag = kj::none);
+    return kj::mv(tag);
+  }
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+namespace {
+
+// TODO(soon): For some reason the ncrypto implementation of these is not
+// working for us but they do work in Node.js. Will need to figure out why.
+// For now, it's easy enough to implement ourselves here.
+using EVP_PKEY_cipher_t = int(
+    EVP_PKEY_CTX* ctx, unsigned char* out, size_t* outlen, const unsigned char* in, size_t inlen);
+
+template <EVP_PKEY_cipher_t cipher>
+jsg::BufferSource Cipher(jsg::Lock& js,
+    ncrypto::EVPKeyCtxPointer&& ctx,
+    const jsg::BufferSource& buffer,
+    const CryptoImpl::PublicPrivateCipherOptions& options) {
+
+  ncrypto::ClearErrorOnReturn clearErrorOnReturn;
+
+  const EVP_MD* digest = nullptr;
+  if (options.oaepHash.size() > 0) {
+    std::string_view name(options.oaepHash.begin(), options.oaepHash.size());
+    digest = ncrypto::getDigestByName(name);
+    JSG_REQUIRE(digest != nullptr, Error, "Unsupported hash digest");
+  }
+
+  JSG_REQUIRE(
+      EVP_PKEY_CTX_set_rsa_padding(ctx.get(), options.padding), Error, "Failed to set the padding");
+
+  if (digest != nullptr && options.padding == RSA_PKCS1_OAEP_PADDING) {
+    JSG_REQUIRE(
+        EVP_PKEY_CTX_set_rsa_oaep_md(ctx.get(), digest) == 1, Error, "Failed to set the digest");
+    JSG_REQUIRE(EVP_PKEY_CTX_set_rsa_mgf1_md(ctx.get(), digest) == 1, Error,
+        "Failed to set the mgf1 digest");
+  }
+
+  KJ_IF_SOME(label, options.oaepLabel) {
+    // The ctx takes ownership of the data buffer so we have to copy.
+    auto data = ncrypto::DataPointer::Alloc(label.size());
+    kj::ArrayPtr<kj::byte> dataPtr(data.get<kj::byte>(), data.size());
+    dataPtr.copyFrom(label.asArrayPtr());
+    auto released = data.release();
+    JSG_REQUIRE(EVP_PKEY_CTX_set0_rsa_oaep_label(
+                    ctx.get(), static_cast<uint8_t*>(released.data), released.len) == 1,
+        Error, "Failed to set the OAEP label");
+  }
+
+  size_t len;
+  JSG_REQUIRE(cipher(ctx.get(), nullptr, &len, buffer.asArrayPtr().begin(), buffer.size()) == 1,
+      Error, "Failed to determine output size");
+
+  if (len == 0) {
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
+  JSG_REQUIRE(cipher(ctx.get(), backing.asArrayPtr().begin(), &len, buffer.asArrayPtr().begin(),
+                  buffer.size()) == 1,
+      Error, "Failed to cipher/decipher");
+
+  if (len < backing.size()) {
+    auto newBacking = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
+    newBacking.asArrayPtr().copyFrom(backing.asArrayPtr().slice(0, len));
+    backing = kj::mv(newBacking);
+  }
+
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+}  // namespace
+
+jsg::BufferSource CryptoImpl::publicEncrypt(jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    jsg::BufferSource buffer,
+    CryptoImpl::PublicPrivateCipherOptions options) {
+  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
+  auto ctx = pkey.newCtx();
+  JSG_REQUIRE(ctx.initForEncrypt(), Error, "Failed to init for encryption");
+  return Cipher<EVP_PKEY_encrypt>(js, kj::mv(ctx), buffer, options);
+}
+
+jsg::BufferSource CryptoImpl::privateDecrypt(jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    jsg::BufferSource buffer,
+    CryptoImpl::PublicPrivateCipherOptions options) {
+  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
+  auto ctx = pkey.newCtx();
+  JSG_REQUIRE(ctx.initForDecrypt(), Error, "Failed to init for decryption");
+  return Cipher<EVP_PKEY_decrypt>(js, kj::mv(ctx), buffer, options);
+}
+
+jsg::BufferSource CryptoImpl::publicDecrypt(jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    jsg::BufferSource buffer,
+    CryptoImpl::PublicPrivateCipherOptions options) {
+  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
+  auto ctx = pkey.newCtx();
+  JSG_REQUIRE(EVP_PKEY_verify_recover_init(ctx.get()) == 1, Error, "Failed to init for decryption");
+  return Cipher<EVP_PKEY_verify_recover>(js, kj::mv(ctx), buffer,
+      {
+        .padding = options.padding,
+        .oaepHash = kj::String(),
+      });
+}
+jsg::BufferSource CryptoImpl::privateEncrypt(jsg::Lock& js,
+    jsg::Ref<CryptoKey> key,
+    jsg::BufferSource buffer,
+    CryptoImpl::PublicPrivateCipherOptions options) {
+  auto& pkey = JSG_REQUIRE_NONNULL(tryGetKey(key), Error, "No key provided");
+  JSG_REQUIRE(pkey.isRsaVariant(), Error, "publicEncrypt() currently only supports RSA keys");
+  auto ctx = pkey.newCtx();
+  JSG_REQUIRE(EVP_PKEY_sign_init(ctx.get()) == 1, Error, "Failed to init for encryption");
+  return Cipher<EVP_PKEY_sign>(js, kj::mv(ctx), buffer,
+      {
+        .padding = options.padding,
+        .oaepHash = kj::String(),
+      });
+}
+
+#pragma endregion  // Cipher/Decipher
+
 }  // namespace workerd::api::node
