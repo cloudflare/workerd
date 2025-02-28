@@ -1,4 +1,4 @@
-From 8c34b3760c2a62fa2fce5f7fa47c887b6814220a Mon Sep 17 00:00:00 2001
+From 37b9b4b1195d733b6cc10abc2b148383c84c8e82 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 26 Feb 2025 18:30:24 +0100
 Subject: Allow Windows builds under Bazel

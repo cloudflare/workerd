@@ -1,4 +1,4 @@
-From 0557ad99107e22f4ee82e5ae6df6cffda62d5125 Mon Sep 17 00:00:00 2001
+From 3a21e1de91a920571b7f939ee6077bd13cd344be Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Thu, 30 Jan 2025 14:50:54 -0500
 Subject: Fix macOS build

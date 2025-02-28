@@ -1,4 +1,4 @@
-From c710e805c23989b9ba14ae2a23698c1f521716d2 Mon Sep 17 00:00:00 2001
+From 1906956a221634250ed2ae32d2dae9d4ef2642a9 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 26 Feb 2025 18:33:33 +0100
 Subject: Speed up V8 bazel build by always using target cfg
