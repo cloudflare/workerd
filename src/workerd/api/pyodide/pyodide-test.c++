@@ -203,6 +203,11 @@ kj::Array<kj::String> strArray(Params&&... params) {
   return kj::arr(kj::str(params)...);
 }
 
+template <typename... Params>
+kj::Array<kj::Array<kj::byte>> bytesArray(Params&&... params) {
+  return kj::arr(kj::heapArray<kj::byte>(kj::str(params).asBytes())...);
+}
+
 KJ_TEST("Simple pass through") {
   auto imports = strArray("b", "c");
   auto result = ArtifactBundler::filterPythonScriptImportsJs({}, kj::mv(imports));
@@ -256,5 +261,29 @@ KJ_TEST("Filters out subdir/submodule") {
       ArtifactBundler::filterPythonScriptImportsJs(kj::mv(workerModules), kj::mv(imports));
   KJ_REQUIRE(result.size() == 0);
 }
+
+KJ_TEST("basic test of getPackageSnapshotImports") {
+  auto a = pyodide::PythonModuleInfo(strArray("a.py"),
+      bytesArray("from js import Response\n"
+                 "import asyncio\n"
+                 "import numbers\n"
+                 "def on_fetch(request):\n"
+                 "  return Response.new('Hello')\n"));
+  auto result = a.getPackageSnapshotImports();
+  KJ_REQUIRE(result.size() == 1);
+  KJ_REQUIRE(result[0] == "numbers");
+};
+
+KJ_TEST("basic test of getPackageSnapshotImports user module") {
+  auto a = pyodide::PythonModuleInfo(strArray("a.py", "numbers.py"),
+      bytesArray("from js import Response\n"
+                 "import asyncio\n"
+                 "import numbers\n"
+                 "def on_fetch(request):\n"
+                 "  return Response.new('Hello')\n",
+          ""));
+  auto result = a.getPackageSnapshotImports();
+  KJ_REQUIRE(result.size() == 0);
+};
 }  // namespace
 }  // namespace workerd::api

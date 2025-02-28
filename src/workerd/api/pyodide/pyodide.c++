@@ -71,24 +71,24 @@ int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(
     jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter) {
-  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->names.size());
+  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
     KJ_IF_SOME(ext, maybeExtFilter) {
-      if (!this->names[i].endsWith(ext)) {
+      if (!this->moduleInfo.names[i].endsWith(ext)) {
         continue;
       }
     }
-    builder.add(js, js.str(this->names[i]));
+    builder.add(js, js.str(this->moduleInfo.names[i]));
   }
   return builder.releaseAsArray();
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getWorkerFiles(
     jsg::Lock& js, kj::String ext) {
-  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->names.size());
-  for (auto i: kj::zeroTo(this->names.size())) {
-    if (this->names[i].endsWith(ext)) {
-      builder.add(js, js.str(this->contents[i]));
+  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->moduleInfo.names.size());
+  for (auto i: kj::zeroTo(this->moduleInfo.names.size())) {
+    if (this->moduleInfo.names[i].endsWith(ext)) {
+      builder.add(js, js.str(this->moduleInfo.contents[i]));
     }
   }
   return builder.releaseAsArray();
@@ -99,7 +99,7 @@ kj::Array<kj::String> _getWorkerFiles(
   auto builder = kj::Vector<kj::String>(names.size());
   for (auto i: kj::zeroTo(names.size())) {
     if (names[i].endsWith(".py")) {
-      builder.add(kj::str(contents[i]));
+      builder.add(kj::str(contents[i].asChars()));
     }
   }
   return builder.releaseAsArray();
@@ -116,11 +116,15 @@ kj::HashSet<kj::String> _getNames(kj::ArrayPtr<kj::String> names) {
   return result;
 }
 
-kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports(jsg::Lock& js) {
+kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports() {
   auto workerFiles = _getWorkerFiles(this->names, this->contents);
   auto imports = ArtifactBundler::parsePythonScriptImports(kj::mv(workerFiles));
   auto names = _getNames(this->names);
   return ArtifactBundler::filterPythonScriptImports(kj::mv(names), kj::mv(imports));
+}
+
+kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports() {
+  return this->moduleInfo.getPackageSnapshotImports();
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
@@ -132,18 +136,18 @@ kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg:
 }
 
 kj::Array<int> PyodideMetadataReader::getSizes(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<int>(this->names.size());
+  auto builder = kj::heapArrayBuilder<int>(this->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
-    builder.add(this->contents[i].size());
+    builder.add(this->moduleInfo.contents[i].size());
   }
   return builder.finish();
 }
 
 int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf) {
-  if (index >= contents.size() || index < 0) {
+  if (index >= this->moduleInfo.contents.size() || index < 0) {
     return 0;
   }
-  auto& data = contents[index];
+  auto& data = this->moduleInfo.contents[index];
   return readToTarget(data, offset, buf);
 }
 

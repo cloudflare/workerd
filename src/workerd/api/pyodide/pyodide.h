@@ -67,6 +67,20 @@ class ReadOnlyBuffer: public jsg::Object {
   }
 };
 
+class PythonModuleInfo {
+ public:
+  PythonModuleInfo(kj::Array<kj::String> names, kj::Array<kj::Array<kj::byte>> contents)
+      : names(kj::mv(names)),
+        contents(kj::mv(contents)) {
+    KJ_REQUIRE(this->names.size() == this->contents.size());
+  }
+  kj::Array<kj::String> names;
+  kj::Array<kj::Array<kj::byte>> contents;
+
+  // Return the list of names to import into a package snapshot.
+  kj::Array<kj::String> getPackageSnapshotImports();
+};
+
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
 // and metadata about the worker.
 //
@@ -75,8 +89,7 @@ class ReadOnlyBuffer: public jsg::Object {
 class PyodideMetadataReader: public jsg::Object {
  private:
   kj::String mainModule;
-  kj::Array<kj::String> names;
-  kj::Array<kj::Array<kj::byte>> contents;
+  PythonModuleInfo moduleInfo;
   kj::Array<kj::String> requirements;
   kj::String pyodideVersion;
   kj::String packagesVersion;
@@ -103,8 +116,7 @@ class PyodideMetadataReader: public jsg::Object {
       bool usePackagesInArtifactBundler,
       kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)),
-        names(kj::mv(names)),
-        contents(kj::mv(contents)),
+        moduleInfo(kj::mv(names), kj::mv(contents)),
         requirements(kj::mv(requirements)),
         pyodideVersion(kj::mv(pyodideVersion)),
         packagesVersion(kj::mv(packagesVersion)),
@@ -148,7 +160,7 @@ class PyodideMetadataReader: public jsg::Object {
   kj::Array<jsg::JsRef<jsg::JsString>> getWorkerFiles(jsg::Lock& js, kj::String ext);
 
   // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports(jsg::Lock& js);
+  kj::Array<kj::String> getPackageSnapshotImports();
 
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
 
@@ -214,10 +226,10 @@ class PyodideMetadataReader: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("mainModule", mainModule);
-    for (const auto& name: names) {
+    for (const auto& name: this->moduleInfo.names) {
       tracker.trackField("name", name);
     }
-    for (const auto& content: contents) {
+    for (const auto& content: this->moduleInfo.contents) {
       tracker.trackField("content", content);
     }
     for (const auto& requirement: requirements) {
