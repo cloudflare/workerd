@@ -58,6 +58,8 @@ class KvNamespace: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
     bool withMetadata);
 
+  kj::String formBulkBodyString(kj::Array<kj::String>& names, bool withMetadata, jsg::Optional<kj::OneOf<kj::String, GetOptions>>& options);
+
   kj::OneOf<jsg::Promise<KvNamespace::GetResult>,jsg::Promise<jsg::JsRef<jsg::JsValue>>> get(
     jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
