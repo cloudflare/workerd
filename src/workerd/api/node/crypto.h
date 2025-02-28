@@ -9,6 +9,8 @@
 #include <workerd/api/crypto/x509.h>
 #include <workerd/jsg/jsg.h>
 
+#include <ncrypto.h>
+
 namespace workerd::api::node {
 
 class CryptoImpl final: public jsg::Object {
@@ -208,6 +210,7 @@ class CryptoImpl final: public jsg::Object {
   jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::BufferSource keyData);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
+  static kj::Maybe<const ncrypto::EVPKeyPointer&> tryGetKey(jsg::Ref<CryptoKey>& key);
 
   struct RsaKeyPairOptions {
     kj::String type;
@@ -248,6 +251,66 @@ class CryptoImpl final: public jsg::Object {
   CryptoKeyPair generateEdKeyPair(EdKeyPairOptions options);
   CryptoKeyPair generateDhKeyPair(DhKeyPairOptions options);
 
+  // Sign/Verify
+  class SignHandle final: public jsg::Object {
+   public:
+    SignHandle(ncrypto::EVPMDCtxPointer ctx);
+    static jsg::Ref<SignHandle> constructor(kj::String algorithm);
+
+    void update(jsg::Lock& js, jsg::BufferSource data);
+    jsg::BufferSource sign(jsg::Lock& js,
+        jsg::Ref<CryptoKey> key,
+        jsg::Optional<int> rsaPadding,
+        jsg::Optional<int> pssSaltLength,
+        jsg::Optional<int> dsaSigEnc);
+
+    JSG_RESOURCE_TYPE(SignHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(sign);
+    }
+
+   private:
+    ncrypto::EVPMDCtxPointer ctx;
+  };
+  class VerifyHandle final: public jsg::Object {
+   public:
+    VerifyHandle(ncrypto::EVPMDCtxPointer ctx);
+    static jsg::Ref<VerifyHandle> constructor(kj::String algorithm);
+
+    void update(jsg::Lock& js, jsg::BufferSource data);
+    bool verify(jsg::Lock& js,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource signature,
+        jsg::Optional<int> rsaPadding,
+        jsg::Optional<int> pssSaltLength,
+        jsg::Optional<int> dsaSigEnc);
+
+    JSG_RESOURCE_TYPE(VerifyHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(verify);
+    }
+
+   private:
+    ncrypto::EVPMDCtxPointer ctx;
+  };
+
+  jsg::BufferSource signOneShot(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::Optional<kj::String> algorithm,
+      jsg::BufferSource data,
+      jsg::Optional<int> rsaPadding,
+      jsg::Optional<int> pssSaltLength,
+      jsg::Optional<int> dsaSigEnc);
+  bool verifyOneShot(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::Optional<kj::String> algorithm,
+      jsg::BufferSource data,
+      jsg::BufferSource signature,
+      jsg::Optional<int> rsaPadding,
+      jsg::Optional<int> pssSaltLength,
+      jsg::Optional<int> dsaSigEnc);
+
+  // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
@@ -289,6 +352,11 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(generateEcKeyPair);
     JSG_METHOD(generateEdKeyPair);
     JSG_METHOD(generateDhKeyPair);
+    // Sign/Verify
+    JSG_NESTED_TYPE(SignHandle);
+    JSG_NESTED_TYPE(VerifyHandle);
+    JSG_METHOD(signOneShot);
+    JSG_METHOD(verifyOneShot);
   }
 };
 
@@ -299,5 +367,6 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::CreateAsymmetricKeyOptions, api::node::CryptoImpl::RsaKeyPairOptions, \
       api::node::CryptoImpl::DsaKeyPairOptions, api::node::CryptoImpl::EcKeyPairOptions,           \
       api::node::CryptoImpl::EdKeyPairOptions, api::node::CryptoImpl::DhKeyPairOptions,            \
+      api::node::CryptoImpl::SignHandle, api::node::CryptoImpl::VerifyHandle,                      \
       EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node

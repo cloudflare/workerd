@@ -85,7 +85,7 @@ const kCustomPromisifyArgsSymbol = Symbol.for(
 );
 
 // Key input contexts.
-enum KeyContext {
+export enum KeyContext {
   kConsumePublic = 'kConsumePublic',
   kConsumePrivate = 'kConsumePrivate',
   kCreatePublic = 'kCreatePublic',
@@ -386,7 +386,7 @@ export function createSecretKey(
   return KeyObject.from(cryptoImpl.createSecretKey(key)) as SecretKeyObject;
 }
 
-function prepareAsymmetricKey(
+export function prepareAsymmetricKey(
   key: CreateAsymmetricKeyOptions | null | undefined,
   ctx: KeyContext
 ): InnerCreateAsymmetricKeyOptions {

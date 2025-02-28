@@ -47,6 +47,15 @@ import {
   Hmac,
 } from 'node-internal:crypto_hash';
 
+import {
+  createSign,
+  createVerify,
+  sign,
+  verify,
+  Sign,
+  Verify,
+} from 'node-internal:crypto_sign';
+
 import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
 
 import { pbkdf2, pbkdf2Sync, ArrayLike } from 'node-internal:crypto_pbkdf2';
@@ -125,6 +134,13 @@ export {
   Certificate,
   // X509
   X509Certificate,
+  // Sign/Verify
+  createSign,
+  createVerify,
+  sign,
+  verify,
+  Sign,
+  Verify,
 };
 
 export function getCiphers(): string[] {
@@ -245,6 +261,13 @@ export default {
   Certificate,
   // X509
   X509Certificate,
+  // Sign/Verify
+  createSign,
+  createVerify,
+  sign,
+  verify,
+  Sign,
+  Verify,
 };
 
 // Classes
@@ -256,9 +279,9 @@ export default {
 //   * [ ] crypto.ECDH
 //   * [x] crypto.Hash
 //   * [x] crypto.Hmac
-//   * [ ] crypto.KeyObject
-//   * [ ] crypto.Sign
-//   * [ ] crypto.Verify
+//   * [x] crypto.KeyObject
+//   * [x] crypto.Sign
+//   * [x] crypto.Verify
 //   * [x] crypto.X509Certificate
 //   * [ ] crypto.constants
 //   * [ ] crypto.DEFAULT_ENCODING
@@ -288,18 +311,18 @@ export default {
 //   * [x] crypto.createHmac(algorithm, key[, options])
 //   * [x] crypto.getHashes()
 // * Keys, not implemented yet. Calling the following APIs will throw a ERR_METHOD_NOT_IMPLEMENTED
-//   * [.] crypto.createPrivateKey(key)
-//   * [.] crypto.createPublicKey(key)
-//   * [.] crypto.createSecretKey(key[, encoding])
-//   * [.] crypto.generateKey(type, options, callback)
-//   * [.] crypto.generateKeyPair(type, options, callback)
-//   * [.] crypto.generateKeyPairSync(type, options)
-//   * [.] crypto.generateKeySync(type, options)
+//   * [x] crypto.createPrivateKey(key)
+//   * [x] crypto.createPublicKey(key)
+//   * [x] crypto.createSecretKey(key[, encoding])
+//   * [x] crypto.generateKey(type, options, callback)
+//   * [x] crypto.generateKeyPair(type, options, callback)
+//   * [x] crypto.generateKeyPairSync(type, options)
+//   * [x] crypto.generateKeySync(type, options)
 // * Sign/Verify
-//   * [ ] crypto.createSign(algorithm[, options])
-//   * [ ] crypto.createVerify(algorithm[, options])
-//   * [ ] crypto.sign(algorithm, data, key[, callback])
-//   * [ ] crypto.verify(algorithm, data, key, signature[, callback])
+//   * [x] crypto.createSign(algorithm[, options])
+//   * [x] crypto.createVerify(algorithm[, options])
+//   * [x] crypto.sign(algorithm, data, key[, callback])
+//   * [x] crypto.verify(algorithm, data, key, signature[, callback])
 // * Misc
 //   * [ ] crypto.getCipherInfo(nameOrNid[, options])
 //   * [x] crypto.getCiphers()

@@ -697,6 +697,12 @@ export class ERR_UNSUPPORTED_OPERATION extends NodeError {
   }
 }
 
+export class ERR_CRYPTO_SIGN_KEY_REQUIRED extends NodeError {
+  constructor() {
+    super('ERR_CRYPTO_SIGN_KEY_REQUIRED', 'No key provided to sign');
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {

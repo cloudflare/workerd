@@ -65,6 +65,47 @@ export class HashHandle {
   public copy(xofLen: number): HashHandle;
 }
 
+export class SignHandle {
+  public constructor(algorithm: string);
+  public update(data: Buffer | ArrayBufferView): void;
+  public sign(
+    key: CryptoKey,
+    rsaPadding?: number,
+    pssSaltLength?: number,
+    dsaSigEnc?: number
+  ): ArrayBuffer;
+}
+
+export class VerifyHandle {
+  public constructor(algorithm: string);
+  public update(data: Buffer | ArrayBufferView): void;
+  public verify(
+    key: CryptoKey,
+    signature: ArrayBufferView,
+    rsaPadding?: number,
+    pssSaltLength?: number,
+    dsaSigEnc?: number
+  ): boolean;
+}
+
+export function signOneShot(
+  key: CryptoKey,
+  algorithm: string | undefined,
+  data: ArrayBufferView,
+  rsaPadding?: number,
+  pssSaltLength?: number,
+  dsaSigEnc?: number
+): ArrayBuffer;
+export function verifyOneShot(
+  key: CryptoKey,
+  algorithm: string | undefined,
+  data: ArrayBufferView,
+  signature: ArrayBufferView,
+  rsaPadding?: number,
+  pssSaltLength?: number,
+  dsaSigEnc?: number
+): boolean;
+
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {

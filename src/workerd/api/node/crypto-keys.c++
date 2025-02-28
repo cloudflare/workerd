@@ -824,4 +824,12 @@ jsg::BufferSource CryptoImpl::statelessDH(
   JSG_FAIL_REQUIRE(Error, "Unsupported keys for stateless diffie-hellman");
 }
 
+kj::Maybe<const ncrypto::EVPKeyPointer&> CryptoImpl::tryGetKey(jsg::Ref<CryptoKey>& key) {
+  KJ_IF_SOME(key, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl)) {
+    const ncrypto::EVPKeyPointer& evp = key;
+    return evp;
+  }
+  return kj::none;
+}
+
 }  // namespace workerd::api::node

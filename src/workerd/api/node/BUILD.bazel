@@ -334,3 +334,17 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/async_hooks-nodejs-test.js"],
 )
+
+wd_test(
+    src = "tests/crypto_sign-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/crypto_sign-test.js",
+        "tests/fixtures/dsa_private.pem",
+        "tests/fixtures/dsa_public.pem",
+        "tests/fixtures/ed25519_private.pem",
+        "tests/fixtures/ed25519_public.pem",
+        "tests/fixtures/rsa_private.pem",
+        "tests/fixtures/rsa_public.pem",
+    ],
+)
