@@ -347,6 +347,12 @@ wd_test(
 )
 
 wd_test(
+    src = "kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["kv-test.js"],
+)
+
+wd_test(
     src = "queue-test.wd-test",
     args = ["--experimental"],
     data = ["queue-test.js"],
