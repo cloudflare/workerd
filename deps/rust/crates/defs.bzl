@@ -1900,6 +1900,12 @@ def crate_repositories():
     maybe(
         http_archive,
         name = "crates_vendor__v8-134.5.0",
+        patch_args = [
+            "-p1",
+        ],
+        patches = [
+            "@workerd//:patches/rust-v8/build.rs.patch",
+        ],
         sha256 = "21c7a224a7eaf3f98c1bad772fbaee56394dce185ef7b19a2e0ca5e3d274165d",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/v8/134.5.0/download"],

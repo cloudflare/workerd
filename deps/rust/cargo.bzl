@@ -36,11 +36,8 @@ PACKAGES = {
 ANNOTATIONS = {
     "v8": [
         crate.annotation(
-            build_script_env = {
-                #                "RUSTY_V8_ARCHIVE": "$(location @v8//:v8_noicu)",
-                "RUSTY_V8_ARCHIVE": "v8/libv8_icu.so",
-            },
-            build_script_data = ["@v8//:v8_icu"],
+            patches = ["@workerd//:patches/rust-v8/build.rs.patch"],
+            patch_args = ["-p1"],
         ),
     ],
 }

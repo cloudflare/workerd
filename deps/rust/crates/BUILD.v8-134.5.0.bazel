@@ -62,9 +62,6 @@ cargo_build_script(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
-    build_script_env = {
-        "RUSTY_V8_ARCHIVE": "v8/libv8_icu.so",
-    },
     compile_data = glob(
         include = ["**"],
         allow_empty = True,
@@ -95,9 +92,7 @@ cargo_build_script(
             "WORKSPACE",
             "WORKSPACE.bazel",
         ],
-    ) + [
-        "@v8//:v8_icu",
-    ],
+    ),
     edition = "2021",
     pkg_name = "v8",
     rustc_flags = [

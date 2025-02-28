@@ -1,0 +1,10 @@
+--- a/build.rs	2006-07-23 18:21:28.000000000 -0700
++++ b/build.rs	2025-02-28 10:26:28.390888937 -0800
+@@ -20,6 +20,7 @@
+ use which::which;
+
+ fn main() {
++  return;
+   println!("cargo:rerun-if-changed=.gn");
+   println!("cargo:rerun-if-changed=BUILD.gn");
+   println!("cargo:rerun-if-changed=src/binding.cc");
