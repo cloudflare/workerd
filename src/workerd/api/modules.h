@@ -22,6 +22,7 @@ class EnvModule final: public jsg::Object {
  public:
   kj::Maybe<jsg::JsObject> getCurrent(jsg::Lock& js);
 
+  // Arranges to propagate the given newEnv in the async context.
   jsg::JsValue withEnv(jsg::Lock& js, jsg::Value newEnv, jsg::Function<jsg::JsValue()> fn);
 
   JSG_RESOURCE_TYPE(EnvModule) {
@@ -77,7 +78,8 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
     builder.add(builtinsBuilder.finish());
   }
 
-  // TODO(later): Add the internal env module also.
+  // TODO(new-module-registry): Add the internal env module also. This relates to the new module
+  // registry implementation.
 }
 
 }  // namespace workerd::api
