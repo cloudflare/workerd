@@ -1,11 +1,7 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
-/**
- * @param {string} tsconfigRootDir
- * @returns {FlatConfig.ConfigArray}
- */
-export function baseConfig({ tsconfigRootDir }) {
+export function baseConfig() {
   return tseslint.config(
     eslint.configs.recommended,
     ...tseslint.configs.strictTypeChecked,
@@ -15,7 +11,8 @@ export function baseConfig({ tsconfigRootDir }) {
           ecmaVersion: "latest",
           sourceType: "module",
           projectService: true,
-          tsconfigRootDir,
+          tsconfigRootDir: import.meta.dirname,
+          jsDocParsingMode: 'all',
         },
       },
       rules: {
