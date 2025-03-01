@@ -134,7 +134,15 @@ function validateParameters(
     if (maxmem === 0) maxmem = defaults.maxmem;
   }
 
-  return { password, salt, keylen, N: N!, r: r!, p: p!, maxmem: maxmem! };
+  return {
+    password,
+    salt,
+    keylen,
+    N: N as number,
+    r: r as number,
+    p: p as number,
+    maxmem: maxmem as number,
+  };
 }
 
 type Callback = (err: Error | null, derivedKey?: ArrayBuffer) => void;

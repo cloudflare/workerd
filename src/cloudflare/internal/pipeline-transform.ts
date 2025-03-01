@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
@@ -124,13 +123,11 @@ export class PipelineTransformImpl<
   }
 
   async #readJsonStream(): Promise<I[]> {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (this.#batch!.format !== Format.JSON_STREAM) {
-      // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-      throw new Error(`expected JSON_STREAM not ${this.#batch!.format}`);
+    if (this.#batch?.format !== Format.JSON_STREAM) {
+      throw new Error(`expected JSON_STREAM not ${this.#batch?.format}`);
     }
 
-    const batch = this.#batch!.data as ReadableStream<Uint8Array>;
+    const batch = this.#batch.data as ReadableStream<Uint8Array>;
     const decoder = batch.pipeThrough(new TextDecoderStream());
 
     const data: I[] = [];
@@ -160,10 +157,14 @@ export class PipelineTransformImpl<
       },
     });
 
+    if (!this.#batch) {
+      throw new Error('Batch should have been defined. Assertion error.');
+    }
+
     return {
-      id: this.#batch!.id,
-      shard: this.#batch!.shard,
-      ts: this.#batch!.ts,
+      id: this.#batch.id,
+      shard: this.#batch.shard,
+      ts: this.#batch.ts,
       format: Format.JSON_STREAM,
       size: {
         bytes: written,

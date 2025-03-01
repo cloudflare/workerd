@@ -24,8 +24,8 @@ export function baseConfig({ tsconfigRootDir }) {
         "@typescript-eslint/explicit-module-boundary-types": "error",
         "@typescript-eslint/no-require-imports": "error",
         "@typescript-eslint/prefer-enum-initializers": "error",
-        "@typescript-eslint/restrict-template-expressions": "warn",
-        "@typescript-eslint/no-non-null-assertion": "warn",
+        "@typescript-eslint/restrict-template-expressions": "off",
+        "@typescript-eslint/no-non-null-assertion": "error",
         "@typescript-eslint/no-extraneous-class": "off",
         "@typescript-eslint/unified-signatures": "off",
         "@typescript-eslint/no-unused-vars": [
