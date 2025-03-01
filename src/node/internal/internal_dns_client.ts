@@ -60,7 +60,6 @@ export async function sendDnsRequest(
   server.searchParams.set('type', type);
 
   // syscall needs to be in format of `queryTxt`
-  // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
   const syscall = `query${type.at(0)?.toUpperCase()}${type.slice(1)}`;
 
   let json: SuccessResponse | FailedResponse;

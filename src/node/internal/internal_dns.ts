@@ -176,11 +176,12 @@ export function resolveSoa(name: string): Promise<SOA> {
     validateAnswer(json.Answer, name, 'querySoa');
 
     // This is highly unlikely, but let's assert length just to be safe.
-    if (json.Answer.length === 0) {
+    const firstElement = json.Answer.at(0);
+    if (!firstElement) {
       throw new DnsError(name, errorCodes.NOTFOUND, 'querySoa');
     }
 
-    return normalizeSoa(json.Answer[0]!);
+    return normalizeSoa(firstElement);
   });
 }
 

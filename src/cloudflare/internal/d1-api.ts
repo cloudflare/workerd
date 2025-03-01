@@ -442,16 +442,16 @@ class D1PreparedStatement {
     const hasResults = results.length > 0;
     if (!hasResults) return null;
 
-    const firstResult = results[0]!;
+    const firstResult = results.at(0);
     if (colName !== undefined) {
-      if (firstResult[colName] === undefined) {
+      if (firstResult?.[colName] === undefined) {
         throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
           cause: new Error('Column not found'),
         });
       }
-      return firstResult[colName]!;
+      return firstResult[colName];
     } else {
-      return firstResult;
+      return firstResult as Record<string, T>;
     }
   }
 
@@ -516,7 +516,7 @@ class D1PreparedStatement {
 }
 
 function firstIfArray<T>(results: T | T[]): T {
-  return Array.isArray(results) ? results[0]! : results;
+  return Array.isArray(results) ? (results.at(0) as T) : results;
 }
 
 // This shim may be used against an older version of D1 that doesn't support
