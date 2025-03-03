@@ -847,9 +847,7 @@ class ArrayWrapper {
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)
-                     ->wrap(context, creator, kj::mv(array[n]))
-                     .template As<v8::Value>();
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
@@ -864,9 +862,7 @@ class ArrayWrapper {
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)
-                     ->wrap(context, creator, kj::mv(array[n]))
-                     .template As<v8::Value>();
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
