@@ -5,9 +5,14 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//:build/wd_test.bzl", "wd_test")
 
-def wpt_test(name, wpt_directory, config, autogates = []):
+### wpt_test macro
+### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
+### -----------------------------------------------------------------------------------------
+
+def wpt_test(name, wpt_directory, config, autogates = [], size = "medium"):
     """
     Main entry point.
+
     1. Generates a workerd test suite in JS. This contains the logic to run
        each WPT test file, applying the relevant test config.
     2. Generates a wd-test file for this test suite. This contains all of the
@@ -20,6 +25,7 @@ def wpt_test(name, wpt_directory, config, autogates = []):
     wpt_tsproject = "//src/wpt:wpt-all@tsproject"
     harness_as_js = "//src/wpt:harness/harness.js"
     compat_date = "//src/workerd/io:trimmed-supported-compatibility-date.txt"
+    wpt_cacert = "@wpt//:tools/certs/cacert.pem"
 
     _wpt_js_test_gen(
         name = js_test_gen_rule,
@@ -39,6 +45,7 @@ def wpt_test(name, wpt_directory, config, autogates = []):
         harness = harness_as_js,
         compat_date = compat_date,
         autogates = autogates,
+        wpt_cacert = wpt_cacert,
     )
 
     wd_test(
@@ -51,24 +58,72 @@ def wpt_test(name, wpt_directory, config, autogates = []):
             wpt_directory,
             compat_date,
             harness_as_js,
+            wpt_cacert,
         ],
+        size = size,
     )
+
+### wpt_module macro and rule
+### (Discovers test files within the WPT directory tree)
+### ----------------------------------------------------
+
+def wpt_module(name):
+    """
+    Given the name of a directory within the WPT tree, creates a rule providing:
+
+    srcs: All files within the directory
+    dir: A reference to the directory itself.
+
+    This info is later used by wpt_test rules to generate JS code and wd-test config
+    for each test.
+    """
+    return _wpt_module(
+        name = "{}@module".format(name),
+        dir = name,
+        srcs = native.glob(["{}/**/*".format(name)]),
+        visibility = ["//visibility:public"],
+    )
+
+WPTModuleInfo = provider(fields = ["base"])
+
+def _wpt_module_impl(ctx):
+    return [
+        DefaultInfo(files = depset(ctx.files.srcs)),
+        WPTModuleInfo(base = ctx.attr.dir.files.to_list()[0]),
+    ]
+
+_wpt_module = rule(
+    implementation = _wpt_module_impl,
+    attrs = {
+        "dir": attr.label(allow_single_file = True),
+        "srcs": attr.label_list(allow_files = True),
+    },
+)
+
+### wpt_js_test_gen rule
+### (Generates a .js file for each test)
+### ------------------------------------
 
 def _wpt_js_test_gen_impl(ctx):
     """
-    Generates a workerd test suite in JS. This contains the logic to run
-    each WPT test file, applying the relevant test config.
+    Generates a workerd test suite in JS.
+
+    This contains the logic to run each WPT test file, applying the relevant test config.
     """
 
     src = ctx.actions.declare_file("{}-test.generated.js".format(ctx.attr.test_name))
+    base = ctx.attr.wpt_directory[WPTModuleInfo].base
+
     files = ctx.attr.wpt_directory.files.to_list()
     test_files = [file for file in files if file.extension == "js" and not is_in_resources_directory(file)]
+
     ctx.actions.write(
         output = src,
         content = WPT_JS_TEST_TEMPLATE.format(
             test_config = ctx.file.test_config.basename,
-            cases = generate_external_cases(test_files),
-            all_test_files = generate_external_file_list(test_files),
+            cases = generate_external_cases(base, test_files),
+            all_test_files = generate_external_file_list(base, test_files),
+            test_name = ctx.attr.test_name,
         ),
     )
 
@@ -76,36 +131,19 @@ def _wpt_js_test_gen_impl(ctx):
         files = depset([src]),
     )
 
-def generate_external_cases(files):
-    """
-    Generate a workerd test case that runs each test file in the WPT module.
-    """
-    return "\n".join([
-        "export const {} = run('{}');".format(test_case_name(file.basename), file.basename)
-        for file in files
-    ])
-
-def generate_external_file_list(files):
-    """
-    Generate a JS list containing the name of every test file in the WPT module"
-    """
-    file_list = ", ".join(["'{}'".format(file.basename) for file in files])
-    return "[{}];".format(file_list)
-
-def test_case_name(filename):
-    """
-    Converts a JS filename to a valid JS identifier for use as a test case name.
-    WPT files are named with the convention some-words-with-hyphens.some-suffix.js.
-    We would turn this into someWordsWithHyphensSomeSuffix.
-    """
-
-    words = (filename
-        .removesuffix(".js")
-        .removesuffix(".any")
-        .replace(".", "-")
-        .split("-"))
-
-    return words[0] + "".join([word.capitalize() for word in words[1:]])
+_wpt_js_test_gen = rule(
+    implementation = _wpt_js_test_gen_impl,
+    attrs = {
+        # A string to use as the test name. Used in the wd-test filename and the worker's name
+        "test_name": attr.string(),
+        # A file group representing a directory of wpt tests. All files in the group will be embedded.
+        "wpt_directory": attr.label(),
+        # A JS file containing the test configuration.
+        "test_config": attr.label(allow_single_file = True),
+        # Dependency: The ts_project rule that compiles the tests to JS
+        "wpt_tsproject": attr.label(),
+    },
+)
 
 WPT_JS_TEST_TEMPLATE = """// This file is autogenerated by wpt_test.bzl
 // DO NOT EDIT.
@@ -113,18 +151,46 @@ import {{ createRunner }} from 'harness/harness';
 import config from '{test_config}';
 
 const allTestFiles = {all_test_files};
-const run = createRunner(config, allTestFiles);
+const run = createRunner(config, '{test_name}', allTestFiles);
 
 {cases}
 """
 
+def generate_external_cases(base, files):
+    """
+    Generate a workerd test case that runs each test file in the WPT module.
+    """
+
+    result = []
+    for file in files:
+        relative_path = module_relative_path(base, file)
+        result.append("export const {} = run('{}');".format(test_case_name(relative_path), relative_path))
+
+    return "\n".join(result)
+
+def generate_external_file_list(base, files):
+    """
+    Generate a JS list containing the name of every test file in the WPT module
+    """
+
+    return "[{}];".format(", ".join([
+        "'{}'".format(module_relative_path(base, file))
+        for file in files
+    ]))
+
+### wpt_wd_test_gen rule
+### (Generates a .wd-test file for each test)
+### -----------------------------------------
+
 def _wpt_wd_test_gen_impl(ctx):
     """
-    Generates a wd-test file for this test suite. This contains all of the
-    paths to modules needed to run the test: generated test suite, test config
-    file, WPT test scripts, associated JSON resources.
+    Generates a wd-test file for this test suite.
+
+    This contains all of the paths to modules needed to run the test: generated test suite, test
+    config file, WPT test scripts, associated JSON resources.
     """
     src = ctx.actions.declare_file("{}.wd-test".format(ctx.attr.test_name))
+    base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     ctx.actions.write(
         output = src,
@@ -132,9 +198,10 @@ def _wpt_wd_test_gen_impl(ctx):
             test_name = ctx.attr.test_name,
             test_config = ctx.file.test_config.basename,
             test_js_generated = ctx.file.test_js_generated.basename,
-            bindings = generate_external_bindings(src.owner, ctx.attr.wpt_directory.files),
-            harness = wd_relative_path(src.owner, ctx.file.harness),
-            compat_date = wd_relative_path(src.owner, ctx.file.compat_date),
+            bindings = generate_external_bindings(src, base, ctx.attr.wpt_directory.files),
+            harness = wd_test_relative_path(src, ctx.file.harness),
+            compat_date = wd_test_relative_path(src, ctx.file.compat_date),
+            wpt_cacert = wd_test_relative_path(src, ctx.file.wpt_cacert),
             autogates = generate_autogates_field(ctx.attr.autogates),
         ),
     )
@@ -142,6 +209,28 @@ def _wpt_wd_test_gen_impl(ctx):
     return DefaultInfo(
         files = depset([src]),
     )
+
+_wpt_wd_test_gen = rule(
+    implementation = _wpt_wd_test_gen_impl,
+    attrs = {
+        # A string to use as the test name. Used in the wd-test filename and the worker's name
+        "test_name": attr.string(),
+        # A file group representing a directory of wpt tests. All files in the group will be embedded.
+        "wpt_directory": attr.label(),
+        # A JS file containing the test configuration.
+        "test_config": attr.label(allow_single_file = True),
+        # An auto-generated JS file containing the test logic.
+        "test_js_generated": attr.label(allow_single_file = True),
+        # Target specifying the location of the WPT test harness
+        "harness": attr.label(allow_single_file = True),
+        # Target specifying the location of the trimmed-supported-compatibility-date.txt file
+        "compat_date": attr.label(allow_single_file = True),
+        # Target specifying the location of the WPT CA certificate
+        "wpt_cacert": attr.label(allow_single_file = True),
+        # A list of autogates to specify in the generated wd-test file
+        "autogates": attr.string_list(),
+    },
+)
 
 WPT_WD_TEST_TEMPLATE = """
 using Workerd = import "/workerd/workerd.capnp";
@@ -163,6 +252,16 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat", "experimental"],
       )
     ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+        tlsOptions = (
+          trustedCertificates = [
+            embed "{wpt_cacert}"
+          ]
+        )
+      )
+    ),
     (
       name = "wpt",
       disk = ".",
@@ -182,12 +281,51 @@ def generate_autogates_field(autogates):
     autogate_list = ", ".join(['"{}"'.format(autogate) for autogate in autogates])
     return "autogates = [{}],".format(autogate_list)
 
-def wd_relative_path(label, target):
+def generate_external_bindings(wd_test_file, base, files):
     """
-    Generates a path that can be used in a .wd-test file to refer to another file. Paths are relative
-    to the .wd-test file. We determine the right path from the label that generated the .wd-test file
+    Generates appropriate bindings for each file in the WPT module:
+
+    - JS files: text binding to allow code to be evaluated
+    - JSON files: JSON binding to allow test code to fetch resources
     """
-    return "../" * (label.package.count("/") + label.name.count("/") + 1) + target.short_path
+
+    result = []
+
+    for file in files.to_list():
+        if file.extension == "js":
+            binding_type = "text"
+        elif file.extension == "json":
+            binding_type = "json"
+        else:
+            # Unknown binding type, skip for now
+            continue
+
+        result.append('(name = "{}", {} = embed "{}")'.format(module_relative_path(base, file), binding_type, wd_test_relative_path(wd_test_file, file)))
+
+    return ",\n".join(result)
+
+### Path manipulation
+### -----------------
+
+def module_relative_path(module_base, file):
+    """
+    Return the relative path of a file inside its parent WPT module.
+
+    For example, within the 'dom/abort' module, the path
+    'dom/abort/resources/abort-signal-any-tests.js' would be referred to as
+    'resources/abort-signal-any-tests.js'
+    """
+
+    return paths.relativize(file.short_path, module_base.short_path)
+
+def wd_test_relative_path(wd_test_file, file):
+    """
+    Generates a path that can be used in a .wd-test file to refer to another file.
+
+    Paths are relative to the .wd-test file.
+    """
+
+    return "../" * (wd_test_file.short_path.count("/")) + file.short_path
 
 def is_in_resources_directory(file):
     """
@@ -196,65 +334,18 @@ def is_in_resources_directory(file):
     immediate_parent = paths.basename(file.dirname)
     return immediate_parent == "resources"
 
-def generate_external_bindings(label, files):
+def test_case_name(filename):
     """
-    Generates appropriate bindings for each file in the WPT module:
-    - JS files: text binding to allow code to be evaluated
-    - JSON files: JSON binding to allow test code to fetch resources
+    Converts a JS filename to a valid JS identifier for use as a test case name.
+
+    WPT files are named with the convention some-words-with-hyphens.some-suffix.js.
+    We would turn this into someWordsWithHyphensSomeSuffix.
     """
 
-    result = []
+    words = (filename
+        .removesuffix(".js")
+        .replace(".", "-")
+        .replace("/", "-")
+        .split("-"))
 
-    for file in files.to_list():
-        file_path = wd_relative_path(label, file)
-
-        if is_in_resources_directory(file):
-            binding_name = "resources/{}".format(file.basename)
-        else:
-            binding_name = file.basename
-
-        if file.extension == "js":
-            entry = """(name = "{}", text = embed "{}")""".format(binding_name, file_path)
-        elif file.extension == "json":
-            entry = """(name = "{}", json = embed "{}")""".format(binding_name, file_path)
-        else:
-            # For other file types, you can add more conditions or skip them
-            continue
-
-        result.append(entry)
-
-    return ",\n".join(result)
-
-_wpt_wd_test_gen = rule(
-    implementation = _wpt_wd_test_gen_impl,
-    attrs = {
-        # A string to use as the test name. Used in the wd-test filename and the worker's name
-        "test_name": attr.string(),
-        # A file group representing a directory of wpt tests. All files in the group will be embedded.
-        "wpt_directory": attr.label(),
-        # A JS file containing the test configuration.
-        "test_config": attr.label(allow_single_file = True),
-        # An auto-generated JS file containing the test logic.
-        "test_js_generated": attr.label(allow_single_file = True),
-        # Target specifying the location of the WPT test harness
-        "harness": attr.label(allow_single_file = True),
-        # Target specifying the location of the trimmed-supported-compatibility-date.txt file
-        "compat_date": attr.label(allow_single_file = True),
-        # A list of autogates to specify in the generated wd-test file
-        "autogates": attr.string_list(),
-    },
-)
-
-_wpt_js_test_gen = rule(
-    implementation = _wpt_js_test_gen_impl,
-    attrs = {
-        # A string to use as the test name. Used in the wd-test filename and the worker's name
-        "test_name": attr.string(),
-        # A file group representing a directory of wpt tests. All files in the group will be embedded.
-        "wpt_directory": attr.label(),
-        # A JS file containing the test configuration.
-        "test_config": attr.label(allow_single_file = True),
-        # Dependency: The ts_project rule that compiles the tests to JS
-        "wpt_tsproject": attr.label(),
-    },
-)
+    return words[0] + "".join([word.capitalize() for word in words[1:]])

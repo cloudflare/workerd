@@ -3,20 +3,26 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 load("@workerd//:build/wpt_get_directories.bzl", "wpt_get_directories")
+load("@workerd//:build/wpt_test.bzl", "wpt_module")
 
-[filegroup(
+[wpt_module(
     name = dir,
-    srcs = glob(["{}/**/*".format(dir)]),
-    visibility = ["//visibility:public"],
 ) for dir in wpt_get_directories(
     excludes = [
         "dom",
+        "fetch",
     ],
     root = "",
 )]
 
-[filegroup(
+[wpt_module(
     name = dir,
-    srcs = glob(["{}/**/*".format(dir)]),
-    visibility = ["//visibility:public"],
 ) for dir in wpt_get_directories(root = "dom")]
+
+[wpt_module(
+    name = dir,
+) for dir in wpt_get_directories(root = "fetch")]
+
+exports_files([
+    "tools/certs/cacert.pem",
+])
