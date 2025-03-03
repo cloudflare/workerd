@@ -29,6 +29,7 @@ import { default as SetupEmscripten } from 'internal:setup-emscripten';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
+import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -79,6 +80,28 @@ function maybeAddVendorDirectoryToPath(pyodide: Pyodide) {
   `);
 }
 
+/**
+ * Verifies that the Pyodide version in our compat flag matches our actual version. This is to
+ * prevent us accidentally releasing a Pyodide bundle built against a different version than one
+ * we expect.
+ */
+function validatePyodideVersion(Module: Module) {
+  const expectedPyodideVersion = MetadataReader.getPyodideVersion();
+  if (expectedPyodideVersion == 'dev') {
+    return;
+  }
+  try {
+    simpleRunPython(
+      Module,
+      `from pyodide import __version__ as v; assert v == \'${expectedPyodideVersion}\'; del v`
+    );
+  } catch {
+    throw new Error(
+      `Pyodide version mismatch, expected '${expectedPyodideVersion}'`
+    );
+  }
+}
+
 export async function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
@@ -117,6 +140,8 @@ export async function loadPyodide(
   const pyodide = Module.API.public_api;
 
   finishSnapshotSetup(pyodide);
+
+  validatePyodideVersion(Module);
 
   // Need to set these here so that the logs go to the right context. If we don't they will go
   // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
