@@ -30,6 +30,7 @@ PATCHES = [
     "0022-Delete-IsolateGroup-in-V8-Dispose.patch",
     "0023-Reset-code_range_-before-pointer-compression-cage.patch",
     "0024-Move-tear-down-in-IsolateGroup-Release-into-destruct.patch",
+    "0025-Modify-where-to-look-for-fast_float-and-simdutf.patch",
 ]
 
 # V8 and its dependencies
@@ -53,6 +54,7 @@ def deps_v8():
         patches = ["//:patches/v8/" + p for p in PATCHES],
         strip_prefix = "v8-" + VERSION,
         url = "https://github.com/v8/v8/archive/refs/tags/" + VERSION + ".tar.gz",
+        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
     git_repository(

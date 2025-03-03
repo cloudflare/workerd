@@ -140,8 +140,13 @@ git_repository(
 
 git_repository(
     name = "fast_float",
-    build_file_content = "exports_files(glob([\"**\"]))",
-    commit = "d7417618f93d2c47e9bbde561510f9fc8bafe003",
+    build_file_content = """cc_library(
+            name = "fast_float",
+            hdrs = glob(["include/fast_float/*.h"]),
+            visibility = ["//visibility:public"],
+            include_prefix = "third_party/fast_float/src",
+        )""",
+    commit = "cb1d42aaa1e14b09e1452cfdef373d051b8c02a4",
     remote = "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git",
 )
 
@@ -351,6 +356,7 @@ new_local_repository(
         deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
         visibility = ["//visibility:public"])""",
     path = "empty",
+    repo_mapping = {"@abseil-cpp": "@com_google_absl"},
 )
 
 # rust-based lolhtml dependency, including the API header.
