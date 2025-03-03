@@ -37,7 +37,18 @@ ANNOTATIONS = {
     "v8": [
         crate.annotation(
             patches = ["@workerd//:patches/rust-v8/build.rs.patch"],
-            patch_args = ["-p1"],
+            patch_args = ["-p4"],
+            deps = [":rusty_v8"],
+            # build_script_deps = ["@workerd-v8//:v8"],
+            additive_build_file_content = """
+                cc_library(
+                    name = "rusty_v8",
+                    deps = ["@workerd-v8//:v8"],
+                    srcs = ["src/binding.cc"],
+                    hdrs = ["src/support.h"],
+                    strip_include_prefix = "src/",
+                )
+            """,
         ),
     ],
 }

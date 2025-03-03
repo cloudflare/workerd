@@ -1901,7 +1901,7 @@ def crate_repositories():
         http_archive,
         name = "crates_vendor__v8-134.5.0",
         patch_args = [
-            "-p1",
+            "-p4",
         ],
         patches = [
             "@workerd//:patches/rust-v8/build.rs.patch",

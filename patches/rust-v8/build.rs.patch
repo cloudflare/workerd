@@ -1,10 +1,65 @@
---- a/build.rs	2006-07-23 18:21:28.000000000 -0700
-+++ b/build.rs	2025-02-28 10:26:28.390888937 -0800
-@@ -20,6 +20,7 @@
- use which::which;
-
- fn main() {
-+  return;
-   println!("cargo:rerun-if-changed=.gn");
-   println!("cargo:rerun-if-changed=BUILD.gn");
-   println!("cargo:rerun-if-changed=src/binding.cc");
+--- /home/maizatskyi/tmp/build.orig.rs	2025-03-03 10:41:21.206318879 -0800
++++ /home/maizatskyi/tmp/build.rs	2025-03-03 14:08:12.060083005 -0800
+@@ -75,7 +75,7 @@
+     return;
+   }
+ 
+-  print_link_flags();
++  // print_link_flags();
+ 
+   // Don't attempt rebuild but link
+   if is_trybuild {
+@@ -115,9 +115,7 @@
+     return;
+   }
+ 
+-  print_prebuilt_src_binding_path();
+-
+-  download_static_lib_binaries();
++  build_binding();
+ }
+ 
+ fn acquire_lock() -> LockFile {
+@@ -150,7 +148,7 @@
+   let bindings = bindgen::Builder::default()
+     .header("src/binding.hpp")
+     .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+-    .clang_args(["-x", "c++", "-std=c++20", "-Iv8/include", "-I."])
++    .clang_args(["-x", "c++", "-std=c++20", "-DV8_TYPED_ARRAY_MAX_SIZE_IN_HEAP=64", "-I/home/maizatskyi/src/github.com/cloudflare/workerd/external/v8/include", "-I/home/maizatskyi/src/github.com/cloudflare/workerd/external/", "-I."])
+     .clang_args(args)
+     .generate_cstr(true)
+     .rustified_enum(".*UseCounterFeature")
+@@ -163,7 +161,7 @@
+     .generate()
+     .expect("Unable to generate bindings");
+ 
+-  let out_path = build_dir().join("gn_out").join("src_binding.rs");
++  let out_path = out_dir().join("src_binding.rs");
+   println!(
+     "cargo:rustc-env=RUSTY_V8_SRC_BINDING_PATH={}",
+     out_path.display()
+@@ -448,18 +446,19 @@
+   build_dir().join("gn_out").join("obj")
+ }
+ 
+-fn build_dir() -> PathBuf {
++fn out_dir() -> PathBuf {
+   let cwd = env::current_dir().unwrap();
+-
+-  // target/debug//build/rusty_v8-d9e5a424d4f96994/out/
+   let out_dir = env::var_os("OUT_DIR").expect(
+     "The 'OUT_DIR' environment is not set (it should be something like \
+      'target/debug/rusty_v8-{hash}').",
+-  );
++    );
+   let out_dir_abs = cwd.join(out_dir);
++  out_dir_abs
++}
+ 
++fn build_dir() -> PathBuf {
+   // This would be target/debug or target/release
+-  out_dir_abs
++  out_dir()
+     .parent()
+     .unwrap()
+     .parent()
