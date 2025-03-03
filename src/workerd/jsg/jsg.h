@@ -2729,9 +2729,6 @@ class Lock {
   // This variation includes modules from the worker bundle.
   kj::Maybe<JsObject> resolveModule(kj::StringPtr specifier);
 
-protected:
-  virtual const V8System& getV8System() = 0;
-
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock

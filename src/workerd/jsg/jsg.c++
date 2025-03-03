@@ -4,14 +4,13 @@
 
 #include "jsg.h"
 
+#include "libplatform/libplatform.h"
 #include "setup.h"
 
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
-
-#include "libplatform/libplatform.h"
 
 namespace workerd::jsg {
 

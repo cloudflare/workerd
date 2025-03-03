@@ -7,9 +7,9 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
-#include <workerd/jsg/setup.h>
 
 #include <kj/debug.h>
 
@@ -459,7 +459,8 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   context->pumpMessageLoop();
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&&) {}));
+      .exclusiveJoin(context->abortPromise.addBranch().then(
+          [] {}, [](kj::Exception&& e) { KJ_LOG(INFO, "uncaught exception", e); }));
 }
 
 kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
