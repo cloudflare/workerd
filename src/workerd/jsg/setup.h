@@ -56,14 +56,18 @@ class V8System {
   explicit V8System(v8::Platform& platform);
 
   // Use a possibly-custom v8::Platform implementation, and apply flags.
-  explicit V8System(v8::Platform& platform, kj::ArrayPtr<const kj::StringPtr> flags, v8::Platform* defaultPlatformPtr = nullptr);
+  explicit V8System(v8::Platform& platform,
+      kj::ArrayPtr<const kj::StringPtr> flags,
+      v8::Platform* defaultPlatformPtr = nullptr);
 
   ~V8System() noexcept(false);
 
   typedef void FatalErrorCallback(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
-  auto& getDefaultPlatform() { return *defaultPlatformPtr_; }
+  auto& getDefaultPlatform() {
+    return *defaultPlatformPtr_;
+  }
 
  private:
   kj::Own<v8::Platform> platformInner;
@@ -71,7 +75,9 @@ class V8System {
   friend class IsolateBase;
   v8::Platform* defaultPlatformPtr_;
 
-  explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>, v8::Platform* defaultPlatformPtr = nullptr);
+  explicit V8System(kj::Own<v8::Platform>,
+      kj::ArrayPtr<const kj::StringPtr>,
+      v8::Platform* defaultPlatformPtr = nullptr);
 };
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
@@ -696,10 +702,6 @@ class Isolate: public IsolateBase {
         jsgIsolate.reportError(
             *this, value.toString(*this), value, JsMessage::create(*this, value));
       }
-    }
-  protected:
-    virtual const V8System& getV8System() override {
-      return jsgIsolate.getV8System();
     }
 
     // Sets an env value that will be expressed on the process.env

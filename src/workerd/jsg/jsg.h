@@ -2721,7 +2721,7 @@ class Lock {
   // Retrieve the worker environment.
   virtual kj::Maybe<Value> getWorkerEnv() = 0;
 
-protected:
+ protected:
   virtual const V8System& getV8System() = 0;
 
  private:
