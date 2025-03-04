@@ -9,7 +9,6 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
-#include <workerd/util/weak-refs.h>
 
 #include <kj/async.h>
 #include <kj/map.h>
