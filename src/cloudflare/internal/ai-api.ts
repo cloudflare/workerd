@@ -83,6 +83,10 @@ export class AiInternalError extends Error {
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
+  // TODO(soon): This is better implemented using the node::buffer API
+  // but we cannot get to that from here currently. Once the node:buffer
+  // API (actually, `node-internal:internal_buffer`) is available to be imported
+  // here we should update this code to use it instead.
   const arrayBuffer = await blob.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
 
