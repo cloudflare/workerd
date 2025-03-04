@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.4.114.14"
+VERSION = "13.4.114.17"
 
-INTEGRITY = "sha256-x9XpAsXjjGgM12clEDmsXNNczus8Eyk3cBKlX2uqE/0="
+INTEGRITY = "sha256-2oHxjMY9AI8zSRf4VU+eJE1q5lWHWKiZ/pnOJBuV2JM="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
