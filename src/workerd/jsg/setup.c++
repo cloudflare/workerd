@@ -315,8 +315,7 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
     }
-#if ((V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION > 2) || V8_MAJOR_VERSION > 13) &&                 \
-    V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+#if V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
     // Create new isolate group so that isolate is in its own group and not in a shared group. That
     // way the isolates don't all use the same pointer cage.
     v8::IsolateGroup group = v8::IsolateGroup::Create();
@@ -333,11 +332,7 @@ IsolateBase::IsolateBase(const V8System& system,
     kj::Own<IsolateObserver> observer)
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
-#if (V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION >= 4) || V8_MAJOR_VERSION > 13
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
-#else
-      ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
-#endif
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
