@@ -28,7 +28,8 @@
 
 namespace workerd {
 class WorkerTracer;
-}
+class BaseTracer;
+}  // namespace workerd
 
 namespace workerd {
 class LimitEnforcer;
@@ -113,7 +114,7 @@ class IoContext_IncomingRequest final {
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+      kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       tracing::InvocationSpanContext invocationSpanContext);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
@@ -160,7 +161,7 @@ class IoContext_IncomingRequest final {
     return *metrics;
   }
 
-  kj::Maybe<WorkerTracer&> getWorkerTracer() {
+  kj::Maybe<BaseTracer&> getWorkerTracer() {
     return workerTracer;
   }
 
@@ -173,7 +174,7 @@ class IoContext_IncomingRequest final {
  private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
-  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+  kj::Maybe<kj::Own<BaseTracer>> workerTracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
 
   // The invocation span context identifies the trace id, invocation id, and root
@@ -252,7 +253,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().metrics;
   }
 
-  const kj::Maybe<WorkerTracer&> getWorkerTracer() {
+  const kj::Maybe<BaseTracer&> getWorkerTracer() {
     if (incomingRequests.empty()) return kj::none;
     return getCurrentIncomingRequest().getWorkerTracer();
   }

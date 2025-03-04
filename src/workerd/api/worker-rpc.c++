@@ -1764,7 +1764,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
-      kj::Maybe<kj::Own<WorkerTracer>> tracer)
+      kj::Maybe<kj::Own<BaseTracer>> tracer)
       : JsRpcTargetBase(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
@@ -1810,7 +1810,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  private:
   kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
-  kj::Maybe<kj::Own<WorkerTracer>> tracer;
+  kj::Maybe<kj::Own<BaseTracer>> tracer;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.

@@ -14,7 +14,7 @@ class LimitEnforcer;
 class RequestObserver;
 class ThreadContext;
 class WorkerInterface;
-class WorkerTracer;
+class BaseTracer;
 
 namespace tracing {
 class InvocationSpanContext;
@@ -39,7 +39,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<RequestObserver> metrics,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
     // The trigger invocation span may be propagated from other request. If it is provided,
     // the implication is that this worker entrypoint is being created as a subrequest or

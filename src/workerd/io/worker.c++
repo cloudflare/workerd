@@ -143,7 +143,7 @@ void sendExceptionToInspector(jsg::Lock& js,
 
 void addExceptionToTrace(jsg::Lock& js,
     IoContext& ioContext,
-    WorkerTracer& tracer,
+    BaseTracer& tracer,
     UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
