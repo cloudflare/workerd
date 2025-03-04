@@ -13,33 +13,17 @@ and hwy bindings as a whole are no longer needed; this patch can be dropped.
 Change-Id: I7c52113596247f8f254ac5f882b41da1ba32e3b1
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d42347b15fa323835c7b2e65346548ae21573ae2..f7e92ed0de31979232200e842c80147803d16535 100644
+index 0b95fa690001e06ef39227c66dbd0866d33b2926..42198db354f84480b3a16ef8df2556bbfb65819a 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4308,6 +4308,10 @@ v8_library(
-         ":v8_libbase_files",
-         ":v8_shared_internal_headers",
+@@ -4302,6 +4302,10 @@ cc_library(
+         "src/torque/kythe-data.h",
+         "src/torque/torque-compiler.h",
      ],
 +    deps = select({
 +        "@v8//bazel/config:is_macos": ["@com_google_absl//absl/synchronization"],
 +        "//conditions:default": [],
 +    }),
      copts = ["-Wno-implicit-fallthrough"],
- )
- 
-@@ -4335,7 +4339,6 @@ cc_library(
-     deps = [
-         ":torque_base_headers",
-         ":v8_libbase",
--        "//external:absl_optional",
-     ],
- )
- 
-@@ -4470,7 +4473,6 @@ v8_binary(
-         "UNISTR_FROM_CHAR_EXPLICIT=",
-     ],
-     deps = [
--        "//external:absl_optional",
-         "v8_libbase",
-         "//external:icu",
-     ],
+     include_prefix = "third_party/v8",
+     includes = ["."],

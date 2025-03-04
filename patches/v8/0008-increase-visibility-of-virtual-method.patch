@@ -7,7 +7,7 @@ Methods were marked as protected, which conflicts with
 v8-platform-wrapper.h implementation.
 
 diff --git a/include/v8-platform.h b/include/v8-platform.h
-index aeeffbc317ca54c1b41b1cc251efa24f6347e0d0..5ed306c03f00e1e8121c5615141a9ecee0def3f8 100644
+index cecc217a62bbdb476619da89c3e0bf53bd70b282..13f349057aeb72afa42d4d77359bf4821e030139 100644
 --- a/include/v8-platform.h
 +++ b/include/v8-platform.h
 @@ -1343,7 +1343,7 @@ class Platform {

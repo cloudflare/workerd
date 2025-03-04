@@ -6,13 +6,9 @@ Subject: Speed up V8 bazel build by always using target cfg
 See the workerd build cfg changes for rationale. This provides a significant
 speedup for the build: Components like ICU were previously compiled in
 both target and exec configurations as generator tools depend on them.
-This also changes torque generation to only run once by splitting up the
-output set instead of running it twice but only defining a part of the
-generated files as the output set. While unrelated to the build cfg change,
-this also improves build times.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index c056e87386233c7d8e512dfa53f4108c8b42678e..69d5e5206ccae77199b9df7efe7797264b42a6e7 100644
+index bfe3365942400fc77f346f2138ac31014f1020aa..96a35feb537ddc9edf864cadba402dfcc40f4ed6 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -23,8 +19,8 @@ index c056e87386233c7d8e512dfa53f4108c8b42678e..69d5e5206ccae77199b9df7efe779726
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4237,22 +4238,20 @@ filegroup(
-     }),
+@@ -4219,22 +4220,20 @@ filegroup(
+     ],
  )
  
 -genrule(
@@ -52,28 +48,19 @@ index c056e87386233c7d8e512dfa53f4108c8b42678e..69d5e5206ccae77199b9df7efe779726
  )
  
  v8_mksnapshot(
-@@ -4454,8 +4453,6 @@ v8_binary(
+@@ -4443,7 +4442,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
--        ":v8_libbase_files",
 -        ":v8_shared_internal_headers",
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -4467,6 +4464,7 @@ v8_binary(
-     ],
-     deps = [
-         "//external:absl_optional",
-+        "v8_libbase",
-         "//external:icu",
-     ],
- )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index e607fb59079e85de87f9e84eb7b6973cca8fc46d..1a6afe57fa386afe3900e4a3a165426f14b1f8a4 100644
+index 270d982eb55415c59f0659de13fa34cd820a9c83..a1539ab5399fe4759fcdbf93e62eb130cb7a2ae7 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -340,6 +340,15 @@ def v8_library(
+@@ -341,6 +341,15 @@ def v8_library(
              **kwargs
          )
  
@@ -89,7 +76,7 @@ index e607fb59079e85de87f9e84eb7b6973cca8fc46d..1a6afe57fa386afe3900e4a3a165426f
  # Use a single generator target for torque definitions and initializers. We can
  # split the set of outputs by using OutputGroupInfo, that way we do not need to
  # run the torque generator twice.
-@@ -404,7 +413,7 @@ _v8_torque_files = rule(
+@@ -409,7 +418,7 @@ _v8_torque_files = rule(
          "tool": attr.label(
              allow_files = True,
              executable = True,
@@ -98,7 +85,7 @@ index e607fb59079e85de87f9e84eb7b6973cca8fc46d..1a6afe57fa386afe3900e4a3a165426f
          ),
          "args": attr.string_list(),
      },
-@@ -505,13 +514,16 @@ _v8_mksnapshot = rule(
+@@ -510,13 +519,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -117,7 +104,7 @@ index e607fb59079e85de87f9e84eb7b6973cca8fc46d..1a6afe57fa386afe3900e4a3a165426f
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -637,3 +649,34 @@ def v8_build_config(name, arch):
+@@ -643,3 +655,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

@@ -8,7 +8,7 @@ by miniflare. This happens because workerd does not support re-loading
 live workers (https://chat.google.com/room/AAAAnS2bXT4/GX5-pa8O0ts).
 
 diff --git a/src/inspector/v8-inspector-impl.cc b/src/inspector/v8-inspector-impl.cc
-index acb181a6dfd7435896f9bea3ac60682725cb16d6..958740e61835e7dd710a6578bcdb503b0dfa0a95 100644
+index 6a9f7cb0467c484882ad7901c30010b1e8d905d6..687172f7ada46603a3ea9c583925eb7359d9a9b3 100644
 --- a/src/inspector/v8-inspector-impl.cc
 +++ b/src/inspector/v8-inspector-impl.cc
 @@ -66,7 +66,7 @@ V8InspectorImpl::V8InspectorImpl(v8::Isolate* isolate,

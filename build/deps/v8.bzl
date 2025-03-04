@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.3.415.18"
+VERSION = "13.4.114.17"
 
-INTEGRITY = "sha256-irTC8837o+iRvTVx6YatlscLn3+nJcr5RumtHCMUhW0="
+INTEGRITY = "sha256-2oHxjMY9AI8zSRf4VU+eJE1q5lWHWKiZ/pnOJBuV2JM="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -15,19 +15,21 @@ PATCHES = [
     "0007-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
-    "0010-Set-torque-generator-path-to-external-v8.-This-allow.patch",
-    "0011-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0012-Expose-v8-Symbol-GetDispose.patch",
-    "0013-Revert-TracedReference-deref-API-removal.patch",
-    "0014-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-    "0015-Update-illegal-invocation-error-message-in-v8.patch",
-    "0016-Implement-cross-request-context-promise-resolve-hand.patch",
-    "0017-Modify-where-to-look-for-fast_float-dependency.patch",
-    "0018-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0019-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0020-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0021-Enable-V8-shared-linkage.patch",
-    "0022-Fix-macOS-build.patch",
+    "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
+    "0011-Expose-v8-Symbol-GetDispose.patch",
+    "0012-Revert-TracedReference-deref-API-removal.patch",
+    "0013-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+    "0014-Update-illegal-invocation-error-message-in-v8.patch",
+    "0015-Implement-cross-request-context-promise-resolve-hand.patch",
+    "0016-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0017-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0018-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0019-Enable-V8-shared-linkage.patch",
+    "0020-Fix-macOS-build.patch",
+    "0021-Delete-IsolateGroup-in-V8-Dispose.patch",
+    "0022-Reset-code_range_-before-pointer-compression-cage.patch",
+    "0023-Move-tear-down-in-IsolateGroup-Release-into-destruct.patch",
+    "0024-Modify-where-to-look-for-fast_float-and-simdutf.patch",
 ]
 
 # V8 and its dependencies
@@ -51,6 +53,7 @@ def deps_v8():
         patches = ["//:patches/v8/" + p for p in PATCHES],
         strip_prefix = "v8-" + VERSION,
         url = "https://github.com/v8/v8/archive/refs/tags/" + VERSION + ".tar.gz",
+        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
     git_repository(

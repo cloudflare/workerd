@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Tue, 9 Jul 2024 08:37:05 -0700
+Subject: Update illegal invocation error message in v8
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
+diff --git a/src/common/message-template.h b/src/common/message-template.h
+index 14a868c28f761bdecab15fe156f91494fb43ece7..e5ab13aadd0d1c71921e6550a0415e0b45f3206a 100644
+--- a/src/common/message-template.h
++++ b/src/common/message-template.h
+@@ -112,7 +112,11 @@ namespace internal {
+     "First argument to % must not be a regular expression")                    \
+   T(FunctionBind, "Bind must be called on a function")                         \
+   T(GeneratorRunning, "Generator is already running")                          \
+-  T(IllegalInvocation, "Illegal invocation")                                   \
++  T(IllegalInvocation,                                                         \
++    "Illegal invocation: function called with incorrect `this` reference. "    \
++    "See "                                                                     \
++    "https://developers.cloudflare.com/workers/observability/errors/"          \
++    "#illegal-invocation-errors for details.")                                 \
+   T(ImmutablePrototypeSet,                                                     \
+     "Immutable prototype object '%' cannot have their prototype set")          \
+   T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
+diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
+index eaa96c232c08dd4454860bbf33e57cc55181bf0e..3e7f2aa117f64c9ef00bcd9f3492d4e39e5945f0 100644
+--- a/test/cctest/test-api.cc
++++ b/test/cctest/test-api.cc
+@@ -211,6 +211,17 @@ THREADED_TEST(IsolateOfContext) {
+   CHECK(env->GetIsolate() == CcTest::isolate());
+ }
+ 
++static bool ExceptionStartsWithIllegalInvocation(v8::Isolate* isolate,
++                                                 v8::TryCatch& try_catch) {
++  v8::Local<v8::String> error_text =
++      try_catch.Exception()
++          ->ToString(isolate->GetCurrentContext())
++          .ToLocalChecked();
++  const char* prefix = "TypeError: Illegal invocation";
++  return strncmp(prefix, *v8::String::Utf8Value(isolate, error_text),
++                 strlen(prefix)) == 0;
++}
++
+ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
+                                 v8::Isolate* isolate) {
+   v8::base::ScopedVector<char> source(200);
+@@ -228,12 +239,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
+   if (!expected_to_throw) {
+     CHECK_EQ(10, signature_callback_count);
+   } else {
+-    CHECK(v8_str("TypeError: Illegal invocation")
+-              ->Equals(isolate->GetCurrentContext(),
+-                       try_catch.Exception()
+-                           ->ToString(isolate->GetCurrentContext())
+-                           .ToLocalChecked())
+-              .FromJust());
++    CHECK(ExceptionStartsWithIllegalInvocation(isolate, try_catch));
+   }
+   signature_expected_receiver_global.Reset();
+ }
+@@ -260,12 +266,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
+   if (!expected_to_throw) {
+     CHECK_EQ(3, signature_callback_count);
+   } else {
+-    CHECK(v8_str("TypeError: Illegal invocation")
+-              ->Equals(isolate->GetCurrentContext(),
+-                       try_catch.Exception()
+-                           ->ToString(isolate->GetCurrentContext())
+-                           .ToLocalChecked())
+-              .FromJust());
++    CHECK(ExceptionStartsWithIllegalInvocation(isolate, try_catch));
+   }
+   signature_expected_receiver_global.Reset();
+ }
+diff --git a/test/mjsunit/ic-megadom-3.js b/test/mjsunit/ic-megadom-3.js
+index f7a7634e7e11845e4b364fcc6942f1170b9ee8da..e811f9e04d60f7a2eaf3a5a48e3c09d23a7c854d 100644
+--- a/test/mjsunit/ic-megadom-3.js
++++ b/test/mjsunit/ic-megadom-3.js
+@@ -42,7 +42,7 @@ function test() {
+     load(new d8.dom.EventTarget());
+   } catch (err) {
+     assertInstanceof(err, TypeError);
+-    assertEquals("Illegal invocation", err.message, 'Error message');
++    assertTrue(err.message.startsWith("Illegal invocation"), 'Error message');
+   }
+ 
+   return result;

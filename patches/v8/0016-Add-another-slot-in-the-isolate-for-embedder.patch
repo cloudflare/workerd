@@ -5,10 +5,10 @@ Subject: Add another slot in the isolate for embedder
 
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index b56e67375dab7bffd1e083f49bf1faf0583af4bc..22818cd5c6f36d6591fab4ac2d0184a9c291c531 100644
+index 676aec370a557eab7b670a42b6be62083e7df5bd..d6148fefba814b99252eec034b5c91397097cfc4 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
-@@ -834,7 +834,7 @@ class Internals {
+@@ -866,7 +866,7 @@ class Internals {
    static const int kExternalTwoByteRepresentationTag = 0x02;
    static const int kExternalOneByteRepresentationTag = 0x0a;
  
