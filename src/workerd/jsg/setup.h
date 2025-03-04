@@ -86,10 +86,6 @@ class IsolateBase {
  public:
   static IsolateBase& from(v8::Isolate* isolate);
 
-  auto& getV8System() {
-    return system;
-  }
-
   // Unwraps a JavaScript exception as a kj::Exception.
   virtual kj::Exception unwrapException(
       v8::Local<v8::Context> context, v8::Local<v8::Value> exception) = 0;
@@ -227,6 +223,10 @@ class IsolateBase {
     return *envAsyncContextKey;
   }
 
+  v8::Platform* getDefaultPlatform() {
+    return defaultPlatform;
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -259,7 +259,7 @@ class IsolateBase {
 
   using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
 
-  const V8System& system;
+  v8::Platform* defaultPlatform;
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
@@ -333,7 +333,7 @@ class IsolateBase {
   // Maps instructions to source code locations.
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
 
-  explicit IsolateBase(const V8System& system,
+  explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer);
   ~IsolateBase() noexcept(false);
@@ -455,7 +455,7 @@ class Isolate: public IsolateBase {
   // and should be instantiated with `instantiateTypeWrapper` before `newContext` is called on
   // a jsg::Lock of this Isolate.
   template <typename MetaConfiguration>
-  explicit Isolate(const V8System& system,
+  explicit Isolate(V8System& system,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
@@ -468,7 +468,7 @@ class Isolate: public IsolateBase {
   }
 
   // Use this constructor when no wrappers have any required configuration.
-  explicit Isolate(const V8System& system,
+  explicit Isolate(V8System& system,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
       : Isolate(system, nullptr, kj::mv(observer), kj::mv(createParams)) {}

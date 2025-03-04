@@ -335,10 +335,9 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
 }
 }  // namespace
 
-IsolateBase::IsolateBase(const V8System& system,
-    v8::Isolate::CreateParams&& createParams,
-    kj::Own<IsolateObserver> observer)
-    : system(system),
+IsolateBase::IsolateBase(
+    V8System& system, v8::Isolate::CreateParams&& createParams, kj::Own<IsolateObserver> observer)
+    : defaultPlatform(&system.getDefaultPlatform()),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
