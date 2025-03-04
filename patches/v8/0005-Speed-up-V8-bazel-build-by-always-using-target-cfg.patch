@@ -1,8 +1,11 @@
 From 1906956a221634250ed2ae32d2dae9d4ef2642a9 Mon Sep 17 00:00:00 2001
-From: Erik Corry <erikcorry@chromium.org>
-Date: Wed, 26 Feb 2025 18:33:33 +0100
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
 
+See the workerd build cfg changes for rationale. This provides a significant
+speedup for the build: Components like ICU were previously compiled in
+both target and exec configurations as generator tools depend on them.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
 index 967f7bbfb2810366de89b7a7a90f284efab6c9c6..45ee9bb2c72c8a0f99ad3d492a798cde9be270f1 100644

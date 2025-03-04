@@ -163,12 +163,6 @@ git_repository(
     remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
 )
 
-# Bindings for Highway library used by V8
-bind(
-    name = "hwy",
-    actual = "@highway//:hwy",
-)
-
 # Bindings for abseil libraries used by V8
 [
     bind(
