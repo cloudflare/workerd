@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/trace.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd {
 namespace tracing {

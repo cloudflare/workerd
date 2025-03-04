@@ -826,12 +826,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // the stream should be stopped and will fulfill the done promise.
     bool finishing = false;
 
-    // When we have a bona fide tail worker that receives its outcome event, we need to make sure
-    // that the final tail worker invocation is completed before destroying the tail worker
-    // customEvent and incomingRequest. To achieve this, we only fulfill the doneFulfiller after
-    // JS execution has completed.
-    // TODO(streaming-tail): I doubt this is the best possible approach here. We should be able to
-    // shut down the tail stream itself before the final tail worker invocation is complete.
+    // When a tail worker receives its outcome event, we need to ensure that the final tail worker
+    // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
+    // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
     bool doFulfill = false;
 
     if (h->IsFunction()) {
@@ -896,19 +893,13 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
-      // TODO: option 1, faulty
-      /*if (doFulfill) {
-        promise = p.then(js, [&](jsg::Lock& js) {
-          doneFulfiller->fulfill();
-          return jsg::Promise<void>(nullptr);
+      if (doFulfill) {
+        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
+            [&](jsg::Lock& js, jsg::Value&& value) {
+          doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
         });
-      }*/
-      // TODO: option 2
-      return ioContext.awaitJs(js, kj::mv(p)).then([&, doFulfill = doFulfill]() {
-        if (doFulfill) {
-          doneFulfiller->fulfill();
-        }
-      });
+      }
+      return ioContext.awaitJs(js, kj::mv(p));
     }
     return kj::READY_NOW;
   }

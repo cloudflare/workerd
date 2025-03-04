@@ -43,7 +43,6 @@
 
 #include <cstdlib>
 #include <ctime>
-#include <list>
 
 namespace workerd::server {
 
