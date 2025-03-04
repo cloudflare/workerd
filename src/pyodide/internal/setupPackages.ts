@@ -312,7 +312,6 @@ function addPackageToLoad(
 }
 
 export { REQUIREMENTS };
-export const TRANSITIVE_REQUIREMENTS = new Set(
-  MetadataReader.getTransitiveRequirements()
-);
+export const TRANSITIVE_REQUIREMENTS =
+  MetadataReader.getTransitiveRequirements();
 export const VIRTUALIZED_DIR = buildVirtualizedDir(TRANSITIVE_REQUIREMENTS);

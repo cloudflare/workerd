@@ -210,7 +210,7 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::str(packagesLock);
   }
 
-  kj::Array<kj::String> getTransitiveRequirements();
+  kj::HashSet<kj::String> getTransitiveRequirements();
 
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);

@@ -162,16 +162,11 @@ int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> bu
   return readToTarget(KJ_REQUIRE_NONNULL(memorySnapshot), offset, buf);
 }
 
-kj::Array<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
+kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
   auto packages = parseLockFile(packagesLock);
   auto depMap = getDepMapFromPackagesLock(*packages);
 
-  auto allRequirements = getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
-  auto result = kj::heapArrayBuilder<kj::String>(allRequirements.size());
-  for (const auto& r: allRequirements) {
-    result.add(kj::str(r));
-  }
-  return result.finish();
+  return getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
 }
 
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
