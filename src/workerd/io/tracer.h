@@ -101,8 +101,13 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
 // of the add* methods below should make more sense: The invocation span context below is currently
 // only being used in the streaming model, when we have switched the legacy model to streaming
 // there will be plenty of cleanup potential.
-class BaseTracer {
+class BaseTracer: public kj::Refcounted {
  public:
+  BaseTracer(): self(kj::refcounted<WeakRef<BaseTracer>>(kj::Badge<BaseTracer>{}, *this)) {}
+  ~BaseTracer() {
+    self->invalidate();
+  }
+
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -131,22 +136,30 @@ class BaseTracer {
   virtual void setFetchResponseInfo(tracing::FetchResponseInfo&&) = 0;
 
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
+
+  kj::Own<WeakRef<BaseTracer>> addWeakRef() {
+    return self->addRef();
+  }
+
+  // A weak reference for the internal span submitter. We use this so that the span submitter can
+  // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
+  // which would interfere with span submission (traces get submitted when the worker returns its
+  // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
+  // span submitter may exist for longer than the tracer).
+  kj::Own<WeakRef<BaseTracer>> self;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
 // Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
 // write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
 // via extractTrace.
-class WorkerTracer final: public kj::Refcounted, public BaseTracer {
+class WorkerTracer: public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
       PipelineLogLevel pipelineLogLevel,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
-  ~WorkerTracer() {
-    self->invalidate();
-  }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
   void addLog(const tracing::InvocationSpanContext& context,
@@ -177,10 +190,6 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   // parent process after receiving a trace from a process sandbox.
   void setTrace(rpc::Trace::Reader reader);
 
-  kj::Own<WeakRef<WorkerTracer>> addWeakRef() {
-    return self->addRef();
-  }
-
   kj::Maybe<kj::Own<tracing::TailStreamWriter>>& getTailStreamWriter();
 
  private:
@@ -197,12 +206,5 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
-
-  // A weak reference for the internal span submitter. We use this so that the span submitter can
-  // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
-  // which would interfere with span submission (traces get submitted when the worker returns its
-  // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
-  // span submitter may exist for longer than the tracer).
-  kj::Own<WeakRef<WorkerTracer>> self;
 };
 }  // namespace workerd
