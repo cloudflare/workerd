@@ -2348,8 +2348,6 @@ class ExternalMemoryAdjustment final {
 // Isolate<TypeWrapper>::Lock. Usually this is only done in top-level code, and the Lock is
 // passed down to everyone else from there. See setup.h for details.
 
-class V8System;
-
 class Lock {
  public:
   // The underlying V8 isolate, useful for directly calling V8 APIs. Hopefully, this is rarely
