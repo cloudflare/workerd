@@ -163,19 +163,6 @@ git_repository(
     remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
 )
 
-# Bindings for abseil libraries used by V8
-[
-    bind(
-        name = "absl_" + absl_component,
-        actual = "@com_google_absl//absl/container:" + absl_component,
-    )
-    for absl_component in [
-        "btree",
-        "flat_hash_map",
-        "flat_hash_set",
-    ]
-]
-
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
