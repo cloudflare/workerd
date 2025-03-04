@@ -537,7 +537,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     kj::TaskSet& waitUntilTasks) {
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
-  KJ_DEFER({ waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest))); });
 
   kj::String queueName;
   uint32_t batchSize;
@@ -633,6 +632,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
       auto result = co_await incomingRequest->finishScheduled();
       bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
       outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
+    } else {
+      // If we aren't going to wait on the waitUntil tasks via a call to
+      // incomingRequest->finishScheduled(), we're responsible for calling draing() on the
+      // incomingRequest to ensure that waitUntil tasks are run in the backgound.
+      waitUntilTasks.add(incomingRequest->drain().attach(
+          kj::mv(incomingRequest), kj::addRef(*queueEventHolder), kj::addRef(*this)));
     }
 
     KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
