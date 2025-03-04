@@ -1,4 +1,4 @@
-From 5de9a9d901269eece324b78366614a6ed5f17b9d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Dominik=20Inf=C3=BChr?= <dinfuehr@chromium.org>
 Date: Tue, 18 Feb 2025 19:04:07 +0100
 Subject: Reset code_range_ before pointer compression cage

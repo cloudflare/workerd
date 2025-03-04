@@ -1,4 +1,4 @@
-From bbab282cad76bc3e0580df2b11bbb83992347191 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
@@ -69,7 +69,7 @@ index 783a76f144d506e3cb0b180b69aea499d61aff82..7d6c3ed40468a61c961ff8776a3c4d26
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/icu/embedded.S",
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 52b675a611e40246f19a96802b3acaeec4b47846..35a7c57b480017748c9c619cb7df0d6a2311f72b 100644
+index a1539ab5399fe4759fcdbf93e62eb130cb7a2ae7..497246e6e5f63b5e73251177317a3c99cbdc7b09 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -298,7 +298,6 @@ def v8_library(

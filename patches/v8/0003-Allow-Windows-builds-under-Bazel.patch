@@ -4,20 +4,6 @@ Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
 
 
-diff --git a/BUILD.bazel b/BUILD.bazel
-index b81f278203126913c3bad74d31348706678ccf06..86e0f9cdb61d0d8f6597d337c2dd965ba67de12c 100644
---- a/BUILD.bazel
-+++ b/BUILD.bazel
-@@ -3833,6 +3833,9 @@ filegroup(
-         "@v8//bazel/config:is_msvc_asm_ia32": ["src/heap/base/asm/ia32/push_registers_masm.asm"],
-         "@v8//bazel/config:is_msvc_asm_x64": ["src/heap/base/asm/x64/push_registers_masm.asm"],
-         "@v8//bazel/config:is_msvc_asm_arm64": ["src/heap/base/asm/arm64/push_registers_masm.S"],
-+        "@v8//bazel/config:is_windows_clang_asm_ia32": ["src/heap/base/asm/ia32/push_registers_asm.cc"],
-+        "@v8//bazel/config:is_windows_clang_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
-+        "@v8//bazel/config:is_windows_clang_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
-     }),
- )
- 
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
 index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965ba67de12c 100644
 --- a/bazel/config/BUILD.bazel

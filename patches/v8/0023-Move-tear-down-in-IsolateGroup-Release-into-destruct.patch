@@ -1,4 +1,4 @@
-From c0c63044cb87b61d39531835f6882affe6eea59f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Dominik=20Inf=C3=BChr?= <dinfuehr@chromium.org>
 Date: Wed, 19 Feb 2025 09:36:49 +0100
 Subject: Move tear down in IsolateGroup::Release() into destructor

@@ -1,4 +1,4 @@
-From a98a1877917c53882565ec8ed06cbf8ecf1cfceb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Mon, 3 Mar 2025 22:30:37 +0100
 Subject: Modify where to look for fast_float and simdutf.

@@ -1,4 +1,4 @@
-From 2ad5b37a0ea422404e1cbb797871f4a1c50567fa Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 26 Feb 2025 18:44:05 +0100
 Subject: Revert "heap: Add masm-specific unwinding annotations to GC

@@ -1,4 +1,4 @@
-From ad94101a730f2fa5b37401cf60cf1c4d2d6b3fef Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Wed, 4 Dec 2024 22:36:05 -0600
 Subject: Add ValueSerializer::SetTreatProxiesAsHostObjects().
