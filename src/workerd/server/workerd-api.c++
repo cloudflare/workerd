@@ -116,6 +116,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     EW_WEBGPU_ISOLATE_TYPES,
 #endif
+    workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -705,9 +706,9 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         // parsed in one context (env) and unparsed in another (process.env).
 
         if (value->IsString()) {
-          lock.setEnvField(lock.str(global.name), jsg::JsValue(value));
+          lock.setProcessEnvField(lock.str(global.name), jsg::JsValue(value));
         } else {
-          lock.setEnvField(lock.str(global.name), lock.str(json.text));
+          lock.setProcessEnvField(lock.str(global.name), lock.str(json.text));
         }
       }
     }
@@ -796,7 +797,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(text, kj::String) {
       value = lock.wrap(context, kj::mv(text));
       if (featureFlags.getPopulateProcessEnv() && featureFlags.getNodeJsCompat()) {
-        lock.setEnvField(lock.str(global.name), jsg::JsValue(value));
+        lock.setProcessEnvField(lock.str(global.name), jsg::JsValue(value));
       }
     }
 

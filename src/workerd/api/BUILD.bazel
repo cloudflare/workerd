@@ -19,6 +19,7 @@ filegroup(
             "pyodide/pyodide.c++",
             "pyodide/setup-emscripten.c++",
             "memory-cache.c++",
+            "modules.c++",
             "r2*.c++",
             "rtti.c++",
             "url.c++",
@@ -84,7 +85,10 @@ wd_cc_library(
 
 wd_cc_library(
     name = "rtti",
-    srcs = ["rtti.c++"],
+    srcs = [
+        "modules.c++",
+        "rtti.c++",
+    ],
     hdrs = [
         "modules.h",
         "rtti.h",
@@ -649,4 +653,16 @@ wd_test(
     src = "tests/fetch-test.wd-test",
     args = ["--experimental"],
     data = ["tests/fetch-test.js"],
+)
+
+wd_test(
+    src = "tests/importable-env-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/importable-env-test.js"],
+)
+
+wd_test(
+    src = "tests/disable-importable-env-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/disable-importable-env-test.js"],
 )

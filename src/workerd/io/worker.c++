@@ -19,6 +19,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/script.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
@@ -1626,6 +1627,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             if (script->isModular()) {
               // Use `env` variable.
               bindingsScope = v8::Object::New(lock.v8Isolate);
+              if (!FeatureFlags::get(js).getDisableImportableEnv()) {
+                lock.setWorkerEnv(lock.v8Ref(bindingsScope.As<v8::Value>()));
+              }
             } else {
               // Use global-scope bindings.
               bindingsScope = context->Global();

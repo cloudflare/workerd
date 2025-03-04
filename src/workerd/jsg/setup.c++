@@ -338,6 +338,7 @@ IsolateBase::IsolateBase(const V8System& system,
 #else
       ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
 #endif
+      envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -433,6 +434,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(symbolAsyncDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(envObj.Reset());
+    KJ_DEFER(workerEnvObj.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.
