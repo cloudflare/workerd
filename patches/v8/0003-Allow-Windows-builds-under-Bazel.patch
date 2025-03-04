@@ -4,6 +4,19 @@ Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
 
 
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 967f7bbfb2810366de89b7a7a90f284efab6c9c6..bfe3365942400fc77f346f2138ac31014f1020aa 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -3829,6 +3829,8 @@ filegroup(
+         "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
+         "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
+         "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
++        "@v8//bazel/config:is_windows_clang_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
++        "@v8//bazel/config:is_windows_clang_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
+         "@v8//bazel/config:is_inline_asm_s390x": ["src/heap/base/asm/s390/push_registers_asm.cc"],
+         "@v8//bazel/config:is_inline_asm_riscv64": ["src/heap/base/asm/riscv64/push_registers_asm.cc"],
+         "@v8//bazel/config:is_inline_asm_ppc64le": ["src/heap/base/asm/ppc/push_registers_asm.cc"],
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
 index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965ba67de12c 100644
 --- a/bazel/config/BUILD.bazel

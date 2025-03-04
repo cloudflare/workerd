@@ -6,7 +6,7 @@ Subject: Modify where to look for fast_float and simdutf.
 Similar to fp16, these dependencies now needs to be downloaded by bazel.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 7d006a815a3b94326dcbdccb3d2aa506ec8c8375..84920f5a884bfdd9dd4b966a4da3d5ed5a6dd3ab 100644
+index 42198db354f84480b3a16ef8df2556bbfb65819a..053ad3d3c264e6e098fea9ac3b2a371aeac3b765 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -2542,8 +2542,6 @@ filegroup(
@@ -18,7 +18,7 @@ index 7d006a815a3b94326dcbdccb3d2aa506ec8c8375..84920f5a884bfdd9dd4b966a4da3d5ed
          "third_party/siphash/halfsiphash.cc",
          "third_party/siphash/halfsiphash.h",
          "third_party/utf8-decoder/utf8-decoder.h",
-@@ -4323,12 +4321,6 @@ cc_library(
+@@ -4327,12 +4325,6 @@ cc_library(
      ],
  )
  
@@ -31,7 +31,7 @@ index 7d006a815a3b94326dcbdccb3d2aa506ec8c8375..84920f5a884bfdd9dd4b966a4da3d5ed
  v8_library(
      name = "v8_libshared",
      srcs = [
-@@ -4357,9 +4349,9 @@ v8_library(
+@@ -4361,9 +4353,9 @@ v8_library(
          ":noicu/generated_torque_definitions",
      ],
      deps = [

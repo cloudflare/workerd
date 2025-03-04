@@ -13,10 +13,10 @@ and hwy bindings as a whole are no longer needed; this patch can be dropped.
 Change-Id: I7c52113596247f8f254ac5f882b41da1ba32e3b1
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 7d6c3ed40468a61c961ff8776a3c4d26731f4484..7d006a815a3b94326dcbdccb3d2aa506ec8c8375 100644
+index 0b95fa690001e06ef39227c66dbd0866d33b2926..42198db354f84480b3a16ef8df2556bbfb65819a 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4298,6 +4298,10 @@ cc_library(
+@@ -4302,6 +4302,10 @@ cc_library(
          "src/torque/kythe-data.h",
          "src/torque/torque-compiler.h",
      ],
