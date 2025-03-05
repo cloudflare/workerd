@@ -167,12 +167,11 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::getSingle(
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::getBulk(jsg::Lock& js,
+jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
   kj::Array<kj::String> name,
   jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
   bool withMetadata) {
     return js.evalNow([&] {
-
       auto& context = IoContext::current();
 
       kj::Url url;
@@ -182,7 +181,6 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::getBulk(jsg::Lock& js,
       url.path.add(kj::str("get"));
 
       kj::String body = formBulkBodyString(name, withMetadata, options);
-
       kj::Maybe<uint64_t> expectedBodySize = uint64_t(body.size());
       auto headers = kj::HttpHeaders(context.getHeaderTable());
 
@@ -215,7 +213,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::getBulk(jsg::Lock& js,
 
       return context.awaitIo(js, kj::mv(promise), [&](jsg::Lock& js, kj::String text) mutable {
         auto result = jsg::JsValue::fromJson(js, text);
-        return jsg::JsRef(js, result);
+        auto map = js.map();
+        KJ_IF_SOME(obj, result.tryCast<jsg::JsObject>()) {
+          auto values = obj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY, jsg::PropertyFilter::SKIP_SYMBOLS, jsg::IndexFilter::SKIP_INDICES);
+          for(int i = 0; i < values.size(); i++) {
+            auto key = values.get(js, i);
+            map.set(js, kj::mv(key), obj.get(js, key));
+          }
+        }
+        return jsg::JsRef(js, map);
       });
     });
 }
@@ -254,7 +260,7 @@ kj::String KvNamespace::formBulkBodyString(kj::Array<kj::String>& names, bool wi
     typeStr = kj::str(",\"type\": \"", type, "\"");
   }
   if(withMetadata) {
-    metadataStr = kj::str(",\"withMetadata\": \"true\"");
+    metadataStr = kj::str(",\"withMetadata\": true");
   }
   if(cacheTtlStr != kj::str("")) {
     cacheTtlStr = kj::str(",\"cacheTtl\": \"",cacheTtlStr,"\"");
@@ -262,7 +268,7 @@ kj::String KvNamespace::formBulkBodyString(kj::Array<kj::String>& names, bool wi
   return kj::str("{", keys, typeStr, metadataStr, cacheTtlStr, "}");
 }
 
-kj::OneOf<jsg::Promise<KvNamespace::GetResult>,jsg::Promise<jsg::JsRef<jsg::JsValue>> > KvNamespace::get(
+kj::OneOf<jsg::Promise<KvNamespace::GetResult>,jsg::Promise<jsg::JsRef<jsg::JsMap>> > KvNamespace::get(
   jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
     KJ_SWITCH_ONEOF(name) {
       KJ_CASE_ONEOF(arr, kj::Array<kj::String>) {
@@ -280,7 +286,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataSin
     return getWithMetadataImpl(js, kj::mv(name), kj::mv(options), LimitEnforcer::KvOpType::GET_WITH);
 }
 
-kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsValue>>> KvNamespace::getWithMetadata(
+kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>> KvNamespace::getWithMetadata(
   jsg::Lock& js, kj::OneOf<kj::Array<kj::String>, kj::String> name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
     KJ_SWITCH_ONEOF(name) {
       KJ_CASE_ONEOF(arr, kj::Array<kj::String>) {

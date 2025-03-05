@@ -58,8 +58,10 @@ export default {
     } else { // generic success for get key
       result = "value-"+pathname.slice(1);
     }
+
     let response =  new Response(result, {status: 200});
     response.headers.set("CF-KV-Metadata", '{"someMetadataKey":"someMetadataValue","someUnicodeMeta":"🤓"}');
+
     return response;
   },
 
@@ -96,20 +98,20 @@ export default {
     assert.strictEqual(new TextDecoder().decode(response), "value-success");
 
 
-    // Testing .get bulk
+    // // Testing .get bulk
     response = await env.KV.get(["key1", "key2"]);
-    let expected = { key1: '{\"example\":\"values-key1\"}', key2: '{\"example\":\"values-key2\"}' };
+    let expected = new Map([ ["key1", '{\"example\":\"values-key1\"}'], ["key2", '{\"example\":\"values-key2\"}'] ]);
     assert.deepStrictEqual(response, expected);
 
     response = await env.KV.get(["key1", "key2"],{});
-    expected = { key1: '{\"example\":\"values-key1\"}', key2: '{\"example\":\"values-key2\"}' };
+    expected = new Map([ ["key1", '{\"example\":\"values-key1\"}'], ["key2", '{\"example\":\"values-key2\"}'] ]);
     assert.deepStrictEqual(response, expected);
 
     let fullKeysArray = [];
-    let fullResponse = {};
+    let fullResponse = new Map();
     for(let i = 0; i< 100; i++) {
       fullKeysArray.push(`key`+i);
-      fullResponse[`key`+i] = `{\"example\":\"values-key${i}\"}`;
+      fullResponse.set(`key`+i, `{\"example\":\"values-key${i}\"}`);
     }
 
     response = await env.KV.get(fullKeysArray,{});
@@ -122,24 +124,24 @@ export default {
     });
 
     response = await env.KV.get(["key1", "not-found"],{cacheTtl: 100});
-    expected = { key1: '{\"example\":\"values-key1\"}', "not-found": null };
+    expected = new Map([ ["key1", '{\"example\":\"values-key1\"}'], ["not-found", null] ]);
     assert.deepStrictEqual(response, expected);
 
     await assert.rejects(env.KV.get([]), {
       message: 'KV GET_BULK failed: 400 Bad Request'
     });
 
-    // get bulk json
+    // // get bulk json
     response = await env.KV.get(["key1", "key2"], "json");
-    expected = { key1: { example: 'values-key1' }, key2: { example: 'values-key2' } };
+    expected = new Map([ ["key1", {"example": "values-key1"}], ["key2", {"example": "values-key2"}] ]);
     assert.deepStrictEqual(response, expected);
 
-    // get bulk json but it is not json - throws error
+    // // get bulk json but it is not json - throws error
     await assert.rejects(env.KV.get(["key-not-json", "key2"], "json"), {
       message: 'KV GET_BULK failed: 500 Internal Server Error',
     });
 
-    // requested type is invalid for bulk get
+    // // requested type is invalid for bulk get
     await assert.rejects(env.KV.get(["key-not-json", "key2"], "arrayBuffer"), {
       message: 'KV GET_BULK failed: 500 Internal Server Error',
     });
@@ -149,7 +151,7 @@ export default {
     });
 
 
-    // get with metadata
+    // // get with metadata
     response = await env.KV.getWithMetadata('key1');
     expected = {
       value: 'value-key1',
@@ -158,15 +160,34 @@ export default {
     };
     assert.deepStrictEqual(response, expected);
 
-    response = await env.KV.getWithMetadata(['key1'],{});
-    expected = { key1: { metadata: 'example-metadata', value: '{"example":"values-key1"}' } };
+    response = await env.KV.getWithMetadata(['key1']);
+    expected = new Map([
+      [
+        "key1",
+        { metadata: "example-metadata", value: '{"example":"values-key1"}' }
+      ]
+    ]);
     assert.deepStrictEqual(response, expected);
 
     response = await env.KV.getWithMetadata(['key1'], "json");
-    expected = { key1: { metadata: 'example-metadata', value: { example: 'values-key1' } } };
+    expected = new Map([
+      [
+        "key1",
+        { metadata: "example-metadata", value: {"example":"values-key1"} }
+      ]
+    ]);
     assert.deepStrictEqual(response, expected);
     response = await env.KV.getWithMetadata(['key1', 'key2'], "json");
-    expected = { key1: { metadata: 'example-metadata', value: { example: 'values-key1' } }, key2: { metadata: 'example-metadata', value: { example: 'values-key2' } } };
+    expected = new Map([
+      [
+        "key1",
+        { metadata: "example-metadata", value: {"example":"values-key1"} }
+      ],
+      [
+        "key2",
+        { metadata: "example-metadata", value: {"example":"values-key2"} }
+      ]
+    ]);
     assert.deepStrictEqual(response, expected);
   },
 };
