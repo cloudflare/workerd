@@ -1901,10 +1901,12 @@ def crate_repositories():
         http_archive,
         name = "crates_vendor__v8-134.5.0",
         patch_args = [
-            "-p4",
+            "-p1",
         ],
         patches = [
-            "@workerd//:patches/rust-v8/build.rs.patch",
+            "@workerd//:patches/rusty-v8/0001-Clean-up-use-of-v8-internals.patch",
+            "@workerd//:patches/rusty-v8/0002-removing-the-rest-of-external-api-usages.patch",
+            "@workerd//:patches/rusty-v8/0003-massage-build.rs-for-workerd.patch",
         ],
         sha256 = "21c7a224a7eaf3f98c1bad772fbaee56394dce185ef7b19a2e0ca5e3d274165d",
         type = "tar.gz",

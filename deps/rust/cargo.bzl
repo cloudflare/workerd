@@ -30,14 +30,18 @@ PACKAGES = {
     # tokio is huge, let's enable only features when we actually need them.
     "tokio": crate.spec(version = "1", default_features = False, features = ["net", "rt", "rt-multi-thread", "time"]),
     "tracing": crate.spec(version = "0", default_features = False, features = ["std"]),
-    "v8": crate.spec(version = "134"),
+    "v8": crate.spec(version = "134.5.0"),
 }
 
 ANNOTATIONS = {
     "v8": [
         crate.annotation(
-            patches = ["@workerd//:patches/rust-v8/build.rs.patch"],
-            patch_args = ["-p4"],
+            patches = [
+                "@workerd//:patches/rusty-v8/0001-Clean-up-use-of-v8-internals.patch",
+                "@workerd//:patches/rusty-v8/0002-removing-the-rest-of-external-api-usages.patch",
+                "@workerd//:patches/rusty-v8/0003-massage-build.rs-for-workerd.patch",
+            ],
+            patch_args = ["-p1"],
             deps = [":rusty_v8"],
             # build_script_deps = ["@workerd-v8//:v8"],
             additive_build_file_content = """

@@ -1,6 +1,14 @@
---- /home/maizatskyi/tmp/build.orig.rs	2025-03-03 10:41:21.206318879 -0800
-+++ /home/maizatskyi/tmp/build.rs	2025-03-03 14:08:12.060083005 -0800
-@@ -75,7 +75,7 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Aizatsky <maizatskyi@cloudflare.com>
+Date: Wed, 5 Mar 2025 09:38:53 -0800
+Subject: massage build.rs for workerd
+
+
+diff --git a/build.rs b/build.rs
+index 87b8063a4725f89d86f0f8fd06cad03ffca947eb..f4964f3ee53cf6c02e2f2c89eaf0f420e9abd82a 100644
+--- a/build.rs
++++ b/build.rs
+@@ -75,7 +75,7 @@ fn main() {
      return;
    }
  
@@ -9,7 +17,7 @@
  
    // Don't attempt rebuild but link
    if is_trybuild {
-@@ -115,9 +115,7 @@
+@@ -115,9 +115,7 @@ fn main() {
      return;
    }
  
@@ -20,7 +28,7 @@
  }
  
  fn acquire_lock() -> LockFile {
-@@ -150,7 +148,7 @@
+@@ -150,7 +148,7 @@ fn build_binding() {
    let bindings = bindgen::Builder::default()
      .header("src/binding.hpp")
      .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
@@ -29,7 +37,7 @@
      .clang_args(args)
      .generate_cstr(true)
      .rustified_enum(".*UseCounterFeature")
-@@ -163,7 +161,7 @@
+@@ -163,7 +161,7 @@ fn build_binding() {
      .generate()
      .expect("Unable to generate bindings");
  
@@ -38,7 +46,7 @@
    println!(
      "cargo:rustc-env=RUSTY_V8_SRC_BINDING_PATH={}",
      out_path.display()
-@@ -448,18 +446,19 @@
+@@ -448,18 +446,19 @@ fn static_lib_dir() -> PathBuf {
    build_dir().join("gn_out").join("obj")
  }
  
