@@ -16,8 +16,8 @@ RUN ./llvm.sh 16
 RUN apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev
 COPY . .
 
-RUN echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
-RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++" >> .bazelrc
+RUN echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
+RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
 # pnpm version will be different depending on the value of `packageManager` field in package.json
 RUN npm install -g pnpm@latest

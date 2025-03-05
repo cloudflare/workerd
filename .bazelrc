@@ -116,10 +116,6 @@ build:windows --host_copt='-Wno-macro-redefined'
 build:windows --per_file_copt='external/dawn@-Wno-unknown-argument'
 build:windows --host_per_file_copt='external/dawn@-Wno-unknown-argument'
 
-# V8 now requires Windows 10, Bazel fails to set this properly.
-build:windows --per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
-build:windows --host_per_file_copt=external/v8/src/base/platform/platform-win32.cc@-D_WIN32_WINNT=0x0A00
-
 # typescript configuration
 # do more correct type checking
 common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
@@ -206,9 +202,9 @@ build:unix --workspace_status_command=./tools/unix/workspace-status.sh
 build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20'
 build:unix --@capnp-cpp//src/kj:libdl=True
 
+# Bazel uses CC to compile C and C++ actions, no need to define CXX.
 build:unix --action_env=BAZEL_COMPILER=clang
 build:unix --action_env=CC=clang
-build:unix --action_env=CXX=clang++
 
 build:unix --test_env=LLVM_SYMBOLIZER=llvm-symbolizer
 
@@ -301,8 +297,8 @@ build:windows --enable_runfiles
 # `#pragma once` when using symlinked virtual includes, `__atomic_*` functions,
 # a standards-compliant preprocessor, support for GNU statement expressions
 # used by some KJ macros, and understands the `.c++` extension by default.
-# As of bazel 7, incompatible_enable_cc_toolchain_resolution is enabled by default, so we need to
-# define a platform for the clang-cl build.
+# As of bazel 7, toolchain resolution is enabled by default, so we need to define a platform for
+# the clang-cl build.
 build:windows --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows-clang-cl
 build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 
