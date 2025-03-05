@@ -147,20 +147,20 @@ git_repository(
             include_prefix = "third_party/fast_float/src",
         )""",
     commit = "cb1d42aaa1e14b09e1452cfdef373d051b8c02a4",
-    remote = "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git",
+    remote = "https://github.com/fastfloat/fast_float.git",
 )
 
 git_repository(
     name = "fp16",
     build_file_content = "exports_files(glob([\"**\"]))",
     commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
-    remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git",
+    remote = "https://github.com/Maratyszcza/FP16.git",
 )
 
 git_repository(
     name = "highway",
     commit = "00fe003dac355b979f36157f9407c7c46448958e",
-    remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
+    remote = "https://github.com/google/highway.git",
 )
 
 # OK, now we can bring in tcmalloc itself.
@@ -337,7 +337,6 @@ new_local_repository(
         deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
         visibility = ["//visibility:public"])""",
     path = "empty",
-    repo_mapping = {"@abseil-cpp": "@com_google_absl"},
 )
 
 # rust-based lolhtml dependency, including the API header.
