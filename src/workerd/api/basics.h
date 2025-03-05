@@ -33,8 +33,8 @@ class Event: public jsg::Object {
   };
 
   inline explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
-      : type(ownType),
-        ownType(kj::mv(ownType)),
+      : ownType(kj::mv(ownType)),
+        type(this->ownType),
         init(init),
         trusted(trusted) {}
 
@@ -195,8 +195,9 @@ class Event: public jsg::Object {
   }
 
  private:
-  kj::StringPtr type;
+  // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
+  kj::StringPtr type;
   Init init;
   bool trusted = true;
   bool stopped = false;
