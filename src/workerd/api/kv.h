@@ -53,14 +53,14 @@ class KvNamespace: public jsg::Object {
   jsg::Promise<KvNamespace::GetResult> getSingle(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
-  jsg::Promise<jsg::JsRef<jsg::JsValue>> getBulk(jsg::Lock& js,
+  jsg::Promise<jsg::JsRef<jsg::JsMap>> getBulk(jsg::Lock& js,
     kj::Array<kj::String> name,
     jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
     bool withMetadata);
 
   kj::String formBulkBodyString(kj::Array<kj::String>& names, bool withMetadata, jsg::Optional<kj::OneOf<kj::String, GetOptions>>& options);
 
-  kj::OneOf<jsg::Promise<KvNamespace::GetResult>,jsg::Promise<jsg::JsRef<jsg::JsValue>>> get(
+  kj::OneOf<jsg::Promise<KvNamespace::GetResult>,jsg::Promise<jsg::JsRef<jsg::JsMap>>> get(
     jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   struct GetWithMetadataResult {
@@ -84,7 +84,7 @@ class KvNamespace: public jsg::Object {
   jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(
       jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
-  kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsValue>>> getWithMetadata(
+  kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>> getWithMetadata(
     jsg::Lock& js, kj::OneOf<kj::Array<kj::String>, kj::String> name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
   struct ListOptions {
     jsg::Optional<int> limit;
