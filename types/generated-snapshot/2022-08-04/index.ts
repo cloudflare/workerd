@@ -3913,7 +3913,7 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
        */
       end?: number;
     }[];
-  };
+  }[];
   /**
    * The transcription in WebVTT format, which includes timing and text information for use in subtitles.
    */
