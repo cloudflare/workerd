@@ -1291,7 +1291,7 @@ class Server::InspectorService final: public kj::HttpService, public kj::HttpSer
       kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
     if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
       // Don't send a response, just close connection.
-      return kj::READY_NOW;
+      co_return;
     }
     KJ_LOG(ERROR, kj::str("Uncaught exception: ", exception));
     KJ_IF_SOME(r, response) {
