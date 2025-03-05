@@ -5,7 +5,7 @@ Subject: Implement cross-request context promise resolve handling
 
 
 diff --git a/include/v8-callbacks.h b/include/v8-callbacks.h
-index 57db44234e2273476fe1cdcde31e1702bbabd61d..55af32087bdfa3fdee65ee3cfcc877ec03d278f8 100644
+index 57db44234e2273476fe1cdcde31e1702bbabd61d..08ba80234c2d657ab7b48f5f845d2ed763adbe32 100644
 --- a/include/v8-callbacks.h
 +++ b/include/v8-callbacks.h
 @@ -524,6 +524,27 @@ using PromiseCrossContextCallback = MaybeLocal<Promise> (*)(Local<Context> conte

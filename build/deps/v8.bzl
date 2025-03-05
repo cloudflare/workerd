@@ -28,6 +28,7 @@ PATCHES = [
     "0020-Disable-memory-leak-assert-when-shutting-down-V8.patch",
     "0021-Enable-V8-shared-linkage.patch",
     "0022-Fix-macOS-build.patch",
+    "0023-expose-public_header-files.patch",
 ]
 
 # V8 and its dependencies

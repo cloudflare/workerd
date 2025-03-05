@@ -94,7 +94,9 @@ cargo_build_script(
             "WORKSPACE",
             "WORKSPACE.bazel",
         ],
-    ),
+    ) + [
+        "@v8//:public_header_files",
+    ],
     edition = "2021",
     pkg_name = "v8",
     rustc_flags = [

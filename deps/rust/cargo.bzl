@@ -43,7 +43,7 @@ ANNOTATIONS = {
             ],
             patch_args = ["-p1"],
             deps = [":rusty_v8"],
-            # build_script_deps = ["@workerd-v8//:v8"],
+            build_script_data = ["@v8//:public_header_files"],
             additive_build_file_content = """
                 cc_library(
                     name = "rusty_v8",
