@@ -33,6 +33,14 @@ export type AiOptions = {
   sessionOptions?: SessionOptions;
 };
 
+export type ConversionResponse = {
+  name: string;
+  mimeType: string;
+  format: 'markdown';
+  tokens: number;
+  data: string;
+};
+
 export type AiModelsSearchParams = {
   author?: string;
   hide_experimental?: boolean;
@@ -72,6 +80,26 @@ export class AiInternalError extends Error {
     super(message);
     this.name = name;
   }
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  // TODO(soon): This is better implemented using the node::buffer API
+  // but we cannot get to that from here currently. Once the node:buffer
+  // API (actually, `node-internal:internal_buffer`) is available to be imported
+  // here we should update this code to use it instead.
+  const arrayBuffer = await blob.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+
+  let binary = '';
+  const chunk = 1024;
+  for (let i = 0; i < uint8Array.length; i += chunk) {
+    binary += String.fromCharCode.apply(
+      null,
+      uint8Array.subarray(i, i + chunk) as unknown as number[]
+    );
+  }
+
+  return btoa(binary);
 }
 
 export class Ai {
@@ -217,6 +245,82 @@ export class Ai {
         const data = (await res.json()) as { errors: { message: string }[] };
 
         throw new AiInternalError(data.errors[0]?.message || 'Internal Error');
+      }
+    }
+  }
+
+  public async toMarkdown(
+    files: { name: string; blob: Blob }[],
+    options?: { gateway?: GatewayOptions }
+  ): Promise<ConversionResponse[]>;
+  public async toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    },
+    options?: { gateway?: GatewayOptions }
+  ): Promise<ConversionResponse>;
+  public async toMarkdown(
+    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
+    options?: { gateway?: GatewayOptions }
+  ): Promise<ConversionResponse | ConversionResponse[]> {
+    const input = Array.isArray(files) ? files : [files];
+
+    const processedFiles = [];
+    for (const file of input) {
+      processedFiles.push({
+        name: file.name,
+        mimeType: file.blob.type,
+        data: await blobToBase64(file.blob),
+      });
+    }
+
+    const fetchOptions = {
+      method: 'POST',
+      body: JSON.stringify({
+        files: processedFiles,
+        options: options,
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+    };
+
+    const endpointUrl =
+      'https://workers-binding.ai/to-everything/markdown/transformer';
+
+    const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
+
+    switch (res.status) {
+      case 200: {
+        const data = (await res.json()) as { result: ConversionResponse[] };
+
+        if (data.result.length === 0) {
+          throw new AiInternalError(
+            'Internal Error Converting files into Markdown'
+          );
+        }
+
+        // If the user sent a list of files, return an array of results, otherwise, return just the first object
+        if (Array.isArray(files)) {
+          return data.result;
+        }
+
+        const obj = data.result.at(0);
+        if (!obj) {
+          throw new AiInternalError(
+            'Internal Error Converting files into Markdown'
+          );
+        }
+
+        return obj;
+      }
+      default: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiInternalError(
+          data.errors.at(0)?.message || 'Internal Error'
+        );
       }
     }
   }
