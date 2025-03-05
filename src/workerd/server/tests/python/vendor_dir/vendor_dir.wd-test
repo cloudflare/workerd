@@ -7,6 +7,9 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
           (name = "vendor/a.py", pythonModule = embed "vendor/a.py"),
+          # This module below is only here to verify that we don't crash because of
+          # duplicate module names.
+          (name = "vendor/worker.py", pythonModule = embed "vendor/a.py"),
           (name = "numpy", pythonRequirement = "")
         ],
         compatibilityDate = "2024-01-15",

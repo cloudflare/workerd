@@ -105,15 +105,15 @@ kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
     }
     auto firstSlash = name.findFirst('/');
     KJ_IF_SOME(idx, firstSlash) {
-      result.insert(kj::str(name.slice(0, idx)));
+      result.upsert(kj::str(name.slice(0, idx)), [](auto&&, auto&&) {});
       continue;
     }
     if (name.endsWith(dotPy)) {
-      result.insert(kj::str(name.slice(0, name.size() - dotPy.size())));
+      result.upsert(kj::str(name.slice(0, name.size() - dotPy.size())), [](auto&&, auto&&) {});
       continue;
     }
     if (name.endsWith(dotSo)) {
-      result.insert(kj::str(name.slice(0, name.size() - dotSo.size())));
+      result.upsert(kj::str(name.slice(0, name.size() - dotSo.size())), [](auto&&, auto&&) {});
       continue;
     }
   }
@@ -399,7 +399,7 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports) {
   auto baselineSnapshotImportsSet = kj::HashSet<kj::StringPtr>();
   for (auto& pkgImport: snapshotImports) {
-    baselineSnapshotImportsSet.insert(kj::mv(pkgImport));
+    baselineSnapshotImportsSet.upsert(kj::mv(pkgImport), [](auto&&, auto&&) {});
   }
 
   kj::HashSet<kj::String> filteredImportsSet;
@@ -426,7 +426,7 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     if (workerModules.contains(firstComponent)) {
       continue;
     }
-    filteredImportsSet.insert(kj::mv(pkgImport));
+    filteredImportsSet.upsert(kj::mv(pkgImport), [](auto&&, auto&&) {});
   }
 
   auto filteredImportsBuilder = kj::heapArrayBuilder<kj::String>(filteredImportsSet.size());
