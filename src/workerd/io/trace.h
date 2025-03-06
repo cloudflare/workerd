@@ -561,6 +561,8 @@ concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool,
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
   using Value = kj::OneOf<kj::String, bool, double, int32_t>;
+  // TODO: Align with existing tag value.
+  //using Value = kj::OneOf<bool, long, double, kj::String>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::String name, Value&& value);

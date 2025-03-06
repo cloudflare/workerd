@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
+class TailStreamWriter final: public kj::Refcounted {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -163,6 +163,7 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing
+ public:
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
   // A weak reference for the internal span submitter. We use this so that the span submitter can
   // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer

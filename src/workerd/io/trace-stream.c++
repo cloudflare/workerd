@@ -1123,7 +1123,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
 
   auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
 
-  return kj::heap<tracing::TailStreamWriter>(
+  return kj::refcounted<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lamba holds a bare
