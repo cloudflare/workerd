@@ -412,8 +412,10 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
       continue;
     }
 
-    // don't include js or pyodide.
-    if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray()) {
+    // don't include modules that we provide and that are likely to be imported by most
+    // workers.
+    if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray() ||
+        firstComponent == "asgi"_kj.asArray() || firstComponent == "workers"_kj.asArray()) {
       continue;
     }
 
