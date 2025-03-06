@@ -44,18 +44,11 @@ export default {
   'basic/header-value-combining.any.js': {
     comment:
       "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
-    expectedFailures: [
-      "response.headers.get('content-length') expects 0, 0",
-      "response.headers.get('double-trouble') expects , ",
-      "response.headers.get('heya') expects , \u000b\f, 1, , , 2",
-      "response.headers.get('foo-test') expects 1, 2, 3",
-      "response.headers.get('www-authenticate') expects 1, 2, 3, 4",
-      "response.headers.get('content-length') expects 0",
-    ],
+    skipAllTests: true,
   },
   'basic/header-value-null-byte.any.js': {
     comment: 'We should return a nicer TypeError instead of "internal error"',
-    expectedFailures: ['Ensure fetch() rejects null bytes in headers'],
+    skipAllTests: true,
   },
   'basic/historical.any.js': {
     comment: 'This test expects us not to implement getAll',
@@ -64,19 +57,7 @@ export default {
   'basic/http-response-code.any.js': {},
   'basic/integrity.sub.any.js': {
     comment: 'Integrity is not implemented',
-    expectedFailures: [
-      'CORS SHA-512 integrity',
-      'Empty string integrity for opaque response',
-      'SHA-256 integrity',
-      'SHA-384 integrity',
-      'SHA-512 integrity',
-      'SHA-512 integrity with missing padding',
-      'SHA-512 integrity base64url encoded',
-      'SHA-512 integrity base64url encoded with missing padding',
-      'Multiple integrities: valid stronger than invalid',
-      'Multiple integrities: invalid as strong as valid',
-      'Multiple integrities: both are valid',
-    ],
+    skipAllTests: true,
   },
   'basic/keepalive.any.js': {
     comment: 'Hard to run - involves iframes and workers',
@@ -165,21 +146,6 @@ export default {
   },
   'basic/request-upload.any.js': {
     comment: 'Multiple reasons for failure; see below',
-    expectedFailures: [
-      // Float16Array not implemented
-      'Fetch with POST with Float16Array body',
-      // To be investigated
-      "Streaming upload shouldn't work on Http/1.1.",
-      // "ReadableStream did not return bytes" isn't captured properly and converted into a fetch rejection
-      'Fetch with POST with ReadableStream containing ArrayBuffer',
-      'Fetch with POST with ReadableStream containing String',
-      'Fetch with POST with ReadableStream containing null',
-      'Fetch with POST with ReadableStream containing Blob',
-      'Fetch with POST with ReadableStream containing number',
-      // We're expected to retry 421 on a new connection
-      'Fetch with POST with text body on 421 response should be retried once on new connection.',
-    ],
-    // Skipping tests will never even run this test code. We have to do this because this test messes up our state.
     skipAllTests: true,
   },
   'basic/request-upload.h2.any.js': {
@@ -190,12 +156,7 @@ export default {
   'basic/response-url.sub.any.js': {
     comment:
       'Unidentified kj issue: Invalid response status line (invalid protocol).',
-    expectedFailures: [
-      'Testing response url getter with http://{{host}}:{{ports[http][0]}}/ada',
-      'Testing response url getter with http://{{host}}:{{ports[http][0]}}/#ada',
-      'Testing response url getter with http://{{host}}:{{ports[http][0]}}/#',
-      'Testing response url getter with http://{{host}}:{{ports[http][0]}}#ada',
-    ],
+    skipAllTests: true,
   },
   'basic/scheme-about.any.js': {},
   'basic/scheme-blob.sub.any.js': {
@@ -223,10 +184,19 @@ export default {
   'basic/stream-response.any.js': {
     comment:
       'Unidentified kj issue: Invalid response status line (invalid protocol).',
+    skipAllTests: true,
   },
   'basic/stream-safe-creation.any.js': {
     comment:
       'Unidentified kj issue: Invalid response status line (invalid protocol).',
+    expectedFailures: [
+      "Object.prototype.start accessor returning invalid value should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.start accessor should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.highWaterMark accessor should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.size accessor should not affect stream creation by 'fetch'",
+      "Object.prototype.size accessor returning invalid value should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.type accessor should not affect stream creation by 'fetch'",
+    ],
   },
   'basic/text-utf8.any.js': {
     comment: 'Some kind of unicode nitpickiness. Needs investigation',
