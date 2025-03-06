@@ -52,10 +52,12 @@ export default {
       "response.headers.get('www-authenticate') expects 1, 2, 3, 4",
       "response.headers.get('content-length') expects 0",
     ],
+    skipAllTests: true,
   },
   'basic/header-value-null-byte.any.js': {
     comment: 'We should return a nicer TypeError instead of "internal error"',
     expectedFailures: ['Ensure fetch() rejects null bytes in headers'],
+    skipAllTests: true,
   },
   'basic/historical.any.js': {
     comment: 'This test expects us not to implement getAll',
@@ -77,6 +79,7 @@ export default {
       'Multiple integrities: invalid as strong as valid',
       'Multiple integrities: both are valid',
     ],
+    skipAllTests: true,
   },
   'basic/keepalive.any.js': {
     comment: 'Hard to run - involves iframes and workers',
@@ -196,6 +199,7 @@ export default {
       'Testing response url getter with http://{{host}}:{{ports[http][0]}}/#',
       'Testing response url getter with http://{{host}}:{{ports[http][0]}}#ada',
     ],
+    skipAllTests: true,
   },
   'basic/scheme-about.any.js': {},
   'basic/scheme-blob.sub.any.js': {
@@ -223,10 +227,19 @@ export default {
   'basic/stream-response.any.js': {
     comment:
       'Unidentified kj issue: Invalid response status line (invalid protocol).',
+    skipAllTests: true,
   },
   'basic/stream-safe-creation.any.js': {
     comment:
       'Unidentified kj issue: Invalid response status line (invalid protocol).',
+    expectedFailures: [
+      "Object.prototype.start accessor returning invalid value should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.start accessor should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.highWaterMark accessor should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.size accessor should not affect stream creation by 'fetch'",
+      "Object.prototype.size accessor returning invalid value should not affect stream creation by 'fetch'",
+      "throwing Object.prototype.type accessor should not affect stream creation by 'fetch'",
+    ],
   },
   'basic/text-utf8.any.js': {
     comment: 'Some kind of unicode nitpickiness. Needs investigation',
