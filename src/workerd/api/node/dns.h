@@ -37,7 +37,7 @@ class DnsUtil final: public jsg::Object {
   };
 
   CaaRecord parseCaaRecord(kj::String record);
-  NaptrRecord parseNaptrRecord(kj::String record);
+  jsg::Value parseNaptrRecord(jsg::Lock& js, kj::String record);
 
   JSG_RESOURCE_TYPE(DnsUtil) {
     JSG_METHOD(parseCaaRecord);

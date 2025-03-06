@@ -15,16 +15,17 @@ DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
     .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
 }
 
-DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
-  auto parsed = rust::dns::parse_naptr_record(::rust::Str(record.begin(), record.size()));
-  return NaptrRecord{
-    .flags = kj::str(parsed.flags),
-    .service = kj::str(parsed.service),
-    .regexp = kj::str(parsed.regexp),
-    .replacement = kj::str(parsed.replacement),
-    .order = parsed.order,
-    .preference = parsed.preference,
-  };
+jsg::Value DnsUtil::parseNaptrRecord(jsg::Lock& js, kj::String record) {
+  auto ptr = rust::dns::parse_naptr_record(js.v8Isolate, ::rust::Str(record.begin(), record.size()));
+  KJ_UNIMPLEMENTED("implement this");
+  // return NaptrRecord{
+  //   .flags = kj::str(parsed.flags),
+  //   .service = kj::str(parsed.service),
+  //   .regexp = kj::str(parsed.regexp),
+  //   .replacement = kj::str(parsed.replacement),
+  //   .order = parsed.order,
+  //   .preference = parsed.preference,
+  // };
 }
 
 }  // namespace workerd::api::node

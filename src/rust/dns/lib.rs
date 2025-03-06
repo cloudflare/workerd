@@ -1,4 +1,5 @@
 use thiserror::Error;
+use std::pin::Pin;
 
 #[derive(Debug, Error)]
 pub enum DnsParserError {
@@ -31,7 +32,13 @@ mod ffi {
     }
     extern "Rust" {
         fn parse_caa_record(record: &str) -> Result<CaaRecord>;
-        fn parse_naptr_record(record: &str) -> Result<NaptrRecord>;
+        unsafe fn parse_naptr_record(isolate: *mut Isolate, record: &str) -> Result<*mut JsValue>;
+    }
+
+    unsafe extern "C++" {
+        include!("workerd/rust/dns/bridge.h");
+        type Isolate;
+        type JsValue;
     }
 }
 
@@ -131,7 +138,7 @@ pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> 
 /// # Errors
 /// `DnsParserError::InvalidHexString`
 /// `DnsParserError::ParseIntError`
-pub fn parse_naptr_record(record: &str) -> Result<ffi::NaptrRecord, DnsParserError> {
+pub unsafe fn parse_naptr_record(isolate: *mut ffi::Isolate, record: &str) -> Result<*mut ffi::JsValue, DnsParserError> {
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 
     let order_str = data[1..3].to_vec();
@@ -153,14 +160,15 @@ pub fn parse_naptr_record(record: &str) -> Result<ffi::NaptrRecord, DnsParserErr
 
     let replacement = parse_replacement(&data[regexp_offset + regexp_length..])?;
 
-    Ok(ffi::NaptrRecord {
-        flags,
-        service,
-        regexp,
-        replacement,
-        order,
-        preference,
-    })
+    todo!("hello");
+    // Ok(ffi::NaptrRecord {
+    //     flags,
+    //     service,
+    //     regexp,
+    //     replacement,
+    //     order,
+    //     preference,
+    // })
 }
 
 /// Replacement values needs to be parsed accordingly.
