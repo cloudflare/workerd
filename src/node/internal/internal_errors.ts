@@ -703,6 +703,23 @@ export class ERR_CRYPTO_SIGN_KEY_REQUIRED extends NodeError {
   }
 }
 
+export class ERR_TLS_HANDSHAKE_TIMEOUT extends NodeError {
+  constructor() {
+    super('ERR_TLS_HANDSHAKE_TIMEOUT', 'TLS handshake timeout');
+  }
+}
+
+export class ConnResetException extends NodeError {
+  path?: string | undefined;
+  host?: string | undefined;
+  port?: number | undefined;
+  localAddress?: string | undefined;
+
+  constructor(message: string) {
+    super('ECONNRESET', message);
+  }
+}
+
 export function aggregateTwoErrors(innerError: any, outerError: any) {
   if (innerError && outerError && innerError !== outerError) {
     if (Array.isArray(outerError.errors)) {

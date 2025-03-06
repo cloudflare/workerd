@@ -23,59 +23,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import {
-  BlockList,
-  SocketAddress,
-  Server,
-  Socket,
-  connect,
-  createConnection,
-  createServer,
-  getDefaultAutoSelectFamily,
-  setDefaultAutoSelectFamily,
-  getDefaultAutoSelectFamilyAttemptTimeout,
-  setDefaultAutoSelectFamilyAttemptTimeout,
-  isIP,
-  isIPv4,
-  isIPv6,
-  _normalizeArgs,
-} from 'node-internal:internal_net';
-
-export const Stream = Socket;
-
-export {
-  BlockList,
-  SocketAddress,
-  Server,
-  Socket,
-  connect,
-  createConnection,
-  createServer,
-  getDefaultAutoSelectFamily,
-  setDefaultAutoSelectFamily,
-  getDefaultAutoSelectFamilyAttemptTimeout,
-  setDefaultAutoSelectFamilyAttemptTimeout,
-  isIP,
-  isIPv4,
-  isIPv6,
-  _normalizeArgs,
-};
-
+import { connect, TLSSocket } from 'node-internal:internal_tls_wrap';
+export { connect, TLSSocket };
 export default {
-  BlockList,
-  SocketAddress,
-  Stream: Socket,
-  Server,
-  Socket,
   connect,
-  createConnection,
-  createServer,
-  getDefaultAutoSelectFamily,
-  setDefaultAutoSelectFamily,
-  getDefaultAutoSelectFamilyAttemptTimeout,
-  setDefaultAutoSelectFamilyAttemptTimeout,
-  isIP,
-  isIPv4,
-  isIPv6,
-  _normalizeArgs,
+  TLSSocket,
 };
