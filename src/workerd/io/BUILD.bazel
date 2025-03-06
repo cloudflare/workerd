@@ -61,6 +61,7 @@ wd_cc_library(
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
+        "tracer.c++",
         "worker.c++",
     ] + ["//src/workerd/api:srcs"] + select({
         ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:srcs"],
@@ -75,6 +76,7 @@ wd_cc_library(
         "io-own.h",
         "io-util.h",
         "promise-wrapper.h",
+        "tracer.h",
         "worker.h",
     ] + ["//src/workerd/api:hdrs"] + select({
         ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:hdrs"],

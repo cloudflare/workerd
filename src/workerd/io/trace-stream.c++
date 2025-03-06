@@ -826,6 +826,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // the stream should be stopped and will fulfill the done promise.
     bool finishing = false;
 
+    // When a tail worker receives its outcome event, we need to ensure that the final tail worker
+    // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
+    // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
+    bool doFulfill = false;
+
     if (h->IsFunction()) {
       // If the handler is a function, then we'll just pass all of the events to that
       // function. If the function returns a promise and there are multiple events we
@@ -840,7 +845,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         if (event.event.is<tracing::Outcome>()) {
           finishing = true;
           results.setStop(true);
-          doneFulfiller->fulfill();
+          doFulfill = true;
         };
         v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
         returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
@@ -857,7 +862,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         if (event.event.is<tracing::Outcome>()) {
           finishing = true;
           results.setStop(true);
-          doneFulfiller->fulfill();
+          doFulfill = true;
         };
         // It is technically an error not to have a handler name here as we shouldn't
         // be reporting any events we don't know! But, there's no reason to treat it
@@ -888,6 +893,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
+      if (doFulfill) {
+        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
+            [&](jsg::Lock& js, jsg::Value&& value) {
+          doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
+        });
+      }
       return ioContext.awaitJs(js, kj::mv(p));
     }
     return kj::READY_NOW;
@@ -918,14 +929,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     t.setEventInfo(ioContext.now(), TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
   }
 
-  ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(), [&] {
-    return Onset(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)), Onset::WorkerInfo{},
-        kj::none);
-  });
-
-  // TODO: Does lifetime need to be extended here?
-  auto outcomeObserver = kj::rc<OutcomeObserver>(
-      kj::addRef(incomingRequest->getMetrics()), ioContext.getInvocationSpanContext());
+  // TODO(streaming-tail): Support instrementation for streaming tail workers themselves – need to
+  // be careful to avoid infinite recursion in case pipeline stages tail themselves in the
+  // downstream implementation.
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(
@@ -997,26 +1003,171 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
-tracing::TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
-    : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
+void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
+  // In reportImpl, our inner state must be active.
+  auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
 
-void tracing::TailStreamWriter::report(
-    const InvocationSpanContext& context, TailEvent::Event&& event) {
-  // Becomes a non-op if a terminal event (close or hibernate) has been reported.
-  auto& s = KJ_UNWRAP_OR_RETURN(state);
-
-  // The onset set must be first and most only happen once.
-  if (event.is<tracing::Onset>()) {
-    KJ_ASSERT(!s.onsetSeen, "Tail stream onset already provided");
-    s.onsetSeen = true;
-  } else {
-    KJ_ASSERT(s.onsetSeen, "Tail stream onset was not reported");
+  // We only care about sessions that are currently active.
+  kj::Vector<kj::Own<Active>> alive(actives.size());
+  for (auto& active: actives) {
+    if (active->capability != kj::none) {
+      alive.add(kj::mv(active));
+    }
   }
 
-  tracing::TailEvent tailEvent(context, s.timeSource(), s.sequence++, kj::mv(event));
+  if (alive.size() == 0) {
+    // Oh! We have no active sessions. Well, never mind then, let's
+    // transition to a closed state and drop everything on the floor.
+    inner = Closed{};
+    return;
+  }
 
-  // If the reporter returns false, then we will treat it as a close signal.
-  if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
+  // If we're already closing, no further events should be reported.
+  if (closing) return;
+  if (event.event.is<tracing::Outcome>()) {
+    closing = true;
+  }
+
+  // Deliver the event to the queue and make sure we are processing.
+  for (auto& active: alive) {
+    active->queue.push_back(event.clone());
+    if (!active->pumping) {
+      waitUntilTasks.add(pump(kj::addRef(*active)));
+    }
+  }
+
+  inner = alive.releaseAsArray();
+}
+
+// Delivers the queued tail events to a streaming tail worker.
+kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
+  current->pumping = true;
+  KJ_DEFER(current->pumping = false);
+
+  if (!current->onsetSeen) {
+    // Our first event... yay! Our first job here will be to dispatch
+    // the onset event to the tail worker. If the tail worker wishes
+    // to handle the remaining events in the stream, then it will return
+    // a new capability to which those would be reported. This is done
+    // via the "result.getPipeline()" API below. If hasPipeline()
+    // returns false then that means the tail worker did not return
+    // a handler for this stream and no further attempts to deliver
+    // events should be made for this stream.
+    current->onsetSeen = true;
+    KJ_ASSERT(!current->queue.empty());
+    auto onsetEvent = kj::mv(current->queue.front());
+    current->queue.pop_front();
+    auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+    auto eventsBuilder = builder.initEvents(1);
+    // When sending the onset event to the tail worker, the receiving end
+    // requires that the onset event be delivered separately, without any
+    // other events in the bundle. So here we'll separate it out and deliver
+    // just the one event...
+    onsetEvent.copyTo(eventsBuilder[0]);
+    auto result = co_await builder.send();
+    if (result.getStop()) {
+      // If our call to send returns a stop signal, then we'll clear
+      // the capability and be done.
+      current->queue.clear();
+      current->capability = kj::none;
+      co_return;
+    }
+  }
+
+  // If we got this far then we have a handler for all of our events.
+  // Deliver remaining streaming tail events in batches if possible.
+  while (!current->queue.empty()) {
+    auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+    auto eventsBuilder = builder.initEvents(current->queue.size());
+    size_t n = 0;
+    for (auto& event: current->queue) {
+      event.copyTo(eventsBuilder[n++]);
+    }
+    current->queue.clear();
+
+    auto result = co_await builder.send();
+
+    // Note that although we cleared the current.queue above, it is
+    // possible/likely that additional events were added to the queue
+    // while the above builder.sent() was being awaited. If the result
+    // comes back indicating that we should stop, then we'll stop here
+    // without any further processing. We'll defensively clear the
+    // queue again and drop the client stub. Otherwise, if result.getStop()
+    // is false, we'll loop back around to send any items that have since
+    // been added to the queue or exit this loop if there are no additional
+    // events waiting to be sent.
+    if (result.getStop()) {
+      current->queue.clear();
+      current->capability = kj::none;
+      co_return;
+    }
+  }
+}
+
+// If we are using streaming tail workers, initialize the mechanism that will deliver events
+// to that collection of tail workers.
+kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
+  if (streamingTailWorkers.size() == 0) {
+    return kj::none;
+  }
+
+  auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
+
+  return kj::heap<tracing::TailStreamWriter>(
+      // This lambda is called for every streaming tail event that is reported. We use
+      // the TailStreamWriterState for this stream to actually handle the event.
+      // Pay attention to the ownership of state here. The lamba holds a bare
+      // reference while the instance is attached to the kj::Own below.
+      [&state = *state, &waitUntilTasks](tracing::TailEvent&& event) mutable {
+    KJ_SWITCH_ONEOF(state.inner) {
+      KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
+        // The tail stream has already been closed because we have received either
+        // an outcome or hibernate event. The writer should have failed and we
+        // actually shouldn't get here. Assert!
+        KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback evoked after close");
+      }
+      KJ_CASE_ONEOF(pending, TailStreamWriterState::Pending) {
+        // This is our first event! It has to be an onset event, which the writer
+        // should have validated for us. Assert if it is not an onset then proceed
+        // to start each of our tail working sessions.
+        KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
+
+        // Transitions into the active state by grabbing the pending client capability.
+        state.inner = KJ_MAP(wi, pending) {
+          auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+          auto result = customEvent->getCap();
+          waitUntilTasks.add(
+              wi->customEvent(kj::mv(customEvent)).attach(kj::mv(wi)).ignoreResult());
+          return kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
+        };
+
+        // At this point our writer state is "active", which means the state
+        // consists of one or more streaming tail worker client stubs to which
+        // the event will be dispatched.
+      }
+      KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
+        // Event cannot be a onset, which should have been validated by the writer.
+        KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
+      }
+    }
+    state.reportImpl(kj::mv(event));
+
+    // The state is determined to be closing when it receives a terminal event
+    // like tracing::Onset or tracing::Hibernate. If we return true, then the
+    // writer expects more events to be received. If we return false, then the
+    // writer can release any state it is holding because we don't expect any
+    // more events to be dispatched. The writer should handle that case by
+    // dropping this lambda.
+
+    return !state.closing;
+  }, []() -> kj::Date {
+    // TODO(streaming-tail): Return proper timestamps. This callback is used to
+    // acquire the timestamps used in the tail stream events. Ideally this will
+    // use the same timesource that backs `IoContext::now()` and includes the
+    // same spectre mitigations.
+    return kj::UNIX_EPOCH;
+  }).attach(kj::mv(state));
 }
 
 }  // namespace workerd::tracing
