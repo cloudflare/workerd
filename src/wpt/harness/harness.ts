@@ -30,9 +30,12 @@ import {
   ok,
   throws,
   fail,
+  rejects,
+  match,
   type AssertPredicate,
 } from 'node:assert';
 
+import { default as crypto } from 'node:crypto';
 import { default as path } from 'node:path';
 
 type CommonOptions = {
@@ -41,6 +44,7 @@ type CommonOptions = {
   before?: () => void;
   after?: () => void;
   replace?: (code: string) => string;
+  only?: boolean;
 };
 
 type SuccessOptions = {
@@ -52,10 +56,18 @@ type SuccessOptions = {
 type ErrorOptions = {
   // A comment is mandatory when there are expected failures or skipped tests
   comment: string;
-  expectedFailures?: string[];
-  skippedTests?: string[];
-  skipAllTests?: boolean;
-};
+} & (
+  | {
+      expectedFailures?: string[];
+      skippedTests?: string[];
+      skipAllTests?: false;
+    }
+  | {
+      expectedFailures?: undefined;
+      skippedTests?: undefined;
+      skipAllTests: true;
+    }
+);
 
 type TestRunnerOptions = CommonOptions & (SuccessOptions | ErrorOptions);
 
@@ -95,6 +107,7 @@ class Test {
   public name: string;
   public properties: unknown;
   public phase: (typeof Test.Phases)[keyof typeof Test.Phases];
+  public cleanup_callbacks: UnknownFunc[] = [];
 
   public error?: Error;
 
@@ -143,6 +156,7 @@ class Test {
       }
 
       this.error = new AggregateError([err], this.name);
+      this.error.stack = '';
       this.done();
     }
 
@@ -251,6 +265,10 @@ class Test {
     );
   }
 
+  public add_cleanup(func: UnknownFunc): void {
+    this.cleanup_callbacks.push(func);
+  }
+
   public done(): void {
     if (this.phase >= Test.Phases.CLEANING) {
       return;
@@ -260,7 +278,10 @@ class Test {
   }
 
   public cleanup(): void {
-    // Actual cleanup support is not yet needed for the WPT modules we support
+    // TODO(soon): Cleanup functions can also return a promise instead of being synchronous, but we don't need this for any tests currently.
+    for (const cleanFn of this.cleanup_callbacks) {
+      cleanFn();
+    }
     this.phase = Test.Phases.COMPLETE;
     this.resolve();
   }
@@ -270,6 +291,9 @@ class Test {
 // Singleton object used to pass test state between the runner and the harness functions available
 // to the evaled  WPT test code.
 class RunnerState {
+  // URL corresponding to the current test file, based on the WPT directory structure.
+  public testUrl: URL;
+
   // Filename of the current test. Used in error messages.
   public testFileName: string;
 
@@ -285,11 +309,16 @@ class RunnerState {
   // Promises returned in the test. The test is done once all promises have resolved.
   public promises: Promise<unknown>[] = [];
 
+  // Callbacks to be run once the entire test is done.
+  public completionCallbacks: UnknownFunc[] = [];
+
   public constructor(
+    testUrl: URL,
     testFileName: string,
     env: Env,
     options: TestRunnerOptions
   ) {
+    this.testUrl = testUrl;
     this.testFileName = testFileName;
     this.env = env;
     this.options = options;
@@ -298,6 +327,10 @@ class RunnerState {
   public async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
     await Promise.all(this.promises);
+
+    for (const cleanFn of this.completionCallbacks) {
+      cleanFn();
+    }
 
     const expectedFailures = new Set(this.options.expectedFailures ?? []);
     const unexpectedFailures = [];
@@ -340,10 +373,20 @@ type TestFn = UnknownFunc;
 type PromiseTestFn = () => Promise<unknown>;
 type ThrowingFn = () => unknown;
 
+type HostInfo = {
+  REMOTE_HOST: string;
+  HTTP_ORIGIN: string;
+  HTTP_REMOTE_ORIGIN: string;
+  HTTPS_ORIGIN: string;
+  ORIGIN: string;
+  HTTPS_REMOTE_ORIGIN: string;
+  HTTP_PORT: string;
+  HTTPS_PORT: string;
+};
 declare global {
   /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   var state: RunnerState;
-  var GLOBAL: { isWindow(): boolean };
+  var GLOBAL: { isWindow(): boolean; isWorker(): boolean };
   /* eslint-enable no-var */
 
   function test(func: TestFn, name: string, properties?: unknown): void;
@@ -364,7 +407,11 @@ declare global {
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
   function assert_true(val: unknown, message?: string): void;
   function assert_false(val: unknown, message?: string): void;
-  function assert_array_equals(a: unknown, b: unknown, message?: string): void;
+  function assert_array_equals(
+    actual: unknown[],
+    expected: unknown[],
+    description?: string
+  ): void;
   function assert_object_equals(a: unknown, b: unknown, message?: string): void;
   function assert_implements(condition: unknown, description?: string): void;
   function assert_implements_optional(
@@ -393,6 +440,33 @@ declare global {
     property_name: string,
     description?: string
   ): void;
+  function promise_rejects_js(
+    test: Test,
+    constructor: typeof Error,
+    promise: Promise<unknown>,
+    description?: string
+  ): Promise<void>;
+  function assert_regexp_match(
+    actual: string,
+    expected: RegExp,
+    description?: string
+  ): void;
+  function assert_greater_than(
+    actual: number,
+    expected: number,
+    description?: string
+  ): void;
+
+  function promise_rejects_exactly(
+    test: Test,
+    exception: typeof Error,
+    promise: Promise<unknown>,
+    description?: string
+  ): Promise<void>;
+  function get_host_info(): HostInfo;
+  function token(): string;
+  function setup(func: UnknownFunc): void;
+  function add_completion_callback(func: UnknownFunc): void;
 }
 
 /**
@@ -451,18 +525,57 @@ function sanitize_unpaired_surrogates(str: string): string {
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access --  We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.Window = Object.getPrototypeOf(globalThis).constructor;
 
+const realFetch = globalThis.fetch;
+const realRequest = globalThis.Request;
+
+function relativizeUrl(input: URL | string): string {
+  return new URL(input, globalThis.state.testUrl).href;
+}
+
+function relativizeRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Request {
+  if (input instanceof Request) {
+    return new realRequest(
+      relativizeRequest(input.url),
+      new realRequest(input, init)
+    );
+  } else if (input instanceof URL) {
+    return new realRequest(relativizeUrl(input), init);
+  } else {
+    return new realRequest(relativizeUrl(input), init);
+  }
+}
+
+globalThis.Request = class _Request extends Request {
+  public constructor(input: RequestInfo | URL, init?: RequestInit) {
+    super(relativizeRequest(input, init));
+  }
+};
+
+globalThis.Response = class _Response extends Response {
+  public static override redirect(
+    url: string | URL,
+    status?: number
+  ): Response {
+    return super.redirect(relativizeUrl(url), status);
+  }
+};
+
 globalThis.fetch = async (
   input: RequestInfo | URL,
-  _init?: RequestInit
-  // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
+  init?: RequestInit
 ): Promise<Response> => {
-  const url =
-    input instanceof Request ? input.url.toString() : input.toString();
-  const exports: unknown = globalThis.state.env[url];
-  const response = new Response();
-  // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
-  response.json = async (): Promise<unknown> => exports;
-  return response;
+  if (typeof input === 'string' && input.endsWith('.json')) {
+    // WPT sometimes uses fetch to load a resource file, we "serve" this from the bindings
+    const exports: unknown = globalThis.state.env[input];
+    const response = new Response();
+    // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
+    response.json = async (): Promise<unknown> => exports;
+    return response;
+  }
+  return realFetch(relativizeRequest(input, init));
 };
 
 // @ts-expect-error We're just exposing enough stuff for the tests to pass; it's not a perfect match
@@ -470,6 +583,9 @@ globalThis.self = globalThis;
 
 globalThis.GLOBAL = {
   isWindow(): boolean {
+    return false;
+  },
+  isWorker(): boolean {
     return false;
   },
 };
@@ -516,7 +632,9 @@ globalThis.promise_test = (func, name, properties): void => {
 
   globalThis.state.promises.push(
     promise.catch((err: unknown) => {
-      globalThis.state.errors.push(new AggregateError([err], name));
+      globalThis.state.errors.push(
+        Object.assign(new AggregateError([err], name), { stack: '' })
+      );
     })
   );
 };
@@ -579,8 +697,25 @@ globalThis.assert_false = (val, message): void => {
   strictEqual(val, false, message);
 };
 
-globalThis.assert_array_equals = (a, b, message): void => {
-  deepStrictEqual(a, b, message);
+/**
+ * Assert that ``actual`` and ``expected`` are both arrays, and that the array properties of
+ * ``actual`` and ``expected`` are all the same value (as for :js:func:`assert_equals`).
+ *
+ * @param actual - Test array.
+ * @param expected - Array that is expected to contain the same values as ``actual``.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_array_equals = (actual, expected, description): void => {
+  strictEqual(actual.length, expected.length, description);
+
+  for (let i = 0; i < actual.length; i++) {
+    strictEqual(
+      Object.prototype.hasOwnProperty.call(actual, i),
+      Object.prototype.hasOwnProperty.call(expected, i),
+      description
+    );
+    strictEqual(actual[i], expected[i], description);
+  }
 };
 
 globalThis.assert_object_equals = (a, b, message): void => {
@@ -763,6 +898,175 @@ globalThis.assert_not_own_property = (
   );
 };
 
+/**
+ * Assert that a Promise is rejected with the right ECMAScript exception.
+ *
+ * @param test - the `Test` to use for the assertion.
+ * @param constructor - The expected exception constructor.
+ * @param promise - The promise that's expected to
+ * reject with the given exception.
+ * @param [description] Error message to add to assert in case of
+ *                               failure.
+ */
+globalThis.promise_rejects_js = async (
+  _test,
+  constructor,
+  promise,
+  description
+): Promise<void> => {
+  return rejects(promise, constructor, description);
+};
+
+/**
+ * Assert that ``actual`` matches the RegExp ``expected``.
+ *
+ * @param actual - Test string.
+ * @param expected - RegExp ``actual`` must match.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_regexp_match = (actual, expected, description): void => {
+  match(actual, expected, description);
+};
+
+/**
+ * Assert that ``actual`` is a number greater than ``expected``.
+ *
+ * @param actual - Test value.
+ * @param expected - Number that ``actual`` must be greater than.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_greater_than = (actual, expected, description): void => {
+  ok(actual > expected, description);
+};
+
+/**
+ * Assert that a Promise is rejected with the provided value.
+ *
+ * @param test - the `Test` to use for the assertion.
+ * @param exception - The expected value of the rejected promise.
+ * @param promise - The promise that's expected to
+ * reject.
+ * @param [description] Error message to add to assert in case of
+ *                               failure.
+ */
+globalThis.promise_rejects_exactly = (
+  _test,
+  exception,
+  promise,
+  description
+): Promise<void> => {
+  return promise
+    .then(() => {
+      assert_unreached(`Should have rejected: ${description}`);
+    })
+    .catch((exc: unknown) => {
+      assert_throws_exactly(
+        exception,
+        () => {
+          throw exc;
+        },
+        description
+      );
+    });
+};
+
+globalThis.get_host_info = (): HostInfo => {
+  const httpUrl = globalThis.state.testUrl;
+
+  const httpsUrl = new URL(httpUrl);
+  httpsUrl.protocol = 'https';
+  httpsUrl.port = '8443';
+
+  return {
+    REMOTE_HOST: httpUrl.hostname,
+    HTTP_ORIGIN: httpUrl.origin,
+    ORIGIN: httpUrl.origin,
+    HTTP_REMOTE_ORIGIN: httpUrl.origin,
+    HTTPS_ORIGIN: httpsUrl.origin,
+    HTTPS_REMOTE_ORIGIN: httpsUrl.origin,
+    HTTP_PORT: httpUrl.port,
+    HTTPS_PORT: httpsUrl.port,
+  };
+};
+
+globalThis.token = (): string => {
+  return crypto.randomUUID();
+};
+
+globalThis.setup = (func): void => {
+  func();
+};
+
+globalThis.add_completion_callback = (func: UnknownFunc): void => {
+  globalThis.state.completionCallbacks.push(func);
+};
+
+class Location {
+  public get ancestorOrigins(): DOMStringList {
+    return {
+      length: 0,
+      item(_index: number): string | null {
+        return null;
+      },
+      contains(_string: string): boolean {
+        return false;
+      },
+    };
+  }
+
+  public get hash(): string {
+    return globalThis.state.testUrl.hash;
+  }
+
+  public get host(): string {
+    return globalThis.state.testUrl.host;
+  }
+
+  public get hostname(): string {
+    return globalThis.state.testUrl.hostname;
+  }
+
+  public get href(): string {
+    return globalThis.state.testUrl.href;
+  }
+
+  public get origin(): string {
+    return globalThis.state.testUrl.origin;
+  }
+
+  public get pathname(): string {
+    return globalThis.state.testUrl.pathname;
+  }
+
+  public get port(): string {
+    return globalThis.state.testUrl.port;
+  }
+
+  public get protocol(): string {
+    return globalThis.state.testUrl.protocol;
+  }
+
+  public get search(): string {
+    return globalThis.state.testUrl.search;
+  }
+
+  public assign(url: string): void {
+    globalThis.state.testUrl = new URL(url);
+  }
+
+  public reload(): void {}
+
+  public replace(url: string): void {
+    globalThis.state.testUrl = new URL(url);
+  }
+
+  public toString(): string {
+    return globalThis.state.testUrl.href;
+  }
+}
+
+globalThis.location = new Location();
+
 function shouldRunTest(message: string): boolean {
   if ((globalThis.state.options.skippedTests ?? []).includes(message)) {
     return false;
@@ -804,7 +1108,7 @@ function parseWptMetadata(code: string): WPTMetadata {
         break;
 
       case 'script': {
-        meta.scripts.push(path.normalize(groups.value));
+        meta.scripts.push(groups.value);
         break;
       }
 
@@ -825,36 +1129,68 @@ function parseWptMetadata(code: string): WPTMetadata {
   return meta;
 }
 
-function evalOnce(
-  includedFiles: Set<string>,
+function getBindingPath(base: string, rawPath: string): string {
+  if (path.isAbsolute(rawPath)) {
+    return rawPath;
+  }
+
+  return path.relative('/', path.resolve(base, rawPath));
+}
+
+const EXCLUDED_PATHS = new Set([
+  // Implemented in harness.ts
+  '/common/subset-tests-by-key.js',
+  '/resources/utils.js',
+  '/common/utils.js',
+  '/common/get-host-info.sub.js',
+]);
+
+function replaceInterpolation(code: string): string {
+  const hostInfo = globalThis.get_host_info();
+
+  return code
+    .replace('{{host}}', hostInfo.REMOTE_HOST)
+    .replace('{{ports[http][0]}}', hostInfo.HTTP_PORT)
+    .replace('{{ports[http][1]}}', hostInfo.HTTP_PORT)
+    .replace('{{ports[https][0]}}', hostInfo.HTTPS_PORT);
+}
+
+function getCodeAtPath(
   env: Env,
-  path: string,
+  base: string,
+  rawPath: string,
   replace?: (code: string) => string
-): void {
-  if (path === '/common/subset-tests-by-key.js') {
-    // The functionality in this file is directly implemented in harness.ts
-    return;
+): string {
+  const bindingPath = getBindingPath(base, rawPath);
+
+  if (EXCLUDED_PATHS.has(bindingPath)) {
+    return '';
   }
 
-  if (includedFiles.has(path)) {
-    return;
-  }
-
-  if (typeof env[path] != 'string') {
+  if (typeof env[bindingPath] != 'string') {
     // We only have access to the files explicitly declared in the .wd-test, not the full WPT
     // checkout, so it's possible for tests to include things we can't load.
     throw new Error(
-      `Test file ${path} not found. Update wpt_test.bzl to handle this case.`
+      `Test file ${bindingPath} not found. Update wpt_test.bzl to handle this case.`
     );
   }
 
-  includedFiles.add(path);
-  const code = replace ? replace(env[path]) : env[path];
-  env.unsafe.eval(code);
+  let code = env[bindingPath];
+  if (replace) {
+    code = replace(code);
+  }
+
+  return replaceInterpolation(code);
+}
+
+function evalAsBlock(env: Env, files: string[]): void {
+  const block = '{' + files.join('\n') + '}';
+  env.unsafe.eval(block);
 }
 
 export function createRunner(
   config: TestRunnerConfig,
+  moduleBase: string,
   allTestFiles: string[]
 ): (file: string) => TestCase {
   const testsNotFound = new Set(Object.keys(config)).difference(
@@ -867,16 +1203,12 @@ export function createRunner(
     );
   }
 
-  // Keeps track of test files which have been included, to avoid loading the same file more
-  // than once. Test files are executed in the global scope using unsafeEval, so executing the same
-  // file again could cause redefinition errors depending on what is in the file.
-  const includedFiles = new Set<string>();
+  const onlyFlagUsed = Object.values(config).some((options) => options.only);
 
   return (file: string): TestCase => {
     return {
       async test(_: unknown, env: Env): Promise<void> {
         const options = config[file];
-        const mainCode = String(env[file]);
 
         if (!options) {
           throw new Error(
@@ -884,23 +1216,35 @@ export function createRunner(
           );
         }
 
+        if (onlyFlagUsed && !options.only) {
+          return;
+        }
+
         if (options.skipAllTests) {
           console.warn(`All tests in ${file} have been skipped.`);
           return;
         }
 
-        globalThis.state = new RunnerState(file, env, options);
-        const meta = parseWptMetadata(mainCode);
+        const testUrl = new URL(
+          path.join(moduleBase, file),
+          'http://localhost:8000'
+        );
+
+        globalThis.state = new RunnerState(testUrl, file, env, options);
+        const meta = parseWptMetadata(String(env[file]));
 
         if (options.before) {
           options.before();
         }
 
+        const files = [];
+
         for (const script of meta.scripts) {
-          evalOnce(includedFiles, env, script);
+          files.push(getCodeAtPath(env, path.dirname(file), script));
         }
 
-        evalOnce(includedFiles, env, file, options.replace);
+        files.push(getCodeAtPath(env, './', file, options.replace));
+        evalAsBlock(env, files);
 
         if (options.after) {
           options.after();
