@@ -15,5 +15,6 @@ wd_rust_crate(
     deps = [
         "//src/rust/cxx-integration",
         "@crates_vendor//:thiserror",
+        "@crates_vendor//:v8",
     ],
 )

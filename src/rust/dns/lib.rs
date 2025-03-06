@@ -32,15 +32,18 @@ mod ffi {
     }
     extern "Rust" {
         fn parse_caa_record(record: &str) -> Result<CaaRecord>;
-        unsafe fn parse_naptr_record(isolate: *mut Isolate, record: &str) -> Result<*mut JsValue>;
     }
 
-    unsafe extern "C++" {
-        include!("workerd/rust/dns/bridge.h");
-        type Isolate;
-        type JsValue;
-    }
+    // unsafe extern "C++" {
+    //     include!("workerd/rust/dns/bridge.h");
+    //     type Isolate;
+    //     type JsValue;
+    // }
 }
+
+// extern "C" {
+//     fn parse_naptr_record(isolate: *mut v8::Isolate, record: *const core::ffi::c_char) -> *mut v8::Value;
+// }
 
 /// Given a vector of strings, converts each slice to UTF-8 from HEX.
 ///
@@ -138,29 +141,34 @@ pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> 
 /// # Errors
 /// `DnsParserError::InvalidHexString`
 /// `DnsParserError::ParseIntError`
-pub unsafe fn parse_naptr_record(isolate: *mut ffi::Isolate, record: &str) -> Result<*mut ffi::JsValue, DnsParserError> {
-    let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
+#[no_mangle]
+pub extern "C" fn parse_naptr_record(isolate: *mut v8::Isolate, record: *const core::ffi::c_char) -> *mut v8::Value {
+    let isolate: &mut v8::Isolate = unsafe { &mut *isolate };
 
-    let order_str = data[1..3].to_vec();
-    let order = u32::from_str_radix(&order_str.join(""), 16)?;
-    let preference_str = data[3..5].to_vec();
-    let preference = u32::from_str_radix(&preference_str.join(""), 16)?;
-
-    let flag_length = usize::from_str_radix(data[5], 16)?;
-    let flag_offset = 6;
-    let flags = decode_hex(&data[flag_offset..flag_length + flag_offset])?.join("");
-
-    let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16)?;
-    let service_offset = flag_offset + flag_length + 1;
-    let service = decode_hex(&data[service_offset..service_length + service_offset])?.join("");
-
-    let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16)?;
-    let regexp_offset = service_offset + service_length + 1;
-    let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset])?.join("");
-
-    let replacement = parse_replacement(&data[regexp_offset + regexp_length..])?;
-
-    todo!("hello");
+    todo!();
+    // let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
+    //
+    // let order_str = data[1..3].to_vec();
+    // let order = u32::from_str_radix(&order_str.join(""), 16)?;
+    // let preference_str = data[3..5].to_vec();
+    // let preference = u32::from_str_radix(&preference_str.join(""), 16)?;
+    //
+    // let flag_length = usize::from_str_radix(data[5], 16)?;
+    // let flag_offset = 6;
+    // let flags = decode_hex(&data[flag_offset..flag_length + flag_offset])?.join("");
+    //
+    // let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16)?;
+    // let service_offset = flag_offset + flag_length + 1;
+    // let service = decode_hex(&data[service_offset..service_length + service_offset])?.join("");
+    //
+    // let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16)?;
+    // let regexp_offset = service_offset + service_length + 1;
+    // let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset])?.join("");
+    //
+    // let replacement = parse_replacement(&data[regexp_offset + regexp_length..])?;
+    //
+    // // let isolate = v8::OwnedIsolate::new(isolate);
+    // todo!("hello");
     // Ok(ffi::NaptrRecord {
     //     flags,
     //     service,

@@ -7,6 +7,8 @@
 #include <workerd/rust/cxx-integration/cxx-bridge.h>
 #include <workerd/rust/dns/lib.rs.h>
 
+extern "C" v8::Value* parse_naptr_record(v8::Isolate* isolate, const char* str);
+
 namespace workerd::api::node {
 
 DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
@@ -16,7 +18,7 @@ DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
 }
 
 jsg::Value DnsUtil::parseNaptrRecord(jsg::Lock& js, kj::String record) {
-  auto ptr = rust::dns::parse_naptr_record(js.v8Isolate, ::rust::Str(record.begin(), record.size()));
+  auto ptr = parse_naptr_record(js.v8Isolate, record.cStr());
   KJ_UNIMPLEMENTED("implement this");
   // return NaptrRecord{
   //   .flags = kj::str(parsed.flags),
