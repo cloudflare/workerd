@@ -82,6 +82,10 @@ kj::Array<jsg::Ref<OTelSpan>> getTraceSpans(const Trace& trace) {
   return KJ_MAP(x, trace.spans) -> jsg::Ref<OTelSpan> { return jsg::alloc<OTelSpan>(x); };
 }
 
+kj::Maybe<kj::String> getTraceIdStr(const Trace& trace) {
+  return trace.traceId.map([](const auto& traceId) { return traceId.toNetworkOrderHex(); });
+}
+
 kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents(
     jsg::Lock& js, const Trace& trace) {
   return KJ_MAP(x, trace.diagnosticChannelEvents) -> jsg::Ref<TraceDiagnosticChannelEvent> {
@@ -207,6 +211,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptTags(getTraceScriptTags(trace)),
       executionModel(enumToStr(trace.executionModel)),
       spans(getTraceSpans(trace)),
+      traceId(getTraceIdStr(trace)),
       outcome(enumToStr(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
       wallTime(trace.wallTime / kj::MILLISECONDS),
@@ -290,6 +295,11 @@ kj::StringPtr TraceItem::getExecutionModel() {
 
 kj::ArrayPtr<jsg::Ref<OTelSpan>> TraceItem::getSpans() {
   return spans;
+}
+
+kj::StringPtr TraceItem::getTraceId() {
+  // TODO(o11y): Handle this better
+  return traceId.orDefault(kj::str());
 }
 
 kj::StringPtr TraceItem::getOutcome() {
