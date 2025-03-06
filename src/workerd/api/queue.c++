@@ -535,6 +535,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
+  // This method has three main chunks of logic:
+  // 1. Do all necessary setup work. This starts right below this comment.
+  // 2. Call into the worker's queue event handler.
+  // 3. Wait on the necessary portions of the worker's code to complete.
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
@@ -572,9 +576,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   };
   auto queueEventHolder = kj::refcounted<QueueEventHolder>();
 
-  // It's a little ugly, but the usage of waitUntil (and finishScheduled) down below are here so
-  // that users can write queue handlers in the old addEventListener("queue", ...) syntax (where we
-  // can't just wait on their addEventListener handler to resolve because it can't be async).
+  // 2. This is where we call into the worker's queue event handler
   auto runProm = context.run(
       [this, entrypointName = entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
           &metrics = incomingRequest->getMetrics(), outcomeObserver = kj::mv(outcomeObserver),
@@ -591,6 +593,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     queueEvent->isServiceWorkerHandler = startResp.isServiceWorkerHandler;
   });
 
+  // 3. Now that we've (asynchronously) called into the event handler, wait on all necessary async
+  // work to complete. This logic is split into two completely separate code paths depending on
+  // whether the queueConsumerNoWaitForWaitUntil compatibility flag is enabled.
+  // * In the enabled path, the queue event can be considered complete as soon as the event handler
+  //   returns and the promise that it returns (if any) has resolved.
+  // * In the disabled path, the queue event isn't complete until all waitUntil'ed promises resolve.
+  //   This was how Queues originally worked, but made for a poor user experience.
   auto compatFlags = context.getWorker().getIsolate().getApi().getFeatureFlags();
   if (compatFlags.getQueueConsumerNoWaitForWaitUntil()) {
     // The user has opted in to only waiting on their event handler rather than all waitUntil'd
@@ -602,10 +611,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     auto outcome = co_await runProm
                        .then([queueEvent = kj::addRef(
                                   *queueEventHolder)]() mutable -> kj::Promise<EventOutcome> {
-      // If it returned a promise, wait on the promise.
+      // If the queue handler returned a promise, wait on the promise.
       KJ_IF_SOME(handlerProm, queueEvent->exportedHandlerProm) {
         return handlerProm.then([]() { return EventOutcome::OK; });
       }
+      // If not, we can consider the invocation complete.
       return EventOutcome::OK;
     })
                        .catch_([](kj::Exception&& e) {
@@ -633,9 +643,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
       bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
       outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
     } else {
-      // If we aren't going to wait on the waitUntil tasks via a call to
-      // incomingRequest->finishScheduled(), we're responsible for calling draing() on the
-      // incomingRequest to ensure that waitUntil tasks are run in the backgound.
+      // We're responsible for calling drain() on the incomingRequest to ensure that waitUntil tasks
+      // can continue to run in the backgound for a while even after we return a result to the
+      // caller of this event. But this is only needed in this code path because in all other code
+      // paths we call incomingRequest->finishScheduled(), which already takes care of waiting on
+      // waitUntil tasks.
       waitUntilTasks.add(incomingRequest->drain().attach(
           kj::mv(incomingRequest), kj::addRef(*queueEventHolder), kj::addRef(*this)));
     }
@@ -654,7 +666,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     auto result = co_await incomingRequest->finishScheduled();
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
 
-    // Log some debug info if the request timed out or was aborted.
+    // Log some debug info if the request timed out or was aborted, to aid in debugging situations
+    // where consumer workers appear to get stuck and repeatedly take 15 minutes.
     // In particular, detect whether or not the users queue() handler function completed
     // and include info about other waitUntil tasks that may have caused the request to timeout.
     if (!completed) {
