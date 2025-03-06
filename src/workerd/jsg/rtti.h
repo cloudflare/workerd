@@ -609,8 +609,8 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, typename Property, auto property>
-  inline void registerStructProperty() {
+  template <typename Property, auto property>
+  inline void registerStructProperty(const char* name) {
     ++members;
   }
 
@@ -789,8 +789,8 @@ struct MembersBuilder {
     // BuildRtti<Configuration, T>::build(constant.initType());
   }
 
-  template <const char* name, typename Property, Property Self::*property>
-  void registerStructProperty() {
+  template <typename Property, Property Self::*property>
+  void registerStructProperty(const char* name) {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     BuildRtti<Configuration, Property>::build(prop.initType(), rtti);
