@@ -80,6 +80,9 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
 
     // Inject modules that enable JS features to be used idiomatically from Python.
+    //
+    // NOTE: setupPatches is called after memorySnapshotDoImports, so any modules injected here
+    // shouldn't be part of the snapshot and should filtered out in filterPythonScriptImports.
     if (USING_OLDEST_PYODIDE_VERSION) {
       // Inject at cloudflare.workers for backwards compatibility
       pyodide.FS.mkdir(`${pyodide.site_packages}/cloudflare`);
