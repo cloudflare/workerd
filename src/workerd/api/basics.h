@@ -32,12 +32,6 @@ class Event: public jsg::Object {
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  inline explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
-      : ownType(kj::mv(ownType)),
-        type(this->ownType),
-        init(init),
-        trusted(trusted) {}
-
   inline explicit Event(kj::StringPtr type, Init init = Init(), bool trusted = true)
       : type(type),
         init(init),
