@@ -360,3 +360,24 @@ wd_test(
         "tests/fixtures/rsa_public.pem",
     ],
 )
+
+js_binary(
+    name = "tls-nodejs-tcp-server",
+    entry_point = "tests/tls-nodejs-tcp-server.js",
+)
+
+wd_test(
+    size = "large",
+    src = "tests/tls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/fixtures/tls-nodejs-tcp-server.pem",
+        "tests/tls-nodejs-test.js",
+    ],
+    sidecar = "tls-nodejs-tcp-server",
+    target_compatible_with = select({
+        # TODO(soon): Investigate why this test timeout on Windows.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
