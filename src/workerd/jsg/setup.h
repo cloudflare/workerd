@@ -42,42 +42,30 @@ kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
 // library.
 class V8System {
  public:
-  // Use the default v8::Platform implementation, as if by:
+  // Uses the default v8::Platform implementation, as if by:
   //   auto v8Platform = jsg::defaultPlatform();
-  //   auto v8System = V8System(*v8Platform);
-  V8System();
-
-  // `flags` is a list of command-line flags to pass to V8, like "--expose-gc" or
+  //   auto v8System = V8System(*v8Platform, flags);
+  // (Optional) `flags` is a list of command-line flags to pass to V8, like "--expose-gc" or
   // "--single_threaded_gc". An exception will be thrown if any flags are not recognized.
-  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags);
-
-  // Use a possibly-custom v8::Platform implementation. Use this if you need to override any
-  // functionality provided by the v8::Platform API.
-  explicit V8System(v8::Platform& platform);
+  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags = nullptr);
 
   // Use a possibly-custom v8::Platform implementation, and apply flags.
   explicit V8System(v8::Platform& platform,
       kj::ArrayPtr<const kj::StringPtr> flags,
-      v8::Platform* defaultPlatformPtr = nullptr);
+      v8::Platform* defaultPlatformPtr);
 
   ~V8System() noexcept(false);
 
   typedef void FatalErrorCallback(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
-  auto& getDefaultPlatform() {
-    return *defaultPlatformPtr_;
-  }
-
  private:
   kj::Own<v8::Platform> platformInner;
-  V8PlatformWrapper platformWrapper;
-  friend class IsolateBase;
+  kj::Own<V8PlatformWrapper> platformWrapper;
   v8::Platform* defaultPlatformPtr_;
+  friend class IsolateBase;
 
-  explicit V8System(kj::Own<v8::Platform>,
-      kj::ArrayPtr<const kj::StringPtr>,
-      v8::Platform* defaultPlatformPtr = nullptr);
+  void init(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>, v8::Platform*);
 };
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code

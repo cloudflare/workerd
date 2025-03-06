@@ -4,7 +4,7 @@
 
 #include "jsg.h"
 
-#include "libplatform/libplatform.h"
+#include <libplatform/libplatform.h>
 #include "setup.h"
 
 #include <workerd/jsg/modules-new.h>
@@ -275,7 +275,7 @@ void Lock::terminateExecution() {
 
 void Lock::pumpMessageLoop() {
   auto platform = IsolateBase::from(v8Isolate).getDefaultPlatform();
-  while (v8::platform::PumpMessageLoop(platform, v8Isolate)) {}
+  while (v8::platform::PumpMessageLoop(platform, v8Isolate, v8::platform::MessageLoopBehavior::kDoNotWait)) {}
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {
