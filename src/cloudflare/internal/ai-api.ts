@@ -175,11 +175,7 @@ export class Ai {
       return res;
     }
 
-    if (!res.ok) {
-      throw await this._parseError(res);
-    }
-
-    if (!res.body) {
+    if (!res.ok || !res.body) {
       throw await this._parseError(res);
     }
 
