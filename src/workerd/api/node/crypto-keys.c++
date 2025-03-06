@@ -99,6 +99,10 @@ class SecretKey final: public CryptoKey::Impl {
     visitor.visit(keyData);
   }
 
+  const kj::ArrayPtr<const kj::byte> rawKeyData() const {
+    return keyData.asArrayPtr().asConst();
+  }
+
  private:
   jsg::BufferSource keyData;
 };
@@ -828,6 +832,13 @@ kj::Maybe<const ncrypto::EVPKeyPointer&> CryptoImpl::tryGetKey(jsg::Ref<CryptoKe
   KJ_IF_SOME(key, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl)) {
     const ncrypto::EVPKeyPointer& evp = key;
     return evp;
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::ArrayPtr<const kj::byte>> CryptoImpl::tryGetSecretKeyData(jsg::Ref<CryptoKey>& key) {
+  KJ_IF_SOME(secret, kj::dynamicDowncastIfAvailable<SecretKey>(*key->impl)) {
+    return secret.rawKeyData();
   }
   return kj::none;
 }

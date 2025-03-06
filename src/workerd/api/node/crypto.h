@@ -211,6 +211,7 @@ class CryptoImpl final: public jsg::Object {
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   static kj::Maybe<const ncrypto::EVPKeyPointer&> tryGetKey(jsg::Ref<CryptoKey>& key);
+  static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(jsg::Ref<CryptoKey>& key);
 
   struct RsaKeyPairOptions {
     kj::String type;
@@ -310,6 +311,80 @@ class CryptoImpl final: public jsg::Object {
       jsg::Optional<int> pssSaltLength,
       jsg::Optional<int> dsaSigEnc);
 
+  // Cipher/Decipher
+  class CipherHandle final: public jsg::Object {
+   public:
+    enum class Mode { CIPHER, DECIPHER };
+
+    struct AuthenticatedInfo {
+      unsigned int auth_tag_len = 0;
+      unsigned int max_message_size = INT_MAX;
+    };
+
+    CipherHandle(Mode mode,
+        ncrypto::CipherCtxPointer ctx,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource iv,
+        kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
+
+    static jsg::Ref<CipherHandle> constructor(jsg::Lock& js,
+        kj::String mode,
+        kj::String algorithm,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource iv,
+        jsg::Optional<uint32_t> maybeAuthTagLength);
+
+    jsg::BufferSource update(jsg::Lock& js, jsg::BufferSource data);
+    jsg::BufferSource final(jsg::Lock& js);
+    void setAAD(jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
+    void setAutoPadding(jsg::Lock& js, bool autoPadding);
+    void setAuthTag(jsg::Lock& js, jsg::BufferSource authTag);
+    jsg::BufferSource getAuthTag(jsg::Lock& js);
+
+    JSG_RESOURCE_TYPE(CipherHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(final);
+      JSG_METHOD(setAAD);
+      JSG_METHOD(setAutoPadding);
+      JSG_METHOD(setAuthTag);
+      JSG_METHOD(getAuthTag);
+    };
+
+   private:
+    Mode mode;
+    ncrypto::CipherCtxPointer ctx;
+    jsg::Ref<CryptoKey> key;
+    jsg::BufferSource iv;
+    kj::Maybe<jsg::BufferSource> maybeAuthTag;
+    kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
+    bool authTagPassed = false;
+    bool pendingAuthFailed = false;
+  };
+
+  struct PublicPrivateCipherOptions {
+    int padding;
+    kj::String oaepHash;
+    jsg::Optional<jsg::BufferSource> oaepLabel;
+    JSG_STRUCT(padding, oaepHash, oaepLabel);
+  };
+
+  jsg::BufferSource publicEncrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+  jsg::BufferSource publicDecrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+  jsg::BufferSource privateEncrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+  jsg::BufferSource privateDecrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+
   // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
@@ -357,6 +432,12 @@ class CryptoImpl final: public jsg::Object {
     JSG_NESTED_TYPE(VerifyHandle);
     JSG_METHOD(signOneShot);
     JSG_METHOD(verifyOneShot);
+    // Cipher/Decipher
+    JSG_NESTED_TYPE(CipherHandle);
+    JSG_METHOD(publicEncrypt);
+    JSG_METHOD(publicDecrypt);
+    JSG_METHOD(privateEncrypt);
+    JSG_METHOD(privateDecrypt);
   }
 };
 
@@ -368,5 +449,6 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::DsaKeyPairOptions, api::node::CryptoImpl::EcKeyPairOptions,           \
       api::node::CryptoImpl::EdKeyPairOptions, api::node::CryptoImpl::DhKeyPairOptions,            \
       api::node::CryptoImpl::SignHandle, api::node::CryptoImpl::VerifyHandle,                      \
+      api::node::CryptoImpl::CipherHandle, api::node::CryptoImpl::PublicPrivateCipherOptions,      \
       EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
