@@ -74,14 +74,27 @@ static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
   return kj::Own<v8::Platform>(&platform, kj::NullDisposer::instance);
 }
 
-V8System::V8System(): V8System(defaultPlatform(0), nullptr) {}
-V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags): V8System(defaultPlatform(0), flags) {}
-V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr) {}
-V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : V8System(userPlatform(platformParam), flags) {}
-V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : platformInner(kj::mv(platformParam)),
-      platformWrapper(*platformInner) {
+V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags) {
+  auto platform = defaultPlatform(0);
+  auto defaultPlatformPtr = platform.get();
+  init(kj::mv(platform), flags, defaultPlatformPtr);
+}
+
+V8System::V8System(v8::Platform& platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    v8::Platform* defaultPlatformPtr) {
+  init(userPlatform(platformParam), flags, defaultPlatformPtr);
+}
+
+void V8System::init(kj::Own<v8::Platform> platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    v8::Platform* defaultPlatformPtr) {
+  platformInner = kj::mv(platformParam);
+  platformWrapper = kj::heap<V8PlatformWrapper>(*platformInner);
+  defaultPlatformPtr_ = defaultPlatformPtr;
+
+  KJ_ASSERT(defaultPlatformPtr_ != nullptr);
+
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
@@ -149,9 +162,9 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   v8::V8::InitializeICUDefaultLocation(nullptr);
 #endif
 
-  v8::V8::InitializePlatform(&platformWrapper);
+  v8::V8::InitializePlatform(platformWrapper.get());
   v8::V8::Initialize();
-  cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
+  cppgc::InitializeProcess(platformWrapper->GetPageAllocator());
   v8Initialized = true;
 }
 
@@ -327,11 +340,10 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
 }
 }  // namespace
 
-IsolateBase::IsolateBase(const V8System& system,
-    v8::Isolate::CreateParams&& createParams,
-    kj::Own<IsolateObserver> observer)
-    : system(system),
-      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
+IsolateBase::IsolateBase(
+    V8System& system, v8::Isolate::CreateParams&& createParams, kj::Own<IsolateObserver> observer)
+    : defaultPlatform(system.defaultPlatformPtr_),
+      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),

@@ -733,4 +733,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("allow_importable_env");
   # When allowed, `import { env } from 'cloudflare:workers'` will provide access
   # to the per-request environment/bindings.
+
+  jsWeakRef @79 :Bool
+      $compatEnableFlag("enable_weak_ref")
+      $compatDisableFlag("disable_weak_ref");
+  # Enables WeakRefs and FinalizationRegistry API. WebAssembly based projects often rely on this API for wasm memory cleanup
 }
