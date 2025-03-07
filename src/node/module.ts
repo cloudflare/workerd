@@ -3,7 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { default as moduleUtil } from 'node-internal:module';
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_VALUE,
+  ERR_METHOD_NOT_IMPLEMENTED,
+} from 'node-internal:internal_errors';
 
 export function createRequire(
   path: string | URL
@@ -21,16 +24,24 @@ export function createRequire(
     );
   }
 
-  return moduleUtil.createRequire(normalizedPath);
+  // TODO(soon): We should move this to C++ land.
+  // Ref: https://nodejs.org/docs/latest/api/modules.html#requireid
+  return Object.assign(moduleUtil.createRequire(normalizedPath), {
+    // We don't throw ERR_METHOD_NOT_IMPLEMENTED because it's too disruptive.
+    resolve(): void {
+      return undefined;
+    },
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    cache: Object.create(null),
+    main: undefined,
+  });
 }
 
 // Indicates only that the given specifier is known to be a
 // Node.js built-in module specifier with or with the the
 // 'node:' prefix. A true return value does not guarantee that
 // the module is actually implemented in the runtime.
-export function isBuiltin(specifier: string): boolean {
-  return moduleUtil.isBuiltin(specifier);
-}
+export const isBuiltin = moduleUtil.isBuiltin.bind(moduleUtil);
 
 // Intentionally does not include modules with mandatory 'node:'
 // prefix like `node:test`.
@@ -110,8 +121,42 @@ export const builtinModules = [
 ];
 Object.freeze(builtinModules);
 
+export function findSourceMap(): void {
+  // Not meaningful to implement in the context of workerd.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('module.findSourceMap');
+}
+
+export function register(): void {
+  // Not meaningful to implement in the context of workerd.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('module.register');
+}
+
+export function syncBuiltinESMExports(): void {
+  // Not meaningful to implement in the context of workerd.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('module.syncBuiltinESMExports');
+}
+
+//
+// IMPORTANT NOTE!
+//
+// We are deliberately not including any of these functions below because
+// they are either experimental, in active development or not relevant
+// as of January 2025.
+//
+// - module.registerHooks()
+// - module.stripTypeScriptTypes()
+// - module.SourceMap
+// - module.constants.compileCacheStatus
+// - module.enableCompileCache()
+// - module.flushCompileCache()
+// - module.getCompileCacheDir()
+//
+
 export default {
   createRequire,
   isBuiltin,
   builtinModules,
+  findSourceMap,
+  register,
+  syncBuiltinESMExports,
 };
