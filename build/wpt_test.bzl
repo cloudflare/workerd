@@ -5,7 +5,7 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//:build/wd_test.bzl", "wd_test")
 
-def wpt_test(name, wpt_directory, test_config):
+def wpt_test(name, wpt_directory, config, autogates = []):
     """
     Main entry point.
     1. Generates a workerd test suite in JS. This contains the logic to run
@@ -16,7 +16,7 @@ def wpt_test(name, wpt_directory, test_config):
     """
 
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
-    test_config_as_js = test_config.removesuffix(".ts") + ".js"
+    test_config_as_js = config.removesuffix(".ts") + ".js"
     wpt_tsproject = "//src/wpt:wpt-all@tsproject"
     harness_as_js = "//src/wpt:harness/harness.js"
     compat_date = "//src/workerd/io:trimmed-supported-compatibility-date.txt"
@@ -38,6 +38,7 @@ def wpt_test(name, wpt_directory, test_config):
         test_js_generated = js_test_gen_rule,
         harness = harness_as_js,
         compat_date = compat_date,
+        autogates = autogates,
     )
 
     wd_test(
@@ -151,6 +152,7 @@ def _wpt_wd_test_gen_impl(ctx):
             bindings = generate_external_bindings(src.owner, ctx.attr.wpt_directory.files),
             harness = wd_relative_path(src.owner, ctx.file.harness),
             compat_date = wd_relative_path(src.owner, ctx.file.compat_date),
+            autogates = generate_autogates_field(ctx.attr.autogates),
         ),
     )
 
@@ -183,7 +185,19 @@ const unitTests :Workerd.Config = (
       disk = ".",
     )
   ],
+  {autogates}
 );"""
+
+def generate_autogates_field(autogates):
+    """
+    Generates a capnproto fragment listing the specified autogates.
+    """
+
+    if not autogates:
+        return ""
+
+    autogate_list = ", ".join(['"{}"'.format(autogate) for autogate in autogates])
+    return "autogates = [{}],".format(autogate_list)
 
 def wd_relative_path(label, target):
     """
@@ -243,6 +257,8 @@ _wpt_wd_test_gen = rule(
         "harness": attr.label(allow_single_file = True),
         # Target specifying the location of the trimmed-supported-compatibility-date.txt file
         "compat_date": attr.label(allow_single_file = True),
+        # A list of autogates to specify in the generated wd-test file
+        "autogates": attr.string_list(),
     },
 )
 
