@@ -1,0 +1,661 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: snek <snek@deno.com>
+Date: Wed, 5 Mar 2025 10:26:16 +0100
+Subject: Clean up use of v8 internals
+
+
+diff --git a/src/array_buffer.rs b/src/array_buffer.rs
+index d4a7adf407568d6576d6b64c6852affcb9821a77..a1c89cfbc878fd1cc9a511eaa93907c0a0a1919c 100644
+--- a/src/array_buffer.rs
++++ b/src/array_buffer.rs
+@@ -59,7 +59,6 @@ extern "C" {
+     deleter: BackingStoreDeleterCallback,
+     deleter_data: *mut c_void,
+   ) -> *mut BackingStore;
+-  fn v8__BackingStore__EmptyBackingStore(shared: bool) -> *mut BackingStore;
+ 
+   fn v8__BackingStore__Data(this: *const BackingStore) -> *mut c_void;
+   fn v8__BackingStore__ByteLength(this: *const BackingStore) -> usize;
+@@ -440,16 +439,6 @@ impl ArrayBuffer {
+     .unwrap()
+   }
+ 
+-  /// Create a new, empty ArrayBuffer.
+-  #[inline(always)]
+-  pub fn empty<'s>(scope: &mut HandleScope<'s>) -> Local<'s, ArrayBuffer> {
+-    // SAFETY: This is a v8-provided empty backing store
+-    let backing_store = unsafe {
+-      UniqueRef::from_raw(v8__BackingStore__EmptyBackingStore(false))
+-    };
+-    Self::with_backing_store(scope, &backing_store.make_shared())
+-  }
+-
+   /// Data length in bytes.
+   #[inline(always)]
+   pub fn byte_length(&self) -> usize {
+@@ -583,11 +572,6 @@ impl ArrayBuffer {
+     T: sealed::Rawable,
+   {
+     let len = bytes.byte_len();
+-    if len == 0 {
+-      return unsafe {
+-        UniqueRef::from_raw(v8__BackingStore__EmptyBackingStore(false))
+-      };
+-    }
+ 
+     let (ptr, slice) = T::into_raw(bytes);
+ 
+diff --git a/src/binding.cc b/src/binding.cc
+index e63c0b722f3c9dc7b8abcb148df06124a7d7fbd7..88cb767f3ce86c5e6ee7f6c4c87cbe922c9c9dd3 100644
+--- a/src/binding.cc
++++ b/src/binding.cc
+@@ -4,33 +4,23 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstdio>
+-#include <iostream>
+-#include <memory>
++#include <thread>
+ 
++#include "cppgc/persistent.h"
+ #include "cppgc/platform.h"
++#include "libplatform/libplatform.h"
+ #include "support.h"
+ #include "unicode/locid.h"
+ #include "v8-callbacks.h"
+-#include "v8/include/cppgc/persistent.h"
+-#include "v8/include/libplatform/libplatform.h"
+-#include "v8/include/v8-cppgc.h"
+-#include "v8/include/v8-fast-api-calls.h"
+-#include "v8/include/v8-inspector.h"
+-#include "v8/include/v8-internal.h"
+-#include "v8/include/v8-platform.h"
+-#include "v8/include/v8-profiler.h"
+-#include "v8/include/v8.h"
+-#include "v8/src/api/api-inl.h"
+-#include "v8/src/api/api.h"
+-#include "v8/src/base/debug/stack_trace.h"
+-#include "v8/src/base/sys-info.h"
+-#include "v8/src/execution/isolate-utils-inl.h"
+-#include "v8/src/execution/isolate-utils.h"
++#include "v8-cppgc.h"
++#include "v8-fast-api-calls.h"
++#include "v8-inspector.h"
++#include "v8-internal.h"
++#include "v8-platform.h"
++#include "v8-profiler.h"
++#include "v8.h"
+ #include "v8/src/flags/flags.h"
+ #include "v8/src/libplatform/default-platform.h"
+-#include "v8/src/objects/objects-inl.h"
+-#include "v8/src/objects/objects.h"
+-#include "v8/src/objects/smi.h"
+ 
+ using namespace support;
+ 
+@@ -124,9 +114,6 @@ static_assert(sizeof(v8::Isolate::DisallowJavascriptExecutionScope) == 12,
+ #endif
+ 
+ extern "C" {
+-const extern int v8__internal__Internals__kIsolateEmbedderDataOffset =
+-    v8::internal::Internals::kIsolateEmbedderDataOffset;
+-
+ void v8__V8__SetFlagsFromCommandLine(int* argc, char** argv,
+                                      const char* usage) {
+   namespace i = v8::internal;
+@@ -203,6 +190,14 @@ uint32_t v8__Isolate__GetNumberOfDataSlots(v8::Isolate* isolate) {
+   return isolate->GetNumberOfDataSlots();
+ }
+ 
++void* v8__Isolate__GetData(v8::Isolate* isolate, uint32_t slot) {
++  return isolate->GetData(slot);
++}
++
++void v8__Isolate__SetData(v8::Isolate* isolate, uint32_t slot, void* data) {
++  isolate->SetData(slot, data);
++}
++
+ const v8::Data* v8__Isolate__GetDataFromSnapshotOnce(v8::Isolate* isolate,
+                                                      size_t index) {
+   return maybe_local_to_ptr(isolate->GetDataFromSnapshotOnce<v8::Data>(index));
+@@ -576,17 +571,17 @@ bool v8__Data__EQ(const v8::Data& self, const v8::Data& other) {
+ }
+ 
+ bool v8__Data__IsBigInt(const v8::Data& self) {
+-  return IsBigInt(*v8::Utils::OpenHandle(&self));
++  return self.IsValue() && reinterpret_cast<const v8::Value&>(self).IsBigInt();
+ }
+ 
+ bool v8__Data__IsBoolean(const v8::Data& self) {
+-  return IsBoolean(*v8::Utils::OpenHandle(&self));
++  return self.IsValue() && reinterpret_cast<const v8::Value&>(self).IsBoolean();
+ }
+ 
+ bool v8__Data__IsContext(const v8::Data& self) { return self.IsContext(); }
+ 
+ bool v8__Data__IsFixedArray(const v8::Data& self) {
+-  return IsFixedArray(*v8::Utils::OpenHandle(&self));
++  return self.IsFixedArray();
+ }
+ 
+ bool v8__Data__IsFunctionTemplate(const v8::Data& self) {
+@@ -596,15 +591,15 @@ bool v8__Data__IsFunctionTemplate(const v8::Data& self) {
+ bool v8__Data__IsModule(const v8::Data& self) { return self.IsModule(); }
+ 
+ bool v8__Data__IsModuleRequest(const v8::Data& self) {
+-  return IsModuleRequest(*v8::Utils::OpenHandle(&self));
++  return self.IsModuleRequest();
+ }
+ 
+ bool v8__Data__IsName(const v8::Data& self) {
+-  return IsName(*v8::Utils::OpenHandle(&self));
++  return self.IsValue() && reinterpret_cast<const v8::Value&>(self).IsName();
+ }
+ 
+ bool v8__Data__IsNumber(const v8::Data& self) {
+-  return IsNumber(*v8::Utils::OpenHandle(&self));
++  return self.IsValue() && reinterpret_cast<const v8::Value&>(self).IsNumber();
+ }
+ 
+ bool v8__Data__IsObjectTemplate(const v8::Data& self) {
+@@ -612,17 +607,18 @@ bool v8__Data__IsObjectTemplate(const v8::Data& self) {
+ }
+ 
+ bool v8__Data__IsPrimitive(const v8::Data& self) {
+-  return IsPrimitive(*v8::Utils::OpenHandle(&self)) && !self.IsPrivate();
++  return self.IsValue() &&
++         reinterpret_cast<const v8::Value&>(self).IsPrimitive();
+ }
+ 
+ bool v8__Data__IsPrivate(const v8::Data& self) { return self.IsPrivate(); }
+ 
+ bool v8__Data__IsString(const v8::Data& self) {
+-  return IsString(*v8::Utils::OpenHandle(&self));
++  return self.IsValue() && reinterpret_cast<const v8::Value&>(self).IsString();
+ }
+ 
+ bool v8__Data__IsSymbol(const v8::Data& self) {
+-  return IsPublicSymbol(*v8::Utils::OpenHandle(&self));
++  return self.IsValue() && reinterpret_cast<const v8::Value&>(self).IsSymbol();
+ }
+ 
+ bool v8__Data__IsValue(const v8::Data& self) { return self.IsValue(); }
+@@ -895,6 +891,8 @@ const v8::String* v8__Value__TypeOf(v8::Value& self, v8::Isolate* isolate) {
+   return local_to_ptr(self.TypeOf(isolate));
+ }
+ 
++uint32_t v8__Value__GetHash(v8::Value& self) { return self.GetHash(); }
++
+ const v8::Primitive* v8__Null(v8::Isolate* isolate) {
+   return local_to_ptr(v8::Null(isolate));
+ }
+@@ -953,12 +951,6 @@ two_pointers_t v8__ArrayBuffer__GetBackingStore(const v8::ArrayBuffer& self) {
+   return make_pod<two_pointers_t>(ptr_to_local(&self)->GetBackingStore());
+ }
+ 
+-v8::BackingStore* v8__BackingStore__EmptyBackingStore(bool shared) {
+-  std::unique_ptr<i::BackingStoreBase> u = i::BackingStore::EmptyBackingStore(
+-      shared ? i::SharedFlag::kShared : i::SharedFlag::kNotShared);
+-  return static_cast<v8::BackingStore*>(u.release());
+-}
+-
+ bool v8__BackingStore__IsResizableByUserJavaScript(
+     const v8::BackingStore& self) {
+   return ptr_to_local(&self)->IsResizableByUserJavaScript();
+@@ -2358,10 +2350,10 @@ const v8::Object* v8__PropertyCallbackInfo__Holder(
+   return local_to_ptr(self.HolderV2());
+ }
+ 
+-v8::internal::Address* v8__PropertyCallbackInfo__GetReturnValue(
++uintptr_t* v8__PropertyCallbackInfo__GetReturnValue(
+     const v8::PropertyCallbackInfo<v8::Value>& self) {
+   v8::ReturnValue<v8::Value> rv = self.GetReturnValue();
+-  return *reinterpret_cast<v8::internal::Address**>(&rv);
++  return *reinterpret_cast<uintptr_t**>(&rv);
+ }
+ 
+ bool v8__PropertyCallbackInfo__ShouldThrowOnError(
+@@ -2874,8 +2866,6 @@ class UnprotectedDefaultPlatform : public v8::platform::DefaultPlatform {
+   using PriorityMode = v8::platform::PriorityMode;
+   using TracingController = v8::TracingController;
+ 
+-  static constexpr int kMaxThreadPoolSize = 16;
+-
+  public:
+   explicit UnprotectedDefaultPlatform(
+       int thread_pool_size, IdleTaskSupport idle_task_support,
+@@ -2885,28 +2875,8 @@ class UnprotectedDefaultPlatform : public v8::platform::DefaultPlatform {
+                                       std::move(tracing_controller),
+                                       priority_mode) {}
+ 
+-  static std::unique_ptr<v8::Platform> New(
+-      int thread_pool_size, IdleTaskSupport idle_task_support,
+-      InProcessStackDumping in_process_stack_dumping,
+-      std::unique_ptr<TracingController> tracing_controller = {},
+-      PriorityMode priority_mode = PriorityMode::kDontApply) {
+-    // This implementation is semantically equivalent to the implementation of
+-    // `v8::platform::NewDefaultPlatform()`.
+-    DCHECK_GE(thread_pool_size, 0);
+-    if (thread_pool_size < 1) {
+-      thread_pool_size =
+-          std::max(v8::base::SysInfo::NumberOfProcessors() - 1, 1);
+-    }
+-    thread_pool_size = std::min(thread_pool_size, kMaxThreadPoolSize);
+-    if (in_process_stack_dumping == InProcessStackDumping::kEnabled) {
+-      v8::base::debug::EnableInProcessStackDumping();
+-    }
+-    return std::make_unique<UnprotectedDefaultPlatform>(
+-        thread_pool_size, idle_task_support, std::move(tracing_controller),
+-        priority_mode);
+-  }
+-
+   v8::ThreadIsolatedAllocator* GetThreadIsolatedAllocator() override {
++    // DefaultThreadIsolatedAllocator is PKU protected
+     return nullptr;
+   }
+ };
+@@ -2923,11 +2893,14 @@ v8::Platform* v8__Platform__NewDefaultPlatform(int thread_pool_size,
+ 
+ v8::Platform* v8__Platform__NewUnprotectedDefaultPlatform(
+     int thread_pool_size, bool idle_task_support) {
+-  return UnprotectedDefaultPlatform::New(
+-             thread_pool_size,
+-             idle_task_support ? v8::platform::IdleTaskSupport::kEnabled
+-                               : v8::platform::IdleTaskSupport::kDisabled,
+-             v8::platform::InProcessStackDumping::kDisabled, nullptr)
++  if (thread_pool_size < 1) {
++    thread_pool_size = std::thread::hardware_concurrency();
++  }
++  thread_pool_size = std::max(std::min(thread_pool_size, 16), 1);
++  return std::make_unique<UnprotectedDefaultPlatform>(
++             thread_pool_size, idle_task_support
++                                   ? v8::platform::IdleTaskSupport::kEnabled
++                                   : v8::platform::IdleTaskSupport::kDisabled)
+       .release();
+ }
+ 
+@@ -3419,28 +3392,6 @@ void v8__HeapProfiler__TakeHeapSnapshot(v8::Isolate* isolate,
+   const_cast<v8::HeapSnapshot*>(snapshot)->Delete();
+ }
+ 
+-v8::Isolate* v8__internal__GetIsolateFromHeapObject(const v8::Data& data) {
+-  namespace i = v8::internal;
+-  i::Tagged<i::Object> object(reinterpret_cast<const i::Address&>(data));
+-  i::Isolate* isolate;
+-  return IsHeapObject(object) &&
+-                 i::GetIsolateFromHeapObject(object.GetHeapObject(), &isolate)
+-             ? reinterpret_cast<v8::Isolate*>(isolate)
+-             : nullptr;
+-}
+-
+-int v8__Value__GetHash(const v8::Value& data) {
+-  namespace i = v8::internal;
+-  i::Tagged<i::Object> object(reinterpret_cast<const i::Address&>(data));
+-  i::Isolate* isolate;
+-  int hash = IsHeapObject(object) && i::GetIsolateFromHeapObject(
+-                                         object.GetHeapObject(), &isolate)
+-                 ? i::Object::GetOrCreateHash(object, isolate).value()
+-                 : i::Smi::ToInt(i::Object::GetHash(object));
+-  assert(hash != 0);
+-  return hash;
+-}
+-
+ void v8__HeapStatistics__CONSTRUCT(uninit_t<v8::HeapStatistics>* buf) {
+   // Should be <= than its counterpart in src/isolate.rs
+   static_assert(sizeof(v8::HeapStatistics) <= sizeof(uintptr_t[16]),
+diff --git a/src/isolate.rs b/src/isolate.rs
+index 555cbb551a1c1b57402e604b92d55465800db876..1ee87c24233d9b5bf82c67a42754bf6ddbbb8e6f 100644
+--- a/src/isolate.rs
++++ b/src/isolate.rs
+@@ -580,11 +580,15 @@ pub type UseCounterFeature = v8__Isolate__UseCounterFeature;
+ pub type UseCounterCallback = extern "C" fn(&mut Isolate, UseCounterFeature);
+ 
+ extern "C" {
+-  static v8__internal__Internals__kIsolateEmbedderDataOffset: int;
+-
+   fn v8__Isolate__New(params: *const raw::CreateParams) -> *mut Isolate;
+   fn v8__Isolate__Dispose(this: *mut Isolate);
+   fn v8__Isolate__GetNumberOfDataSlots(this: *const Isolate) -> u32;
++  fn v8__Isolate__GetData(isolate: *const Isolate, slot: u32) -> *mut c_void;
++  fn v8__Isolate__SetData(
++    isolate: *const Isolate,
++    slot: u32,
++    data: *mut c_void,
++  );
+   fn v8__Isolate__Enter(this: *mut Isolate);
+   fn v8__Isolate__Exit(this: *mut Isolate);
+   fn v8__Isolate__GetCurrent() -> *mut Isolate;
+@@ -772,14 +776,6 @@ extern "C" {
+ pub struct Isolate(Opaque);
+ 
+ impl Isolate {
+-  // Total number of isolate data slots provided by V8.
+-  const EMBEDDER_DATA_SLOT_COUNT: u32 = 4;
+-
+-  // Byte offset inside `Isolate` where the isolate data slots are stored. This
+-  // should be the same as the value of `kIsolateEmbedderDataOffset` which is
+-  // defined in `v8-internal.h`.
+-  const EMBEDDER_DATA_OFFSET: usize = size_of::<[*const (); 73]>();
+-
+   // Isolate data slots used internally by rusty_v8.
+   const ANNEX_SLOT: u32 = 0;
+   const CURRENT_SCOPE_DATA_SLOT: u32 = 1;
+@@ -787,14 +783,10 @@ impl Isolate {
+ 
+   #[inline(always)]
+   fn assert_embedder_data_slot_count_and_offset_correct(&self) {
+-    assert_eq!(
+-      unsafe { v8__Isolate__GetNumberOfDataSlots(self) },
+-      Self::EMBEDDER_DATA_SLOT_COUNT
+-    );
+-    assert_eq!(
+-      unsafe { v8__internal__Internals__kIsolateEmbedderDataOffset } as usize,
+-      Self::EMBEDDER_DATA_OFFSET
+-    );
++    assert!(
++      unsafe { v8__Isolate__GetNumberOfDataSlots(self) }
++        >= Self::INTERNAL_DATA_SLOT_COUNT
++    )
+   }
+ 
+   fn new_impl(params: CreateParams) -> *mut Isolate {
+@@ -967,29 +959,18 @@ impl Isolate {
+   /// Returns the maximum number of available embedder data slots. Valid slots
+   /// are in the range of `0 <= n < Isolate::get_number_of_data_slots()`.
+   pub fn get_number_of_data_slots(&self) -> u32 {
+-    Self::EMBEDDER_DATA_SLOT_COUNT - Self::INTERNAL_DATA_SLOT_COUNT
++    let n = unsafe { v8__Isolate__GetNumberOfDataSlots(self) };
++    n - Self::INTERNAL_DATA_SLOT_COUNT
+   }
+ 
+   #[inline(always)]
+   pub(crate) fn get_data_internal(&self, slot: u32) -> *mut c_void {
+-    let slots = unsafe {
+-      let p = self as *const Self as *const u8;
+-      let p = p.add(Self::EMBEDDER_DATA_OFFSET);
+-      let p = p as *const [*mut c_void; Self::EMBEDDER_DATA_SLOT_COUNT as _];
+-      &*p
+-    };
+-    slots[slot as usize]
++    unsafe { v8__Isolate__GetData(self, slot) }
+   }
+ 
+   #[inline(always)]
+   pub(crate) fn set_data_internal(&mut self, slot: u32, data: *mut c_void) {
+-    let slots = unsafe {
+-      let p = self as *mut Self as *mut u8;
+-      let p = p.add(Self::EMBEDDER_DATA_OFFSET);
+-      let p = p as *mut [*mut c_void; Self::EMBEDDER_DATA_SLOT_COUNT as _];
+-      &mut *p
+-    };
+-    slots[slot as usize] = data;
++    unsafe { v8__Isolate__SetData(self, slot, data) }
+   }
+ 
+   pub(crate) fn init_scope_root(&mut self) {
+diff --git a/src/shared_array_buffer.rs b/src/shared_array_buffer.rs
+index f72d1891b987e2153884fff0f162a51f707a7ac0..ca539e980d3942d5d2bb3dbe1f8107d6108b82ed 100644
+--- a/src/shared_array_buffer.rs
++++ b/src/shared_array_buffer.rs
+@@ -35,7 +35,6 @@ extern "C" {
+     deleter: BackingStoreDeleterCallback,
+     deleter_data: *mut c_void,
+   ) -> *mut BackingStore;
+-  fn v8__BackingStore__EmptyBackingStore(shared: bool) -> *mut BackingStore;
+ }
+ 
+ impl SharedArrayBuffer {
+@@ -74,17 +73,6 @@ impl SharedArrayBuffer {
+     .unwrap()
+   }
+ 
+-  /// Create a new, empty SharedArrayBuffer.
+-  #[inline(always)]
+-  pub fn empty<'s>(
+-    scope: &mut HandleScope<'s>,
+-  ) -> Local<'s, SharedArrayBuffer> {
+-    // SAFETY: This is a v8-provided empty backing store
+-    let backing_store =
+-      unsafe { UniqueRef::from_raw(v8__BackingStore__EmptyBackingStore(true)) };
+-    Self::with_backing_store(scope, &backing_store.make_shared())
+-  }
+-
+   /// Data length in bytes.
+   #[inline(always)]
+   pub fn byte_length(&self) -> usize {
+@@ -173,11 +161,6 @@ impl SharedArrayBuffer {
+     T: crate::array_buffer::sealed::Rawable,
+   {
+     let len = bytes.byte_len();
+-    if len == 0 {
+-      return unsafe {
+-        UniqueRef::from_raw(v8__BackingStore__EmptyBackingStore(false))
+-      };
+-    }
+ 
+     let (ptr, slice) = T::into_raw(bytes);
+ 
+diff --git a/src/support.h b/src/support.h
+index b256bb611e174ae816affcf8ea71f2fb52733fa8..022be5d5eaaf0cd6579419f9814ca8e59dc12d72 100644
+--- a/src/support.h
++++ b/src/support.h
+@@ -9,29 +9,9 @@
+ #include <type_traits>
+ #include <utility>
+ 
+-#include "v8/include/cppgc/name-provider.h"
+-#include "v8/include/v8-cppgc.h"
+-#include "v8/include/v8.h"
+-
+-// Work around a bug in the V8 headers.
+-//
+-// The following template is defined in v8-internal.h. It has a subtle bug that
+-// indirectly makes it impossible to convert `v8::Data` handles to themselves.
+-// Some methods do that impliclity so they don't compile without this hack; one
+-// example is `Local<Data> MaybeLocal::FromMaybe(Local<Data> default_value)`.
+-//
+-// Spot the bug :)
+-//
+-// ```
+-// template <class T>
+-// V8_INLINE void PerformCastCheck(T* data) {
+-//   CastCheck<std::is_base_of<Data, T>::value &&
+-//             !std::is_same<Data, std::remove_cv<T>>::value>::Perform(data);
+-// }
+-// ```
+-template <>
+-template <>
+-inline void v8::internal::CastCheck<true>::Perform<v8::Data>(v8::Data* data) {}
++#include "cppgc/name-provider.h"
++#include "v8-cppgc.h"
++#include "v8.h"
+ 
+ // Check assumptions made in binding code.
+ static_assert(sizeof(bool) == sizeof(uint8_t), "");
+diff --git a/src/value.rs b/src/value.rs
+index ca1bb6207cbf9e624c602cef053a0e3afff15dd2..161f897817040f3630fbeb060d02891320f484ff 100644
+--- a/src/value.rs
++++ b/src/value.rs
+@@ -1,6 +1,3 @@
+-use std::num::NonZeroI32;
+-
+-use crate::support::int;
+ use crate::support::Maybe;
+ use crate::BigInt;
+ use crate::Boolean;
+@@ -142,7 +139,7 @@ extern "C" {
+   );
+   fn v8__Value__BooleanValue(this: *const Value, isolate: *mut Isolate)
+     -> bool;
+-  fn v8__Value__GetHash(this: *const Value) -> int;
++  fn v8__Value__GetHash(this: *const Value) -> u32;
+   fn v8__Value__TypeOf(
+     this: *const Value,
+     isolate: *mut Isolate,
+@@ -704,14 +701,13 @@ impl Value {
+     unsafe { v8__Value__BooleanValue(self, scope.get_isolate_ptr()) }
+   }
+ 
+-  /// Returns the V8 hash value for this value. The current implementation
+-  /// uses a hidden property to store the identity hash on some object types.
+-  ///
+-  /// The return value will never be 0. Also, it is not guaranteed to be
+-  /// unique.
++  /// Get the hash of this value. The hash is not guaranteed to be
++  /// unique. For |Object| and |Name| instances the result is equal to
++  /// |GetIdentityHash|. Hashes are not guaranteed to be stable across
++  /// different isolates or processes.
+   #[inline(always)]
+-  pub fn get_hash(&self) -> NonZeroI32 {
+-    unsafe { NonZeroI32::new_unchecked(v8__Value__GetHash(self)) }
++  pub fn get_hash(&self) -> u32 {
++    unsafe { v8__Value__GetHash(self) }
+   }
+ 
+   #[inline(always)]
+diff --git a/tests/test_api.rs b/tests/test_api.rs
+index 3c6686d38c8d7bd1b0d9bfabe18660d7bdb2abb0..3d7f630d710517c1ed1c2289686c879305500f84 100644
+--- a/tests/test_api.rs
++++ b/tests/test_api.rs
+@@ -11,7 +11,7 @@ use std::ffi::CStr;
+ use std::hash::Hash;
+ use std::mem::MaybeUninit;
+ use std::os::raw::c_char;
+-use std::ptr::{addr_of, addr_of_mut, NonNull};
++use std::ptr::{addr_of, addr_of_mut};
+ use std::sync::atomic::{AtomicUsize, Ordering};
+ use std::sync::Arc;
+ use std::sync::Mutex;
+@@ -643,85 +643,6 @@ fn isolate_drop_order() {
+   drop(isolate2);
+ }
+ 
+-#[test]
+-fn get_isolate_from_handle() {
+-  extern "C" {
+-    fn v8__internal__GetIsolateFromHeapObject(
+-      location: *const v8::Data,
+-    ) -> *mut v8::Isolate;
+-  }
+-
+-  fn check_handle_helper(
+-    isolate: &mut v8::Isolate,
+-    expect_some: Option<bool>,
+-    local: v8::Local<v8::Data>,
+-  ) {
+-    let isolate_ptr = NonNull::from(isolate);
+-    let maybe_ptr = unsafe { v8__internal__GetIsolateFromHeapObject(&*local) };
+-    let maybe_ptr = NonNull::new(maybe_ptr);
+-    if let Some(ptr) = maybe_ptr {
+-      assert_eq!(ptr, isolate_ptr);
+-    }
+-    if let Some(expected_some) = expect_some {
+-      assert_eq!(maybe_ptr.is_some(), expected_some);
+-    }
+-  }
+-
+-  fn check_handle<'s, F, D>(
+-    scope: &mut v8::HandleScope<'s>,
+-    expect_some: Option<bool>,
+-    f: F,
+-  ) where
+-    F: Fn(&mut v8::HandleScope<'s>) -> D,
+-    D: Into<v8::Local<'s, v8::Data>>,
+-  {
+-    let local = f(scope).into();
+-
+-    // Check that we can get the isolate from a Local.
+-    check_handle_helper(scope, expect_some, local);
+-
+-    // Check that we can still get it after converting it to a Global.
+-    let global = v8::Global::new(scope, local);
+-    let local2 = v8::Local::new(scope, &global);
+-    check_handle_helper(scope, expect_some, local2);
+-  }
+-
+-  fn check_eval(
+-    scope: &mut v8::HandleScope,
+-    expect_some: Option<bool>,
+-    code: &str,
+-  ) {
+-    check_handle(scope, expect_some, |scope| eval(scope, code).unwrap());
+-  }
+-
+-  let _setup_guard = setup::parallel_test();
+-  let isolate = &mut v8::Isolate::new(Default::default());
+-
+-  let scope = &mut v8::HandleScope::new(isolate);
+-  let context = v8::Context::new(scope, Default::default());
+-  let scope = &mut v8::ContextScope::new(scope, context);
+-
+-  check_handle(scope, None, v8::null);
+-  check_handle(scope, None, v8::undefined);
+-  check_handle(scope, None, |s| v8::Boolean::new(s, true));
+-  check_handle(scope, None, |s| v8::Boolean::new(s, false));
+-  check_handle(scope, None, |s| v8::String::new(s, "").unwrap());
+-  check_eval(scope, None, "''");
+-  check_handle(scope, Some(true), |s| v8::String::new(s, "Words").unwrap());
+-  check_eval(scope, Some(true), "'Hello'");
+-  check_eval(scope, Some(true), "Symbol()");
+-  check_handle(scope, Some(true), v8::Object::new);
+-  check_eval(scope, Some(true), "this");
+-  check_handle(scope, Some(true), |s| s.get_current_context());
+-  check_eval(scope, Some(true), "({ foo: 'bar' })");
+-  check_eval(scope, Some(true), "() => {}");
+-  check_handle(scope, Some(true), |s| v8::Number::new(s, 4.2f64));
+-  check_handle(scope, Some(true), |s| v8::Number::new(s, -0f64));
+-  check_handle(scope, Some(false), |s| v8::Integer::new(s, 0));
+-  check_eval(scope, Some(true), "3.3");
+-  check_eval(scope, Some(false), "3.3 / 3.3");
+-}
+-
+ #[test]
+ fn handles_from_isolate() {
+   let _setup_guard = setup::parallel_test();
+@@ -853,7 +774,7 @@ fn array_buffer() {
+     assert_eq!(shared_bs_2[9].get(), 9);
+ 
+     // Empty
+-    let ab = v8::ArrayBuffer::empty(scope);
++    let ab = v8::ArrayBuffer::new(scope, 0);
+     assert_eq!(0, ab.byte_length());
+     assert!(!ab.get_backing_store().is_shared());
+ 
+@@ -2966,8 +2887,8 @@ fn object() {
+     let object_ = v8::Object::new(scope);
+     assert!(!object_.is_null_or_undefined());
+     let id = object_.get_identity_hash();
+-    assert_eq!(id, object_.get_hash());
+-    assert_ne!(id, v8::Object::new(scope).get_hash());
++    assert_eq!(id.get() as u32, object_.get_hash());
++    assert_ne!(id.get() as u32, v8::Object::new(scope).get_hash());
+ 
+     assert!(object.has(scope, n1.into()).unwrap());
+     assert!(object.has_own_property(scope, n1).unwrap());
+@@ -5276,7 +5197,7 @@ fn get_hash() {
+     let hash = pri1.get_hash();
+     assert_eq!(hash, pri2.get_hash());
+     if let Ok(name) = v8::Local::<v8::Name>::try_from(pri1) {
+-      assert_eq!(hash, name.get_identity_hash());
++      assert_eq!(hash, name.get_identity_hash().get() as u32);
+       name_count += 1;
+     }
+     if !hashes.insert(hash) {
+@@ -5321,7 +5242,7 @@ fn get_hash() {
+       let val = objects.get_index(scope, i).unwrap();
+       let hash = val.get_hash();
+       let obj = v8::Local::<v8::Object>::try_from(val).unwrap();
+-      assert_eq!(hash, obj.get_identity_hash());
++      assert_eq!(hash, obj.get_identity_hash().get() as u32);
+       if !hashes.insert(hash) {
+         collision_count += 1;
+       }
+@@ -5995,7 +5916,7 @@ fn shared_array_buffer() {
+     assert_eq!(shared_bs_3[9].get(), 9);
+ 
+     // Empty
+-    let ab = v8::SharedArrayBuffer::empty(scope);
++    let ab = v8::SharedArrayBuffer::new(scope, 0).unwrap();
+     assert_eq!(ab.byte_length(), 0);
+     assert!(ab.get_backing_store().is_shared());
+   }
