@@ -125,7 +125,7 @@ IoContext::IoContext(ThreadContext& thread,
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       threadId(getThreadId()),
-      deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
+      deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
       waitUntilTasks(*this),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
@@ -988,11 +988,10 @@ void IoContext::requireCurrent() {
   KJ_REQUIRE(threadLocalRequest == this, "request is not current in this thread");
 }
 
-void IoContext::checkFarGet(const DeleteQueue* expectedQueue, const std::type_info& type) {
-  KJ_ASSERT(expectedQueue);
+void IoContext::checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type) {
   requireCurrent();
 
-  if (expectedQueue == deleteQueue.get()) {
+  if (&expectedQueue == deleteQueue.queue.get()) {
     // same request or same actor, success
   } else {
     throwNotCurrentJsError(type);
@@ -1031,7 +1030,7 @@ void IoContext::runInContextScope(Worker::LockType lockType,
       {
         // Handle any pending deletions that arrived while the worker was processing a different
         // request.
-        auto l = deleteQueue->crossThreadDeleteQueue.lockExclusive();
+        auto l = deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
         auto& state = KJ_ASSERT_NONNULL(*l);
         for (auto& object: state.queue) {
           OwnedObjectList::unlink(*object);
@@ -1345,7 +1344,7 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
 
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   if (promiseContextTag == kj::none) {
-    auto deferral = kj::heap<IoCrossContextExecutor>(kj::atomicAddRef(*deleteQueue));
+    auto deferral = kj::heap<IoCrossContextExecutor>(deleteQueue.queue.addRef());
     promiseContextTag = jsg::JsRef(js, js.opaque(kj::mv(deferral)));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
@@ -1360,10 +1359,10 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // the DeleteQueue.
   try {
     for (;;) {
-      co_await context->deleteQueue->resetCrossThreadSignal();
+      co_await context->deleteQueue.queue->resetCrossThreadSignal();
       co_await context->run([](auto& lock) {
         auto& context = IoContext::current();
-        auto l = context.deleteQueue->crossThreadDeleteQueue.lockExclusive();
+        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
         auto& state = KJ_ASSERT_NONNULL(*l);
         for (auto& action: state.actions) {
           action(lock);

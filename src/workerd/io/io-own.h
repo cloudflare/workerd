@@ -118,7 +118,7 @@ class OwnedObjectList {
 };
 
 // Object which receives possibly-cross-thread deletions of owned objects.
-class DeleteQueue: public kj::AtomicRefcounted {
+class DeleteQueue: public kj::AtomicRefcounted, public kj::EnableAddRefToThis<DeleteQueue> {
  public:
   DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 
@@ -148,20 +148,21 @@ class DeleteQueue: public kj::AtomicRefcounted {
 
   // Implements the corresponding methods of IoContext and ActorContext.
   template <typename T>
-  IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects);
+  IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
   template <typename T>
-  ReverseIoOwn<T> addObjectReverse(
-      kj::Own<workerd::WeakRef<IoContext>> weakRef, kj::Own<T> obj, OwnedObjectList& ownedObjects);
+  ReverseIoOwn<T> addObjectReverse(kj::Own<workerd::WeakRef<IoContext>> weakRef,
+      kj::Own<T> obj,
+      OwnedObjectList& ownedObjects) const;
 
-  static void checkFarGet(const DeleteQueue* deleteQueue, const std::type_info& type);
+  static void checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type);
   static void checkWeakGet(workerd::WeakRef<IoContext>& weak);
 
  private:
   template <typename T>
-  SpecificOwnedObject<T>* addObjectImpl(kj::Own<T> obj, OwnedObjectList& ownedObjects);
+  SpecificOwnedObject<T>* addObjectImpl(kj::Own<T> obj, OwnedObjectList& ownedObjects) const;
 
-  kj::Promise<void> resetCrossThreadSignal();
+  kj::Promise<void> resetCrossThreadSignal() const;
 
   friend class IoContext;
 };
@@ -172,8 +173,7 @@ class DeleteQueue: public kj::AtomicRefcounted {
 // just deletions.
 class IoCrossContextExecutor {
  public:
-  IoCrossContextExecutor(kj::Own<const DeleteQueue> deleteQueue)
-      : deleteQueue(kj::mv(deleteQueue)) {}
+  IoCrossContextExecutor(kj::Arc<DeleteQueue> deleteQueue): deleteQueue(kj::mv(deleteQueue)) {}
 
   // Tries to execute the specified action to the owning IoContext.
   // The target IoContext will be signaled to run the action as soon as it is able.
@@ -183,12 +183,12 @@ class IoCrossContextExecutor {
   friend class IoContext;
   friend class DeleteQueue;
 
-  kj::Own<const DeleteQueue> deleteQueue;
+  kj::Arc<DeleteQueue> deleteQueue;
 };
 
 template <typename T>
 inline SpecificOwnedObject<T>* DeleteQueue::addObjectImpl(
-    kj::Own<T> obj, OwnedObjectList& ownedObjects) {
+    kj::Own<T> obj, OwnedObjectList& ownedObjects) const {
   auto& ref = *obj;
 
   // HACK: We need an Own<OwnedObject>, but we actually need to allocate it as the subclass
@@ -213,13 +213,14 @@ inline SpecificOwnedObject<T>* DeleteQueue::addObjectImpl(
 }
 
 template <typename T>
-inline IoOwn<T> DeleteQueue::addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) {
-  return IoOwn<T>(kj::atomicAddRef(*this), addObjectImpl(kj::mv(obj), ownedObjects));
+inline IoOwn<T> DeleteQueue::addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects) const {
+  return IoOwn<T>(addRefToThis(), addObjectImpl(kj::mv(obj), ownedObjects));
 }
 
 template <typename T>
-inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
-    kj::Own<workerd::WeakRef<IoContext>> weakRef, kj::Own<T> obj, OwnedObjectList& ownedObjects) {
+inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(kj::Own<workerd::WeakRef<IoContext>> weakRef,
+    kj::Own<T> obj,
+    OwnedObjectList& ownedObjects) const {
   return ReverseIoOwn<T>(kj::mv(weakRef), addObjectImpl(kj::mv(obj), ownedObjects));
 }
 
@@ -227,12 +228,12 @@ inline ReverseIoOwn<T> DeleteQueue::addObjectReverse(
 // matters a bit, we need to cancel all tasks (destroy the TaskSet) before this happens, so
 // we can't just do it in IoContext's destructor. As a hack, we customize our pointer
 // to the delete queue to get the tear-down order right.
-class DeleteQueuePtr: public kj::Own<DeleteQueue> {
+class DeleteQueuePtr {
  public:
-  DeleteQueuePtr(kj::Own<DeleteQueue> value): kj::Own<DeleteQueue>(kj::mv(value)) {}
+  DeleteQueuePtr(kj::Arc<DeleteQueue> queue): queue(kj::mv(queue)) {}
   KJ_DISALLOW_COPY_AND_MOVE(DeleteQueuePtr);
   ~DeleteQueuePtr() noexcept(false) {
-    auto ptr = get();
+    auto ptr = queue.get();
     if (ptr != nullptr) {
       auto lock = ptr->crossThreadDeleteQueue.lockExclusive();
       KJ_IF_SOME(state, *lock) {
@@ -246,6 +247,7 @@ class DeleteQueuePtr: public kj::Own<DeleteQueue> {
       *lock = kj::none;
     }
   }
+  kj::Arc<DeleteQueue> queue;
 };
 
 // Owned pointer held by a V8 heap object, pointing to a KJ event loop object. Cannot be
@@ -285,10 +287,10 @@ class IoOwn {
   friend class IoContext;
   friend class DeleteQueue;
 
-  kj::Own<const DeleteQueue> deleteQueue;
+  kj::Arc<DeleteQueue> deleteQueue;
   SpecificOwnedObject<T>* item;
 
-  IoOwn(kj::Own<const DeleteQueue> deleteQueue, SpecificOwnedObject<T>* item)
+  IoOwn(kj::Arc<DeleteQueue> deleteQueue, SpecificOwnedObject<T>* item)
       : deleteQueue(kj::mv(deleteQueue)),
         item(item) {}
 };
@@ -298,7 +300,7 @@ class IoOwn {
 template <typename T>
 class IoPtr {
  public:
-  IoPtr(const IoPtr& other): deleteQueue(kj::atomicAddRef(*other.deleteQueue)), ptr(other.ptr) {}
+  IoPtr(const IoPtr& other): deleteQueue(other.deleteQueue.addRef()), ptr(other.ptr) {}
   IoPtr(IoPtr&& other) = default;
 
   T* operator->();
@@ -311,12 +313,10 @@ class IoPtr {
   friend class IoContext;
   friend class DeleteQueue;
 
-  kj::Own<const DeleteQueue> deleteQueue;
+  kj::Arc<DeleteQueue> deleteQueue;
   T* ptr;
 
-  IoPtr(kj::Own<const DeleteQueue> deleteQueue, T* ptr)
-      : deleteQueue(kj::mv(deleteQueue)),
-        ptr(ptr) {}
+  IoPtr(kj::Arc<DeleteQueue> deleteQueue, T* ptr): deleteQueue(kj::mv(deleteQueue)), ptr(ptr) {}
 };
 
 // Owned pointer held by a KJ I/O object living in the same thread as an IoContext. The underlying
@@ -408,13 +408,13 @@ IoPtr<T>& IoPtr<T>::operator=(decltype(nullptr)) {
 
 template <typename T>
 inline T* IoOwn<T>::operator->() {
-  DeleteQueue::checkFarGet(deleteQueue, typeid(T));
+  DeleteQueue::checkFarGet(*deleteQueue.get(), typeid(T));
   return item->ptr;
 }
 
 template <typename T>
 inline IoOwn<T>::operator kj::Own<T>() && {
-  DeleteQueue::checkFarGet(deleteQueue, typeid(T));
+  DeleteQueue::checkFarGet(*deleteQueue.get(), typeid(T));
   auto result = kj::mv(item->ptr);
   OwnedObjectList::unlink(*item);
   item = nullptr;
@@ -424,7 +424,7 @@ inline IoOwn<T>::operator kj::Own<T>() && {
 
 template <typename T>
 inline T* IoPtr<T>::operator->() {
-  DeleteQueue::checkFarGet(deleteQueue, typeid(T));
+  DeleteQueue::checkFarGet(*deleteQueue.get(), typeid(T));
   return ptr;
 }
 
