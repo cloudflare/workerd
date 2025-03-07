@@ -666,3 +666,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/disable-importable-env-test.js"],
 )
+
+wd_test(
+    src = "tests/request-client-disconnect.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-client-disconnect.js"],
+)

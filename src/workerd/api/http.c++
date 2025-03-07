@@ -995,7 +995,7 @@ jsg::Ref<Request> Request::constructor(
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
       fetcher = oldRequest->getFetcher();
-      signal = oldRequest->getSignal();
+      signal = oldRequest->getThisSignal();
     }
   }
 
@@ -1051,6 +1051,7 @@ jsg::Ref<Request> Request::constructor(
           // explicitly say `signal: null`, they must want to drop the signal that was on the
           // original request.
           signal = kj::mv(s);
+          initDict.signal = kj::none;
         }
 
         KJ_IF_SOME(newCf, initDict.cf) {
@@ -1093,7 +1094,7 @@ jsg::Ref<Request> Request::constructor(
         redirect = otherRequest->redirect;
         cacheMode = otherRequest->cacheMode;
         fetcher = otherRequest->getFetcher();
-        signal = otherRequest->getSignal();
+        signal = otherRequest->getThisSignal();
         headers = jsg::alloc<Headers>(*otherRequest->headers);
         cf = otherRequest->cf.deepClone(js);
         KJ_IF_SOME(b, otherRequest->getBody()) {
@@ -1112,7 +1113,8 @@ jsg::Ref<Request> Request::constructor(
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
   return jsg::alloc<Request>(method, url, redirect, KJ_ASSERT_NONNULL(kj::mv(headers)),
-      kj::mv(fetcher), kj::mv(signal), kj::mv(cf), kj::mv(body), cacheMode);
+      kj::mv(fetcher), kj::mv(signal), kj::mv(cf), kj::mv(body), /* thisSignal */ kj::none,
+      cacheMode);
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
@@ -1121,8 +1123,13 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
   auto cfClone = cf.deepClone(js);
   auto bodyClone = Body::clone(js);
 
-  return jsg::alloc<Request>(method, url, redirect, kj::mv(headersClone), getFetcher(), getSignal(),
-      kj::mv(cfClone), kj::mv(bodyClone));
+  return jsg::alloc<Request>(method, url, redirect, kj::mv(headersClone), getFetcher(),
+      /* signal */ getThisSignal(), kj::mv(cfClone), kj::mv(bodyClone), /* thisSignal */ kj::none);
+
+  // signal
+  //-------
+  // The fetch spec states: "Let clonedSignal be the result of creating a dependent abort signal
+  // from « this’s signal », using AbortSignal and this’s relevant realm."
 }
 
 kj::StringPtr Request::getMethod() {
@@ -1166,7 +1173,7 @@ jsg::Optional<jsg::JsObject> Request::getCf(jsg::Lock& js) {
 // that's a bit silly and unnecessary.
 // The name "thisSignal" is derived from the fetch spec, which draws a
 // distinction between the "signal" and "this' signal".
-jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
+jsg::Ref<AbortSignal> Request::getThisSignal() {
   KJ_IF_SOME(s, signal) {
     return s.addRef();
   }
@@ -1176,6 +1183,14 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
   auto newSignal = jsg::alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   thisSignal = newSignal.addRef();
   return newSignal;
+}
+
+void Request::clearSignalIfIgnoredForSubrequest() {
+  KJ_IF_SOME(s, signal) {
+    if (s->isIgnoredForSubrequests()) {
+      signal = kj::none;
+    }
+  }
 }
 
 kj::Maybe<Request::Redirect> Request::tryParseRedirect(kj::StringPtr redirect) {
@@ -2218,6 +2233,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     // We could emulate these behaviors with various hacks, but just reconstructing the request up
     // front is robust, and won't add significant overhead compared to the rest of fetch().
     auto jsRequest = Request::constructor(js, kj::mv(requestOrUrl), kj::mv(requestInit));
+
+    // Clear the request's signal if the 'ignoreForSubrequests' flag is set. This happens when
+    // a request from an incoming fetch is passed-through to another fetch. We want to avoid
+    // aborting the subrequest in that case.
+    jsRequest->clearSignalIfIgnoredForSubrequest();
 
     // This URL list keeps track of redirections and becomes a source for Response's URL list. The
     // first URL in the list is the Request's URL (visible to JS via Request::getUrl()). The last URL

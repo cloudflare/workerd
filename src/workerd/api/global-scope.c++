@@ -145,7 +145,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     kj::HttpService::Response& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
-    kj::Maybe<ExportedHandler&> exportedHandler) {
+    kj::Maybe<ExportedHandler&> exportedHandler,
+    kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
   // that it can drop the reference whenever it gets GC'ed. But in this case the stream's lifetime
@@ -216,7 +217,17 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   auto jsRequest = jsg::alloc<Request>(method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
       jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
-      kj::none /** AbortSignal **/, kj::mv(cf), kj::mv(body));
+      /* signal */ kj::none, kj::mv(cf), kj::mv(body),
+      /* thisSignal */ kj::mv(abortSignal), Request::CacheMode::NONE);
+
+  // signal vs thisSignal
+  // --------------------
+  // The fetch spec definition of Request has a distinction between the
+  // "signal" (which is an optional AbortSignal passed in with the options), and "this' signal",
+  // which is an AbortSignal that is always available via the request.signal accessor.
+  //
+  // redirect
+  // --------
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
