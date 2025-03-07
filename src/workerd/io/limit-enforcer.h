@@ -111,7 +111,7 @@ class LimitEnforcer {
   // external subrequests.
   virtual void newSubrequest(bool isInHouse) = 0;
 
-  enum class KvOpType { GET, GET_WITH, PUT, LIST, DELETE };
+  enum class KvOpType { GET, GET_WITH, PUT, LIST, DELETE, GET_BULK };
   // Called before starting a KV operation. Throws a JSG exception if the operation should be
   // blocked due to exceeding limits, such as the free tier daily operation limit.
   virtual void newKvRequest(KvOpType op) = 0;
