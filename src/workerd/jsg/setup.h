@@ -474,6 +474,7 @@ class Isolate: public IsolateBase {
   // Isolate.  Currently used by non-sandboxing edgeworker, but deprecated.
   template <typename MetaConfiguration>
   explicit Isolate(V8System& system,
+      kj::Maybe<v8::IsolateGroup> group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
