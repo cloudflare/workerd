@@ -23,7 +23,7 @@ Finalizeable::~Finalizeable() noexcept(false) {
 #endif
 
 void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
-  if (IoContext::hasCurrent() && IoContext::current().deleteQueue.get() == this) {
+  if (IoContext::hasCurrent() && IoContext::current().deleteQueue.queue.get() == this) {
     // Deletion from same thread. No need to enqueue.
     kj::AllowAsyncDestructorsScope scope;
     OwnedObjectList::unlink(*object);
@@ -67,7 +67,7 @@ void DeleteQueue::scheduleAction(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&&
   }
 }
 
-void DeleteQueue::checkFarGet(const DeleteQueue* deleteQueue, const std::type_info& type) {
+void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type) {
   IoContext::current().checkFarGet(deleteQueue, type);
 }
 
@@ -78,7 +78,7 @@ void DeleteQueue::checkWeakGet(workerd::WeakRef<IoContext>& weak) {
   }
 }
 
-kj::Promise<void> DeleteQueue::resetCrossThreadSignal() {
+kj::Promise<void> DeleteQueue::resetCrossThreadSignal() const {
   auto lock = crossThreadDeleteQueue.lockExclusive();
   KJ_IF_SOME(state, *lock) {
     KJ_IF_SOME(fulfiller, state.crossThreadFulfiller) {
