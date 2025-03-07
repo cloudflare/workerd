@@ -69,6 +69,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   bool isAllowedTrigger(kj::StringPtr name) const override;
   void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
   bool allowTransactions() const override;
+  bool shouldAddQueryStats() const override;
 
   SqliteDatabase& getDb(jsg::Lock& js) {
     return storage->getSqliteDb(js);
