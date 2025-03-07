@@ -25,7 +25,9 @@
 
 import {
   default as cryptoImpl,
-  PublicPrivateCipherOptions,
+  type GetCipherInfoOptions,
+  type CipherInfo,
+  type PublicPrivateCipherOptions,
   type CipherHandle,
 } from 'node-internal:crypto';
 
@@ -688,4 +690,17 @@ export function publicDecrypt(
       getPaddingAndHash(key as HashOptions)
     )
   );
+}
+
+export function getCipherInfo(
+  nameOrId: string | number,
+  options: GetCipherInfoOptions = {}
+): CipherInfo | undefined {
+  if (typeof nameOrId !== 'string' && typeof nameOrId !== 'number') {
+    throw new ERR_INVALID_ARG_TYPE('nameOrId', ['string', 'number'], nameOrId);
+  }
+
+  validateObject(options, 'options');
+
+  return cryptoImpl.getCipherInfo(nameOrId, options);
 }

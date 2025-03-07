@@ -13,9 +13,11 @@ import {
   privateEncrypt,
   createPublicKey,
   createPrivateKey,
+  getCiphers,
+  getCipherInfo,
 } from 'node:crypto';
 
-import { strictEqual, deepStrictEqual, throws } from 'node:assert';
+import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
 
 const tests = [
   { name: 'aes-128-cbc', size: 16, iv: 16 },
@@ -297,5 +299,69 @@ export const missingArgChecks = {
     throws(() => privateDecrypt('key'), {
       code: 'ERR_MISSING_ARGS',
     });
+  },
+};
+
+export const known_ciphers_info = {
+  test() {
+    const ciphers = getCiphers();
+    ciphers.forEach((i) => {
+      const info = getCipherInfo(i);
+      ok(info);
+      strictEqual(typeof info, 'object');
+      strictEqual(typeof info.name, 'string');
+      strictEqual(typeof info.nid, 'number');
+      strictEqual(typeof info.blockSize, 'number');
+      strictEqual(typeof info.ivLength, 'number');
+      strictEqual(typeof info.keyLength, 'number');
+      strictEqual(typeof info.mode, 'string');
+    });
+  },
+};
+
+export const test_cipher_info = {
+  test() {
+    const info = getCipherInfo('aes-128-cbc', {
+      ivLength: 16,
+      keyLength: 16,
+    });
+    ok(info);
+    strictEqual(typeof info, 'object');
+    strictEqual(typeof info.name, 'string');
+    strictEqual(typeof info.nid, 'number');
+    strictEqual(typeof info.blockSize, 'number');
+    strictEqual(typeof info.ivLength, 'number');
+    strictEqual(typeof info.keyLength, 'number');
+    strictEqual(typeof info.mode, 'string');
+  },
+};
+
+export const test_cipher_info2 = {
+  test() {
+    const info = getCipherInfo('aes-128-cbc', {
+      ivLength: 17,
+      keyLength: 15,
+    });
+    strictEqual(info, undefined);
+  },
+};
+
+export const test_cipher_info3 = {
+  test() {
+    const info = getCipherInfo('aes-128-cbc', {
+      ivLength: -1,
+      keyLength: 16,
+    });
+    strictEqual(info, undefined);
+  },
+};
+
+export const test_cipher_info4 = {
+  test() {
+    const info = getCipherInfo('aes-128-cbc', {
+      ivLength: 16,
+      keyLength: -1,
+    });
+    strictEqual(info, undefined);
   },
 };

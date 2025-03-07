@@ -152,6 +152,36 @@ export function privateDecrypt(
   options: PublicPrivateCipherOptions
 ): Buffer;
 
+interface CipherInfo {
+  name: string;
+  nid: number;
+  blockSize?: number;
+  ivLength?: number;
+  keyLength: number;
+  mode:
+    | 'cbc'
+    | 'ccm'
+    | 'cfb'
+    | 'ctr'
+    | 'ecb'
+    | 'gcm'
+    | 'ocb'
+    | 'ofb'
+    | 'stream'
+    | 'wrap'
+    | 'xts';
+}
+
+interface GetCipherInfoOptions {
+  ivLength?: number;
+  keyLength?: number;
+}
+
+export function getCipherInfo(
+  nameOrId: string | number,
+  options: GetCipherInfoOptions
+): CipherInfo | undefined;
+
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {
