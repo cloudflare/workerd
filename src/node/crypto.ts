@@ -65,6 +65,7 @@ import {
   publicEncrypt,
   privateDecrypt,
   privateEncrypt,
+  getCipherInfo,
 } from 'node-internal:crypto_cipher';
 
 import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
@@ -161,6 +162,7 @@ export {
   publicEncrypt,
   privateDecrypt,
   privateEncrypt,
+  getCipherInfo,
 };
 
 export function getCiphers(): string[] {
@@ -297,12 +299,13 @@ export default {
   publicEncrypt,
   privateDecrypt,
   privateEncrypt,
+  getCipherInfo,
 };
 
 // Classes
 //   * [x] crypto.Certificate
-//   * [ ] crypto.Cipher
-//   * [ ] crypto.Decipher
+//   * [x] crypto.Cipher
+//   * [x] crypto.Decipher
 //   * [x] crypto.DiffieHellman
 //   * [x] crypto.DiffieHellmanGroup
 //   * [ ] crypto.ECDH
@@ -320,14 +323,14 @@ export default {
 //   * [x] crypto.generatePrime(size[, options[, callback]])
 //   * [x] crypto.generatePrimeSync(size[, options])
 // * Ciphers
-//   * [ ] crypto.createCipher(algorithm, password[, options])
-//   * [ ] crypto.createCipheriv(algorithm, key, iv[, options])
-//   * [ ] crypto.createDecipher(algorithm, password[, options])
-//   * [ ] crypto.createDecipheriv(algorithm, key, iv[, options])
-//   * [ ] crypto.privateDecrypt(privateKey, buffer)
-//   * [ ] crypto.privateEncrypt(privateKey, buffer)
-//   * [ ] crypto.publicDecrypt(key, buffer)
-//   * [ ] crypto.publicEncrypt(key, buffer)
+//   * [x] crypto.createCipher(algorithm, password[, options])
+//   * [x] crypto.createCipheriv(algorithm, key, iv[, options])
+//   * [x] crypto.createDecipher(algorithm, password[, options])
+//   * [x] crypto.createDecipheriv(algorithm, key, iv[, options])
+//   * [x] crypto.privateDecrypt(privateKey, buffer)
+//   * [x] crypto.privateEncrypt(privateKey, buffer)
+//   * [x] crypto.publicDecrypt(key, buffer)
+//   * [x] crypto.publicEncrypt(key, buffer)
 // * DiffieHellman
 //   * [x] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
 //   * [x] crypto.createDiffieHellman(primeLength[, generator])
@@ -353,7 +356,7 @@ export default {
 //   * [x] crypto.sign(algorithm, data, key[, callback])
 //   * [x] crypto.verify(algorithm, data, key, signature[, callback])
 // * Misc
-//   * [ ] crypto.getCipherInfo(nameOrNid[, options])
+//   * [x] crypto.getCipherInfo(nameOrNid[, options])
 //   * [x] crypto.getCiphers()
 //   * [x] crypto.getCurves()
 //   * [x] crypto.secureHeapUsed()

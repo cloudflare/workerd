@@ -385,6 +385,26 @@ class CryptoImpl final: public jsg::Object {
       jsg::BufferSource buffer,
       PublicPrivateCipherOptions options);
 
+  struct CipherInfo {
+    kj::String name;
+    int nid;
+    jsg::Optional<int> blockSize;
+    jsg::Optional<int> ivLength;
+    int keyLength;
+    kj::String mode;  // 'cbc', 'ccm', 'cfb', 'ctr', 'ecb', 'gcm', 'ocb',
+                      // 'ofb', 'stream', 'wrap', 'xts'
+    JSG_STRUCT(name, nid, blockSize, ivLength, keyLength, mode)
+  };
+
+  struct GetCipherInfoOptions {
+    jsg::Optional<int> keyLength;
+    jsg::Optional<int> ivLength;
+    JSG_STRUCT(keyLength, ivLength);
+  };
+
+  jsg::Optional<CipherInfo> getCipherInfo(
+      kj::OneOf<kj::String, int> nameOrNid, GetCipherInfoOptions options);
+
   // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
@@ -438,6 +458,7 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(publicDecrypt);
     JSG_METHOD(privateEncrypt);
     JSG_METHOD(privateDecrypt);
+    JSG_METHOD(getCipherInfo);
   }
 };
 
@@ -450,5 +471,6 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::EdKeyPairOptions, api::node::CryptoImpl::DhKeyPairOptions,            \
       api::node::CryptoImpl::SignHandle, api::node::CryptoImpl::VerifyHandle,                      \
       api::node::CryptoImpl::CipherHandle, api::node::CryptoImpl::PublicPrivateCipherOptions,      \
+      api::node::CryptoImpl::CipherInfo, api::node::CryptoImpl::GetCipherInfoOptions,              \
       EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node
