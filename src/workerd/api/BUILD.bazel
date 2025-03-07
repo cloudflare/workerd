@@ -24,6 +24,7 @@ filegroup(
             "rtti.c++",
             "url.c++",
             "urlpattern.c++",
+            "urlpattern-standard.c++",
             "util.c++",
         ],
     ),
@@ -49,6 +50,7 @@ filegroup(
             "rtti.h",
             "url.h",
             "urlpattern.h",
+            "urlpattern-standard.h",
             "util.h",
         ],
     ),
@@ -245,6 +247,18 @@ wd_cc_library(
     deps = [
         ":url",
         "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "urlpattern-standard",
+    srcs = ["urlpattern-standard.c++"],
+    hdrs = ["urlpattern-standard.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@ada-url",
         "@capnp-cpp//src/kj",
     ],
 )
