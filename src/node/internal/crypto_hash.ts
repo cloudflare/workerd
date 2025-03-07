@@ -300,4 +300,29 @@ Hmac.prototype._flush = Hash.prototype._flush;
 // eslint-disable-next-line @typescript-eslint/unbound-method
 Hmac.prototype._transform = Hash.prototype._transform;
 
+export function hash(
+  algorithm: string,
+  data: string | ArrayBufferView,
+  outputEncoding: string = 'hex'
+): string | Buffer {
+  validateString(algorithm, 'algorithm');
+  validateString(outputEncoding, 'outputEncoding');
+
+  if (typeof data === 'string') {
+    const hash = createHash(algorithm);
+    hash.update(data, 'utf8');
+    return hash.digest(outputEncoding);
+  } else if (isArrayBufferView(data)) {
+    const hash = createHash(algorithm);
+    hash.update(data, 'utf8');
+    return hash.digest(outputEncoding);
+  }
+
+  throw new ERR_INVALID_ARG_TYPE(
+    'data',
+    ['string', 'Buffer', 'TypedArray', 'DataView'],
+    data
+  );
+}
+
 export { Hash, Hmac };
