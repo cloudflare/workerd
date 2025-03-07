@@ -1049,12 +1049,6 @@ class ArrayBufferWrapper {
     // v8::ArrayBuffer::NewBackingStore() that accepts a deleter callback, and arrange for it to
     // delete an Array<byte> placed on the heap.
     //
-    // TODO(perf): We could avoid an allocation here, perhaps, by decomposing the kj::Array<byte>
-    //   into its component pointer and disposer, and then pass the disposer pointer as the
-    //   "deleter_data" for NewBackingStore. However, KJ doesn't give us any way to decompose an
-    //   Array<T> this way, and it might not want to, as this could make it impossible to support
-    //   unifying Array<T> and Vector<T> in the future (i.e. making all Array<T>s growable). So
-    //   it may be best to stick with allocating an Array<byte> on the heap after all...
     size_t size = value.size();
     if (size == 0) {
       // BackingStore doesn't call custom deleter if begin is null, which it often is for empty
@@ -1062,15 +1056,33 @@ class ArrayBufferWrapper {
       return v8::ArrayBuffer::New(isolate, 0);
     }
     byte* begin = value.begin();
+    if (isolate->GetGroup().SandboxContains(begin)) {
+      // TODO(perf): We could avoid an allocation here, perhaps, by decomposing the
+      //   kj::Array<byte> into its component pointer and disposer, and then pass the disposer
+      //   pointer as the "deleter_data" for NewBackingStore. However, KJ doesn't give us any way
+      //   to decompose an Array<T> this way, and it might not want to, as this could make it
+      //   impossible to support unifying Array<T> and Vector<T> in the future (i.e. making all
+      //   Array<T>s growable). So it may be best to stick with allocating an Array<byte> on the
+      //   heap after all...
+      auto ownerPtr = new kj::Array<byte>(kj::mv(value));
 
-    auto ownerPtr = new kj::Array<byte>(kj::mv(value));
+      std::unique_ptr<v8::BackingStore> backing = v8::ArrayBuffer::NewBackingStore(
+          begin, size, [](void* begin, size_t size, void* ownerPtr) {
+        delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
+      }, ownerPtr);
 
-    std::unique_ptr<v8::BackingStore> backing =
-        v8::ArrayBuffer::NewBackingStore(begin, size, [](void* begin, size_t size, void* ownerPtr) {
-      delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
-    }, ownerPtr);
+      return v8::ArrayBuffer::New(isolate, kj::mv(backing));
+    } else {
+      // The Array is not already inside the sandbox.  We have to make a copy and move it in.
+      // For performance reasons we might want to throw here and fix all callers to allocate
+      // inside the sandbox.
+      std::unique_ptr<v8::BackingStore> in_sandbox = v8::ArrayBuffer::NewBackingStore(
+          isolate, size, v8::BackingStoreInitializationMode::kUninitialized);
 
-    return v8::ArrayBuffer::New(isolate, kj::mv(backing));
+      memcpy(in_sandbox->Data(), value.begin(), size);
+
+      return v8::ArrayBuffer::New(isolate, kj::mv(in_sandbox));
+    }
   }
 
   v8::Local<v8::ArrayBuffer> wrap(v8::Local<v8::Context> context,
