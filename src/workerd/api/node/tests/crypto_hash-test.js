@@ -291,3 +291,36 @@ export const hash_pipe_test = {
     await p.promise;
   },
 };
+
+export const hash_one_shot = {
+  test() {
+    const string = 'Node.js';
+    assert.strictEqual(
+      crypto.hash('sha1', 'Node.js'),
+      '10b3493287f831e81a438811a1ffba01f8cec4b7'
+    );
+
+    const check = Buffer.from(
+      '10b3493287f831e81a438811a1ffba01f8cec4b7',
+      'hex'
+    );
+    const base64 = 'Tm9kZS5qcw==';
+    assert.deepStrictEqual(
+      crypto.hash('sha1', Buffer.from(base64, 'base64'), 'buffer'),
+      check
+    );
+
+    assert.throws(() => crypto.hash(1), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => crypto.hash('sha1', 12), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => crypto.hash('sha1', 'test', 123), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => crypto.hash('unknown', 'what'), {
+      message: /Digest method not supported/,
+    });
+  },
+};

@@ -45,6 +45,7 @@ import {
   Hash,
   HashOptions,
   Hmac,
+  hash,
 } from 'node-internal:crypto_hash';
 
 import {
@@ -119,6 +120,7 @@ export {
   Hash,
   HashOptions,
   Hmac,
+  hash,
   // Hkdf
   hkdf,
   hkdfSync,
@@ -250,6 +252,7 @@ export default {
   createHash,
   createHmac,
   getHashes,
+  hash,
   // Hkdf
   hkdf,
   hkdfSync,
@@ -339,6 +342,7 @@ export default {
 //   * [x] crypto.createHash(algorithm[, options])
 //   * [x] crypto.createHmac(algorithm, key[, options])
 //   * [x] crypto.getHashes()
+//   * [x] crypto.hash()
 // * Keys, not implemented yet. Calling the following APIs will throw a ERR_METHOD_NOT_IMPLEMENTED
 //   * [x] crypto.createPrivateKey(key)
 //   * [x] crypto.createPublicKey(key)
