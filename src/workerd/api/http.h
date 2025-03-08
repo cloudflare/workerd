@@ -414,6 +414,12 @@ private:
   }
 };
 
+// Controls how response bodies are encoded/decoded according to Content-Encoding headers
+enum class Response_BodyEncoding {
+  AUTO,    // Automatically encode/decode based on Content-Encoding headers
+  MANUAL   // Treat Content-Encoding headers as opaque (no automatic encoding/decoding)
+};
+
 class Request;
 class Response;
 struct RequestInitializerDict;
@@ -707,6 +713,11 @@ struct RequestInitializerDict {
   // `null`.
   jsg::Optional<kj::Maybe<jsg::Ref<AbortSignal>>> signal;
 
+  // Controls whether the response body is automatically decoded according to Content-Encoding
+  // headers. Default behavior is "automatic" which means bodies are decoded. Setting this to
+  // "manual" means the raw compressed bytes are returned.
+  jsg::Optional<kj::String> encodeResponseBody;
+
   // The duplex option controls whether or not a fetch is expected to send the entire request
   // before processing the response. The default value ("half"), which is currently the only
   // option supported by the standard, dictates that the request is fully sent before handling
@@ -724,7 +735,7 @@ struct RequestInitializerDict {
   // jsg::Optional<kj::String> priority;
   // TODO(conform): Might support later?
 
-  JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal);
+  JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if(flags.getCacheOptionEnabled()) {
       if(flags.getCacheNoCache()) {
@@ -733,6 +744,7 @@ struct RequestInitializerDict {
           body?: BodyInit | null;
           cache?: 'no-store' | 'no-cache';
           cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
         });
       } else {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
@@ -740,6 +752,7 @@ struct RequestInitializerDict {
           body?: BodyInit | null;
           cache?: 'no-store';
           cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
         });
       }
     } else {
@@ -748,6 +761,7 @@ struct RequestInitializerDict {
         body?: BodyInit | null;
         cache?: never;
         cf?: Cf;
+        encodeResponseBody?: "automatic" | "manual";
       });
     }
   }
@@ -777,10 +791,11 @@ public:
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
           kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
-          kj::Maybe<Body::ExtractedBody> body, CacheMode cacheMode = CacheMode::NONE)
+          kj::Maybe<Body::ExtractedBody> body, CacheMode cacheMode = CacheMode::NONE,
+          Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
-      cacheMode(cacheMode), cf(kj::mv(cf)) {
+      cacheMode(cacheMode), cf(kj::mv(cf)), responseBodyEncoding(responseBodyEncoding) {
     KJ_IF_SOME(s, signal) {
       // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
       // that the cancel machinery is not used but the request.signal accessor will still
@@ -883,6 +898,9 @@ public:
   // the default value should be an empty string. When the Request object is
   // created we verify that the given value is undefined or empty.
   kj::String getIntegrity() { return kj::String(); }
+  
+  // Get the response body encoding setting for this request  
+  Response_BodyEncoding getResponseBodyEncoding() { return responseBodyEncoding; }
 
   JSG_RESOURCE_TYPE(Request, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
@@ -993,6 +1011,9 @@ private:
   kj::Maybe<jsg::Ref<AbortSignal>> thisSignal;
 
   CfProperty cf;
+  
+  // Controls how to handle Content-Encoding headers in the response
+  Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, fetcher, signal, thisSignal, cf);
@@ -1001,16 +1022,14 @@ private:
 
 class Response final: public Body {
 public:
-  enum class BodyEncoding {
-    AUTO,
-    MANUAL
-  };
+  // Alias to the global Response_BodyEncoding enum for backward compatibility
+  using BodyEncoding = Response_BodyEncoding;
 
   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
            CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
-           Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
+           BodyEncoding bodyEncoding = BodyEncoding::AUTO);
 
   // ---------------------------------------------------------------------------
   // JS API

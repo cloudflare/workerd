@@ -4092,5 +4092,137 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
 // TODO(beta): Test TLS (send and receive)
 // TODO(beta): Test CLI overrides
 
+KJ_TEST("Server: encodeResponseBody: manual option") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    // Make a subrequest with encodeResponseBody: "manual"
+                `    let response = await fetch("http://subhost/foo", {
+                `      encodeResponseBody: "manual"
+                `    });
+                `    
+                `    // Get the raw bytes, which should not be decompressed
+                `    let rawBytes = await response.arrayBuffer();
+                `    let decoder = new TextDecoder();
+                `    let rawText = decoder.decode(rawBytes);
+                `    
+                `    return new Response(
+                `      "Content-Encoding: " + response.headers.get("Content-Encoding") + "\n" +
+                `      "Raw content: " + rawText
+                `    );
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+
+  // Send a response with Content-Encoding: gzip, but the body is not actually
+  // compressed - it's just "fake-gzipped-content" as plain text
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 20
+    Content-Encoding: gzip
+
+    fake-gzipped-content
+  )"_blockquote);
+
+  // Verify that:
+  // 1. The Content-Encoding header was preserved
+  // 2. The body was not decompressed (we get the raw "fake-gzipped-content")
+  conn.recvHttp200(R"(
+    Content-Encoding: gzip
+    Raw content: fake-gzipped-content)"_blockquote);
+}
+
+KJ_TEST("Server: encodeResponseBody: manual pass-through") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    // Make a subrequest with encodeResponseBody: "manual" and pass through the response
+                `    return fetch("http://subhost/foo", {
+                `      encodeResponseBody: "manual"
+                `    });
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost");
+  subreq.recv(R"(
+    GET /foo HTTP/1.1
+    Host: subhost
+
+  )"_blockquote);
+
+  // Send a response with Content-Encoding: gzip, but the body is not actually
+  // compressed - it's just "fake-gzipped-content" as plain text
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 20
+    Content-Encoding: gzip
+
+    fake-gzipped-content
+  )"_blockquote);
+
+  // Verify that the response is passed through verbatim, with:
+  // 1. The Content-Encoding header preserved
+  // 2. The body not decompressed
+  // 3. The body not re-encoded
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 20
+    Content-Encoding: gzip
+
+    fake-gzipped-content)"_blockquote);
+}
+
 }  // namespace
 }  // namespace workerd::server
