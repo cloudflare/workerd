@@ -98,9 +98,18 @@ uint32_t writeInto(jsg::Lock& js,
       return result.written;
     }
     case Encoding::UTF16LE: {
+#if __has_feature(undefined_behavior_sanitizer)
+      // UBSan warns about unaligned writes, but this can be hard to avoid if dest is unaligned.
+      // Use temp variable to perform aligned write instead.
+      kj::Array<uint16_t> tmpBuf = kj::heapArray<uint16_t>(dest.size() / sizeof(uint16_t));
+      auto result = string.writeInto(js, tmpBuf, flags);
+      kj::ArrayPtr<uint16_t> buf(reinterpret_cast<uint16_t*>(dest.begin()), result.written);
+      buf.copyFrom(tmp);
+#else
       kj::ArrayPtr<uint16_t> buf(
           reinterpret_cast<uint16_t*>(dest.begin()), dest.size() / sizeof(uint16_t));
       auto result = string.writeInto(js, buf, flags);
+#endif
       return result.written * sizeof(uint16_t);
     }
     case Encoding::BASE64:
