@@ -1720,6 +1720,7 @@ export interface RequestInit<Cf = CfProperties> {
   integrity?: string;
   /* An AbortSignal to set request's signal. */
   signal?: AbortSignal | null;
+  encodeResponseBody?: "automatic" | "manual";
 }
 export type Service<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
