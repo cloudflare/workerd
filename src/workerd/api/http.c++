@@ -927,6 +927,7 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<Body::ExtractedBody> body;
   Redirect redirect = Redirect::FOLLOW;
   CacheMode cacheMode = CacheMode::NONE;
+  Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
 
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(u, kj::String) {
@@ -1078,6 +1079,16 @@ jsg::Ref<Request> Request::constructor(
           cacheMode = getCacheModeFromName(c);
         }
 
+        KJ_IF_SOME(e, initDict.encodeResponseBody) {
+          if (e == "manual"_kj) {
+            responseBodyEncoding = Response_BodyEncoding::MANUAL;
+          } else if (e == "automatic"_kj) {
+            responseBodyEncoding = Response_BodyEncoding::AUTO;
+          } else {
+            JSG_FAIL_REQUIRE(TypeError, kj::str("encodeResponseBody: unexpected value: ", e));
+          }
+        }
+
         if (initDict.method != kj::none || initDict.body != kj::none) {
           // We modified at least one of the method or the body. In this case, we enforce the
           // spec rule that GET/HEAD requests cannot have bodies. (On the other hand, if neither
@@ -1093,6 +1104,7 @@ jsg::Ref<Request> Request::constructor(
         method = otherRequest->method;
         redirect = otherRequest->redirect;
         cacheMode = otherRequest->cacheMode;
+        responseBodyEncoding = otherRequest->responseBodyEncoding;
         fetcher = otherRequest->getFetcher();
         signal = otherRequest->getThisSignal();
         headers = jsg::alloc<Headers>(*otherRequest->headers);
@@ -1114,7 +1126,7 @@ jsg::Ref<Request> Request::constructor(
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
   return jsg::alloc<Request>(method, url, redirect, KJ_ASSERT_NONNULL(kj::mv(headers)),
       kj::mv(fetcher), kj::mv(signal), kj::mv(cf), kj::mv(body), /* thisSignal */ kj::none,
-      cacheMode);
+      cacheMode, responseBodyEncoding);
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
@@ -1124,7 +1136,8 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
   auto bodyClone = Body::clone(js);
 
   return jsg::alloc<Request>(method, url, redirect, kj::mv(headersClone), getFetcher(),
-      /* signal */ getThisSignal(), kj::mv(cfClone), kj::mv(bodyClone), /* thisSignal */ kj::none);
+      /* signal */ getThisSignal(), kj::mv(cfClone), kj::mv(bodyClone), /* thisSignal */ kj::none,
+      cacheMode, responseBodyEncoding);
 
   // signal
   //-------
@@ -1260,6 +1273,11 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
           kj::str("Unsupported cache mode: ", c));
     }
   }
+
+  KJ_IF_SOME(e, encodeResponseBody) {
+    JSG_REQUIRE(e == "manual"_kj || e == "automatic"_kj, TypeError,
+        kj::str("encodeResponseBody: unexpected value: ", e));
+  }
 }
 
 void Request::serialize(jsg::Lock& js,
@@ -1312,7 +1330,12 @@ void Request::serialize(jsg::Lock& js,
             // instead of `null`.
             .signal = signal.map([](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
     return s.addRef();
-  })})));
+  }),
+
+            // Only serialize responseBodyEncoding if it's not the default AUTO
+            .encodeResponseBody = responseBodyEncoding == Response_BodyEncoding::AUTO
+                ? jsg::Optional<kj::String>()
+                : kj::str("manual")})));
 }
 
 jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
@@ -1939,7 +1962,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
           return js.resolvedPromise(makeHttpResponse(js, jsRequest->getMethodEnum(),
               kj::mv(urlList), response.statusCode, response.statusText, *response.headers,
               newNullInputStream(), jsg::alloc<WebSocket>(kj::mv(webSocket)),
-              Response::BodyEncoding::AUTO, kj::mv(signal)));
+              jsRequest->getResponseBodyEncoding(), kj::mv(signal)));
         }
       }
       KJ_UNREACHABLE;
@@ -2062,7 +2085,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
 
   auto result = makeHttpResponse(js, jsRequest->getMethodEnum(), kj::mv(urlList),
       response.statusCode, response.statusText, *response.headers, kj::mv(response.body), kj::none,
-      Response::BodyEncoding::AUTO, kj::mv(signal));
+      jsRequest->getResponseBodyEncoding(), kj::mv(signal));
 
   return js.resolvedPromise(kj::mv(result));
 }
@@ -2208,7 +2231,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
 
   // TODO(someday): Fill response CF blob from somewhere?
   return jsg::alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(responseHeaders), nullptr,
-      kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket));
+      kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket), bodyEncoding);
 }
 
 namespace {
