@@ -3506,7 +3506,11 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.missingSuperclass = info.missingSuperclass;
 
       impl->classInstance = kj::mv(handler);
-    }, kj::mv(inputLock));
+    }, inputLock.addRef());
+    // We addRef() the inputLock above rather than kj::mv() it so that the lock remains held
+    // through the catch block below, if an exception is thrown. This is important since we
+    // MUST update `impl->classInstance` to something other than `Initializing` before we
+    // release the lock.
   } catch (...) {
     // Get the KJ exception
     auto e = kj::getCaughtExceptionAsKj();
