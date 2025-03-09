@@ -3450,6 +3450,19 @@ Worker::Actor::Actor(const Worker& worker,
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
   KJ_IF_SOME(info, impl->classInstance.tryGet<ActorClassInfo*>()) {
+    // IMPORTANT: We need to set the state to "Initializing" synchronously, before
+    // ensureConstructedImpl() actually executes and acquires the input lock.
+    // This prevents multiple concurrent initialization attempts if multiple calls to
+    // ensureConstructed() arrive back-to-back.
+    //
+    // This doesn't create a race condition with getHandler() because InputGate::wait()
+    // synchronously adds the caller to the wait queue, even though it completes
+    // asynchronously. Any call to getHandler() that arrives after this point will
+    // have to wait for the input lock, which is only acquired and released by
+    // ensureConstructedImpl() when it completes initialization.
+    //
+    // So the "actor still initializing" error in getHandler() should be impossible
+    // unless a code path is bypassing the input lock mechanism.
     context.addWaitUntil(ensureConstructedImpl(context, *info));
     impl->classInstance = Impl::Initializing();
   }
@@ -3458,56 +3471,56 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
   InputGate::Lock inputLock = co_await impl->inputGate.wait();
 
-  bool containerRunning = false;
-  KJ_IF_SOME(c, impl->container) {
-    // We need to do an RPC to check if the container is running.
-    // TODO(perf): It would be nice if we could have started this RPC earlier, e.g. in parallel
-    //   with starting the script, and also if we could save the status across hibernations. But
-    //   that would require some refactoring, and this RPC should (eventally) be local, so it's
-    //   not a huge deal.
-    auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
-    containerRunning = status.getRunning();
-  }
-
-  co_await context
-      .run(
-          [this, &info, containerRunning](Worker::Lock& lock) {
-    jsg::Lock& js = lock;
-
-    kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
-    KJ_IF_SOME(c, impl->actorCache) {
-      storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
+  try {
+    bool containerRunning = false;
+    KJ_IF_SOME(c, impl->container) {
+      // We need to do an RPC to check if the container is running.
+      // TODO(perf): It would be nice if we could have started this RPC earlier, e.g. in parallel
+      //   with starting the script, and also if we could save the status across hibernations. But
+      //   that would require some refactoring, and this RPC should (eventally) be local, so it's
+      //   not a huge deal.
+      auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
+      containerRunning = status.getRunning();
     }
-    auto handler = info.cls(lock,
-        jsg::alloc<api::DurableObjectState>(cloneId(),
-            jsg::JsRef<jsg::JsValue>(
-                js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-            kj::mv(storage), kj::mv(impl->container), containerRunning),
-        KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
-    // HACK: We set handler.env to undefined because we already passed the real env into the
-    //   constructor, and we want the handler methods to act like they take just one parameter.
-    //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
-    //   on the actor's state field instead.
-    handler.env = js.v8Ref(js.v8Undefined());
-    handler.ctx = kj::none;
-    handler.missingSuperclass = info.missingSuperclass;
+    co_await context.run([this, &info, containerRunning](Worker::Lock& lock) {
+      jsg::Lock& js = lock;
 
-    impl->classInstance = kj::mv(handler);
-  }, kj::mv(inputLock))
-      .catch_([this](kj::Exception&& e) {
+      kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
+      KJ_IF_SOME(c, impl->actorCache) {
+        storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
+      }
+      auto handler = info.cls(lock,
+          jsg::alloc<api::DurableObjectState>(cloneId(),
+              jsg::JsRef<jsg::JsValue>(
+                  js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
+              kj::mv(storage), kj::mv(impl->container), containerRunning),
+          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+      // HACK: We set handler.env to undefined because we already passed the real env into the
+      //   constructor, and we want the handler methods to act like they take just one parameter.
+      //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
+      //   on the actor's state field instead.
+      handler.env = js.v8Ref(js.v8Undefined());
+      handler.ctx = kj::none;
+      handler.missingSuperclass = info.missingSuperclass;
+
+      impl->classInstance = kj::mv(handler);
+    }, kj::mv(inputLock));
+  } catch (...) {
+    // Get the KJ exception
+    auto e = kj::getCaughtExceptionAsKj();
+
     auto msg = e.getDescription();
-
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
       // If we already set up a brokenness reason, we shouldn't override it.
-
       auto description = jsg::annotateBroken(msg, "broken.constructorFailed");
       e.setDescription(kj::mv(description));
     }
 
     impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
     impl->classInstance = kj::mv(e);
-  });
+  }
 }
 
 Worker::Actor::~Actor() noexcept(false) {
