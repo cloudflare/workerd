@@ -384,8 +384,8 @@ export default {
 //   * [x] crypto.randomInt([min, ]max[, callback])
 //   * [x] crypto.randomUUID([options])
 // * Key Derivation
-//   * [.] crypto.hkdf(digest, ikm, salt, info, keylen, callback) (* still needs KeyObject support)
-//   * [.] crypto.hkdfSync(digest, ikm, salt, info, keylen) (* still needs KeyObject support)
+//   * [x] crypto.hkdf(digest, ikm, salt, info, keylen, callback)
+//   * [x] crypto.hkdfSync(digest, ikm, salt, info, keylen)
 //   * [x] crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)
 //   * [x] crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
 //   * [x] crypto.scrypt(password, salt, keylen[, options], callback)
