@@ -327,8 +327,13 @@ kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
   auto result = check(inner->Exec(js.v8Context(), js.str(input)));
-  if (result->IsNullOrUndefined()) return kj::none;
+  if (result->IsNull()) return kj::none;
   return JsArray(result.As<v8::Array>());
+}
+
+bool JsRegExp::match(Lock& js, kj::StringPtr input) {
+  auto result = check(inner->Exec(js.v8Context(), js.str(input)));
+  return !result->IsNull();
 }
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {

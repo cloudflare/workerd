@@ -10,6 +10,7 @@
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif
@@ -52,10 +53,14 @@ class CompressionStream;
 class DecompressionStream;
 class TextEncoderStream;
 class TextDecoderStream;
-class URLPattern;
 class Blob;
 class File;
 class FormData;
+
+class URLPattern;
+namespace urlpattern {
+class URLPattern;
+}  // namespace urlpattern
 
 class URL;
 class URLSearchParams;
@@ -709,7 +714,13 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(URL);
       JSG_NESTED_TYPE(URLSearchParams);
     }
-    JSG_NESTED_TYPE(URLPattern);
+
+    // We conditionally enable a more spec compliant URLPattern to avoid any breakages.
+    if (util::Autogate::isEnabled(util::AutogateKey::URLPATTERN)) {
+      JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
+    } else {
+      JSG_NESTED_TYPE(URLPattern);
+    }
 
     JSG_NESTED_TYPE(Blob);
     JSG_NESTED_TYPE(File);

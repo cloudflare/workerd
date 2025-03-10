@@ -18,6 +18,7 @@ enum class AutogateKey {
   // Fetches Python packages as individual bundles from GCS instead of using a single big bundle
   // embedded in the binary
   PYTHON_FETCH_INDIVIDUAL_PACKAGES,
+  URLPATTERN,
   NumOfKeys  // Reserved for iteration.
 };
 
