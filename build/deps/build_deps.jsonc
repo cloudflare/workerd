@@ -241,7 +241,7 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "//:build/BUILD.wpt",
-      "freeze_version": "wpt-818762709"
+      "freeze_version": "wpt-af83b77e2"
      }
   ]
 }
