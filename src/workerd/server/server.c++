@@ -1716,6 +1716,9 @@ class Server::WorkerService final: public Service,
   }
 
   void unlink() override {
+    // Need to remove all waited until tasks before destroying `ioChannels`
+    waitUntilTasks.clear();
+
     // Need to tear down all actors before tearing down `ioChannels.actorStorage`.
     actorNamespaces.clear();
 
