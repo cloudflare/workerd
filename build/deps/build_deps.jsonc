@@ -85,6 +85,13 @@
       "file_regex": "^rules_cc-"
     },
     {
+      "name": "rules_java",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "rules_java",
+      "file_regex": "^rules_java-"
+    },
+    {
       "name": "rules_shell",
       "type": "github_release",
       "owner": "bazelbuild",
