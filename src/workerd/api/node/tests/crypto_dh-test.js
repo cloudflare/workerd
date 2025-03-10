@@ -375,3 +375,41 @@ export const dhKeygenTest = {
     );
   },
 };
+
+export const ecdh = {
+  test() {
+    const curves = crypto.getCurves();
+    curves.forEach((i) => {
+      const alice = crypto.createECDH(i);
+      const bob = crypto.createECDH(i);
+
+      alice.generateKeys();
+      bob.generateKeys();
+
+      const aliceSecret = alice.computeSecret(bob.getPublicKey(), null, 'hex');
+      const bobSecret = bob.computeSecret(alice.getPublicKey(), null, 'hex');
+
+      assert.strictEqual(aliceSecret, bobSecret);
+    });
+  },
+};
+
+export const ecdhConvertKey = {
+  test() {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.generateKeys();
+
+    const compressedKey = ecdh.getPublicKey('hex', 'compressed');
+
+    const uncompressedKey = crypto.ECDH.convertKey(
+      compressedKey,
+      'prime256v1',
+      'hex',
+      'hex',
+      'uncompressed'
+    );
+
+    // The converted key and the uncompressed public key should be the same
+    assert.strictEqual(uncompressedKey, ecdh.getPublicKey('hex'));
+  },
+};

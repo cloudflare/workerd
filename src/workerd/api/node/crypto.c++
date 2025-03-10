@@ -1141,4 +1141,176 @@ jsg::Optional<CryptoImpl::CipherInfo> CryptoImpl::getCipherInfo(
 
 #pragma endregion  // Cipher/Decipher
 
+// =============================================================================
+#pragma region ECDH
+
+namespace {
+ncrypto::ECPointPointer bufferToPoint(const EC_GROUP* group, jsg::BufferSource& buf) {
+  JSG_REQUIRE(buf.size() <= INT32_MAX, Error, "buffer is too big");
+
+  auto pub = ncrypto::ECPointPointer::New(group);
+  JSG_REQUIRE(pub, Error, "Failed to allocate EC_POINT for a public key");
+
+  ncrypto::Buffer<const unsigned char> buffer{
+    .data = buf.asArrayPtr().begin(),
+    .len = buf.size(),
+  };
+
+  JSG_REQUIRE(pub.setFromBuffer(buffer, group), Error, "Failed to set point");
+  return pub;
+}
+
+point_conversion_form_t getFormat(kj::StringPtr format) {
+  if (format == "compressed"_kj) return POINT_CONVERSION_COMPRESSED;
+  if (format == "uncompressed"_kj) return POINT_CONVERSION_UNCOMPRESSED;
+  if (format == "hybrid"_kj) return POINT_CONVERSION_HYBRID;
+  JSG_FAIL_REQUIRE(Error, "Invalid ECDH public key format");
+}
+
+jsg::BufferSource ecPointToBuffer(
+    jsg::Lock& js, const EC_GROUP* group, const EC_POINT* point, point_conversion_form_t form) {
+  size_t len = EC_POINT_point2oct(group, point, form, nullptr, 0, nullptr);
+  JSG_REQUIRE(len != 0, Error, "Failed to get public key length");
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, len);
+
+  len =
+      EC_POINT_point2oct(group, point, form, backing.asArrayPtr().begin(), backing.size(), nullptr);
+  JSG_REQUIRE(len != 0, Error, "Failed to get public key");
+
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+bool isKeyValidForCurve(const EC_GROUP* group, const ncrypto::BignumPointer& private_key) {
+  // Private keys must be in the range [1, n-1].
+  // Ref: Section 3.2.1 - http://www.secg.org/sec1-v2.pdf
+  if (private_key < ncrypto::BignumPointer::One()) {
+    return false;
+  }
+  auto order = ncrypto::BignumPointer::New();
+  JSG_REQUIRE(order, Error, "Internal failure when checking ECDH key");
+  return EC_GROUP_get_order(group, order.get(), nullptr) && private_key < order;
+}
+}  // namespace
+
+CryptoImpl::ECDHHandle::ECDHHandle(ncrypto::ECKeyPointer key)
+    : key_(kj::mv(key)),
+      group_(key_.getGroup()) {}
+
+jsg::Ref<CryptoImpl::ECDHHandle> CryptoImpl::ECDHHandle::constructor(
+    jsg::Lock& js, kj::String curveName) {
+
+  int nid = OBJ_sn2nid(curveName.begin());
+  JSG_REQUIRE(nid != NID_undef, Error, "Invalid curve");
+
+  auto key = ncrypto::ECKeyPointer::NewByCurveName(nid);
+  JSG_REQUIRE(key, Error, "Failed to create key using named curve");
+
+  return jsg::alloc<CryptoImpl::ECDHHandle>(kj::mv(key));
+}
+
+jsg::BufferSource CryptoImpl::ECDHHandle::computeSecret(
+    jsg::Lock& js, jsg::BufferSource otherPublicKey) {
+
+  ncrypto::ClearErrorOnReturn clear_error_on_return;
+
+  JSG_REQUIRE(key_.checkKey(), Error, "Invalid keypair");
+
+  auto pub = bufferToPoint(group_, otherPublicKey);
+  JSG_REQUIRE(pub, Error, "Invalid to set ECDH public key");
+
+  int field_size = EC_GROUP_get_degree(group_);
+  size_t out_len = (field_size + 7) / 8;
+
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, out_len);
+
+  JSG_REQUIRE(ECDH_compute_key(backing.asArrayPtr().begin(), out_len, pub, key_.get(), nullptr),
+      Error, "Failed to compute ECDH key");
+
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+void CryptoImpl::ECDHHandle::generateKeys() {
+  ncrypto::ClearErrorOnReturn clear_error_on_return;
+  JSG_REQUIRE(key_.generate(), Error, "Failed to generate keys");
+}
+
+jsg::BufferSource CryptoImpl::ECDHHandle::getPrivateKey(jsg::Lock& js) {
+  auto b = key_.getPrivateKey();
+  JSG_REQUIRE(b != nullptr, Error, "Failed to get ECDH private key");
+  auto backing =
+      jsg::BackingStore::alloc<v8::ArrayBuffer>(js, ncrypto::BignumPointer::GetByteCount(b));
+  JSG_REQUIRE(backing.size() ==
+          ncrypto::BignumPointer::EncodePaddedInto(b, backing.asArrayPtr().begin(), backing.size()),
+      Error, "Failed to encode the private key");
+  return jsg::BufferSource(js, kj::mv(backing));
+}
+
+jsg::BufferSource CryptoImpl::ECDHHandle::getPublicKey(jsg::Lock& js, kj::String format) {
+  const auto group = key_.getGroup();
+  const auto pub = key_.getPublicKey();
+  JSG_REQUIRE(pub != nullptr, Error, "Failed to get ECDH public key");
+  point_conversion_form_t form = getFormat(format);
+  return ecPointToBuffer(js, group, pub, form);
+}
+
+void CryptoImpl::ECDHHandle::setPrivateKey(jsg::Lock& js, jsg::BufferSource key) {
+
+  JSG_REQUIRE(key.size() <= INT32_MAX, Error, "key is too big");
+
+  ncrypto::BignumPointer priv(key.asArrayPtr().begin(), key.size());
+  JSG_REQUIRE(priv, Error, "Failed to convert buffer to BN");
+
+  JSG_REQUIRE(
+      isKeyValidForCurve(group_, priv), Error, "Private key is not valid for specified curve.");
+
+  auto new_key = key_.clone();
+  JSG_REQUIRE(new_key, Error, "Internal error when setting private key");
+
+  bool result = new_key.setPrivateKey(priv);
+  priv.reset();
+
+  JSG_REQUIRE(result, Error, "Failed to convert BN to a private key");
+
+  ncrypto::ClearErrorOnReturn clear_error_on_return;
+
+  auto priv_key = new_key.getPrivateKey();
+  JSG_REQUIRE(priv_key, Error, "Failed to get ECDH private key");
+
+  auto pub = ncrypto::ECPointPointer::New(group_);
+  JSG_REQUIRE(pub, Error, "Internal error when initializing new EC point");
+
+  JSG_REQUIRE(pub.mul(group_, priv_key), Error, "Failed to generate ECDH public key");
+
+  JSG_REQUIRE(new_key.setPublicKey(pub), Error, "Failed to set generated public key");
+
+  key_ = std::move(new_key);
+  group_ = key_.getGroup();
+}
+
+jsg::BufferSource CryptoImpl::ECDHHandle::convertKey(
+    jsg::Lock& js, jsg::BufferSource key, kj::String curveName, kj::String format) {
+  ncrypto::ClearErrorOnReturn clear_error_on_return;
+
+  JSG_REQUIRE(key.size() <= INT32_MAX, Error, "key is too big");
+  if (key.size() == 0) {
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, 0);
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
+
+  int nid = OBJ_sn2nid(curveName.begin());
+  JSG_REQUIRE(nid != NID_undef, Error, "Invalid curve");
+
+  auto group = ncrypto::ECGroupPointer::NewByCurveName(nid);
+
+  auto pub = bufferToPoint(group, key);
+  JSG_REQUIRE(pub, Error, "Failed to convert buffer to EC_POINT");
+
+  point_conversion_form_t form = getFormat(format);
+
+  return ecPointToBuffer(js, group, pub, form);
+}
+
+#pragma endregion  // ECDH
+
 }  // namespace workerd::api::node

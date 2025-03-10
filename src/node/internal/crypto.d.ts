@@ -476,4 +476,19 @@ export class DiffieHellmanHandle {
   public getVerifyError(): number;
 }
 
+export type ECDHFormat = 'compressed' | 'uncompressed' | 'hybrid';
+export class ECDHHandle {
+  public constructor(curveName: string);
+  public computeSecret(otherPublicKey: ArrayBufferView): ArrayBuffer;
+  public generateKeys(): ArrayBuffer;
+  public getPrivateKey(): ArrayBuffer;
+  public getPublicKey(format: ECDHFormat): ArrayBuffer;
+  public setPrivateKey(key: ArrayBufferView): void;
+  public static convertKey(
+    key: ArrayBufferView,
+    curveName: string,
+    format: ECDHFormat
+  ): ArrayBuffer;
+}
+
 export function DiffieHellmanGroupHandle(name: string): DiffieHellmanHandle;
