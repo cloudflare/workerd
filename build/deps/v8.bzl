@@ -30,6 +30,7 @@ PATCHES = [
     "0022-Reset-code_range_-before-pointer-compression-cage.patch",
     "0023-Move-tear-down-in-IsolateGroup-Release-into-destruct.patch",
     "0024-Modify-where-to-look-for-fast_float-and-simdutf.patch",
+    "0025-expose-public_header-files.patch",
 ]
 
 # V8 and its dependencies

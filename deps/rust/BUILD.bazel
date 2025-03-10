@@ -2,7 +2,7 @@ load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_rust//crate_universe:defs.bzl", "crates_vendor", "render_config")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
-load("cargo.bzl", "PACKAGES")
+load("cargo.bzl", "ANNOTATIONS", "PACKAGES")
 
 selects.config_setting_group(
     name = "linux_x64",
@@ -57,6 +57,7 @@ CARGO_BAZEL = select({
 # To repin crates: bazel run //rust-deps:crates_vendor -- --repin
 crates_vendor(
     name = "crates_vendor",
+    annotations = ANNOTATIONS,
     cargo_bazel = CARGO_BAZEL,
     cargo_lockfile = "//deps/rust:Cargo.lock",
     generate_binaries = True,
