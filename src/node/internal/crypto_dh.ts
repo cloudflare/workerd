@@ -313,12 +313,6 @@ export function diffieHellman(options: DiffieHellmanKeyPair): Buffer {
       'must equal privateKey.asymmetricKeyType'
     );
   }
-  // if (
-  //   publicKey.asymmetricKeyType !== 'dh' ||
-  //   privateKey.asymmetricKeyType !== 'dh'
-  // ) {
-  //   throw new ERR_INVALID_ARG_TYPE('options', 'DiffieHellman keys', options);
-  // }
   const res = cryptoImpl.statelessDH(
     getKeyObjectHandle(privateKey),
     getKeyObjectHandle(publicKey)
