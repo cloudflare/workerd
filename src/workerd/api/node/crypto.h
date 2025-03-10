@@ -410,11 +410,42 @@ class CryptoImpl final: public jsg::Object {
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
 
+  // ECDH
+  class ECDHHandle final: public jsg::Object {
+   public:
+    ECDHHandle(ncrypto::ECKeyPointer key);
+    static jsg::Ref<ECDHHandle> constructor(jsg::Lock& js, kj::String curveName);
+
+    static jsg::BufferSource convertKey(
+        jsg::Lock& js, jsg::BufferSource key, kj::String curveName, kj::String format);
+
+    jsg::BufferSource computeSecret(jsg::Lock& js, jsg::BufferSource otherPublicKey);
+    void generateKeys();
+    jsg::BufferSource getPrivateKey(jsg::Lock& js);
+    jsg::BufferSource getPublicKey(jsg::Lock& js, kj::String format);
+    void setPrivateKey(jsg::Lock& js, jsg::BufferSource key);
+
+    JSG_RESOURCE_TYPE(ECDHHandle) {
+      JSG_STATIC_METHOD(convertKey);
+      JSG_METHOD(computeSecret);
+      JSG_METHOD(generateKeys);
+      JSG_METHOD(getPrivateKey);
+      JSG_METHOD(getPublicKey);
+      JSG_METHOD(setPrivateKey);
+    }
+
+   private:
+    ncrypto::ECKeyPointer key_;
+    const EC_GROUP* group_;
+  };
+
   JSG_RESOURCE_TYPE(CryptoImpl) {
     // DH
     JSG_NESTED_TYPE(DiffieHellmanHandle);
     JSG_METHOD(DiffieHellmanGroupHandle);
     JSG_METHOD(statelessDH);
+    // ECDH
+    JSG_NESTED_TYPE(ECDHHandle);
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);
@@ -472,5 +503,5 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::SignHandle, api::node::CryptoImpl::VerifyHandle,                      \
       api::node::CryptoImpl::CipherHandle, api::node::CryptoImpl::PublicPrivateCipherOptions,      \
       api::node::CryptoImpl::CipherInfo, api::node::CryptoImpl::GetCipherInfoOptions,              \
-      EW_CRYPTO_X509_ISOLATE_TYPES
+      api::node::CryptoImpl::ECDHHandle, EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node

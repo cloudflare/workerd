@@ -22,6 +22,8 @@ import {
   createDiffieHellmanGroup,
   getDiffieHellman,
   diffieHellman,
+  createECDH,
+  ECDH,
 } from 'node-internal:crypto_dh';
 
 import {
@@ -101,6 +103,8 @@ export {
   createDiffieHellmanGroup,
   getDiffieHellman,
   diffieHellman,
+  ECDH,
+  createECDH,
   // Random
   randomBytes,
   randomFillSync,
@@ -225,6 +229,8 @@ export default {
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  ECDH,
+  createECDH,
   // Keys,
   KeyObject,
   PublicKeyObject,
@@ -311,7 +317,7 @@ export default {
 //   * [x] crypto.Decipher
 //   * [x] crypto.DiffieHellman
 //   * [x] crypto.DiffieHellmanGroup
-//   * [ ] crypto.ECDH
+//   * [x] crypto.ECDH
 //   * [x] crypto.Hash
 //   * [x] crypto.Hmac
 //   * [x] crypto.KeyObject
@@ -338,8 +344,8 @@ export default {
 //   * [x] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
 //   * [x] crypto.createDiffieHellman(primeLength[, generator])
 //   * [x] crypto.createDiffieHellmanGroup(name)
-//   * [ ] crypto.createECDH(curveName)
-//   * [ ] crypto.diffieHellman(options)
+//   * [x] crypto.createECDH(curveName)
+//   * [x] crypto.diffieHellman(options)
 //   * [x] crypto.getDiffieHellman(groupName)
 // * Hash
 //   * [x] crypto.createHash(algorithm[, options])
