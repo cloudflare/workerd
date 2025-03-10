@@ -37,9 +37,11 @@ js_run_binary(
         ":types_worker",
         "//:node_modules/prettier",
         "//src/workerd/server:workerd",
-    ],
+        # Add explicit dependencies on type definition files
+    ] + glob(["defines/**/*.d.ts"]),
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
+    tags = ["manual"],  # Add manual tag so it doesn't build by default
     tool = ":build_types_bin",
     visibility = ["//visibility:public"],
 )
@@ -51,6 +53,20 @@ js_binary(
     ],
     entry_point = "scripts/build-worker.js",
     node_options = ["--enable-source-maps"],
+)
+
+# This is a wrapper target that only rebuilds the types when necessary
+js_run_binary(
+    name = "build_types_when_needed",
+    srcs = [
+        "scripts/config.capnp",
+        ":types_worker",
+        "//:node_modules/prettier",
+        "//src/workerd/server:workerd",
+    ] + glob(["defines/**/*.d.ts"]) + glob(["src/transforms/**/*.ts"]),
+    out_dirs = ["definitions"],
+    tool = ":build_types_bin",
+    visibility = ["//visibility:public"],
 )
 
 js_run_binary(

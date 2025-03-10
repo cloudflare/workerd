@@ -98,3 +98,10 @@ js_library(
     srcs = [".prettierrc.json"],
     visibility = ["//visibility:public"],
 )
+
+# Smart types target that only rebuilds when necessary
+alias(
+    name = "types",
+    actual = "//types:build_types_when_needed",
+    visibility = ["//visibility:public"],
+)
