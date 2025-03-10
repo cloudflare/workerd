@@ -157,11 +157,11 @@ class KvNamespace: public jsg::Object {
       get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<ArrayBuffer | null>;
       get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<ReadableStream | null>;
 
-      get<ExpectedValue = unknown>(key: Array<Key>, type: "text"): Promise<ExpectedValue | null>;
-      get<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<ExpectedValue | null>;
-      get<ExpectedValue = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<ExpectedValue | null>;
-      get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<ExpectedValue | null>;
-      get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<ExpectedValue | null>;
+      get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+      get<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, ExpectedValue | null>>;
+      get(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, string | null>>;
+      get(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, string | null>>;
+      get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, ExpectedValue | null>>;
 
       list<Metadata = unknown>(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<Metadata, Key>>;
 
@@ -177,12 +177,11 @@ class KvNamespace: public jsg::Object {
       getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"arrayBuffer">): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
       getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"stream">): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
 
-      getWithMetadata<ExpectedValue = unknown>(key: Array<Key>, type: "text"): Promise<ExpectedValue | null>;
-      getWithMetadata<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<ExpectedValue | null>;
-      getWithMetadata<ExpectedValue = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<ExpectedValue | null>;
-      getWithMetadata<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<ExpectedValue | null>;
-      getWithMetadata<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<ExpectedValue | null>;
-
+      getWithMetadata<Metadata = unknown>(key: Array<Key>, type: "text"): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+      getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+      getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
       delete(key: Key): Promise<void>;
     });
   }
