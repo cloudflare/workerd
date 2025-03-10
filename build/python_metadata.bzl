@@ -75,7 +75,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
     {
         "name": "development",
         "id": "dev",
-        "feature_flags": ["pythonWorkersDevPyodide", "pythonExternalPackages"],
+        "feature_flags": ["pythonWorkersDevPyodide"],
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "packages": "20240829.4",
