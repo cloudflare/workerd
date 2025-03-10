@@ -1066,6 +1066,79 @@ jsg::BufferSource CryptoImpl::privateEncrypt(jsg::Lock& js,
       });
 }
 
+namespace {
+ncrypto::Cipher getCipher(kj::OneOf<kj::String, int>& nameOrNid) {
+  KJ_SWITCH_ONEOF(nameOrNid) {
+    KJ_CASE_ONEOF(nid, int) {
+      return ncrypto::Cipher::FromNid(nid);
+    }
+    KJ_CASE_ONEOF(name, kj::String) {
+      std::string_view nameStr(name.cStr(), name.size());
+      return ncrypto::Cipher::FromName(nameStr);
+    }
+  }
+  return {};
+}
+}  // namespace
+
+jsg::Optional<CryptoImpl::CipherInfo> CryptoImpl::getCipherInfo(
+    kj::OneOf<kj::String, int> nameOrNid, CryptoImpl::GetCipherInfoOptions options) {
+
+  if (auto cipher = getCipher(nameOrNid)) {
+
+    int keyLength = cipher.getKeyLength();
+    int ivLength = cipher.getIvLength();
+
+    if (options.ivLength != kj::none || options.keyLength != kj::none) {
+      auto ctx = ncrypto::CipherCtxPointer::New();
+      if (!ctx.init(cipher, true)) return kj::none;
+      KJ_IF_SOME(len, options.keyLength) {
+        if (!ctx.setKeyLength(len)) return kj::none;
+        keyLength = len;
+      }
+      KJ_IF_SOME(len, options.ivLength) {
+        // For CCM modes, the IV may be between 7 and 13 bytes.
+        // For GCM and OCB modes, we'll check by attempting to
+        // set the value. For everything else, just check that
+        // check_len == iv_length.
+        switch (cipher.getMode()) {
+          case EVP_CIPH_CCM_MODE: {
+            if (len < 7 || len > 13) return kj::none;
+            break;
+          }
+          case EVP_CIPH_GCM_MODE: {
+            if (!ctx.setIvLength(len)) return kj::none;
+            break;
+          }
+          case EVP_CIPH_OCB_MODE: {
+            if (!ctx.setIvLength(len)) return kj::none;
+            break;
+          }
+          default:
+            if (len != ivLength) return kj::none;
+            break;
+        }
+        ivLength = len;
+      }
+    }
+
+    auto nameView = cipher.getName();
+    auto modeView = cipher.getModeLabel();
+    kj::String name = kj::str(kj::heapArray<char>(nameView.data(), nameView.size()));
+    kj::String mode = kj::str(kj::heapArray<char>(modeView.data(), modeView.size()));
+    return CipherInfo{
+      .name = kj::mv(name),
+      .nid = cipher.getNid(),
+      .blockSize = cipher.getBlockSize(),
+      .ivLength = ivLength,
+      .keyLength = keyLength,
+      .mode = kj::mv(mode),
+    };
+  }
+
+  return kj::none;
+}
+
 #pragma endregion  // Cipher/Decipher
 
 }  // namespace workerd::api::node
