@@ -104,7 +104,7 @@ uint32_t writeInto(jsg::Lock& js,
       kj::Array<uint16_t> tmpBuf = kj::heapArray<uint16_t>(dest.size() / sizeof(uint16_t));
       auto result = string.writeInto(js, tmpBuf, flags);
       kj::ArrayPtr<uint16_t> buf(reinterpret_cast<uint16_t*>(dest.begin()), result.written);
-      buf.copyFrom(tmp);
+      buf.copyFrom(tmpBuf);
 #else
       kj::ArrayPtr<uint16_t> buf(
           reinterpret_cast<uint16_t*>(dest.begin()), dest.size() / sizeof(uint16_t));
