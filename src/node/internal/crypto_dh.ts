@@ -38,6 +38,7 @@ import {
 import {
   ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
 import {
@@ -305,11 +306,12 @@ export function diffieHellman(options: DiffieHellmanKeyPair): Buffer {
       privateKey
     );
   }
-  if (
-    publicKey.asymmetricKeyType !== 'dh' ||
-    privateKey.asymmetricKeyType !== 'dh'
-  ) {
-    throw new ERR_INVALID_ARG_TYPE('options', 'DiffieHellman keys', options);
+  if (publicKey.asymmetricKeyType !== privateKey.asymmetricKeyType) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options.publicKey.asymmetricKeyType',
+      publicKey.asymmetricKeyType,
+      'must equal privateKey.asymmetricKeyType'
+    );
   }
   const res = cryptoImpl.statelessDH(
     getKeyObjectHandle(privateKey),

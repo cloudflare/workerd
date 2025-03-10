@@ -813,8 +813,13 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
 
 jsg::BufferSource CryptoImpl::statelessDH(
     jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey) {
-  KJ_ASSERT(privateKey->getAlgorithmName() == "dh"_kj, "Invalid private key algorithm");
-  KJ_ASSERT(publicKey->getAlgorithmName() == "dh"_kj, "Invalid public key algorithm");
+  auto privateKeyAlg = privateKey->getAlgorithmName();
+  auto publicKeyAlg = publicKey->getAlgorithmName();
+  KJ_ASSERT(privateKeyAlg == "dh"_kj || privateKeyAlg == "ec"_kj || privateKeyAlg == "x25519"_kj,
+      "Invalid private key algorithm");
+  KJ_ASSERT(publicKeyAlg == "dh"_kj || publicKeyAlg == "ec"_kj || publicKeyAlg == "x25519"_kj,
+      "Invalid public key algorithm");
+  KJ_ASSERT(privateKeyAlg == publicKeyAlg, "Mismatched public and private key types");
   KJ_IF_SOME(pubKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*publicKey->impl)) {
     KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
       auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
