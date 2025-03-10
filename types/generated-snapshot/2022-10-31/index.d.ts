@@ -5854,6 +5854,8 @@ interface RateLimit {
    */
   limit(options: RateLimitOptions): Promise<RateLimitOutcome>;
 }
+// Extend this in your apps to properly type Env
+interface Env {}
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
 // strips all `module` blocks.
@@ -6112,6 +6114,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export const env: Env;
 }
 declare module "cloudflare:sockets" {
   function _connect(
