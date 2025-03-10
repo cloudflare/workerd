@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
-from workers import Blob, File, FormData, Response, fetch
+from workers import Blob, File, FormData, Request, Response, fetch
 
 import pyodide.http
 from pyodide.ffi import to_js
@@ -324,6 +324,55 @@ async def can_use_cf_fetch_opts(env):
     assert text == "success"
 
 
+async def request_unit_tests(env):
+    req = Request("https://test.com", method=HTTPMethod.POST)
+    assert req.method == HTTPMethod.POST
+
+    # Verify that we can pass JS headers to Request
+    js_headers = js.Headers.new()
+    js_headers.set("foo", "bar")
+    req_with_headers = Request("http://example.com", headers=js_headers)
+    assert req_with_headers.headers["foo"] == "bar"
+
+    # Verify that we can pass a dictionary as headers to Request
+    req_with_headers = Request("http://example.com", headers={"aaaa": "test"})
+    assert req_with_headers.headers["aaaa"] == "test"
+
+    # Verify that BodyUserError is thrown correctly.
+    req_used_twice = Request(
+        "http://example.com", body='{"field": 42}', method=HTTPMethod.POST
+    )
+    data = await req_used_twice.json()
+    assert data["field"] == 42
+    try:
+        req_used_twice.clone()
+        raise ValueError("Expected to throw")  # noqa: TRY301
+    except Exception as exc:
+        assert exc.__class__.__name__ == "OSError"  # TODO: BodyUsedError when available
+
+    # Verify that duplicate header keys are returned correctly.
+    js_headers = js.Headers.new()
+    js_headers.append("Accept-encoding", "deflate")
+    js_headers.append("Accept-encoding", "gzip")
+    req_with_dup_headers = Request("http://example.com", headers=js_headers)
+    assert req_with_dup_headers.url == "http://example.com/"
+    encoding = req_with_dup_headers.headers.get_all("Accept-encoding")
+    assert "deflate" in encoding
+    assert "gzip" in encoding
+
+    # Verify that we can get a Blob.
+    req_for_blob = Request("http://example.com", body="foobar", method="POST")
+    blob = await req_for_blob.blob()
+    assert (await blob.text()) == "foobar"
+
+    # Verify that we can get a FormData back.
+    js_form_data = js.FormData.new()
+    js_form_data.append("foobar", 123)
+    req_with_form_data = Request("http://example.com", body=js_form_data, method="POST")
+    form_data = await req_with_form_data.form_data()
+    assert form_data["foobar"] == "123"
+
+
 async def test(ctrl, env):
     await can_return_custom_fetch_response(env)
     await can_modify_response(env)
@@ -340,3 +389,4 @@ async def test(ctrl, env):
     await can_request_form_data_blob(env)
     await replace_body_unit_tests(env)
     await can_use_cf_fetch_opts(env)
+    await request_unit_tests(env)
