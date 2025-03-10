@@ -45,7 +45,6 @@ import {
 } from 'node-internal:internal_types';
 
 import {
-  NodeError,
   ERR_INVALID_ARG_TYPE,
   ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
@@ -63,14 +62,8 @@ function validateParameters(
   info: ArrayLike;
   length: number;
 } {
-  // TODO(soon): Add support for KeyObject input.
   if (key instanceof KeyObject) {
-    throw new NodeError(
-      'ERR_METHOD_NOT_IMPLEMENTED',
-      'KeyObject support for hkdf() and ' +
-        'hkdfSync() is not yet implemented. Use ArrayBuffer, TypedArray, ' +
-        'DataView, or Buffer instead.'
-    );
+    key = key.export() as ArrayLike;
   }
 
   validateString(hash, 'digest');

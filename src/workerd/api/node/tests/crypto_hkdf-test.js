@@ -33,6 +33,7 @@ import {
   hkdf,
   hkdfSync,
   getHashes,
+  createSecretKey,
 } from 'node:crypto';
 
 export const hkdf_error_tests = {
@@ -259,5 +260,24 @@ export const hkdf_correctness_tests = {
     getHashes().forEach((hash) => {
       assert.ok(hkdfSync(hash, 'key', 'salt', 'info', 5));
     });
+  },
+};
+
+export const hkdf_secret_key = {
+  async test() {
+    const check = 'ae1db23b1051ea6bc1f182e5114d869c1b5e0b8d';
+
+    const key = createSecretKey('abcdef01020304', 'hex');
+    const result = hkdfSync('sha256', key, 'hello', 'there', 20);
+    assert.strictEqual(Buffer.from(result).toString('hex'), check);
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+
+    hkdf('sha256', key, 'hello', 'there', 20, (err, result) => {
+      if (err) return reject(err);
+      resolve(Buffer.from(result).toString('hex'));
+    });
+
+    assert.strictEqual(await promise, check);
   },
 };
