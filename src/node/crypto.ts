@@ -218,7 +218,90 @@ export function getFips(): boolean {
   return fips;
 }
 
+export const constants: Record<string, number> = Object.create(null) as Record<
+  string,
+  number
+>;
+Object.defineProperties(constants, {
+  DH_CHECK_P_NOT_SAFE_PRIME: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  DH_CHECK_P_NOT_PRIME: {
+    value: 1,
+    configurable: false,
+    writable: false,
+  },
+  DH_UNABLE_TO_CHECK_GENERATOR: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  DH_NOT_SUITABLE_GENERATOR: {
+    value: 8,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PKCS1_PADDING: {
+    value: 1,
+    configurable: false,
+    writable: false,
+  },
+  RSA_NO_PADDING: {
+    value: 3,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PKCS1_OAEP_PADDING: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  RSA_X931_PADDING: {
+    value: 5,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PKCS1_PSS_PADDING: {
+    value: 6,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PSS_SALTLEN_DIGEST: {
+    value: 1,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PSS_SALTLEN_MAX_SIGN: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PSS_SALTLEN_AUTO: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  POINT_CONVERSION_COMPRESSED: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  POINT_CONVERSION_UNCOMPRESSED: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  POINT_CONVERSION_HYBRID: {
+    value: 6,
+    configurable: false,
+    writable: false,
+  },
+});
+
 export default {
+  constants,
   // DH
   DiffieHellman,
   DiffieHellmanGroup,
@@ -318,7 +401,7 @@ export default {
 //   * [x] crypto.Sign
 //   * [x] crypto.Verify
 //   * [x] crypto.X509Certificate
-//   * [ ] crypto.constants
+//   * [x] crypto.constants
 //   * [ ] crypto.DEFAULT_ENCODING
 // * Primes
 //   * [x] crypto.checkPrime(candidate[, options], callback)
