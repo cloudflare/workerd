@@ -4,7 +4,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { PipelineTransformationEntrypoint } from 'cloudflare:pipeline-transform';
+import { PipelineTransformationEntrypoint } from 'cloudflare:pipelines';
 
 // this is how "Pipeline" would be implemented by the user
 const customTransform = class MyEntrypoint extends PipelineTransformationEntrypoint {
