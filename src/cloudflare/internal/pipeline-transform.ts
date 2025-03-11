@@ -82,7 +82,7 @@ export class PipelineTransformImpl<
 
   // called by the dispatcher to validate that run is properly implemented by the subclass
   // @ts-expect-error thinks ping is never used
-  private _ping(): Promise<void> {
+  private async _ping(): Promise<void> {
     // making sure the function was overridden by an implementing subclass
     if (this.run !== PipelineTransformImpl.prototype.run) {
       return Promise.resolve();
