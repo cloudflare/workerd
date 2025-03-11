@@ -118,6 +118,14 @@ class SqliteDatabase {
     virtual bool allowTransactions() const {
       return true;
     }
+
+    // Whether or not this query's rows read and written should be recorded to the SqliteObserver
+    // when the query is done. (In other words, determines whether this query is billed.)
+    //
+    // We don't bill for TRUSTED queries since they are used internally by the system.
+    virtual bool shouldAddQueryStats() const {
+      return false;
+    }
   };
 
   // Use as the `Regulator&` for queries that are fully trusted. As a general rule, this should

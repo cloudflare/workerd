@@ -834,9 +834,17 @@ KJ_TEST("SQLite observer addQueryStats") {
     uint64_t rowsWritten = 0;
   };
 
+  class TestQueryStatsRegulator: public SqliteDatabase::Regulator {
+   public:
+    bool shouldAddQueryStats() const override {
+      return true;
+    }
+  };
+
   TempDirOnDisk dir;
   SqliteDatabase::Vfs vfs(*dir);
   TestSqliteObserver sqliteObserver = TestSqliteObserver();
+  TestQueryStatsRegulator regulator;
   SqliteDatabase db(
       vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
 
@@ -851,9 +859,9 @@ KJ_TEST("SQLite observer addQueryStats") {
   int rowsWrittenBefore = sqliteObserver.rowsWritten;
   constexpr int dbRowCount = 3;
   {
-    db.run("INSERT INTO things (id) VALUES (10)");
-    db.run("INSERT INTO things (id) VALUES (11)");
-    db.run("INSERT INTO things (id) VALUES (12)");
+    db.run(regulator, "INSERT INTO things (id) VALUES (10)");
+    db.run(regulator, "INSERT INTO things (id) VALUES (11)");
+    db.run(regulator, "INSERT INTO things (id) VALUES (12)");
   }
   KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == dbRowCount);
@@ -861,7 +869,7 @@ KJ_TEST("SQLite observer addQueryStats") {
   rowsReadBefore = sqliteObserver.rowsRead;
   rowsWrittenBefore = sqliteObserver.rowsWritten;
   {
-    auto getCount = db.prepare("SELECT COUNT(*) FROM things");
+    auto getCount = db.prepare(regulator, "SELECT COUNT(*) FROM things");
     KJ_EXPECT(getCount.run().getInt(0) == dbRowCount);
   }
   KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
@@ -871,7 +879,7 @@ KJ_TEST("SQLite observer addQueryStats") {
   rowsReadBefore = sqliteObserver.rowsRead;
   rowsWrittenBefore = sqliteObserver.rowsWritten;
   {
-    auto stmt = db.prepare("SELECT * FROM things");
+    auto stmt = db.prepare(regulator, "SELECT * FROM things");
     auto query = stmt.run();
     KJ_ASSERT(!query.isDone());
     while (!query.isDone()) {
@@ -881,11 +889,24 @@ KJ_TEST("SQLite observer addQueryStats") {
   KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == dbRowCount);
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 0);
 
+  // Verify system queries don't affect stats.
+  rowsReadBefore = sqliteObserver.rowsRead;
+  rowsWrittenBefore = sqliteObserver.rowsWritten;
+  db.run("INSERT INTO things (id) VALUES (13)");
+  {
+    auto query = db.run("SELECT * FROM things");
+    while (!query.isDone()) {
+      query.nextRow();
+    }
+  }
+  KJ_EXPECT(sqliteObserver.rowsRead == rowsReadBefore);
+  KJ_EXPECT(sqliteObserver.rowsWritten == rowsWrittenBefore);
+
   // Verify addQueryStats works correctly when db is reset
   rowsReadBefore = sqliteObserver.rowsRead;
   rowsWrittenBefore = sqliteObserver.rowsWritten;
   {
-    auto query = db.run("INSERT INTO things (id) VALUES (100)");
+    auto query = db.run(regulator, "INSERT INTO things (id) VALUES (100)");
     db.reset();
   }
   KJ_EXPECT(sqliteObserver.rowsRead - rowsReadBefore == 1);

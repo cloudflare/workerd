@@ -10,15 +10,31 @@ namespace workerd {
 namespace {
 
 KJ_TEST("SQLite-KV") {
+  class TestSqliteObserver: public SqliteObserver {
+   public:
+    void addQueryStats(uint64_t read, uint64_t written) override {
+      rowsRead += read;
+      rowsWritten += written;
+    }
+
+    uint64_t rowsRead = 0;
+    uint64_t rowsWritten = 0;
+  };
+
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  TestSqliteObserver sqliteObserver;
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
   SqliteKv kv(db);
 
   kv.put("foo", "abc"_kj.asBytes());
   kv.put("bar", "def"_kj.asBytes());
   kv.put("baz", "123"_kj.asBytes());
   kv.put("qux", "321"_kj.asBytes());
+
+  KJ_EXPECT(sqliteObserver.rowsWritten == 4);
+  KJ_EXPECT(sqliteObserver.rowsRead == 0);
 
   {
     bool called = false;
@@ -29,6 +45,9 @@ KJ_TEST("SQLite-KV") {
     KJ_EXPECT(called);
   }
 
+  KJ_EXPECT(sqliteObserver.rowsWritten == 4);
+  KJ_EXPECT(sqliteObserver.rowsRead == 1);
+
   {
     bool called = false;
     KJ_EXPECT(kv.get("bar", [&](kj::ArrayPtr<const byte> value) {
@@ -38,9 +57,15 @@ KJ_TEST("SQLite-KV") {
     KJ_EXPECT(called);
   }
 
+  KJ_EXPECT(sqliteObserver.rowsWritten == 4);
+  KJ_EXPECT(sqliteObserver.rowsRead == 2);
+
   KJ_EXPECT(!kv.get("corge", [&](kj::ArrayPtr<const byte> value) {
     KJ_FAIL_EXPECT("should not call callback when no match", value.asChars());
   }));
+
+  KJ_EXPECT(sqliteObserver.rowsWritten == 4);
+  KJ_EXPECT(sqliteObserver.rowsRead == 2);
 
   auto list = [&](auto&&... params) {
     kj::Vector<kj::String> results;

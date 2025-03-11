@@ -15,6 +15,11 @@ namespace workerd {
 // of KJ exceptions which become internal errors.
 class SqliteKvRegulator: public SqliteDatabase::Regulator {
   void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
+
+  // We bill for KV operations as rows read/written.
+  virtual bool shouldAddQueryStats() const override {
+    return true;
+  }
 };
 
 // Class which implements KV storage on top of SQLite. This is intended to be used for Durable
@@ -123,9 +128,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
       ORDER BY key DESC
       LIMIT ?
     )");
-    // We don't pass in the regulator here because this query doesn't take user input, so
-    // it failing is always our fault.
-    SqliteDatabase::Statement stmtCountKeys = db.prepare(R"(
+    SqliteDatabase::Statement stmtCountKeys = db.prepare(regulator, R"(
       SELECT count(*) FROM _cf_KV
     )");
 
