@@ -1,0 +1,189 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yagiz Nizipli <yagiz@nizipli.com>
+Date: Tue, 18 Feb 2025 11:21:51 -0500
+Subject: add processed_characters option to WriteUtf8V2
+
+Bug: https://issues.chromium.org/issues/397377176
+
+Change-Id: I22086a675eb5565bef254a94ac1b6827a1c61a51
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/6276706
+Reviewed-by: Erik Corry <erikcorry@chromium.org>
+Auto-Submit: Yagiz Nizipli <yagiz@nizipli.com>
+Commit-Queue: Leszek Swirski <leszeks@chromium.org>
+Reviewed-by: Leszek Swirski <leszeks@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#98780}
+
+diff --git a/include/v8-primitive.h b/include/v8-primitive.h
+index 01773bcaff9b921e77ae70ef09d8a30c1637d533..b608535abae0ed2d5ee74a327203a4bffb9847fd 100644
+--- a/include/v8-primitive.h
++++ b/include/v8-primitive.h
+@@ -257,11 +257,14 @@ class V8_EXPORT String : public Name {
+    * \param buffer The buffer into which the string will be written.
+    * \param capacity The number of bytes available in the output buffer.
+    * \param flags Various flags that influence the behavior of this operation.
++   * \param processed_characters_return The number of processed characters from
++   * the buffer.
+    * \return The number of bytes copied to the buffer including the null
+    * terminator (if written).
+    */
+   size_t WriteUtf8V2(Isolate* isolate, char* buffer, size_t capacity,
+-                     int flags = WriteFlags::kNone) const;
++                     int flags = WriteFlags::kNone,
++                     size_t* processed_characters_return = nullptr) const;
+ 
+   /**
+    * A zero length string.
+diff --git a/src/api/api.cc b/src/api/api.cc
+index fccbd853f957617c79d97dbdd69fec7c39f65af5..43540a968a5b7e94c3e883d1bf8b5f51072bae05 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -6163,7 +6163,8 @@ void String::WriteOneByteV2(Isolate* v8_isolate, uint32_t offset,
+ }
+ 
+ size_t String::WriteUtf8V2(Isolate* v8_isolate, char* buffer, size_t capacity,
+-                           int flags) const {
++                           int flags,
++                           size_t* processed_characters_return) const {
+   auto str = Utils::OpenDirectHandle(this);
+   i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
+   API_RCS_SCOPE(i_isolate, String, WriteUtf8);
+@@ -6175,7 +6176,8 @@ size_t String::WriteUtf8V2(Isolate* v8_isolate, char* buffer, size_t capacity,
+   if (flags & String::WriteFlags::kReplaceInvalidUtf8) {
+     i_flags |= i::String::Utf8EncodingFlag::kReplaceInvalid;
+   }
+-  return i::String::WriteUtf8(i_isolate, str, buffer, capacity, i_flags);
++  return i::String::WriteUtf8(i_isolate, str, buffer, capacity, i_flags,
++                              processed_characters_return);
+ }
+ 
+ namespace {
+diff --git a/src/objects/string.cc b/src/objects/string.cc
+index e6ad2e286bdb05273f0152c214f34f332d67854c..a6013dd168a31e336e79ce5019b36482b6096211 100644
+--- a/src/objects/string.cc
++++ b/src/objects/string.cc
+@@ -1111,8 +1111,8 @@ void String::WriteToFlat2(SinkCharT* dst, Tagged<ConsString> src,
+ 
+ // static
+ size_t String::WriteUtf8(Isolate* isolate, DirectHandle<String> string,
+-                         char* buffer, size_t capacity,
+-                         Utf8EncodingFlags flags) {
++                         char* buffer, size_t capacity, Utf8EncodingFlags flags,
++                         size_t* processed_characters_return) {
+   DCHECK_IMPLIES(flags & Utf8EncodingFlag::kNullTerminate, capacity > 0);
+   DCHECK_IMPLIES(capacity > 0, buffer != nullptr);
+ 
+@@ -1121,19 +1121,22 @@ size_t String::WriteUtf8(Isolate* isolate, DirectHandle<String> string,
+   DisallowGarbageCollection no_gc;
+   FlatContent content = string->GetFlatContent(no_gc);
+   DCHECK(content.IsFlat());
+-  if (content.IsOneByte()) {
+-    return unibrow::Utf8::Encode<uint8_t>(
+-               content.ToOneByteVector(), buffer, capacity,
+-               flags & Utf8EncodingFlag::kNullTerminate,
+-               flags & Utf8EncodingFlag::kReplaceInvalid)
+-        .bytes_written;
+-  } else {
+-    return unibrow::Utf8::Encode<uint16_t>(
+-               content.ToUC16Vector(), buffer, capacity,
+-               flags & Utf8EncodingFlag::kNullTerminate,
+-               flags & Utf8EncodingFlag::kReplaceInvalid)
+-        .bytes_written;
++
++  auto encoding_result = content.IsOneByte()
++                             ? unibrow::Utf8::Encode<uint8_t>(
++                                   content.ToOneByteVector(), buffer, capacity,
++                                   flags & Utf8EncodingFlag::kNullTerminate,
++                                   flags & Utf8EncodingFlag::kReplaceInvalid)
++                             : unibrow::Utf8::Encode<uint16_t>(
++                                   content.ToUC16Vector(), buffer, capacity,
++                                   flags & Utf8EncodingFlag::kNullTerminate,
++                                   flags & Utf8EncodingFlag::kReplaceInvalid);
++
++  if (processed_characters_return != nullptr) {
++    *processed_characters_return = encoding_result.characters_processed;
+   }
++
++  return encoding_result.bytes_written;
+ }
+ 
+ template <typename SourceChar>
+diff --git a/src/objects/string.h b/src/objects/string.h
+index d456749e52cbbab17b95334bcc6fee18a597fe58..238310eb3d89a2e9206ff6f58c4fcfacd00bba33 100644
+--- a/src/objects/string.h
++++ b/src/objects/string.h
+@@ -553,7 +553,8 @@ V8_OBJECT class String : public Name {
+   using Utf8EncodingFlags = base::Flags<Utf8EncodingFlag>;
+   static size_t WriteUtf8(Isolate* isolate, DirectHandle<String> string,
+                           char* buffer, size_t capacity,
+-                          Utf8EncodingFlags flags);
++                          Utf8EncodingFlags flags,
++                          size_t* processed_characters_return = nullptr);
+ 
+   // Returns true if this string has no unpaired surrogates and false otherwise.
+   static inline bool IsWellFormedUnicode(Isolate* isolate,
+diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
+index 3e7f2aa117f64c9ef00bcd9f3492d4e39e5945f0..434a6f56ce6389f9eec463386e19cb61c08e6206 100644
+--- a/test/cctest/test-api.cc
++++ b/test/cctest/test-api.cc
+@@ -8607,6 +8607,7 @@ THREADED_TEST(StringWrite) {
+   char utf8buf[0xD800 * 3];
+   uint16_t wbuf[100];
+   size_t len;
++  size_t processed_characters;
+ 
+   memset(utf8buf, 0x1, 1000);
+   len = v8::String::Empty(isolate)->WriteUtf8V2(
+@@ -8621,8 +8622,10 @@ THREADED_TEST(StringWrite) {
+   CHECK_EQ(0, strcmp(utf8buf, "abc\xC3\xB0\xE2\x98\x83"));
+ 
+   memset(utf8buf, 0x1, 1000);
+-  len = str2->WriteUtf8V2(isolate, utf8buf, 8);
++  len = str2->WriteUtf8V2(isolate, utf8buf, 8, String::WriteFlags::kNone,
++                          &processed_characters);
+   CHECK_EQ(8, len);
++  CHECK_EQ(5, processed_characters);
+   CHECK_EQ(0, strncmp(utf8buf, "abc\xC3\xB0\xE2\x98\x83\x01", 9));
+ 
+   memset(utf8buf, 0x1, 1000);
+@@ -8828,8 +8831,10 @@ THREADED_TEST(StringWrite) {
+ 
+   memset(utf8buf, 0x1, sizeof(utf8buf));
+   utf8buf[5] = 'X';
+-  len = str->WriteUtf8V2(isolate, utf8buf, sizeof(utf8buf));
++  len = str->WriteUtf8V2(isolate, utf8buf, sizeof(utf8buf),
++                         String::WriteFlags::kNone, &processed_characters);
+   CHECK_EQ(5, len);
++  CHECK_EQ(5, processed_characters);
+   CHECK_EQ('X', utf8buf[5]);  // Test that the sixth character is untouched.
+   utf8buf[5] = '\0';
+   CHECK_EQ(0, strcmp(utf8buf, "abcde"));
+@@ -8846,6 +8851,29 @@ THREADED_TEST(StringWrite) {
+   str->WriteV2(isolate, 0, 0, nullptr);
+   len = str->WriteUtf8V2(isolate, nullptr, 0);
+   CHECK_EQ(0, len);
++
++  std::tuple<const char*, size_t, size_t> cases[] = {
++      {"\xC3\xA9", 0, 0},          // é (2-byte) but buffer is 0
++      {"\xC3\xA9", 1, 0},          // é (2-byte) but buffer is 1
++      {"\xE2\x82\xAC", 0, 0},      // € (3-byte) but buffer is 0
++      {"\xE2\x82\xAC", 1, 0},      // € (3-byte) but buffer is 1
++      {"\xE2\x82\xAC", 2, 0},      // € (3-byte) but buffer is 2
++      {"\xF0\x9F\x98\x81", 0, 0},  // 😁 (4-byte) but buffer is 0
++      {"\xF0\x9F\x98\x81", 1, 0},  // 😁 (4-byte) but buffer is 1
++      {"\xF0\x9F\x98\x81", 2, 0},  // 😁 (4-byte) but buffer is 2
++  };
++
++  for (const auto& test_case : cases) {
++    auto test_str =
++        String::NewFromUtf8(isolate, std::get<0>(test_case)).ToLocalChecked();
++    auto test_buffer_capacity = std::get<1>(test_case);
++    char test_buffer[4];
++    len =
++        test_str->WriteUtf8V2(isolate, test_buffer, test_buffer_capacity,
++                              String::WriteFlags::kNone, &processed_characters);
++    CHECK_EQ(std::get<2>(test_case), len);
++    CHECK_EQ(0, processed_characters);
++  }
+ }
+ 
+ static void Utf16Helper(LocalContext& context, const char* name,
