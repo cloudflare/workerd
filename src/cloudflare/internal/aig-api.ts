@@ -64,7 +64,12 @@ export type AIGatewayProviders =
   | 'google-ai-studio'
   | 'mistral'
   | 'grok'
-  | 'openrouter';
+  | 'openrouter'
+  | 'deepseek'
+  | 'cerebras'
+  | 'cartesia'
+  | 'elevenlabs'
+  | 'adobe-firefly';
 
 export type AIGatewayHeaders = {
   'cf-aig-metadata':
@@ -111,6 +116,31 @@ export class AiGateway {
   public constructor(fetcher: Fetcher, gatewayId: string) {
     this.#fetcher = fetcher;
     this.#gatewayId = gatewayId;
+  }
+
+  // eslint-disable-next-line
+  public async getUrl(provider: AIGatewayProviders | string): Promise<string> {
+    const res = await this.#fetcher.fetch(
+      `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/url/${provider}`,
+      {
+        method: 'GET',
+      }
+    );
+
+    switch (res.status) {
+      case 200: {
+        const data = (await res.json()) as { result: { url: string } };
+
+        return data.result.url;
+      }
+      default: {
+        const data = (await res.json()) as { errors: { message: string }[] };
+
+        throw new AiGatewayInternalError(
+          data.errors[0]?.message || 'Internal Error'
+        );
+      }
+    }
   }
 
   public async getLog(logId: string): Promise<AiGatewayLog> {
