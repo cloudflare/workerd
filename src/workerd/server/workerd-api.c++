@@ -201,10 +201,8 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
       kj::HttpHeaders headers(table);
 
-      // TODO: Point this at our production R2 bucket.
       kj::String url =
-          kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide_",
-              version, ".capnp.bin");
+          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
