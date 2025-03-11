@@ -19,6 +19,14 @@ namespace workerd {
 
 static thread_local IoContext* threadLocalRequest = nullptr;
 
+SuppressIoContextScope::SuppressIoContextScope(): cached(threadLocalRequest) {
+  threadLocalRequest = nullptr;
+}
+
+SuppressIoContextScope::~SuppressIoContextScope() noexcept(false) {
+  threadLocalRequest = cached;
+}
+
 static const kj::EventLoopLocal<int> threadId;
 
 static void* getThreadId() {
@@ -1012,8 +1020,7 @@ void IoContext::runInContextScope(Worker::LockType lockType,
   // common for child objects to contain pointers back to stuff owned by the parent that could
   // then be dangling.
   KJ_REQUIRE(threadId == getThreadId(), "IoContext cannot switch threads");
-  IoContext* previousRequest = threadLocalRequest;
-  KJ_DEFER(threadLocalRequest = previousRequest);
+  SuppressIoContextScope previousRequest;
   threadLocalRequest = this;
 
   worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
@@ -1166,12 +1173,9 @@ static constexpr auto kAsyncIoErrorMessage =
 IoContext& IoContext::current() {
   if (threadLocalRequest == nullptr) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
-    if (isolate == nullptr) {
-      KJ_FAIL_REQUIRE("there is no current request on this thread");
-    } else {
-      isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
-      throw jsg::JsExceptionThrown();
-    }
+    KJ_REQUIRE(isolate != nullptr, "there is no current request on this thread");
+    isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
+    throw jsg::JsExceptionThrown();
   } else {
     return *threadLocalRequest;
   }
