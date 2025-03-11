@@ -134,9 +134,7 @@ static const PythonConfig defaultConfig{
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
-}  // namespace
 
-namespace {
 kj::Path getPyodideBundleFileName(kj::StringPtr version) {
   return kj::Path(kj::str("pyodide_", version, ".capnp.bin"));
 }
@@ -266,6 +264,9 @@ struct WorkerdApi::Impl final {
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
+    if (maybeOwnedModuleRegistry != kj::none) {
+      jsgIsolate.setUsingNewModuleRegistry();
+    }
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
       if (features->getPythonWorkers()) {
         auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
@@ -463,6 +464,7 @@ kj::Array<kj::StringPtr> compileNamedExports(capnp::List<capnp::Text>::Reader na
 }
 }  // namespace
 
+// Part of the original module registry implementation.
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
     config::Worker::Module::Reader module,
     jsg::CompilationObserver& observer,
@@ -529,6 +531,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
   KJ_UNREACHABLE;
 }
 
+// Part of the original module registry implementation.
 void WorkerdApi::compileModules(jsg::Lock& lockParam,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
@@ -610,8 +613,6 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     api::registerModules(*modules, featureFlags);
 
-    // TODO(perf): we'd like to find a way to precompile these on server startup and use isolate
-    // cloning for faster worker creation.
     for (auto extension: extensions) {
       for (auto module: extension.getModules()) {
         modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
@@ -951,51 +952,27 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
   builder.setEvalCallback([](jsg::Lock& js, const auto& module, v8::Local<v8::Module> v8Module,
                               const auto& observer) -> jsg::Promise<jsg::Value> {
-    static constexpr auto handleDynamicImport =
-        [](kj::Own<const Worker> worker, const auto& module, jsg::V8Ref<v8::Module> v8Module,
-            const auto& observer, kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
-        -> kj::Promise<jsg::Promise<jsg::Value>> {
-      co_await kj::yield();
-      KJ_ASSERT(!IoContext::hasCurrent());
-      auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
+    // This callback is used when a module is evaluated to arrange evaluating
+    // the module outside of the current IoContext. Creating the
+    // SuppressIoContextScope here ensures that the current
+    // IoContext, if any, is moved out of the way while we are evaluating.
+    SuppressIoContextScope suppressIoContextScope;
+    KJ_ASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
 
-      co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
-        return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-          jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
-          return js.tryCatch([&] {
-            return js.toPromise(jsg::check(v8Module.getHandle(js)->Evaluate(js.v8Context())));
-          }, [&](jsg::Value&& exception) {
-            return js.rejectedPromise<jsg::Value>(kj::mv(exception));
-          });
-        });
-      });
-    };
-
-    // If there is an active IoContext, then we want to defer evaluation of the
-    // module to escape the current IoContext.
-    if (IoContext::hasCurrent()) {
-      auto& context = IoContext::current();
-      return context.awaitIo(js,
-          handleDynamicImport(kj::atomicAddRef(context.getWorker()), module, js.v8Ref(v8Module),
-              observer, jsg::AsyncContextFrame::currentRef(js)),
-          [](jsg::Lock& js, jsg::Promise<jsg::Value>&& result) { return kj::mv(result); });
-    }
-
-    // If there is no active IoContext at this point, then we can evaluate the module
-    // immediately.
     return js.tryCatch([&]() -> jsg::Promise<jsg::Value> {
       return js.toPromise(jsg::check(v8Module->Evaluate(js.v8Context())));
     }, [&](jsg::Value&& exception) { return js.rejectedPromise<jsg::Value>(kj::mv(exception)); });
   });
 
+  // Add the module bundles that are built into to runtime.
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
+  // Add the module bundles that are configured by the worker.
   jsg::modules::ModuleBundle::BundleBuilder bundleBuilder;
   bool firstEsm = true;
   bool hasPythonModules = false;
-  auto confModules = conf.getModules();
   using namespace workerd::api::pyodide;
-  for (auto def: confModules) {
+  for (auto def: conf.getModules()) {
     switch (def.which()) {
       case config::Worker::Module::ES_MODULE: {
         jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
@@ -1064,13 +1041,14 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
   builder.add(bundleBuilder.finish());
 
+  // Add the built-in module bundles that support python workers/pyodide.
   if (hasPythonModules) {
     jsg::modules::ModuleBundle::BuiltinBuilder pyodideBundleBuilder;
-    auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
-    auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
-    auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
-    auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
-    auto limiterSpecifier = "pyodide-internal:limiter"_url;
+    const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
+    const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
+    const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
+    const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
+    const auto limiterSpecifier = "pyodide-internal:limiter"_url;
 
     auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     // Inject metadata that the entrypoint module will read.

@@ -214,6 +214,14 @@ class IsolateBase {
     return *envAsyncContextKey;
   }
 
+  void setUsingNewModuleRegistry() {
+    usingNewModuleRegistry = true;
+  }
+
+  bool isUsingNewModuleRegistry() const {
+    return usingNewModuleRegistry;
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -266,6 +274,7 @@ class IsolateBase {
   bool nodeJsCompatEnabled = false;
   bool setToStringTag = false;
   bool allowTopLevelAwait = true;
+  bool usingNewModuleRegistry = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;

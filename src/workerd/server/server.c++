@@ -3093,6 +3093,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
       limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
       kj::mv(newModuleRegistry));
+
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
@@ -3303,57 +3304,54 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
 
-  {
-    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
-      lock.validateHandlers(errorReporter);
+  worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
+    lock.validateHandlers(errorReporter);
 
-      // Build `ctx.exports` based on the entrypoints reported by `validateHandlers()`.
-      kj::Vector<Global> ctxExports(
-          errorReporter.namedEntrypoints.size() + localActorConfigs.size());
+    // Build `ctx.exports` based on the entrypoints reported by `validateHandlers()`.
+    kj::Vector<Global> ctxExports(errorReporter.namedEntrypoints.size() + localActorConfigs.size());
 
-      // Start numbering loopback channels for stateless entrypoints after the last subrequest
-      // channel used by bindings.
-      uint nextSubrequestChannel =
-          subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      if (errorReporter.defaultEntrypoint != kj::none) {
-        ctxExports.add(Global{.name = kj::str("default"),
-          .value = Global::Fetcher{
-            .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
-      }
-      for (auto& ep: errorReporter.namedEntrypoints) {
-        ctxExports.add(Global{.name = kj::str(ep.key),
-          .value = Global::Fetcher{
-            .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
-      }
+    // Start numbering loopback channels for stateless entrypoints after the last subrequest
+    // channel used by bindings.
+    uint nextSubrequestChannel =
+        subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+    if (errorReporter.defaultEntrypoint != kj::none) {
+      ctxExports.add(Global{.name = kj::str("default"),
+        .value = Global::Fetcher{
+          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+    }
+    for (auto& ep: errorReporter.namedEntrypoints) {
+      ctxExports.add(Global{.name = kj::str(ep.key),
+        .value = Global::Fetcher{
+          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+    }
 
-      // Start numbering loopback channels for actor classes after the last actor channel used by
-      // bindings.
-      uint nextActorChannel = actorChannels.size();
-      for (auto& ns: localActorConfigs) {
-        decltype(Global::value) value;
-        KJ_SWITCH_ONEOF(ns.value) {
-          KJ_CASE_ONEOF(durable, Durable) {
-            value = Global::DurableActorNamespace{
-              .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
-          }
-          KJ_CASE_ONEOF(ephemeral, Ephemeral) {
-            value = Global::EphemeralActorNamespace{
-              .actorChannel = nextActorChannel++,
-            };
-          }
+    // Start numbering loopback channels for actor classes after the last actor channel used by
+    // bindings.
+    uint nextActorChannel = actorChannels.size();
+    for (auto& ns: localActorConfigs) {
+      decltype(Global::value) value;
+      KJ_SWITCH_ONEOF(ns.value) {
+        KJ_CASE_ONEOF(durable, Durable) {
+          value = Global::DurableActorNamespace{
+            .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
         }
-        ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+        KJ_CASE_ONEOF(ephemeral, Ephemeral) {
+          value = Global::EphemeralActorNamespace{
+            .actorChannel = nextActorChannel++,
+          };
+        }
       }
+      ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+    }
 
-      JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-        WorkerdApi::from(worker->getIsolate().getApi())
-            .compileGlobals(lock, ctxExports, ctxExportsHandle.getHandle(js), 1);
-      });
-
-      // As an optimization, drop this now while we have the lock.
-      { auto drop = kj::mv(ctxExportsHandle); }
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+      WorkerdApi::from(worker->getIsolate().getApi())
+          .compileGlobals(lock, ctxExports, ctxExportsHandle.getHandle(js), 1);
     });
-  }
+
+    // As an optimization, drop this now while we have the lock.
+    { auto drop = kj::mv(ctxExportsHandle); }
+  });
 
   auto linkCallback = [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
                           actorChannels = kj::mv(actorChannels),

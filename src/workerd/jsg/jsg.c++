@@ -6,6 +6,8 @@
 
 #include "setup.h"
 
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -287,6 +289,37 @@ JsSymbol Lock::symbolDispose() {
 }
 JsSymbol Lock::symbolAsyncDispose() {
   return IsolateBase::from(v8Isolate).getSymbolAsyncDispose();
+}
+
+kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
+  auto& isolate = IsolateBase::from(v8Isolate);
+  if (isolate.isUsingNewModuleRegistry()) {
+    return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
+        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN_ONLY);
+  }
+
+  // Use the original module registry implementation
+  auto registry = ModuleRegistry::from(*this);
+  KJ_ASSERT(registry != nullptr);
+  auto module = registry->resolveInternalImport(*this, specifier);
+  return jsg::JsObject(module.getHandle(*this).As<v8::Object>());
+}
+
+kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
+  auto& isolate = IsolateBase::from(v8Isolate);
+  if (isolate.isUsingNewModuleRegistry()) {
+    return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
+        *this, specifier, jsg::modules::ResolveContext::Type::BUNDLE);
+  }
+
+  auto moduleRegistry = jsg::ModuleRegistry::from(*this);
+  if (moduleRegistry == nullptr) return kj::none;
+  auto spec = kj::Path::parse(specifier);
+  auto& info = JSG_REQUIRE_NONNULL(
+      moduleRegistry->resolve(*this, spec), Error, kj::str("No such module: ", specifier));
+  auto module = info.module.getHandle(*this);
+  jsg::instantiateModule(*this, module);
+  return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
 void ExternalMemoryAdjustment::maybeDeferAdjustment(

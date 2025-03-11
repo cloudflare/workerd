@@ -2718,6 +2718,14 @@ class Lock {
   // Retrieve the worker environment.
   virtual kj::Maybe<Value> getWorkerEnv() = 0;
 
+  // Resolve an internalk module namespace from the given specifier.
+  // This variation can be used only for internal built-ins.
+  kj::Maybe<JsObject> resolveInternalModule(kj::StringPtr specifier);
+
+  // Resolve a module namespace from the given specifier.
+  // This variation includes modules from the worker bundle.
+  kj::Maybe<JsObject> resolveModule(kj::StringPtr specifier);
+
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock

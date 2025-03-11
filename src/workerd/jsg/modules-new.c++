@@ -296,7 +296,6 @@ class IsolateModuleRegistry final {
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
         return found.key.getHandle(js);
       }
-
       // No? That's OK, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
         return found.key.getHandle(js);
@@ -365,9 +364,7 @@ class IsolateModuleRegistry final {
   // Used to implement the synchronous dynamic import of modules in support of APIs
   // like the CommonJS require. Returns the instantiated/evaluated module namespace.
   // If an empty v8::MaybeLocal is returned and the default option is given, then an
-  // exception has been scheduled. In this case, module evaluation *is not permitted*
-  // to use promise microtasks. If module.evaluate() returns a pending promise the
-  // require will fail.
+  // exception has been scheduled.
   // Note that this returns the module namespace object. In CommonJS, the require()
   // function will actually return the default export from the module namespace object.
   v8::MaybeLocal<v8::Object> require(
@@ -378,41 +375,62 @@ class IsolateModuleRegistry final {
       auto module = entry.key.getHandle(js);
       auto status = module->GetStatus();
 
-      if (status == v8::Module::kEvaluated) {
+      // If status is kErrored, that means a prior attempt to evaluate the module
+      // failed. We simply propagate the same error here.
+      if (status == v8::Module::kErrored) {
+        js.throwException(JsValue(module->GetException()));
+      }
+
+      // TODO(new-module-registry): Circular dependencies should be fine
+      // when we are talking strictly about CJS/Node.js style modules.
+      // For ESM, it becomes more problematic because v8 will not allow
+      // us to grab the default export while the module is still evaluating.
+
+      if (entry.module.isEsm() && status == v8::Module::kEvaluating) {
+        JSG_FAIL_REQUIRE(Error, "Circular dependency when resolving module: ", specifier);
+      }
+
+      // If the module has already been evaluated, or is in the process of being
+      // evaluated, return the module namespace object directly. Note that if the
+      // module is a synthetic module, and status is kEvaluating, it is possible
+      // and likely that the namespace has not yet been fully evaluated and will
+      // be incomplete here. This allows CJS circular dependencies to be supported
+      // to a degree. Just like in Node.js, however, such circular dependencies
+      // can still be problematic depending on how they are used.
+      if (status == v8::Module::kEvaluated || status == v8::Module::kEvaluating) {
         return module->GetModuleNamespace().As<v8::Object>();
       }
-
-      if (status == v8::Module::kErrored) {
-        js.throwException(js.v8Ref(module->GetException()));
-      }
-
-      // TODO(soon): Node.js and other runtimes allow circular dependencies in sync require.
-      // We don't for a number of reasons but we should consider relaxing this restriction.
-      JSG_REQUIRE(status != v8::Module::kEvaluating, TypeError,
-          kj::str("Circular module dependency with synchronous require: ", specifier));
 
       // Evaluate the module and grab the default export from the module namespace.
       auto promise =
           check(entry.module.evaluate(js, module, observer, maybeEvalCallback)).As<v8::Promise>();
+
+      // Run the microtasks to ensure that any promises that happen to be scheduled
+      // during the evaluation of the top-level scope have a chance to be settled,
       js.runMicrotasks();
+
+      static const auto kTopLevelAwaitError =
+          "Use of top-level await in a synchronously required module is restricted to "
+          "promises that are resolved synchronously. This includes any top-level awaits "
+          "in the entrypoint module for a worker."_kj;
 
       switch (promise->State()) {
         case v8::Promise::kFulfilled: {
-          // This is what we want.
+          // This is what we want. The module namespace should be fully populated
+          // and evaluated at this point.
           return module->GetModuleNamespace().As<v8::Object>();
         }
         case v8::Promise::kRejected: {
           // Oops, there was an error. We should throw it.
-          js.throwException(js.v8Ref(promise->Result()));
+          js.throwException(JsValue(promise->Result()));
           break;
         }
         case v8::Promise::kPending: {
-          // If the promise is not fulfilled or rejected at this point, fail.
-          JSG_FAIL_REQUIRE(Error,
-              "The module evaluation did not complete synchronously. "
-              "This is not permitted for synchronous require(...). "
-              "Use await import(...) instead.");
-          break;
+          // The module evaluation could not complete in a single drain of the
+          // microtask queue. This means we've got a pending promise somwwhere
+          // that is being awaited preventing the module from being ready to
+          // go. We can't have that! Throw! Throw!
+          JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", specifier, "\".");
         }
       }
       KJ_UNREACHABLE;
@@ -914,7 +932,6 @@ void ModuleBundle::getBuiltInBundleFromCapnp(
   for (auto module: bundle.getModules()) {
     if (module.getType() == filter) {
       auto specifier = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
-
       switch (module.which()) {
         case workerd::jsg::Module::SRC: {
           builder.addEsm(specifier, module.getSrc().asChars());
@@ -1385,29 +1402,6 @@ Function<void()> Module::compileEvalFunction(Lock& js,
       JsValue(check(ref.getHandle(js)->Call(js.v8Context(), js.v8Context()->Global(), 0, nullptr)));
     });
   };
-}
-
-// ======================================================================================
-
-struct Module::EvaluatingScope::Impl final {
-  Module::EvaluatingScope& scope;
-  Impl(Module::EvaluatingScope& scope): scope(scope) {}
-  ~Impl() noexcept(false) {
-    KJ_DASSERT(&KJ_ASSERT_NONNULL(scope.maybeEvaluating) == this);
-    scope.maybeEvaluating = kj::none;
-  }
-};
-
-kj::Own<void> Module::EvaluatingScope::enterEvaluationScope(const Url& specifier) {
-  JSG_REQUIRE(maybeEvaluating == kj::none, Error,
-      kj::str("Module cannot be recursively evaluated: ", specifier));
-  auto impl = kj::heap<Impl>(*this);
-  maybeEvaluating = *impl;
-  return impl;
-}
-
-Module::EvaluatingScope::~EvaluatingScope() noexcept(false) {
-  KJ_DASSERT(maybeEvaluating == kj::none);
 }
 
 const Url ModuleBundle::BundleBuilder::BASE = "file:///"_url;

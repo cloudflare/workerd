@@ -320,14 +320,14 @@ class Module {
    public:
     EvaluatingScope() = default;
     KJ_DISALLOW_COPY_AND_MOVE(EvaluatingScope);
-    ~EvaluatingScope() noexcept(false);
-    kj::Own<void> enterEvaluationScope(const Url& specifier) KJ_WARN_UNUSED_RESULT;
+    bool enterEvaluationScope() {
+      if (evaluating) return false;
+      evaluating = true;
+      return true;
+    }
 
    private:
-    struct Impl;
-    KJ_DECLARE_NON_POLYMORPHIC(Impl);
-    kj::Maybe<Impl&> maybeEvaluating;
-    friend struct Impl;
+    bool evaluating = false;
   };
 
   // A CjsStyleModuleHandler is used for CommonJS style modules (including
@@ -343,9 +343,14 @@ class Module {
                const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
-        auto evaluating = evaluatingScope->enterEvaluationScope(specifier);
+        // A CJS module can only be evaluated once. Return early if evaluation
+        // has already been started.
+        if (!evaluatingScope->enterEvaluationScope()) {
+          return true;
+        }
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
         auto ext = alloc<T>(js, specifier);
+        ns.setDefault(js, ext->getExports(js));
         auto fn = Module::compileEvalFunction(js, source, name,
             JsObject(wrapper.wrap(js.v8Context(), kj::none, ext.addRef())), observer);
         fn(js);

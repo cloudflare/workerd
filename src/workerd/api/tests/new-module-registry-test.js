@@ -16,6 +16,20 @@ strictEqual(import.meta.url, 'file:///worker');
 // Verify that import.meta.main is true here.
 ok(import.meta.main);
 
+// When running in nodejs_compat_v2 mode, the globalThis.Buffer
+// and globalThis.process properties are resolved from the module
+// registry. Let's make sure we get good values here.
+strictEqual(typeof globalThis.Buffer, 'function');
+strictEqual(globalThis.Buffer, Buffer);
+ok(globalThis.process);
+strictEqual(typeof globalThis.process, 'object');
+
+// Our internal implementation of console.log depend on the module registry
+// to get the node-internal:internal_inspect module. This console.log makes
+// sure that works correctly without crashing when using the new module
+// registry implementation.
+console.log(import.meta);
+
 // Verify that import.meta.resolve provides correct results here.
 // The input should be interpreted as a URL and normalized according
 // to the rules in the WHATWG URL specification.
@@ -46,6 +60,11 @@ strictEqual(Buffer.from(data.default).toString(), 'abcdef');
 import * as json from 'json';
 deepStrictEqual(json.default, { foo: 1 });
 
+// Synchronously resolved promises can be awaited.
+await Promise.resolve();
+
+// These dynamics imports can be top-level awaited because they
+// are immediately rejected with errors.
 await rejects(import('invalid-json'), {
   message: /Unexpected non-whitespace character after JSON/,
 });
