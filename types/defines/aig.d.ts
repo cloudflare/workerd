@@ -42,36 +42,41 @@ export type AiGatewayLog = {
 };
 
 export type AIGatewayProviders =
-  | 'workers-ai'
-  | 'anthropic'
-  | 'aws-bedrock'
-  | 'azure-openai'
-  | 'google-vertex-ai'
-  | 'huggingface'
-  | 'openai'
-  | 'perplexity-ai'
-  | 'replicate'
-  | 'groq'
-  | 'cohere'
-  | 'google-ai-studio'
-  | 'mistral'
-  | 'grok'
-  | 'openrouter';
+  | "workers-ai"
+  | "anthropic"
+  | "aws-bedrock"
+  | "azure-openai"
+  | "google-vertex-ai"
+  | "huggingface"
+  | "openai"
+  | "perplexity-ai"
+  | "replicate"
+  | "groq"
+  | "cohere"
+  | "google-ai-studio"
+  | "mistral"
+  | "grok"
+  | "openrouter"
+  | "deepseek"
+  | "cerebras"
+  | "cartesia"
+  | "elevenlabs"
+  | "adobe-firefly";
 
 export type AIGatewayHeaders = {
-  'cf-aig-metadata':
+  "cf-aig-metadata":
     | Record<string, number | string | boolean | null | bigint>
     | string;
-  'cf-aig-custom-cost':
+  "cf-aig-custom-cost":
     | { per_token_in?: number; per_token_out?: number }
     | { total_cost?: number }
     | string;
-  'cf-aig-cache-ttl': number | string;
-  'cf-aig-skip-cache': boolean | string;
-  'cf-aig-cache-key': string;
-  'cf-aig-collect-log': boolean | string;
+  "cf-aig-cache-ttl": number | string;
+  "cf-aig-skip-cache": boolean | string;
+  "cf-aig-cache-key": string;
+  "cf-aig-collect-log": boolean | string;
   Authorization: string;
-  'Content-Type': string;
+  "Content-Type": string;
   [key: string]: string | number | boolean | object;
 };
 
@@ -88,5 +93,8 @@ export interface AiGatewayLogNotFound extends Error {}
 export declare abstract class AiGateway {
   patchLog(logId: string, data: AiGatewayPatchLog): Promise<void>;
   getLog(logId: string): Promise<AiGatewayLog>;
-  run(data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[]): Promise<Response>;
+  run(
+    data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[]
+  ): Promise<Response>;
+  getUrl(provider: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }

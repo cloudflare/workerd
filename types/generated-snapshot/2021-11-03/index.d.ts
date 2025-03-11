@@ -4363,7 +4363,12 @@ type AIGatewayProviders =
   | "google-ai-studio"
   | "mistral"
   | "grok"
-  | "openrouter";
+  | "openrouter"
+  | "deepseek"
+  | "cerebras"
+  | "cartesia"
+  | "elevenlabs"
+  | "adobe-firefly";
 type AIGatewayHeaders = {
   "cf-aig-metadata":
     | Record<string, number | string | boolean | null | bigint>
@@ -4399,6 +4404,7 @@ declare abstract class AiGateway {
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
   ): Promise<Response>;
+  getUrl(provider: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
 interface BasicImageTransformations {
   /**
