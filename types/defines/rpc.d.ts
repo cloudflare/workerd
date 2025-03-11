@@ -1,6 +1,3 @@
-// Extend this in your apps to properly type Env
-interface Env {}
-
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
 // strips all `module` blocks.
@@ -242,15 +239,8 @@ declare module "cloudflare:workers" {
   };
 
   export abstract class WorkflowStep {
-    do<T extends Rpc.Serializable<T>>(
-      name: string,
-      callback: () => Promise<T>
-    ): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(
-      name: string,
-      config: WorkflowStepConfig,
-      callback: () => Promise<T>
-    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(name: string, callback: () => Promise<T>): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
   }
@@ -267,11 +257,6 @@ declare module "cloudflare:workers" {
 
     constructor(ctx: ExecutionContext, env: Env);
 
-    run(
-      event: Readonly<WorkflowEvent<T>>,
-      step: WorkflowStep
-    ): Promise<unknown>;
+    run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
   }
-
-  export const env: Env;
 }
