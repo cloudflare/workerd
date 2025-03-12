@@ -344,7 +344,6 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   /**
    * DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
    * Only applies to the deprecated v1 alpha databases.
-   * @deprecated
    */
   public async dump(): Promise<ArrayBuffer> {
     const response = await this._wrappedFetch('http://d1/dump', {
