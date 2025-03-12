@@ -995,7 +995,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
 };
 
-// The SuppressIoContextScope utilty is used to temporarily suppress the active IoContext
+// The SuppressIoContextScope utility is used to temporarily suppress the active IoContext
 // on the current thread while it is in scope.
 struct SuppressIoContextScope {
   IoContext* cached;

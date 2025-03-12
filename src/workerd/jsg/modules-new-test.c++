@@ -1600,15 +1600,17 @@ KJ_TEST("Using a registry from multiple threads works") {
   static constexpr auto makeThread = [](ModuleRegistry& registry) {
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
     kj::Thread thread([&registry, fulfiller = kj::mv(paf.fulfiller)] {
-      PREAMBLE([&](Lock& js) {
-        CompilationObserver compilationObserver;
-        auto attached = registry.attachToIsolate(js, compilationObserver);
-        js.tryCatch([&] {
-          auto val = ModuleRegistry::resolve(js, "file:///foo");
-          KJ_ASSERT(val.isNumber());
-        }, [&](Value exception) { js.throwException(kj::mv(exception)); });
-        fulfiller->fulfill();
-      });
+      {
+        PREAMBLE([&](Lock& js) {
+          CompilationObserver compilationObserver;
+          auto attached = registry.attachToIsolate(js, compilationObserver);
+          js.tryCatch([&] {
+            auto val = ModuleRegistry::resolve(js, "file:///foo");
+            KJ_ASSERT(val.isNumber());
+          }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+        });
+      }
+      fulfiller->fulfill();
     });
     thread.detach();
     return kj::mv(paf.promise);

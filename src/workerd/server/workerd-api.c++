@@ -264,6 +264,9 @@ struct WorkerdApi::Impl final {
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
+    // maybeOwnedModuleRegistry is only set when using the
+    // new module registry implementation. When that is the
+    // case we also need to tell JSG.
     if (maybeOwnedModuleRegistry != kj::none) {
       jsgIsolate.setUsingNewModuleRegistry();
     }

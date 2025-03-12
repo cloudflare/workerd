@@ -2718,7 +2718,7 @@ class Lock {
   // Retrieve the worker environment.
   virtual kj::Maybe<Value> getWorkerEnv() = 0;
 
-  // Resolve an internalk module namespace from the given specifier.
+  // Resolve an internal module namespace from the given specifier.
   // This variation can be used only for internal built-ins.
   kj::Maybe<JsObject> resolveInternalModule(kj::StringPtr specifier);
 

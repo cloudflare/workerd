@@ -1875,7 +1875,7 @@ void Worker::handleLog(jsg::Lock& js,
     auto colors =
         COLOR_MODE == ColorMode::ENABLED || (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
-    static constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
+    constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
     auto inspectModule = KJ_ASSERT_NONNULL(js.resolveInternalModule(kSpecifier));
     v8::Local<v8::Value> formatLogVal = inspectModule.get(js, "formatLog"_kj);
     KJ_ASSERT(formatLogVal->IsFunction());

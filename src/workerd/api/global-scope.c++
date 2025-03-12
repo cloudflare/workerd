@@ -872,7 +872,7 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
 
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
   KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
-  static const auto kSpecifier = "node:buffer"_kj;
+  constexpr auto kSpecifier = "node:buffer"_kj;
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     auto def = module.get(js, "default"_kj);
     auto obj = KJ_ASSERT_NONNULL(def.tryCast<jsg::JsObject>());
@@ -889,7 +889,7 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
 
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
-  static const auto kSpecifier = "node:process"_kj;
+  constexpr auto kSpecifier = "node:process"_kj;
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     auto def = module.get(js, "default"_kj);
     JSG_REQUIRE(def.isObject(), TypeError, "Invalid node:process implementation");
