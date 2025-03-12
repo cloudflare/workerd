@@ -15,6 +15,13 @@ wpt_test(
 )
 
 wpt_test(
+    name = "urlpattern-standard",
+    autogates = ["workerd-autogate-urlpattern"],
+    config = "urlpattern-standard-test.ts",
+    wpt_directory = "@wpt//:urlpattern",
+)
+
+wpt_test(
     name = "dom/abort",
     config = "dom/abort-test.ts",
     wpt_directory = "@wpt//:dom/abort",

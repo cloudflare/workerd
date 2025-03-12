@@ -19,9 +19,13 @@
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/url-standard.h>
+#include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/rtti.h>
+
+// TODO(soon): Remove this once URLPattern autogate has been removed.
+#include <workerd/util/autogate.h>
 
 #include <kj/test.h>
 
@@ -31,6 +35,7 @@ namespace workerd::api {
 namespace {
 
 KJ_TEST("WorkerGlobalScope") {
+  util::Autogate::initAutogate({});
   jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
   builder.structure<WorkerGlobalScope>();
   KJ_EXPECT(builder.structure("workerd::api::Event"_kj) != kj::none);
@@ -38,6 +43,7 @@ KJ_TEST("WorkerGlobalScope") {
 }
 
 KJ_TEST("ServiceWorkerGlobalScope") {
+  util::Autogate::initAutogate({});
   jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
   builder.structure<ServiceWorkerGlobalScope>();
   KJ_EXPECT(builder.structure("workerd::api::DurableObjectId"_kj) != kj::none);
