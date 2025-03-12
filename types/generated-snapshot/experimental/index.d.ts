@@ -2965,6 +2965,7 @@ interface SqlStorage {
   ): SqlStorageCursor<T>;
   prepare(query: string): SqlStorageStatement;
   ingest(query: string): SqlStorageIngestResult;
+  setMaxPageCountForTest(count: number): void;
   get databaseSize(): number;
   Cursor: typeof SqlStorageCursor;
   Statement: typeof SqlStorageStatement;

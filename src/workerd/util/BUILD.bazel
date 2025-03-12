@@ -262,6 +262,8 @@ kj_test(
     src = "sqlite-test.c++",
     deps = [
         ":sqlite",
+        "//src/workerd/io:io-gate",
+        "@sqlite3",
     ],
 )
 
