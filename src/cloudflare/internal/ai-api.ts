@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
+import { AutoRAG } from 'cloudflare-internal:autorag-api';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -247,18 +248,18 @@ export class Ai {
 
   public async toMarkdown(
     files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions }
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse[]>;
   public async toMarkdown(
     files: {
       name: string;
       blob: Blob;
     },
-    options?: { gateway?: GatewayOptions }
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse>;
   public async toMarkdown(
     files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions }
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse | ConversionResponse[]> {
     const input = Array.isArray(files) ? files : [files];
 
@@ -287,42 +288,52 @@ export class Ai {
 
     const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
 
-    switch (res.status) {
-      case 200: {
-        const data = (await res.json()) as { result: ConversionResponse[] };
+    if (!res.ok) {
+      const content = await res.text();
+      let parsedContent;
 
-        if (data.result.length === 0) {
-          throw new AiInternalError(
-            'Internal Error Converting files into Markdown'
-          );
-        }
-
-        // If the user sent a list of files, return an array of results, otherwise, return just the first object
-        if (Array.isArray(files)) {
-          return data.result;
-        }
-
-        const obj = data.result.at(0);
-        if (!obj) {
-          throw new AiInternalError(
-            'Internal Error Converting files into Markdown'
-          );
-        }
-
-        return obj;
+      try {
+        parsedContent = JSON.parse(content) as {
+          errors: { message: string }[];
+        };
+      } catch {
+        throw new AiInternalError(content);
       }
-      default: {
-        const data = (await res.json()) as { errors: { message: string }[] };
 
-        throw new AiInternalError(
-          data.errors.at(0)?.message || 'Internal Error'
-        );
-      }
+      throw new AiInternalError(
+        parsedContent.errors.at(0)?.message || 'Internal Error'
+      );
     }
+
+    const data = (await res.json()) as { result: ConversionResponse[] };
+
+    if (data.result.length === 0) {
+      throw new AiInternalError(
+        'Internal Error Converting files into Markdown'
+      );
+    }
+
+    // If the user sent a list of files, return an array of results, otherwise, return just the first object
+    if (Array.isArray(files)) {
+      return data.result;
+    }
+
+    const obj = data.result.at(0);
+    if (!obj) {
+      throw new AiInternalError(
+        'Internal Error Converting files into Markdown'
+      );
+    }
+
+    return obj;
   }
 
   public gateway(gatewayId: string): AiGateway {
     return new AiGateway(this.fetcher, gatewayId);
+  }
+
+  public autorag(autoragId: string): AutoRAG {
+    return new AutoRAG(this.fetcher, autoragId);
   }
 }
 

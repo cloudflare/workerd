@@ -860,6 +860,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  autorag(autoragId: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
@@ -874,13 +875,13 @@ export declare abstract class Ai<
   public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   public toMarkdown(
     files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions }
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse[]>;
   public toMarkdown(
     files: {
       name: string;
       blob: Blob;
     },
-    options?: { gateway?: GatewayOptions }
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse>;
 }

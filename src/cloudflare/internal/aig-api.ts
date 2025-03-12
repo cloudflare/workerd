@@ -109,6 +109,24 @@ export class AiGatewayLogNotFound extends Error {
   }
 }
 
+async function parseError(
+  res: Response,
+  defaultMsg = 'Internal Error',
+  errorCls = AiGatewayInternalError
+): Promise<Error> {
+  const content = await res.text();
+
+  try {
+    const parsedContent = JSON.parse(content) as {
+      errors: { message: string }[];
+    };
+
+    return new errorCls(parsedContent.errors.at(0)?.message || defaultMsg);
+  } catch {
+    return new AiGatewayInternalError(content);
+  }
+}
+
 export class AiGateway {
   readonly #fetcher: Fetcher;
   readonly #gatewayId: string;
@@ -119,28 +137,19 @@ export class AiGateway {
   }
 
   // eslint-disable-next-line
-  public async getUrl(provider: AIGatewayProviders | string): Promise<string> {
+  public async getUrl(provider?: AIGatewayProviders | string): Promise<string> {
     const res = await this.#fetcher.fetch(
-      `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/url/${provider}`,
-      {
-        method: 'GET',
-      }
+      `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/url/${provider ?? 'universal'}`,
+      { method: 'GET' }
     );
 
-    switch (res.status) {
-      case 200: {
-        const data = (await res.json()) as { result: { url: string } };
-
-        return data.result.url;
-      }
-      default: {
-        const data = (await res.json()) as { errors: { message: string }[] };
-
-        throw new AiGatewayInternalError(
-          data.errors[0]?.message || 'Internal Error'
-        );
-      }
+    if (!res.ok) {
+      throw await parseError(res);
     }
+
+    const data = (await res.json()) as { result: { url: string } };
+
+    return data.result.url;
   }
 
   public async getLog(logId: string): Promise<AiGatewayLog> {
@@ -161,18 +170,10 @@ export class AiGateway {
         };
       }
       case 404: {
-        const data = (await res.json()) as { errors: { message: string }[] };
-
-        throw new AiGatewayLogNotFound(
-          data.errors[0]?.message || 'Log Not Found'
-        );
+        throw await parseError(res, 'Log Not Found', AiGatewayLogNotFound);
       }
       default: {
-        const data = (await res.json()) as { errors: { message: string }[] };
-
-        throw new AiGatewayInternalError(
-          data.errors[0]?.message || 'Internal Error'
-        );
+        throw await parseError(res);
       }
     }
   }
@@ -194,18 +195,10 @@ export class AiGateway {
         return;
       }
       case 404: {
-        const data = (await res.json()) as { errors: { message: string }[] };
-
-        throw new AiGatewayLogNotFound(
-          data.errors[0]?.message || 'Log Not Found'
-        );
+        throw await parseError(res, 'Log Not Found', AiGatewayLogNotFound);
       }
       default: {
-        const data = (await res.json()) as { errors: { message: string }[] };
-
-        throw new AiGatewayInternalError(
-          data.errors[0]?.message || 'Internal Error'
-        );
+        throw await parseError(res);
       }
     }
   }
