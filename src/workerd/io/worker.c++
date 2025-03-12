@@ -610,7 +610,7 @@ struct Worker::Isolate::Impl {
           i.get()->contextDestroyed(context.getHandle(*lock));
         }
         { auto drop = kj::mv(context); }
-        lock->v8Isolate->ContextDisposedNotification(false);
+        lock->v8Isolate->ContextDisposedNotification(v8::ContextDependants::kNoDependants);
       });
     }
 
