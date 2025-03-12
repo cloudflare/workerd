@@ -1568,6 +1568,7 @@ struct TailStreamWriterState {
       onsetEvent.copyTo(eventsBuilder[0]);
       auto result = co_await builder.send();
       if (!result.hasPipeline()) {
+        KJ_LOG(WARNING, "pump - tail worker not interested in events");
         // If we don't have a pipeline result at this point, then the
         // tail worker is not interested in events. Let's clear the
         // capability and any events that may have been queued..
@@ -1575,6 +1576,7 @@ struct TailStreamWriterState {
         current.queue.clear();
         co_return;
       }
+      KJ_LOG(WARNING, "pump - tail worker *is* interested in events");
       // We have a pipeline! Let's replace our initial then proceed to
       // deliver all the queued events (if any).
       current.capability = result.getPipeline();
@@ -1586,6 +1588,7 @@ struct TailStreamWriterState {
     // If we got this far then we have a handler for all of our events.
     // Deliver streaming tail events in batches if possible.
     while (!current.queue.empty()) {
+      KJ_LOG(WARNING, "check the queue and send", current.queue.size());
       auto builder = cap.reportRequest();
       auto eventsBuilder = builder.initEvents(current.queue.size());
       size_t n = 0;
@@ -1610,6 +1613,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       // the TailStreamWriterState for this strema to actually handle the event.
       [state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks)](
           IoContext& ioContext, tracing::TailEvent&& event) mutable {
+
     KJ_SWITCH_ONEOF(state->inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
         // The tail stream has already been closed because we have received either
@@ -1623,6 +1627,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // to start each of our tail working sessions.
         KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
 
+        KJ_LOG(WARNING, "tailstreamwriter - pending", event.spanId);
         // Transitions into the active state by grabbing the pending client
         // capability.
         state->inner = KJ_MAP(wi, pending) {
@@ -1638,6 +1643,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         state->reportImpl(kj::mv(event));
       }
       KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
+        KJ_LOG(WARNING, "tailstreamwriter - active", event.spanId);
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
         auto final = event.event.is<tracing::Outcome>() || event.event.is<tracing::Hibernate>();
@@ -3791,11 +3797,12 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> sendTraces(SendTracesContext context) override {
-      KJ_LOG(WARNING, "sendTraces()");
+      KJ_LOG(WARNING, "EventDispatcherImpl - sendTraces()");
       throwUnsupported();
     }
 
     kj::Promise<void> prewarm(PrewarmContext context) override {
+      KJ_LOG(WARNING, "EventDispatcherImpl - prewarm()");
       throwUnsupported();
     }
 
@@ -3808,11 +3815,12 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> queue(QueueContext context) override {
+      KJ_LOG(WARNING, "EventDispatcherImpl - queue()");
       throwUnsupported();
     }
 
     kj::Promise<void> jsRpcSession(JsRpcSessionContext context) override {
-      KJ_LOG(WARNING, "jsRpcSession()");
+      KJ_LOG(WARNING, "EventDispatcherImpl - jsRpcSession()");
       auto customEvent = kj::heap<api::JsRpcSessionCustomEventImpl>(
           api::JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
 
@@ -3827,7 +3835,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-      KJ_LOG(WARNING, "tailStreamSession()");
+      KJ_LOG(WARNING, "EventDispatcherImpl - tailStreamSession()");
       auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;

@@ -15,6 +15,7 @@ export default {
     console.log('tail in worker b');
     console.log(...args);
     return (...args) => {
+      console.log("this is the tail stream")
       console.log(...args);
     };
   },

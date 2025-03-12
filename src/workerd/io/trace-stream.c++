@@ -900,6 +900,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
+  KJ_LOG(WARNING, "here 2");
 
   KJ_DEFER({
     if (revokePaf.fulfiller->isWaiting()) {
@@ -920,9 +921,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
 
   this->capFulfiller->fulfill(kj::mv(cap));
 
+  // TODO: This is where the error is coming from!
+  KJ_LOG(WARNING, "here");
   try {
     co_await sent.ignoreResult().exclusiveJoin(kj::mv(completionPaf.promise));
   } catch (...) {
+    KJ_LOG(WARNING, "catch");
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(kj::cp(e));
