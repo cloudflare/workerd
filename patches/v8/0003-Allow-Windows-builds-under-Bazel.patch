@@ -5,7 +5,7 @@ Subject: Allow Windows builds under Bazel
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 967f7bbfb2810366de89b7a7a90f284efab6c9c6..bfe3365942400fc77f346f2138ac31014f1020aa 100644
+index 967f7bbfb2810366de89b7a7a90f284efab6c9c6..702648004a7c68721c80e7b43cdcd355ceb16710 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -3829,6 +3829,8 @@ filegroup(

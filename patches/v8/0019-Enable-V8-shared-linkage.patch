@@ -5,7 +5,7 @@ Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index bf957ac52fc0d99ec4c18b325bef455e1c92c4c3..0b95fa690001e06ef39227c66dbd0866d33b2926 100644
+index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad700f1c400 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -1372,6 +1372,7 @@ filegroup(
@@ -41,7 +41,7 @@ index bf957ac52fc0d99ec4c18b325bef455e1c92c4c3..0b95fa690001e06ef39227c66dbd0866
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -3909,6 +3906,7 @@ filegroup(
+@@ -3907,6 +3904,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -49,7 +49,7 @@ index bf957ac52fc0d99ec4c18b325bef455e1c92c4c3..0b95fa690001e06ef39227c66dbd0866
      ],
  )
  
-@@ -4019,6 +4017,10 @@ filegroup(
+@@ -4017,6 +4015,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -60,7 +60,7 @@ index bf957ac52fc0d99ec4c18b325bef455e1c92c4c3..0b95fa690001e06ef39227c66dbd0866
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4036,6 +4038,7 @@ filegroup(
+@@ -4034,6 +4036,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",

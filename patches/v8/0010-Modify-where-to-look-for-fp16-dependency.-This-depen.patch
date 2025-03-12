@@ -7,10 +7,10 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 96a35feb537ddc9edf864cadba402dfcc40f4ed6..bf957ac52fc0d99ec4c18b325bef455e1c92c4c3 100644
+index e65bd03bec247979b2825584f5b59e5ab0c40283..bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3843,16 +3843,22 @@ filegroup(
+@@ -3841,16 +3841,22 @@ filegroup(
      }),
  )
  
