@@ -3709,7 +3709,14 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> sendTraces(SendTracesContext context) override {
-      throwUnsupported();
+      auto traces =
+          KJ_MAP(trace, context.getParams().getTraces()){ return kj::refcounted<Trace>(trace); };
+      auto event =
+          kj::heap<api::TraceCustomEventImpl>(api::TraceCustomEventImpl::TYPE, kj::mv(traces));
+      auto worker = getWorker();
+      auto result = co_await worker->customEvent(kj::mv(event));
+      auto resp = context.getResults().getResult();
+      resp.setOutcome(result.outcome);
     }
 
     kj::Promise<void> prewarm(PrewarmContext context) override {
