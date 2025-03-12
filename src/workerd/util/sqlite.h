@@ -178,6 +178,12 @@ class SqliteDatabase {
     onWriteCallback = kj::mv(callback);
   }
 
+  void handleCriticalError(kj::Maybe<int> errorCode, kj::StringPtr errorMessage);
+
+  void onCriticalError(kj::Function<void(int sqliteErrorCode, kj::StringPtr message)> callback) {
+    onCriticalErrorCallback = kj::mv(callback);
+  }
+
   // Invoke the onWrite() callback.
   //
   // This is useful when the caller is about to execute a statement which SQLite considers
@@ -288,6 +294,7 @@ class SqliteDatabase {
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
+  kj::Maybe<kj::Function<void(int sqliteErrorCode, kj::StringPtr message)>> onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
@@ -522,7 +529,12 @@ class SqliteDatabase::Query final: private ResetListener {
     }
   }
 
+  void handleCriticalError(kj::Maybe<int> errorCode, kj::StringPtr errorMessage) {
+    return db.handleCriticalError(errorCode, errorMessage);
+  }
+
  private:
+  SqliteDatabase& db;
   const Regulator& regulator;
   StatementAndEffect ownStatement;                // for one-off queries
   kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
@@ -547,6 +559,7 @@ class SqliteDatabase::Query final: private ResetListener {
   template <typename... Params>
   Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
       : ResetListener(db),
+        db(db),
         regulator(regulator),
         maybeStatement(statement.prepareForExecution()) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
@@ -557,6 +570,7 @@ class SqliteDatabase::Query final: private ResetListener {
   template <typename... Params>
   Query(SqliteDatabase& db, const Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
       : ResetListener(db),
+        db(db),
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         maybeStatement(ownStatement) {
