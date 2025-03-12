@@ -337,6 +337,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Force context abort now.
   void abort(kj::Exception&& e) {
+    abortException = kj::cp(e);
     abortFulfiller->reject(kj::mv(e));
   }
 
@@ -853,6 +854,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   DeleteQueuePtr deleteQueue;
 
+  kj::Maybe<kj::Exception> abortException;
   kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
   kj::ForkedPromise<void> abortPromise = nullptr;
 
@@ -1014,6 +1016,12 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
+  // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
+  // been aborted, there's likely not an active request so later operations will fail anyway.
+  KJ_IF_SOME(ex, abortException) {
+    kj::throwFatalException(kj::cp(ex));
+  }
+
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
