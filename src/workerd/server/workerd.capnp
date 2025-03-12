@@ -643,6 +643,10 @@ struct Worker {
   tails @14 :List(ServiceDesignator);
   # List of tail worker services that should receive tail events for this worker.
   # See: https://developers.cloudflare.com/workers/observability/logs/tail-workers/
+
+  streamingTails @15 :List(ServiceDesignator);
+  # List of streaming tail worker services that should receive tail events for this worker.
+  # NOTE: This will be deleted in a future refactor, do not depend on this.
 }
 
 struct ExternalServer {
