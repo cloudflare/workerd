@@ -213,6 +213,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   void onWrite();
 
+  void onCriticalError(kj::Exception exception);
+
   // Issues a request to the alarm scheduler for the given time, returning a promise that resolves
   // when the request is confirmed.
   kj::Promise<void> requestScheduledAlarm(kj::Maybe<kj::Date> requestedTime);
