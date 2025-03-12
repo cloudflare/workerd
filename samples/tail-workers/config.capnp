@@ -17,6 +17,7 @@ const helloWorld :Workerd.Worker = (
   ],
   compatibilityDate = "2024-10-14",
   tails = ["log"],
+  streamingTails = ["log"],
 );
 
 const logWorker :Workerd.Worker = (

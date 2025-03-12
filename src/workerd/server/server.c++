@@ -1631,6 +1631,7 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
     AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<Service>> tails;
+    kj::Array<kj::Own<Service>> streamingTails;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
   using AbortActorsCallback = kj::Function<void()>;
@@ -1760,25 +1761,20 @@ class Server::WorkerService final: public Service,
 
     kj::Array<kj::Own<WorkerInterface>> legacyTailWorkers = nullptr;
     kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers = nullptr;
-    // If streaming tail workers is enabled, then we will initialize two lists:
-    // one with services that only export the tail or trace handler (legacy tail
-    // workers) and one that exports the tailStream handler. We'll check tailStreams
-    // first.
+    legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
+      // Caution here... if the tail worker ends up have a circular dependency
+      // on the worker we'll end up with an infinite loop trying to initialize.
+      // We can test this directly but it's more difficult to test indirect
+      // loops (dependency of dependency, etc). Here we're just going to keep
+      // it simple and just check the direct dependency.
+      // If service refers to an EntrypointService, we need to compare with the underlying
+      // WorkerService to match this.
+      KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
+      return service->startRequest({});
+    };
+
     if (util::Autogate::isEnabled(util::AutogateKey::STREAMING_TAIL_WORKERS)) {
-      kj::Vector<kj::Own<WorkerInterface>> legacyList;
-      kj::Vector<kj::Own<WorkerInterface>> streamingList;
-      for (auto& service: channels.tails) {
-        KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
-        if (service->hasHandler("tailStream"_kj)) {
-          streamingList.add(service->startRequest({}));
-        } else if (service->hasHandler("tail") || service->hasHandler("trace")) {
-          legacyList.add(service->startRequest({}));
-        }
-      }
-      legacyTailWorkers = legacyList.releaseAsArray();
-      streamingTailWorkers = streamingList.releaseAsArray();
-    } else {
-      legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
+      streamingTailWorkers = KJ_MAP(service, channels.streamingTails) -> kj::Own<WorkerInterface> {
         // Caution here... if the tail worker ends up have a circular dependency
         // on the worker we'll end up with an infinite loop trying to initialize.
         // We can test this directly but it's more difficult to test indirect
@@ -3473,6 +3469,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
     result.tails = KJ_MAP(tail, conf.getTails()) {
       return lookupService(tail, kj::str("Worker \"", name, "\"'s tails"));
+    };
+
+    result.streamingTails = KJ_MAP(streamingTails, conf.getStreamingTails()) {
+      return lookupService(streamingTails, kj::str("Worker \"", name, "\"'s streaming tails"));
     };
 
     return result;
