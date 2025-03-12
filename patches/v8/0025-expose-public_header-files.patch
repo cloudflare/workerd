@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Aizatsky <maizatskyi@cloudflare.com>
+Date: Wed, 5 Mar 2025 12:56:48 -0800
+Subject: expose public_header files
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index f7e92ed0de31979232200e842c80147803d16535..af720921cca3b98f0b35e551486650a398a2bbc9 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -581,6 +581,7 @@ v8_config(
+ filegroup(
+     name = "public_header_files",
+     srcs = glob(["include/**/*.h"]),
++    visibility = ["//visibility:public"],
+ )
+ 
+ filegroup(

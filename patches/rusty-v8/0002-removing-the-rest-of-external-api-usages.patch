@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Aizatsky <maizatskyi@cloudflare.com>
+Date: Wed, 5 Mar 2025 09:24:38 -0800
+Subject: removing the rest of external api usages
+
+
+diff --git a/src/binding.cc b/src/binding.cc
+index 88cb767f3ce86c5e6ee7f6c4c87cbe922c9c9dd3..f735a6e25fe327ae176d8b24c302c9f84c36e69a 100644
+--- a/src/binding.cc
++++ b/src/binding.cc
+@@ -6,6 +6,7 @@
+ #include <cstdio>
+ #include <thread>
+ 
++#include "cppgc/allocation.h"
+ #include "cppgc/persistent.h"
+ #include "cppgc/platform.h"
+ #include "libplatform/libplatform.h"
+@@ -19,8 +20,8 @@
+ #include "v8-platform.h"
+ #include "v8-profiler.h"
+ #include "v8.h"
+-#include "v8/src/flags/flags.h"
+-#include "v8/src/libplatform/default-platform.h"
++// #include "v8/src/flags/flags.h"
++// #include "v8/src/libplatform/default-platform.h"
+ 
+ using namespace support;
+ 
+@@ -116,10 +117,11 @@ static_assert(sizeof(v8::Isolate::DisallowJavascriptExecutionScope) == 12,
+ extern "C" {
+ void v8__V8__SetFlagsFromCommandLine(int* argc, char** argv,
+                                      const char* usage) {
+-  namespace i = v8::internal;
+-  using HelpOptions = i::FlagList::HelpOptions;
+-  HelpOptions help_options = HelpOptions(HelpOptions::kExit, usage);
+-  i::FlagList::SetFlagsFromCommandLine(argc, argv, true, help_options);
++  // namespace i = v8::internal;
++  // using HelpOptions = i::FlagList::HelpOptions;
++  // HelpOptions help_options = HelpOptions(HelpOptions::kExit, usage);
++  // i::FlagList::SetFlagsFromCommandLine(argc, argv, true, help_options);
++  abort();
+ }
+ 
+ void v8__V8__SetFlagsFromString(const char* flags, size_t length) {
+@@ -591,7 +593,8 @@ bool v8__Data__IsFunctionTemplate(const v8::Data& self) {
+ bool v8__Data__IsModule(const v8::Data& self) { return self.IsModule(); }
+ 
+ bool v8__Data__IsModuleRequest(const v8::Data& self) {
+-  return self.IsModuleRequest();
++  // return self.IsModuleRequest();
++  abort();
+ }
+ 
+ bool v8__Data__IsName(const v8::Data& self) {
+@@ -607,8 +610,9 @@ bool v8__Data__IsObjectTemplate(const v8::Data& self) {
+ }
+ 
+ bool v8__Data__IsPrimitive(const v8::Data& self) {
+-  return self.IsValue() &&
+-         reinterpret_cast<const v8::Value&>(self).IsPrimitive();
++  // return self.IsValue() &&
++  //        reinterpret_cast<const v8::Value&>(self).IsPrimitive();
++  abort();
+ }
+ 
+ bool v8__Data__IsPrivate(const v8::Data& self) { return self.IsPrivate(); }
+@@ -891,7 +895,7 @@ const v8::String* v8__Value__TypeOf(v8::Value& self, v8::Isolate* isolate) {
+   return local_to_ptr(self.TypeOf(isolate));
+ }
+ 
+-uint32_t v8__Value__GetHash(v8::Value& self) { return self.GetHash(); }
++uint32_t v8__Value__GetHash(v8::Value& self) { abort(); }
+ 
+ const v8::Primitive* v8__Null(v8::Isolate* isolate) {
+   return local_to_ptr(v8::Null(isolate));
+@@ -2860,26 +2864,26 @@ v8::StartupData v8__SnapshotCreator__CreateBlob(
+   return self->CreateBlob(function_code_handling);
+ }
+ 
+-class UnprotectedDefaultPlatform : public v8::platform::DefaultPlatform {
+-  using IdleTaskSupport = v8::platform::IdleTaskSupport;
+-  using InProcessStackDumping = v8::platform::InProcessStackDumping;
+-  using PriorityMode = v8::platform::PriorityMode;
+-  using TracingController = v8::TracingController;
++// class UnprotectedDefaultPlatform : public v8::platform::DefaultPlatform {
++//   using IdleTaskSupport = v8::platform::IdleTaskSupport;
++//   using InProcessStackDumping = v8::platform::InProcessStackDumping;
++//   using PriorityMode = v8::platform::PriorityMode;
++//   using TracingController = v8::TracingController;
+ 
+- public:
+-  explicit UnprotectedDefaultPlatform(
+-      int thread_pool_size, IdleTaskSupport idle_task_support,
+-      std::unique_ptr<TracingController> tracing_controller = {},
+-      PriorityMode priority_mode = PriorityMode::kDontApply)
+-      : v8::platform::DefaultPlatform(thread_pool_size, idle_task_support,
+-                                      std::move(tracing_controller),
+-                                      priority_mode) {}
+-
+-  v8::ThreadIsolatedAllocator* GetThreadIsolatedAllocator() override {
+-    // DefaultThreadIsolatedAllocator is PKU protected
+-    return nullptr;
+-  }
+-};
++//  public:
++//   explicit UnprotectedDefaultPlatform(
++//       int thread_pool_size, IdleTaskSupport idle_task_support,
++//       std::unique_ptr<TracingController> tracing_controller = {},
++//       PriorityMode priority_mode = PriorityMode::kDontApply)
++//       : v8::platform::DefaultPlatform(thread_pool_size, idle_task_support,
++//                                       std::move(tracing_controller),
++//                                       priority_mode) {}
++
++//   v8::ThreadIsolatedAllocator* GetThreadIsolatedAllocator() override {
++//     // DefaultThreadIsolatedAllocator is PKU protected
++//     return nullptr;
++//   }
++// };
+ 
+ v8::Platform* v8__Platform__NewDefaultPlatform(int thread_pool_size,
+                                                bool idle_task_support) {
+@@ -2893,15 +2897,16 @@ v8::Platform* v8__Platform__NewDefaultPlatform(int thread_pool_size,
+ 
+ v8::Platform* v8__Platform__NewUnprotectedDefaultPlatform(
+     int thread_pool_size, bool idle_task_support) {
+-  if (thread_pool_size < 1) {
+-    thread_pool_size = std::thread::hardware_concurrency();
+-  }
+-  thread_pool_size = std::max(std::min(thread_pool_size, 16), 1);
+-  return std::make_unique<UnprotectedDefaultPlatform>(
+-             thread_pool_size, idle_task_support
+-                                   ? v8::platform::IdleTaskSupport::kEnabled
+-                                   : v8::platform::IdleTaskSupport::kDisabled)
+-      .release();
++  // if (thread_pool_size < 1) {
++  //   thread_pool_size = std::thread::hardware_concurrency();
++  // }
++  // thread_pool_size = std::max(std::min(thread_pool_size, 16), 1);
++  // return std::make_unique<UnprotectedDefaultPlatform>(
++  //            thread_pool_size, idle_task_support
++  //                                  ? v8::platform::IdleTaskSupport::kEnabled
++  //                                  : v8::platform::IdleTaskSupport::kDisabled)
++  //     .release();
++  abort();
+ }
+ 
+ v8::Platform* v8__Platform__NewSingleThreadedDefaultPlatform(
