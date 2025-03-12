@@ -5,6 +5,7 @@
 #include "actor-sqlite.h"
 
 #include "io-gate.h"
+#include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
 #include <workerd/util/sentry.h>
@@ -37,6 +38,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
+  db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
 
   // Because we preserve an invariant that scheduled alarms are always at or earlier than
@@ -192,6 +194,21 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
     alarmDirty = p->alarmDirty;
   } else {
     alarmDirty = false;
+  }
+}
+
+void ActorSqlite::onCriticalError(int sqliteErrorCode, kj::StringPtr message) {
+  switch (sqliteErrorCode) {
+    case SQLITE_FULL:
+      JSG_FAIL_REQUIRE(Error, "Database or disk full: ", message);
+    case SQLITE_IOERR:
+      JSG_FAIL_REQUIRE(Error, "Disk I/O error: ", message);
+    case SQLITE_BUSY:
+      JSG_FAIL_REQUIRE(Error, "Database in use by another process: ", message);
+    case SQLITE_NOMEM:
+      JSG_FAIL_REQUIRE(Error, "Out of memory: ", message);
+    case SQLITE_INTERRUPT:
+      JSG_FAIL_REQUIRE(Error, "Out of memory: ", message);
   }
 }
 

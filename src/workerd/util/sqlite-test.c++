@@ -2,9 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/mutex.h"
 #include "sqlite.h"
+#include "workerd/io/io-gate.h"
 
 #include <fcntl.h>
+#include <sqlite3.h>
 
 #include <kj/refcount.h>
 #include <kj/test.h>
@@ -14,6 +17,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <thread>
 
 #if _WIN32
 #include <io.h>
@@ -1476,10 +1480,22 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
 };
 
-KJ_TEST("I/O exceptions pass through SQLite") {
+KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Create a tracker to verify our callback is called
+  bool criticalErrorCallbackCalled = false;
+  int capturedErrorCode = 0;
+  kj::String capturedErrorMessage = nullptr;
+
+  // Register a critical error callback
+  db.onCriticalError([&](int sqliteErrorCode, kj::StringPtr message) {
+    criticalErrorCallbackCalled = true;
+    capturedErrorCode = sqliteErrorCode;
+    capturedErrorMessage = kj::str(message);
+  });
 
   db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1492,10 +1508,92 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   // Now arrange for an error on write().
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
-  // It should pass through.
-  KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+  KJ_EXPECT_THROW_MESSAGE("disk I/O error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
   )")));
+
+  KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_EXPECT(capturedErrorCode == SQLITE_IOERR);
+  KJ_EXPECT(capturedErrorMessage.startsWith("disk I/O error"));
+}
+
+void testCriticalError(int expectedErrorCode,
+    const char* expectedErrorMessage,
+    kj::Function<void(SqliteDatabase&, SqliteDatabase::Vfs& vfs)> triggerErrorFn) {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Create a tracker to verify our callback is called
+  bool criticalErrorCallbackCalled = false;
+  int capturedErrorCode = 0;
+  kj::String capturedErrorMessage = nullptr;
+
+  // Register a critical error callback
+  db.onCriticalError([&](int sqliteErrorCode, kj::StringPtr message) {
+    criticalErrorCallbackCalled = true;
+    capturedErrorCode = sqliteErrorCode;
+    capturedErrorMessage = kj::str(message);
+  });
+
+  KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
+
+  KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_EXPECT(capturedErrorCode == expectedErrorCode);
+  KJ_EXPECT(capturedErrorMessage.startsWith(expectedErrorMessage));
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
+  testCriticalError(
+      SQLITE_BUSY, "database is locked", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    // Create a second database connection to hold an exclusive lock
+    SqliteDatabase lockDb(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+
+    db.run("CREATE TABLE IF NOT EXISTS lock_test (id INTEGER PRIMARY KEY)");
+    db.run("INSERT INTO lock_test VALUES (1) ON CONFLICT DO NOTHING");
+
+    // Start an exclusive transaction in the locking database
+    lockDb.run("BEGIN EXCLUSIVE TRANSACTION");
+    lockDb.run("UPDATE lock_test SET id = 2 WHERE id = 1");
+
+    // Attempt to start another exclusive transaction in the main database
+    // This should trigger SQLITE_BUSY
+    db.run(SqliteDatabase::TRUSTED, "BEGIN EXCLUSIVE TRANSACTION");
+  });
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
+  testCriticalError(
+      SQLITE_FULL, "database or disk is full", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    // Set up a database with limited size
+    db.run("PRAGMA max_page_count = 10");
+    db.run("CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)");
+
+    // Create a large blob to quickly fill the database
+    auto largeData = kj::heapArray<byte>(100000);  // 100KB
+    memset(largeData.begin(), 'X', largeData.size());
+
+    // This should eventually trigger SQLITE_FULL
+    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_full VALUES (?, ?)", 1, largeData.asPtr());
+  });
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
+  testCriticalError(
+      SQLITE_NOMEM, "out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
+
+    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
+    db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
+
+    // Create data that will exceed the memory limit
+    auto largeData = kj::heapArray<byte>(50000);  // 50KB
+    memset(largeData.begin(), 'X', largeData.size());
+
+    // This operation should trigger SQLITE_NOMEM when SQLite tries to allocate
+    // memory for the large parameter
+    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_nomem VALUES (?, ?)", 1, largeData.asPtr());
+  });
 }
 
 }  // namespace
