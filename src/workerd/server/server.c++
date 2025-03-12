@@ -1613,7 +1613,6 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       // the TailStreamWriterState for this strema to actually handle the event.
       [state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks)](
           IoContext& ioContext, tracing::TailEvent&& event) mutable {
-
     KJ_SWITCH_ONEOF(state->inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
         // The tail stream has already been closed because we have received either
@@ -2527,7 +2526,7 @@ class Server::WorkerService final: public Service,
     bool hasHandler(kj::StringPtr handlerName) override {
       KJ_LOG(WARNING, "EntrypointService hasHandler()", handlerName);
       KJ_LOG(WARNING, "handlers.size()", handlers.size());
-      for (auto& handler : handlers) {
+      for (auto& handler: handlers) {
         KJ_LOG(WARNING, "handler", handler);
       }
       return handlers.contains(handlerName);
