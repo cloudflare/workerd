@@ -139,8 +139,8 @@ URL_PATTERN_COMPONENTS(DEFINE_GETTER)
 #undef DEFINE_GETTER
 
 jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
-    jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,
-    jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternOptions>> maybeBase,
+    jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
+    jsg::Optional<kj::OneOf<jsg::USVString, URLPatternOptions>> maybeBase,
     jsg::Optional<URLPatternOptions> maybeOptions) {
   ada::url_pattern_input input;
   std::optional<std::string_view> base{};
@@ -148,7 +148,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(mi, maybeInput) {
     KJ_SWITCH_ONEOF(mi) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         input = std::string_view(str.begin(), str.size());
       }
       KJ_CASE_ONEOF(init, URLPatternInit) {
@@ -161,7 +161,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
 
   KJ_IF_SOME(b, maybeBase) {
     KJ_SWITCH_ONEOF(b) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         base = std::string_view(str.begin(), str.size());
       }
       KJ_CASE_ONEOF(o, URLPatternOptions) {
@@ -183,8 +183,8 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
   return js.alloc<URLPattern>(std::move(*result));
 }
 
-bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,
-    jsg::Optional<jsg::DOMString> maybeBase) {
+bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
+    jsg::Optional<jsg::USVString> maybeBase) {
   ada::result<bool> result;
   std::optional<std::string_view> base{};
 
@@ -196,7 +196,7 @@ bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> m
 
   KJ_IF_SOME(mi, maybeInput) {
     KJ_SWITCH_ONEOF(mi) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         result = inner.test(std::string_view(str.begin(), str.size()), base_ptr);
       }
       KJ_CASE_ONEOF(pi, URLPattern::URLPatternInit) {
@@ -213,8 +213,8 @@ bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> m
 }
 
 kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(jsg::Lock& js,
-    jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,
-    jsg::Optional<jsg::DOMString> maybeBase) {
+    jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> maybeInput,
+    jsg::Optional<jsg::USVString> maybeBase) {
   ada::result<std::optional<ada::url_pattern_result>> result;
   std::optional<std::string_view> base_url{};
 
@@ -224,7 +224,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(jsg::Lock& js,
 
   KJ_IF_SOME(mi, maybeInput) {
     KJ_SWITCH_ONEOF(mi) {
-      KJ_CASE_ONEOF(str, jsg::DOMString) {
+      KJ_CASE_ONEOF(str, jsg::USVString) {
         result = inner.exec(
             std::string_view(str.begin(), str.size()), base_url ? &base_url.value() : nullptr);
       }

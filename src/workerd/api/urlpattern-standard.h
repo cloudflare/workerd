@@ -106,16 +106,16 @@ class URLPattern final: public jsg::Object {
   explicit URLPattern(ada::url_pattern<URLPatternRegexEngine> i): inner(kj::mv(i)) {};
 
   static jsg::Ref<URLPattern> constructor(jsg::Lock& js,
-      jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> input,
-      jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternOptions>> baseURL,
+      jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> input,
+      jsg::Optional<kj::OneOf<jsg::USVString, URLPatternOptions>> baseURL,
       jsg::Optional<URLPatternOptions> patternOptions);
 
   kj::Maybe<URLPatternResult> exec(jsg::Lock& js,
-      jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> input,
-      jsg::Optional<jsg::DOMString> baseURL);
+      jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> input,
+      jsg::Optional<jsg::USVString> baseURL);
 
-  bool test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> input,
-      jsg::Optional<jsg::DOMString> baseURL);
+  bool test(jsg::Optional<kj::OneOf<jsg::USVString, URLPatternInit>> input,
+      jsg::Optional<jsg::USVString> baseURL);
 
   bool getHasRegExpGroups() const;
 
