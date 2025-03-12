@@ -96,5 +96,5 @@ export declare abstract class AiGateway {
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[]
   ): Promise<Response>;
-  getUrl(provider: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
+  getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
