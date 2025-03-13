@@ -5474,11 +5474,7 @@ export declare abstract class D1Database {
    * @param constraintOrBookmark Either the session constraint or the explicit bookmark to anchor the created session.
    */
   withSession(
-    constraintOrBookmark:
-      | D1SessionBookmark
-      | D1SessionConstraint
-      | null
-      | undefined,
+    constraintOrBookmark?: D1SessionBookmark | D1SessionConstraint,
   ): D1DatabaseSession;
   /**
    * @deprecated dump() will be removed soon, only applies to deprecated alpha v1 databases.
