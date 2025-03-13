@@ -2,7 +2,9 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-load("@workerd//:build/wpt_test.bzl", "wpt_find_modules", "wpt_module")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@python3_13//:defs.bzl", "interpreter")
+load("@workerd//:build/wpt_test.bzl", "wpt_find_modules", "wpt_module", "wpt_server_entrypoint")
 
 [wpt_module(
     name = dir,
@@ -21,6 +23,24 @@ load("@workerd//:build/wpt_test.bzl", "wpt_find_modules", "wpt_module")
 [wpt_module(
     name = dir,
 ) for dir in wpt_find_modules(root = "fetch")]
+
+write_file(
+    name = "gen_config_json",
+    out = "config.json",
+    content = [json.encode({
+        "server_host": "localhost",
+        "check_subdomains": False,
+    })],
+    visibility = ["//visibility:public"],
+)
+
+wpt_server_entrypoint(
+    name = "entrypoint",
+    srcs = ["wpt"] + glob(["**/*.py"]),
+    config_json = "config.json",
+    python = interpreter,
+    visibility = ["//visibility:public"],
+)
 
 exports_files([
     "tools/certs/cacert.pem",
