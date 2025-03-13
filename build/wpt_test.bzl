@@ -9,7 +9,7 @@ load("//:build/wd_test.bzl", "wd_test")
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, autogates = [], size = "medium"):
+def wpt_test(name, wpt_directory, config, autogates = [], start_server = False, **kwargs):
     """
     Main entry point.
 
@@ -52,15 +52,16 @@ def wpt_test(name, wpt_directory, config, autogates = [], size = "medium"):
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
+        sidecar = "@wpt//:entrypoint" if start_server else None,
         data = [
-            test_config_as_js,
-            js_test_gen_rule,
-            wpt_directory,
-            compat_date,
-            harness_as_js,
-            wpt_cacert,
+            test_config_as_js,  # e.g. "url-test.js"
+            js_test_gen_rule,  # e.g. "url-test.generated.js",
+            wpt_directory,  # e.g. wpt/url/**",
+            compat_date,  # i.e. trimmed-supported-compatibility-date.txt
+            harness_as_js,  # i.e. "harness/harness.js"
+            wpt_cacert,  # i.e. "wpt/tools/certs/cacert.pem",
         ],
-        size = size,
+        **kwargs
     )
 
 ### wpt_module macro and rule
@@ -303,6 +304,56 @@ def generate_external_bindings(wd_test_file, base, files):
         result.append('(name = "{}", {} = embed "{}")'.format(module_relative_path(base, file), binding_type, wd_test_relative_path(wd_test_file, file)))
 
     return ",\n".join(result)
+
+### WPT server entrypoint
+### ---------------------
+### (Create a single no-args script that starts the WPT server)
+
+WPT_ENTRYPOINT_SCRIPT_TEMPLATE = """
+# Make /usr/sbin/sysctl visibile (Python needs to call it on macOS)
+export PATH="$PATH:/usr/sbin"
+
+cd $(dirname $0)
+{python} wpt.py serve --config {config_json}
+"""
+
+def _wpt_server_entrypoint_impl(ctx):
+    """
+    This rule generates a script that starts the wpt server.
+
+    This script is passed as the sidecar to wd_test.
+    We generate a script because Bazel doesn't want arguments in this context, and we use a custom
+    rule to do so because we want more control over paths and dependencies than with a genrule.
+    """
+    start_src = ctx.actions.declare_file("start.sh")
+    ctx.actions.write(
+        output = start_src,
+        is_executable = True,
+        content = WPT_ENTRYPOINT_SCRIPT_TEMPLATE.format(
+            python = ctx.file.python.short_path,
+            config_json = ctx.file.config_json.basename,
+        ),
+    )
+
+    return DefaultInfo(
+        runfiles = ctx.runfiles(
+            files = [start_src],
+            transitive_files = depset(ctx.files.srcs + [ctx.file.python, ctx.file.config_json]),
+        ),
+        executable = start_src,
+    )
+
+wpt_server_entrypoint = rule(
+    implementation = _wpt_server_entrypoint_impl,
+    attrs = {
+        # Python interpreter to use to run the WPT server
+        "python": attr.label(allow_single_file = True),
+        # All the Python code that should be visible
+        "srcs": attr.label_list(allow_files = True),
+        # Config file to pass to wpt serve
+        "config_json": attr.label(allow_single_file = True),
+    },
+)
 
 ### Path manipulation
 ### -----------------
