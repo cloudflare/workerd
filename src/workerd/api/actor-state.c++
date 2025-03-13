@@ -725,7 +725,7 @@ SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
           "SQL is not enabled for this Durable Object class. To enable it, change "
           "`new_classes` to `new_sqlite_classes` within the 'migrations' field in "
           "your wrangler.jsonc or wrangler.toml file. If using workerd directly,"
-          "set "`enableSql = true` in your workerd config for the class. Note "
+          "set `enableSql = true` in your workerd config for the class. Note "
           "that this change cannot be made after the class is "
           "already deployed to production.");
     }
