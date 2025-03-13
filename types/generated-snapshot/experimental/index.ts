@@ -6095,6 +6095,9 @@ export declare namespace Rpc {
     >]: MethodOrProperty<T[K]>;
   };
 }
+export declare namespace Cloudflare {
+  interface Env {}
+}
 export declare namespace TailStream {
   interface Header {
     readonly name: string;

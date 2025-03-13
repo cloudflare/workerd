@@ -6114,6 +6114,9 @@ declare namespace Rpc {
     >]: MethodOrProperty<T[K]>;
   };
 }
+declare namespace Cloudflare {
+  interface Env {}
+}
 declare module "cloudflare:workers" {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
@@ -6212,6 +6215,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export const env: Cloudflare.Env;
 }
 declare module "cloudflare:sockets" {
   function _connect(
