@@ -94,7 +94,9 @@ class D1Database {
     return this.alwaysPrimarySession.exec(query);
   }
 
-  // DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
+  /**
+   * @deprecated
+   */
   public async dump(): Promise<ArrayBuffer> {
     return this.alwaysPrimarySession.dump();
   }
@@ -106,13 +108,13 @@ class D1DatabaseWithSessionAPI extends D1Database {
   }
 
   public withSession(
-    constraintOrToken: D1SessionBookmarkOrConstraint | null | undefined
+    constraintOrBookmark?: D1SessionBookmarkOrConstraint
   ): D1DatabaseSession {
-    constraintOrToken = constraintOrToken?.trim();
-    if (constraintOrToken == null || constraintOrToken === '') {
-      constraintOrToken = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
+    constraintOrBookmark = constraintOrBookmark?.trim();
+    if (constraintOrBookmark == null || constraintOrBookmark === '') {
+      constraintOrBookmark = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
-    return new D1DatabaseSession(this.fetcher, constraintOrToken);
+    return new D1DatabaseSession(this.fetcher, constraintOrBookmark);
   }
 }
 
@@ -339,7 +341,10 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
     }
   }
 
-  // DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
+  /**
+   * DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
+   * Only applies to the deprecated v1 alpha databases.
+   */
   public async dump(): Promise<ArrayBuffer> {
     const response = await this._wrappedFetch('http://d1/dump', {
       method: 'POST',
