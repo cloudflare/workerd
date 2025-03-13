@@ -104,6 +104,7 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
 
     // WITHSESSION
     {
+      expectType<D1DatabaseSession>(env.DB.withSession());
       const session = env.DB.withSession("first-primary");
       expectType<D1DatabaseSession>(session);
 

@@ -108,7 +108,7 @@ class D1DatabaseWithSessionAPI extends D1Database {
   }
 
   public withSession(
-    constraintOrBookmark: D1SessionBookmarkOrConstraint | null | undefined
+    constraintOrBookmark?: D1SessionBookmarkOrConstraint
   ): D1DatabaseSession {
     constraintOrBookmark = constraintOrBookmark?.trim();
     if (constraintOrBookmark == null || constraintOrBookmark === '') {
