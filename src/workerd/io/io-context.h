@@ -337,6 +337,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Force context abort now.
   void abort(kj::Exception&& e) {
+    if (abortException != kj::none) {
+      return;
+    }
     abortException = kj::cp(e);
     abortFulfiller->reject(kj::mv(e));
   }

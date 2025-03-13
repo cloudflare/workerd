@@ -1205,8 +1205,7 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     // Don't bother fulfilling `abortFulfiller` if limits were exceeded because in that case the
     // abort promise will be fulfilled shortly anyway.
     if (limitEnforcer->getLimitsExceeded() == kj::none) {
-      abortFulfiller->reject(
-          JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
+      abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
     }
   }
 
