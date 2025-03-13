@@ -19,7 +19,7 @@ wpt_test(
     name = "urlpattern-standard",
     autogates = ["workerd-autogate-urlpattern"],
     config = "urlpattern-standard-test.ts",
-    wpt_directory = "@wpt//:urlpattern",
+    wpt_directory = "@wpt//:urlpattern@module",
 )
 
 wpt_test(
