@@ -2,8 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import flags from 'workerd:compatibility-flags';
-
 interface Fetcher {
   fetch: typeof fetch;
 }
@@ -570,8 +568,5 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
-  if (flags.enableD1WithSessionsAPI) {
-    return new D1DatabaseWithSessionAPI(env.fetcher);
-  }
-  return new D1Database(env.fetcher);
+  return new D1DatabaseWithSessionAPI(env.fetcher);
 }

@@ -605,12 +605,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables routing to a replica on the client-side.
   # Doesn't mean requests *will* be routed to a replica, only that they can be.
 
-  enableD1WithSessionsAPI @61 :Bool
+  obsolete61 @61 :Bool
       $compatEnableFlag("enable_d1_with_sessions_api")
       $experimental;
-  # Enables the withSessions(commitTokenOrConstraint) method that allows users
-  # to use read-replication for D1.
-  # Experimental since this is not yet ready and is only meant for internal testing during development.
+  # Was used to enable the withSession(bookmarkOrConstraint) method that allows users
+  # to use read-replication Sessions API for D1. This is now enabled for everyone.
 
   handleCrossRequestPromiseResolution @62 :Bool
       $compatEnableFlag("handle_cross_request_promise_resolution")
