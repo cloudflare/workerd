@@ -53,24 +53,10 @@ load("@rules_python//python:repositories.bzl", "py_repositories", "python_regist
 
 py_repositories()
 
-http_archive(
-    name = "com_google_benchmark",
-    integrity = "sha256-a8GApX0j1NlRVRn5KwyD1hsFtbqxiJYfNqx7BrDZ6c4=",
-    strip_prefix = "benchmark-1.8.3",
-    url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz",
-)
-
 # These are part of what's needed to get `bazel query 'deps(//...)'`, to work, but this is difficult to support
 # based on our dependencies – just use cquery instead.
 # load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
 # benchmark_deps()
-
-http_archive(
-    name = "brotli",
-    sha256 = "e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff",
-    strip_prefix = "brotli-1.1.0",
-    urls = ["https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"],
-)
 
 http_archive(
     name = "nbytes",

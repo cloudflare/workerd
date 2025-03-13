@@ -242,6 +242,14 @@
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "//:build/BUILD.wpt",
       "freeze_version": "wpt-afa16aa1d"
-     }
+    },
+    // microbenchmark
+    {
+      "type": "github_release",
+      "name": "com_google_benchmark",
+      "owner": "google",
+      "repo": "benchmark",
+      "file_regex": "benchmark-*\\.tar\\.gz"
+    }
   ]
 }
