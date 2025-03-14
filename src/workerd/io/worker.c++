@@ -1675,6 +1675,29 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
                         obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
+                        // Python Workers append all durable objects classes in the
+                        // pythonDurableObjects named export.
+                        bool isPythonWorker = FeatureFlags::get(js).getPythonWorkers();
+                        if (handler.name == "pythonDurableObjects" && isPythonWorker) {
+                          auto handle = obj.self.getHandle(js);
+                          auto dict = js.toDict(handle);
+                          for (auto& field: dict.fields) {
+                            auto unwrapped = api.unwrapExport(lock, field.value);
+                            KJ_SWITCH_ONEOF(unwrapped) {
+                              KJ_CASE_ONEOF(cls, EntrypointClass) {
+                                impl->actorClasses.insert(kj::mv(field.name),
+                                    ActorClassInfo{
+                                      .cls = kj::mv(cls),
+                                      .missingSuperclass = false,
+                                    });
+                              }
+                              KJ_CASE_ONEOF(obj, api::ExportedHandler) {
+                                KJ_FAIL_ASSERT("Expected EntrypointClass");
+                              }
+                            }
+                          }
+                        }
+
                         impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
                       }
                       KJ_CASE_ONEOF(cls, EntrypointClass) {
