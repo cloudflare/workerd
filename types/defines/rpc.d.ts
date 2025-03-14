@@ -146,7 +146,7 @@ declare namespace Rpc {
   > = MaybeCallableProvider<T> & {
     [K in Exclude<
       keyof T,
-      Reserved | symbol | keyof StubBase<never>
+      Reserved | symbol | keyof StubBase<never> | 'ctx' | 'env'
     >]: MethodOrProperty<T[K]>;
   };
 }
@@ -165,15 +165,14 @@ declare module "cloudflare:workers" {
     [Rpc.__RPC_TARGET_BRAND]: never;
   }
 
-  // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
   export abstract class WorkerEntrypoint<Env = unknown>
     implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
-    protected ctx: ExecutionContext;
-    protected env: Env;
+    ctx: ExecutionContext;
+    env: Env;
     constructor(ctx: ExecutionContext, env: Env);
 
     fetch?(request: Request): Response | Promise<Response>;
@@ -189,8 +188,8 @@ declare module "cloudflare:workers" {
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
-    protected ctx: DurableObjectState;
-    protected env: Env;
+    ctx: DurableObjectState;
+    env: Env;
     constructor(ctx: DurableObjectState, env: Env);
 
     fetch?(request: Request): Response | Promise<Response>;
@@ -256,8 +255,8 @@ declare module "cloudflare:workers" {
   {
     [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
 
-    protected ctx: ExecutionContext;
-    protected env: Env;
+    ctx: ExecutionContext;
+    env: Env;
 
     constructor(ctx: ExecutionContext, env: Env);
 
