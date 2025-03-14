@@ -16,6 +16,7 @@ import {
   USING_OLDEST_PYODIDE_VERSION,
   DURABLE_OBJECT_CLASSES,
   WORKER_ENTRYPOINT_CLASSES,
+  SHOULD_SNAPSHOT_TO_DISK,
 } from 'pyodide-internal:metadata';
 import { reportError } from 'pyodide-internal:util';
 import { default as Limiter } from 'pyodide-internal:limiter';
@@ -138,6 +139,12 @@ async function preparePython(): Promise<PyModule> {
 }
 
 function makeHandler(pyHandlerName: string): Handler {
+  if (pyHandlerName === "test" && SHOULD_SNAPSHOT_TO_DISK) {
+    return async function() {
+      await getPyodide();
+      console.log("Stored snapshot to disk; quitting without running test");
+    }
+  }
   return async function (...args: any[]) {
     try {
       const mainModule = await enterJaegerSpan(

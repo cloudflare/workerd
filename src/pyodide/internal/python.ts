@@ -12,6 +12,8 @@ import {
   maybeCollectSnapshot,
   restoreSnapshot,
   preloadDynamicLibs,
+  shouldSnapshot,
+  HIWIRE_STATE,
 } from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
@@ -19,6 +21,10 @@ import {
   entropyBeforeTopLevel,
   getRandomValues,
 } from 'pyodide-internal:topLevelEntropy/lib';
+import {
+  USING_OLDEST_PYODIDE_VERSION,
+} from 'pyodide-internal:metadata';
+
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
  * emscripten seperately from this code in another context.
@@ -56,13 +62,20 @@ function prepareWasmLinearMemory(Module: Module): void {
   }
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   entropyAfterRuntimeInit(Module);
-  if (SHOULD_RESTORE_SNAPSHOT) {
-    return;
+  if (!SHOULD_RESTORE_SNAPSHOT) {
+    // The effects of these are purely in Python state so they only need to be run
+    // if we didn't restore a snapshot.
+    entropyBeforeTopLevel(Module);
+    adjustSysPath(Module);
   }
-  // The effects of these are purely in Python state so they only need to be run
-  // if we didn't restore a snapshot.
-  entropyBeforeTopLevel(Module);
-  adjustSysPath(Module);
+  console.log("!USING_OLDEST_PYODIDE_VERSION", !USING_OLDEST_PYODIDE_VERSION)
+  if (!USING_OLDEST_PYODIDE_VERSION) {
+    if (shouldSnapshot()) {
+      Module.API.config._makeSnapshot = true;
+    }
+    console.log("finalizeBootstrap!");
+    Module.API.finalizeBootstrap(HIWIRE_STATE);
+  }
 }
 
 function maybeAddVendorDirectoryToPath(pyodide: Pyodide) {
@@ -135,8 +148,10 @@ export async function loadPyodide(
   // present in snapshot memory.
   mountWorkerFiles(Module);
 
-  // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
+  if (USING_OLDEST_PYODIDE_VERSION) {
+    // Finish setting up Pyodide's ffi so we can use the nice Python interface
+    enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
+  }
   const pyodide = Module.API.public_api;
 
   finishSnapshotSetup(pyodide);
@@ -147,8 +162,8 @@ export async function loadPyodide(
   // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
   Module.API.initializeStreams(
     null,
-    (msg) => console.log(msg),
-    (msg) => console.error(msg)
+    (msg: string) => console.log(msg),
+    (msg: string) => console.error(msg)
   );
   maybeAddVendorDirectoryToPath(pyodide);
   return pyodide;

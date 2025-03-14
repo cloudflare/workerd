@@ -50,18 +50,25 @@ verify_no_packages_were_removed()
 def _bundle_id(*, pyodide_version, pyodide_date, backport, **_kwds):
     return "%s_%s_%s" % (pyodide_version, pyodide_date, backport)
 
-def make_bundle_version_info(versions):
+def _make_bundle_version_info(versions):
     result = {}
     for entry in versions:
         name = entry["name"]
         if entry["name"] != "development":
             entry["id"] = _bundle_id(**entry)
         result[name] = entry
+
+    dev = result["development"]
+    dev = result[dev["pyodide_version"]] | dev
+    dev["feature_flags"].append("pythonWorkersDevPyodide")
+    dev["wd_feature_flags"].append("python_workers_development")
+    result["development"] = dev
+
     return result
 
 # NOTE: This data needs to be kept in sync with compatibility-date.capnp.
 # Particularly the packages and backport fields.
-BUNDLE_VERSION_INFO = make_bundle_version_info([
+BUNDLE_VERSION_INFO = _make_bundle_version_info([
     {
         "name": "0.26.0a2",
         "pyodide_version": "0.26.0a2",
@@ -70,6 +77,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "backport": "35",
         "integrity": "sha256-hSoh1LErAWYQCUmPlJprOPVSs1BBluuxqSxyZ/BSbRY=",
         "feature_flags": [],
+        "wd_feature_flags": [],
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
@@ -83,6 +91,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "backport": "3",
         "integrity": "sha256-WK/ncK67jb8bygm60ccFBNGBnWhptu3MYhOSv9CGJsk=",
         "feature_flags": ["pythonWorkers20250116"],
+        "wd_feature_flags": ["python_workers_20250116"],
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-cb0651452.bin",
@@ -91,11 +100,9 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
     {
         "name": "development",
         "id": "dev",
-        "feature_flags": ["pythonWorkersDevPyodide"],
-        "emscripten_version": "3.1.52",
-        "python_version": "3.12.1",
-        "packages": "20240829.4",
-        "baseline_snapshot": "baseline-d13ce2f4a.bin",
-        "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
+        "pyodide_version": "0.26.0a2",
+        # Other fields are copied from appropriate other entry by _make_bundle_version_info.
     },
 ])
+
+TEST_VARIANT_DEFAULT = False

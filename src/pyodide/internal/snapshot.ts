@@ -8,6 +8,7 @@ import {
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
   REQUIREMENTS,
+  USING_OLDEST_PYODIDE_VERSION,
 } from 'pyodide-internal:metadata';
 import { reportError, simpleRunPython } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
@@ -36,6 +37,7 @@ export let SHOULD_RESTORE_SNAPSHOT = false;
  * Record the dlopen handles that are needed by the MEMORY.
  */
 let DSO_METADATA: DylinkInfo = {};
+export let HIWIRE_STATE: any;
 
 /**
  * Preload a dynamic library.
@@ -310,7 +312,7 @@ function memorySnapshotDoImports(Module: Module): string[] {
   // The `importedModules` list will contain all modules that have been imported, including local
   // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
   // grab them and put them into a set for fast filtering.
-  const importedModules: string[] = MetadataReader.getPackageSnapshotImports();
+  const importedModules: string[] = MetadataReader.getPackageSnapshotImports(Module.API.version);
   const deduplicatedModules = [...new Set(importedModules)];
 
   // Import the modules list so they are included in the snapshot.
@@ -327,11 +329,18 @@ function memorySnapshotDoImports(Module: Module): string[] {
  * linear memory into MEMORY.
  */
 function makeLinearMemorySnapshot(Module: Module): Uint8Array {
-  const dsoJSON = recordDsoHandles(Module);
+  let json = recordDsoHandles(Module) as any;
+  if (!USING_OLDEST_PYODIDE_VERSION) {
+    const hiwire = Module.API.serializeHiwireState(Module);
+    json = {
+      dsos: json,
+      hiwire
+    }
+  }
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // checkLoadedSoFiles(dsoJSON);
   }
-  return encodeSnapshot(Module.HEAP8, dsoJSON);
+  return encodeSnapshot(Module.HEAP8, json);
 }
 
 // "\x00snp"
@@ -343,15 +352,15 @@ export let LOADED_SNAPSHOT_VERSION: number | undefined = undefined;
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
  */
-function encodeSnapshot(heap: Uint8Array, dsoJSON: object): Uint8Array {
-  const dsoString = JSON.stringify(dsoJSON);
-  let snapshotOffset = HEADER_SIZE + 2 * dsoString.length;
+function encodeSnapshot(heap: Uint8Array, json: object): Uint8Array {
+  const jsonString = JSON.stringify(json);
+  let snapshotOffset = HEADER_SIZE + 2 * jsonString.length;
   // align to 8 bytes
   snapshotOffset = Math.ceil(snapshotOffset / 8) * 8;
   const toUpload = new Uint8Array(snapshotOffset + heap.length);
   const encoder = new TextEncoder();
   const { written: jsonLength } = encoder.encodeInto(
-    dsoString,
+    jsonString,
     toUpload.subarray(HEADER_SIZE)
   );
   const uint32View = new Uint32Array(toUpload.buffer);
@@ -387,7 +396,14 @@ function decodeSnapshot(): void {
   const jsonBuf = new Uint8Array(jsonLength);
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
   const jsonTxt = new TextDecoder().decode(jsonBuf);
-  DSO_METADATA = JSON.parse(jsonTxt);
+  const json = JSON.parse(jsonTxt);
+  if (USING_OLDEST_PYODIDE_VERSION) {
+    DSO_METADATA = json;
+  } else {
+    DSO_METADATA = json.dsos;
+    HIWIRE_STATE = json.hiwire;
+  }
+
   LOADED_BASELINE_SNAPSHOT = Number(DSO_METADATA?.settings?.baselineSnapshot);
   READ_MEMORY = function (Module) {
     // restore memory from snapshot
@@ -444,10 +460,17 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
   }
 }
 
+export function shouldSnapshot() {
+  return ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
+}
+
 export function maybeCollectSnapshot(Module: Module): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
   const importedModulesList = memorySnapshotDoImports(Module);
+  if (!shouldSnapshot()) {
+    return;
+  }
   if (ArtifactBundler.isEwValidating()) {
     const snapshot = makeLinearMemorySnapshot(Module);
     ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
