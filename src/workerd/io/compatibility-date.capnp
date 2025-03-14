@@ -732,4 +732,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("allow_importable_env");
   # When allowed, `import { env } from 'cloudflare:workers'` will provide access
   # to the per-request environment/bindings.
+
+  requestSignalPassthrough @79 :Bool
+      $compatEnableFlag("request_signal_passthrough")
+      $compatDisableFlag("no_request_signal_passthrough")
+      $compatEnableDate("2025-04-14");
+    # When enabled, the AbortSignal of the incoming request is not passed through to subrequests.
+    # As a result, outgoing subrequests will not be cancelled when the incoming request is.
+
 }
