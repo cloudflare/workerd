@@ -355,6 +355,10 @@ jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<jsg::Dict<NamedExport>>(
       lock.v8Context(), moduleNamespace);
 }
+NamedExport WorkerdApi::unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<NamedExport>(
+      lock.v8Context(), exportVal);
+}
 WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
 

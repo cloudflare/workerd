@@ -117,6 +117,7 @@ class PyodideMetadataReader: public jsg::Object {
   bool createBaselineSnapshot;
   bool usePackagesInArtifactBundler;
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
+  kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
 
  public:
   PyodideMetadataReader(kj::String mainModule,
@@ -131,7 +132,8 @@ class PyodideMetadataReader: public jsg::Object {
       bool snapshotToDisk,
       bool createBaselineSnapshot,
       bool usePackagesInArtifactBundler,
-      kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
+      kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
+      kj::Maybe<kj::Array<kj::String>> durableObjectClasses)
       : mainModule(kj::mv(mainModule)),
         moduleInfo(kj::mv(names), kj::mv(contents)),
         requirements(kj::mv(requirements)),
@@ -143,7 +145,8 @@ class PyodideMetadataReader: public jsg::Object {
         snapshotToDisk(snapshotToDisk),
         createBaselineSnapshot(createBaselineSnapshot),
         usePackagesInArtifactBundler(usePackagesInArtifactBundler),
-        memorySnapshot(kj::mv(memorySnapshot)) {}
+        memorySnapshot(kj::mv(memorySnapshot)),
+        durableObjectClasses(kj::mv(durableObjectClasses)) {}
 
   bool isWorkerd() {
     return this->isWorkerdFlag;
@@ -212,6 +215,13 @@ class PyodideMetadataReader: public jsg::Object {
 
   kj::HashSet<kj::String> getTransitiveRequirements();
 
+  kj::Maybe<kj::ArrayPtr<kj::String>> getDurableObjectClasses() {
+    KJ_IF_SOME(cls, durableObjectClasses) {
+      return cls.asPtr();
+    }
+    return kj::none;
+  }
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -232,6 +242,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getTransitiveRequirements);
+    JSG_METHOD(getDurableObjectClasses);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

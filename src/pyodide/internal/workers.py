@@ -626,3 +626,11 @@ def handler(func):
         return func(*args, **kwargs)
 
     return wrapper
+
+
+class DurableObject:
+    """
+    Base class used to define a Durable Object.
+    """
+
+    pass
