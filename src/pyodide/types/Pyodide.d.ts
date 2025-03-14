@@ -1,9 +1,14 @@
+declare type AnyClass<T = any> = new (...args: any[]) => T;
+
 declare type Handler = (...args: any[]) => any;
 
+declare type PyCallable = ((...args: any[]) => any) & {
+  call: (...args: any[]) => any;
+  callRelaxed: (...args: any[]) => any;
+};
+
 interface PyModule {
-  [handlerName: string]: {
-    callRelaxed: (...args: any[]) => any;
-  };
+  [handlerName: string]: PyCallable;
 }
 
 interface Pyodide {

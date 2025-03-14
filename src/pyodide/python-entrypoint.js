@@ -6,4 +6,23 @@
 // we delegate the implementation to `python-entrypoint-helper` which is a
 // BUILTIN module that can see our INTERNAL modules.
 
+import { DurableObject } from 'cloudflare:workers';
+
+// The creation of `pythonDurableObjects` has to be done here because python-entrypoint-helper
+// is a BUILTIN and so cannot import `DurableObject` (which is also a builtin). As a workaround
+// we call `makeDurableObjectClass` here and pass it the DurableObject class.
+import {
+  pythonDurableObjectClasses,
+  makeDurableObjectClass,
+} from 'pyodide:python-entrypoint-helper';
+
+let pythonDurableObjects = {};
+for (const className of pythonDurableObjectClasses) {
+  pythonDurableObjects[className] = makeDurableObjectClass(
+    className,
+    DurableObject
+  );
+}
+
+export { pythonDurableObjects };
 export { default } from 'pyodide:python-entrypoint-helper';

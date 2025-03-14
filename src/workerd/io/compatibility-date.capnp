@@ -732,4 +732,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("allow_importable_env");
   # When allowed, `import { env } from 'cloudflare:workers'` will provide access
   # to the per-request environment/bindings.
+
+  pythonWorkersDurableObjects @79 :Bool
+      $compatEnableFlag("python_workers_durable_objects")
+      $experimental;
+
 }

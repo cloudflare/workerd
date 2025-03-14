@@ -604,3 +604,11 @@ class Request:
     async def text(self) -> str:
         self._raise_if_failed()
         return await self.js_object.text()
+
+
+class DurableObject:
+    """
+    Base class used to define a Durable Object.
+    """
+
+    pass
