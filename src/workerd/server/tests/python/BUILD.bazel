@@ -81,3 +81,5 @@ py_wd_test("vendor_dir")
 py_wd_test("dont-snapshot-pyodide")
 
 py_wd_test("filter-non-py-files")
+
+py_wd_test("durable-object")

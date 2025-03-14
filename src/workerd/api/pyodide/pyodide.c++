@@ -516,6 +516,9 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
   }
   auto lock = KJ_ASSERT_NONNULL(getPyodideLock(pythonRelease),
       kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
+  auto durableObjectClasses = KJ_MAP(objectNamespace, conf.getDurableObjectNamespaces()) {
+    return kj::str(objectNamespace.getClassName());
+  };
 
   // clang-format off
   return jsg::alloc<PyodideMetadataReader>(
@@ -531,7 +534,8 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
     snapshotToDisk,
     pythonConfig.createBaselineSnapshot,
     false,    /* usePackagesInArtifactBundler */
-    kj::mv(memorySnapshot)
+    kj::mv(memorySnapshot),
+    kj::mv(durableObjectClasses)
   );
   // clang-format on
 }

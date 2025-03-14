@@ -1,0 +1,30 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityDate = "2025-03-04",
+
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workers_durable_objects"],
+
+  modules = [
+    (name = "worker.py", pythonModule = embed "worker.py"),
+  ],
+
+  durableObjectNamespaces = [
+    ( className = "DurableObjectExample",
+      uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e",
+      enableSql = true ),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+);
