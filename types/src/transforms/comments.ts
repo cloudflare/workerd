@@ -7,6 +7,7 @@ import { hasModifier } from "./helpers";
 // Refer to `collateStandardComments()` in `standards.ts` for construction
 export type CommentsData = Record<
   /* globalName */ string,
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   | Record</* root */ "$" | /* memberName */ string, string | undefined>
   | undefined
 >;
@@ -22,7 +23,7 @@ export function createCommentsTransformer(
   };
 }
 
-function maybeAddComment(node: ts.Node, comment?: string) {
+function maybeAddComment(node: ts.Node, comment?: string): void {
   if (comment === undefined) return;
   ts.addSyntheticLeadingComment(
     node,
@@ -32,8 +33,8 @@ function maybeAddComment(node: ts.Node, comment?: string) {
   );
 }
 
-function createVisitor(data: CommentsData) {
-  return (node: ts.Node) => {
+function createVisitor(data: CommentsData): ts.Visitor {
+  return (node) => {
     if (
       (ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node)) &&
       node.name !== undefined &&

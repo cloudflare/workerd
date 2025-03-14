@@ -116,7 +116,7 @@ export function maybeExtractGlobalNode(
 function createGlobalScopeVisitor(
   ctx: ts.TransformationContext,
   checker: ts.TypeChecker
-) {
+): ts.Visitor {
   // Called with each class/interface that should have its methods/properties
   // extracted into global functions/consts. Recursively visits superclasses.
   function extractGlobalNodes(

@@ -8,7 +8,7 @@ export type ParameterNamesData = Record<
 >;
 
 let data: ParameterNamesData | undefined;
-export function installParameterNames(newData: ParameterNamesData) {
+export function installParameterNames(newData: ParameterNamesData): void {
   data = newData;
 }
 

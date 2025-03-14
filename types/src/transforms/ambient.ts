@@ -33,7 +33,7 @@ export function createAmbientTransformer(): ts.TransformerFactory<ts.SourceFile>
   };
 }
 
-function createVisitor(ctx: ts.TransformationContext) {
+function createVisitor(ctx: ts.TransformationContext): ts.Visitor {
   const moduleBlockChildVisitor: ts.Visitor = (node) => {
     return ensureStatementModifiers(ctx, node, { declare: false });
   };
@@ -43,7 +43,7 @@ function createVisitor(ctx: ts.TransformationContext) {
     }
     return node;
   };
-  const visitor: ts.Visitor = (node) => {
+  return (node) => {
     if (
       ts.isModuleDeclaration(node) &&
       (node.flags & ts.NodeFlags.Namespace) === 0
@@ -55,5 +55,4 @@ function createVisitor(ctx: ts.TransformationContext) {
       declare: true,
     });
   };
-  return visitor;
 }

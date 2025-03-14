@@ -84,7 +84,7 @@ export function createInternalNamespaceTransformer(
 function collectInternalModuleStructures(
   root: StructureGroups,
   structureMap: StructureMap
-) {
+): Map<string, Structure> {
   const moduleRoots = new Map</* specifier */ string, Structure>(); // TODO: add members here as well?
   root.getModules().forEach((module) => {
     if (!module.isStructureName()) return;
@@ -99,7 +99,7 @@ function collectInternalModuleStructures(
 function createInternalNamespaceVisitor(
   moduleRoots: ReturnType<typeof collectInternalModuleStructures>,
   ctx: ts.TransformationContext
-) {
+): ts.Visitor {
   const visitor: ts.Visitor = (node) => {
     if (
       ts.isModuleDeclaration(node) &&

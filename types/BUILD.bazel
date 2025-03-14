@@ -12,8 +12,10 @@ wd_ts_project(
         ],
         exclude = ["src/worker/**/*"],
     ),
+    eslintrc_json = "eslint.config.mjs",
     deps = [
-        "//:node_modules/@types",
+        "//:node_modules/@types/debug",
+        "//:node_modules/@types/node",
         "//:node_modules/@workerd/jsg",
         "//:node_modules/capnp-ts",
         "//:node_modules/esbuild",
