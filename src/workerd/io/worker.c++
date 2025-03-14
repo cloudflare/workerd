@@ -799,6 +799,9 @@ struct Worker::Script::Impl {
   using DynamicImportHandler = kj::Function<jsg::Value()>;
 
   void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
+    // This is only used with the original module registry implementation.
+    KJ_ASSERT(!FeatureFlags::get(js).getNewModuleRegistry(),
+        "legacy dynamic imports must not be used with the new module registry");
     static auto constexpr handleDynamicImport =
         [](kj::Own<const Worker> worker, DynamicImportHandler handler,
             kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
@@ -1266,9 +1269,9 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
       } else {
-        // Although we're going to compile a script independent of context, V8 requires that there be
-        // an active context, otherwise it will segfault, I guess. So we create a dummy context.
-        // (Undocumented, as usual.)
+        // Although we're going to compile a script independent of context, V8 requires that
+        // there be an active context, otherwise it will segfault, I guess. So we create a
+        // dummy context. (Undocumented, as usual.)
         context =
             v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
         // We need to set the highest used index in every context we create to be a nullptr
@@ -1284,32 +1287,32 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         if (logNewScript) {
           // HACK: Log a message indicating that a new script was loaded. This is used only when the
           //   inspector is enabled. We want to do this immediately after the context is created,
-          //   before the user gets a chance to modify the behavior of the console, which if they did,
-          //   we'd then need to be more careful to apply time limits and such.
+          //   before the user gets a chance to modify the behavior of the console, which if they
+          //   did, we'd then need to be more careful to apply time limits and such.
           lockedWorkerIsolate.logMessage(lock, static_cast<uint16_t>(cdp::LogType::WARNING),
               "Script modified; context reset.");
         }
 
-        // We need to register this context with the inspector, otherwise errors won't be reported. But
-        // we want it to be un-registered as soon as the script has been compiled, otherwise the
-        // inspector will end up with multiple contexts active which is very confusing for the user
-        // (since they'll have to select from the drop-down which context to use).
+        // We need to register this context with the inspector, otherwise errors won't be
+        // reported. But we want it to be un-registered as soon as the script has been
+        // compiled, otherwise the inspector will end up with multiple contexts active which
+        // is very confusing for the user (since they'll have to select from the drop-down
+        // which context to use).
         //
         // (For modules, the context was already registered by `setupContext()`, above.
         KJ_IF_SOME(i, isolate->impl->inspector) {
-          if (!source.is<ModulesSource>()) {
+          if (!modular) {
             i.get()->contextCreated(
                 v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Compiler")));
           }
         } else {
         }  // Here to squash a compiler warning
         KJ_DEFER({
-          if (!source.is<ModulesSource>()) {
+          if (!modular) {
             KJ_IF_SOME(i, isolate->impl->inspector) {
               i.get()->contextDestroyed(context);
             } else {
-              // Else block to avoid dangling else clang warning.
-            }
+            }  // Here to squash a compiler warning
           }
         });
 
@@ -1320,23 +1323,26 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           try {
             KJ_SWITCH_ONEOF(source) {
               KJ_CASE_ONEOF(script, ScriptSource) {
+                // This path is used for the older, service worker syntax workers.
+
                 impl->globals =
                     script.compileGlobals(lock, isolate->getApi(), isolate->getApi().getObserver());
 
                 {
-                  // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
-                  // excessively-expensive computation requiring a time limit. We'll go ahead and apply a time
-                  // limit just to be safe. Don't add it to the rollover bank, though.
+                  // It's unclear to me if CompileUnboundScript() can get trapped in any
+                  // infinite loops or excessively-expensive computation requiring a time
+                  // limit. We'll go ahead and apply a time limit just to be safe. Don't
+                  // add it to the rollover bank, though.
                   auto limitScope =
                       isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
                   impl->unboundScriptOrMainModule =
                       jsg::NonModuleScript::compile(lock, script.mainScript, script.mainScriptName);
                 }
-
-                break;
               }
 
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
+                // This path is used for the new ESM worker syntax.
+
                 this->isPython = modulesSource.isPython;
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
                   kj::Own<void> limitScope;
@@ -1351,7 +1357,6 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   modulesSource.compileModules(lock, isolate->getApi());
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
-                break;
               }
             }
 
@@ -1477,21 +1482,6 @@ void Worker::setupContext(
 // =======================================================================================
 
 namespace {
-
-jsg::JsObject resolveNodeInspectModule(jsg::Lock& js) {
-  static constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
-  if (FeatureFlags::get(js).getNewModuleRegistry()) {
-    return KJ_ASSERT_NONNULL(
-        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, kSpecifier));
-  }
-
-  // Use the original module registry implementation
-  auto registry = jsg::ModuleRegistry::from(js);
-  KJ_ASSERT(registry != nullptr);
-  auto inspectModule = registry->resolveInternalImport(js, kSpecifier);
-  return jsg::JsObject(inspectModule.getHandle(js).As<v8::Object>());
-}
-
 kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     const kj::Path& mainModule,
     jsg::JsContext<api::ServiceWorkerGlobalScope>& jsContext,
@@ -1867,7 +1857,8 @@ void Worker::handleLog(jsg::Lock& js,
     // not even evaluate its arguments, so `message()` will not be called at all.
     KJ_LOG(INFO, "console.log()", message());
   } else {
-    // Write to stdio if allowed by console mode
+    // Write to stdio if allowed by console mode. This is making use of our internal
+    // built-in implementation of the node:util inspect API.
     static const ColorMode COLOR_MODE = permitsColor();
 #if _WIN32
     static bool STDOUT_TTY = _isatty(_fileno(stdout));
@@ -1884,7 +1875,8 @@ void Worker::handleLog(jsg::Lock& js,
     auto colors =
         COLOR_MODE == ColorMode::ENABLED || (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
-    auto inspectModule = resolveNodeInspectModule(js);
+    constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
+    auto inspectModule = KJ_ASSERT_NONNULL(js.resolveInternalModule(kSpecifier));
     v8::Local<v8::Value> formatLogVal = inspectModule.get(js, "formatLog"_kj);
     KJ_ASSERT(formatLogVal->IsFunction());
     auto formatLog = formatLogVal.As<v8::Function>();

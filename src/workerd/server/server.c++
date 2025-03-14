@@ -1613,6 +1613,103 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   EventOutcome outcome = EventOutcome::OK;
   kj::uint fetchStatus = 0;
 };
+
+// IsolateLimitEnforcer that enforces no limits.
+class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
+ public:
+  v8::Isolate::CreateParams getCreateParams() override {
+    return {};
+  }
+
+  void customizeIsolate(v8::Isolate* isolate) override {}
+
+  ActorCacheSharedLruOptions getActorCacheLruOptions() override {
+    // TODO(someday): Make this configurable?
+    return {.softLimit = 16 * (1ull << 20),  // 16 MiB
+      .hardLimit = 128 * (1ull << 20),       // 128 MiB
+      .staleTimeout = 30 * kj::SECONDS,
+      .dirtyListByteLimit = 8 * (1ull << 20),  // 8 MiB
+      .maxKeysPerRpc = 128,
+
+      // For now, we use `neverFlush` to implement in-memory-only actors.
+      // See WorkerService::getActor().
+      .neverFlush = true};
+  }
+
+  kj::Own<void> enterStartupJs(
+      jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
+    return {};
+  }
+
+  kj::Own<void> enterStartupPython(
+      jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
+    return {};
+  }
+
+  kj::Own<void> enterDynamicImportJs(
+      jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
+    return {};
+  }
+
+  kj::Own<void> enterLoggingJs(
+      jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
+    return {};
+  }
+
+  kj::Own<void> enterInspectorJs(
+      jsg::Lock& loc, kj::OneOf<kj::Exception, kj::Duration>&) const override {
+    return {};
+  }
+
+  void completedRequest(kj::StringPtr id) const override {}
+
+  bool exitJs(jsg::Lock& lock) const override {
+    return false;
+  }
+
+  void reportMetrics(IsolateObserver& isolateMetrics) const override {}
+
+  kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
+    // No limit on the number of iterations in workerd
+    return kj::none;
+  }
+
+  bool hasExcessivelyExceededHeapLimit() const override {
+    return false;
+  }
+};
+
+struct ErrorReporter: public Worker::ValidationErrorReporter {
+  ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
+
+  Server& server;
+  kj::StringPtr name;
+
+  // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
+  kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
+  kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
+  kj::HashSet<kj::String> actorClasses;
+
+  void addError(kj::String error) override {
+    server.handleReportConfigError(kj::str("service ", name, ": ", error));
+  }
+
+  void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
+    kj::HashSet<kj::String> set;
+    for (auto& method: methods) {
+      set.insert(kj::mv(method));
+    }
+    KJ_IF_SOME(e, exportName) {
+      namedEntrypoints.insert(kj::str(e), kj::mv(set));
+    } else {
+      defaultEntrypoint = kj::mv(set);
+    }
+  }
+
+  void addActorClass(kj::StringPtr exportName) override {
+    actorClasses.insert(kj::str(exportName));
+  }
+};
 }  // namespace
 
 class Server::WorkerService final: public Service,
@@ -2967,39 +3064,6 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
-  struct ErrorReporter: public Worker::ValidationErrorReporter {
-    ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
-
-    Server& server;
-    kj::StringPtr name;
-
-    // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
-    kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
-    kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
-    kj::HashSet<kj::String> actorClasses;
-
-    void addError(kj::String error) override {
-      server.reportConfigError(kj::str("service ", name, ": ", error));
-    }
-
-    void addEntrypoint(
-        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
-      kj::HashSet<kj::String> set;
-      for (auto& method: methods) {
-        set.insert(kj::mv(method));
-      }
-      KJ_IF_SOME(e, exportName) {
-        namedEntrypoints.insert(kj::str(e), kj::mv(set));
-      } else {
-        defaultEntrypoint = kj::mv(set);
-      }
-    }
-
-    void addActorClass(kj::StringPtr exportName) override {
-      actorClasses.insert(kj::str(exportName));
-    }
-  };
-
   ErrorReporter errorReporter(*this, name);
 
   capnp::MallocMessageBuilder arena;
@@ -3012,60 +3076,6 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }
-
-  // IsolateLimitEnforcer that enforces no limits.
-  class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
-   public:
-    v8::Isolate::CreateParams getCreateParams() override {
-      return {};
-    }
-    void customizeIsolate(v8::Isolate* isolate) override {}
-    ActorCacheSharedLruOptions getActorCacheLruOptions() override {
-      // TODO(someday): Make this configurable?
-      return {.softLimit = 16 * (1ull << 20),  // 16 MiB
-        .hardLimit = 128 * (1ull << 20),       // 128 MiB
-        .staleTimeout = 30 * kj::SECONDS,
-        .dirtyListByteLimit = 8 * (1ull << 20),  // 8 MiB
-        .maxKeysPerRpc = 128,
-
-        // For now, we use `neverFlush` to implement in-memory-only actors.
-        // See WorkerService::getActor().
-        .neverFlush = true};
-    }
-    kj::Own<void> enterStartupJs(
-        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-      return {};
-    }
-    kj::Own<void> enterStartupPython(
-        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-      return {};
-    }
-    kj::Own<void> enterDynamicImportJs(
-        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-      return {};
-    }
-    kj::Own<void> enterLoggingJs(
-        jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-      return {};
-    }
-    kj::Own<void> enterInspectorJs(
-        jsg::Lock& loc, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-      return {};
-    }
-    void completedRequest(kj::StringPtr id) const override {}
-    bool exitJs(jsg::Lock& lock) const override {
-      return false;
-    }
-    void reportMetrics(IsolateObserver& isolateMetrics) const override {}
-    kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
-      // No limit on the number of iterations in workerd
-      return kj::none;
-    }
-
-    bool hasExcessivelyExceededHeapLimit() const override {
-      return false;
-    }
-  };
 
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
@@ -3083,6 +3093,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
       limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
       kj::mv(newModuleRegistry));
+
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
@@ -3293,57 +3304,54 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
 
-  {
-    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
-      lock.validateHandlers(errorReporter);
+  worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
+    lock.validateHandlers(errorReporter);
 
-      // Build `ctx.exports` based on the entrypoints reported by `validateHandlers()`.
-      kj::Vector<Global> ctxExports(
-          errorReporter.namedEntrypoints.size() + localActorConfigs.size());
+    // Build `ctx.exports` based on the entrypoints reported by `validateHandlers()`.
+    kj::Vector<Global> ctxExports(errorReporter.namedEntrypoints.size() + localActorConfigs.size());
 
-      // Start numbering loopback channels for stateless entrypoints after the last subrequest
-      // channel used by bindings.
-      uint nextSubrequestChannel =
-          subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
-      if (errorReporter.defaultEntrypoint != kj::none) {
-        ctxExports.add(Global{.name = kj::str("default"),
-          .value = Global::Fetcher{
-            .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
-      }
-      for (auto& ep: errorReporter.namedEntrypoints) {
-        ctxExports.add(Global{.name = kj::str(ep.key),
-          .value = Global::Fetcher{
-            .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
-      }
+    // Start numbering loopback channels for stateless entrypoints after the last subrequest
+    // channel used by bindings.
+    uint nextSubrequestChannel =
+        subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+    if (errorReporter.defaultEntrypoint != kj::none) {
+      ctxExports.add(Global{.name = kj::str("default"),
+        .value = Global::Fetcher{
+          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+    }
+    for (auto& ep: errorReporter.namedEntrypoints) {
+      ctxExports.add(Global{.name = kj::str(ep.key),
+        .value = Global::Fetcher{
+          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+    }
 
-      // Start numbering loopback channels for actor classes after the last actor channel used by
-      // bindings.
-      uint nextActorChannel = actorChannels.size();
-      for (auto& ns: localActorConfigs) {
-        decltype(Global::value) value;
-        KJ_SWITCH_ONEOF(ns.value) {
-          KJ_CASE_ONEOF(durable, Durable) {
-            value = Global::DurableActorNamespace{
-              .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
-          }
-          KJ_CASE_ONEOF(ephemeral, Ephemeral) {
-            value = Global::EphemeralActorNamespace{
-              .actorChannel = nextActorChannel++,
-            };
-          }
+    // Start numbering loopback channels for actor classes after the last actor channel used by
+    // bindings.
+    uint nextActorChannel = actorChannels.size();
+    for (auto& ns: localActorConfigs) {
+      decltype(Global::value) value;
+      KJ_SWITCH_ONEOF(ns.value) {
+        KJ_CASE_ONEOF(durable, Durable) {
+          value = Global::DurableActorNamespace{
+            .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
         }
-        ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+        KJ_CASE_ONEOF(ephemeral, Ephemeral) {
+          value = Global::EphemeralActorNamespace{
+            .actorChannel = nextActorChannel++,
+          };
+        }
       }
+      ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+    }
 
-      JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-        WorkerdApi::from(worker->getIsolate().getApi())
-            .compileGlobals(lock, ctxExports, ctxExportsHandle.getHandle(js), 1);
-      });
-
-      // As an optimization, drop this now while we have the lock.
-      { auto drop = kj::mv(ctxExportsHandle); }
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+      WorkerdApi::from(worker->getIsolate().getApi())
+          .compileGlobals(lock, ctxExports, ctxExportsHandle.getHandle(js), 1);
     });
-  }
+
+    // As an optimization, drop this now while we have the lock.
+    { auto drop = kj::mv(ctxExportsHandle); }
+  });
 
   auto linkCallback = [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
                           actorChannels = kj::mv(actorChannels),

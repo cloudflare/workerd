@@ -1173,9 +1173,10 @@ KJ_TEST("Awaiting a never resolved promise in synchronous require fails as expec
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
       KJ_ASSERT(str ==
-          "Error: The module evaluation did not complete synchronously. "
-          "This is not permitted for synchronous require(...). "
-          "Use await import(...) instead.");
+          "Error: Use of top-level await in a synchronously "
+          "required module is restricted to promises that are resolved "
+          "synchronously. This includes any top-level awaits in the "
+          "entrypoint module for a worker. Specifier: \"file:///foo\".");
     });
   });
 }
@@ -1347,14 +1348,21 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
 
     // In this test, we have an ESM module (bar) that imports a CJS style
     // module (foo) that synchronously tries to require the ESM module (bar).
-    // This is not allowed because the CJS module cannot successfully require
-    // a module that is still in the process of being evaluated.
+
+    // The circular dependency between foo and baz here, as CJS style modules,
+    // should be ok in that it should not throw an error. However, the circular
+    // dependency between foo and bar is more problematic since it is forbidden
+    // to depend on an ESM that has not yet been fully resolved.
+
+    bundleBuilder.addSyntheticModule("baz",
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            kj::str("exports = require('foo');"), kj::str("baz")));
 
     bundleBuilder.addSyntheticModule("foo",
         Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("exports = require('bar');"), kj::str("foo")));
+            kj::str("require('baz'); exports = require('bar');"), kj::str("foo")));
 
-    auto bar = kj::str("export default 123; await import('foo');");
+    auto bar = kj::str("export default {}; await import('foo');");
     bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
@@ -1363,11 +1371,10 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///bar", "default"_kjc);
-      JSG_FAIL_REQUIRE(Error, "Should have failed");
+      JSG_FAIL_REQUIRE(Error, "should have failed");
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(
-          str == "TypeError: Circular module dependency with synchronous require: file:///bar");
+      KJ_ASSERT(str == "Error: Circular dependency when resolving module: file:///bar");
     });
   });
 }
@@ -1383,14 +1390,21 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
 
     // In this test, we have an ESM module (bar) that imports a CJS style
     // module (foo) that synchronously tries to require the ESM module (bar).
-    // This is not allowed because the CJS module cannot successfully require
-    // a module that is still in the process of being evaluated.
+
+    // The circular dependency between foo and baz here, as CJS style modules,
+    // should be ok in that it should not throw an error. However, the circular
+    // dependency between foo and bar is more problematic since it is forbidden
+    // to depend on an ESM that has not yet been fully resolved.
+
+    bundleBuilder.addSyntheticModule("baz",
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
+            kj::str("exports = require('foo');"), kj::str("baz")));
 
     bundleBuilder.addSyntheticModule("foo",
         Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("exports = require('bar');"), kj::str("foo")));
+            kj::str("require('baz'); exports = require('bar');"), kj::str("foo")));
 
-    auto bar = kj::str("export default 123; import bar from 'foo';");
+    auto bar = kj::str("export default {}; import bar from 'foo';");
     bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
 
     auto registry = ModuleRegistry::Builder(observer).add(bundleBuilder.finish()).finish();
@@ -1399,12 +1413,10 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
 
     js.tryCatch([&] {
       ModuleRegistry::resolve(js, "file:///bar", "default"_kjc);
-      JSG_FAIL_REQUIRE(Error, "Should have failed");
+      JSG_FAIL_REQUIRE(Error, "should have failed");
     }, [&](Value exception) {
       auto str = kj::str(exception.getHandle(js));
-      KJ_ASSERT(str ==
-          "TypeError: Circular module dependency with synchronous require: "
-          "file:///bar");
+      KJ_ASSERT(str == "Error: Circular dependency when resolving module: file:///bar");
     });
   });
 }
@@ -1588,15 +1600,17 @@ KJ_TEST("Using a registry from multiple threads works") {
   static constexpr auto makeThread = [](ModuleRegistry& registry) {
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
     kj::Thread thread([&registry, fulfiller = kj::mv(paf.fulfiller)] {
-      PREAMBLE([&](Lock& js) {
-        CompilationObserver compilationObserver;
-        auto attached = registry.attachToIsolate(js, compilationObserver);
-        js.tryCatch([&] {
-          auto val = ModuleRegistry::resolve(js, "file:///foo");
-          KJ_ASSERT(val.isNumber());
-        }, [&](Value exception) { js.throwException(kj::mv(exception)); });
-        fulfiller->fulfill();
-      });
+      {
+        PREAMBLE([&](Lock& js) {
+          CompilationObserver compilationObserver;
+          auto attached = registry.attachToIsolate(js, compilationObserver);
+          js.tryCatch([&] {
+            auto val = ModuleRegistry::resolve(js, "file:///foo");
+            KJ_ASSERT(val.isNumber());
+          }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+        });
+      }
+      fulfiller->fulfill();
     });
     thread.detach();
     return kj::mv(paf.promise);

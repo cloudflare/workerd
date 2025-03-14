@@ -8,12 +8,9 @@ exports_files(["modules.capnp"])
 
 wd_cc_library(
     name = "jsg",
-    srcs = [
-        "modules-new.c++",
-    ],
+    srcs = [],
     hdrs = [
         "jsg-test.h",
-        "modules-new.h",
         "type-wrapper.h",
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
@@ -86,6 +83,7 @@ wd_cc_library(
         "jsg.c++",
         "jsvalue.c++",
         "modules.c++",
+        "modules-new.c++",
         "promise.c++",
         "resource.c++",
         "ser.c++",
@@ -103,6 +101,7 @@ wd_cc_library(
         "jsg.h",
         "jsvalue.h",
         "modules.h",
+        "modules-new.h",
         "promise.h",
         "resource.h",
         "ser.h",
@@ -121,6 +120,7 @@ wd_cc_library(
         ":meta",
         ":modules_capnp",
         ":observer",
+        ":url",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",

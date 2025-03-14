@@ -870,47 +870,36 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   }
 }
 
-namespace {
-jsg::JsValue resolveFromRegistry(jsg::Lock& js, kj::StringPtr specifier) {
-  auto moduleRegistry = jsg::ModuleRegistry::from(js);
-  if (moduleRegistry == nullptr) {
-    // TODO: Return the known built-in instead? This gets a bit tricky as we currently
-    // have no mechanism defined for accessing and caching the built-in module without
-    // the module registry. Should we even support this case at all? Without the module
-    // registry the user can't access the other importable modules anyway. For now, just
-    // returning undefined in this case seems the most appropriate.
-    return js.undefined();
-  }
-
-  auto spec = kj::Path::parse(specifier);
-  auto& info = JSG_REQUIRE_NONNULL(
-      moduleRegistry->resolve(js, spec), Error, kj::str("No such module: ", specifier));
-  auto module = info.module.getHandle(js);
-
-  jsg::instantiateModule(js, module);
-  return jsg::JsValue(js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj));
-}
-}  // namespace
-
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
   KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
-  auto value = resolveFromRegistry(js, "node:buffer"_kj);
-  auto obj = JSG_REQUIRE_NONNULL(
-      value.tryCast<jsg::JsObject>(), TypeError, "Invalid node:buffer implementation");
-  // Unlike the getProcess() case below, this getter is returning an object that
-  // is exported by the node:buffer module and not the module itself, so we need
-  // this additional get to the grab the reference to the thing we're actually
-  // returning.
-  auto buffer = obj.get(js, "Buffer"_kj);
-  JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
-  return buffer;
+  constexpr auto kSpecifier = "node:buffer"_kj;
+  KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+    auto def = module.get(js, "default"_kj);
+    auto obj = KJ_ASSERT_NONNULL(def.tryCast<jsg::JsObject>());
+    auto buffer = obj.get(js, "Buffer"_kj);
+    JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
+    return buffer;
+  } else {
+    // If we are unable to resolve the node:buffer module here, it likely
+    // means that we don't actually have a module registry installed. Just
+    // return undefined in this case.
+    return js.undefined();
+  }
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
-  auto value = resolveFromRegistry(js, "node:process"_kj);
-  JSG_REQUIRE(value.isObject(), TypeError, "Invalid node:process implementation");
-  return value;
+  constexpr auto kSpecifier = "node:process"_kj;
+  KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+    auto def = module.get(js, "default"_kj);
+    JSG_REQUIRE(def.isObject(), TypeError, "Invalid node:process implementation");
+    return def;
+  } else {
+    // If we are unable to resolve the node:process module here, it likely
+    // means that we don't actually have a module registry installed. Just
+    // return undefined in this case.
+    return js.undefined();
+  }
 }
 
 double Performance::now() {
