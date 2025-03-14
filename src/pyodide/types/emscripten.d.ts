@@ -8,11 +8,22 @@ interface PyodideConfig {
   jsglobals: any;
   resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
+  _makeSnapshot?: boolean;
 }
+
+type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;
+
+type SnapshotConfig = {
+  hiwireKeys: SerializedHiwireValue[];
+  immortalKeys: string[];
+};
 
 interface API {
   config: PyodideConfig;
-  finalizeBootstrap: () => void;
+  finalizeBootstrap: (
+    fromSnapshot?: SnapshotConfig,
+    snapshotDeserializer?: (obj: any) => any
+  ) => void;
   public_api: Pyodide;
   rawRun: (code: string) => [status: number, err: string];
   initializeStreams: (
@@ -20,10 +31,11 @@ interface API {
     stdout?: (a: string) => void,
     stderr?: (a: string) => void
   ) => void;
-  version: string;
+  version: '0.26.0a2' | '0.27.5';
   pyodide_base: {
     pyimport_impl: PyCallable;
   };
+  serializeHiwireState(Module: Module): SnapshotConfig;
 }
 
 interface LDSO {

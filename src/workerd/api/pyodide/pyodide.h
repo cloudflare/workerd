@@ -76,7 +76,7 @@ class PythonModuleInfo {
   kj::Array<kj::Array<kj::byte>> contents;
 
   // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports();
+  kj::Array<kj::String> getPackageSnapshotImports(kj::StringPtr version);
   // Takes in a list of Python files (their contents). Parses these files to find the import
   // statements, then returns a list of modules imported via those statements.
   //
@@ -92,8 +92,9 @@ class PythonModuleInfo {
   static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
   kj::HashSet<kj::String> getWorkerModuleSet();
   kj::Array<kj::String> getPythonFileContents();
-  static kj::Array<kj::String> filterPythonScriptImports(
-      kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);
+  static kj::Array<kj::String> filterPythonScriptImports(kj::HashSet<kj::String> workerModules,
+      kj::ArrayPtr<kj::String> imports,
+      kj::StringPtr version);
 };
 
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
@@ -180,7 +181,7 @@ class PyodideMetadataReader: public jsg::Object {
   kj::Array<int> getSizes(jsg::Lock& js);
 
   // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports();
+  kj::Array<kj::String> getPackageSnapshotImports(kj::String version);
 
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
 

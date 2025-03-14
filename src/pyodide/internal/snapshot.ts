@@ -23,10 +23,7 @@ let LOADED_BASELINE_SNAPSHOT: number;
  */
 
 /**
- * Global variable for the memory snapshot. On the first run we stick a copy of
- * the linear memory here, on subsequent runs we can skip bootstrapping Python
- * which is quite slow. Startup with snapshot is 3-5 times faster than without
- * it.
+ * Global variable for the memory snapshot.
  */
 let READ_MEMORY: ((mod: Module) => void) | undefined = undefined;
 let SNAPSHOT_SIZE: number | undefined = undefined;
@@ -36,6 +33,15 @@ export let SHOULD_RESTORE_SNAPSHOT = false;
  * Record the dlopen handles that are needed by the MEMORY.
  */
 let DSO_METADATA: DylinkInfo = {};
+// The state of the JS FFI
+export let HIWIRE_STATE: SnapshotConfig;
+
+type NewSnapshotMeta = {
+  hiwire: SnapshotConfig;
+  dsos: DylinkInfo;
+  version: 1;
+};
+type SnapshotMeta = DylinkInfo | NewSnapshotMeta;
 
 /**
  * Preload a dynamic library.
@@ -226,6 +232,7 @@ type DylinkInfo = {
   settings?: { baselineSnapshot?: boolean };
   loadOrder?: string[];
   soMemoryBases?: { [name: string]: number };
+  version?: undefined;
 };
 
 /**
@@ -286,6 +293,7 @@ function memorySnapshotDoImports(Module: Module): string[] {
   const toDelete = Array.from(
     new Set(SNAPSHOT_IMPORTS.map((x) => x.split('.', 1)[0]))
   ).join(',');
+
   simpleRunPython(Module, `import ${toImport}`);
   simpleRunPython(Module, 'sysconfig.get_config_vars()');
   // Delete to avoid polluting globals
@@ -305,7 +313,9 @@ function memorySnapshotDoImports(Module: Module): string[] {
   // The `importedModules` list will contain all modules that have been imported, including local
   // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
   // grab them and put them into a set for fast filtering.
-  const importedModules: string[] = MetadataReader.getPackageSnapshotImports();
+  const importedModules: string[] = MetadataReader.getPackageSnapshotImports(
+    Module.API.version
+  );
   const deduplicatedModules = [...new Set(importedModules)];
 
   // Import the modules list so they are included in the snapshot.
@@ -322,11 +332,20 @@ function memorySnapshotDoImports(Module: Module): string[] {
  * linear memory into MEMORY.
  */
 function makeLinearMemorySnapshot(Module: Module): Uint8Array {
-  const dsoJSON = recordDsoHandles(Module);
+  let meta: SnapshotMeta = recordDsoHandles(Module);
+  if (Module.API.version !== '0.26.0a2') {
+    const hiwire = Module.API.serializeHiwireState(Module);
+    const tmp: NewSnapshotMeta = {
+      version: 1,
+      dsos: meta,
+      hiwire,
+    };
+    meta = tmp;
+  }
   if (IS_CREATING_BASELINE_SNAPSHOT) {
     // checkLoadedSoFiles(dsoJSON);
   }
-  return encodeSnapshot(Module.HEAP8, dsoJSON);
+  return encodeSnapshot(Module.HEAP8, meta);
 }
 
 // "\x00snp"
@@ -338,22 +357,22 @@ export let LOADED_SNAPSHOT_VERSION: number | undefined = undefined;
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
  */
-function encodeSnapshot(heap: Uint8Array, dsoJSON: object): Uint8Array {
-  const dsoString = JSON.stringify(dsoJSON);
-  let snapshotOffset = HEADER_SIZE + 2 * dsoString.length;
+function encodeSnapshot(heap: Uint8Array, meta: SnapshotMeta): Uint8Array {
+  const json = JSON.stringify(meta);
+  let snapshotOffset = HEADER_SIZE + 2 * json.length;
   // align to 8 bytes
   snapshotOffset = Math.ceil(snapshotOffset / 8) * 8;
   const toUpload = new Uint8Array(snapshotOffset + heap.length);
   const encoder = new TextEncoder();
-  const { written: jsonLength } = encoder.encodeInto(
-    dsoString,
+  const { written: jsonByteLength } = encoder.encodeInto(
+    json,
     toUpload.subarray(HEADER_SIZE)
   );
   const uint32View = new Uint32Array(toUpload.buffer);
   uint32View[0] = SNAPSHOT_MAGIC;
   uint32View[1] = CREATE_SNAPSHOT_VERSION;
   uint32View[2] = snapshotOffset;
-  uint32View[3] = jsonLength;
+  uint32View[3] = jsonByteLength;
   toUpload.subarray(snapshotOffset).set(heap);
   return toUpload;
 }
@@ -378,11 +397,17 @@ function decodeSnapshot(): void {
   const snapshotOffset = buf[0];
   SNAPSHOT_SIZE =
     MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
-  const jsonLength = buf[1];
-  const jsonBuf = new Uint8Array(jsonLength);
+  const jsonByteLength = buf[1];
+  const jsonBuf = new Uint8Array(jsonByteLength);
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
-  const jsonTxt = new TextDecoder().decode(jsonBuf);
-  DSO_METADATA = JSON.parse(jsonTxt) as DylinkInfo;
+  const json = new TextDecoder().decode(jsonBuf);
+  const meta = JSON.parse(json) as SnapshotMeta;
+  if (!meta?.version) {
+    DSO_METADATA = meta;
+  } else {
+    ({ dsos: DSO_METADATA, hiwire: HIWIRE_STATE } = meta);
+  }
+
   LOADED_BASELINE_SNAPSHOT = Number(DSO_METADATA?.settings?.baselineSnapshot);
   READ_MEMORY = function (Module): void {
     // restore memory from snapshot
@@ -434,10 +459,17 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
   }
 }
 
+export function shouldCreateSnapshot(): boolean {
+  return ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
+}
+
 export function maybeCollectSnapshot(Module: Module): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
   const importedModulesList = memorySnapshotDoImports(Module);
+  if (!shouldCreateSnapshot()) {
+    return;
+  }
   if (ArtifactBundler.isEwValidating()) {
     const snapshot = makeLinearMemorySnapshot(Module);
     ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });

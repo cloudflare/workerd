@@ -17,6 +17,7 @@ import {
   USING_OLDEST_PYODIDE_VERSION,
   DURABLE_OBJECT_CLASSES,
   WORKER_ENTRYPOINT_CLASSES,
+  SHOULD_SNAPSHOT_TO_DISK,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
@@ -186,6 +187,12 @@ function doRelaxedPyCall(pyfunc: PyCallable, args: any[]): any {
 }
 
 function makeHandler(pyHandlerName: string): Handler {
+  if (pyHandlerName === 'test' && SHOULD_SNAPSHOT_TO_DISK) {
+    return async function () {
+      await getPyodide();
+      console.log('Stored snapshot to disk; quitting without running test');
+    };
+  }
   return async function (...args: any[]) {
     const mainModule = await enterJaegerSpan(
       'prep_python',
