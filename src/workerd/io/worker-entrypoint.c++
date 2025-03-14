@@ -7,6 +7,7 @@
 #include <workerd/api/basics.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
@@ -326,10 +327,11 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::Ref<api::AbortSignal> signal = abortController
-                                            .emplace(jsg::alloc<api::AbortController>(
-                                                api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS))
-                                            ->getSignal();
+    auto flags = FeatureFlags::get(lock).getRequestSignalPassthrough()
+        ? api::AbortSignal::Flag::NONE
+        : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
+    jsg::Ref<api::AbortSignal> signal =
+        abortController.emplace(jsg::alloc<api::AbortController>(flags))->getSignal();
 
     return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock,
