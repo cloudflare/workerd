@@ -94,19 +94,6 @@ class D1Database {
     return this.alwaysPrimarySession.exec(query);
   }
 
-  /**
-   * @deprecated
-   */
-  public async dump(): Promise<ArrayBuffer> {
-    return this.alwaysPrimarySession.dump();
-  }
-}
-
-class D1DatabaseWithSessionAPI extends D1Database {
-  public constructor(fetcher: Fetcher) {
-    super(fetcher);
-  }
-
   public withSession(
     constraintOrBookmark?: D1SessionBookmarkOrConstraint
   ): D1DatabaseSession {
@@ -115,6 +102,13 @@ class D1DatabaseWithSessionAPI extends D1Database {
       constraintOrBookmark = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
     return new D1DatabaseSession(this.fetcher, constraintOrBookmark);
+  }
+
+  /**
+   * @deprecated
+   */
+  public async dump(): Promise<ArrayBuffer> {
+    return this.alwaysPrimarySession.dump();
   }
 }
 
@@ -573,5 +567,5 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
-  return new D1DatabaseWithSessionAPI(env.fetcher);
+  return new D1Database(env.fetcher);
 }
