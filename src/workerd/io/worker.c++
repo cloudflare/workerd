@@ -2156,6 +2156,44 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
     ignoredHandlers.insert("unhandledrejection"_kj);
     ignoredHandlers.insert("rejectionhandled"_kj);
 
+    // Helper function to collect methods from a prototype chain
+    auto collectMethodsFromPrototypeChain = [&](jsg::JsValue startProto,
+                                                kj::HashSet<kj::String>& seenNames) {
+      // Find the prototype for `Object` by creating one.
+      auto obj = js.obj();
+      jsg::JsValue prototypeOfObject = obj.getPrototype(js);
+
+      // Walk the prototype chain.
+      jsg::JsValue proto = startProto;
+      for (;;) {
+        auto protoObj = JSG_REQUIRE_NONNULL(proto.tryCast<jsg::JsObject>(), TypeError,
+            "Exported value's prototype chain does not end in Object.");
+        if (protoObj == prototypeOfObject) {
+          // Reached the prototype for `Object`. Stop here.
+          break;
+        }
+
+        // Awkwardly, the prototype's members are not typically enumerable, so we have to
+        // enumerate them rather directly.
+        jsg::JsArray properties = protoObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+            jsg::PropertyFilter::SKIP_SYMBOLS, jsg::IndexFilter::SKIP_INDICES);
+        for (auto i: kj::zeroTo(properties.size())) {
+          auto name = properties.get(js, i).toString(js);
+          if (name == "constructor"_kj) {
+            // Don't treat special method `constructor` as an exported handler.
+            continue;
+          }
+
+          if (!ignoredHandlers.contains(name)) {
+            // Only report each method name once, even if it overrides a method in a superclass.
+            seenNames.upsert(kj::mv(name), [&](auto&, auto&&) {});
+          }
+        }
+
+        proto = protoObj.getPrototype(js);
+      }
+    };
+
     KJ_IF_SOME(c, worker.impl->context) {
       // Service workers syntax.
       auto handlerNames = c->getHandlerNames();
@@ -2172,7 +2210,6 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       errorReporter.addEntrypoint(kj::none, handlers.releaseAsArray());
     } else {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
-        kj::Vector<kj::String> methods;
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
           // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
@@ -2182,15 +2219,28 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           //   hence we will see it here. Rather than try to correct this inconsistency between
           //   struct and dict handling (which could have unintended consequences), let's just
           //   work around by ignoring arrays here.
+          errorReporter.addEntrypoint(name, kj::Array<kj::String>());
         } else {
+          // Use a HashSet to avoid duplicates when methods exist both as own properties
+          // and in the prototype chain
+          kj::HashSet<kj::String> methodSet;
+
+          // First, check for own properties (like a plain object literal)
           auto dict = js.toDict(handle);
           for (auto& field: dict.fields) {
             if (!ignoredHandlers.contains(field.name)) {
-              methods.add(kj::mv(field.name));
+              methodSet.upsert(kj::mv(field.name), [&](auto&, auto&&) {});
             }
           }
+
+          // Then, check for methods in the prototype chain (like a class instance)
+          js.withinHandleScope([&]() {
+            collectMethodsFromPrototypeChain(jsg::JsObject(handle).getPrototype(js), methodSet);
+          });
+
+          // Convert HashSet to Array for reporting
+          errorReporter.addEntrypoint(name, KJ_MAP(n, methodSet) { return kj::mv(n); });
         }
-        errorReporter.addEntrypoint(name, methods.releaseAsArray());
       };
 
       auto getEntrypointName = [&](kj::StringPtr key) -> kj::Maybe<kj::StringPtr> {
@@ -2224,44 +2274,16 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         // prototype, and its prototype's prototype, and so on, until we get to Object's
         // prototype, which we ignore.
         auto entrypointName = getEntrypointName(entry.key);
-        js.withinHandleScope([&]() {
-          // Find the prototype for `Object` by creating one.
-          auto obj = js.obj();
-          jsg::JsValue prototypeOfObject = obj.getPrototype(js);
+        kj::HashSet<kj::String> seenNames;
 
-          // Walk the prototype chain.
+        js.withinHandleScope([&]() {
+          // For stateless classes, we need to get the class's prototype property
           jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
           jsg::JsValue proto = ctor.get(js, "prototype");
-          kj::HashSet<kj::String> seenNames;
-          for (;;) {
-            auto protoObj = JSG_REQUIRE_NONNULL(proto.tryCast<jsg::JsObject>(), TypeError,
-                "Exported entrypoint class's prototype chain does not end in Object.");
-            if (protoObj == prototypeOfObject) {
-              // Reached the prototype for `Object`. Stop here.
-              break;
-            }
-
-            // Awkwardly, the prototype's members are not typically enumerable, so we have to
-            // enumerate them rather directly.
-            jsg::JsArray properties =
-                protoObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
-                    jsg::PropertyFilter::SKIP_SYMBOLS, jsg::IndexFilter::SKIP_INDICES);
-            for (auto i: kj::zeroTo(properties.size())) {
-              auto name = properties.get(js, i).toString(js);
-              if (name == "constructor"_kj) {
-                // Don't treat special method `constructor` as an exported handler.
-                continue;
-              }
-
-              // Only report each method name once, even if it overrides a method in a superclass.
-              seenNames.upsert(kj::mv(name), [&](auto&, auto&&) {});
-            }
-
-            proto = protoObj.getPrototype(js);
-          }
-
-          errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+          collectMethodsFromPrototypeChain(proto, seenNames);
         });
+
+        errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
       }
     }
   });
