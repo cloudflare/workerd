@@ -2700,6 +2700,7 @@ class Lock {
 
   void runMicrotasks();
   void terminateExecution();
+  void pumpMessageLoop();
 
   // Logs and reports the error to tail workers (if called within an request),
   // the inspector (if attached), or to KJ_LOG(Info).
