@@ -75,7 +75,13 @@ py_wd_test("seek-metadatafs")
     for python_version, package_version in PYTHON_VERSION_TO_PACKAGES.items()
 ]
 
-py_wd_test("undefined-handler")
+py_wd_test(
+    "undefined-handler",
+    tags = [
+        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
+        "no-asan",
+    ],
+)
 
 py_wd_test("vendor_dir")
 
