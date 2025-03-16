@@ -14,8 +14,6 @@ def eslint_test(
         name = name + "@eslint",
         args = [
             "--config $(location {})".format(eslintrc_json),
-            "--parser-options project:$(location {})".format(tsconfig_json),
-            "-f stylish",
             "--report-unused-disable-directives",
         ] + ["$(location " + src + ")" for src in ts_srcs],
         data = srcs + data + [
