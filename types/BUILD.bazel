@@ -13,6 +13,7 @@ wd_ts_project(
         exclude = ["src/worker/**/*"],
     ),
     eslintrc_json = "eslint.config.mjs",
+    tsconfig_json = "//types:tsconfig.json",
     deps = [
         "//:node_modules/@types/debug",
         "//:node_modules/@types/node",
@@ -78,6 +79,7 @@ js_run_binary(
     wd_ts_test(
         src = src,
         node_options = ["--enable-source-maps"],
+        tsconfig_json = "//types:tsconfig.json",
         deps = [":types_lib"],
     )
     for src in glob(["test/**/*.spec.ts"])

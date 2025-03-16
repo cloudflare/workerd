@@ -1,11 +1,11 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 
 def eslint_test(
         name,
         eslintrc_json,
         tsconfig_json,
-        srcs):
+        srcs,
+        data = []):
     ts_srcs = [src for src in srcs if src.endswith(".ts")]
 
     # TODO: lint js_srcs too, not just ts_srcs
@@ -18,7 +18,7 @@ def eslint_test(
             "-f stylish",
             "--report-unused-disable-directives",
         ] + ["$(location " + src + ")" for src in ts_srcs],
-        data = srcs + [
+        data = srcs + data + [
             eslintrc_json,
             tsconfig_json,
             "//tools:base-eslint",
