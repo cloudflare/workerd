@@ -6,7 +6,6 @@
 
 #include <workerd/api/node/async-hooks.h>
 #include <workerd/api/node/buffer.h>
-#include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/url.h>
@@ -53,7 +52,6 @@ class CompatibilityFlags: public jsg::Object {
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(UrlUtil, "node-internal:url")                                                                  \
-  V(DnsUtil, "node-internal:dns")                                                                  \
   V(TimersUtil, "node-internal:timers")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
@@ -146,4 +144,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES,           \
-      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES\
+      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES\

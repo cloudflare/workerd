@@ -1,6 +1,6 @@
-load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
-wd_rust_binary(
+wd_rust_crate(
     name = "rjs",
     cxx_bridge_src = "lib.rs",
     visibility = ["//visibility:public"],

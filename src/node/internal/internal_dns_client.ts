@@ -1,7 +1,25 @@
-import { default as dnsUtil } from 'node-internal:dns';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import { DnsError } from 'node-internal:internal_errors';
 import { validateString } from 'node-internal:validators';
+
+declare global {
+  var rust: {
+    parseCaaRecord(record: string): {
+      critical: number;
+      field: 'issue' | 'iodef' | 'issuewild';
+      value: string;
+    };
+
+    parseNaptrRecord(record: string): {
+      flags: string;
+      service: string;
+      regexp: string;
+      replacement: string;
+      order: number;
+      preference: number;
+    };
+  };
+}
 
 export type TTLResponse = {
   ttl: number;
@@ -150,7 +168,7 @@ export type CAA = {
 };
 export function normalizeCaa({ data }: Answer): CAA {
   // CAA API returns "hex", so we need to convert it to UTF-8
-  const record = dnsUtil.parseCaaRecord(data);
+  const record = globalThis.rust.parseCaaRecord(data);
   const obj: CAA = { critical: record.critical };
   obj[record.field] = record.value;
   return obj;
@@ -166,7 +184,7 @@ export type NAPTR = {
 };
 export function normalizeNaptr({ data }: Answer): NAPTR {
   // Cloudflare DNS appends "." at the end whereas Node.js doesn't.
-  return dnsUtil.parseNaptrRecord(data);
+  return globalThis.rust.parseNaptrRecord(data);
 }
 
 export function normalizePtr({ data }: Answer): string {

@@ -117,6 +117,7 @@ wd_cc_library(
         ":supported-compatibility-date_capnp",
         ":trace",
         ":worker-interface",
+        "//src/rust/rjs",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",

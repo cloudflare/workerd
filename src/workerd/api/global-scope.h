@@ -7,6 +7,7 @@
 #include "basics.h"
 #include "hibernation-event-params.h"
 #include "http.h"
+#include "workerd/jsg/jsvalue.h"
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
@@ -168,8 +169,12 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
     return {};
   };
 
+  jsg::JsValue getRust(jsg::Lock& lock);
+
   JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
+
+    JSG_LAZY_INSTANCE_PROPERTY(rust, getRust);
 
     JSG_NESTED_TYPE(EventTarget);
 

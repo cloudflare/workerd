@@ -1,5 +1,5 @@
-use thiserror::Error;
 use std::pin::Pin;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DnsParserError {
@@ -142,7 +142,10 @@ pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> 
 /// `DnsParserError::InvalidHexString`
 /// `DnsParserError::ParseIntError`
 #[no_mangle]
-pub extern "C" fn parse_naptr_record(isolate: *mut v8::Isolate, record: *const core::ffi::c_char) -> *mut v8::Value {
+pub extern "C" fn parse_naptr_record(
+    isolate: *mut v8::Isolate,
+    record: *const core::ffi::c_char,
+) -> *mut v8::Value {
     let isolate: &mut v8::Isolate = unsafe { &mut *isolate };
 
     todo!();
