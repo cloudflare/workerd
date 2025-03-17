@@ -1247,6 +1247,17 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
             } else if (object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
+            } else if (object.isInstanceOf<JsRpcStub>(js)) {
+              // Yes. It's a JsRpcStub. We should allow descending into the stub.
+              // Note that the wildcard property of a stub is a prototype property, not an instance
+              // property, so setting allowInstanceProperties = false here gets the behavior we
+              // want.
+              // TODO(now): We actually need to treat JsRpcProperty the same, even though it cannot
+              //    directly be serialized, since pipelining can reach into the properties of
+              //    a stub that was serialized.
+              // TODO(someday): We'll need to support JsRpcPromise here if someday we allow it to
+              //    be serialized.
+              allowInstanceProperties = false;
             } else if (isFunctionForRpc(js, object)) {
               // Yes. It's a function.
               allowInstanceProperties = true;
