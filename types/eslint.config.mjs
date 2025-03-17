@@ -1,36 +1,17 @@
-import eslint from "@eslint/js";
-import importPlugin from "eslint-plugin-import";
-import tseslint from "typescript-eslint";
+import { baseConfig } from '../tools/base.eslint.config.mjs';
 
-export default tseslint.config(
-  eslint.configs.recommended,
-  ...tseslint.configs.strictTypeChecked,
+export default [
+  ...baseConfig(),
   {
-    languageOptions: {
-      parserOptions: {
-        ecmaVersion: "latest",
-        sourceType: "module",
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
     rules: {
       "@typescript-eslint/ban-ts-comment": "off",
       "@typescript-eslint/no-non-null-assertion": "off",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-empty-function": "off",
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         { argsIgnorePattern: "^_" },
       ],
     },
   },
-  {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    plugins: { import: importPlugin },
-    rules: {
-      "import/order": ["warn", { alphabetize: { order: "asc" } }],
-      "sort-imports": ["warn", { ignoreDeclarationSort: true }],
-    },
-  },
-);
+]

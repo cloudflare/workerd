@@ -64,11 +64,11 @@ type WildcardRule = [/* from */ RegExp, /* to */ string];
 function entryWildcardRule([from, to]: [string, string]): WildcardRule {
   return [new RegExp(`^${from.replace("*", "(.+)")}$`), to];
 }
-function maybeApplyWildcardRule(rules: WildcardRule[], text: string) {
+function maybeApplyWildcardRule(rules: WildcardRule[], text: string): string | undefined {
   for (const [from, to] of rules) {
     const match = from.exec(text);
     if (match === null) continue;
-    return match[1] === undefined ? to : to.replace("*", match[1]);
+    return match.at(1) === undefined ? to : to.replaceAll("*", match[1]);
   }
 }
 
@@ -78,8 +78,8 @@ const pathUnresolveRules = pathEntries.map(([from, to]) =>
   entryWildcardRule([to, from])
 );
 
-function createImportResolveVisitor(ctx: ts.TransformationContext) {
-  const visitor: ts.Visitor = (node) => {
+function createImportResolveVisitor(ctx: ts.TransformationContext): ts.Visitor {
+  return (node) => {
     // Visit all `declare module "<specifier>"` nodes
     if (
       ts.isModuleDeclaration(node) &&
@@ -97,13 +97,12 @@ function createImportResolveVisitor(ctx: ts.TransformationContext) {
 
     return node;
   };
-  return visitor;
 }
 
 function createModuleImportResolveVisitor(
   ctx: ts.TransformationContext,
   referencingPath: string
-) {
+): ts.Visitor {
   assert(referencingPath.startsWith("/"), "Expected absolute referencing path");
   // `file:` protocol isn't important here, just need something for a valid URL
   const referencingURL = new URL(referencingPath, "file:");

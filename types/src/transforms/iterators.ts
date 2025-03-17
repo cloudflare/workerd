@@ -144,6 +144,7 @@ function createIteratorDeclarationsVisitor(
         assert(nextTypeSymbol?.members !== undefined);
         let nextValueSymbol: ts.Symbol | undefined;
         nextTypeSymbol.members.forEach((value, key) => {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
           if (key === "value") nextValueSymbol = value;
         });
         assert(nextValueSymbol !== undefined);
