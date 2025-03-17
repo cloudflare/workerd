@@ -803,7 +803,7 @@ struct Worker::Script::Impl {
     KJ_ASSERT(!FeatureFlags::get(js).getNewModuleRegistry(),
         "legacy dynamic imports must not be used with the new module registry");
     static auto constexpr handleDynamicImport =
-        [](kj::Own<const Worker> worker, DynamicImportHandler handler,
+        [](kj::Arc<Worker> worker, DynamicImportHandler handler,
             kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
         -> kj::Promise<DynamicImportResult> {
       co_await kj::yield();
@@ -853,7 +853,7 @@ struct Worker::Script::Impl {
         auto& context = IoContext::current();
 
         return context.awaitIo(js,
-            handleDynamicImport(kj::atomicAddRef(context.getWorker()), kj::mv(handler),
+            handleDynamicImport(context.getWorker().addRef(), kj::mv(handler),
                 jsg::AsyncContextFrame::currentRef(js)),
             [](jsg::Lock& js, DynamicImportResult result) {
           if (result.isException) {
@@ -3431,7 +3431,7 @@ kj::Maybe<Worker::ConnectFn&> Worker::getConnectOverride(kj::StringPtr networkAd
   return connectOverrides.find(networkAddress);
 }
 
-Worker::Actor::Actor(const Worker& worker,
+Worker::Actor::Actor(kj::Arc<Worker> worker,
     kj::Maybe<RequestTracker&> tracker,
     Actor::Id actorId,
     bool hasTransient,
@@ -3445,7 +3445,7 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
     kj::Maybe<rpc::Container::Client> container)
-    : worker(kj::atomicAddRef(worker)),
+    : worker(kj::mv(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),

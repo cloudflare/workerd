@@ -600,7 +600,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   //   returns and the promise that it returns (if any) has resolved.
   // * In the disabled path, the queue event isn't complete until all waitUntil'ed promises resolve.
   //   This was how Queues originally worked, but made for a poor user experience.
-  auto compatFlags = context.getWorker().getIsolate().getApi().getFeatureFlags();
+  auto compatFlags = context.getWorker()->getIsolate().getApi().getFeatureFlags();
   if (compatFlags.getQueueConsumerNoWaitForWaitUntil()) {
     // The user has opted in to only waiting on their event handler rather than all waitUntil'd
     // promises.
@@ -691,7 +691,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
         }
       }
       auto& ioContext = incomingRequest->getContext();
-      auto scriptId = ioContext.getWorker().getScript().getId();
+      auto scriptId = ioContext.getWorker()->getScript().getId();
       auto tasks = ioContext.getWaitUntilTasks().trace();
       if (result == IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT) {
         KJ_LOG(WARNING, "NOSENTRY queue event hit timeout", scriptId, status, tasks);

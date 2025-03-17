@@ -43,7 +43,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   // topLevelRequest.getZoneDefaultWorkerLimits(), since the top level request may be shared between
   // zone and non-zone workers.
   static kj::Own<WorkerInterface> construct(ThreadContext& threadContext,
-      kj::Own<const Worker> worker,
+      kj::Arc<Worker> worker,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -93,7 +93,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
 
-  void init(kj::Own<const Worker> worker,
+  void init(kj::Arc<Worker> worker,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
       kj::Own<LimitEnforcer> limitEnforcer,
       kj::Own<void> ioContextDependency,
@@ -153,7 +153,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 };
 
 kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContext,
-    kj::Own<const Worker> worker,
+    kj::Arc<Worker> worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -197,7 +197,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)) {}
 
-void WorkerEntrypoint::init(kj::Own<const Worker> worker,
+void WorkerEntrypoint::init(kj::Arc<Worker> worker,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
     kj::Own<LimitEnforcer> limitEnforcer,
     kj::Own<void> ioContextDependency,
@@ -753,10 +753,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
 }
 
 #ifdef KJ_DEBUG
-void requestGc(const Worker& worker) {
+void requestGc(kj::Arc<Worker> worker) {
   TRACE_EVENT("workerd", "Debug: requestGc()");
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    auto& isolate = worker.getIsolate();
+    auto& isolate = worker->getIsolate();
     auto lock = isolate.getApi().lock(stackScope);
     lock->requestGcForTesting();
   });
@@ -765,13 +765,13 @@ void requestGc(const Worker& worker) {
 template <typename T>
 kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
   TRACE_EVENT("workerd", "Debug: addGcPassForTest");
-  auto worker = kj::atomicAddRef(context.getWorker());
+  auto worker = context.getWorker().addRef();
   if constexpr (kj::isSameType<T, void>()) {
     co_await promise;
-    requestGc(*worker);
+    requestGc(kj::mv(worker));
   } else {
     auto ret = co_await promise;
-    requestGc(*worker);
+    requestGc(kj::mv(worker));
     co_return kj::mv(ret);
   }
 }
@@ -790,7 +790,7 @@ kj::Promise<T> WorkerEntrypoint::maybeAddGcPassForTest(IoContext& context, kj::P
 }  // namespace
 
 kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
-    kj::Own<const Worker> worker,
+    kj::Arc<Worker> worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
