@@ -541,10 +541,14 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     }
   }
   auto cacheClient = context.getCacheClient();
-  auto httpClient = cacheName
-                        .map([&](kj::String& n) {
-    return cacheClient->getNamespace(n, kj::mv(cfBlobJson), span);
-  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(cfBlobJson), span); });
+  auto metadata = CacheClient::SubrequestMetadata{
+    .cfBlobJson = kj::mv(cfBlobJson),
+    .parentSpan = span,
+  };
+  auto httpClient =
+      cacheName.map([&](kj::String& n) {
+    return cacheClient->getNamespace(n, kj::mv(metadata));
+  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
   httpClient = httpClient.attach(kj::mv(span), kj::mv(userSpan), kj::mv(cacheClient));
   return httpClient;
 }
