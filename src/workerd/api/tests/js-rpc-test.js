@@ -436,6 +436,17 @@ export class MyService extends WorkerEntrypoint {
   }
 }
 
+// An entrypoint which forwards methods calls to MyService, thus acting as a proxy.
+export class MyServiceProxy extends WorkerEntrypoint {
+  makeCounter(i) {
+    return this.env.MyService.makeCounter(i);
+  }
+
+  getAnObject(i) {
+    return this.env.MyService.getAnObject(i);
+  }
+}
+
 export class MyActor extends DurableObject {
   #counter = 0;
 
@@ -850,6 +861,29 @@ export let promisePipelining = {
       name: 'TypeError',
       message: 'The RPC receiver does not implement the method "foo".',
     });
+  },
+};
+
+// Test promise pipelining through a proxy.
+export let promisePipeliningProxy = {
+  async test(controller, env, ctx) {
+    // Pipeline on a proxied call that just returns a stub.
+    {
+      let counter = env.MyServiceProxy.makeCounter(12);
+      let promise1 = counter.increment(3);
+      let promise2 = counter.increment(5);
+      assert.strictEqual(await promise1, 15);
+      assert.strictEqual(await promise2, 20);
+    }
+
+    // Pipeline on a proxied call that returns an object containing a stub.
+    {
+      let counter = env.MyServiceProxy.getAnObject(12).counter;
+      let promise1 = counter.increment(3);
+      let promise2 = counter.increment(5);
+      assert.strictEqual(await promise1, 15);
+      assert.strictEqual(await promise2, 20);
+    }
   },
 };
 
