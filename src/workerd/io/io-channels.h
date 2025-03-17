@@ -30,6 +30,10 @@ class CacheClient {
 
     // Specifies the parent span for the subrequest for tracing purposes.
     SpanParent parentSpan;
+
+    // Serialized JSON value to pass in ew_compat field of control header to FL. This has the same
+    // semantics as the field in IoChannelFactory::SubrequestMetadata.
+    kj::Maybe<kj::StringPtr> featureFlagsForFl;
   };
 
   // Get the default namespace, i.e. the one that fetch() will use for caching.
