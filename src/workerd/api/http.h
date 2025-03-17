@@ -791,7 +791,7 @@ public:
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
           kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
-          kj::Maybe<Body::ExtractedBody> body, kj::Maybe<jsg::Ref<AbortSignal>> thisSignal,
+          kj::Maybe<Body::ExtractedBody> body,
           CacheMode cacheMode = CacheMode::NONE,
           Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
@@ -802,14 +802,10 @@ public:
       // that the cancel machinery is not used but the request.signal accessor will still
       // do the right thing.
       if (s->getNeverAborts()) {
-        this->thisSignal = s.addRef();
+        this->thisSignal = kj::mv(s);
       } else {
-        this->signal = s.addRef();
+        this->signal = kj::mv(s);
       }
-    }
-
-    KJ_IF_SOME(s, thisSignal) {
-      this->thisSignal = s.addRef();
     }
   }
   // TODO(conform): Technically, the request's URL should be parsed immediately upon Request
@@ -862,12 +858,8 @@ public:
   // request.signal to always return an AbortSignal even if one is not actively
   // used on this request.
   kj::Maybe<jsg::Ref<AbortSignal>> getSignal();
-  jsg::Ref<AbortSignal> getThisSignal();
 
-  // Clear the request's signal if the 'ignoreForSubrequests' flag is set. This happens when
-  // a request from an incoming fetch is passed-through to another fetch. We want to avoid
-  // aborting the subrequest in that case.
-  void clearSignalIfIgnoredForSubrequest();
+  jsg::Ref<AbortSignal> getThisSignal(jsg::Lock& js);
 
   // Returns the `cf` field containing Cloudflare feature flags.
   jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
