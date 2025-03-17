@@ -343,7 +343,7 @@ TestFixture::TestFixture(SetupParams&& params)
           IsolateObserver::StartType::COLD,
           false,
           nullptr)),
-      worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
+      worker(kj::arc<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
             // no bindings, nothing to do
@@ -367,7 +367,7 @@ TestFixture::TestFixture(SetupParams&& params)
         return jsg::alloc<api::DurableObjectStorage>(
             IoContext::current().addObject(actorCache), /*enableSql=*/false);
       };
-      actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
+      actor = kj::refcounted<Worker::Actor>(worker.addRef(), /*tracker=*/kj::none, kj::mv(id),
           /*hasTransient=*/false, makeActorCache,
           /*classname=*/kj::none, makeStorage, lock, kj::refcounted<MockActorLoopback>(),
           *timerChannel, kj::refcounted<ActorObserver>(), kj::none, kj::none);
@@ -408,7 +408,7 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
+      threadContext, worker.addRef(), actor, kj::heap<MockLimitEnforcer>());
   auto invocationSpanContext = tracing::InvocationSpanContext::newForInvocation(kj::none, kj::none);
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(kj::addRef(*context),
       kj::heap<DummyIoChannelFactory>(*timerChannel), kj::refcounted<RequestObserver>(), nullptr,
