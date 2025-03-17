@@ -1778,6 +1778,23 @@ export interface KVNamespace<Key extends string = string> {
     key: Key,
     options?: KVNamespaceGetOptions<"stream">,
   ): Promise<ReadableStream | null>;
+  get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+  get<ExpectedValue = unknown>(
+    key: Array<Key>,
+    type: "json",
+  ): Promise<Map<string, ExpectedValue | null>>;
+  get(
+    key: Array<Key>,
+    options?: Partial<KVNamespaceGetOptions<undefined>>,
+  ): Promise<Map<string, string | null>>;
+  get(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"text">,
+  ): Promise<Map<string, string | null>>;
+  get<ExpectedValue = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"json">,
+  ): Promise<Map<string, ExpectedValue | null>>;
   list<Metadata = unknown>(
     options?: KVNamespaceListOptions,
   ): Promise<KVNamespaceListResult<Metadata, Key>>;
@@ -1822,6 +1839,30 @@ export interface KVNamespace<Key extends string = string> {
     key: Key,
     options: KVNamespaceGetOptions<"stream">,
   ): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    type: "text",
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
+    key: Array<Key>,
+    type: "json",
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+  >;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    options?: Partial<KVNamespaceGetOptions<undefined>>,
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"text">,
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"json">,
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+  >;
   delete(key: Key): Promise<void>;
 }
 export interface KVNamespaceListOptions {
@@ -5870,6 +5911,18 @@ export type PagesPluginFunction<
 > = (
   context: EventPluginContext<Env, Params, Data, PluginArgs>,
 ) => Response | Promise<Response>;
+// Copyright (c) 2022-2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+export declare abstract class PipelineTransform {
+  /**
+   * transformJson recieves an array of javascript objects which can be
+   * mutated and returned to the pipeline
+   * @param data The data to be mutated
+   * @returns A promise containing the mutated data
+   */
+  public transformJson(data: object[]): Promise<object[]>;
+}
 // PubSubMessage represents an incoming PubSub message.
 // The message includes metadata about the broker, the client, and the payload
 // itself.
