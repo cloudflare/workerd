@@ -1167,7 +1167,7 @@ export let serializeRpcPromiseOrProprety = {
       () => env.MyService.getRemoteNestedRpcProperty(func).value(),
       {
         name: 'TypeError',
-        message: '"value" is not a function.',
+        message: '"foo" is not a function.',
       }
     );
   },

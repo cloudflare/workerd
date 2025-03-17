@@ -1085,7 +1085,13 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
       switch (op.which()) {
         case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
-          JSG_REQUIRE(isFunctionForRpc(js, propHandle), TypeError,
+          // Note that using isFunctionForRpc(js, propHandle) here would be incorrect, since that
+          // decides whether it is a function *that can be serialized as a stub*. JsRpcProperty
+          // is (at present) considered non-serializable in itself, but when traversing the
+          // pipeline path, we may have descended into a stub and its properties, thus we could
+          // actually be invoking a JsRpcProperty here. As long as it is in fact callable, we will
+          // allow it.
+          JSG_REQUIRE(propHandle->IsFunction(), TypeError,
               kj::str("\"", methodNameForTrace, "\" is not a function."));
           auto fn = propHandle.As<v8::Function>();
 
