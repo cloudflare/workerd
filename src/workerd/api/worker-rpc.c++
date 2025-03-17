@@ -155,8 +155,11 @@ namespace {
 //
 // `makeBuilder` is a function which takes a capnp::MessageSize hint and returns the
 // rpc::JsValue::Builder to fill in.
+//
+// Returns an array of stub disposers that should be released when the object that was serialized
+// is no longer needed for pipelining.
 template <typename Func>
-void serializeJsValue(jsg::Lock& js,
+kj::Vector<kj::Own<void>> serializeJsValue(jsg::Lock& js,
     jsg::JsValue value,
     Func makeBuilder,
     RpcSerializerExternalHander::GetStreamSinkFunc getStreamSinkFunc) {
@@ -193,6 +196,9 @@ void serializeJsValue(jsg::Lock& js,
     builder.adoptExternals(
         externalHandler.build(capnp::Orphanage::getForMessageContaining(builder)));
   }
+
+  // Return the disposers so they can be attached to the pipeline
+  return externalHandler.releaseStubDisposers();
 }
 
 struct DeserializeResult {
@@ -846,9 +852,11 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     builder.setRpcTarget(kj::mv(cap));
   });
 
-  // Sending a stub over RPC implicitly disposes the stub. The application can explicitly .dup() it
-  // if this is undesired.
-  dispose();
+  // Instead of disposing the stub immediately, we add a disposer to the serializer
+  // that will be executed when the pipeline is finished. This ensures the stub
+  // remains valid for the duration of any pipelined operations.
+  externalHandler->addStubDisposer(
+      kj::heap(kj::defer([self = JSG_THIS]() mutable { self->dispose(); })));
 }
 
 jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
@@ -897,6 +905,11 @@ struct Object {
 
   // Was the value a plain JavaScript object which had a custom dispose() method?
   bool hasDispose;
+
+  // Please assign the stub disposer list returned by `serializeJsValue` into this reference. This
+  // points into the object backing `cap` -- the disposers will be held until the pipeline is
+  // destroyed. TODO(cleanup): This is pretty gross, can we refactor it to be better?
+  kj::Vector<kj::Own<void>>& stubDisposers;
 };
 
 // The value was something that should serialize to a single stub (e.g. it was an RpcTarget, a
@@ -1023,7 +1036,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           auto maybePipeline = makeCallPipeline(js, resultValue);
 
           rpc::JsRpcTarget::CallResults::Builder results = nullptr;
-          serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
+          auto stubDisposers = serializeJsValue(js, resultValue, [&](capnp::MessageSize hint) {
             hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
             hint.capCount += 1;  // for callPipeline
             results = callContext.initResults(hint);
@@ -1035,7 +1048,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
           KJ_SWITCH_ONEOF(maybePipeline) {
             KJ_CASE_ONEOF(obj, MakeCallPipeline::Object) {
+              obj.stubDisposers = kj::mv(stubDisposers);
               results.setCallPipeline(kj::mv(obj.cap));
+
+              // Note that hasDisposer is ONLY meant to indicate the presence of an
+              // application-level disposer. It need not be true if we only have stub disposers.
               results.setHasDisposer(obj.hasDispose);
             }
             KJ_CASE_ONEOF(obj, MakeCallPipeline::SingleStub) {
@@ -1450,11 +1467,22 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     // If we have a disposer, and the I/O context is not already destroyed, arrange to call the
     // disposer.
     KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
-      KJ_IF_SOME(d, handles->dispose) {
-        ctx.addTask(ctx.run(
-            [dispose = kj::mv(d), object = kj::mv(handles->object)](Worker::Lock& lock) mutable {
+      auto& h = *handles;
+      if (h.dispose != kj::none || !h.stubDisposers.empty()) {
+        ctx.addTask(ctx.run([h = kj::mv(h)](Worker::Lock& lock) mutable {
           jsg::Lock& js = lock;
-          jsg::check(dispose.getHandle(js)->Call(js.v8Context(), object.getHandle(js), 0, nullptr));
+
+          // It's best if `handles` is destroyed under lock, as this avoids the need to queue
+          // destroyed handles to the cross-thread disposal queue. So, move it to the local stack.
+          auto handles = kj::mv(h);
+
+          // Call the disposer for the top-level object, if there was one.
+          KJ_IF_SOME(d, handles.dispose) {
+            jsg::check(
+                d.getHandle(js)->Call(js.v8Context(), handles.object.getHandle(js), 0, nullptr));
+          }
+
+          // Dropping `handles` will also call disposers for any stubs that were in the object.
         }));
       }
     }
@@ -1468,10 +1496,18 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     };
   }
 
+  kj::Vector<kj::Own<void>>& getStubDisposersRef() {
+    return handles->stubDisposers;
+  }
+
  private:
   struct Handles {
     jsg::JsRef<jsg::JsObject> object;
     kj::Maybe<jsg::V8Ref<v8::Function>> dispose;
+
+    // Discposers for stubs or other things inside `object` which need to be dropped as soon as
+    // the pipeline is dropped.
+    kj::Vector<kj::Own<void>> stubDisposers;
 
     Handles(jsg::Lock& js, jsg::JsObject object, kj::Maybe<v8::Local<v8::Function>> dispose)
         : object(js, object),
@@ -1546,10 +1582,13 @@ static MakeCallPipeline::Result makeCallPipeline(jsg::Lock& js, jsg::JsValue val
       // that a new `dispose()` method will always be added on the client side).
       obj.delete_(js, js.symbolDispose());
 
-      return MakeCallPipeline::Object{
-        .cap = rpc::JsRpcTarget::Client(
-            kj::heap<TransientJsRpcTarget>(js, IoContext::current(), obj, maybeDispose, true)),
-        .hasDispose = maybeDispose != kj::none};
+      auto pipeline =
+          kj::heap<TransientJsRpcTarget>(js, IoContext::current(), obj, maybeDispose, true);
+      auto& stubDisposersRef = pipeline->getStubDisposersRef();
+
+      return MakeCallPipeline::Object{.cap = rpc::JsRpcTarget::Client(kj::mv(pipeline)),
+        .hasDispose = maybeDispose != kj::none,
+        .stubDisposers = stubDisposersRef};
     } else if (obj.isInstanceOf<JsRpcStub>(js)) {
       // It's just a stub. It'll serialize as a single stub, obviously.
       return MakeCallPipeline::SingleStub();
