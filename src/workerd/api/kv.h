@@ -50,8 +50,22 @@ class KvNamespace: public jsg::Object {
   using GetResult = kj::Maybe<
       kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
 
-  jsg::Promise<GetResult> get(
+  jsg::Promise<KvNamespace::GetResult> getSingle(
       jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+
+  jsg::Promise<jsg::JsRef<jsg::JsMap>> getBulk(jsg::Lock& js,
+      kj::Array<kj::String> name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
+      bool withMetadata);
+
+  kj::String formBulkBodyString(kj::Array<kj::String>& names,
+      bool withMetadata,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>>& options);
+
+  kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>> get(
+      jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::String>> name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   struct GetWithMetadataResult {
     GetResult value;
@@ -70,9 +84,14 @@ class KvNamespace: public jsg::Object {
       kj::String name,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
       LimitEnforcer::KvOpType op);
-  jsg::Promise<GetWithMetadataResult> getWithMetadata(
+
+  jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(
       jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
+  kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>>
+  getWithMetadata(jsg::Lock& js,
+      kj::OneOf<kj::Array<kj::String>, kj::String> name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
   struct ListOptions {
     jsg::Optional<int> limit;
     jsg::Optional<kj::Maybe<kj::String>> prefix;
@@ -144,6 +163,12 @@ class KvNamespace: public jsg::Object {
       get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<ArrayBuffer | null>;
       get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<ReadableStream | null>;
 
+      get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+      get<ExpectedValue = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, ExpectedValue | null>>;
+      get(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, string | null>>;
+      get(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, string | null>>;
+      get<ExpectedValue = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, ExpectedValue | null>>;
+
       list<Metadata = unknown>(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<Metadata, Key>>;
 
       put(key: Key, value: string | ArrayBuffer | ArrayBufferView | ReadableStream, options?: KVNamespacePutOptions): Promise<void>;
@@ -158,6 +183,11 @@ class KvNamespace: public jsg::Object {
       getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"arrayBuffer">): Promise<KVNamespaceGetWithMetadataResult<ArrayBuffer, Metadata>>;
       getWithMetadata<Metadata = unknown>(key: Key, options: KVNamespaceGetOptions<"stream">): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
 
+      getWithMetadata<Metadata = unknown>(key: Array<Key>, type: "text"): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, type: "json"): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
+      getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: Partial<KVNamespaceGetOptions<undefined>>): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+      getWithMetadata<Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"text">): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>;
+      getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(key: Array<Key>, options?: KVNamespaceGetOptions<"json">): Promise<Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>;
       delete(key: Key): Promise<void>;
     });
   }
