@@ -273,17 +273,17 @@ Object.defineProperties(constants, {
     writable: false,
   },
   RSA_PSS_SALTLEN_DIGEST: {
-    value: 1,
+    value: -1,
     configurable: false,
     writable: false,
   },
   RSA_PSS_SALTLEN_MAX_SIGN: {
-    value: 2,
+    value: -2,
     configurable: false,
     writable: false,
   },
   RSA_PSS_SALTLEN_AUTO: {
-    value: 2,
+    value: -2,
     configurable: false,
     writable: false,
   },
