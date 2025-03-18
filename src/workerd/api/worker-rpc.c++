@@ -321,6 +321,31 @@ class RevokerMembrane final: public capnp::MembranePolicy, public kj::Refcounted
   kj::ForkedPromise<void> promise;
 };
 
+// A membrane which attaches some object until it is destroyed.
+//
+// TODO(cleanup): This is generally useful, should it be part of capnp?
+class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+ public:
+  explicit AttachmentMembrane(kj::Own<void> attachment): attachment(kj::mv(attachment)) {}
+
+  kj::Maybe<capnp::Capability::Client> inboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Maybe<capnp::Capability::Client> outboundCall(
+      uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
+    return kj::none;
+  }
+
+  kj::Own<MembranePolicy> addRef() override {
+    return kj::addRef(*this);
+  }
+
+ private:
+  kj::Own<void> attachment;
+};
+
 // Given a value, check if it has a dispose method and, if so, invoke it.
 void tryCallDisposeMethod(jsg::Lock& js, jsg::JsValue value) {
   js.withinHandleScope([&]() {
@@ -848,7 +873,26 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "Remote RPC references can only be serialized for RPC.");
 
-  externalHandler->write([cap = getClient()](rpc::JsValue::External::Builder builder) mutable {
+  // We may be forwarding a stub that points to some other isolate. Consider the case where we
+  // are returning the stub to our client. The RPC session remains live as long as the client is
+  // holding any remaining stubs obtained from this session, due to CompletionMembrane. However, if
+  // the only remaining stubs point on to different isolates, and we don't have anything left to
+  // do in this IoContext, then the pending event mechanism would abort the IoContext early with
+  // "The script will never generate a response." To avoid that, we need to attach a pending event
+  // to this stub, using a membrane.
+  //
+  // TODO(someday): Ideally, we would not need to keep the IoContext live just because stubs pass
+  //   through it. It would be nice to implement a sort of "deferred proxying" for RPC, where we
+  //   shut down the IoContext when it has nothing left to do. Note, though, that if the IoContext
+  //   is explicitly *aborted*, we probably should revoke all capabilities obtained through it.
+  //   That actually doesn't quite happen today: aborting the IoContext is likely to cancel all
+  //   subrequests which probably has the effect of breaking any stubs obtained from them, but
+  //   not necessarily (the subrequests could use waitUntil() to extend themselves). Anyway, this
+  //   will be trickier to get right, so I'm punting with this work-around for now.
+  auto cap = capnp::membrane(
+      getClient(), kj::refcounted<AttachmentMembrane>(IoContext::current().registerPendingEvent()));
+
+  externalHandler->write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
     builder.setRpcTarget(kj::mv(cap));
   });
 
