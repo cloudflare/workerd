@@ -91,6 +91,8 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
             return "kv_list"_kjc;
           case LimitEnforcer::KvOpType::DELETE:
             return "kv_delete"_kjc;
+          case LimitEnforcer::KvOpType::GET_BULK:
+            return "kv_get_bulk"_kjc;
         }
       }
     }
