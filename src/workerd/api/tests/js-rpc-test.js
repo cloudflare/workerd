@@ -44,6 +44,19 @@ class MyCounter extends RpcTarget {
   }
 }
 
+class RpcBox extends RpcTarget {
+  #value;
+
+  constructor(value) {
+    super();
+    this.#value = value;
+  }
+
+  get value() {
+    return this.#value;
+  }
+}
+
 class NonRpcClass {
   foo() {
     return 123;
@@ -149,6 +162,10 @@ export class MyService extends WorkerEntrypoint {
 
   async getAnObject(i) {
     return { foo: 123 + i, counter: new MyCounter(i) };
+  }
+
+  async getADeeperObject(i) {
+    return { foo: 123 + i, box: new RpcBox(new RpcStub(new MyCounter(i))) };
   }
 
   async getMap() {
@@ -444,6 +461,10 @@ export class MyServiceProxy extends WorkerEntrypoint {
 
   getAnObject(i) {
     return this.env.MyService.getAnObject(i);
+  }
+
+  getADeeperObject(i) {
+    return this.env.MyService.getADeeperObject(i);
   }
 }
 
@@ -879,6 +900,16 @@ export let promisePipeliningProxy = {
     // Pipeline on a proxied call that returns an object containing a stub.
     {
       let counter = env.MyServiceProxy.getAnObject(12).counter;
+      let promise1 = counter.increment(3);
+      let promise2 = counter.increment(5);
+      assert.strictEqual(await promise1, 15);
+      assert.strictEqual(await promise2, 20);
+    }
+
+    // Pipeline on a proxied call that returns an object containing an object that contains a
+    // stub. (This ensures that pipelining can traverse JsRpcProperty values.)
+    {
+      let counter = env.MyServiceProxy.getADeeperObject(12).box.value;
       let promise1 = counter.increment(3);
       let promise2 = counter.increment(5);
       assert.strictEqual(await promise1, 15);
