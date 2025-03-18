@@ -5478,6 +5478,20 @@ export interface D1Meta {
   last_row_id: number;
   changed_db: boolean;
   changes: number;
+  /**
+   * The region of the database instance that executed the query.
+   */
+  served_by_region?: string;
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
+  timings?: {
+    /**
+     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
+     */
+    sql_duration_ms: number;
+  };
 }
 export interface D1Response {
   success: true;
