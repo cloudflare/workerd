@@ -732,4 +732,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("allow_importable_env");
   # When allowed, `import { env } from 'cloudflare:workers'` will provide access
   # to the per-request environment/bindings.
+
+  assetsSecFetchModeNavigateHeaderPrefersAssetServing @79 :Bool
+      $compatEnableFlag("assets_navigation_prefers_asset_serving")
+      $compatDisableFlag("assets_navigation_has_no_effect")
+      $compatEnableDate("2025-04-01");
+  # Enables routing to asset-worker over a user worker when an appropriate
+  # `assets.not_found_handling` configuration option is set and `Sec-Fetch-Mode: navigate` header
+  # is present. This flag is used only by @cloudflare/workers-shared (within workers-sdk) and not
+  #  directly by workerd.
 }
