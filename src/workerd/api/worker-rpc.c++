@@ -890,13 +890,6 @@ static bool isFunctionForRpc(jsg::Lock& js, jsg::JsValue value) {
   return isFunctionForRpc(js, v8::Local<v8::Value>(value).As<v8::Function>());
 }
 
-static inline bool isFunctionForRpc(jsg::Lock& js, v8::Local<v8::Value> val) {
-  return isFunctionForRpc(js, jsg::JsValue(val));
-}
-static inline bool isFunctionForRpc(jsg::Lock& js, jsg::JsObject val) {
-  return isFunctionForRpc(js, jsg::JsValue(val));
-}
-
 // `makeCallPipeline()` has a bit of a complicated result type..
 namespace MakeCallPipeline {
 // The value is an object, which may have stubs inside it.
