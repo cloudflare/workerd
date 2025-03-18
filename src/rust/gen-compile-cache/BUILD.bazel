@@ -19,7 +19,10 @@ wd_cc_library(
     hdrs = [
         "cxx-bridge.h",
     ],
-    linkstatic = True,
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
     deps = [
         "//src/rust/cxx-integration",
         "//src/workerd/jsg",
