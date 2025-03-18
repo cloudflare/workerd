@@ -11,6 +11,7 @@ interface D1Meta {
    * The region of the database instance that executed the query.
    */
   served_by_region?: string;
+
   /**
    * True if-and-only-if the database instance that executed the query was the primary.
    */
