@@ -48,7 +48,9 @@ import {
   ConnResetException,
   ERR_TLS_HANDSHAKE_TIMEOUT,
   ERR_OPTION_NOT_IMPLEMENTED,
+  ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
+import { SecureContext } from 'node-internal:internal_tls_common';
 
 const kConnectOptions = Symbol('connect-options');
 const kErrorEmitted = Symbol('error-emitted');
@@ -207,9 +209,11 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.requestOCSP');
   }
 
-  if (tlsOptions.secureContext !== undefined) {
-    // TODO(soon): Investigate supporting this.
-    throw new ERR_OPTION_NOT_IMPLEMENTED('options.secureContext');
+  if (
+    tlsOptions.secureContext !== undefined &&
+    !(tlsOptions.secureContext instanceof SecureContext)
+  ) {
+    throw new ERR_TLS_INVALID_CONTEXT('context');
   }
 
   if (tlsOptions.pskCallback !== undefined) {
@@ -606,6 +610,7 @@ export function connect(...args: unknown[]): TLSSocket {
     ALPNProtocols: options.ALPNProtocols,
     enableTrace: options.enableTrace,
     highWaterMark: options.highWaterMark,
+    secureContext: options.secureContext,
     // @ts-expect-error TS2412 Type inconsistencies between types/node
     onread: options.onread,
     signal: options.signal,

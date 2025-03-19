@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 import tls from 'node:tls';
-import { strictEqual, ok, rejects, throws } from 'node:assert';
+import { strictEqual, ok, rejects, throws, doesNotThrow } from 'node:assert';
 import { once } from 'node:events';
 import net from 'node:net';
 
@@ -280,5 +280,18 @@ export const tlsConnectGivenSocket = {
     }
 
     await Promise.all(promises);
+  },
+};
+
+export const testSecureContext = {
+  async test() {
+    throws(() => tls.connect({ port: 42, secureContext: {} }), {
+      code: 'ERR_TLS_INVALID_CONTEXT',
+    });
+
+    doesNotThrow(() => {
+      const secureContext = tls.createSecureContext({});
+      tls.connect({ port: 42, secureContext });
+    });
   },
 };

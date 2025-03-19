@@ -709,6 +709,12 @@ export class ERR_TLS_HANDSHAKE_TIMEOUT extends NodeError {
   }
 }
 
+export class ERR_TLS_INVALID_CONTEXT extends NodeTypeError {
+  constructor(field: string) {
+    super('ERR_TLS_INVALID_CONTEXT', `${field} must be a SecureContext`);
+  }
+}
+
 export class ConnResetException extends NodeError {
   path?: string | undefined;
   host?: string | undefined;
