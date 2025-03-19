@@ -741,4 +741,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # `assets.not_found_handling` configuration option is set and `Sec-Fetch-Mode: navigate` header
   # is present. This flag is used only by @cloudflare/workers-shared (within workers-sdk) and not
   #  directly by workerd.
+
+  cacheApiCompatFlags @80 :Bool
+      $compatEnableFlag("cache_api_compat_flags")
+      $compatDisableFlag("no_cache_api_compat_flags")
+      $compatEnableDate("2025-04-19");
+    # when enabled, exports compability flags for FL to Cache API requests.
+
 }
