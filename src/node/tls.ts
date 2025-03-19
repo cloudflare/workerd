@@ -23,11 +23,13 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import { checkServerIdentity } from 'node-internal:internal_tls';
 import { createSecureContext } from 'node-internal:internal_tls_common';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
-export { TLSSocket, connect, createSecureContext };
+export { TLSSocket, connect, createSecureContext, checkServerIdentity };
 export default {
   TLSSocket,
   connect,
   createSecureContext,
+  checkServerIdentity,
 };
