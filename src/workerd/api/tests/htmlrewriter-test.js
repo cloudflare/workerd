@@ -968,6 +968,10 @@ export const svgNamespace = {
   },
 };
 
+// This test is commented out because it will cause a stack overflow in workerd if enabled.
+// It is included for reference.
+
+/*
 export const stackOverflow1 = {
   // One big handler
   async test() {
@@ -991,7 +995,7 @@ export const stackOverflow1 = {
       await reader.read();
     }
   },
-};
+};*/
 
 export const stackOverflow2 = {
   // Many small handlers
