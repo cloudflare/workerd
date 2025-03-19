@@ -5,6 +5,9 @@
 
 #include "ada.h"
 
+#include <workerd/rust/cxx-integration/cxx-bridge.h>
+#include <workerd/rust/net/lib.rs.h>
+
 namespace workerd::api::node {
 
 namespace {
@@ -77,6 +80,11 @@ jsg::JsString UrlUtil::format(
 
   auto href = out->get_href();
   return js.str(kj::StringPtr(href.data(), href.size()));
+}
+
+jsg::JsString UrlUtil::canonicalizeIp(jsg::Lock& js, kj::String input) {
+  auto out = rust::net::canonicalize_ip({input.begin(), input.size()});
+  return js.str(kj::StringPtr(out.data(), out.size()));
 }
 
 }  // namespace workerd::api::node

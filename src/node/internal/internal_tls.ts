@@ -1,5 +1,31 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+//
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 import type { PeerCertificate } from 'node:tls';
 import { isIP } from 'node:internal/internal_net';
+import { default as urlUtil } from 'node-internal:url';
 import {
   ERR_TLS_CERT_ALTNAME_INVALID,
   ERR_TLS_CERT_ALTNAME_FORMAT,
@@ -9,10 +35,6 @@ import {
 // a conservative version that only lowercases A-Z.
 function toLowerCase(c: string): string {
   return String.fromCharCode(32 + c.charCodeAt(0));
-}
-
-function canonicalizeIP(_ip: string): string {
-  throw new Error('Not implemented');
 }
 
 function unfqdn(host: string): string {
@@ -136,7 +158,7 @@ export function checkServerIdentity(
       if (name.startsWith('DNS:')) {
         dnsNames.push(name.slice(4));
       } else if (name.startsWith('IP Address:')) {
-        ips.push(canonicalizeIP(name.slice(11)));
+        ips.push(urlUtil.canonicalizeIp(name.slice(11)));
       }
     });
   }
@@ -147,7 +169,7 @@ export function checkServerIdentity(
   hostname = unfqdn(hostname); // Remove trailing dot for error messages.
 
   if (isIP(hostname)) {
-    valid = ips.includes(canonicalizeIP(hostname));
+    valid = ips.includes(urlUtil.canonicalizeIp(hostname));
     if (!valid)
       reason = `IP: ${hostname} is not in the cert's list: ` + ips.join(', ');
   } else if (dnsNames.length > 0 || subject?.CN) {
