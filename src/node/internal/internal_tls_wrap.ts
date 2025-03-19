@@ -207,10 +207,14 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.requestOCSP');
   }
 
-  if (tlsOptions.secureContext !== undefined) {
-    // TODO(soon): Investigate supporting this.
-    throw new ERR_OPTION_NOT_IMPLEMENTED('options.secureContext');
-  }
+  // In order to unblock mysql2 SSL connections, we omit the validation
+  // of secureContext option. When we implement createSecureContext(),
+  // we will visit this behavior.
+  // TODO(soon): Implement createSecureContext() to support secureContext option.
+  //
+  // if (tlsOptions.secureContext !== undefined) {
+  //   throw new ERR_OPTION_NOT_IMPLEMENTED('options.secureContext');
+  // }
 
   if (tlsOptions.pskCallback !== undefined) {
     // Used for TLS-PSK negotiation. We do not support it.
