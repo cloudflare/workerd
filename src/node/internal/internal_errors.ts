@@ -732,9 +732,9 @@ export class ERR_TLS_INVALID_CONTEXT extends NodeTypeError {
 export class ERR_TLS_CERT_ALTNAME_INVALID extends NodeError {
   reason: string;
   host: string;
-  cert: PeerCertificate;
+  cert?: Partial<PeerCertificate> | undefined;
 
-  constructor(reason: string, host: string, cert: PeerCertificate) {
+  constructor(reason: string, host: string, cert?: Partial<PeerCertificate>) {
     super('ERR_TLS_CERT_ALTNAME_INVALID', reason);
     this.reason = reason;
     this.host = host;

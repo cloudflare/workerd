@@ -84,7 +84,7 @@ jsg::JsString UrlUtil::format(
 
 jsg::JsString UrlUtil::canonicalizeIp(jsg::Lock& js, kj::String input) {
   auto out = rust::net::canonicalize_ip({input.begin(), input.size()});
-  return js.str(kj::StringPtr(out.data(), out.size()));
+  return js.str(kj::StringPtr(out.c_str(), out.size()));
 }
 
 }  // namespace workerd::api::node

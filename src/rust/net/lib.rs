@@ -12,5 +12,5 @@ mod ffi {
 pub fn canonicalize_ip(input: &str) -> String {
     IpAddr::from_str(input)
         .map(|ip| ip.to_string())
-        .unwrap_or(input.to_owned())
+        .unwrap_or(String::new())
 }

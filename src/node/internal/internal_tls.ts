@@ -24,12 +24,12 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import type { PeerCertificate } from 'node:tls';
-import { isIP } from 'node:internal/internal_net';
+import { isIP } from 'node-internal:internal_net';
 import { default as urlUtil } from 'node-internal:url';
 import {
   ERR_TLS_CERT_ALTNAME_INVALID,
   ERR_TLS_CERT_ALTNAME_FORMAT,
-} from 'node:internal/internal_errors';
+} from 'node-internal:internal_errors';
 
 // String#toLowerCase() is locale-sensitive so we use
 // a conservative version that only lowercases A-Z.
@@ -74,7 +74,7 @@ function check(
 
   const hostSubdomain = hostParts[0] as string;
   const patternSubdomain = patternParts[0] as string;
-  const patternSubdomainParts = patternSubdomain.split('*', 3) ?? [];
+  const patternSubdomainParts = patternSubdomain.split('*', 3);
 
   // Short-circuit when the subdomain does not contain a wildcard.
   // RFC 6125 does not allow wildcard substitution for components
@@ -122,7 +122,7 @@ function splitEscapedAltNames(altNames: string): string[] {
       if (!match) {
         throw new ERR_TLS_CERT_ALTNAME_FORMAT();
       }
-      currentToken += JSON.parse(match[0]);
+      currentToken += JSON.parse(match[0]) as string;
       offset = nextQuote + match[0].length;
     } else if (nextSep !== -1) {
       // There is a separator and no quote before it.
@@ -141,8 +141,8 @@ function splitEscapedAltNames(altNames: string): string[] {
 
 export function checkServerIdentity(
   hostname: string,
-  cert: PeerCertificate
-): void {
+  cert: Partial<PeerCertificate>
+): Error | undefined {
   const subject = cert.subject;
   const altNames = cert.subjectaltname;
   const dnsNames: string[] = [];
@@ -183,7 +183,7 @@ export function checkServerIdentity(
         reason = `Host: ${hostname}. is not in the cert's altnames: ${altNames}`;
     } else {
       // Match against Common Name only if no supported identifiers exist.
-      const cn = subject.CN;
+      const cn = subject?.CN;
 
       if (Array.isArray(cn)) valid = cn.some(wildcard);
       else if (cn) valid = wildcard(cn);
@@ -195,6 +195,7 @@ export function checkServerIdentity(
   }
 
   if (!valid) {
-    new ERR_TLS_CERT_ALTNAME_INVALID(reason, hostname, cert);
+    return new ERR_TLS_CERT_ALTNAME_INVALID(reason, hostname, cert);
   }
+  return undefined;
 }
