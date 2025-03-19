@@ -12,6 +12,8 @@
 
 #include <lol_html.h>
 
+#include <capnp/message.h>
+
 struct lol_html_HtmlRewriter {};
 struct lol_html_HtmlRewriterBuilder {};
 struct lol_html_AttributesIterator {};
@@ -220,6 +222,8 @@ using UnregisteredElementOrDocumentHandlers =
 // Wrapper around an actual rewriter (streaming parser).
 class Rewriter final: public WritableStreamSink {
  public:
+  friend void stackOverflow(jsg::Lock& js, size_t stackSize);
+
   explicit Rewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
       kj::ArrayPtr<const char> encoding,
@@ -747,15 +751,11 @@ void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
     return;
   }
 
+  KJ_DBG(maybeWaitScope != kj::none);
   auto bufferCopy = kj::heapArray(buffer);
-
-  KJ_IF_SOME(wp, writePromise) {
-    writePromise = wp.then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
-      return inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-    });
-  } else {
-    writePromise = inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-  }
+  auto promise =
+      kj::evalLater([&]() { return inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy)); });
+  promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
 }
 
 // =======================================================================================
@@ -1270,6 +1270,20 @@ void HTMLRewriter::visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(documentHandlers);
       }
     }
+  }
+}
+
+void stackOverflow(jsg::Lock& js, size_t stackSize) {
+  //src/edgeworker/api-tests:html-rewriter-test
+  auto ts = IdentityTransformStream::constructor(js);
+  auto outputSink = ts->getWritable()->removeSink(js);
+  kj::ArrayPtr<const char> encoding = "utf-8"_kj;
+
+  Rewriter r(js, NULL, encoding, kj::mv(outputSink));
+  kj::String buffer = kj::str("<div></div>");
+  r.outputImpl(buffer.asBytes());
+  for (size_t i = 0; i < stackSize / sizeof(void*); i++) {
+    r.outputImpl(buffer.asBytes());
   }
 }
 

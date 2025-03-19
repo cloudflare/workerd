@@ -35,6 +35,8 @@ class DocumentEnd;
 // =======================================================================================
 // HTMLRewriter
 
+void stackOverflow(jsg::Lock& js, size_t stackSize);
+
 class HTMLRewriter: public jsg::Object {
  public:
   class Token;
