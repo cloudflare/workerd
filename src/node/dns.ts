@@ -43,78 +43,68 @@ export class Resolver {
     throw new Error('Not implemented');
   }
 
-  public getServers(callback: never): void {
-    getServers(callback);
+  public getServers(...args: Parameters<typeof getServers>): void {
+    getServers(...args);
   }
 
-  public resolve(callback: never): void {
-    resolve(callback);
+  public resolve(...args: Parameters<typeof resolve>): void {
+    resolve(...args);
   }
 
-  public resolve4(
-    input: string,
-    options?: { ttl?: boolean },
-    callback?: never
-  ): void {
-    // @ts-expect-error TS2554 TODO(soon): Fix callbackify typescript types
-    resolve4(input, options, callback);
+  public resolve4(...args: Parameters<typeof resolve4>): void {
+    resolve4(...args);
   }
 
-  public resolve6(
-    input: string,
-    options?: { ttl?: boolean },
-    callback?: never
-  ): void {
-    // @ts-expect-error TS2554 TODO(soon): Fix callbackify typescript types
-    resolve6(input, options, callback);
+  public resolve6(...args: Parameters<typeof resolve6>): void {
+    resolve6(...args);
   }
 
-  public resolveAny(_input: string, callback: never): void {
-    resolveAny(callback);
+  public resolveAny(...args: Parameters<typeof resolveAny>): void {
+    resolveAny(...args);
   }
 
-  public resolveCaa(name: string, callback: never): void {
-    resolveCaa(name, callback);
+  public resolveCaa(...args: Parameters<typeof resolveCaa>): void {
+    resolveCaa(...args);
   }
 
-  public resolveCname(name: string, callback: never): void {
-    resolveCname(name, callback);
+  public resolveCname(...args: Parameters<typeof resolveCname>): void {
+    resolveCname(...args);
   }
 
-  public resolveMx(name: string, callback: never): void {
-    resolveMx(name, callback);
+  public resolveMx(...args: Parameters<typeof resolveMx>): void {
+    resolveMx(...args);
   }
 
-  public resolveNaptr(name: string, callback: never): void {
-    resolveNaptr(name, callback);
+  public resolveNaptr(...args: Parameters<typeof resolveNaptr>): void {
+    resolveNaptr(...args);
   }
 
-  public resolveNs(name: string, callback: never): void {
-    resolveNs(name, callback);
+  public resolveNs(...args: Parameters<typeof resolveNs>): void {
+    resolveNs(...args);
   }
 
-  public resolvePtr(name: string, callback: never): void {
-    resolvePtr(name, callback);
+  public resolvePtr(...args: Parameters<typeof resolvePtr>): void {
+    resolvePtr(...args);
   }
 
-  public resolveSoa(name: string, callback: never): void {
-    resolveSoa(name, callback);
+  public resolveSoa(...args: Parameters<typeof resolveSoa>): void {
+    resolveSoa(...args);
   }
 
-  public resolveSrv(name: string, callback: never): void {
-    resolveSrv(name, callback);
+  public resolveSrv(...args: Parameters<typeof resolveSrv>): void {
+    resolveSrv(...args);
   }
 
-  public resolveTxt(name: string, callback: never): void {
-    resolveTxt(name, callback);
+  public resolveTxt(...args: Parameters<typeof resolveTxt>): void {
+    resolveTxt(...args);
   }
 
-  public reverse(name: string, callback: never): void {
-    reverse(name, callback);
+  public reverse(...args: Parameters<typeof reverse>): void {
+    reverse(...args);
   }
 
-  public setServers(callback: never): void {
-    setServers(callback);
+  public setServers(...args: Parameters<typeof setServers>): void {
+    setServers(...args);
   }
 }
 

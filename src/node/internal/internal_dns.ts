@@ -26,6 +26,7 @@ import {
   DnsError,
   ERR_INVALID_ARG_TYPE,
   ERR_OPTION_NOT_IMPLEMENTED,
+  ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 import {
   validateString,
@@ -123,7 +124,7 @@ export function lookup(
     }
     if (options?.order != null) {
       validateOneOf(options.order, 'options.order', validDnsOrders);
-      dnsOrder = options.order as DnsOrder; // eslint-disable-line @typescript-eslint/no-unused-vars
+      dnsOrder = options.order as DnsOrder;
     }
   }
 
@@ -218,10 +219,41 @@ export async function lookupService(): Promise<void> {
   throw new Error('Not implemented');
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function resolve(): Promise<void> {
-  // TODO(soon): Implement this.
-  throw new Error('Not implemented');
+export function resolve(
+  name: string,
+  rrtype: string
+): Promise<unknown> | Promise<void> {
+  validateString(name, 'name');
+
+  switch (rrtype) {
+    case 'A':
+      return resolve4(name);
+    case 'AAAA':
+      return resolve6(name);
+    case 'ANY':
+      return resolveAny();
+    case 'CAA':
+      return resolveCaa(name);
+    case 'CNAME':
+      return resolveCname(name);
+    case 'MX':
+      return resolveMx(name);
+    case 'NAPTR':
+      return resolveNaptr(name);
+    case 'NS':
+      return resolveNs(name);
+    case 'PTR':
+      return resolvePtr(name);
+    case 'SOA':
+      return resolveSoa(name);
+    case 'SRV':
+      return resolveSrv(name);
+    case 'TXT':
+      return resolveTxt(name);
+    default: {
+      throw new ERR_INVALID_ARG_VALUE('rrtype', rrtype);
+    }
+  }
 }
 
 export function resolve4(

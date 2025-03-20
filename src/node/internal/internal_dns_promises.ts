@@ -71,8 +71,8 @@ export class Resolver {
     return getServers();
   }
 
-  public resolve(): Promise<void> {
-    return resolve();
+  public resolve(name: string, rrtype: string): ReturnType<typeof resolve> {
+    return resolve(name, rrtype);
   }
 
   public resolve4(
