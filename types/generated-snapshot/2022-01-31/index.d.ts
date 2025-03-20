@@ -1751,6 +1751,23 @@ interface KVNamespace<Key extends string = string> {
     key: Key,
     options?: KVNamespaceGetOptions<"stream">,
   ): Promise<ReadableStream | null>;
+  get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+  get<ExpectedValue = unknown>(
+    key: Array<Key>,
+    type: "json",
+  ): Promise<Map<string, ExpectedValue | null>>;
+  get(
+    key: Array<Key>,
+    options?: Partial<KVNamespaceGetOptions<undefined>>,
+  ): Promise<Map<string, string | null>>;
+  get(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"text">,
+  ): Promise<Map<string, string | null>>;
+  get<ExpectedValue = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"json">,
+  ): Promise<Map<string, ExpectedValue | null>>;
   list<Metadata = unknown>(
     options?: KVNamespaceListOptions,
   ): Promise<KVNamespaceListResult<Metadata, Key>>;
@@ -1795,6 +1812,30 @@ interface KVNamespace<Key extends string = string> {
     key: Key,
     options: KVNamespaceGetOptions<"stream">,
   ): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    type: "text",
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
+    key: Array<Key>,
+    type: "json",
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+  >;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    options?: Partial<KVNamespaceGetOptions<undefined>>,
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"text">,
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"json">,
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+  >;
   delete(key: Key): Promise<void>;
 }
 interface KVNamespaceListOptions {

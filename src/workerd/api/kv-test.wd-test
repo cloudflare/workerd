@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "kv-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "kv-test.js" )
+        ],
+        bindings = [ ( name = "KV", kvNamespace = "kv-test" ), ],
+        compatibilityDate = "2023-07-24",
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+      )
+    ),
+  ],
+);
