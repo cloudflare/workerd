@@ -113,7 +113,12 @@ const location = undefined;
 
 function addEventListener(){}
 
-function reportUndefinedSymbolsNoOp() {}
+function reportUndefinedSymbolsPatched(Module) {
+    if (Module.API.version === "0.26.0a2") {
+        return;
+    }
+    Module.reportUndefinedSymbols(undefined);
+}
 
 if (typeof FinalizationRegistry === "undefined") {
     globalThis.FinalizationRegistry = class FinalizationRegistry {
@@ -157,7 +162,7 @@ REPLACEMENTS = [
     ],
     [
         "reportUndefinedSymbols()",
-        "reportUndefinedSymbolsNoOp()",
+        "reportUndefinedSymbolsPatched(Module)",
     ],
     [
         "crypto.getRandomValues(",
@@ -177,9 +182,16 @@ REPLACEMENTS = [
         "eval(UTF8ToString(ptr))",
         "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
     ],
+    # Dynamic linking patches:
+    # library lookup
     [
-        "!libData&&flags.fs",
-        "!(libData ??= patchDynlibLookup(Module, libName))&&flags.fs",
+        "!libData",
+        "!(libData ??= patchDynlibLookup(Module, libName))",
+    ],
+    # for ensuring memory base of dynlib is stable when restoring snapshots
+    [
+        "getMemory(",
+        "Module.getMemoryPatched(Module, libName, ",
     ],
 ]
 

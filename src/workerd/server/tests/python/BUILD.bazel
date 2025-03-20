@@ -52,23 +52,16 @@ py_wd_test("seek-metadatafs")
         # was rebuilt and backport bumped.
         pkg_skip_versions = {
             "0.27.1": [
-                "micropip",
+                "cryptography",  # top-level entropy
+                "soupsieve",  # Circular dependency with beautifulsoup4
+                "starlette",  # No module named 'starlette.converters'
+                # requests and dependencies have an ssl problem
                 "langchain-core",
                 "langchain_openai",
                 "langsmith",
-                "PyJWT",
-                "beautifulsoup4",
-                "cffi",
-                "cryptography",
-                "pycparser",
-                "python-multipart",
-                "soupsieve",
-                "sqlalchemy",
-                "starlette",
-                "tblib",
-                "pydantic_core",
                 "requests",
-                "urllib3",
+                # aiohttp has same ssl problem
+                "aiohttp",
             ],
         },
     )

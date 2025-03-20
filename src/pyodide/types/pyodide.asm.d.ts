@@ -4,5 +4,5 @@ declare module 'pyodide-internal:generated/pyodide.asm.wasm' {
 }
 
 declare module 'pyodide-internal:generated/pyodide.asm' {
-  const _createPyodideModule: (es: EmscriptenSettings) => Module;
+  const _createPyodideModule: (es: EmscriptenSettings) => Promise<void>;
 }

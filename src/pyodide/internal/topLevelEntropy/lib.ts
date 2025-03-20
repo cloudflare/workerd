@@ -73,24 +73,23 @@ export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
  * Hypothetically, we could skip it for new dedicated snapshots.
  */
 export function entropyMountFiles(Module: Module): void {
-  Module.FS.mkdir(`/lib/python3.12/site-packages/_cloudflare`);
+  const cloudflareDir = Module.FS.sitePackages + '/_cloudflare';
+  Module.FS.mkdir(cloudflareDir);
+  Module.FS.writeFile(cloudflareDir + '/__init__.py', new Uint8Array(0), {
+    canOwn: true,
+  });
   Module.FS.writeFile(
-    `/lib/python3.12/site-packages/_cloudflare/__init__.py`,
-    new Uint8Array(0),
-    { canOwn: true }
-  );
-  Module.FS.writeFile(
-    `/lib/python3.12/site-packages/_cloudflare/entropy_patches.py`,
+    cloudflareDir + '/entropy_patches.py',
     new Uint8Array(entropyPatches),
     { canOwn: true }
   );
   Module.FS.writeFile(
-    `/lib/python3.12/site-packages/_cloudflare/entropy_import_context.py`,
+    cloudflareDir + '/entropy_import_context.py',
     new Uint8Array(entropyImportContext),
     { canOwn: true }
   );
   Module.FS.writeFile(
-    `/lib/python3.12/site-packages/_cloudflare/import_patch_manager.py`,
+    cloudflareDir + '/import_patch_manager.py',
     new Uint8Array(importPatchManager),
     { canOwn: true }
   );

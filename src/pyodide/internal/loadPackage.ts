@@ -18,10 +18,8 @@ import {
   USING_OLDEST_PACKAGES_VERSION,
 } from 'pyodide-internal:metadata';
 import {
-  DYNLIB_PATH,
   VIRTUALIZED_DIR,
   STDLIB_PACKAGES,
-  getSitePackagesPath,
 } from 'pyodide-internal:setupPackages';
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';

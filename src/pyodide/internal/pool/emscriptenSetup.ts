@@ -62,7 +62,9 @@ function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
     try {
       const pymajor = Module._py_version_major();
       const pyminor = Module._py_version_minor();
-      Module.FS.mkdirTree(`/lib/python${pymajor}.${pyminor}/site-packages`);
+      Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+      Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
+      Module.FS.mkdirTree(Module.FS.sitePackages);
       Module.FS.writeFile(
         `/lib/python${pymajor}${pyminor}.zip`,
         new Uint8Array(pythonStdlib),

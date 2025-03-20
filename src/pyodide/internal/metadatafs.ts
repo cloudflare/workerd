@@ -56,7 +56,11 @@ export function createMetadataFS(Module: Module): object {
       if (parent.tree == undefined) {
         throw new Error('cannot lookup directory, tree is undefined');
       }
-      return parent.tree.get(name)!;
+      const res = parent.tree.get(name);
+      if (res === undefined) {
+        throw new Module.FS.ErrnoError(44);
+      }
+      return res;
     },
     read(stream, position, buffer) {
       return MetadataReader.read(stream.node.index!, position, buffer);
