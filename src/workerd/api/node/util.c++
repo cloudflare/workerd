@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "util.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 
@@ -213,6 +214,13 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
   KJ_IF_SOME(spec, jsg::checkNodeSpecifier(specifier)) {
     isNode = true;
     specifier = kj::mv(spec);
+  }
+
+  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+    KJ_IF_SOME(mod, js.resolveInternalModule(specifier)) {
+      return mod;
+    }
+    return js.undefined();
   }
 
   auto registry = jsg::ModuleRegistry::from(js);
