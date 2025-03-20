@@ -16,10 +16,11 @@ import {
   setServers,
   getDefaultResultOrder,
   setDefaultResultOrder,
-  lookup,
+  lookup as internalLookup,
   lookupService,
   resolve,
   resolveAny,
+  type LookupOptions,
 } from 'node-internal:internal_dns';
 import {
   CAA,
@@ -48,7 +49,6 @@ export {
   setServers,
   getDefaultResultOrder,
   setDefaultResultOrder,
-  lookup,
   lookupService,
   resolve,
   resolveAny,
@@ -136,6 +136,26 @@ export class Resolver {
   public setServers(): Promise<void> {
     return setServers();
   }
+}
+
+export function lookup(
+  hostname: string,
+  options?: LookupOptions
+): Promise<unknown> {
+  const { promise, resolve, reject } = Promise.withResolvers();
+  internalLookup(hostname, options, (error, address, family) => {
+    if (error) {
+      reject(error);
+    } else if (Array.isArray(address)) {
+      resolve(address);
+    } else {
+      resolve({
+        address,
+        family,
+      });
+    }
+  });
+  return promise;
 }
 
 export default {

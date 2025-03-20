@@ -25,13 +25,9 @@ export const resolve4 = callbackify(dns.resolve4.bind(dns));
 export const resolve6 = callbackify(dns.resolve6.bind(dns));
 export const getServers = callbackify(dns.getServers.bind(dns));
 export const setServers = callbackify(dns.setServers.bind(dns));
-export const getDefaultResultOrder = callbackify(
-  dns.getDefaultResultOrder.bind(dns)
-);
-export const setDefaultResultOrder = callbackify(
-  dns.setDefaultResultOrder.bind(dns)
-);
-export const lookup = callbackify(dns.lookup.bind(this));
+export const getDefaultResultOrder = dns.getDefaultResultOrder.bind(dns);
+export const setDefaultResultOrder = dns.setDefaultResultOrder.bind(dns);
+export const lookup = dns.lookup.bind(dns);
 export const lookupService = callbackify(dns.lookupService.bind(this));
 export const resolve = callbackify(dns.resolve.bind(this));
 export const resolveAny = callbackify(dns.resolveAny.bind(this));
