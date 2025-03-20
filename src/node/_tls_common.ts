@@ -23,7 +23,10 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { createSecureContext } from 'node-internal:internal_tls_common';
+import {
+  createSecureContext,
+  SecureContext,
+} from 'node-internal:internal_tls_common';
 
-export { createSecureContext };
-export default { createSecureContext };
+export { createSecureContext, SecureContext };
+export default { createSecureContext, SecureContext };

@@ -27,24 +27,47 @@ import type tls from 'node:tls';
 import { ERR_OPTION_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { validateInteger } from 'node-internal:validators';
 
-export class SecureContext {
-  public context: unknown = undefined;
+// @ts-expect-error TS2323 Redeclare error.
+export declare class SecureContext {
+  public context: unknown;
   public constructor(
     _secureProtocol?: string,
     secureOptions?: number,
     minVersion?: string,
     maxVersion?: string
-  ) {
-    if (minVersion !== undefined) {
-      throw new ERR_OPTION_NOT_IMPLEMENTED('minVersion');
-    }
-    if (maxVersion !== undefined) {
-      throw new ERR_OPTION_NOT_IMPLEMENTED('maxVersion');
-    }
-    if (secureOptions) {
-      validateInteger(secureOptions, 'secureOptions');
-    }
+  );
+}
+
+// This is intentionally not fully compatible with Node.js implementation
+// since creating and customizing an actually equivalent SecureContext is not supported.
+// @ts-expect-error TS2323 Redeclare error.
+export function SecureContext(
+  this: SecureContext,
+  secureProtocol?: string,
+  secureOptions?: number,
+  minVersion?: string,
+  maxVersion?: string
+): SecureContext {
+  if (!(this instanceof SecureContext)) {
+    return new SecureContext(
+      secureProtocol,
+      secureOptions,
+      minVersion,
+      maxVersion
+    );
   }
+  if (minVersion !== undefined) {
+    throw new ERR_OPTION_NOT_IMPLEMENTED('minVersion');
+  }
+  if (maxVersion !== undefined) {
+    throw new ERR_OPTION_NOT_IMPLEMENTED('maxVersion');
+  }
+  if (secureOptions) {
+    validateInteger(secureOptions, 'secureOptions');
+  }
+
+  this.context = undefined;
+  return this;
 }
 
 export function createSecureContext(

@@ -294,6 +294,11 @@ export const testSecureContext = {
       const secureContext = tls.createSecureContext({});
       tls.connect({ port: 42, secureContext });
     });
+
+    doesNotThrow(() => {
+      const secureContext = tls.SecureContext();
+      tls.connect({ port: 42, secureContext });
+    });
   },
 };
 
