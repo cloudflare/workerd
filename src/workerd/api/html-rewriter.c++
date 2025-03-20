@@ -247,6 +247,8 @@ class Rewriter final: public WritableStreamSink {
   // Otherwise, just return.
   kj::Promise<void> finishWrite();
 
+  kj::Promise<void> flushWrite();
+
   static kj::Own<lol_html_HtmlRewriter> buildRewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
       kj::ArrayPtr<const char> encoding,
@@ -499,6 +501,10 @@ void Rewriter::abort(kj::Exception reason) {
 
 kj::Promise<void> Rewriter::finishWrite() {
   maybeWaitScope = kj::none;
+  return flushWrite();
+}
+
+kj::Promise<void> Rewriter::flushWrite() {
   auto checkException = [this]() -> kj::Promise<void> {
     KJ_ASSERT(writePromise == kj::none);
 
@@ -542,6 +548,7 @@ lol_html_rewriter_directive_t Rewriter::thunkImpl(
       // to keep V8 from getting confused.
       auto promise = kj::evalLater([&]() { return thunkPromise<T>(content, registeredHandler); });
       promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
+      flushWrite().wait(KJ_ASSERT_NONNULL(maybeWaitScope));
     })) {
       // Exception in handler. We need to abort the streaming parser, but can't do so just yet: we
       // need to unwind the stack because we're probably still inside a cool_thing_rewriter_write().
