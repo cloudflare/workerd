@@ -28,6 +28,7 @@ import {
   SocketOptions,
   _normalizeArgs,
 } from 'node-internal:internal_net';
+import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
   TlsOptions,
@@ -48,7 +49,9 @@ import {
   ConnResetException,
   ERR_TLS_HANDSHAKE_TIMEOUT,
   ERR_OPTION_NOT_IMPLEMENTED,
+  ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
+import { SecureContext } from 'node-internal:internal_tls_common';
 
 const kConnectOptions = Symbol('connect-options');
 const kErrorEmitted = Symbol('error-emitted');
@@ -62,6 +65,7 @@ export declare class TLSSocket extends Socket {
   public _handle: Socket['_handle'];
   public _init(): void;
   public _tlsOptions: TlsOptions &
+    ConnectionOptions &
     SocketOptions &
     TcpSocketConnectOpts & {
       isServer?: boolean;
@@ -207,14 +211,25 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.requestOCSP');
   }
 
-  if (tlsOptions.secureContext !== undefined) {
-    // TODO(soon): Investigate supporting this.
-    throw new ERR_OPTION_NOT_IMPLEMENTED('options.secureContext');
+  if (
+    tlsOptions.secureContext !== undefined &&
+    !(tlsOptions.secureContext instanceof SecureContext)
+  ) {
+    throw new ERR_TLS_INVALID_CONTEXT('context');
   }
 
   if (tlsOptions.pskCallback !== undefined) {
     // Used for TLS-PSK negotiation. We do not support it.
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.pskCallback');
+  }
+
+  // TODO(soon): Call this on secureConnect once connect() api supports
+  // getting peer certificate.
+  if (tlsOptions.checkServerIdentity !== undefined) {
+    validateFunction(
+      tlsOptions.checkServerIdentity,
+      'options.checkServerIdentity'
+    );
   }
 
   this._tlsOptions = tlsOptions;
@@ -595,8 +610,10 @@ export function connect(...args: unknown[]): TLSSocket {
   }
 
   if (options.checkServerIdentity !== undefined) {
-    // Not supported.
-    throw new ERR_OPTION_NOT_IMPLEMENTED('options.checkServerIdentity');
+    validateFunction(
+      options.checkServerIdentity,
+      'options.checkServerIdentity'
+    );
   }
 
   const tlssock = new TLSSocket(options.socket, {
@@ -606,6 +623,8 @@ export function connect(...args: unknown[]): TLSSocket {
     ALPNProtocols: options.ALPNProtocols,
     enableTrace: options.enableTrace,
     highWaterMark: options.highWaterMark,
+    secureContext: options.secureContext,
+    checkServerIdentity: options.checkServerIdentity ?? checkServerIdentity,
     // @ts-expect-error TS2412 Type inconsistencies between types/node
     onread: options.onread,
     signal: options.signal,

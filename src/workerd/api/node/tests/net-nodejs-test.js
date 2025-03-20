@@ -1108,20 +1108,3 @@ export const testNetRemoteAddress = {
     await promise;
   },
 };
-
-export default {
-  connect({ inbound }) {
-    inbound.cancel();
-    return new ReadableStream({
-      start(c) {
-        c.close();
-      },
-    });
-  },
-};
-
-export const echoServer = {
-  connect({ inbound }) {
-    return inbound.pipeThrough(new IdentityTransformStream());
-  },
-};

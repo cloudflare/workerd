@@ -63,6 +63,8 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/cxx-integration",
+        "//src/rust/net",
         "//src/workerd/io",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",

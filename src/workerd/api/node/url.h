@@ -19,10 +19,12 @@ class UrlUtil final: public jsg::Object {
   jsg::JsString format(
       jsg::Lock& js, kj::String href, bool hash, bool unicode, bool search, bool auth);
   jsg::JsString toASCII(jsg::Lock& js, kj::String url);
+  jsg::JsString canonicalizeIp(jsg::Lock& js, kj::String input);
 
   JSG_RESOURCE_TYPE(UrlUtil) {
     JSG_METHOD(domainToUnicode);
     JSG_METHOD(domainToASCII);
+    JSG_METHOD(canonicalizeIp);
 
     // Legacy APIs
     JSG_METHOD(format);

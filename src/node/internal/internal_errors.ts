@@ -30,6 +30,7 @@
 // TODO(soon): Fill in more of the internal/errors implementation
 
 import { inspect } from 'node-internal:internal_inspect';
+import type { PeerCertificate } from 'node:tls';
 
 const classRegExp = /^([A-Z][a-z0-9]*)+$/;
 
@@ -83,6 +84,19 @@ export class NodeTypeError extends NodeErrorAbstraction implements TypeError {
   constructor(code: string, message: string) {
     super(TypeError.prototype.name, code, message);
     Object.setPrototypeOf(this, TypeError.prototype);
+    this.toString = function () {
+      return `${this.name} [${this.code}]: ${this.message}`;
+    };
+  }
+}
+
+export class NodeSyntaxError
+  extends NodeErrorAbstraction
+  implements SyntaxError
+{
+  constructor(code: string, message: string) {
+    super(SyntaxError.prototype.name, code, message);
+    Object.setPrototypeOf(this, SyntaxError.prototype);
     this.toString = function () {
       return `${this.name} [${this.code}]: ${this.message}`;
     };
@@ -706,6 +720,34 @@ export class ERR_CRYPTO_SIGN_KEY_REQUIRED extends NodeError {
 export class ERR_TLS_HANDSHAKE_TIMEOUT extends NodeError {
   constructor() {
     super('ERR_TLS_HANDSHAKE_TIMEOUT', 'TLS handshake timeout');
+  }
+}
+
+export class ERR_TLS_INVALID_CONTEXT extends NodeTypeError {
+  constructor(field: string) {
+    super('ERR_TLS_INVALID_CONTEXT', `${field} must be a SecureContext`);
+  }
+}
+
+export class ERR_TLS_CERT_ALTNAME_INVALID extends NodeError {
+  reason: string;
+  host: string;
+  cert?: Partial<PeerCertificate> | undefined;
+
+  constructor(reason: string, host: string, cert?: Partial<PeerCertificate>) {
+    super('ERR_TLS_CERT_ALTNAME_INVALID', reason);
+    this.reason = reason;
+    this.host = host;
+    this.cert = cert;
+  }
+}
+
+export class ERR_TLS_CERT_ALTNAME_FORMAT extends NodeSyntaxError {
+  constructor() {
+    super(
+      'ERR_TLS_CERT_ALTNAME_FORMAT',
+      'Invalid subject alternative name string'
+    );
   }
 }
 
