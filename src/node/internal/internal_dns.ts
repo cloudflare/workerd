@@ -22,19 +22,194 @@ import {
   type SRV,
   type TTLResponse,
 } from 'node-internal:internal_dns_client';
-import { DnsError } from 'node-internal:internal_errors';
-import { validateString } from 'node-internal:validators';
+import {
+  DnsError,
+  ERR_INVALID_ARG_TYPE,
+  ERR_OPTION_NOT_IMPLEMENTED,
+} from 'node-internal:internal_errors';
+import {
+  validateString,
+  validateFunction,
+  validateOneOf,
+  validateNumber,
+  validateBoolean,
+} from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
+import { isIP } from 'node-internal:internal_net';
+
+type DnsOrder = 'verbatim' | 'ipv4first' | 'ipv6first';
+
+export const validFamilies = [0, 4, 6];
+export const validDnsOrders: DnsOrder[] = [
+  'verbatim',
+  'ipv4first',
+  'ipv6first',
+];
+
+let defaultDnsOrder: DnsOrder = 'verbatim';
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function getServers(): Promise<string[]> {
   return ['1.1.1.1', '2606:4700:4700::1111', '1.0.0.1', '2606:4700:4700::1001'];
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function lookup(): Promise<void> {
-  // TODO(soon): Implement this.
-  throw new Error('Not implemented');
+export type LookupOptions = {
+  family?: number | string;
+  hints?: number;
+  all?: boolean;
+  order?: string;
+  verbatim?: boolean;
+};
+
+export type LookupCallback = (
+  err: Error | null,
+  address?: string | { address: string; family: number }[],
+  family?: number
+) => void;
+
+export function lookup(
+  hostname: string,
+  options?: LookupOptions | LookupCallback,
+  callback?: LookupCallback
+): void {
+  let family: 0 | 4 | 6 = 0;
+  let all = false;
+  let dnsOrder: DnsOrder = getDefaultResultOrder();
+
+  // Parse arguments
+  if (hostname) {
+    validateString(hostname, 'hostname');
+  }
+
+  if (typeof options === 'function') {
+    callback = options;
+    family = 0;
+  } else if (typeof options === 'number') {
+    validateFunction(callback, 'callback');
+
+    validateOneOf(options, 'family', validFamilies);
+    family = options;
+  } else if (options !== undefined && typeof options !== 'object') {
+    validateFunction(arguments.length === 2 ? options : callback, 'callback');
+    throw new ERR_INVALID_ARG_TYPE('options', ['integer', 'object'], options);
+  } else {
+    validateFunction(callback, 'callback');
+
+    if (options?.hints != null) {
+      validateNumber(options.hints, 'options.hints');
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.hints');
+    }
+    if (options?.family != null) {
+      switch (options.family) {
+        case 'IPv4':
+          family = 4;
+          break;
+        case 'IPv6':
+          family = 6;
+          break;
+        default:
+          validateOneOf(options.family, 'options.family', validFamilies);
+          family = options.family as 0 | 4 | 6;
+          break;
+      }
+    }
+    if (options?.all != null) {
+      validateBoolean(options.all, 'options.all');
+      all = options.all;
+    }
+    if (options?.verbatim != null) {
+      validateBoolean(options.verbatim, 'options.verbatim');
+      dnsOrder = options.verbatim ? 'verbatim' : 'ipv4first';
+    }
+    if (options?.order != null) {
+      validateOneOf(options.order, 'options.order', validDnsOrders);
+      dnsOrder = options.order as DnsOrder; // eslint-disable-line @typescript-eslint/no-unused-vars
+    }
+  }
+
+  if (!hostname) {
+    if (all) {
+      process.nextTick(callback, null, []);
+    } else {
+      process.nextTick(callback, null, null, family === 6 ? 6 : 4);
+    }
+    return;
+  }
+
+  const matchedFamily = isIP(hostname);
+  if (matchedFamily) {
+    if (all) {
+      process.nextTick(callback, null, [
+        { address: hostname, family: matchedFamily },
+      ]);
+    } else {
+      process.nextTick(callback, null, hostname, matchedFamily);
+    }
+    return;
+  }
+
+  // If all is true and family is 0, we need to query both A and AAAA records
+  if (all && family === 0) {
+    Promise.all([
+      sendDnsRequest(hostname, 'A').catch(() => ({ Answer: [] })),
+      sendDnsRequest(hostname, 'AAAA').catch(() => ({ Answer: [] })),
+    ])
+      .then(([ipv4Response, ipv6Response]): void => {
+        const ipv4Addresses: { address: string; family: 4 }[] =
+          ipv4Response.Answer?.map((answer) => ({
+            address: answer.data,
+            family: 4,
+          })) ?? [];
+        const ipv6Addresses: { address: string; family: 4 }[] =
+          ipv6Response.Answer?.map((answer) => ({
+            address: answer.data,
+            family: 4,
+          })) ?? [];
+
+        // No addresses found
+        if (ipv4Addresses.length === 0 && ipv6Addresses.length === 0) {
+          callback(new DnsError(hostname, errorCodes.NOTFOUND, 'queryA'));
+          return;
+        }
+
+        // Order addresses based on dnsOrder
+        if (dnsOrder === 'ipv6first') {
+          callback(null, [...ipv6Addresses, ...ipv4Addresses]);
+        } else {
+          // verbatim - preserve order as received (still separating by type)
+          // ipv4first = same as verbatim
+          callback(null, [...ipv4Addresses, ...ipv6Addresses]);
+        }
+      })
+      .catch((error: unknown): void => {
+        process.nextTick(callback, error);
+      });
+  } else {
+    const requestType = family === 4 ? 'A' : 'AAAA';
+
+    // Single request for all other cases (including when all=true but family is specified)
+    sendDnsRequest(hostname, requestType)
+      .then((json): void => {
+        validateAnswer(json.Answer, hostname, `query${requestType}`);
+
+        if (all) {
+          // Return all addresses with the specified family
+          callback(
+            null,
+            json.Answer.map((answer) => ({
+              address: answer.data,
+              family,
+            }))
+          );
+        } else {
+          // Return just the first address
+          callback(null, json.Answer.at(0)?.data as string, family);
+        }
+      })
+      .catch((error: unknown): void => {
+        process.nextTick(callback, error);
+      });
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await
@@ -226,16 +401,13 @@ export function reverse(name: string): Promise<string[]> {
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function setDefaultResultOrder(): Promise<void> {
-  // Does not apply to workerd
-  throw new Error('Not implemented');
+export function setDefaultResultOrder(value: unknown): void {
+  validateOneOf(value, 'dnsOrder', validDnsOrders);
+  defaultDnsOrder = value as DnsOrder;
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function getDefaultResultOrder(): Promise<void> {
-  // Does not apply to workerd
-  throw new Error('Not implemented');
+export function getDefaultResultOrder(): DnsOrder {
+  return defaultDnsOrder;
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await
