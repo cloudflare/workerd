@@ -4,4 +4,5 @@ export {
   WritableOptions,
   Readable,
   ReadableOptions,
+  duplexPair,
 } from 'node:stream';

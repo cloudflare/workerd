@@ -40,7 +40,10 @@ def rust_cxx_bridge(
         hdrs = [src + ".h"] + hdrs,
         strip_include_prefix = strip_include_prefix,
         include_prefix = include_prefix,
-        linkstatic = True,
+        linkstatic = select({
+            "@platforms//os:windows": True,
+            "//conditions:default": False,
+        }),
         deps = deps,
         visibility = visibility,
     )

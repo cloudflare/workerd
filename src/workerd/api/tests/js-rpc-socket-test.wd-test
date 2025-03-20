@@ -17,6 +17,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "self", service = "nonClass-loop"),
           (name = "MyService", service = "MyService-loop"),
+          (name = "MyServiceProxy", service = "MyServiceProxy-loop"),
           (name = "MyActor", durableObjectNamespace = "MyActor"),
           (name = "ActorNoExtends", durableObjectNamespace = "ActorNoExtends"),
           (name = "defaultExport", service = "default-loop"),
@@ -37,6 +38,12 @@ const unitTests :Workerd.Config = (
         http = (capnpConnectHost = "cappy")
       )
     ),
+    ( name = "MyServiceProxy-loop",
+      external = (
+        address = "loopback:MyServiceProxy-loop",
+        http = (capnpConnectHost = "cappy")
+      )
+    ),
     ( name = "nonClass-loop",
       external = (
         address = "loopback:nonClass-loop",
@@ -54,6 +61,11 @@ const unitTests :Workerd.Config = (
     ( name = "MyService-loop",
       address = "loopback:MyService-loop",
       service = (name = "js-rpc-test", entrypoint = "MyService"),
+      http = (capnpConnectHost = "cappy")
+    ),
+    ( name = "MyServiceProxy-loop",
+      address = "loopback:MyServiceProxy-loop",
+      service = (name = "js-rpc-test", entrypoint = "MyServiceProxy"),
       http = (capnpConnectHost = "cappy")
     ),
     ( name = "nonClass-loop",

@@ -24,19 +24,25 @@ class WorkerInterface;
 // contain it.
 class CacheClient {
  public:
+  struct SubrequestMetadata {
+    // The `request.cf` blob, JSON-encoded.
+    kj::Maybe<kj::String> cfBlobJson;
+
+    // Specifies the parent span for the subrequest for tracing purposes.
+    SpanParent parentSpan;
+
+    // Serialized JSON value to pass in ew_compat field of control header to FL. This has the same
+    // semantics as the field in IoChannelFactory::SubrequestMetadata.
+    kj::Maybe<kj::StringPtr> featureFlagsForFl;
+  };
+
   // Get the default namespace, i.e. the one that fetch() will use for caching.
   //
-  // The returned client is intended to be used for one request. `cfBlobJson` and `parentSpan` have
-  // the same meaning as in `IoContext::SubrequestMetadata`.
-  virtual kj::Own<kj::HttpClient> getDefault(
-      kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) = 0;
+  // The returned client is intended to be used for one request.
+  virtual kj::Own<kj::HttpClient> getDefault(SubrequestMetadata metadata) = 0;
 
   // Get an HttpClient for the given cache namespace.
-  //
-  // The returned client is intended to be used for one request. `parentSpan` has the same meaning
-  // as in `IoContext::SubrequestMetadata`.
-  virtual kj::Own<kj::HttpClient> getNamespace(
-      kj::StringPtr name, kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) = 0;
+  virtual kj::Own<kj::HttpClient> getNamespace(kj::StringPtr name, SubrequestMetadata metadata) = 0;
 };
 
 // A timer instance, used to back Date.now(), setTimeout(), etc. This object may implement

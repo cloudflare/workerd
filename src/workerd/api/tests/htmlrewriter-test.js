@@ -967,3 +967,56 @@ export const svgNamespace = {
     strictEqual(namespace, 'http://www.w3.org/2000/svg');
   },
 };
+
+// This test is commented out because it will cause a stack overflow in workerd if enabled.
+// It is included for reference.
+
+/*
+export const stackOverflow1 = {
+  // One big handler
+  async test() {
+    const promiseDepth = 128 * 100;
+    const numReads = 2;
+    const input = new Response('<div></div>');
+
+    const output = new HTMLRewriter()
+      .onDocument({
+        end(e) {
+          for (let i = 0; i < promiseDepth; i++) {
+            e.append('<div></div>', { html: true });
+          }
+        },
+      })
+      .transform(input);
+
+    // Begin reading but do not fully consume
+    const reader = output.body.getReader();
+    for (let i = 0; i < numReads; i++) {
+      await reader.read();
+    }
+  },
+};*/
+
+export const stackOverflow2 = {
+  // Many small handlers
+  async test() {
+    const promiseDepth = 128 * 100;
+    const numReads = promiseDepth;
+
+    const input = new Response('<div></div>'.repeat(promiseDepth));
+
+    const output = new HTMLRewriter()
+      .on('div', {
+        element(e) {
+          e.append('<div></div>', { html: true });
+        },
+      })
+      .transform(input);
+
+    // Begin reading but do not fully consume
+    const reader = output.body.getReader();
+    for (let i = 0; i < numReads; i++) {
+      await reader.read();
+    }
+  },
+};

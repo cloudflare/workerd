@@ -5489,6 +5489,20 @@ interface D1Meta {
   last_row_id: number;
   changed_db: boolean;
   changes: number;
+  /**
+   * The region of the database instance that executed the query.
+   */
+  served_by_region?: string;
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
+  timings?: {
+    /**
+     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
+     */
+    sql_duration_ms: number;
+  };
 }
 interface D1Response {
   success: true;
@@ -5867,19 +5881,19 @@ declare module "assets:*" {
 declare module "cloudflare:pipelines" {
   export abstract class PipelineTransformationEntrypoint<
     Env = unknown,
-    I extends PipelineRecord = {},
-    O extends PipelineRecord = {},
+    I extends PipelineRecord = PipelineRecord,
+    O extends PipelineRecord = PipelineRecord,
   > {
+    protected env: Env;
+    protected ctx: ExecutionContext;
+    constructor(ctx: ExecutionContext, env: Env);
     /**
      * run recieves an array of PipelineRecord which can be
-     * mutated and returned to the pipeline
+     * transformed and returned to the pipeline
      * @param records Incoming records from the pipeline to be transformed
      * @param metadata Information about the specific pipeline calling the transformation entrypoint
      * @returns A promise containing the transformed PipelineRecord array
      */
-    protected env: Env;
-    protected ctx: ExecutionContext;
-    constructor(ctx: ExecutionContext, env: Env);
     public run(records: I[], metadata: PipelineBatchMetadata): Promise<O[]>;
   }
   export type PipelineRecord = Record<string, unknown>;
@@ -5887,7 +5901,7 @@ declare module "cloudflare:pipelines" {
     pipelineId: string;
     pipelineName: string;
   };
-  export interface Pipeline<T extends PipelineRecord> {
+  export interface Pipeline<T extends PipelineRecord = PipelineRecord> {
     /**
      * The Pipeline interface represents the type of a binding to a Pipeline
      *

@@ -62,6 +62,23 @@ class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler
     return externals.size();
   }
 
+  // Add an object that will be released once the serialized value is no longer needed to handle
+  // pipelined calls (i.e. when we are serializing a return value). In particular, for each stub
+  // that we found while serializing, we need to make sure its disposer is run later, so the
+  // Own<void>'s destructor runs said disposer.
+  //
+  // NOTE: These are called "stub disposers" because they are most commonly used to dispose stubs
+  //   that were part of the serialized value, but other kinds of serialized objects could use
+  //   this as well.
+  void addStubDisposer(kj::Own<void> disposer) {
+    stubDisposers.add(kj::mv(disposer));
+  }
+
+  // Get the list of disposers to be attached to the pipeline
+  kj::Vector<kj::Own<void>> releaseStubDisposers() {
+    return kj::mv(stubDisposers);
+  }
+
   // We serialize functions by turning them into RPC stubs.
   void serializeFunction(
       jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) override;
@@ -74,6 +91,7 @@ class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler
   GetStreamSinkFunc getStreamSinkFunc;
 
   kj::Vector<BuilderCallback> externals;
+  kj::Vector<kj::Own<void>> stubDisposers;
 
   kj::Maybe<rpc::JsValue::StreamSink::Client> streamSink;
 };

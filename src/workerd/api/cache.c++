@@ -70,8 +70,10 @@ jsg::Unimplemented Cache::addAll(kj::Array<Request::Info> requests) {
   return {};
 }
 
-jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
-    jsg::Lock& js, Request::Info requestOrUrl, jsg::Optional<CacheQueryOptions> options) {
+jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
+    Request::Info requestOrUrl,
+    jsg::Optional<CacheQueryOptions> options,
+    CompatibilityFlags::Reader flags) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   if (context.isFiddle()) {
@@ -89,8 +91,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
     }
 
-    auto httpClient = getHttpClient(
-        context, jsRequest->serializeCfBlobJson(js), "cache_match"_kjc, jsRequest->getUrl());
+    auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_match"_kjc,
+        jsRequest->getUrl(), kj::none, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     requestHeaders.set(context.getHeaderIds().cacheControl, "only-if-cached");
@@ -316,11 +318,12 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
         context.addFunctor(
             [this, &context, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
                 serializePromise = kj::mv(serializePromise),
-                writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise)](jsg::Lock& js,
+                writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise),
+                enableCompatFlags = flags.getCacheApiCompatFlags()](jsg::Lock& js,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
       // Make the PUT request to cache.
       auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_put"_kjc,
-          jsRequest->getUrl(), kj::mv(cacheControl));
+          jsRequest->getUrl(), kj::mv(cacheControl), enableCompatFlags);
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
       jsRequest->shallowCopyHeadersTo(requestHeaders);
       auto nativeRequest = httpClient->request(kj::HttpMethod::PUT,
@@ -471,8 +474,10 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
   });
 }
 
-jsg::Promise<bool> Cache::delete_(
-    jsg::Lock& js, Request::Info requestOrUrl, jsg::Optional<CacheQueryOptions> options) {
+jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
+    Request::Info requestOrUrl,
+    jsg::Optional<CacheQueryOptions> options,
+    CompatibilityFlags::Reader flags) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   if (context.isFiddle()) {
@@ -492,8 +497,8 @@ jsg::Promise<bool> Cache::delete_(
 
     // Make the PURGE request to cache.
 
-    auto httpClient = getHttpClient(
-        context, jsRequest->serializeCfBlobJson(js), "cache_delete"_kjc, jsRequest->getUrl());
+    auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_delete"_kjc,
+        jsRequest->getUrl(), kj::none, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     // HACK: The cache doesn't permit PURGE requests from the outside world. It does this by
@@ -527,7 +532,8 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     kj::Maybe<kj::String> cfBlobJson,
     kj::LiteralStringConst operationName,
     kj::StringPtr url,
-    kj::Maybe<jsg::ByteString> cacheControl) {
+    kj::Maybe<jsg::ByteString> cacheControl,
+    bool enableCompatFlags) {
   auto span = context.makeTraceSpan(operationName);
   auto userSpan = context.makeUserTraceSpan(operationName);
 
@@ -541,10 +547,18 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     }
   }
   auto cacheClient = context.getCacheClient();
-  auto httpClient = cacheName
-                        .map([&](kj::String& n) {
-    return cacheClient->getNamespace(n, kj::mv(cfBlobJson), span);
-  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(cfBlobJson), span); });
+  auto metadata = CacheClient::SubrequestMetadata{
+    .cfBlobJson = kj::mv(cfBlobJson),
+    .parentSpan = span,
+    .featureFlagsForFl = kj::none,
+  };
+  if (enableCompatFlags) {
+    metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
+  }
+  auto httpClient =
+      cacheName.map([&](kj::String& n) {
+    return cacheClient->getNamespace(n, kj::mv(metadata));
+  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
   httpClient = httpClient.attach(kj::mv(span), kj::mv(userSpan), kj::mv(cacheClient));
   return httpClient;
 }
