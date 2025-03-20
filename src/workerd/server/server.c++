@@ -2514,18 +2514,16 @@ class Server::WorkerService final: public Service,
         : cacheService(cacheService),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
-    kj::Own<kj::HttpClient> getDefault(
-        kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) override {
-
-      return kj::heap<CacheHttpClientImpl>(
-          cacheService, cacheNamespaceHeader, kj::none, kj::mv(cfBlobJson), kj::mv(parentSpan));
+    kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {
+      return kj::heap<CacheHttpClientImpl>(cacheService, cacheNamespaceHeader, kj::none,
+          kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
     }
 
     kj::Own<kj::HttpClient> getNamespace(
-        kj::StringPtr cacheName, kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) override {
+        kj::StringPtr cacheName, CacheClient::SubrequestMetadata metadata) override {
       auto encodedName = kj::encodeUriComponent(cacheName);
       return kj::heap<CacheHttpClientImpl>(cacheService, cacheNamespaceHeader, kj::mv(encodedName),
-          kj::mv(cfBlobJson), kj::mv(parentSpan));
+          kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
     }
 
    private:
