@@ -279,6 +279,7 @@ export class Ai {
         options: options,
       }),
       headers: {
+        ...(options?.extraHeaders || {}),
         'content-type': 'application/json',
       },
     };

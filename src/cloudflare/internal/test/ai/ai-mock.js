@@ -23,15 +23,27 @@ export default {
       const result = [];
 
       for (const file of body.files) {
-        const fileblob = await base64ToBlob(file.data, file.mimeType);
-        const arr = await fileblob.arrayBuffer();
-        result.push({
-          name: file.name,
-          mimeType: file.mimeType,
-          format: 'markdown',
-          tokens: 0,
-          data: decoder.decode(arr),
-        });
+        if (file.name === 'headers.md') {
+          const newHeaders = new Headers(request.headers);
+          newHeaders.delete('content-length');
+          result.push({
+            name: file.name,
+            mimeType: file.mimeType,
+            format: 'markdown',
+            tokens: 0,
+            data: Object.fromEntries(newHeaders.entries()),
+          });
+        } else {
+          const fileblob = await base64ToBlob(file.data, file.mimeType);
+          const arr = await fileblob.arrayBuffer();
+          result.push({
+            name: file.name,
+            mimeType: file.mimeType,
+            format: 'markdown',
+            tokens: 0,
+            data: decoder.decode(arr),
+          });
+        }
       }
 
       return Response.json({

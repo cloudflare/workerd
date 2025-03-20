@@ -228,6 +228,25 @@ export const tests = {
     }
 
     {
+      // Test toMarkdown with extra headers
+      const resp = await env.ai.toMarkdown(
+        {
+          name: 'headers.md',
+          blob: new Blob([`# Random Markdown`], { type: 'text/markdown' }),
+        },
+        { extraHeaders: { example: 'header' } }
+      );
+
+      assert.deepStrictEqual(resp, {
+        name: 'headers.md',
+        mimeType: 'text/markdown',
+        format: 'markdown',
+        tokens: 0,
+        data: { 'content-type': 'application/json', example: 'header' },
+      });
+    }
+
+    {
       // Test toMarkdown with multiple file
       const resp = await env.ai.toMarkdown([
         {
