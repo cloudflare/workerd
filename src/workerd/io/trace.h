@@ -290,7 +290,7 @@ struct FetchEventInfo final {
     kj::String value;
 
     void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
-    Header clone();
+    Header clone() const;
 
     JSG_MEMORY_INFO(Header) {
       tracker.trackField("name", name);
@@ -305,7 +305,7 @@ struct FetchEventInfo final {
   kj::Array<Header> headers;
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
-  FetchEventInfo clone();
+  FetchEventInfo clone() const;
 };
 
 // Describes a jsrpc request
@@ -319,7 +319,7 @@ struct JsRpcEventInfo final {
   kj::String methodName;
 
   void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
-  JsRpcEventInfo clone();
+  JsRpcEventInfo clone() const;
 };
 
 // Describes a scheduled request
@@ -334,7 +334,7 @@ struct ScheduledEventInfo final {
   kj::String cron;
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
-  ScheduledEventInfo clone();
+  ScheduledEventInfo clone() const;
 };
 
 // Describes a Durable Object alarm request
@@ -348,7 +348,7 @@ struct AlarmEventInfo final {
   kj::Date scheduledTime;
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
-  AlarmEventInfo clone();
+  AlarmEventInfo clone() const;
 };
 
 // Describes a queue worker request
@@ -363,7 +363,7 @@ struct QueueEventInfo final {
   uint32_t batchSize;
 
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
-  QueueEventInfo clone();
+  QueueEventInfo clone() const;
 };
 
 // Describes an email request
@@ -379,7 +379,7 @@ struct EmailEventInfo final {
   uint32_t rawSize;
 
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
-  EmailEventInfo clone();
+  EmailEventInfo clone() const;
 };
 
 // Describes a legacy tail worker request
@@ -403,13 +403,13 @@ struct TraceEventInfo final {
     kj::Maybe<kj::String> scriptName;
 
     void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
-    TraceItem clone();
+    TraceItem clone() const;
   };
 
   kj::Vector<TraceItem> traces;
 
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
-  TraceEventInfo clone();
+  TraceEventInfo clone() const;
 };
 
 // Describes a hibernatable web socket event
@@ -432,7 +432,7 @@ struct HibernatableWebSocketEventInfo final {
   Type type;
 
   void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
-  HibernatableWebSocketEventInfo clone();
+  HibernatableWebSocketEventInfo clone() const;
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
 };
 
@@ -453,7 +453,7 @@ struct FetchResponseInfo final {
   uint16_t statusCode;
 
   void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
-  FetchResponseInfo clone();
+  FetchResponseInfo clone() const;
 };
 
 // Describes an event published using the node:diagnostics_channel API
@@ -469,7 +469,7 @@ struct DiagnosticChannelEvent final {
   kj::Array<kj::byte> message;
 
   void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
-  DiagnosticChannelEvent clone();
+  DiagnosticChannelEvent clone() const;
 };
 
 // Describes a log event
@@ -488,7 +488,7 @@ struct Log final {
   kj::String message;
 
   void copyTo(rpc::Trace::Log::Builder builder);
-  Log clone();
+  Log clone() const;
 };
 
 // Describes an exception event
@@ -509,7 +509,7 @@ struct Exception final {
   kj::Maybe<kj::String> stack;
 
   void copyTo(rpc::Trace::Exception::Builder builder);
-  Exception clone();
+  Exception clone() const;
 };
 
 // Used to indicate that a previously hibernated tail stream is being resumed.
@@ -523,7 +523,7 @@ struct Resume final {
   kj::Maybe<kj::Array<kj::byte>> attachment;
 
   void copyTo(rpc::Trace::Resume::Builder builder);
-  Resume clone();
+  Resume clone() const;
 };
 
 // Used to indicate that a tail stream is being hibernated.
@@ -535,7 +535,7 @@ struct Hibernate final {
   ~Hibernate() noexcept(false) = default;
 
   void copyTo(rpc::Trace::Hibernate::Builder builder);
-  Hibernate clone();
+  Hibernate clone() const;
 };
 
 // EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
@@ -550,6 +550,8 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     HibernatableWebSocketEventInfo,
     Resume,
     CustomEventInfo>;
+
+EventInfo cloneEventInfo(const EventInfo& info);
 
 template <typename T>
 concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
@@ -586,7 +588,7 @@ struct Attribute final {
   Values value;
 
   void copyTo(rpc::Trace::Attribute::Builder builder);
-  Attribute clone();
+  Attribute clone() const;
 };
 using CustomInfo = kj::Array<Attribute>;
 
@@ -608,7 +610,7 @@ struct Return final {
   kj::Maybe<Info> info = kj::none;
 
   void copyTo(rpc::Trace::Return::Builder builder);
-  Return clone();
+  Return clone() const;
 };
 
 // A Link mark is used to establish a link from one span to another.
@@ -627,7 +629,7 @@ struct Link final {
   SpanId spanId;
 
   void copyTo(rpc::Trace::Link::Builder builder);
-  Link clone();
+  Link clone() const;
 };
 
 using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, kj::Array<Attribute>>;
@@ -649,7 +651,7 @@ struct SpanOpen final {
   kj::Maybe<Info> info = kj::none;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder);
-  SpanOpen clone();
+  SpanOpen clone() const;
 };
 
 // Marks the closing of a child span within the streaming tail session.
@@ -665,7 +667,7 @@ struct SpanClose final {
   EventOutcome outcome = EventOutcome::OK;
 
   void copyTo(rpc::Trace::SpanClose::Builder builder);
-  SpanClose clone();
+  SpanClose clone() const;
 };
 
 // The Onset and Outcome event types are special forms of SpanOpen and
@@ -714,7 +716,7 @@ struct Onset final {
   kj::Maybe<TriggerContext> trigger;
 
   void copyTo(rpc::Trace::Onset::Builder builder);
-  Onset clone();
+  Onset clone() const;
 };
 
 struct Outcome final {
@@ -729,7 +731,7 @@ struct Outcome final {
   kj::Duration wallTime;
 
   void copyTo(rpc::Trace::Outcome::Builder builder);
-  Outcome clone();
+  Outcome clone() const;
 };
 
 // A streaming tail worker receives a series of Tail Events. Tail events always
@@ -765,7 +767,7 @@ struct TailEvent final {
   Event event;
 
   void copyTo(rpc::Trace::TailEvent::Builder builder);
-  TailEvent clone();
+  TailEvent clone() const;
 };
 }  // namespace tracing
 
