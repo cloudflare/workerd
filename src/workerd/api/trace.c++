@@ -658,6 +658,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
+  // NOTE: It is safe to trace the tail worker, since we only invoke it all the way at the end.
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(
         context.getInvocationSpanContext(), context.now(), tracing::TraceEventInfo(traces));
