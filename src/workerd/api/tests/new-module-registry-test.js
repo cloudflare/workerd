@@ -24,6 +24,15 @@ strictEqual(globalThis.Buffer, Buffer);
 ok(globalThis.process);
 strictEqual(typeof globalThis.process, 'object');
 
+// Verify that process.getBuiltinModule works correctly with
+// the new module registry.
+const builtinBuffer1 = process.getBuiltinModule('buffer');
+const builtinBuffer2 = process.getBuiltinModule('node:buffer');
+strictEqual(builtinBuffer1, builtinBuffer2);
+strictEqual(builtinBuffer1.Buffer, globalThis.Buffer);
+const nonExistent = process.getBuiltinModule('non-existent');
+strictEqual(nonExistent, undefined);
+
 // Our internal implementation of console.log depend on the module registry
 // to get the node-internal:internal_inspect module. This console.log makes
 // sure that works correctly without crashing when using the new module

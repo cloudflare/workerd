@@ -295,7 +295,7 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
-        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN_ONLY);
+        *this, specifier, jsg::modules::ResolveContext::Type::BUILTIN);
   }
 
   // Use the original module registry implementation
