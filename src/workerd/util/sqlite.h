@@ -180,7 +180,7 @@ class SqliteDatabase {
 
   void handleCriticalError(kj::Maybe<int> errorCode, kj::StringPtr errorMessage);
 
-  void onCriticalError(kj::Function<void(int sqliteErrorCode, kj::StringPtr message)> callback) {
+  void onCriticalError(kj::Function<void(kj::StringPtr message)> callback) {
     onCriticalErrorCallback = kj::mv(callback);
   }
 
@@ -294,7 +294,7 @@ class SqliteDatabase {
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
-  kj::Maybe<kj::Function<void(int sqliteErrorCode, kj::StringPtr message)>> onCriticalErrorCallback;
+  kj::Maybe<kj::Function<void(kj::StringPtr message)>> onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
