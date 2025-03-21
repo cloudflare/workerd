@@ -490,6 +490,7 @@ struct Worker::Impl {
   kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
   kj::HashMap<kj::String, ActorClassInfo> actorClasses;
   kj::HashMap<kj::String, EntrypointClass> statelessClasses;
+  kj::HashMap<kj::String, EntrypointClass> workflowClasses;
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
@@ -1683,7 +1684,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                               impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               return;
                             } else if (handle == entrypointClasses.workflowEntrypoint) {
-                              impl->statelessClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                              impl->workflowClasses.insert(kj::mv(handler.name), kj::mv(cls));
                               return;
                             }
 
@@ -2261,6 +2262,29 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
               "did not produce a startup-time error.");
         }
       }
+
+      for (auto& entry: worker.impl->workflowClasses) {
+        KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
+          // We also want to check for handlers in workflows - we primarily want to see if the provided worker
+          // has exposed the `run` handler inside of the class.
+          kj::HashSet<kj::String> seenNames;
+
+          js.withinHandleScope([&]() {
+            // For stateless classes, we need to get the class's prototype property
+            jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
+            jsg::JsValue proto = ctor.get(js, "prototype");
+            collectMethodsFromPrototypeChain(proto, seenNames);
+          });
+
+          errorReporter.addWorkflowClass(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+        } else {
+          // Similiar to Durable Objects, Workflow cannot be the default entrypoint (at the time of writing).
+          LOG_PERIODICALLY(ERROR,
+              "Exported Workflow class cannot be the default entrypoint. This doesn't work, but historically "
+              "did not produce a startup-time error.");
+        }
+      }
+
       for (auto& entry: worker.impl->statelessClasses) {
         // We want to report all of the stateless class's members. To do this, we examine its
         // prototype, and its prototype's prototype, and so on, until we get to Object's

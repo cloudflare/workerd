@@ -3059,6 +3059,43 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
+  struct ErrorReporter: public Worker::ValidationErrorReporter {
+    ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
+
+    Server& server;
+    kj::StringPtr name;
+
+    // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
+    kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
+    kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
+    kj::HashSet<kj::String> actorClasses;
+
+    void addError(kj::String error) override {
+      server.reportConfigError(kj::str("service ", name, ": ", error));
+    }
+
+    void addEntrypoint(
+        kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
+      kj::HashSet<kj::String> set;
+      for (auto& method: methods) {
+        set.insert(kj::mv(method));
+      }
+      KJ_IF_SOME(e, exportName) {
+        namedEntrypoints.insert(kj::str(e), kj::mv(set));
+      } else {
+        defaultEntrypoint = kj::mv(set);
+      }
+    }
+
+    void addActorClass(kj::StringPtr exportName) override {
+      actorClasses.insert(kj::str(exportName));
+    }
+
+    void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
+      // This is only used for validation and has no runtime implications, at least for now.
+    }
+  };
+
   ErrorReporter errorReporter(*this, name);
 
   capnp::MallocMessageBuilder arena;
