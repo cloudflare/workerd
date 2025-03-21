@@ -1,5 +1,22 @@
+use core::ffi::c_void;
 use std::pin::Pin;
 use thiserror::Error;
+
+/// CAA record representation
+struct CaaRecord {
+    critical: u8,
+    field: String,
+    value: String,
+}
+/// NAPTR record representation
+struct NaptrRecord {
+    flags: String,
+    service: String,
+    regexp: String,
+    replacement: String,
+    order: u32,
+    preference: u32,
+}
 
 #[derive(Debug, Error)]
 pub enum DnsParserError {
@@ -13,37 +30,10 @@ pub enum DnsParserError {
     Unknown,
 }
 
-#[cxx::bridge(namespace = "workerd::rust::dns")]
-mod ffi {
-    /// CAA record representation
-    struct CaaRecord {
-        critical: u8,
-        field: String,
-        value: String,
-    }
-    /// NAPTR record representation
-    struct NaptrRecord {
-        flags: String,
-        service: String,
-        regexp: String,
-        replacement: String,
-        order: u32,
-        preference: u32,
-    }
-    extern "Rust" {
-        fn parse_caa_record(record: &str) -> Result<CaaRecord>;
-    }
-
-    // unsafe extern "C++" {
-    //     include!("workerd/rust/dns/bridge.h");
-    //     type Isolate;
-    //     type JsValue;
-    // }
+#[no_mangle]
+pub extern "C" fn parse_caa_record(info: *const c_void) {
+    todo!("hello")
 }
-
-// extern "C" {
-//     fn parse_naptr_record(isolate: *mut v8::Isolate, record: *const core::ffi::c_char) -> *mut v8::Value;
-// }
 
 /// Given a vector of strings, converts each slice to UTF-8 from HEX.
 ///
@@ -87,7 +77,7 @@ pub fn decode_hex(input: &[&str]) -> Result<Vec<String>, DnsParserError> {
 /// # Errors
 /// `DnsParserError::InvalidHexString`
 /// `DnsParserError::ParseIntError`
-pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> {
+pub fn parse_caa_record_impl(record: &str) -> Result<CaaRecord, DnsParserError> {
     // Let's remove "\\#" and the length of data from the beginning of the record
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
     let critical = data[0].parse::<u8>()?;
@@ -103,83 +93,11 @@ pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> 
         )));
     }
 
-    Ok(ffi::CaaRecord {
+    Ok(CaaRecord {
         critical,
         field,
         value,
     })
-}
-
-/// Parses an unknown RR format returned from Cloudflare DNS.
-/// Specification is available at
-/// `<https://datatracker.ietf.org/doc/html/rfc3597>`
-///
-/// The format of the record is as follows:
-/// \# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00
-///       |--|  |--|  |  |  |  |--------------------------|  |  |--------------|  |  |--------------------------------|
-///       |     |     |  |  |  |                             |  |                 |  - Replacement
-///       |     |     |  |  |  |                             |  |                 - Length of first part of the replacement
-///       |     |     |  |  |  |                             |  - Regexp
-///       |     |     |  |  |  |                             - Regexp length
-///       |     |     |  |  |  - Service
-///       |     |     |  |  - Length of service
-///       |     |     |  - Flag
-///       |     |     - Length of flags
-///       |     - Preference
-///       - Order
-///
-/// ```
-/// let record = parse_naptr_record("\\# 37 15 b3 08 ae 01 73 0a 6d 79 2d 73 65 72 76 69 63 65 06 72 65 67 65 78 70 0b 72 65 70 6c 61 63 65 6d 65 6e 74 00");
-/// assert_eq!(record.flags, "s");
-/// assert_eq!(record.service, "my-service");
-/// assert_eq!(record.regexp, "regexp");
-/// assert_eq!(record.replacement, "replacement");
-/// assert_eq!(record.order, 5555);
-/// assert_eq!(record.preference, 2222);
-/// ```
-///
-/// # Errors
-/// `DnsParserError::InvalidHexString`
-/// `DnsParserError::ParseIntError`
-#[no_mangle]
-pub extern "C" fn parse_naptr_record(
-    isolate: *mut v8::Isolate,
-    record: *const core::ffi::c_char,
-) -> *mut v8::Value {
-    let isolate: &mut v8::Isolate = unsafe { &mut *isolate };
-
-    todo!();
-    // let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
-    //
-    // let order_str = data[1..3].to_vec();
-    // let order = u32::from_str_radix(&order_str.join(""), 16)?;
-    // let preference_str = data[3..5].to_vec();
-    // let preference = u32::from_str_radix(&preference_str.join(""), 16)?;
-    //
-    // let flag_length = usize::from_str_radix(data[5], 16)?;
-    // let flag_offset = 6;
-    // let flags = decode_hex(&data[flag_offset..flag_length + flag_offset])?.join("");
-    //
-    // let service_length = usize::from_str_radix(data[flag_offset + flag_length], 16)?;
-    // let service_offset = flag_offset + flag_length + 1;
-    // let service = decode_hex(&data[service_offset..service_length + service_offset])?.join("");
-    //
-    // let regexp_length = usize::from_str_radix(data[service_offset + service_length], 16)?;
-    // let regexp_offset = service_offset + service_length + 1;
-    // let regexp = decode_hex(&data[regexp_offset..regexp_length + regexp_offset])?.join("");
-    //
-    // let replacement = parse_replacement(&data[regexp_offset + regexp_length..])?;
-    //
-    // // let isolate = v8::OwnedIsolate::new(isolate);
-    // todo!("hello");
-    // Ok(ffi::NaptrRecord {
-    //     flags,
-    //     service,
-    //     regexp,
-    //     replacement,
-    //     order,
-    //     preference,
-    // })
 }
 
 /// Replacement values needs to be parsed accordingly.
