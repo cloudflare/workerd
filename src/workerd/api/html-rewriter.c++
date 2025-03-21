@@ -325,9 +325,11 @@ class Rewriter final: public WritableStreamSink {
   // this (buildRewriter()) modifies that vector.
   kj::Own<lol_html_HtmlRewriter> rewriter;
 
-  kj::Own<WritableStreamSink> inner;
+  // Stores data written by lol-html, which will be periodically flushed to inner.
+  kj::Vector<kj::byte> outputBuffer;
 
-  kj::Maybe<kj::Promise<void>> writePromise;
+  // The destination for the output from lol-html
+  kj::Own<WritableStreamSink> inner;
 
   kj::Maybe<kj::Exception> maybeException;
 
@@ -432,6 +434,9 @@ namespace {
 // but it'd always be increased to this anyway.
 const size_t FIBER_STACK_SIZE = 1024 * 64;
 
+// The maximum size of the internal output buffer.
+const size_t MAX_OUTPUT_BUFFER_SIZE = 128 * 1024 * 1024;
+
 const kj::FiberPool& getFiberPool() {
   const static kj::FiberPool FIBER_POOL(FIBER_STACK_SIZE);
   return FIBER_POOL;
@@ -505,25 +510,17 @@ kj::Promise<void> Rewriter::finishWrite() {
 }
 
 kj::Promise<void> Rewriter::flushWrite() {
-  auto checkException = [this]() -> kj::Promise<void> {
-    KJ_ASSERT(writePromise == kj::none);
+  if (!outputBuffer.empty()) {
+    KJ_DEFER(outputBuffer.clear());
 
-    KJ_IF_SOME(exception, maybeException) {
-      inner->abort(kj::cp(exception));
-      return kj::cp(exception);
-    }
-
-    return kj::READY_NOW;
-  };
-
-  KJ_IF_SOME(wp, writePromise) {
-    KJ_DEFER(writePromise = kj::none);
-    return wp.then([checkException]() { return checkException(); });
+    co_await inner->write(outputBuffer);
   }
 
-  return checkException();
+  KJ_IF_SOME(exception, maybeException) {
+    inner->abort(kj::cp(exception));
+    kj::throwFatalException(kj::cp(exception));
+  }
 }
-
 template <typename T, typename CType>
 lol_html_rewriter_directive_t Rewriter::thunk(CType* content, void* userdata) {
   auto& registration = *reinterpret_cast<RegisteredHandler*>(userdata);
@@ -754,15 +751,12 @@ void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
     return;
   }
 
-  auto bufferCopy = kj::heapArray(buffer);
-
-  KJ_IF_SOME(wp, writePromise) {
-    writePromise = wp.then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
-      return inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-    });
-  } else {
-    writePromise = inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
+  if (outputBuffer.size() + buffer.size() > MAX_OUTPUT_BUFFER_SIZE) {
+    maybePoison(KJ_EXCEPTION(FAILED, kj::str(JSG_EXCEPTION(RangeError) ": Memory limit exceeded")));
+    return;
   }
+
+  outputBuffer.addAll(buffer);
 }
 
 // =======================================================================================
