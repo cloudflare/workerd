@@ -4,6 +4,9 @@
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
   tail(...args) {
+    // TODO: Logging is useful for simple-test, disabled for now to preserve format.
+    console.log('Dummy got input');
+    console.log(args, args[0][0]);
     return (...args) => {};
   },
 };
