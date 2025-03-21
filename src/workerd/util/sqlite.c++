@@ -1267,7 +1267,8 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(regulator),
-      maybeStatement(statement.prepareForExecution()) {
+      maybeStatement(statement.prepareForExecution()),
+      queryEvent(*this) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1280,7 +1281,8 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     : ResetListener(db),
       regulator(regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-      maybeStatement(ownStatement) {
+      maybeStatement(ownStatement),
+      queryEvent(*this) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1294,6 +1296,13 @@ void SqliteDatabase::Query::destroy() {
   if (regulator.shouldAddQueryStats()) {
     //Update the db stats that we have collected for the query
     db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
+  }
+
+  queryEvent.setQueryEventStats(rowsRead, rowsWritten, !(regulator.shouldAddQueryStats()));
+  try {
+    queryEvent.setQueryStatement(kj::str(sqlite3_sql(getStatementAndEffect().statement)));
+  } catch (kj::Exception& e) {
+    queryEvent.setQueryErrorDescription(kj::str(e.getDescription()));
   }
 
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
@@ -1413,6 +1422,7 @@ void SqliteDatabase::Query::nextRow(bool first) {
 
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
+    queryEvent.setQueryResult(err);
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets
