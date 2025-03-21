@@ -35,8 +35,6 @@
       "type": "github_release",
       "owner": "simdutf",
       "repo": "simdutf",
-      // simdutf temporarily forgot to upload "singleheader.zip" for 6.4.0
-      "freeze_version": "v6.3.1",
       "file_regex": "singleheader.zip",
       "strip_prefix": "",
       "build_file": "//:build/BUILD.simdutf"
@@ -86,7 +84,9 @@
       "name": "com_google_protobuf",
       "owner": "protocolbuffers",
       "repo": "protobuf",
-      "file_regex": "protobuf-.*\\.tar\\.gz"
+      "file_regex": "protobuf-.*\\.tar\\.gz",
+      // Frozen because protobuf version management is difficult. Newer versions currently break build.
+      "freeze_version": "v29.3"
     },
     {
       "type": "github_release",
