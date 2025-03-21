@@ -30,16 +30,7 @@
 
 #include <kj/encoding.h>
 
-extern "C" void init_rjs(v8::Isolate* isolate, v8::Context* context, v8::Object* obj);
-
 namespace workerd::api {
-
-jsg::JsValue WorkerGlobalScope::getRust(jsg::Lock& lock) {
-  v8::Local<v8::Object> obj = v8::Object::New(lock.v8Isolate);
-  init_rjs(lock.v8Isolate, *lock.v8Context(), *obj);
-
-  return jsg::JsValue(kj::mv(obj));
-}
 
 namespace {
 

@@ -582,6 +582,11 @@ struct MemberCounter {
     ++members;
   }
 
+  template <const char* name, RustCallback callback>
+  inline void registerRustMethod() {
+    // TODO(soon): Implement this
+  }
+
   template <typename Method, Method method>
   inline void registerCallable() { /* not a member */ }
 
@@ -804,6 +809,11 @@ struct MembersBuilder {
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
+  }
+
+  template <const char* name, RustCallback callback>
+  inline void registerRustMethod() {
+    // TODO(soon): Take a look at this
   }
 
   template <typename Method, Method method>

@@ -201,6 +201,14 @@ namespace workerd::jsg {
     registry.template registerMethod<NAME, decltype(&Self::name), &Self::name>();                  \
   } while (false)
 
+using RustCallback = void (*)(void* /* FunctionCallbackInfo<Value>* */);
+
+#define JSG_RUST_METHOD(name)                                                                      \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerRustMethod<NAME, name>();                  \
+  } while (false)
+
 // Like JSG_METHOD but allows you to specify a different name to use in JavaScript. This is
 // particularly useful when a JavaScript API wants to use a name that is a keyword in C++. For
 // example:

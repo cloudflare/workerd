@@ -12,6 +12,7 @@
 
 #include "ser.h"
 #include "util.h"
+#include "workerd/jsg/jsg.h"
 #include "wrappable.h"
 
 #include <workerd/jsg/memory.h>
@@ -963,6 +964,22 @@ struct ResourceTypeBuilder {
         v8::FunctionTemplate::New(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
                 ArgumentIndexes<Method>>::callback,
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
+  }
+
+
+  template<RustCallback cb>
+  struct RustCallbackWrapper {
+    static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+      cb((void*)(&info));
+    }
+  };
+
+  template <const char* name, RustCallback callback>
+  inline void registerRustMethod() {
+    prototype->Set(isolate, name,
+        v8::FunctionTemplate::New(isolate,
+            RustCallbackWrapper<callback>::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
   }
 

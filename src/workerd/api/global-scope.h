@@ -15,6 +15,8 @@
 #include <workerd/api/gpu/gpu.h>
 #endif
 
+extern "C" void parse_caa_record(void*);
+
 namespace workerd::jsg {
 class DOMException;
 }  // namespace workerd::jsg
@@ -169,12 +171,10 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
     return {};
   };
 
-  jsg::JsValue getRust(jsg::Lock& lock);
-
   JSG_RESOURCE_TYPE(WorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
 
-    JSG_LAZY_INSTANCE_PROPERTY(rust, getRust);
+    JSG_RUST_METHOD(parse_caa_record);
 
     JSG_NESTED_TYPE(EventTarget);
 
