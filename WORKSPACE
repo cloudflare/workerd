@@ -4,6 +4,10 @@ load("@//build/deps:gen/build_deps.bzl", build_deps_gen = "deps_gen")
 
 build_deps_gen()
 
+load("@//build/deps:gen/shared_deps.bzl", shared_deps_gen = "deps_gen")
+
+shared_deps_gen()
+
 load("@//build/deps:gen/deps.bzl", "deps_gen")
 
 deps_gen()
