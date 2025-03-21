@@ -289,7 +289,7 @@ void tracing::FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder
   }
 }
 
-tracing::FetchEventInfo tracing::FetchEventInfo::clone() {
+tracing::FetchEventInfo tracing::FetchEventInfo::clone() const {
   return FetchEventInfo(
       method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); });
 }
@@ -307,7 +307,7 @@ void tracing::FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header:
   builder.setValue(value);
 }
 
-tracing::FetchEventInfo::Header tracing::FetchEventInfo::Header::clone() {
+tracing::FetchEventInfo::Header tracing::FetchEventInfo::Header::clone() const {
   return Header(kj::str(name), kj::str(value));
 }
 
@@ -320,7 +320,7 @@ void tracing::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder
   builder.setMethodName(methodName);
 }
 
-tracing::JsRpcEventInfo tracing::JsRpcEventInfo::clone() {
+tracing::JsRpcEventInfo tracing::JsRpcEventInfo::clone() const {
   return JsRpcEventInfo(kj::str(methodName));
 }
 
@@ -337,7 +337,7 @@ void tracing::ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder
   builder.setCron(cron);
 }
 
-tracing::ScheduledEventInfo tracing::ScheduledEventInfo::clone() {
+tracing::ScheduledEventInfo tracing::ScheduledEventInfo::clone() const {
   return ScheduledEventInfo(scheduledTime, kj::str(cron));
 }
 
@@ -350,7 +350,7 @@ void tracing::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder
   builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
 }
 
-tracing::AlarmEventInfo tracing::AlarmEventInfo::clone() {
+tracing::AlarmEventInfo tracing::AlarmEventInfo::clone() const {
   return AlarmEventInfo(scheduledTime);
 }
 
@@ -367,7 +367,7 @@ void tracing::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder
   builder.setBatchSize(batchSize);
 }
 
-tracing::QueueEventInfo tracing::QueueEventInfo::clone() {
+tracing::QueueEventInfo tracing::QueueEventInfo::clone() const {
   return QueueEventInfo(kj::str(queueName), batchSize);
 }
 
@@ -387,7 +387,7 @@ void tracing::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder
   builder.setRawSize(rawSize);
 }
 
-tracing::EmailEventInfo tracing::EmailEventInfo::clone() {
+tracing::EmailEventInfo tracing::EmailEventInfo::clone() const {
   return EmailEventInfo(kj::str(mailFrom), kj::str(rcptTo), rawSize);
 }
 
@@ -419,7 +419,7 @@ void tracing::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder
   }
 }
 
-tracing::TraceEventInfo tracing::TraceEventInfo::clone() {
+tracing::TraceEventInfo tracing::TraceEventInfo::clone() const {
   return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
 }
 
@@ -436,7 +436,7 @@ void tracing::TraceEventInfo::TraceItem::copyTo(
   }
 }
 
-tracing::TraceEventInfo::TraceItem tracing::TraceEventInfo::TraceItem::clone() {
+tracing::TraceEventInfo::TraceItem tracing::TraceEventInfo::TraceItem::clone() const {
   return TraceItem(scriptName.map([](auto& name) { return kj::str(name); }));
 }
 
@@ -458,7 +458,7 @@ void tracing::DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent:
   builder.setMessage(message);
 }
 
-tracing::DiagnosticChannelEvent tracing::DiagnosticChannelEvent::clone() {
+tracing::DiagnosticChannelEvent tracing::DiagnosticChannelEvent::clone() const {
   return DiagnosticChannelEvent(timestamp, kj::str(channel), kj::heapArray<kj::byte>(message));
 }
 
@@ -486,7 +486,7 @@ void tracing::HibernatableWebSocketEventInfo::copyTo(
   }
 }
 
-tracing::HibernatableWebSocketEventInfo tracing::HibernatableWebSocketEventInfo::clone() {
+tracing::HibernatableWebSocketEventInfo tracing::HibernatableWebSocketEventInfo::clone() const {
   KJ_SWITCH_ONEOF(type) {
     KJ_CASE_ONEOF(_, Message) {
       return HibernatableWebSocketEventInfo(Message{});
@@ -533,7 +533,7 @@ void tracing::FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder b
   builder.setStatusCode(statusCode);
 }
 
-tracing::FetchResponseInfo tracing::FetchResponseInfo::clone() {
+tracing::FetchResponseInfo tracing::FetchResponseInfo::clone() const {
   return FetchResponseInfo(statusCode);
 }
 
@@ -691,7 +691,7 @@ void tracing::Log::copyTo(rpc::Trace::Log::Builder builder) {
   builder.setMessage(message);
 }
 
-tracing::Log tracing::Log::clone() {
+tracing::Log tracing::Log::clone() const {
   return Log(timestamp, logLevel, kj::str(message));
 }
 
@@ -704,7 +704,7 @@ void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) {
   }
 }
 
-tracing::Exception tracing::Exception::clone() {
+tracing::Exception tracing::Exception::clone() const {
   return Exception(timestamp, kj::str(name), kj::str(message),
       stack.map([](auto& stack) { return kj::str(stack); }));
 }
@@ -833,7 +833,7 @@ void tracing::Resume::copyTo(rpc::Trace::Resume::Builder builder) {
   }
 }
 
-tracing::Resume tracing::Resume::clone() {
+tracing::Resume tracing::Resume::clone() const {
   return Resume(attachment.map([](auto& attach) { return kj::heapArray<kj::byte>(attach); }));
 }
 
@@ -843,7 +843,7 @@ tracing::Hibernate::Hibernate(rpc::Trace::Hibernate::Reader reader) {}
 
 void tracing::Hibernate::copyTo(rpc::Trace::Hibernate::Builder builder) {}
 
-tracing::Hibernate tracing::Hibernate::clone() {
+tracing::Hibernate tracing::Hibernate::clone() const {
   return Hibernate();
 }
 
@@ -916,7 +916,7 @@ void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) {
   }
 }
 
-tracing::Attribute tracing::Attribute::clone() {
+tracing::Attribute tracing::Attribute::clone() const {
   constexpr auto cloneValue = [](const Value& value) -> Value {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(str, kj::String) {
@@ -981,7 +981,7 @@ void tracing::Return::copyTo(rpc::Trace::Return::Builder builder) {
   }
 }
 
-tracing::Return tracing::Return::clone() {
+tracing::Return tracing::Return::clone() const {
   KJ_IF_SOME(i, info) {
     KJ_SWITCH_ONEOF(i) {
       KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
@@ -1057,9 +1057,9 @@ void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) {
   }
 }
 
-tracing::SpanOpen tracing::SpanOpen::clone() {
-  constexpr auto cloneInfo = [](kj::Maybe<Info>& info) -> kj::Maybe<tracing::SpanOpen::Info> {
-    return info.map([](Info& info) -> tracing::SpanOpen::Info {
+tracing::SpanOpen tracing::SpanOpen::clone() const {
+  constexpr auto cloneInfo = [](const kj::Maybe<Info>& info) -> kj::Maybe<tracing::SpanOpen::Info> {
+    return info.map([](const Info& info) -> tracing::SpanOpen::Info {
       KJ_SWITCH_ONEOF(info) {
         KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
           return fetch.clone();
@@ -1089,7 +1089,7 @@ void tracing::SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) {
   builder.setOutcome(outcome);
 }
 
-tracing::SpanClose tracing::SpanClose::clone() {
+tracing::SpanClose tracing::SpanClose::clone() const {
   return SpanClose(outcome);
 }
 
@@ -1141,9 +1141,9 @@ void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) {
   ctx.setSpanId(spanId.getId());
 }
 
-tracing::Link tracing::Link::clone() {
+tracing::Link tracing::Link::clone() const {
   return Link(
-      label.map([](kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
+      label.map([](const kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
 }
 
 namespace {
@@ -1328,43 +1328,44 @@ tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
   };
 }
 
-tracing::Onset tracing::Onset::clone() {
-  constexpr auto cloneInfo = [](Info& info) -> tracing::Onset::Info {
-    KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
-        return fetch.clone();
-      }
-      KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
-        return jsrpc.clone();
-      }
-      KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
-        return scheduled.clone();
-      }
-      KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
-        return alarm.clone();
-      }
-      KJ_CASE_ONEOF(queue, QueueEventInfo) {
-        return queue.clone();
-      }
-      KJ_CASE_ONEOF(email, EmailEventInfo) {
-        return email.clone();
-      }
-      KJ_CASE_ONEOF(trace, TraceEventInfo) {
-        return trace.clone();
-      }
-      KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
-        return hws.clone();
-      }
-      KJ_CASE_ONEOF(resume, Resume) {
-        return resume.clone();
-      }
-      KJ_CASE_ONEOF(custom, CustomEventInfo) {
-        return CustomEventInfo();
-      }
+tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+      return fetch.clone();
     }
-    KJ_UNREACHABLE;
-  };
-  return Onset(cloneInfo(info), workerInfo.clone(), trigger.map([](TriggerContext& ctx) {
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
+      return jsrpc.clone();
+    }
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+      return scheduled.clone();
+    }
+    KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+      return alarm.clone();
+    }
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
+      return queue.clone();
+    }
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
+      return email.clone();
+    }
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
+      return trace.clone();
+    }
+    KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
+      return hws.clone();
+    }
+    KJ_CASE_ONEOF(resume, Resume) {
+      return resume.clone();
+    }
+    KJ_CASE_ONEOF(custom, CustomEventInfo) {
+      return CustomEventInfo();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+tracing::Onset tracing::Onset::clone() const {
+  return Onset(cloneEventInfo(info), workerInfo.clone(), trigger.map([](const TriggerContext& ctx) {
     return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
   }));
 }
@@ -1385,7 +1386,7 @@ void tracing::Outcome::copyTo(rpc::Trace::Outcome::Builder builder) {
   builder.setWallTime(wallTime / kj::MILLISECONDS);
 }
 
-tracing::Outcome tracing::Outcome::clone() {
+tracing::Outcome tracing::Outcome::clone() const {
   return Outcome(outcome, cpuTime, wallTime);
 }
 
@@ -1521,8 +1522,8 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
   }
 }
 
-tracing::TailEvent tracing::TailEvent::clone() {
-  constexpr auto cloneEvent = [](Event& event) -> Event {
+tracing::TailEvent tracing::TailEvent::clone() const {
+  constexpr auto cloneEvent = [](const Event& event) -> Event {
     KJ_SWITCH_ONEOF(event) {
       KJ_CASE_ONEOF(onset, Onset) {
         return onset.clone();
