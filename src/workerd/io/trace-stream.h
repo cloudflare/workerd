@@ -13,10 +13,12 @@ namespace workerd::tracing {
 // events to a tail worker.
 class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
  public:
-  TailStreamCustomEventImpl(uint16_t typeId = TYPE,
+  TailStreamCustomEventImpl(bool isLegacyStream,
+      uint16_t typeId = TYPE,
       kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
-      : capFulfiller(kj::mv(paf.fulfiller)),
+      : isLegacyStream(isLegacyStream),
+        capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId) {}
 
@@ -48,6 +50,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
   }
 
  private:
+  bool isLegacyStream;
   kj::Own<kj::PromiseFulfiller<workerd::rpc::TailStreamTarget::Client>> capFulfiller;
   kj::Maybe<rpc::TailStreamTarget::Client> clientCap;
   uint16_t typeId;
@@ -86,10 +89,14 @@ struct TailStreamWriterState {
   bool closing = false;
   kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer;
 
-  TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
+  TailStreamWriterState(Pending pending,
+      kj::TaskSet& waitUntilTasks,
+      kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer)
       : inner(kj::mv(pending)),
-        waitUntilTasks(waitUntilTasks) {}
+        waitUntilTasks(waitUntilTasks),
+        pipelineTracer(kj::mv(pipelineTracer)) {}
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriterState);
 
   void reportImpl(tracing::TailEvent&& event);
@@ -99,6 +106,9 @@ struct TailStreamWriterState {
 };
 
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks);
+    kj::Array<kj::Own<WorkerInterface>> tailWorkers,
+    bool hasLegacyStream,
+    kj::TaskSet& waitUntilTasks,
+    kj::Rc<PipelineTracer> pipelineTracer);
 
 }  // namespace workerd::tracing

@@ -595,6 +595,9 @@ interface TailStreamTarget $Cxx.allowCancellation {
     # For an initial tailStream call, the stop flag indicates that the tail worker does
     # not wish to continue receiving events. If the stop field is not set, or the value
     # is false, then events will be delivered to the tail worker until stop is indicated.
+    completedTrace @1 :Trace;
+    # completed trace object. This will be empty except when we're using this for the legacy tail
+    # worker.
   }
 
   report @0 TailStreamParams -> TailStreamResults;
@@ -648,12 +651,14 @@ interface EventDispatcher @0xf20697475ec1752d {
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 
-  tailStreamSession @10 () -> (topLevel :TailStreamTarget) $Cxx.allowCancellation;
+  tailStreamSession @10 (isLegacyStream :Bool) -> (topLevel :TailStreamTarget) $Cxx.allowCancellation;
   # Opens a streaming tail session. The call does not return until the session is complete.
   #
   # `topLevel` is the top-level tail session target, on which exactly one method call can
   # be made. This call must be made using pipelining since `tailStreamSession()` won't return
   # until after the call completes.
+  # The isLegacyStream parameter indicates that this is a tail stream used to transfer events for
+  # any legacy tail workers, instead of being back by an actual streaming tail worker.
 
   obsolete5 @5();
   obsolete6 @6();

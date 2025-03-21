@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
+class TailStreamWriter final: public kj::Refcounted {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -78,11 +78,14 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
 
   // When collecting traces from multiple stages in a pipeline, this is called by the
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
-  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
+  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces, bool isLevel = false);
+
+  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
 
  private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
+  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 
   friend class WorkerTracer;
 };

@@ -1893,28 +1893,36 @@ class Server::WorkerService final: public Service,
         addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
       }
 
-      if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
-        for (auto& service: channels.streamingTails) {
-          addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
-        }
+      // Set up a single pseudo STW to accumulate events for any legacy tail workers, using the
+      // first LTW service.
+      // Setting up legacy tail workers support.
+      if (legacyTailWorkers.size()) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *channels.tails[0]);
+      }
+      for (auto& service: channels.streamingTails) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
       }
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
     kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
-    if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
-      // Setting up legacy tail workers support, but only if we actually have tail workers
-      // configured.
+    if (streamingTailWorkers.size() > 0) {
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-      workerTracer =
-          tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel, kj::none /* scriptId */,
-              kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
-              kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */,
-              tracing::initializeTailStreamWriter(
-                  streamingTailWorkers.releaseAsArray(), waitUntilTasks));
+      // Setting up legacy tail workers support, but only if we actually have tail workers
+      // configured. This is done using the hasTailStream parameter.
+      auto tailStreamWriter =
+          tracing::initializeTailStreamWriter(streamingTailWorkers.releaseAsArray(),
+              legacyTailWorkers.size() > 0, waitUntilTasks, tracer.addRef());
+      KJ_IF_SOME(t, tailStreamWriter) {
+        tracer->addTailStreamWriter(kj::addRef(*t));
+      }
+      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
+          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
+          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
+          kj::none /* entrypoint */, kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
@@ -1927,16 +1935,18 @@ class Server::WorkerService final: public Service,
       // will be. See below, we end up creating two references to the WorkerTracer,
       // one held by the observer and one that will be passed to the IoContext.
       // The PipelineTracer will be destroyed once both of those are freed.
-      waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = legacyTailWorkers.releaseAsArray()](
-                            kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
-        for (auto& worker: tailWorkers) {
-          auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
-              workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
-          co_await worker->customEvent(kj::mv(event)).ignoreResult();
-        }
-        co_return;
-      })));
+      if (legacyTailWorkers.size() > 0) {
+        waitUntilTasks.add(tracer->onComplete().then(
+            kj::coCapture([tailWorkers = kj::mv(legacyTailWorkers)](
+                              kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
+          for (auto& worker: tailWorkers) {
+            auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
+                workerd::api::TraceCustomEventImpl::TYPE, mapAddRef(traces));
+            co_await worker->customEvent(kj::mv(event)).ignoreResult();
+          }
+          co_return;
+        })));
+      }
     }
 
     observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
@@ -3685,7 +3695,8 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> tailStreamSession(TailStreamSessionContext context) override {
-      auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+      auto customEvent =
+          kj::heap<tracing::TailStreamCustomEventImpl>(context.getParams().getIsLegacyStream());
       auto cap = customEvent->getCap();
       capnp::PipelineBuilder<TailStreamSessionResults> pipelineBuilder;
       pipelineBuilder.setTopLevel(cap);
