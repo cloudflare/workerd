@@ -35,6 +35,8 @@
       "type": "github_release",
       "owner": "simdutf",
       "repo": "simdutf",
+      // simdutf temporarily forgot to upload "singleheader.zip" for 6.4.0
+      "freeze_version": "v6.3.1",
       "file_regex": "singleheader.zip",
       "strip_prefix": "",
       "build_file": "//:build/BUILD.simdutf"
@@ -90,8 +92,7 @@
       "type": "github_release",
       "name": "brotli",
       "owner": "google",
-      "repo": "brotli",
-      "file_regex": "brotli-*\\.tar\\.gz"
+      "repo": "brotli"
     }
   ]
 }
