@@ -26,11 +26,32 @@ using kj::uint;
 // Used to collect periodic metrics about queries and size of sqlite db
 class SqliteObserver {
  public:
+  void setDbWalSize(uint64_t dbWalSize) {
+    this->dbWalSize = dbWalSize;
+  }
+  uint64_t getDbWalSize() {
+    return dbWalSize;
+  }
+  kj::TimePoint now() {
+    return monotonicClock.now();
+  }
   virtual void addQueryStats(uint64_t rowsRead, uint64_t rowsWritten) {}
   // The method is not used by the SqliteDatabase, it is added here for convenience
   virtual void setSqliteStoredBytes(uint64_t sqliteStoredBytes) {}
 
+  virtual void reportQueryEvent(kj::StringPtr queryStatement,
+      uint64_t queryRowsRead,
+      uint64_t queryRowsWritten,
+      kj::Duration queryLatency,
+      uint64_t dbWalBytesWritten,
+      int queryError,
+      bool isInternalQuery) {}
+
   static SqliteObserver DEFAULT;
+
+ private:
+  uint64_t dbWalSize = 0;
+  const kj::MonotonicClock& monotonicClock = kj::systemPreciseMonotonicClock();
 };
 
 // C++/KJ API for SQLite.
@@ -522,11 +543,56 @@ class SqliteDatabase::Query final: private ResetListener {
     }
   }
 
+  struct QueryEvent {
+    explicit QueryEvent(Query& q)
+        : parent(q),
+          observer(q.db.sqliteObserver),
+          dbWalSizeBefore(observer.getDbWalSize()),
+          startTime(observer.now()) {}
+
+    ~QueryEvent() {
+      uint64_t dbWalSizeAfter = observer.getDbWalSize();
+      uint64_t dbWalBytesWritten = (dbWalSizeAfter - dbWalSizeBefore);
+      kj::Duration queryLatency = observer.now() - startTime;
+
+      observer.reportQueryEvent(/*queryStatement=*/queryStatement,
+          /*queryRowsRead=*/rowsRead,
+          /*queryRowsWritten=*/rowsWritten,
+          /*queryLatency=*/queryLatency,
+          /*dbWalBytesWritten=*/dbWalBytesWritten,
+          /*queryResult=*/queryResult,
+          /*isInternalQuery=*/isInternalQuery);
+    }
+
+    void setQueryEventStats(uint64_t rowsRead,
+        uint64_t rowsWritten,
+        bool isInternalQuery,
+        kj::StringPtr queryStatement) {
+      this->rowsRead = rowsRead;
+      this->rowsWritten = rowsWritten;
+      this->isInternalQuery = isInternalQuery;
+      this->queryStatement = queryStatement;
+    }
+    void setQueryResult(int res) {
+      queryResult = res;
+    }
+    Query& parent;
+    SqliteObserver& observer;
+    kj::StringPtr queryStatement;
+    bool isInternalQuery;
+    uint64_t dbWalSizeBefore;
+    kj::TimePoint startTime;
+    uint64_t rowsRead = 0;
+    uint64_t rowsWritten = 0;
+    int queryResult = 0;
+  };
+
  private:
   const Regulator& regulator;
   StatementAndEffect ownStatement;                // for one-off queries
   kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
   bool done = false;
+  QueryEvent queryEvent;
 
   // Storing the rowsRead and rowsWritten here to use in cases where a DB is reset.
   // When the DB is reset, getRowdRead and getRowsWritten will fail as the statement they
@@ -548,7 +614,8 @@ class SqliteDatabase::Query final: private ResetListener {
   Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
       : ResetListener(db),
         regulator(regulator),
-        maybeStatement(statement.prepareForExecution()) {
+        maybeStatement(statement.prepareForExecution()),
+        queryEvent(*this) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
@@ -559,7 +626,8 @@ class SqliteDatabase::Query final: private ResetListener {
       : ResetListener(db),
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-        maybeStatement(ownStatement) {
+        maybeStatement(ownStatement),
+        queryEvent(*this) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
