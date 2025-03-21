@@ -6106,6 +6106,13 @@ export declare namespace Rpc {
 export declare namespace Cloudflare {
   interface Env {}
 }
+export interface SecretsStoreSecret {
+  /**
+   * Get a secret from the Secrets Store, returning a string of the secret value
+   * if it exists, or throws an error if it does not exist
+   */
+  get(): Promise<string>;
+}
 export declare namespace TailStream {
   interface Header {
     readonly name: string;
