@@ -13,8 +13,7 @@
       "type": "github_release",
       "owner": "bazelbuild",
       "repo": "rules_python",
-      "file_regex": "^rules_python-.*\\.tar\\.gz$",
-      "freeze_version": "0.40.0"
+      "file_regex": "^rules_python-.*\\.tar\\.gz$"
     },
     {
       // Needed for objc_library starting with bazel 7, used to build dawn on macOS

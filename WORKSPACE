@@ -272,20 +272,23 @@ load("@//build/deps:v8.bzl", "deps_v8")
 
 deps_v8()
 
+PYTHON_TOOLCHAIN = "python3_13"
+
+PYTHON_INTERPRETER = "@" + PYTHON_TOOLCHAIN + "_host//:python"
+
 python_register_toolchains(
-    name = "python3_13",
+    name = PYTHON_TOOLCHAIN,
     ignore_root_user_error = True,
     # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
     python_version = "3.13",
 )
 
-load("@python3_13//:defs.bzl", "interpreter")
 load("@rules_python//python:pip.bzl", "pip_parse")
 
 pip_parse(
     name = "v8_python_deps",
     extra_pip_args = ["--require-hashes"],
-    python_interpreter_target = interpreter,
+    python_interpreter_target = PYTHON_INTERPRETER,
     requirements_lock = "@v8//:bazel/requirements.txt",
 )
 
@@ -295,7 +298,7 @@ v8_python_deps_install()
 
 pip_parse(
     name = "py_deps",
-    python_interpreter_target = interpreter,
+    python_interpreter_target = PYTHON_INTERPRETER,
     requirements_lock = "//build/deps:requirements.txt",
 )
 

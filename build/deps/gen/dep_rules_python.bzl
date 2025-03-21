@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "0.40.0"
-URL = "https://github.com/bazel-contrib/rules_python/releases/download/0.40.0/rules_python-0.40.0.tar.gz"
-STRIP_PREFIX = "rules_python-0.40.0"
-SHA256 = "690e0141724abb568267e003c7b6d9a54925df40c275a870a4d934161dc9dd53"
+TAG_NAME = "1.2.0"
+URL = "https://github.com/bazel-contrib/rules_python/releases/download/1.2.0/rules_python-1.2.0.tar.gz"
+STRIP_PREFIX = "rules_python-1.2.0"
+SHA256 = "2ef40fdcd797e07f0b6abda446d1d84e2d9570d234fddf8fcd2aa262da852d1c"
 TYPE = "tgz"
 
 def dep_rules_python():
