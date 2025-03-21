@@ -13,7 +13,8 @@
       "type": "github_release",
       "owner": "bazelbuild",
       "repo": "rules_python",
-      "file_regex": "\\.tar\\.gz$"
+      "file_regex": "^rules_python-.*\\.tar\\.gz$",
+      "freeze_version": "0.40.0"
     },
     {
       // Needed for objc_library starting with bazel 7, used to build dawn on macOS
@@ -241,7 +242,15 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "//:build/BUILD.wpt",
-      "freeze_version": "wpt-af83b77e2"
-     }
+      "freeze_version": "wpt-afa16aa1d"
+    },
+    // microbenchmark
+    {
+      "type": "github_release",
+      "name": "com_google_benchmark",
+      "owner": "google",
+      "repo": "benchmark",
+      "file_regex": "benchmark-*\\.tar\\.gz"
+    }
   ]
 }

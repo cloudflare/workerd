@@ -151,6 +151,10 @@ declare namespace Rpc {
   };
 }
 
+declare namespace Cloudflare {
+	interface Env {}
+}
+
 declare module "cloudflare:workers" {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
@@ -259,4 +263,6 @@ declare module "cloudflare:workers" {
 
     run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
   }
+
+  export const env: Cloudflare.Env;
 }

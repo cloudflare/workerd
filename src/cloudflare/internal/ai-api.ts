@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
+import { AutoRAG } from 'cloudflare-internal:autorag-api';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -31,6 +32,14 @@ export type AiOptions = {
    * @deprecated this option is deprecated, do not use this
    */
   sessionOptions?: SessionOptions;
+};
+
+export type ConversionResponse = {
+  name: string;
+  mimeType: string;
+  format: 'markdown';
+  tokens: number;
+  data: string;
 };
 
 export type AiModelsSearchParams = {
@@ -72,6 +81,26 @@ export class AiInternalError extends Error {
     super(message);
     this.name = name;
   }
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  // TODO(soon): This is better implemented using the node::buffer API
+  // but we cannot get to that from here currently. Once the node:buffer
+  // API (actually, `node-internal:internal_buffer`) is available to be imported
+  // here we should update this code to use it instead.
+  const arrayBuffer = await blob.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+
+  let binary = '';
+  const chunk = 1024;
+  for (let i = 0; i < uint8Array.length; i += chunk) {
+    binary += String.fromCharCode.apply(
+      null,
+      uint8Array.subarray(i, i + chunk) as unknown as number[]
+    );
+  }
+
+  return btoa(binary);
 }
 
 export class Ai {
@@ -147,11 +176,7 @@ export class Ai {
       return res;
     }
 
-    if (!res.ok) {
-      throw await this._parseError(res);
-    }
-
-    if (!res.body) {
+    if (!res.ok || !res.body) {
       throw await this._parseError(res);
     }
 
@@ -221,8 +246,95 @@ export class Ai {
     }
   }
 
+  public async toMarkdown(
+    files: { name: string; blob: Blob }[],
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+  ): Promise<ConversionResponse[]>;
+  public async toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    },
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+  ): Promise<ConversionResponse>;
+  public async toMarkdown(
+    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
+    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+  ): Promise<ConversionResponse | ConversionResponse[]> {
+    const input = Array.isArray(files) ? files : [files];
+
+    const processedFiles = [];
+    for (const file of input) {
+      processedFiles.push({
+        name: file.name,
+        mimeType: file.blob.type,
+        data: await blobToBase64(file.blob),
+      });
+    }
+
+    const fetchOptions = {
+      method: 'POST',
+      body: JSON.stringify({
+        files: processedFiles,
+        options: options,
+      }),
+      headers: {
+        ...(options?.extraHeaders || {}),
+        'content-type': 'application/json',
+      },
+    };
+
+    const endpointUrl =
+      'https://workers-binding.ai/to-everything/markdown/transformer';
+
+    const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
+
+    if (!res.ok) {
+      const content = await res.text();
+      let parsedContent;
+
+      try {
+        parsedContent = JSON.parse(content) as {
+          errors: { message: string }[];
+        };
+      } catch {
+        throw new AiInternalError(content);
+      }
+
+      throw new AiInternalError(
+        parsedContent.errors.at(0)?.message || 'Internal Error'
+      );
+    }
+
+    const data = (await res.json()) as { result: ConversionResponse[] };
+
+    if (data.result.length === 0) {
+      throw new AiInternalError(
+        'Internal Error Converting files into Markdown'
+      );
+    }
+
+    // If the user sent a list of files, return an array of results, otherwise, return just the first object
+    if (Array.isArray(files)) {
+      return data.result;
+    }
+
+    const obj = data.result.at(0);
+    if (!obj) {
+      throw new AiInternalError(
+        'Internal Error Converting files into Markdown'
+      );
+    }
+
+    return obj;
+  }
+
   public gateway(gatewayId: string): AiGateway {
     return new AiGateway(this.fetcher, gatewayId);
+  }
+
+  public autorag(autoragId: string): AutoRAG {
+    return new AutoRAG(this.fetcher, autoragId);
   }
 }
 

@@ -1,11 +1,7 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
-/**
- * @param {string} tsconfigRootDir
- * @returns {FlatConfig.ConfigArray}
- */
-export function baseConfig({ tsconfigRootDir }) {
+export function baseConfig() {
   return tseslint.config(
     eslint.configs.recommended,
     ...tseslint.configs.strictTypeChecked,
@@ -15,7 +11,8 @@ export function baseConfig({ tsconfigRootDir }) {
           ecmaVersion: "latest",
           sourceType: "module",
           projectService: true,
-          tsconfigRootDir,
+          tsconfigRootDir: import.meta.dirname,
+          jsDocParsingMode: 'all',
         },
       },
       rules: {
@@ -24,8 +21,8 @@ export function baseConfig({ tsconfigRootDir }) {
         "@typescript-eslint/explicit-module-boundary-types": "error",
         "@typescript-eslint/no-require-imports": "error",
         "@typescript-eslint/prefer-enum-initializers": "error",
-        "@typescript-eslint/restrict-template-expressions": "warn",
-        "@typescript-eslint/no-non-null-assertion": "warn",
+        "@typescript-eslint/restrict-template-expressions": "off",
+        "@typescript-eslint/no-non-null-assertion": "error",
         "@typescript-eslint/no-extraneous-class": "off",
         "@typescript-eslint/unified-signatures": "off",
         "@typescript-eslint/no-unused-vars": [

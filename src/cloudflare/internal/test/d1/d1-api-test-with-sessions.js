@@ -97,17 +97,17 @@ async function testD1ApiWithSessionsTokensHandling(DB, envD1MockFetcher) {
     true
   );
 
-  // Assert tokens sent by the DEFAULT DB.withSessions()
+  // Assert tokens sent by the DEFAULT DB.withSession()
   await resetCommitTokens(envD1MockFetcher);
   await testD1ApiQueriesHappyPath(DB.withSession());
   await assertTokensSentReceived('first-unconstrained');
 
-  // Assert tokens sent by the DB.withSessions("first-unconstrained")
+  // Assert tokens sent by the DB.withSession("first-unconstrained")
   await resetCommitTokens(envD1MockFetcher);
   await testD1ApiQueriesHappyPath(DB.withSession('first-unconstrained'));
   await assertTokensSentReceived('first-unconstrained');
 
-  // Assert tokens sent by the DB.withSessions("first-primary")
+  // Assert tokens sent by the DB.withSession("first-primary")
   await resetCommitTokens(envD1MockFetcher);
   await testD1ApiQueriesHappyPath(DB.withSession('first-primary'));
   await assertTokensSentReceived('first-primary');

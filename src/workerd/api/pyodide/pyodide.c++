@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
+#include "requirements.h"
+
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/util/string-buffer.h>
@@ -69,27 +71,64 @@ int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(
     jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter) {
-  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->names.size());
+  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
     KJ_IF_SOME(ext, maybeExtFilter) {
-      if (!this->names[i].endsWith(ext)) {
+      if (!this->moduleInfo.names[i].endsWith(ext)) {
         continue;
       }
     }
-    builder.add(js, js.str(this->names[i]));
+    builder.add(js, js.str(this->moduleInfo.names[i]));
   }
   return builder.releaseAsArray();
 }
 
-kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getWorkerFiles(
-    jsg::Lock& js, kj::String ext) {
-  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->names.size());
-  for (auto i: kj::zeroTo(this->names.size())) {
-    if (this->names[i].endsWith(ext)) {
-      builder.add(js, js.str(this->contents[i]));
+kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
+  auto builder = kj::Vector<kj::String>(names.size());
+  for (auto i: kj::zeroTo(names.size())) {
+    if (names[i].endsWith(".py")) {
+      builder.add(kj::str(contents[i].asChars()));
     }
   }
   return builder.releaseAsArray();
+}
+
+kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
+  auto result = kj::HashSet<kj::String>();
+  const auto vendor = "vendor/"_kj;
+  const auto dotPy = ".py"_kj;
+  const auto dotSo = ".so"_kj;
+  for (auto& item: names) {
+    kj::StringPtr name = item;
+    if (name.startsWith(vendor)) {
+      name = name.slice(vendor.size());
+    }
+    auto firstSlash = name.findFirst('/');
+    KJ_IF_SOME(idx, firstSlash) {
+      result.upsert(kj::str(name.slice(0, idx)), [](auto&&, auto&&) {});
+      continue;
+    }
+    if (name.endsWith(dotPy)) {
+      result.upsert(kj::str(name.slice(0, name.size() - dotPy.size())), [](auto&&, auto&&) {});
+      continue;
+    }
+    if (name.endsWith(dotSo)) {
+      result.upsert(kj::str(name.slice(0, name.size() - dotSo.size())), [](auto&&, auto&&) {});
+      continue;
+    }
+  }
+  return result;
+}
+
+kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports() {
+  auto workerFiles = this->getPythonFileContents();
+  auto importedNames = parsePythonScriptImports(kj::mv(workerFiles));
+  auto workerModules = getWorkerModuleSet();
+  return PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(importedNames));
+}
+
+kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports() {
+  return this->moduleInfo.getPackageSnapshotImports();
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
@@ -101,18 +140,18 @@ kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg:
 }
 
 kj::Array<int> PyodideMetadataReader::getSizes(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<int>(this->names.size());
+  auto builder = kj::heapArrayBuilder<int>(this->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
-    builder.add(this->contents[i].size());
+    builder.add(this->moduleInfo.contents[i].size());
   }
   return builder.finish();
 }
 
 int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf) {
-  if (index >= contents.size() || index < 0) {
+  if (index >= this->moduleInfo.contents.size() || index < 0) {
     return 0;
   }
-  auto& data = contents[index];
+  auto& data = this->moduleInfo.contents[index];
   return readToTarget(data, offset, buf);
 }
 
@@ -123,6 +162,13 @@ int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> bu
   return readToTarget(KJ_REQUIRE_NONNULL(memorySnapshot), offset, buf);
 }
 
+kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
+  auto packages = parseLockFile(packagesLock);
+  auto depMap = getDepMapFromPackagesLock(*packages);
+
+  return getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
+}
+
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
   if (existingSnapshot == kj::none) {
     return 0;
@@ -130,7 +176,7 @@ int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
   return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
 }
 
-kj::Array<kj::String> ArtifactBundler::parsePythonScriptImports(kj::Array<kj::String> files) {
+kj::Array<kj::String> PythonModuleInfo::parsePythonScriptImports(kj::Array<kj::String> files) {
   auto result = kj::Vector<kj::String>();
 
   for (auto& file: files) {
@@ -349,39 +395,11 @@ kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
-// This is equivalent to `pkgImport.replace('.', '/') + ".py"`.
-kj::String importToModuleFilename(kj::StringPtr pkgImport) {
-  auto result = kj::heapString(pkgImport.size() + 3);
-  for (auto i = 0; i < pkgImport.size(); i++) {
-    if (pkgImport[i] == '.') {
-      result[i] = '/';
-    } else {
-      result[i] = pkgImport[i];
-    }
-  }
-
-  result[pkgImport.size()] = '.';
-  result[pkgImport.size() + 1] = 'p';
-  result[pkgImport.size() + 2] = 'y';
-  return result;
-}
-
-bool isWorkerModuleImport(kj::HashSet<kj::String>& workerModules,
-    kj::ArrayPtr<const char> firstComponent,
-    kj::StringPtr pkgImport) {
-  // TODO: handling for:
-  // 1. namespace packages
-  // 2. shared libraries
-  return workerModules.contains(kj::str(firstComponent, ".py")) ||
-      workerModules.contains(kj::str(firstComponent, "/__init__.py")) ||
-      workerModules.contains(importToModuleFilename(pkgImport));
-}
-
-kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
+kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports) {
   auto baselineSnapshotImportsSet = kj::HashSet<kj::StringPtr>();
   for (auto& pkgImport: snapshotImports) {
-    baselineSnapshotImportsSet.insert(kj::mv(pkgImport));
+    baselineSnapshotImportsSet.upsert(kj::mv(pkgImport), [](auto&&, auto&&) {});
   }
 
   kj::HashSet<kj::String> filteredImportsSet;
@@ -394,8 +412,10 @@ kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
       continue;
     }
 
-    // don't include js or pyodide.
-    if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray()) {
+    // don't include modules that we provide and that are likely to be imported by most
+    // workers.
+    if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray() ||
+        firstComponent == "asgi"_kj.asArray() || firstComponent == "workers"_kj.asArray()) {
       continue;
     }
 
@@ -405,10 +425,10 @@ kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
     }
 
     // Don't include imports from worker files
-    if (isWorkerModuleImport(workerModules, firstComponent, pkgImport)) {
+    if (workerModules.contains(firstComponent)) {
       continue;
     }
-    filteredImportsSet.insert(kj::mv(pkgImport));
+    filteredImportsSet.upsert(kj::mv(pkgImport), [](auto&&, auto&&) {});
   }
 
   auto filteredImportsBuilder = kj::heapArrayBuilder<kj::String>(filteredImportsSet.size());
@@ -416,15 +436,6 @@ kj::Array<kj::String> ArtifactBundler::filterPythonScriptImports(
     filteredImportsBuilder.add(kj::mv(pkgImport));
   }
   return filteredImportsBuilder.finish();
-}
-
-kj::Array<kj::String> ArtifactBundler::filterPythonScriptImportsJs(
-    kj::Array<kj::String> workerModules, kj::Array<kj::String> imports) {
-  kj::HashSet<kj::String> workerModulesSet;
-  for (auto& workerModule: workerModules) {
-    workerModulesSet.insert(kj::mv(workerModule));
-  }
-  return ArtifactBundler::filterPythonScriptImports(kj::mv(workerModulesSet), kj::mv(imports));
 }
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease) {
@@ -510,6 +521,7 @@ jsg::Ref<PyodideMetadataReader> makePyodideMetadataReader(Worker::Reader conf,
     names.finish(),
     contents.finish(),
     requirements.finish(),
+    kj::str(pythonRelease.getPyodide()),
     kj::str(pythonRelease.getPackages()),
     kj::mv(lock),
     true      /* isWorkerd */,

@@ -13,9 +13,8 @@ import {
   Type,
   Type_Which,
 } from "@workerd/jsg/rtti.capnp.js";
-import ts, { factory as f } from "typescript";
+import ts from "typescript";
 import { createStructureNode } from "./structure";
-import { getTypeName } from "./type";
 
 export { getTypeName } from "./type";
 
@@ -46,42 +45,44 @@ function collectIncluded(map: StructureMap, root?: string): Set<string> {
   function visitType(type: Type): void {
     switch (type.which()) {
       case Type_Which.PROMISE:
-        return visitType(type.getPromise().getValue());
-      case Type_Which.STRUCTURE:
+        { visitType(type.getPromise().getValue()); return; }
+      case Type_Which.STRUCTURE: {
         const name = type.getStructure().getFullyQualifiedName();
         const structure = map.get(name);
         assert(structure !== undefined, `Unknown structure type: ${name}`);
-        return visitStructure(structure);
+        { visitStructure(structure); return; }
+      }
       case Type_Which.ARRAY:
-        return visitType(type.getArray().getElement());
+        { visitType(type.getArray().getElement()); return; }
       case Type_Which.MAYBE:
-        return visitType(type.getMaybe().getValue());
-      case Type_Which.DICT:
+        { visitType(type.getMaybe().getValue()); return; }
+      case Type_Which.DICT: {
         const dict = type.getDict();
         visitType(dict.getKey());
-        return visitType(dict.getValue());
+        { visitType(dict.getValue()); return; }
+      }
       case Type_Which.ONE_OF:
-        return type.getOneOf().getVariants().forEach(visitType);
+        { type.getOneOf().getVariants().forEach(visitType); return; }
       case Type_Which.FUNCTION:
-        return visitFunction(type.getFunction());
+        { visitFunction(type.getFunction()); return; }
     }
   }
 
-  function visitFunction(func: FunctionType | Method) {
+  function visitFunction(func: FunctionType | Method): void {
     func.getArgs().forEach(visitType);
     visitType(func.getReturnType());
   }
 
-  function visitMember(member: Member) {
+  function visitMember(member: Member): void {
     switch (member.which()) {
       case Member_Which.METHOD:
-        return visitFunction(member.getMethod());
+        { visitFunction(member.getMethod()); return; }
       case Member_Which.PROPERTY:
-        return visitType(member.getProperty().getType());
+        { visitType(member.getProperty().getType()); return; }
       case Member_Which.NESTED:
-        return visitStructure(member.getNested().getStructure());
+        { visitStructure(member.getNested().getStructure()); return; }
       case Member_Which.CONSTRUCTOR:
-        return member.getConstructor().getArgs().forEach(visitType);
+        { member.getConstructor().getArgs().forEach(visitType); return; }
     }
   }
 

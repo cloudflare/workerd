@@ -6,6 +6,8 @@
 
 #include <workerd/jsg/jsg.h>
 
+#include <v8-value-serializer.h>
+
 #include <kj/vector.h>
 
 namespace workerd::jsg {

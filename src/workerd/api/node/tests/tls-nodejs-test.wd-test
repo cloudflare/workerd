@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "tls-nodejs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "tls-nodejs-test.js")
+        ],
+        compatibilityDate = "2025-01-09",
+        compatibilityFlags = ["nodejs_compat"],
+      ),
+    ),
+    ( name = "internet",
+      network = (
+        allow = ["private"],
+        tlsOptions = (
+          trustedCertificates = [
+            embed "fixtures/tls-nodejs-tcp-server.pem",
+          ],
+        ),
+      ),
+    ),
+  ],
+);

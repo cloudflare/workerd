@@ -7,7 +7,6 @@
 
 #include "async-context.h"
 #include "jsg.h"
-#include "type-wrapper.h"
 #include "v8-platform-wrapper.h"
 
 #include <workerd/jsg/observer.h>
@@ -19,7 +18,12 @@
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
+#include <typeindex>
+
 namespace workerd::jsg {
+
+class Deserializer;
+class Serializer;
 
 // Construct a default V8 platform, with the given background thread pool size.
 //
@@ -206,6 +210,18 @@ class IsolateBase {
     return externalMemoryAccounter;
   }
 
+  AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
+    return *envAsyncContextKey;
+  }
+
+  void setUsingNewModuleRegistry() {
+    usingNewModuleRegistry = true;
+  }
+
+  bool isUsingNewModuleRegistry() const {
+    return usingNewModuleRegistry;
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -258,6 +274,7 @@ class IsolateBase {
   bool nodeJsCompatEnabled = false;
   bool setToStringTag = false;
   bool allowTopLevelAwait = true;
+  bool usingNewModuleRegistry = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
@@ -267,11 +284,20 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
+  // Object that is used as the underlying target of process.env when nodejs-compat mode is used.
+  v8::Global<v8::Object> envObj;
+
+  // Object used as the underlying storage for a workers environment.
+  v8::Global<v8::Object> workerEnvObj;
+
   // Polyfilled Symbol.asyncDispose.
   v8::Global<v8::Symbol> symbolAsyncDispose;
 
   // Used to account for external memory
   v8::ExternalMemoryAccounter externalMemoryAccounter;
+
+  // A shared async context key for accessing env
+  kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
 
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local
   // testing.
@@ -674,6 +700,35 @@ class Isolate: public IsolateBase {
       }
     }
 
+    // Sets an env value that will be expressed on the process.env
+    // if/when nodejs-compat mode is used.
+    void setProcessEnvField(const JsValue& name, const JsValue& value) override {
+      getProcessEnv().set(*this, name, value);
+    }
+
+    // Returns the env base object.
+    JsObject getProcessEnv(bool release = false) override {
+      KJ_DEFER({
+        if (release) jsgIsolate.envObj.Reset();
+      });
+      if (jsgIsolate.envObj.IsEmpty()) {
+        v8::Local<v8::Object> env = obj();
+        jsgIsolate.envObj.Reset(v8Isolate, env);
+      }
+      return JsObject(jsgIsolate.envObj.Get(v8Isolate));
+    }
+
+    void setWorkerEnv(Value value) override {
+      auto handle = value.getHandle(*this);
+      KJ_ASSERT(handle->IsObject());
+      jsgIsolate.workerEnvObj.Reset(v8Isolate, handle.template As<v8::Object>());
+    }
+
+    kj::Maybe<Value> getWorkerEnv() override {
+      if (jsgIsolate.workerEnvObj.IsEmpty()) return kj::none;
+      return v8Ref<v8::Value>(jsgIsolate.workerEnvObj.Get(v8Isolate));
+    }
+
    private:
     Isolate& jsgIsolate;
 
@@ -742,25 +797,5 @@ class Isolate: public IsolateBase {
   // GetAlignedPointerFromEmbedderData and just return wrappers[0].
   bool hasExtraWrappers = false;
 };
-
-// This macro helps cut down on template spam in error messages. Instead of instantiating Isolate
-// directly, do:
-//
-//     JSG_DECLARE_ISOLATE_TYPE(MyIsolate, SomeApiType, AnotherApiType, ...);
-//
-// `MyIsolate` becomes your custom Isolate type, which will support wrapping all of the listed
-// API types.
-#define JSG_DECLARE_ISOLATE_TYPE(Type, ...)                                                        \
-  class Type##_TypeWrapper;                                                                        \
-  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>        \
-      Type##_TypeWrapperBase;                                                                      \
-  class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
-   public:                                                                                         \
-    using Type##_TypeWrapperBase::TypeWrapper;                                                     \
-  };                                                                                               \
-  class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
-   public:                                                                                         \
-    using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
-  }
 
 }  // namespace workerd::jsg

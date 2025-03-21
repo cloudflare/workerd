@@ -721,6 +721,12 @@ export declare class Event {
    */
   readonly currentTarget?: EventTarget;
   /**
+   * Returns the object to which event is dispatched (its target).
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
+   */
+  readonly target?: EventTarget;
+  /**
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
@@ -1565,6 +1571,7 @@ export declare abstract class Body {
 export declare var Response: {
   prototype: Response;
   new (body?: BodyInit | null, init?: ResponseInit): Response;
+  error(): Response;
   redirect(url: string, status?: number): Response;
   json(any: any, maybeInit?: ResponseInit | Response): Response;
 };
@@ -1590,6 +1597,8 @@ export interface Response extends Body {
   readonly url: string;
   readonly webSocket: WebSocket | null;
   readonly cf?: any;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
+  type: "default" | "error";
 }
 export interface ResponseInit {
   status?: number;
@@ -1682,6 +1691,7 @@ export interface RequestInit<Cf = CfProperties> {
   integrity?: string;
   /* An AbortSignal to set request's signal. */
   signal?: AbortSignal | null;
+  encodeResponseBody?: "automatic" | "manual";
 }
 export type Service<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
@@ -1744,6 +1754,23 @@ export interface KVNamespace<Key extends string = string> {
     key: Key,
     options?: KVNamespaceGetOptions<"stream">,
   ): Promise<ReadableStream | null>;
+  get(key: Array<Key>, type: "text"): Promise<Map<string, string | null>>;
+  get<ExpectedValue = unknown>(
+    key: Array<Key>,
+    type: "json",
+  ): Promise<Map<string, ExpectedValue | null>>;
+  get(
+    key: Array<Key>,
+    options?: Partial<KVNamespaceGetOptions<undefined>>,
+  ): Promise<Map<string, string | null>>;
+  get(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"text">,
+  ): Promise<Map<string, string | null>>;
+  get<ExpectedValue = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"json">,
+  ): Promise<Map<string, ExpectedValue | null>>;
   list<Metadata = unknown>(
     options?: KVNamespaceListOptions,
   ): Promise<KVNamespaceListResult<Metadata, Key>>;
@@ -1788,6 +1815,30 @@ export interface KVNamespace<Key extends string = string> {
     key: Key,
     options: KVNamespaceGetOptions<"stream">,
   ): Promise<KVNamespaceGetWithMetadataResult<ReadableStream, Metadata>>;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    type: "text",
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
+    key: Array<Key>,
+    type: "json",
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+  >;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    options?: Partial<KVNamespaceGetOptions<undefined>>,
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<Metadata = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"text">,
+  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
+    key: Array<Key>,
+    options?: KVNamespaceGetOptions<"json">,
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+  >;
   delete(key: Key): Promise<void>;
 }
 export interface KVNamespaceListOptions {
@@ -2440,6 +2491,8 @@ export interface TraceItem {
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
+  readonly cpuTime: number;
+  readonly wallTime: number;
 }
 export interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
@@ -3416,6 +3469,7 @@ export interface Container {
 export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
+  env?: Record<string, string>;
 }
 export type AiImageClassificationInput = {
   image: number[];
@@ -3563,6 +3617,10 @@ export type AiTextGenerationFunctionsInput = {
   name: string;
   code: string;
 };
+export type AiTextGenerationResponseFormat = {
+  type: string;
+  json_schema?: any;
+};
 export type AiTextGenerationInput = {
   prompt?: string;
   raw?: boolean;
@@ -3576,6 +3634,7 @@ export type AiTextGenerationInput = {
   frequency_penalty?: number;
   presence_penalty?: number;
   messages?: RoleScopedChatInput[];
+  response_format?: AiTextGenerationResponseFormat;
   tools?:
     | AiTextGenerationToolInput[]
     | AiTextGenerationToolLegacyInput[]
@@ -3844,7 +3903,7 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
        */
       end?: number;
     }[];
-  };
+  }[];
   /**
    * The transcription in WebVTT format, which includes timing and text information for use in subtitles.
    */
@@ -4097,6 +4156,73 @@ export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
   inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
 }
+export interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender must alternate between 'user' and 'assistant'.
+     */
+    role: "user" | "assistant";
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Dictate the output format of the generated response.
+   */
+  response_format?: {
+    /**
+     * Set to json_object to process and output generated text as JSON.
+     */
+    type?: string;
+  };
+}
+export interface Ai_Cf_Meta_Llama_Guard_3_8B_Output {
+  response?:
+    | string
+    | {
+        /**
+         * Whether the conversation is safe or not.
+         */
+        safe?: boolean;
+        /**
+         * A list of what hazard categories predicted for the conversation, if the conversation is deemed unsafe.
+         */
+        categories?: string[];
+      };
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+}
+export declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
+  inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -4159,12 +4285,20 @@ export interface AiModels {
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
+  "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
 }
 export type AiOptions = {
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
+};
+export type ConversionResponse = {
+  name: string;
+  mimeType: string;
+  format: "markdown";
+  tokens: number;
+  data: string;
 };
 export type AiModelsSearchParams = {
   author?: string;
@@ -4199,6 +4333,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
+  autorag(autoragId: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
@@ -4211,6 +4346,26 @@ export declare abstract class Ai<
       : AiModelList[Name]["postProcessedOutputs"]
   >;
   public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  public toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    }[],
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
+  ): Promise<ConversionResponse[]>;
+  public toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    },
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
+  ): Promise<ConversionResponse>;
 }
 export type GatewayOptions = {
   id: string;
@@ -4267,7 +4422,12 @@ export type AIGatewayProviders =
   | "google-ai-studio"
   | "mistral"
   | "grok"
-  | "openrouter";
+  | "openrouter"
+  | "deepseek"
+  | "cerebras"
+  | "cartesia"
+  | "elevenlabs"
+  | "adobe-firefly";
 export type AIGatewayHeaders = {
   "cf-aig-metadata":
     | Record<string, number | string | boolean | null | bigint>
@@ -4303,6 +4463,42 @@ export declare abstract class AiGateway {
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
   ): Promise<Response>;
+  getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
+}
+export interface AutoRAGInternalError extends Error {}
+export interface AutoRAGNotFoundError extends Error {}
+export interface AutoRAGUnauthorizedError extends Error {}
+export type AutoRagSearchRequest = {
+  query: string;
+  max_num_results?: number;
+  ranking_options?: {
+    ranker?: string;
+    score_threshold?: number;
+  };
+  rewrite_query?: boolean;
+};
+export type AutoRagSearchResponse = {
+  object: "vector_store.search_results.page";
+  search_query: string;
+  data: {
+    file_id: string;
+    filename: string;
+    score: number;
+    attributes: Record<string, string | number | boolean | null>;
+    content: {
+      type: "text";
+      text: string;
+    }[];
+  }[];
+  has_more: boolean;
+  next_page: string | null;
+};
+export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
+  response: string;
+};
+export declare abstract class AutoRAG {
+  search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
+  aiSearch(params: AutoRagSearchRequest): Promise<AutoRagAiSearchResponse>;
 }
 export interface BasicImageTransformations {
   /**
@@ -5297,6 +5493,20 @@ export interface D1Meta {
   last_row_id: number;
   changed_db: boolean;
   changes: number;
+  /**
+   * The region of the database instance that executed the query.
+   */
+  served_by_region?: string;
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
+  timings?: {
+    /**
+     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
+     */
+    sql_duration_ms: number;
+  };
 }
 export interface D1Response {
   success: true;
@@ -5310,11 +5520,43 @@ export interface D1ExecResult {
   count: number;
   duration: number;
 }
+export type D1SessionConstraint =
+  // Indicates that the first query should go to the primary, and the rest queries
+  // using the same D1DatabaseSession will go to any replica that is consistent with
+  // the bookmark maintained by the session (returned by the first query).
+  | "first-primary"
+  // Indicates that the first query can go anywhere (primary or replica), and the rest queries
+  // using the same D1DatabaseSession will go to any replica that is consistent with
+  // the bookmark maintained by the session (returned by the first query).
+  | "first-unconstrained";
+export type D1SessionBookmark = string;
 export declare abstract class D1Database {
   prepare(query: string): D1PreparedStatement;
-  dump(): Promise<ArrayBuffer>;
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
   exec(query: string): Promise<D1ExecResult>;
+  /**
+   * Creates a new D1 Session anchored at the given constraint or the bookmark.
+   * All queries executed using the created session will have sequential consistency,
+   * meaning that all writes done through the session will be visible in subsequent reads.
+   *
+   * @param constraintOrBookmark Either the session constraint or the explicit bookmark to anchor the created session.
+   */
+  withSession(
+    constraintOrBookmark?: D1SessionBookmark | D1SessionConstraint,
+  ): D1DatabaseSession;
+  /**
+   * @deprecated dump() will be removed soon, only applies to deprecated alpha v1 databases.
+   */
+  dump(): Promise<ArrayBuffer>;
+}
+export declare abstract class D1DatabaseSession {
+  prepare(query: string): D1PreparedStatement;
+  batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+  /**
+   * @returns The latest session bookmark across all executed queries on the session.
+   *          If no query has been executed yet, `null` is returned.
+   */
+  getBookmark(): D1SessionBookmark | null;
 }
 export declare abstract class D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
@@ -5627,30 +5869,6 @@ export type PagesPluginFunction<
 > = (
   context: EventPluginContext<Env, Params, Data, PluginArgs>,
 ) => Response | Promise<Response>;
-// Copyright (c) 2022-2023 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-export declare abstract class PipelineTransform {
-  /**
-   * transformJson recieves an array of javascript objects which can be
-   * mutated and returned to the pipeline
-   * @param data The data to be mutated
-   * @returns A promise containing the mutated data
-   */
-  public transformJson(data: object[]): Promise<object[]>;
-}
-// Copyright (c) 2022-2023 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-export interface Pipeline {
-  /**
-   * send takes an array of javascript objects which are
-   * then received by the pipeline for processing
-   *
-   * @param data The data to be sent
-   */
-  send(data: object[]): Promise<void>;
-}
 // PubSubMessage represents an incoming PubSub message.
 // The message includes metadata about the broker, the client, and the payload
 // itself.
@@ -5858,6 +6076,9 @@ export declare namespace Rpc {
       Reserved | symbol | keyof StubBase<never>
     >]: MethodOrProperty<T[K]>;
   };
+}
+export declare namespace Cloudflare {
+  interface Env {}
 }
 export declare namespace TailStream {
   interface Header {
@@ -6370,6 +6591,15 @@ export declare abstract class Workflow<PARAMS = unknown> {
   public create(
     options?: WorkflowInstanceCreateOptions<PARAMS>,
   ): Promise<WorkflowInstance>;
+  /**
+   * Create a batch of instances and return handle for all of them. If a provided id exists, an error will be thrown.
+   * `createBatch` is limited at 100 instances at a time or when the RPC limit for the batch (1MiB) is reached.
+   * @param batch List of Options when creating an instance including name and params
+   * @returns A promise that resolves with a list of handles for the created instances.
+   */
+  public createBatch(
+    batch: WorkflowInstanceCreateOptions<PARAMS>[],
+  ): Promise<WorkflowInstance[]>;
 }
 export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**

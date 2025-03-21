@@ -35,6 +35,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
+#include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/promise-wrapper.h>
@@ -107,6 +108,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_URL_ISOLATE_TYPES,
     EW_URL_STANDARD_ISOLATE_TYPES,
     EW_URLPATTERN_ISOLATE_TYPES,
+    EW_URLPATTERN_STANDARD_ISOLATE_TYPES,
     EW_WEBSOCKET_ISOLATE_TYPES,
     EW_SQL_ISOLATE_TYPES,
     EW_NODE_ISOLATE_TYPES,
@@ -116,6 +118,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     EW_WEBGPU_ISOLATE_TYPES,
 #endif
+    workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -131,9 +134,7 @@ static const PythonConfig defaultConfig{
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
-}  // namespace
 
-namespace {
 kj::Path getPyodideBundleFileName(kj::StringPtr version) {
   return kj::Path(kj::str("pyodide_", version, ".capnp.bin"));
 }
@@ -200,10 +201,8 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
       kj::HttpHeaders headers(table);
 
-      // TODO: Point this at our production R2 bucket.
       kj::String url =
-          kj::str("https://pyodide.runtime-playground.workers.dev/pyodide-capnp-bin/pyodide_",
-              version, ".capnp.bin");
+          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
@@ -265,6 +264,12 @@ struct WorkerdApi::Impl final {
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
+    // maybeOwnedModuleRegistry is only set when using the
+    // new module registry implementation. When that is the
+    // case we also need to tell JSG.
+    if (maybeOwnedModuleRegistry != kj::none) {
+      jsgIsolate.setUsingNewModuleRegistry();
+    }
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
       if (features->getPythonWorkers()) {
         auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
@@ -462,6 +467,7 @@ kj::Array<kj::StringPtr> compileNamedExports(capnp::List<capnp::Text>::Reader na
 }
 }  // namespace
 
+// Part of the original module registry implementation.
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
     config::Worker::Module::Reader module,
     jsg::CompilationObserver& observer,
@@ -528,6 +534,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
   KJ_UNREACHABLE;
 }
 
+// Part of the original module registry implementation.
 void WorkerdApi::compileModules(jsg::Lock& lockParam,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
@@ -609,8 +616,6 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     api::registerModules(*modules, featureFlags);
 
-    // TODO(perf): we'd like to find a way to precompile these on server startup and use isolate
-    // cloning for faster worker creation.
     for (auto extension: extensions) {
       for (auto module: extension.getModules()) {
         modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
@@ -632,10 +637,84 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
   v8::Local<v8::Value> value;
 
+  // When new binding types are created. If their value resolves to be a string
+  // or a JSON stringified/stringifiable value, then it should be added to
+  // process.env here as well, just like with Global::Json and kj::String
+  // entries.
+  //
+  // It is important to understand the process.env is fundamentally different
+  // from the existing bag of bindings. The keys and values on process.env are
+  // fundamentally a Record<string, string>, where any value set on process.env
+  // is coerced to a string. Having a separate object for process.env is the
+  // easiest approach as opposed to wrapping the bindings/env with a proxy that
+  // tries to abstract the details. If this ends up needing to change later then
+  // as long as the observable behavior remains the same we can do so without
+  // Yet Another Compat Flag.
+
   KJ_SWITCH_ONEOF(global.value) {
     KJ_CASE_ONEOF(json, Global::Json) {
-      v8::Local<v8::String> string = lock.wrap(context, kj::mv(json.text));
-      value = jsg::check(v8::JSON::Parse(context, string));
+      value = jsg::check(v8::JSON::Parse(context, lock.str(json.text)));
+      if (featureFlags.getPopulateProcessEnv() && featureFlags.getNodeJsCompat()) {
+        // Generally speaking, process.env has the TEXT and JSON bindings from env.
+        // TEXT bindings are simple enough and env.{name} will strictly equal
+        // process.env.{name}. With JSON bindings it a bit trickier due to architectural
+        // quirks and history in our runtime.
+        // If you set the JSON environment variable to a value that parses to a string
+        // then it will be exposed on process.env and env as that parsed string such
+        // that env.{name} will strictly equal process.env{name} like with TEXT bindings.
+        // If, however, the value parses to any type other than a string, the
+        // process.env.{name} will instead be the raw parseable JSON string and will
+        // *not* strictly equal env.{name}.
+        //
+        // So, for example, given the bindings:
+        //
+        //    (name = "FOO", json = "{}"),
+        //    (name = "BAR", json = "\"abc\""),
+        //    (name = "BAZ", json = "\"\\\"abc\\\"\"")
+        //
+        // In the worker:
+        //
+        //    env.FOO === process.env.FOO;                      // false
+        //    console.log(typeof env.FOO);                      // 'object'
+        //    console.log(typeof process.env.FOO);              // 'string'
+        //    console.log(env.FOO);                             // [object Object]
+        //    console.log(process.env.FOO);                     // '{}'
+        //    console.log(typeof JSON.parse(process.env.FOO));  // 'object'
+        //
+        //    env.BAR === process.env.BAR;                      // true
+        //    console.log(typeof env.BAR);                      // 'string'
+        //    console.log(typeof process.env.BAR);              // 'string'
+        //    console.log(env.BAR);                             // 'abc'
+        //    console.log(process.env.BAR);                     // 'abc'
+        //    console.log(typeof JSON.parse(process.env.BAR));  // throws!!
+        //
+        //    env.BAZ === process.env.BAZ;                      // true
+        //    console.log(typeof enf.BAZ);                      // 'string'
+        //    console.log(typeof process.env.BAZ);              // 'string'
+        //    console.log(env.BAZ);                             // '"abc"'
+        //    console.log(process.env.BAZ);                     // '"abc"
+        //    console.log(typeof JSON.parse(process.env.BAZ));  // 'string'
+        //
+        // JSON.parse(process.env.FOO) works because the value is a parseable
+        // JSON string. JSON.parse(process.env.BAR) throws an error because
+        // the value is not a parseable JSON string, even tho the binding uses
+        // type JSON. JSON.parse(process.env.BAZ)` works because the original
+        // JSON-encoded value was double-escaped and the result of the above
+        // v8::JSON::Parse is itself a parseable JSON string.
+        //
+        // Practically speaking this means that developers can never really
+        // count on environment variables accessed via `env` always being
+        // strictly equal to the same environment variable accessed via
+        // process.env because, despite being defined as JSON bindings,
+        // the resulting value may or may not be JSON parseable or may be
+        // parsed in one context (env) and unparsed in another (process.env).
+
+        if (value->IsString()) {
+          lock.setProcessEnvField(lock.str(global.name), jsg::JsValue(value));
+        } else {
+          lock.setProcessEnvField(lock.str(global.name), lock.str(json.text));
+        }
+      }
     }
 
     KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
@@ -721,6 +800,9 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(text, kj::String) {
       value = lock.wrap(context, kj::mv(text));
+      if (featureFlags.getPopulateProcessEnv() && featureFlags.getNodeJsCompat()) {
+        lock.setProcessEnvField(lock.str(global.name), jsg::JsValue(value));
+      }
     }
 
     KJ_CASE_ONEOF(data, kj::Array<byte>) {
@@ -873,51 +955,27 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
   builder.setEvalCallback([](jsg::Lock& js, const auto& module, v8::Local<v8::Module> v8Module,
                               const auto& observer) -> jsg::Promise<jsg::Value> {
-    static constexpr auto handleDynamicImport =
-        [](kj::Own<const Worker> worker, const auto& module, jsg::V8Ref<v8::Module> v8Module,
-            const auto& observer, kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
-        -> kj::Promise<jsg::Promise<jsg::Value>> {
-      co_await kj::yield();
-      KJ_ASSERT(!IoContext::hasCurrent());
-      auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
+    // This callback is used when a module is evaluated to arrange evaluating
+    // the module outside of the current IoContext. Creating the
+    // SuppressIoContextScope here ensures that the current
+    // IoContext, if any, is moved out of the way while we are evaluating.
+    SuppressIoContextScope suppressIoContextScope;
+    KJ_ASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
 
-      co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
-        return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-          jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
-          return js.tryCatch([&] {
-            return js.toPromise(jsg::check(v8Module.getHandle(js)->Evaluate(js.v8Context())));
-          }, [&](jsg::Value&& exception) {
-            return js.rejectedPromise<jsg::Value>(kj::mv(exception));
-          });
-        });
-      });
-    };
-
-    // If there is an active IoContext, then we want to defer evaluation of the
-    // module to escape the current IoContext.
-    if (IoContext::hasCurrent()) {
-      auto& context = IoContext::current();
-      return context.awaitIo(js,
-          handleDynamicImport(kj::atomicAddRef(context.getWorker()), module, js.v8Ref(v8Module),
-              observer, jsg::AsyncContextFrame::currentRef(js)),
-          [](jsg::Lock& js, jsg::Promise<jsg::Value>&& result) { return kj::mv(result); });
-    }
-
-    // If there is no active IoContext at this point, then we can evaluate the module
-    // immediately.
     return js.tryCatch([&]() -> jsg::Promise<jsg::Value> {
       return js.toPromise(jsg::check(v8Module->Evaluate(js.v8Context())));
     }, [&](jsg::Value&& exception) { return js.rejectedPromise<jsg::Value>(kj::mv(exception)); });
   });
 
+  // Add the module bundles that are built into to runtime.
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
+  // Add the module bundles that are configured by the worker.
   jsg::modules::ModuleBundle::BundleBuilder bundleBuilder;
   bool firstEsm = true;
   bool hasPythonModules = false;
-  auto confModules = conf.getModules();
   using namespace workerd::api::pyodide;
-  for (auto def: confModules) {
+  for (auto def: conf.getModules()) {
     switch (def.which()) {
       case config::Worker::Module::ES_MODULE: {
         jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
@@ -986,13 +1044,14 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
   builder.add(bundleBuilder.finish());
 
+  // Add the built-in module bundles that support python workers/pyodide.
   if (hasPythonModules) {
     jsg::modules::ModuleBundle::BuiltinBuilder pyodideBundleBuilder;
-    auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
-    auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
-    auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
-    auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
-    auto limiterSpecifier = "pyodide-internal:limiter"_url;
+    const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
+    const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
+    const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
+    const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
+    const auto limiterSpecifier = "pyodide-internal:limiter"_url;
 
     auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     // Inject metadata that the entrypoint module will read.

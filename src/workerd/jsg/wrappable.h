@@ -10,7 +10,6 @@
 
 #include <v8-context.h>
 #include <v8-object.h>
-#include <v8-version.h>
 
 #include <kj/common.h>
 #include <kj/debug.h>

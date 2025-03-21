@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Dominik=20Inf=C3=BChr?= <dinfuehr@chromium.org>
+Date: Wed, 19 Feb 2025 09:36:49 +0100
+Subject: Move tear down in IsolateGroup::Release() into destructor
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Bug: 391169065
+Change-Id: I09938757ac846a9133ca42f762b0541e2f7961af
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/6279368
+Reviewed-by: Igor Sheludko <ishell@chromium.org>
+Commit-Queue: Dominik Inführ <dinfuehr@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#98789}
+
+diff --git a/src/init/isolate-group.cc b/src/init/isolate-group.cc
+index 513954b584d367adce922d14679a16f8b72a47bd..0971e9cb80660c4ac137e87b4edd6f8da0219014 100644
+--- a/src/init/isolate-group.cc
++++ b/src/init/isolate-group.cc
+@@ -69,12 +69,27 @@ struct PtrComprCageReservationParams
+ IsolateGroup::~IsolateGroup() {
+   DCHECK_EQ(reference_count_.load(), 0);
+   DCHECK_EQ(isolate_count_, 0);
+-  // If pointer compression is enabled but the external code space is disabled,
+-  // the pointer cage's page allocator is used for the CodeRange, whose
+-  // destructor calls it via VirtualMemory::Free.  Therefore we explicitly clear
+-  // the code range here while we know the reservation still has a valid page
+-  // allocator.
++
++#ifdef V8_ENABLE_LEAPTIERING
++  js_dispatch_table_.TearDown();
++#endif  // V8_ENABLE_LEAPTIERING
++
++#ifdef V8_ENABLE_SANDBOX
++  code_pointer_table_.TearDown();
++#endif  // V8_ENABLE_SANDBOX
++
++  // Reset before `reservation_` for pointer compression but disabled external
++  // code space.
+   code_range_.reset();
++
++#ifdef V8_COMPRESS_POINTERS
++  DCHECK(reservation_.IsReserved());
++  reservation_.Free();
++#endif  // V8_COMPRESS_POINTERS
++
++#ifdef V8_ENABLE_SANDBOX
++  sandbox_->TearDown();
++#endif  // V8_ENABLE_SANDBOX
+ }
+ 
+ #ifdef V8_ENABLE_SANDBOX
+@@ -165,31 +180,8 @@ void IsolateGroup::InitializeOncePerProcess() {
+ 
+ void IsolateGroup::Release() {
+   DCHECK_LT(0, reference_count_.load());
+-#ifdef V8_ENABLE_SANDBOX
+-  Sandbox* sandbox = sandbox_;
+-#endif
+-  if (--reference_count_ == 0) {
+-#ifdef V8_ENABLE_LEAPTIERING
+-    js_dispatch_table_.TearDown();
+-#endif  // V8_ENABLE_LEAPTIERING
+-
+-#ifdef V8_ENABLE_SANDBOX
+-    code_pointer_table_.TearDown();
+-#endif  // V8_ENABLE_SANDBOX
+-
+-    // Reset before `reservation_` for pointer compression but disabled external
+-    // code space.
+-    code_range_.reset();
+-
+-#ifdef V8_COMPRESS_POINTERS
+-    DCHECK(reservation_.IsReserved());
+-    reservation_.Free();
+-#endif  // V8_COMPRESS_POINTERS
+-
+-#ifdef V8_ENABLE_SANDBOX
+-    sandbox->TearDown();
+-#endif  // V8_ENABLE_SANDBOX
+ 
++  if (--reference_count_ == 0) {
+     delete this;
+   }
+ }

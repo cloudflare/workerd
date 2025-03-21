@@ -1,11 +1,20 @@
 import type { Buffer } from 'node-internal:internal_buffer';
 
+export interface SocketInfo {
+  remoteAddress?: string | null;
+  localAddress?: string | null;
+}
+
 declare namespace sockets {
   function connect(
     input: string,
-    options: Record<string, unknown>
+    options: {
+      allowHalfOpen?: boolean | undefined;
+      highWatermark?: number | undefined;
+      secureTransport: 'on' | 'off' | 'starttls';
+    }
   ): {
-    opened: Promise<void>;
+    opened: Promise<SocketInfo>;
     closed: Promise<void>;
     close(): Promise<void>;
     readable: {

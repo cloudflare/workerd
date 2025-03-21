@@ -1,0 +1,36 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "autorag-api-test",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "autorag-api-test.py")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat", %PYTHON_FEATURE_FLAGS],
+        bindings = [
+        (
+          name = "ai",
+          wrapped = (
+            moduleName = "cloudflare-internal:ai-api",
+            innerBindings = [(
+              name = "fetcher",
+              service = "autorag-mock"
+            )],
+          )
+        )
+        ],
+      )
+    ),
+    ( name = "autorag-mock",
+      worker = (
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+        modules = [
+          (name = "worker", esModule = embed "autorag-mock.js")
+        ],
+      )
+    )
+  ]
+);

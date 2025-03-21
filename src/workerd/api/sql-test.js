@@ -411,6 +411,21 @@ async function test(state) {
   // The following sequence of calls is mentioned by https://www.sqlite.org/lang_analyze.html as how
   // one might optmize the query planner.
   {
+    // Dry-run.  SQLite's documentation uses -1 as the debug example.
+    assert.deepEqual(Array.from(sql.exec('PRAGMA optimize(-1);')), [
+      { optimize: 'ANALYZE "main"."myTable"' },
+      { optimize: 'ANALYZE "main"."_cf_KV"' },
+    ]);
+  }
+  {
+    // Dry-run.  This sets all of the bits except for the sign bit because SQLite's optimize
+    // function doesn't parse hex numbers into negative integers.
+    assert.deepEqual(Array.from(sql.exec('PRAGMA optimize(0x7fffffff);')), [
+      { optimize: 'ANALYZE "main"."myTable"' },
+      { optimize: 'ANALYZE "main"."_cf_KV"' },
+    ]);
+  }
+  {
     let info = [...sql.exec('PRAGMA optimize=0x10002;')];
     assert.equal(info.length, 0);
   }

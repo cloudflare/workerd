@@ -20,5 +20,21 @@ export const tests = {
       const instance = await env.workflow.get('bar');
       assert.deepStrictEqual(instance.id, 'bar');
     }
+
+    {
+      // Test createBatch
+      const instances = await env.workflow.createBatch([
+        {
+          id: 'foo',
+          payload: { bar: 'baz' },
+        },
+        {
+          id: 'bar',
+          payload: { bar: 'baz' },
+        },
+      ]);
+      assert.deepStrictEqual(instances[0].id, 'foo');
+      assert.deepStrictEqual(instances[1].id, 'bar');
+    }
   },
 };

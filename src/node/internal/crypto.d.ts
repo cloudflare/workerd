@@ -65,6 +65,123 @@ export class HashHandle {
   public copy(xofLen: number): HashHandle;
 }
 
+export class SignHandle {
+  public constructor(algorithm: string);
+  public update(data: Buffer | ArrayBufferView): void;
+  public sign(
+    key: CryptoKey,
+    rsaPadding?: number,
+    pssSaltLength?: number,
+    dsaSigEnc?: number
+  ): ArrayBuffer;
+}
+
+export class VerifyHandle {
+  public constructor(algorithm: string);
+  public update(data: Buffer | ArrayBufferView): void;
+  public verify(
+    key: CryptoKey,
+    signature: ArrayBufferView,
+    rsaPadding?: number,
+    pssSaltLength?: number,
+    dsaSigEnc?: number
+  ): boolean;
+}
+
+export function signOneShot(
+  key: CryptoKey,
+  algorithm: string | undefined,
+  data: ArrayBufferView,
+  rsaPadding?: number,
+  pssSaltLength?: number,
+  dsaSigEnc?: number
+): ArrayBuffer;
+export function verifyOneShot(
+  key: CryptoKey,
+  algorithm: string | undefined,
+  data: ArrayBufferView,
+  signature: ArrayBufferView,
+  rsaPadding?: number,
+  pssSaltLength?: number,
+  dsaSigEnc?: number
+): boolean;
+
+export class CipherHandle {
+  public constructor(
+    mode: 'cipher' | 'decipher',
+    algorithm: string,
+    key: CryptoKey,
+    iv: ArrayBuffer | ArrayBufferView,
+    authTagLength?: number
+  );
+  public update(data: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+  public final(): ArrayBuffer;
+  public setAAD(
+    data: ArrayBuffer | ArrayBufferView,
+    plaintextLength?: number
+  ): void;
+  public setAutoPadding(autoPadding: boolean): void;
+  public getAuthTag(): ArrayBuffer | undefined;
+  public setAuthTag(tag: ArrayBuffer | ArrayBufferView): void;
+}
+
+export interface PublicPrivateCipherOptions {
+  padding: number;
+  oaepHash: string;
+  oaepLabel: ArrayBuffer | ArrayBufferView | undefined;
+}
+
+export function publicEncrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+export function publicDecrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+export function privateEncrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+export function privateDecrypt(
+  key: CryptoKey,
+  buffer: ArrayBuffer | ArrayBufferView,
+  options: PublicPrivateCipherOptions
+): Buffer;
+
+interface CipherInfo {
+  name: string;
+  nid: number;
+  blockSize?: number;
+  ivLength?: number;
+  keyLength: number;
+  mode:
+    | 'cbc'
+    | 'ccm'
+    | 'cfb'
+    | 'ctr'
+    | 'ecb'
+    | 'gcm'
+    | 'ocb'
+    | 'ofb'
+    | 'stream'
+    | 'wrap'
+    | 'xts';
+}
+
+interface GetCipherInfoOptions {
+  ivLength?: number;
+  keyLength?: number;
+}
+
+export function getCipherInfo(
+  nameOrId: string | number,
+  options: GetCipherInfoOptions
+): CipherInfo | undefined;
+
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {
@@ -296,7 +413,7 @@ export interface AsymmetricKeyDetails {
 // The user-provided options passed to createPrivateKey or createPublicKey.
 // This will be processed into an InnerCreateAsymmetricKeyOptions.
 export interface CreateAsymmetricKeyOptions {
-  key: string | ArrayBuffer | ArrayBufferView | JsonWebKey;
+  key: string | ArrayBuffer | ArrayBufferView | JsonWebKey | null | undefined;
   format?: AsymmetricKeyFormat;
   type?: PublicKeyEncoding | PrivateKeyEncoding;
   passphrase?: string | Uint8Array | Buffer;
@@ -357,6 +474,21 @@ export class DiffieHellmanHandle {
   public generateKeys(): ArrayBuffer;
 
   public getVerifyError(): number;
+}
+
+export type ECDHFormat = 'compressed' | 'uncompressed' | 'hybrid';
+export class ECDHHandle {
+  public constructor(curveName: string);
+  public computeSecret(otherPublicKey: ArrayBufferView): ArrayBuffer;
+  public generateKeys(): ArrayBuffer;
+  public getPrivateKey(): ArrayBuffer;
+  public getPublicKey(format: ECDHFormat): ArrayBuffer;
+  public setPrivateKey(key: ArrayBufferView): void;
+  public static convertKey(
+    key: ArrayBufferView,
+    curveName: string,
+    format: ECDHFormat
+  ): ArrayBuffer;
 }
 
 export function DiffieHellmanGroupHandle(name: string): DiffieHellmanHandle;

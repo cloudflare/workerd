@@ -63,6 +63,8 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/rust/cxx-integration",
+        "//src/rust/net",
         "//src/workerd/io",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
@@ -333,4 +335,51 @@ wd_test(
     src = "tests/async_hooks-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/async_hooks-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tests/crypto_sign-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/crypto_sign-test.js",
+        "tests/fixtures/dsa_private.pem",
+        "tests/fixtures/dsa_public.pem",
+        "tests/fixtures/ed25519_private.pem",
+        "tests/fixtures/ed25519_public.pem",
+        "tests/fixtures/rsa_private.pem",
+        "tests/fixtures/rsa_public.pem",
+    ],
+)
+
+wd_test(
+    src = "tests/crypto_cipher-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/crypto_cipher-test.js",
+        "tests/fixtures/ed25519_private.pem",
+        "tests/fixtures/ed25519_public.pem",
+        "tests/fixtures/rsa_private.pem",
+        "tests/fixtures/rsa_public.pem",
+    ],
+)
+
+js_binary(
+    name = "tls-nodejs-tcp-server",
+    entry_point = "tests/tls-nodejs-tcp-server.js",
+)
+
+wd_test(
+    size = "large",
+    src = "tests/tls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/fixtures/tls-nodejs-tcp-server.pem",
+        "tests/tls-nodejs-test.js",
+    ],
+    sidecar = "tls-nodejs-tcp-server",
+    target_compatible_with = select({
+        # TODO(soon): Investigate why this test timeout on Windows.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

@@ -236,6 +236,7 @@ class WorkerdApi final: public Worker::Api {
       v8::Local<v8::Object> target,
       uint32_t ownerId) const;
 
+  // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
       config::Worker::Module::Reader conf,
       jsg::CompilationObserver& observer,

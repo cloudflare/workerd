@@ -1,0 +1,23 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto_sign-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto_sign-test.js")
+        ],
+        compatibilityDate = "2025-01-15",
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          ( name = "rsa_private.pem", text = embed "fixtures/rsa_private.pem" ),
+          ( name = "rsa_public.pem", text = embed "fixtures/rsa_public.pem" ),
+          ( name = "ed25519_private.pem", text = embed "fixtures/ed25519_private.pem" ),
+          ( name = "ed25519_public.pem", text = embed "fixtures/ed25519_public.pem" ),
+          ( name = "dsa_private.pem", text = embed "fixtures/dsa_private.pem" ),
+          ( name = "dsa_public.pem", text = embed "fixtures/dsa_public.pem" ),
+        ],
+      )
+    ),
+  ],
+);

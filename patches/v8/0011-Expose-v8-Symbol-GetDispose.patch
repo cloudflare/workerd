@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jon Phillips <jphillips@cloudflare.com>
+Date: Tue, 30 Apr 2024 00:06:33 +0100
+Subject: Expose v8::Symbol::GetDispose().
+
+V8 appears to be in the process of supporting the explicit resource
+management spec. Since `Symbol.dispose` has been exposed to JS we need
+to be able to access the native v8::Symbol too.
+
+diff --git a/include/v8-primitive.h b/include/v8-primitive.h
+index d5c182dd81fbc7ad7c7cc24fa8bdecceb12a6c4b..01773bcaff9b921e77ae70ef09d8a30c1637d533 100644
+--- a/include/v8-primitive.h
++++ b/include/v8-primitive.h
+@@ -792,6 +792,8 @@ class V8_EXPORT Symbol : public Name {
+   static Local<Symbol> GetToPrimitive(Isolate* isolate);
+   static Local<Symbol> GetToStringTag(Isolate* isolate);
+   static Local<Symbol> GetUnscopables(Isolate* isolate);
++  static Local<Symbol> GetDispose(Isolate* isolate);
++  static Local<Symbol> GetAsyncDispose(Isolate* isolate);
+ 
+   V8_INLINE static Symbol* Cast(Data* data) {
+ #ifdef V8_ENABLE_CHECKS
+diff --git a/src/api/api.cc b/src/api/api.cc
+index e44379fd53524a637bdab085e542af25bc055787..27575d6c54065b107643ea9caaaa18f439f0a854 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -9659,7 +9659,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
+   V(Split, split)                             \
+   V(ToPrimitive, to_primitive)                \
+   V(ToStringTag, to_string_tag)               \
+-  V(Unscopables, unscopables)
++  V(Unscopables, unscopables)                 \
++  V(Dispose, dispose)                         \
++  V(AsyncDispose, async_dispose)              \
+ 
+ #define SYMBOL_GETTER(Name, name)                                      \
+   Local<Symbol> v8::Symbol::Get##Name(Isolate* v8_isolate) {           \

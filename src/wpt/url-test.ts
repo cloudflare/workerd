@@ -5,7 +5,14 @@
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
-  'IdnaTestV2.window.js': {},
+  'IdnaTestV2-removed.window.js': {},
+  'IdnaTestV2.window.js': {
+    comment:
+      'WPT recently updated this test to check for Unicode 16 compliance',
+    // We now have a huge number of failures
+    // https://github.com/web-platform-tests/wpt/commit/d0cd7c05f70f6928234e90ddff90b39ef9c1eebc
+    skipAllTests: true,
+  },
   'historical.any.js': {},
   'idlharness.any.js': {
     comment: 'Does not contain any relevant tests',
@@ -27,23 +34,10 @@ export default {
     skipAllTests: true,
   },
   'toascii.window.js': {
-    comment:
-      'Replacer disables tests involving document.createElement. Expected failures are due to Unicode 15.1',
-    expectedFailures: [
-      // Taken from https://github.com/nodejs/node/blob/5ab7c4c5b01e7579fd436000232f0f0484289d44/test/wpt/status/url.json#L13
-      '\uD87E\uDC68.com (using URL)',
-      '\uD87E\uDC68.com (using URL.host)',
-      '\uD87E\uDC68.com (using URL.hostname)',
-    ],
     replace: (code): string =>
       code.replace(/\["url", "a", "area"\]/, '[ "url" ]'),
   },
-  'url-constructor.any.js': {
-    comment: 'Fix this eventually',
-    expectedFailures: [
-      'Parsing: <http://example.com/\uD800\uD801\uDFFE\uDFFF\uFDD0\uFDCF\uFDEF\uFDF0\uFFFE\uFFFF?\uD800\uD801\uDFFE\uDFFF\uFDD0\uFDCF\uFDEF\uFDF0\uFFFE\uFFFF> without base',
-    ],
-  },
+  'url-constructor.any.js': {},
   'url-origin.any.js': {},
   'url-searchparams.any.js': {},
   'url-setters-a-area.window.js': {
@@ -135,12 +129,7 @@ export default {
   'urlsearchparams-append.any.js': {},
   'urlsearchparams-constructor.any.js': {
     comment: 'Fix this eventually',
-    expectedFailures: [
-      'URLSearchParams constructor, DOMException as argument',
-      'Construct with 2 unpaired surrogates (no trailing)',
-      'Construct with 3 unpaired surrogates (no leading)',
-      'Construct with object with NULL, non-ASCII, and surrogate keys',
-    ],
+    expectedFailures: ['URLSearchParams constructor, DOMException as argument'],
   },
   'urlsearchparams-delete.any.js': {},
   'urlsearchparams-foreach.any.js': {},

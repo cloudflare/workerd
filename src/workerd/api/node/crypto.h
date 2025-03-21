@@ -9,6 +9,8 @@
 #include <workerd/api/crypto/x509.h>
 #include <workerd/jsg/jsg.h>
 
+#include <ncrypto.h>
+
 namespace workerd::api::node {
 
 class CryptoImpl final: public jsg::Object {
@@ -208,6 +210,8 @@ class CryptoImpl final: public jsg::Object {
   jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::BufferSource keyData);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
+  static kj::Maybe<const ncrypto::EVPKeyPointer&> tryGetKey(jsg::Ref<CryptoKey>& key);
+  static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(jsg::Ref<CryptoKey>& key);
 
   struct RsaKeyPairOptions {
     kj::String type;
@@ -248,15 +252,200 @@ class CryptoImpl final: public jsg::Object {
   CryptoKeyPair generateEdKeyPair(EdKeyPairOptions options);
   CryptoKeyPair generateDhKeyPair(DhKeyPairOptions options);
 
+  // Sign/Verify
+  class SignHandle final: public jsg::Object {
+   public:
+    SignHandle(ncrypto::EVPMDCtxPointer ctx);
+    static jsg::Ref<SignHandle> constructor(kj::String algorithm);
+
+    void update(jsg::Lock& js, jsg::BufferSource data);
+    jsg::BufferSource sign(jsg::Lock& js,
+        jsg::Ref<CryptoKey> key,
+        jsg::Optional<int> rsaPadding,
+        jsg::Optional<int> pssSaltLength,
+        jsg::Optional<int> dsaSigEnc);
+
+    JSG_RESOURCE_TYPE(SignHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(sign);
+    }
+
+   private:
+    ncrypto::EVPMDCtxPointer ctx;
+  };
+  class VerifyHandle final: public jsg::Object {
+   public:
+    VerifyHandle(ncrypto::EVPMDCtxPointer ctx);
+    static jsg::Ref<VerifyHandle> constructor(kj::String algorithm);
+
+    void update(jsg::Lock& js, jsg::BufferSource data);
+    bool verify(jsg::Lock& js,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource signature,
+        jsg::Optional<int> rsaPadding,
+        jsg::Optional<int> pssSaltLength,
+        jsg::Optional<int> dsaSigEnc);
+
+    JSG_RESOURCE_TYPE(VerifyHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(verify);
+    }
+
+   private:
+    ncrypto::EVPMDCtxPointer ctx;
+  };
+
+  jsg::BufferSource signOneShot(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::Optional<kj::String> algorithm,
+      jsg::BufferSource data,
+      jsg::Optional<int> rsaPadding,
+      jsg::Optional<int> pssSaltLength,
+      jsg::Optional<int> dsaSigEnc);
+  bool verifyOneShot(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::Optional<kj::String> algorithm,
+      jsg::BufferSource data,
+      jsg::BufferSource signature,
+      jsg::Optional<int> rsaPadding,
+      jsg::Optional<int> pssSaltLength,
+      jsg::Optional<int> dsaSigEnc);
+
+  // Cipher/Decipher
+  class CipherHandle final: public jsg::Object {
+   public:
+    enum class Mode { CIPHER, DECIPHER };
+
+    struct AuthenticatedInfo {
+      unsigned int auth_tag_len = 0;
+      unsigned int max_message_size = INT_MAX;
+    };
+
+    CipherHandle(Mode mode,
+        ncrypto::CipherCtxPointer ctx,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource iv,
+        kj::Maybe<AuthenticatedInfo> maybeAuthInfo);
+
+    static jsg::Ref<CipherHandle> constructor(jsg::Lock& js,
+        kj::String mode,
+        kj::String algorithm,
+        jsg::Ref<CryptoKey> key,
+        jsg::BufferSource iv,
+        jsg::Optional<uint32_t> maybeAuthTagLength);
+
+    jsg::BufferSource update(jsg::Lock& js, jsg::BufferSource data);
+    jsg::BufferSource final(jsg::Lock& js);
+    void setAAD(jsg::Lock& js, jsg::BufferSource aad, jsg::Optional<uint32_t> maybePlaintextLength);
+    void setAutoPadding(jsg::Lock& js, bool autoPadding);
+    void setAuthTag(jsg::Lock& js, jsg::BufferSource authTag);
+    jsg::BufferSource getAuthTag(jsg::Lock& js);
+
+    JSG_RESOURCE_TYPE(CipherHandle) {
+      JSG_METHOD(update);
+      JSG_METHOD(final);
+      JSG_METHOD(setAAD);
+      JSG_METHOD(setAutoPadding);
+      JSG_METHOD(setAuthTag);
+      JSG_METHOD(getAuthTag);
+    };
+
+   private:
+    Mode mode;
+    ncrypto::CipherCtxPointer ctx;
+    jsg::Ref<CryptoKey> key;
+    jsg::BufferSource iv;
+    kj::Maybe<jsg::BufferSource> maybeAuthTag;
+    kj::Maybe<AuthenticatedInfo> maybeAuthInfo;
+    bool authTagPassed = false;
+    bool pendingAuthFailed = false;
+  };
+
+  struct PublicPrivateCipherOptions {
+    int padding;
+    kj::String oaepHash;
+    jsg::Optional<jsg::BufferSource> oaepLabel;
+    JSG_STRUCT(padding, oaepHash, oaepLabel);
+  };
+
+  jsg::BufferSource publicEncrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+  jsg::BufferSource publicDecrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+  jsg::BufferSource privateEncrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+  jsg::BufferSource privateDecrypt(jsg::Lock& js,
+      jsg::Ref<CryptoKey> key,
+      jsg::BufferSource buffer,
+      PublicPrivateCipherOptions options);
+
+  struct CipherInfo {
+    kj::String name;
+    int nid;
+    jsg::Optional<int> blockSize;
+    jsg::Optional<int> ivLength;
+    int keyLength;
+    kj::String mode;  // 'cbc', 'ccm', 'cfb', 'ctr', 'ecb', 'gcm', 'ocb',
+                      // 'ofb', 'stream', 'wrap', 'xts'
+    JSG_STRUCT(name, nid, blockSize, ivLength, keyLength, mode)
+  };
+
+  struct GetCipherInfoOptions {
+    jsg::Optional<int> keyLength;
+    jsg::Optional<int> ivLength;
+    JSG_STRUCT(keyLength, ivLength);
+  };
+
+  jsg::Optional<CipherInfo> getCipherInfo(
+      kj::OneOf<kj::String, int> nameOrNid, GetCipherInfoOptions options);
+
+  // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::Array<const kj::byte> input);
+
+  // ECDH
+  class ECDHHandle final: public jsg::Object {
+   public:
+    ECDHHandle(ncrypto::ECKeyPointer key);
+    static jsg::Ref<ECDHHandle> constructor(jsg::Lock& js, kj::String curveName);
+
+    static jsg::BufferSource convertKey(
+        jsg::Lock& js, jsg::BufferSource key, kj::String curveName, kj::String format);
+
+    jsg::BufferSource computeSecret(jsg::Lock& js, jsg::BufferSource otherPublicKey);
+    void generateKeys();
+    jsg::BufferSource getPrivateKey(jsg::Lock& js);
+    jsg::BufferSource getPublicKey(jsg::Lock& js, kj::String format);
+    void setPrivateKey(jsg::Lock& js, jsg::BufferSource key);
+
+    JSG_RESOURCE_TYPE(ECDHHandle) {
+      JSG_STATIC_METHOD(convertKey);
+      JSG_METHOD(computeSecret);
+      JSG_METHOD(generateKeys);
+      JSG_METHOD(getPrivateKey);
+      JSG_METHOD(getPublicKey);
+      JSG_METHOD(setPrivateKey);
+    }
+
+   private:
+    ncrypto::ECKeyPointer key_;
+    const EC_GROUP* group_;
+  };
 
   JSG_RESOURCE_TYPE(CryptoImpl) {
     // DH
     JSG_NESTED_TYPE(DiffieHellmanHandle);
     JSG_METHOD(DiffieHellmanGroupHandle);
     JSG_METHOD(statelessDH);
+    // ECDH
+    JSG_NESTED_TYPE(ECDHHandle);
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);
@@ -289,6 +478,18 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(generateEcKeyPair);
     JSG_METHOD(generateEdKeyPair);
     JSG_METHOD(generateDhKeyPair);
+    // Sign/Verify
+    JSG_NESTED_TYPE(SignHandle);
+    JSG_NESTED_TYPE(VerifyHandle);
+    JSG_METHOD(signOneShot);
+    JSG_METHOD(verifyOneShot);
+    // Cipher/Decipher
+    JSG_NESTED_TYPE(CipherHandle);
+    JSG_METHOD(publicEncrypt);
+    JSG_METHOD(publicDecrypt);
+    JSG_METHOD(privateEncrypt);
+    JSG_METHOD(privateDecrypt);
+    JSG_METHOD(getCipherInfo);
   }
 };
 
@@ -299,5 +500,8 @@ class CryptoImpl final: public jsg::Object {
       api::node::CryptoImpl::CreateAsymmetricKeyOptions, api::node::CryptoImpl::RsaKeyPairOptions, \
       api::node::CryptoImpl::DsaKeyPairOptions, api::node::CryptoImpl::EcKeyPairOptions,           \
       api::node::CryptoImpl::EdKeyPairOptions, api::node::CryptoImpl::DhKeyPairOptions,            \
-      EW_CRYPTO_X509_ISOLATE_TYPES
+      api::node::CryptoImpl::SignHandle, api::node::CryptoImpl::VerifyHandle,                      \
+      api::node::CryptoImpl::CipherHandle, api::node::CryptoImpl::PublicPrivateCipherOptions,      \
+      api::node::CryptoImpl::CipherInfo, api::node::CryptoImpl::GetCipherInfoOptions,              \
+      api::node::CryptoImpl::ECDHHandle, EW_CRYPTO_X509_ISOLATE_TYPES
 }  // namespace workerd::api::node

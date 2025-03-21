@@ -5,13 +5,13 @@ Based on https://github.com/pyodide/pyodide/issues/3711#issuecomment-1773523301
 with some modifications.
 """
 
-# ruff: noqa
+# ruff: noqa: PLR0913, TRY301, TRY300
 
 from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
 
-from aiohttp import ClientSession, ClientTimeout, InvalidURL, hdrs, payload
+from aiohttp import ClientSession, ClientTimeout, CookieJar, InvalidURL, hdrs, payload
 from aiohttp.client_reqrep import _merge_ssl_params
 from aiohttp.helpers import TimeoutHandle, get_env_proxy_for_url, strip_auth_from_url
 from multidict import CIMultiDict, istr
@@ -19,7 +19,7 @@ from yarl import URL
 
 
 class Content:
-    __slots__ = ("_jsresp", "_exception")
+    __slots__ = ("_exception", "_jsresp")
 
     def __init__(self, _jsresp):
         self._jsresp = _jsresp
@@ -83,7 +83,6 @@ async def _request(
     elif json is not None:
         data = payload.JsonPayload(json, dumps=self._json_serialize)
 
-    redirects = 0
     history = []
     version = self._version
     params = params or {}
@@ -110,11 +109,10 @@ async def _request(
 
     if timeout is None:
         real_timeout = self._timeout
+    elif not isinstance(timeout, ClientTimeout):
+        real_timeout = ClientTimeout(total=timeout)  # type: ignore[arg-type]
     else:
-        if not isinstance(timeout, ClientTimeout):
-            real_timeout = ClientTimeout(total=timeout)  # type: ignore[arg-type]
-        else:
-            real_timeout = timeout
+        real_timeout = timeout
     # timeout is cumulative for all request operations
     # (request, redirects, responses, data consuming)
     tm = TimeoutHandle(self._loop, real_timeout.total)

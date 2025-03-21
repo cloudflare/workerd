@@ -244,6 +244,8 @@ class UtilModule final: public jsg::Object {
     return processPlatform;
   }
 
+  jsg::JsObject getEnvObject(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(UtilModule) {
     JSG_NESTED_TYPE(MIMEType);
     JSG_NESTED_TYPE(MIMEParams);
@@ -263,6 +265,9 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
     JSG_METHOD(getCallSites);
+    // TODO(cleanup): It might be about time to separate some of these out
+    // to a different module.
+    JSG_METHOD(getEnvObject);
 
 #define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)

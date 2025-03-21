@@ -22,7 +22,7 @@ import { compose } from 'node-internal:streams_compose';
 import { Stream } from 'node-internal:streams_legacy';
 import { Writable } from 'node-internal:streams_writable';
 import { Readable } from 'node-internal:streams_readable';
-import { Duplex } from 'node-internal:streams_duplex';
+import { Duplex, duplexPair } from 'node-internal:streams_duplex';
 import { Transform, PassThrough } from 'node-internal:streams_transform';
 import { promises } from 'node-internal:streams_promises';
 
@@ -52,6 +52,7 @@ export {
   setDefaultHighWaterMark,
   isDestroyed,
   isWritable,
+  duplexPair,
 };
 
 Stream.addAbortSignal = addAbortSignal;
@@ -73,5 +74,6 @@ Stream.promises = promises;
 Stream.getDefaultHighWaterMark = getDefaultHighWaterMark;
 Stream.setDefaultHighWaterMark = setDefaultHighWaterMark;
 Stream.isDestroyed = isDestroyed;
+Stream.duplexPair = duplexPair;
 
 export default Stream;

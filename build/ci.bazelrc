@@ -12,6 +12,10 @@ build:ci --verbose_failures
 build:ci --jobs=32
 # Do not check for changes in external repository files, should speed up bazel invocations after the first one
 build:ci --noexperimental_check_external_repository_files
+# Only build runfile trees when needed. Runfile trees are useful for directly invoking bazel-built
+# binaries, but not needed otherwise. Building runfile trees is slow on systems with slow disk I/O,
+# so avoid doing so where we can. https://github.com/bazelbuild/bazel/commit/03246077f948f2790a83520e7dccc2625650e6df
+build:ci --nobuild_runfile_links
 # Rate limit progress updates for smaller logs, default is 0.2 which leads to very frequent updates.
 build:ci --show_progress_rate_limit=1
 # Enable color output
@@ -50,8 +54,8 @@ build:ci-linux-common --copt='-Werror'
 build:ci-linux-common --copt='-Wno-error=#warnings'
 build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
 # keep in sync with .github/workflows/test.yml
-build:ci-linux-common --action_env=CC=/usr/lib/llvm-16/bin/clang --action_env=CXX=/usr/lib/llvm-16/bin/clang++
-build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-16/bin/clang --host_action_env=CXX=/usr/lib/llvm-16/bin/clang++
+build:ci-linux-common --action_env=CC=/usr/lib/llvm-16/bin/clang
+build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-16/bin/clang
 
 build:ci-linux --config=ci-linux-common
 build:ci-linux-arm --config=ci-linux --remote_download_regex=".*src/workerd/server/workerd.*"

@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "0.8.3"
-URL = "https://github.com/astral-sh/ruff/releases/download/0.8.3/ruff-aarch64-apple-darwin.tar.gz"
+TAG_NAME = "0.11.0"
+URL = "https://github.com/astral-sh/ruff/releases/download/0.11.0/ruff-aarch64-apple-darwin.tar.gz"
 STRIP_PREFIX = "ruff-aarch64-apple-darwin"
-SHA256 = "b99da0f689b01d5b556fe2f66a756c99fe85b78cebd19f73817de7315438d53e"
+SHA256 = "09ea313f2aab3844432b46c6c5e3e066b26ae4953f4bac1e545176e5dea22306"
 TYPE = "tgz"
 
 def dep_ruff_darwin_arm64():

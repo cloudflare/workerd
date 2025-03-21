@@ -43,7 +43,7 @@ function transform(
     program: ts.Program,
     checker: ts.TypeChecker
   ) => ts.TransformerFactory<ts.SourceFile>[]
-) {
+): string {
   const program = createMemoryProgram(sources);
   const checker = program.getTypeChecker();
   const sourceFile = program.getSourceFile(sourcePath);

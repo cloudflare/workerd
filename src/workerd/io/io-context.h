@@ -14,6 +14,7 @@
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/exception.h>
@@ -336,6 +337,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Force context abort now.
   void abort(kj::Exception&& e) {
+    if (abortException != kj::none) {
+      return;
+    }
+    abortException = kj::cp(e);
     abortFulfiller->reject(kj::mv(e));
   }
 
@@ -852,6 +857,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   DeleteQueuePtr deleteQueue;
 
+  kj::Maybe<kj::Exception> abortException;
   kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
   kj::ForkedPromise<void> abortPromise = nullptr;
 
@@ -909,7 +915,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void taskFailed(kj::Exception&& exception) override;
   void requireCurrent();
-  void checkFarGet(const DeleteQueue* expectedQueue, const std::type_info& type);
+  void checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type);
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
 
@@ -989,6 +995,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
 };
 
+// The SuppressIoContextScope utility is used to temporarily suppress the active IoContext
+// on the current thread while it is in scope.
+struct SuppressIoContextScope {
+  IoContext* cached;
+  SuppressIoContextScope();
+  ~SuppressIoContextScope() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(SuppressIoContextScope);
+};
+
 // =======================================================================================
 // inline implementation details
 
@@ -1013,6 +1028,12 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
+  // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
+  // been aborted, there's likely not an active request so later operations will fail anyway.
+  KJ_IF_SOME(ex, abortException) {
+    kj::throwFatalException(kj::cp(ex));
+  }
+
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
@@ -1353,13 +1374,13 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
 template <typename T>
 inline IoOwn<T> IoContext::addObject(kj::Own<T> obj) {
   requireCurrent();
-  return deleteQueue->addObject(kj::mv(obj), ownedObjects);
+  return deleteQueue.queue->addObject(kj::mv(obj), ownedObjects);
 }
 
 template <typename T>
 inline IoPtr<T> IoContext::addObject(T& obj) {
   requireCurrent();
-  return IoPtr<T>(kj::atomicAddRef(*deleteQueue), &obj);
+  return IoPtr<T>(deleteQueue.queue.addRef(), &obj);
 }
 
 template <typename Func>
@@ -1377,7 +1398,7 @@ template <typename T>
 inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
   // We intentionally don't requireCurrent() -- the only requirement is that the caller is in the
   // same thread.
-  return deleteQueue->addObjectReverse(getWeakRef(), kj::mv(obj), ownedObjects);
+  return deleteQueue.queue->addObjectReverse(getWeakRef(), kj::mv(obj), ownedObjects);
 }
 
 template <typename Func>

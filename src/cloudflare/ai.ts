@@ -13,3 +13,10 @@ export {
   AiGatewayInternalError,
   AiGatewayLogNotFound,
 } from 'cloudflare-internal:aig-api';
+
+export {
+  AutoRAG,
+  AutoRAGInternalError,
+  AutoRAGNotFoundError,
+  AutoRAGUnauthorizedError,
+} from 'cloudflare-internal:autorag-api';

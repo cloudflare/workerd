@@ -4,7 +4,10 @@
 
 #include "ser.h"
 
+#include "dom-exception.h"
 #include "setup.h"
+
+#include <v8-proxy.h>
 
 namespace workerd::jsg {
 

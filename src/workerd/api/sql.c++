@@ -111,6 +111,11 @@ bool SqlStorage::allowTransactions() const {
       "write coalescing.");
 }
 
+bool SqlStorage::shouldAddQueryStats() const {
+  // Bill for queries executed from JavaScript.
+  return true;
+}
+
 SqlStorage::StatementCache::~StatementCache() noexcept(false) {
   for (auto& entry: lru) {
     lru.remove(entry);

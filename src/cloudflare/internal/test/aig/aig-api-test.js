@@ -7,6 +7,15 @@ import * as assert from 'node:assert';
 export const tests = {
   async test(_, env) {
     {
+      // Test gateway get url
+      const resp = await env.ai.gateway('my-gateway').getUrl('openai');
+      assert.deepEqual(
+        resp,
+        'https://gateway.ai.cloudflare.com/v1/account-tag-abc/my-gateway/openai'
+      );
+    }
+
+    {
       // Test gateway get log
       const resp = await env.ai.gateway('my-gateway').getLog('my-log-123');
       assert.deepEqual(resp, {

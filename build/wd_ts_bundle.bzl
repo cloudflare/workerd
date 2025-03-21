@@ -1,5 +1,5 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
+load("@workerd//:build/eslint_test.bzl", "eslint_test")
 load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 def to_js(filenames):
@@ -85,25 +85,9 @@ def wd_ts_bundle(
     )
 
     if lint:
-        # TODO: lint js_srcs too, not just ts_srcs
-        eslint_bin.eslint_test(
-            size = "large",
-            name = name + "@eslint",
-            args = [
-                "--config $(location {})".format(eslintrc_json),
-                "--parser-options project:$(location {})".format(tsconfig_json),
-                "-f stylish",
-                "--report-unused-disable-directives",
-            ] + ["$(location " + src + ")" for src in ts_srcs],
-            data = srcs + [
-                eslintrc_json,
-                tsconfig_json,
-                "//tools:base-eslint",
-                "//:prettierrc",
-            ],
-            tags = ["lint"],
-            target_compatible_with = select({
-                "@platforms//os:windows": ["@platforms//:incompatible"],
-                "//conditions:default": [],
-            }),
+        eslint_test(
+            name = name,
+            eslintrc_json = eslintrc_json,
+            tsconfig_json = tsconfig_json,
+            srcs = srcs,
         )

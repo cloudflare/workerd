@@ -257,14 +257,7 @@ function memorySnapshotDoImports(Module: Module): string[] {
   // The `importedModules` list will contain all modules that have been imported, including local
   // modules, the usual `js` and other stdlib modules. We want to filter out local imports, so we
   // grab them and put them into a set for fast filtering.
-  const importedModules: string[] =
-    ArtifactBundler.constructor.filterPythonScriptImportsJs(
-      MetadataReader.getNames('py'),
-      ArtifactBundler.constructor.parsePythonScriptImports(
-        MetadataReader.getWorkerFiles('py')
-      )
-    );
-
+  const importedModules: string[] = MetadataReader.getPackageSnapshotImports();
   const deduplicatedModules = [...new Set(importedModules)];
 
   // Import the modules list so they are included in the snapshot.

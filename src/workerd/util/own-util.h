@@ -20,6 +20,11 @@ inline auto mapAddRef(kj::Maybe<kj::Rc<T>>& maybe) -> kj::Maybe<kj::Rc<T>> {
 }
 
 template <typename T>
+inline auto mapAddRef(kj::Maybe<kj::Arc<T>>& maybe) -> kj::Maybe<kj::Arc<T>> {
+  return maybe.map([](kj::Arc<T>& t) { return t.addRef(); });
+}
+
+template <typename T>
 inline auto mapAddRef(kj::Maybe<T&> maybe) -> kj::Maybe<kj::Own<T>> {
   return maybe.map([](T& t) { return kj::addRef(t); });
 }

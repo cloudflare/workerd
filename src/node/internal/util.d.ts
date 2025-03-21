@@ -120,6 +120,7 @@ export function isBoxedPrimitive(
   value: unknown
 ): value is number | string | boolean | bigint | symbol;
 
+export function getEnvObject(): Record<string, string>;
 export function getBuiltinModule(id: string): any;
 export function getCallSites(frames?: number): Record<string, string>[];
 export function processExitImpl(code: number): void;

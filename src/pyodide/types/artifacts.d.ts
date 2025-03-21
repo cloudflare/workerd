@@ -1,11 +1,6 @@
 declare namespace ArtifactBundler {
   const constructor: {
     getSnapshotImports(): string[];
-    filterPythonScriptImportsJs(
-      fileNames: string[],
-      imports: string[]
-    ): string[];
-    parsePythonScriptImports(fileNames: string[]): string[];
   };
 
   type MemorySnapshotResult = {

@@ -19,10 +19,12 @@ filegroup(
             "pyodide/pyodide.c++",
             "pyodide/setup-emscripten.c++",
             "memory-cache.c++",
+            "modules.c++",
             "r2*.c++",
             "rtti.c++",
             "url.c++",
             "urlpattern.c++",
+            "urlpattern-standard.c++",
             "util.c++",
         ],
     ),
@@ -48,6 +50,7 @@ filegroup(
             "rtti.h",
             "url.h",
             "urlpattern.h",
+            "urlpattern-standard.h",
             "util.h",
         ],
     ),
@@ -76,6 +79,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:uuid",
     ],
@@ -83,7 +87,10 @@ wd_cc_library(
 
 wd_cc_library(
     name = "rtti",
-    srcs = ["rtti.c++"],
+    srcs = [
+        "modules.c++",
+        "rtti.c++",
+    ],
     hdrs = [
         "modules.h",
         "rtti.h",
@@ -135,10 +142,12 @@ wd_cc_library(
     name = "pyodide",
     srcs = [
         "pyodide/pyodide.c++",
+        "pyodide/requirements.c++",
         "pyodide/setup-emscripten.c++",
     ],
     hdrs = [
         "pyodide/pyodide.h",
+        "pyodide/requirements.h",
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
     ],
@@ -242,6 +251,18 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "urlpattern-standard",
+    srcs = ["urlpattern-standard.c++"],
+    hdrs = ["urlpattern-standard.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@ada-url",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
 ####################################################################################################
 ## Tests
 
@@ -321,6 +342,34 @@ wd_test(
 )
 
 wd_test(
+    src = "tail-worker-test.wd-test",
+    args = [
+        "--experimental",
+    ],
+    data = [
+        # To reduce complexity, tail-worker-test calls into other tests to get traces from them.
+        "actor-alarms-test.js",
+        "http-test.js",
+        "queue-test.js",
+        "tail-worker-test.js",
+        "tail-worker-test-receiver.js",
+        "tail-worker-test-dummy.js",
+        "tests/websocket-hibernation.js",
+    ],
+)
+
+wd_test(
+    src = "tail-worker-test-invalid.wd-test",
+    args = [
+        "--experimental",
+    ],
+    data = [
+        "http-test.js",
+        "tail-worker-test-invalid.js",
+    ],
+)
+
+wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],
     data = ["analytics-engine-test.js"],
@@ -336,6 +385,17 @@ wd_test(
     src = "http-test.wd-test",
     args = ["--experimental"],
     data = ["http-test.js"],
+)
+
+wd_test(
+    src = "ctx-props-test.wd-test",
+    args = ["--experimental"],
+)
+
+wd_test(
+    src = "kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["kv-test.js"],
 )
 
 wd_test(
@@ -613,4 +673,16 @@ wd_test(
     src = "tests/fetch-test.wd-test",
     args = ["--experimental"],
     data = ["tests/fetch-test.js"],
+)
+
+wd_test(
+    src = "tests/importable-env-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/importable-env-test.js"],
+)
+
+wd_test(
+    src = "tests/disable-importable-env-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/disable-importable-env-test.js"],
 )

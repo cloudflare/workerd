@@ -99,6 +99,10 @@ class SecretKey final: public CryptoKey::Impl {
     visitor.visit(keyData);
   }
 
+  const kj::ArrayPtr<const kj::byte> rawKeyData() const {
+    return keyData.asArrayPtr().asConst();
+  }
+
  private:
   jsg::BufferSource keyData;
 };
@@ -809,8 +813,13 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
 
 jsg::BufferSource CryptoImpl::statelessDH(
     jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey) {
-  KJ_ASSERT(privateKey->getAlgorithmName() == "dh"_kj, "Invalid private key algorithm");
-  KJ_ASSERT(publicKey->getAlgorithmName() == "dh"_kj, "Invalid public key algorithm");
+  auto privateKeyAlg = privateKey->getAlgorithmName();
+  auto publicKeyAlg = publicKey->getAlgorithmName();
+  KJ_ASSERT(privateKeyAlg == "dh"_kj || privateKeyAlg == "ec"_kj || privateKeyAlg == "x25519"_kj,
+      "Invalid private key algorithm");
+  KJ_ASSERT(publicKeyAlg == "dh"_kj || publicKeyAlg == "ec"_kj || publicKeyAlg == "x25519"_kj,
+      "Invalid public key algorithm");
+  KJ_ASSERT(privateKeyAlg == publicKeyAlg, "Mismatched public and private key types");
   KJ_IF_SOME(pubKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*publicKey->impl)) {
     KJ_IF_SOME(pvtKey, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*privateKey->impl)) {
       auto data = ncrypto::DHPointer::stateless(pubKey, pvtKey);
@@ -822,6 +831,21 @@ jsg::BufferSource CryptoImpl::statelessDH(
     }
   }
   JSG_FAIL_REQUIRE(Error, "Unsupported keys for stateless diffie-hellman");
+}
+
+kj::Maybe<const ncrypto::EVPKeyPointer&> CryptoImpl::tryGetKey(jsg::Ref<CryptoKey>& key) {
+  KJ_IF_SOME(key, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl)) {
+    const ncrypto::EVPKeyPointer& evp = key;
+    return evp;
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::ArrayPtr<const kj::byte>> CryptoImpl::tryGetSecretKeyData(jsg::Ref<CryptoKey>& key) {
+  KJ_IF_SOME(secret, kj::dynamicDowncastIfAvailable<SecretKey>(*key->impl)) {
+    return secret.rawKeyData();
+  }
+  return kj::none;
 }
 
 }  // namespace workerd::api::node

@@ -85,6 +85,13 @@
       "owner": "protocolbuffers",
       "repo": "protobuf",
       "file_regex": "protobuf-.*\\.tar\\.gz"
+    },
+    {
+      "type": "github_release",
+      "name": "brotli",
+      "owner": "google",
+      "repo": "brotli",
+      "file_regex": "brotli-*\\.tar\\.gz"
     }
   ]
 }

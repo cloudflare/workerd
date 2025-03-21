@@ -414,6 +414,12 @@ private:
   }
 };
 
+// Controls how response bodies are encoded/decoded according to Content-Encoding headers
+enum class Response_BodyEncoding {
+  AUTO,    // Automatically encode/decode based on Content-Encoding headers
+  MANUAL   // Treat Content-Encoding headers as opaque (no automatic encoding/decoding)
+};
+
 class Request;
 class Response;
 struct RequestInitializerDict;
@@ -676,41 +682,21 @@ struct RequestInitializerDict {
   //   and passed on to the next worker? Then `cf` is just one such field: it's not special,
   //   it's only named `cf` because the consumer is Cloudflare code.
 
-  // These control CORS policy. This doesn't matter on the edge because CSRF is not possible
-  // here:
-  // 1. We don't have the user's credentials (e.g. cookies) for any other origin, so we couldn't
-  //    forge a request from the user even if we wanted to.
-  // 2. We aren't behind the user's firewall, so we also can't forge requests to unauthenticated
-  //    internal network services.
-  jsg::WontImplement mode;
-
-  // These control CORS policy. This doesn't matter on the edge because CSRF is not possible
-  // here:
-  // 1. We don't have the user's credentials (e.g. cookies) for any other origin, so we couldn't
-  //    forge a request from the user even if we wanted to.
-  // 2. We aren't behind the user's firewall, so we also can't forge requests to unauthenticated
-  //    internal network services.
-  jsg::WontImplement credentials;
+  // The fetch standard defines additional properties that are really only relevant in browser
+  // implementations that implement CORS. The WinterTC has determined that for non-browser
+  // environments, these should be silently ignoredif the runtime has no use for them.
+  //  * mode
+  //  * credentials
+  //  * referrer
+  //  * referrerPolicy
+  //  * keepalive
+  //  * window
 
   // In browsers this controls the local browser cache. For Cloudflare Workers it could control the
   // Cloudflare edge cache. While the standard defines a number of values for this property, our
   // implementation supports only three: undefined (identifying the default caching behavior that
   // has been implemented by the runtime), "no-store", and "no-cache".
   jsg::Optional<kj::String> cache;
-
-  // These control how the `Referer` and `Origin` headers are initialized by the browser.
-  // Browser-side JavaScript is normally not permitted to set these headers, because servers
-  // sometimes use the headers to defend against CSRF. On the edge, CSRF is not a risk (see
-  // comments about `mode` and `credentials`, above), hence protecting the Referer and Origin
-  // headers is not necessary, so we treat them as regular-old headers instead.
-  jsg::WontImplement referrer;
-
-  // These control how the `Referer` and `Origin` headers are initialized by the browser.
-  // Browser-side JavaScript is normally not permitted to set these headers, because servers
-  // sometimes use the headers to defend against CSRF. On the edge, CSRF is not a risk (see
-  // comments about `mode` and `credentials`, above), hence protecting the Referer and Origin
-  // headers is not necessary, so we treat them as regular-old headers instead.
-  jsg::WontImplement referrerPolicy;
 
   // Subresource integrity (check response against a given hash).
   // We do not implement integrity checking, however, we will accept either an undefined
@@ -727,12 +713,10 @@ struct RequestInitializerDict {
   // `null`.
   jsg::Optional<kj::Maybe<jsg::Ref<AbortSignal>>> signal;
 
-  // We do not support keepalive currently and may never?
-  // Per the spec, keepalive is "a boolean indicating whether or not request can
-  // outlive the global in which it was created." We could choose to explicitly indicate
-  // that we do not support this option but for now we'll just ignore it.
-  // jsg::Optional<bool> keepalive;
-  // TODO(conform): Won't support?
+  // Controls whether the response body is automatically decoded according to Content-Encoding
+  // headers. Default behavior is "automatic" which means bodies are decoded. Setting this to
+  // "manual" means the raw compressed bytes are returned.
+  jsg::Optional<kj::String> encodeResponseBody;
 
   // The duplex option controls whether or not a fetch is expected to send the entire request
   // before processing the response. The default value ("half"), which is currently the only
@@ -751,8 +735,7 @@ struct RequestInitializerDict {
   // jsg::Optional<kj::String> priority;
   // TODO(conform): Might support later?
 
-  JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
-             referrer, referrerPolicy, integrity, signal);
+  JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if(flags.getCacheOptionEnabled()) {
       if(flags.getCacheNoCache()) {
@@ -761,6 +744,7 @@ struct RequestInitializerDict {
           body?: BodyInit | null;
           cache?: 'no-store' | 'no-cache';
           cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
         });
       } else {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
@@ -768,6 +752,7 @@ struct RequestInitializerDict {
           body?: BodyInit | null;
           cache?: 'no-store';
           cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
         });
       }
     } else {
@@ -776,6 +761,7 @@ struct RequestInitializerDict {
         body?: BodyInit | null;
         cache?: never;
         cf?: Cf;
+        encodeResponseBody?: "automatic" | "manual";
       });
     }
   }
@@ -805,10 +791,12 @@ public:
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
           kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
-          kj::Maybe<Body::ExtractedBody> body, CacheMode cacheMode = CacheMode::NONE)
+          kj::Maybe<Body::ExtractedBody> body,
+          CacheMode cacheMode = CacheMode::NONE,
+          Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
-      cacheMode(cacheMode), cf(kj::mv(cf)) {
+      cacheMode(cacheMode), cf(kj::mv(cf)), responseBodyEncoding(responseBodyEncoding) {
     KJ_IF_SOME(s, signal) {
       // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
       // that the cancel machinery is not used but the request.signal accessor will still
@@ -876,10 +864,6 @@ public:
   // Returns the `cf` field containing Cloudflare feature flags.
   jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
 
-  // We do not implement support for the keepalive option but we do want to at least provide
-  // the standard property, hard-coded to always be false.
-  bool getKeepalive() { return false; }
-
   // The duplex option controls whether or not a fetch is expected to send the entire request
   // before processing the response. The default value ("half"), which is currently the only
   // option supported by the standard, dictates that the request is fully sent before handling
@@ -889,18 +873,23 @@ public:
   // jsg::JsValue getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
   // TODO(conform): Might implement?
 
-  // These relate to CORS support, which we do not implement. In the
-  // Request initializer we will explicitly throw if any attempt is
-  // made to specify these. For the accessors tho, we want it to always
-  // just return undefined rather than throw, which helps with code
-  // portability across multiple runtimes. The spec says that the default
-  // value for mode when not specified *should* be 'no-cors`, but that
-  // value implies strict limitations that we do not follow. In discussion
-  // with other implementers with the same issues, it was decided that
-  // simply returning undefined for these was the best option.
-  // jsg::JsValue getMode(jsg::Lock& js) { return js.v8Undefined(); }
-  // jsg::JsValue getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
-  // TODO(conform): Won't implement?
+  // These relate to CORS support, which we do not implement. WinterTC has determined that
+  // non-browser implementations that do not implement CORS support should ignore these
+  // entirely as if they were not defined.
+  //  * destination
+  //  * mode
+  //  * credentials
+  //  * referrer
+  //  * referrerPolicy
+  //  * isReloadNavigation
+  //  * isHistoryNavigation
+  //  * keepalive (see below)
+
+  // We do not implement support for the keepalive option but we do want to at least provide
+  // the standard property, hard-coded to always be false. WinterTC actually recommends that
+  // this one just be left undefined but we already had this returning false always and it
+  // would require a compat flag to remove. Just keep it as it's harmless.
+  bool getKeepalive() { return false; }
 
   // The cache mode determines how HTTP cache is used with the request.
   jsg::Optional<kj::StringPtr> getCache(jsg::Lock& js);
@@ -910,6 +899,9 @@ public:
   // the default value should be an empty string. When the Request object is
   // created we verify that the given value is undefined or empty.
   kj::String getIntegrity() { return kj::String(); }
+
+  // Get the response body encoding setting for this request
+  Response_BodyEncoding getResponseBodyEncoding() { return responseBodyEncoding; }
 
   JSG_RESOURCE_TYPE(Request, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
@@ -932,8 +924,6 @@ public:
       // TODO(conform): These are standard properties that we do not implement (see descriptions
       // above).
       // JSG_READONLY_PROTOTYPE_PROPERTY(duplex, getDuplex);
-      // JSG_READONLY_PROTOTYPE_PROPERTY(mode, getMode);
-      // JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
       if(flags.getCacheOptionEnabled()) {
@@ -976,8 +966,6 @@ public:
       // TODO(conform): These are standard properties that we do not implement (see descriptions
       // above).
       // JSG_READONLY_INSTANCE_PROPERTY(duplex, getDuplex);
-      // JSG_READONLY_INSTANCE_PROPERTY(mode, getMode);
-      // JSG_READONLY_INSTANCE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_INSTANCE_PROPERTY(keepalive, getKeepalive);
 
@@ -1025,6 +1013,9 @@ private:
 
   CfProperty cf;
 
+  // Controls how to handle Content-Encoding headers in the response
+  Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO;
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, fetcher, signal, thisSignal, cf);
   }
@@ -1032,16 +1023,14 @@ private:
 
 class Response final: public Body {
 public:
-  enum class BodyEncoding {
-    AUTO,
-    MANUAL
-  };
+  // Alias to the global Response_BodyEncoding enum for backward compatibility
+  using BodyEncoding = Response_BodyEncoding;
 
   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
            CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
-           Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
+           BodyEncoding bodyEncoding = BodyEncoding::AUTO);
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -1097,13 +1086,7 @@ public:
   //
   // A network error is a response whose status is always 0, status message is always the empty
   // byte sequence, header list is always empty, body is always null, and trailer is always empty.
-  static jsg::Unimplemented error() { return {}; };
-  // TODO(conform): implementation is missing; two approaches where tested:
-  //  - returning a HTTP 5xx response but that doesn't match the spec and we didn't
-  //    find it useful.
-  //  - throwing/propagating a DISCONNECTED kj::Exception to actually disconnect the
-  //    client. However, we were concerned about possible side-effects and incorrect
-  //    error reporting.
+  static jsg::Ref<Response> error(jsg::Lock& js);
 
   jsg::Ref<Response> clone(jsg::Lock& js);
 
@@ -1136,9 +1119,11 @@ public:
 
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was
-  // determined that just have this property as undefined is the best option.
-  // jsg::JsValue getType(jsg::Lock& js) { return js.v8Undefined(); }
-  // TODO(conform): Won't implement?
+  // determined that only the `'default'` and `'error'` properties should be implemented.
+  kj::StringPtr getType() {
+    if (statusCode == 0) return "error"_kj;
+    return "default"_kj;
+  }
 
   JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
@@ -1161,9 +1146,7 @@ public:
 
       JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
 
-      // TODO(conform): This is a standard properties that we do not implement (see description
-      // above).
-      // JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
+      JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(status, getStatus);
       JSG_READONLY_INSTANCE_PROPERTY(statusText, getStatusText);
@@ -1177,12 +1160,13 @@ public:
 
       JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
 
-      // TODO(conform): This is a standard properties that we do not implement (see description
-      // above).
-      // JSG_READONLY_INSTANCE_PROPERTY(type, getType);
+      JSG_READONLY_INSTANCE_PROPERTY(type, getType);
     }
 
-    JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
+    JSG_TS_OVERRIDE({
+      constructor(body?: BodyInit | null, init?: ResponseInit);
+      type: 'default' | 'error';
+    });
     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
   }
 

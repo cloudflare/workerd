@@ -189,9 +189,9 @@ def get_url_content_sha256(url):
 def extra_attributes(repo):
     extras = ""
     if "build_file" in repo:
-        extras += f"\n        build_file = \"{repo['build_file']}\","
+        extras += f'\n        build_file = "{repo["build_file"]}",'
     if "build_file_content" in repo:
-        extras += f"\n        build_file_content = \"{repo['build_file_content']}\","
+        extras += f'\n        build_file_content = "{repo["build_file_content"]}",'
     if "repo_mapping" in repo:
         extras += f"\n        repo_mapping = {json.dumps(repo['repo_mapping'])},"
     if "patches" in repo:
@@ -422,7 +422,7 @@ def gen_crate(repo):
 
     prefix = f"{name}-{version['num']}"
     url = f"https://crates.io{version['dl_path']}"
-    extra_exports = f"\nVERSION = \"{version['num']}\""
+    extra_exports = f'\nVERSION = "{version["num"]}"'
 
     return HTTP_ARCHIVE_TEMPLATE.format(
         name=repo["name"],

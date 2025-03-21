@@ -6,8 +6,6 @@
 #include "jsg-test.h"
 #include "jsg.h"
 
-#include <workerd/util/autogate.h>
-
 namespace workerd::jsg::test {
 namespace {
 
@@ -114,42 +112,8 @@ struct ThrowContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(ThrowIsolate, ThrowContext);
 
-KJ_TEST("throw internal error without internal-error-id autogate") {
+KJ_TEST("throw internal error") {
   setPredictableModeForTest();
-  util::Autogate::initAutogateNamesForTest({});  // without internal-error-id autogate
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  Evaluator<ThrowContext, ThrowIsolate> e(v8System);
-  {
-    KJ_EXPECT_LOG(ERROR, "thrown from throwException");
-    e.expectEval("throwException()", "throws", "Error: internal error");
-  }
-  {
-    // We also expect the logged internal error to contain the error id.
-    KJ_EXPECT_LOG(ERROR, "wdErrId = 0123456789abcdefghijklmn");
-    e.expectEval("throwException()", "throws", "Error: internal error");
-  }
-
-  {
-    KJ_EXPECT_LOG(ERROR, "thrown from getThrowing");
-    e.expectEval("throwing", "throws", "Error: internal error");
-  }
-
-  {
-    KJ_EXPECT_LOG(ERROR, "thrown from setThrowing");
-    e.expectEval("throwing = 123", "throws", "Error: internal error");
-  }
-
-  {
-    KJ_EXPECT_LOG(ERROR, "thrown from returnFunctionThatThrows");
-    e.expectEval("returnFunctionThatThrows(123)(321)", "throws", "Error: internal error");
-  }
-}
-
-KJ_TEST("throw internal error with internal-error-id autogate") {
-  setPredictableModeForTest();
-  util::Autogate::initAutogateNamesForTest({"internal-error-id"_kj});
-  KJ_DEFER(util::Autogate::deinitAutogate());
 
   Evaluator<ThrowContext, ThrowIsolate> e(v8System);
   {
@@ -309,72 +273,8 @@ struct TunneledContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(TunneledIsolate, TunneledContext);
 
-KJ_TEST("throw tunneled exception without internal-error-id autogate") {
+KJ_TEST("throw tunneled exception") {
   setPredictableModeForTest();
-  util::Autogate::initAutogateNamesForTest({});  // without internal-error-id autogate
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  Evaluator<TunneledContext, TunneledIsolate> e(v8System);
-  e.expectEval(
-      "throwTunneledTypeError()", "throws", "TypeError: thrown from throwTunneledTypeError");
-  e.expectEval("throwTunneledTypeErrorLateColon()", "throws", "TypeError");
-  e.expectEval("throwTunneledTypeErrorWithExpectation()", "throws",
-      "TypeError: thrown from throwTunneledTypeErrorWithExpectation");
-  e.expectEval("throwTunneledOperationError()", "throws",
-      "OperationError: thrown from throwTunneledOperationError");
-  e.expectEval("throwTunneledOperationErrorWithoutMessage()", "throws", "OperationError");
-  e.expectEval("throwTunneledOperationErrorLateColon()", "throws", "OperationError");
-  e.expectEval("throwTunneledOperationErrorWithExpectation()", "throws",
-      "OperationError: thrown from throwTunneledOperationErrorWithExpectation");
-  {
-    KJ_EXPECT_LOG(ERROR, "thrown from throwTunneledInternalOperationError");
-    e.expectEval(
-        "throwTunneledInternalOperationError()", "throws", "OperationError: internal error");
-  }
-  {
-    // We also expect the logged internal error to contain the error id.
-    KJ_EXPECT_LOG(ERROR, "wdErrId = 0123456789abcdefghijklmn");
-    e.expectEval(
-        "throwTunneledInternalOperationError()", "throws", "OperationError: internal error");
-  }
-  {
-    KJ_EXPECT_LOG(ERROR, " jsg.TypeError");
-    e.expectEval("throwBadTunneledError()", "throws", "Error: internal error");
-  }
-  {
-    KJ_EXPECT_LOG(ERROR, "expected s.startsWith(\";\");  jsg.TypeError");
-    e.expectEval("throwBadTunneledErrorWithExpectation()", "throws", "Error: internal error");
-  }
-  e.expectEval("throwTunneledMacroTypeError()", "throws",
-      "TypeError: thrown from throwTunneledMacroTypeError");
-  e.expectEval("throwTunneledMacroTypeErrorWithExpectation()", "throws",
-      "TypeError: thrown from throwTunneledMacroTypeErrorWithExpectation");
-  e.expectEval("throwTunneledMacroOperationError()", "throws",
-      "OperationError: thrown from throwTunneledMacroOperationError");
-  e.expectEval("throwTunneledMacroOperationErrorWithExpectation()", "throws",
-      "OperationError: thrown from throwTunneledMacroOperationErrorWithExpectation");
-  e.expectEval("throwTunneledCompileError()", "throws",
-      "CompileError: thrown from throwTunneledCompileError");
-  e.expectEval(
-      "throwTunneledLinkError()", "throws", "CompileError: thrown from throwTunneledLinkError");
-  e.expectEval("throwTunneledRuntimeError()", "throws",
-      "CompileError: thrown from throwTunneledRuntimeError");
-  e.expectEval(
-      "throwTunneledDOMException()", "throws", "Some error: thrown from throwTunneledDOMException");
-  {
-    KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledInvalidDOMException");
-    e.expectEval("throwTunneledInvalidDOMException()", "throws", "Error: internal error");
-  }
-  {
-    KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledGarbledDOMException");
-    e.expectEval("throwTunneledGarbledDOMException()", "throws", "Error: internal error");
-  }
-}
-
-KJ_TEST("throw tunneled exception with internal-error-id autogate") {
-  setPredictableModeForTest();
-  util::Autogate::initAutogateNamesForTest({"internal-error-id"_kj});
-  KJ_DEFER(util::Autogate::deinitAutogate());
 
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   e.expectEval(

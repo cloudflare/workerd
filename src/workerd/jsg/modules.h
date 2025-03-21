@@ -9,7 +9,10 @@
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/promise.h>
+#include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
+
+#include <v8-json.h>
 
 #include <kj/filesystem.h>
 #include <kj/map.h>

@@ -61,11 +61,15 @@ class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcou
       : impl(kj::mv(inner), canceler) {}
 
   kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return impl.wrap<size_t>(&kj::AsyncInputStream::read, buffer, minBytes, maxBytes);
+    kj::Promise<size_t> (kj::AsyncInputStream::*read)(void*, size_t, size_t) =
+        &kj::AsyncInputStream::read;
+    return impl.wrap<size_t>(read, buffer, minBytes, maxBytes);
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return impl.wrap(&kj::AsyncInputStream::tryRead, buffer, minBytes, maxBytes);
+    kj::Promise<size_t> (kj::AsyncInputStream::*tryRead)(void*, size_t, size_t) =
+        &kj::AsyncInputStream::tryRead;
+    return impl.wrap(tryRead, buffer, minBytes, maxBytes);
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {

@@ -1,0 +1,53 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "ctx-props-test-disabled",
+      worker = (
+        modules = [
+          (name = "worker-props-disabled", esModule =
+            `import assert from 'node:assert';
+            `export default {
+            ` async fetch(request, env, ctx) {
+            `   return new Response(JSON.stringify(ctx.props));
+            ` },
+            ` async test(request, env, ctx) {
+            `   const resp = await env.SERVICE.fetch(new Request("https://placeholder/hello"));
+            `   const body = await resp.json();
+            `   assert.strictEqual(JSON.stringify(body), '{}');
+            ` },
+            `};
+          )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = (name = "ctx-props-test-disabled", props = (json = "false"))),
+        ],
+        compatibilityDate = "2025-02-14",
+        compatibilityFlags = ["nodejs_compat", "nonclass_entrypoint_reuses_ctx_across_invocations"],
+      )
+    ),
+    ( name = "ctx-props-test-enabled",
+      worker = (
+        modules = [
+          (name = "worker-props-enabled", esModule =
+            `import assert from 'node:assert';
+            `export default {
+            ` async fetch(request, env, ctx) {
+            `   return new Response(JSON.stringify(ctx.props));
+            ` },
+            ` async test(request, env, ctx) {
+            `   const resp = await env.SERVICE.fetch(new Request("https://placeholder/hello"));
+            `   const body = await resp.json();
+            `   assert.deepStrictEqual(body, {foo: 123});
+            ` },
+            `};
+          )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = (name = "ctx-props-test-enabled", props = (json = "{\"foo\" : 123}"))),
+        ],
+        compatibilityDate = "2025-02-14",
+        compatibilityFlags = ["nodejs_compat", "unique_ctx_per_invocation"],
+    ))
+  ],
+);

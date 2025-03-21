@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "1.17.1"
-URL = "https://api.github.com/repos/bazelbuild/apple_support/tarball/1.17.1"
-STRIP_PREFIX = "bazelbuild-apple_support-8ee7a2d"
-SHA256 = "75112edeece57fedeef88bce87e28e4a30cc29f0892053532f29f57cf62709a1"
+TAG_NAME = "1.19.0"
+URL = "https://api.github.com/repos/bazelbuild/apple_support/tarball/1.19.0"
+STRIP_PREFIX = "bazelbuild-apple_support-92cef2e"
+SHA256 = "fcbb1eae4ffbe32df629e0bba33dc8fa97222974d55c54d8f2d809abba73cb46"
 TYPE = "tgz"
 
 def dep_build_bazel_apple_support():

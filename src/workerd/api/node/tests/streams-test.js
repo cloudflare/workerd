@@ -34,6 +34,7 @@ import {
   isErrored,
   pipeline,
   promises,
+  duplexPair,
 } from 'node:stream';
 
 import { ByteLengthQueuingStrategy } from 'node:stream/web';
@@ -1460,8 +1461,8 @@ export const duplex = {
 
     // We have no equivalent for on('exit') ... should we?
     // process.on('exit', () => {
-    //   assert.strictEqual(read.val, 1);
-    //   assert.strictEqual(written.val, 2);
+    //   strictEqual(read.val, 1);
+    //   strictEqual(written.val, 2);
     // });
 
     // Duplex.fromWeb
@@ -11435,6 +11436,73 @@ export const errorHandling2 = {
     } catch (err) {
       // The error should have propagated correctly through the adapter
       strictEqual(err.message, 'boom');
+    }
+  },
+};
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/98513884684bccf944d7834f4820b061af41fb36/test/parallel/test-stream-duplexpair.js
+export const testDuplexPair = {
+  async test() {
+    {
+      const pair = duplexPair();
+
+      ok(pair[0] instanceof Duplex);
+      ok(pair[1] instanceof Duplex);
+      notStrictEqual(pair[0], pair[1]);
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const [clientSide, serverSide] = duplexPair();
+      ok(clientSide instanceof Duplex);
+      ok(serverSide instanceof Duplex);
+      serverSide.on('data', (d) => strictEqual(`${d}`, 'foo'));
+      serverSide.on('end', resolve);
+      clientSide.end('foo');
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const [serverSide, clientSide] = duplexPair();
+      serverSide.cork();
+      serverSide.write('abc');
+      serverSide.write('12');
+      serverSide.end('\n');
+      serverSide.uncork();
+      let characters = '';
+      clientSide.on('readable', function () {
+        for (let segment; (segment = this.read()) !== null; )
+          characters += segment;
+      });
+      clientSide.on('end', function () {
+        strictEqual(characters, 'abc12\n');
+        resolve();
+      });
+      await promise;
+    }
+
+    // Test the case where the the _write never calls [kCallback]
+    // because a zero-size push doesn't trigger a _read
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const [serverSide, clientSide] = duplexPair();
+      serverSide.write('');
+      serverSide.write('12');
+      serverSide.write('');
+      serverSide.write('');
+      serverSide.end('\n');
+      let characters = '';
+      clientSide.on('readable', function () {
+        for (let segment; (segment = this.read()) !== null; )
+          characters += segment;
+      });
+      clientSide.on('end', function () {
+        strictEqual(characters, '12\n');
+        resolve();
+      });
+      await promise;
     }
   },
 };

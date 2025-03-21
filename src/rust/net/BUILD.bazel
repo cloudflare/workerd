@@ -1,0 +1,12 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "net",
+    cxx_bridge_deps = [],
+    cxx_bridge_src = "lib.rs",
+    test_deps = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx-integration",
+    ],
+)

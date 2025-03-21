@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { build } from "esbuild";
+import { build, type PluginBuild, type OnResolveArgs, type OnLoadArgs } from "esbuild";
 import { CommentsData } from "src/transforms";
 import cloudflareComments from "../src/cloudflare";
 import { collateStandardComments } from "../src/standards";
@@ -23,7 +23,7 @@ async function readPath(rootPath: string): Promise<string> {
   }
 }
 
-async function readParamNames() {
+async function readParamNames(): Promise<Record<string, Record<string, string[]>>> {
   // Support methods defined in parent classes
   const additionalClassNames: [string, string][] = [
     ["DurableObjectStorageOperations", "DurableObjectStorage"],
@@ -41,7 +41,7 @@ async function readParamNames() {
   function registerApi(
     structureName: string,
     record: (typeof recordArray)[number]
-  ) {
+  ): void {
     let functionName: string = record.function_like_name;
     if (functionName.endsWith("_")) functionName = functionName.slice(0, -1);
     // `constructor` is a reserved property name
@@ -72,7 +72,7 @@ async function readParamNames() {
   return result;
 }
 
-export async function readComments(): Promise<CommentsData> {
+export function readComments(): CommentsData {
   const comments = collateStandardComments(
     path.join(
       path.dirname(require.resolve("typescript")),
@@ -89,6 +89,7 @@ export async function readComments(): Promise<CommentsData> {
     comments[name] ??= {};
     for (const [member, comment] of Object.entries(members)) {
       const apiEntry = comments[name];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       assert(apiEntry !== undefined);
       apiEntry[member] = comment;
     }
@@ -110,12 +111,15 @@ if (require.main === module)
     plugins: [
       {
         name: "raw",
-        setup(build) {
-          build.onResolve({ filter: /^raw:/ }, async (args) => {
+        setup(build: PluginBuild): void {
+          build.onResolve({ filter: /^raw:/ }, (args: OnResolveArgs): {
+            namespace: string,
+            path: string
+          } => {
             const resolved = path.resolve(args.resolveDir, args.path.slice(4));
             return { namespace: "raw", path: resolved };
           });
-          build.onLoad({ namespace: "raw", filter: /.*/ }, async (args) => {
+          build.onLoad({ namespace: "raw", filter: /.*/ }, async (args: OnLoadArgs) => {
             const contents = await readPath(args.path);
             return { contents, loader: "text" };
           });
@@ -123,20 +127,20 @@ if (require.main === module)
       },
       {
         name: "virtual",
-        setup(build) {
-          build.onResolve({ filter: /^virtual:/ }, (args) => {
+        setup(build: PluginBuild): void {
+          build.onResolve({ filter: /^virtual:/ }, (args: OnResolveArgs) => {
             return {
               namespace: "virtual",
               path: args.path.substring("virtual:".length),
             };
           });
-          build.onLoad({ namespace: "virtual", filter: /.*/ }, async (args) => {
+          build.onLoad({ namespace: "virtual", filter: /.*/ }, async (args: OnLoadArgs) => {
             if (args.path === "param-names.json") {
               const contents = await readParamNames();
               return { contents: JSON.stringify(contents), loader: "json" };
             }
             if (args.path === "comments.json") {
-              const comments = await readComments();
+              const comments = readComments();
               return { contents: JSON.stringify(comments), loader: "json" };
             }
           });

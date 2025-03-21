@@ -201,6 +201,7 @@ export const inspect = {
   url: 'http://placeholder/not-found',
   webSocket: null,
   cf: undefined,
+  type: 'default',
   body: ReadableStream {
     locked: false,
     [state]: 'readable',
@@ -234,6 +235,7 @@ export const inspect = {
   defaultPrevented: false,
   returnValue: true,
   currentTarget: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
+  target: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
   srcElement: WebSocket { readyState: 1, url: null, protocol: '', extensions: '' },
   timeStamp: 0,
   isTrusted: true,
@@ -328,6 +330,7 @@ export const cacheMode = {
   url: 'http://placeholder/not-found',
   webSocket: null,
   cf: undefined,
+  type: 'default',
   body: ReadableStream {
     locked: false,
     [state]: 'readable',

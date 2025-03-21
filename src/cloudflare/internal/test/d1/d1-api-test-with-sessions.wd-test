@@ -12,7 +12,7 @@ const unitTests :Workerd.Config = (
         compatibilityDate = "2023-01-15",
 
         # NOTE: We provide the extra compatibility flag to enable the Sessions API.
-        compatibilityFlags = ["nodejs_compat", "enable_d1_with_sessions_api"],
+        compatibilityFlags = ["nodejs_compat"],
 
         bindings = [
         (

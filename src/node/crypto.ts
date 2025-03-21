@@ -22,6 +22,8 @@ import {
   createDiffieHellmanGroup,
   getDiffieHellman,
   diffieHellman,
+  createECDH,
+  ECDH,
 } from 'node-internal:crypto_dh';
 
 import {
@@ -45,7 +47,29 @@ import {
   Hash,
   HashOptions,
   Hmac,
+  hash,
 } from 'node-internal:crypto_hash';
+
+import {
+  createSign,
+  createVerify,
+  sign,
+  verify,
+  Sign,
+  Verify,
+} from 'node-internal:crypto_sign';
+
+import {
+  Cipheriv,
+  Decipheriv,
+  createCipheriv,
+  createDecipheriv,
+  publicDecrypt,
+  publicEncrypt,
+  privateDecrypt,
+  privateEncrypt,
+  getCipherInfo,
+} from 'node-internal:crypto_cipher';
 
 import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
 
@@ -79,6 +103,8 @@ export {
   createDiffieHellmanGroup,
   getDiffieHellman,
   diffieHellman,
+  ECDH,
+  createECDH,
   // Random
   randomBytes,
   randomFillSync,
@@ -99,6 +125,7 @@ export {
   Hash,
   HashOptions,
   Hmac,
+  hash,
   // Hkdf
   hkdf,
   hkdfSync,
@@ -125,6 +152,23 @@ export {
   Certificate,
   // X509
   X509Certificate,
+  // Sign/Verify
+  createSign,
+  createVerify,
+  sign,
+  verify,
+  Sign,
+  Verify,
+  // Cipher/Decipher
+  Cipheriv,
+  Decipheriv,
+  createCipheriv,
+  createDecipheriv,
+  publicDecrypt,
+  publicEncrypt,
+  privateDecrypt,
+  privateEncrypt,
+  getCipherInfo,
 };
 
 export function getCiphers(): string[] {
@@ -178,13 +222,98 @@ export function getFips(): boolean {
   return fips;
 }
 
+export const constants: Record<string, number> = Object.create(null) as Record<
+  string,
+  number
+>;
+Object.defineProperties(constants, {
+  DH_CHECK_P_NOT_SAFE_PRIME: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  DH_CHECK_P_NOT_PRIME: {
+    value: 1,
+    configurable: false,
+    writable: false,
+  },
+  DH_UNABLE_TO_CHECK_GENERATOR: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  DH_NOT_SUITABLE_GENERATOR: {
+    value: 8,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PKCS1_PADDING: {
+    value: 1,
+    configurable: false,
+    writable: false,
+  },
+  RSA_NO_PADDING: {
+    value: 3,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PKCS1_OAEP_PADDING: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  RSA_X931_PADDING: {
+    value: 5,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PKCS1_PSS_PADDING: {
+    value: 6,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PSS_SALTLEN_DIGEST: {
+    value: -1,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PSS_SALTLEN_MAX_SIGN: {
+    value: -2,
+    configurable: false,
+    writable: false,
+  },
+  RSA_PSS_SALTLEN_AUTO: {
+    value: -2,
+    configurable: false,
+    writable: false,
+  },
+  POINT_CONVERSION_COMPRESSED: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  POINT_CONVERSION_UNCOMPRESSED: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  POINT_CONVERSION_HYBRID: {
+    value: 6,
+    configurable: false,
+    writable: false,
+  },
+});
+
 export default {
+  constants,
   // DH
   DiffieHellman,
   DiffieHellmanGroup,
   createDiffieHellman,
   createDiffieHellmanGroup,
   getDiffieHellman,
+  ECDH,
+  createECDH,
   // Keys,
   KeyObject,
   PublicKeyObject,
@@ -214,6 +343,7 @@ export default {
   createHash,
   createHmac,
   getHashes,
+  hash,
   // Hkdf
   hkdf,
   hkdfSync,
@@ -245,22 +375,39 @@ export default {
   Certificate,
   // X509
   X509Certificate,
+  // Sign/Verify
+  createSign,
+  createVerify,
+  sign,
+  verify,
+  Sign,
+  Verify,
+  // Cipher/Decipher
+  Cipheriv,
+  Decipheriv,
+  createCipheriv,
+  createDecipheriv,
+  publicDecrypt,
+  publicEncrypt,
+  privateDecrypt,
+  privateEncrypt,
+  getCipherInfo,
 };
 
 // Classes
 //   * [x] crypto.Certificate
-//   * [ ] crypto.Cipher
-//   * [ ] crypto.Decipher
+//   * [x] crypto.Cipher
+//   * [x] crypto.Decipher
 //   * [x] crypto.DiffieHellman
 //   * [x] crypto.DiffieHellmanGroup
-//   * [ ] crypto.ECDH
+//   * [x] crypto.ECDH
 //   * [x] crypto.Hash
 //   * [x] crypto.Hmac
-//   * [ ] crypto.KeyObject
-//   * [ ] crypto.Sign
-//   * [ ] crypto.Verify
+//   * [x] crypto.KeyObject
+//   * [x] crypto.Sign
+//   * [x] crypto.Verify
 //   * [x] crypto.X509Certificate
-//   * [ ] crypto.constants
+//   * [x] crypto.constants
 //   * [ ] crypto.DEFAULT_ENCODING
 // * Primes
 //   * [x] crypto.checkPrime(candidate[, options], callback)
@@ -268,40 +415,41 @@ export default {
 //   * [x] crypto.generatePrime(size[, options[, callback]])
 //   * [x] crypto.generatePrimeSync(size[, options])
 // * Ciphers
-//   * [ ] crypto.createCipher(algorithm, password[, options])
-//   * [ ] crypto.createCipheriv(algorithm, key, iv[, options])
-//   * [ ] crypto.createDecipher(algorithm, password[, options])
-//   * [ ] crypto.createDecipheriv(algorithm, key, iv[, options])
-//   * [ ] crypto.privateDecrypt(privateKey, buffer)
-//   * [ ] crypto.privateEncrypt(privateKey, buffer)
-//   * [ ] crypto.publicDecrypt(key, buffer)
-//   * [ ] crypto.publicEncrypt(key, buffer)
+//   * [x] crypto.createCipher(algorithm, password[, options])
+//   * [x] crypto.createCipheriv(algorithm, key, iv[, options])
+//   * [x] crypto.createDecipher(algorithm, password[, options])
+//   * [x] crypto.createDecipheriv(algorithm, key, iv[, options])
+//   * [x] crypto.privateDecrypt(privateKey, buffer)
+//   * [x] crypto.privateEncrypt(privateKey, buffer)
+//   * [x] crypto.publicDecrypt(key, buffer)
+//   * [x] crypto.publicEncrypt(key, buffer)
 // * DiffieHellman
 //   * [x] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
 //   * [x] crypto.createDiffieHellman(primeLength[, generator])
 //   * [x] crypto.createDiffieHellmanGroup(name)
-//   * [ ] crypto.createECDH(curveName)
-//   * [ ] crypto.diffieHellman(options)
+//   * [x] crypto.createECDH(curveName)
+//   * [x] crypto.diffieHellman(options)
 //   * [x] crypto.getDiffieHellman(groupName)
 // * Hash
 //   * [x] crypto.createHash(algorithm[, options])
 //   * [x] crypto.createHmac(algorithm, key[, options])
 //   * [x] crypto.getHashes()
+//   * [x] crypto.hash()
 // * Keys, not implemented yet. Calling the following APIs will throw a ERR_METHOD_NOT_IMPLEMENTED
-//   * [.] crypto.createPrivateKey(key)
-//   * [.] crypto.createPublicKey(key)
-//   * [.] crypto.createSecretKey(key[, encoding])
-//   * [.] crypto.generateKey(type, options, callback)
-//   * [.] crypto.generateKeyPair(type, options, callback)
-//   * [.] crypto.generateKeyPairSync(type, options)
-//   * [.] crypto.generateKeySync(type, options)
+//   * [x] crypto.createPrivateKey(key)
+//   * [x] crypto.createPublicKey(key)
+//   * [x] crypto.createSecretKey(key[, encoding])
+//   * [x] crypto.generateKey(type, options, callback)
+//   * [x] crypto.generateKeyPair(type, options, callback)
+//   * [x] crypto.generateKeyPairSync(type, options)
+//   * [x] crypto.generateKeySync(type, options)
 // * Sign/Verify
-//   * [ ] crypto.createSign(algorithm[, options])
-//   * [ ] crypto.createVerify(algorithm[, options])
-//   * [ ] crypto.sign(algorithm, data, key[, callback])
-//   * [ ] crypto.verify(algorithm, data, key, signature[, callback])
+//   * [x] crypto.createSign(algorithm[, options])
+//   * [x] crypto.createVerify(algorithm[, options])
+//   * [x] crypto.sign(algorithm, data, key[, callback])
+//   * [x] crypto.verify(algorithm, data, key, signature[, callback])
 // * Misc
-//   * [ ] crypto.getCipherInfo(nameOrNid[, options])
+//   * [x] crypto.getCipherInfo(nameOrNid[, options])
 //   * [x] crypto.getCiphers()
 //   * [x] crypto.getCurves()
 //   * [x] crypto.secureHeapUsed()
@@ -319,8 +467,8 @@ export default {
 //   * [x] crypto.randomInt([min, ]max[, callback])
 //   * [x] crypto.randomUUID([options])
 // * Key Derivation
-//   * [.] crypto.hkdf(digest, ikm, salt, info, keylen, callback) (* still needs KeyObject support)
-//   * [.] crypto.hkdfSync(digest, ikm, salt, info, keylen) (* still needs KeyObject support)
+//   * [x] crypto.hkdf(digest, ikm, salt, info, keylen, callback)
+//   * [x] crypto.hkdfSync(digest, ikm, salt, info, keylen)
 //   * [x] crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)
 //   * [x] crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
 //   * [x] crypto.scrypt(password, salt, keylen[, options], callback)

@@ -2,8 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import flags from 'workerd:compatibility-flags';
-
 interface Fetcher {
   fetch: typeof fetch;
 }
@@ -96,25 +94,21 @@ class D1Database {
     return this.alwaysPrimarySession.exec(query);
   }
 
-  // DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
+  public withSession(
+    constraintOrBookmark?: D1SessionBookmarkOrConstraint
+  ): D1DatabaseSession {
+    constraintOrBookmark = constraintOrBookmark?.trim();
+    if (constraintOrBookmark == null || constraintOrBookmark === '') {
+      constraintOrBookmark = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
+    }
+    return new D1DatabaseSession(this.fetcher, constraintOrBookmark);
+  }
+
+  /**
+   * @deprecated
+   */
   public async dump(): Promise<ArrayBuffer> {
     return this.alwaysPrimarySession.dump();
-  }
-}
-
-class D1DatabaseWithSessionAPI extends D1Database {
-  public constructor(fetcher: Fetcher) {
-    super(fetcher);
-  }
-
-  public withSession(
-    constraintOrToken: D1SessionBookmarkOrConstraint | null | undefined
-  ): D1DatabaseSession {
-    constraintOrToken = constraintOrToken?.trim();
-    if (constraintOrToken == null || constraintOrToken === '') {
-      constraintOrToken = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
-    }
-    return new D1DatabaseSession(this.fetcher, constraintOrToken);
   }
 }
 
@@ -341,7 +335,10 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
     }
   }
 
-  // DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
+  /**
+   * DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
+   * Only applies to the deprecated v1 alpha databases.
+   */
   public async dump(): Promise<ArrayBuffer> {
     const response = await this._wrappedFetch('http://d1/dump', {
       method: 'POST',
@@ -442,16 +439,16 @@ class D1PreparedStatement {
     const hasResults = results.length > 0;
     if (!hasResults) return null;
 
-    const firstResult = results[0]!;
+    const firstResult = results.at(0);
     if (colName !== undefined) {
-      if (firstResult[colName] === undefined) {
+      if (firstResult?.[colName] === undefined) {
         throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
           cause: new Error('Column not found'),
         });
       }
-      return firstResult[colName]!;
+      return firstResult[colName];
     } else {
-      return firstResult;
+      return firstResult as Record<string, T>;
     }
   }
 
@@ -516,7 +513,7 @@ class D1PreparedStatement {
 }
 
 function firstIfArray<T>(results: T | T[]): T {
-  return Array.isArray(results) ? results[0]! : results;
+  return Array.isArray(results) ? (results.at(0) as T) : results;
 }
 
 // This shim may be used against an older version of D1 that doesn't support
@@ -570,8 +567,5 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
-  if (flags.enableD1WithSessionsAPI) {
-    return new D1DatabaseWithSessionAPI(env.fetcher);
-  }
   return new D1Database(env.fetcher);
 }

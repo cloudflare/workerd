@@ -1,12 +1,12 @@
 {
   "compilerOptions": {
     "module": "commonjs",
-    "target": "esnext",
-    "lib": ["esnext"],
+    "target": "ESNext",
+    "lib": ["ESNext", "dom", "dom.iterable"],
     "strict": true,
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "types": ["node"],
+    "types": ["@types/node", "@types/debug"],
     "sourceMap": true,
     "baseUrl": ".",
     "rootDir": ".",

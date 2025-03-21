@@ -375,3 +375,100 @@ export const dhKeygenTest = {
     );
   },
 };
+
+export const ecdh = {
+  test() {
+    const curves = crypto.getCurves();
+    curves.forEach((i) => {
+      const alice = crypto.createECDH(i);
+      const bob = crypto.createECDH(i);
+
+      alice.generateKeys();
+      bob.generateKeys();
+
+      const aliceSecret = alice.computeSecret(bob.getPublicKey(), null, 'hex');
+      const bobSecret = bob.computeSecret(alice.getPublicKey(), null, 'hex');
+
+      assert.strictEqual(aliceSecret, bobSecret);
+    });
+  },
+};
+
+export const ecdhConvertKey = {
+  test() {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.generateKeys();
+
+    const compressedKey = ecdh.getPublicKey('hex', 'compressed');
+
+    const uncompressedKey = crypto.ECDH.convertKey(
+      compressedKey,
+      'prime256v1',
+      'hex',
+      'hex',
+      'uncompressed'
+    );
+
+    // The converted key and the uncompressed public key should be the same
+    assert.strictEqual(uncompressedKey, ecdh.getPublicKey('hex'));
+  },
+};
+
+export const statelessDh = {
+  test() {
+    // DH keygen is currently unsupported by the boringssl+fips
+    // we use internally. This test works for workerd but fails
+    // on the internal run.
+    // const pair1 = crypto.generateKeyPairSync('dh', {
+    //   prime: Buffer.from([31, 0, 0, 0, 0, 1]),
+    // });
+    // const pair2 = crypto.generateKeyPairSync('dh', {
+    //   prime: Buffer.from([31, 0, 0, 0, 0, 1]),
+    // });
+    // const sec1 = crypto.diffieHellman({
+    //   publicKey: pair1.publicKey,
+    //   privateKey: pair2.privateKey,
+    // });
+    // const sec2 = crypto.diffieHellman({
+    //   publicKey: pair2.publicKey,
+    //   privateKey: pair1.privateKey,
+    // });
+    // assert.deepStrictEqual(sec1, sec2);
+  },
+};
+
+export const statelessDhX25591 = {
+  test() {
+    const pair1 = crypto.generateKeyPairSync('x25519');
+    const pair2 = crypto.generateKeyPairSync('x25519');
+    const sec1 = crypto.diffieHellman({
+      publicKey: pair1.publicKey,
+      privateKey: pair2.privateKey,
+    });
+    const sec2 = crypto.diffieHellman({
+      publicKey: pair2.publicKey,
+      privateKey: pair1.privateKey,
+    });
+    assert.deepStrictEqual(sec1, sec2);
+  },
+};
+
+export const statelessDhEc = {
+  test() {
+    // The Boringssl-based implementation currently does not support
+    // the mechanisms for stateless dh using named EC curve.
+    const pair1 = crypto.generateKeyPairSync('ec', { namedCurve: 'secp224r1' });
+    const pair2 = crypto.generateKeyPairSync('ec', { namedCurve: 'secp224r1' });
+    assert.throws(
+      () => {
+        crypto.diffieHellman({
+          publicKey: pair1.publicKey,
+          privateKey: pair2.privateKey,
+        });
+      },
+      {
+        message: /Failed to derive/,
+      }
+    );
+  },
+};

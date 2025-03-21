@@ -155,7 +155,7 @@ function createInterfaceMemberNode(
   const which = member.which();
   // noinspection FallThroughInSwitchStatementJS
   switch (which) {
-    case Member_Which.METHOD:
+    case Member_Which.METHOD: {
       const method = member.getMethod();
       [modifiers, name, params, result] = createMethodPartial(
         fullyQualifiedInterfaceName,
@@ -169,7 +169,8 @@ function createInterfaceMemberNode(
         params,
         result
       );
-    case Member_Which.PROPERTY:
+    }
+    case Member_Which.PROPERTY: {
       const prop = member.getProperty();
       if (prop.getPrototype()) {
         return createPrototypeProperty(prop);
@@ -183,7 +184,8 @@ function createInterfaceMemberNode(
           result
         );
       }
-    case Member_Which.NESTED:
+    }
+    case Member_Which.NESTED: {
       const nested = member.getNested();
       [name, result] = createNestedPartial(nested);
       return f.createPropertySignature(
@@ -192,7 +194,8 @@ function createInterfaceMemberNode(
         /* questionToken */ undefined,
         result
       );
-    case Member_Which.CONSTANT:
+    }
+    case Member_Which.CONSTANT: {
       const constant = member.getConstant();
       [modifiers, name, result] = createConstantPartial(constant);
       return f.createPropertySignature(
@@ -201,10 +204,15 @@ function createInterfaceMemberNode(
         /* questionToken */ undefined,
         result
       );
-    case Member_Which.CONSTRUCTOR:
+    }
+    case Member_Which.CONSTRUCTOR: {
       assert.fail("Unexpected constructor member inside interface");
+      break;
+    }
     default:
+    {
       assert.fail(`Unknown member: ${which satisfies never}`);
+    }
   }
 }
 
@@ -240,7 +248,7 @@ function createClassMemberNode(
 
   const which = member.which();
   switch (which) {
-    case Member_Which.METHOD:
+    case Member_Which.METHOD: {
       const method = member.getMethod();
       [modifiers, name, params, result] = createMethodPartial(
         fullyQualifiedClassName,
@@ -256,7 +264,8 @@ function createClassMemberNode(
         result,
         /* body */ undefined
       );
-    case Member_Which.PROPERTY:
+    }
+    case Member_Which.PROPERTY: {
       const prop = member.getProperty();
       if (prop.getPrototype()) {
         return createPrototypeProperty(prop);
@@ -271,7 +280,8 @@ function createClassMemberNode(
           /* initializer */ undefined
         );
       }
-    case Member_Which.NESTED:
+    }
+    case Member_Which.NESTED: {
       const nested = member.getNested();
       [name, result] = createNestedPartial(nested);
       return f.createPropertyDeclaration(
@@ -281,7 +291,8 @@ function createClassMemberNode(
         result,
         /* initializer */ undefined
       );
-    case Member_Which.CONSTANT:
+    }
+    case Member_Which.CONSTANT: {
       const constant = member.getConstant();
       [modifiers, name, result] = createConstantPartial(constant);
       return f.createPropertyDeclaration(
@@ -291,7 +302,8 @@ function createClassMemberNode(
         result,
         /* initializer */ undefined
       );
-    case Member_Which.CONSTRUCTOR:
+    }
+    case Member_Which.CONSTRUCTOR: {
       const constructor = member.getConstructor();
       params = createParamDeclarationNodes(
         fullyQualifiedClassName,
@@ -304,6 +316,7 @@ function createClassMemberNode(
         params,
         /* body */ undefined
       );
+    }
     default:
       assert.fail(`Unknown member: ${which satisfies never}`);
   }
@@ -360,7 +373,7 @@ export interface CreateStructureNodeOptions {
 export function createStructureNode(
   structure: Structure,
   opts: CreateStructureNodeOptions
-) {
+): ts.InterfaceDeclaration | ts.ClassDeclaration  {
   const { asClass, ambientContext = false } = opts;
   const modifiers: ts.Modifier[] = [];
   const name = getTypeName(structure);

@@ -722,10 +722,11 @@ SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
       // We're presumably running local workerd, which always uses SQLite for DO storage, but we're
       // trying to simulate a non-SQLite DO namespace for testing purposes.
       JSG_FAIL_REQUIRE(Error,
-          "SQL is not enabled for this Durable Object class. To enable it, set "
-          "`enableSql = true` in your workerd config for the class. If using wrangler, "
-          "under `[[migrations]]` in wrangler.toml, change `new_classes` to "
-          "`new_sqlite_classes`. Note that this change cannot be made after the class is "
+          "SQL is not enabled for this Durable Object class. To enable it, change "
+          "`new_classes` to `new_sqlite_classes` within the 'migrations' field in "
+          "your wrangler.jsonc or wrangler.toml file. If using workerd directly,"
+          "set `enableSql = true` in your workerd config for the class. Note "
+          "that this change cannot be made after the class is "
           "already deployed to production.");
     }
   } else {

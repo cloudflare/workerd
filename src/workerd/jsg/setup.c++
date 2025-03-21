@@ -14,6 +14,7 @@
 #include <workerd/util/uuid.h>
 
 #include <v8-cppgc.h>
+#include <v8-initialization.h>
 
 #if !_WIN32
 #include <cxxabi.h>
@@ -314,8 +315,7 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
     }
-#if ((V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION > 2) || V8_MAJOR_VERSION > 13) &&                 \
-    V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+#if V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
     // Create new isolate group so that isolate is in its own group and not in a shared group. That
     // way the isolates don't all use the same pointer cage.
     v8::IsolateGroup group = v8::IsolateGroup::Create();
@@ -332,11 +332,8 @@ IsolateBase::IsolateBase(const V8System& system,
     kj::Own<IsolateObserver> observer)
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
-#if (V8_MAJOR_VERSION == 13 && V8_MINOR_VERSION >= 4) || V8_MAJOR_VERSION > 13
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
-#else
-      ptr(newIsolate(kj::mv(createParams), cppHeap.get())),
-#endif
+      envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
@@ -431,6 +428,8 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(symbolAsyncDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
+    KJ_DEFER(envObj.Reset());
+    KJ_DEFER(workerEnvObj.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
     // that is destroyed before the lock is released.

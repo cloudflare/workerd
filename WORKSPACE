@@ -53,24 +53,10 @@ load("@rules_python//python:repositories.bzl", "py_repositories", "python_regist
 
 py_repositories()
 
-http_archive(
-    name = "com_google_benchmark",
-    integrity = "sha256-a8GApX0j1NlRVRn5KwyD1hsFtbqxiJYfNqx7BrDZ6c4=",
-    strip_prefix = "benchmark-1.8.3",
-    url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz",
-)
-
 # These are part of what's needed to get `bazel query 'deps(//...)'`, to work, but this is difficult to support
 # based on our dependencies – just use cquery instead.
 # load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
 # benchmark_deps()
-
-http_archive(
-    name = "brotli",
-    sha256 = "e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff",
-    strip_prefix = "brotli-1.1.0",
-    urls = ["https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"],
-)
 
 http_archive(
     name = "nbytes",
@@ -140,42 +126,28 @@ git_repository(
 
 git_repository(
     name = "fast_float",
-    build_file_content = "exports_files(glob([\"**\"]))",
-    commit = "d7417618f93d2c47e9bbde561510f9fc8bafe003",
-    remote = "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git",
+    build_file_content = """cc_library(
+            name = "fast_float",
+            hdrs = glob(["include/fast_float/*.h"]),
+            visibility = ["//visibility:public"],
+            include_prefix = "third_party/fast_float/src",
+        )""",
+    commit = "cb1d42aaa1e14b09e1452cfdef373d051b8c02a4",
+    remote = "https://github.com/fastfloat/fast_float.git",
 )
 
 git_repository(
     name = "fp16",
     build_file_content = "exports_files(glob([\"**\"]))",
     commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
-    remote = "https://chromium.googlesource.com/external/github.com/Maratyszcza/FP16.git",
+    remote = "https://github.com/Maratyszcza/FP16.git",
 )
 
 git_repository(
     name = "highway",
     commit = "00fe003dac355b979f36157f9407c7c46448958e",
-    remote = "https://chromium.googlesource.com/external/github.com/google/highway.git",
+    remote = "https://github.com/google/highway.git",
 )
-
-# Bindings for Highway library used by V8
-bind(
-    name = "hwy",
-    actual = "@highway//:hwy",
-)
-
-# Bindings for abseil libraries used by V8
-[
-    bind(
-        name = "absl_" + absl_component,
-        actual = "@com_google_absl//absl/container:" + absl_component,
-    )
-    for absl_component in [
-        "btree",
-        "flat_hash_map",
-        "flat_hash_set",
-    ]
-]
 
 # OK, now we can bring in tcmalloc itself.
 http_archive(
@@ -212,7 +184,7 @@ rust_register_toolchains(
         # Add support for macOS rosetta
         "aarch64-unknown-linux-gnu",
     ],
-    versions = ["1.83.0"],  # LLVM 19
+    versions = ["1.84.0"],  # LLVM 19
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")

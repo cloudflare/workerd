@@ -121,11 +121,8 @@ def run_bazel_tool(
     else:
         tool_path = init_external_dir() / tool_target / "file" / "downloaded"
 
-    if not tool_path.exists():
-        build_target = (
-            f"@{tool_target}//:file" if is_archive else f"@{tool_target}//file"
-        )
-        subprocess.run(["bazel", "build", build_target])
+    build_target = f"@{tool_target}//:file" if is_archive else f"@{tool_target}//file"
+    subprocess.run(["bazel", "build", build_target])
 
     return subprocess.run([tool_path, *args])
 

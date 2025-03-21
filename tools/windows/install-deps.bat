@@ -57,7 +57,7 @@ winget install "Microsoft.VisualStudio.2022.Community" --override "install --con
 echo.
 echo.* Step 4: Install Python 3.
 winget install Python3 -v 3.12.1 --override "/passive PrependPath=1"
-@rem bazel requires a bazel3.exe binary, create a symlink for it.
+@rem bazel requires a python3.exe binary, create a symlink for it.
 mklink "%LOCALAPPDATA%\Programs\Python\Python312\python3.exe" "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 
 echo.

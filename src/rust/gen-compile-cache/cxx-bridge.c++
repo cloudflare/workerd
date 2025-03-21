@@ -1,6 +1,7 @@
 #include "cxx-bridge.h"
 
 #include <workerd/jsg/compile-cache.h>
+#include <workerd/jsg/type-wrapper.h>
 #include <workerd/jsg/setup.h>
 
 #include <workerd/rust/cxx-integration/lib.rs.h>

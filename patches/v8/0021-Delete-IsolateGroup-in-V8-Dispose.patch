@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Dominik=20Inf=C3=BChr?= <dinfuehr@chromium.org>
+Date: Mon, 17 Feb 2025 15:17:57 +0100
+Subject: Delete IsolateGroup in V8::Dispose()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We can simplify ReleaseDefault() a bit by directly invoking the dtor
+for the default IsolateGroup. This allows us to remove some
+explicit resetting of fields in the default IsolateGroup.
+
+This CL will allow us to re-introduce the IsolateGroup-global
+thread pool for Turbofan jobs without explicitly stopping the thread
+pool in ReleaseDefault().
+
+Bug: 391169065
+Change-Id: Ifb5f9e1748d312189663b7787630bc8a18e7a1e8
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/6276488
+Reviewed-by: Igor Sheludko <ishell@chromium.org>
+Commit-Queue: Dominik Inführ <dinfuehr@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#98740}
+
+diff --git a/src/init/isolate-group.cc b/src/init/isolate-group.cc
+index 9136ce8b60323ebb102f9acf20b08eb441679bb3..9babbd878409518736433d436c86a8cf7ed2cdb1 100644
+--- a/src/init/isolate-group.cc
++++ b/src/init/isolate-group.cc
+@@ -66,7 +66,6 @@ struct PtrComprCageReservationParams
+ };
+ #endif  // V8_COMPRESS_POINTERS
+ 
+-IsolateGroup::IsolateGroup() {}
+ IsolateGroup::~IsolateGroup() {
+   DCHECK_EQ(reference_count_.load(), 0);
+   DCHECK_EQ(isolate_count_, 0);
+@@ -138,9 +137,8 @@ void IsolateGroup::Initialize(bool process_wide) {
+ 
+ // static
+ void IsolateGroup::InitializeOncePerProcess() {
+-  static base::LeakyObject<IsolateGroup> default_isolate_group;
+-  default_isolate_group_ = default_isolate_group.get();
+-
++  CHECK_NULL(default_isolate_group_);
++  default_isolate_group_ = new IsolateGroup;
+   IsolateGroup* group = GetDefault();
+ 
+   DCHECK_NULL(group->page_allocator_);
+@@ -171,10 +169,24 @@ void IsolateGroup::Release() {
+   Sandbox* sandbox = sandbox_;
+ #endif
+   if (--reference_count_ == 0) {
+-    delete this;
++#ifdef V8_ENABLE_LEAPTIERING
++    js_dispatch_table_.TearDown();
++#endif  // V8_ENABLE_LEAPTIERING
++
++#ifdef V8_ENABLE_SANDBOX
++    code_pointer_table_.TearDown();
++#endif  // V8_ENABLE_SANDBOX
++
++#ifdef V8_COMPRESS_POINTERS
++    DCHECK(reservation_.IsReserved());
++    reservation_.Free();
++#endif  // V8_COMPRESS_POINTERS
++
+ #ifdef V8_ENABLE_SANDBOX
+     sandbox->TearDown();
+-#endif
++#endif  // V8_ENABLE_SANDBOX
++
++    delete this;
+   }
+ }
+ 
+@@ -281,19 +293,8 @@ void IsolateGroup::ReleaseDefault() {
+   IsolateGroup* group = GetDefault();
+   CHECK_EQ(group->reference_count_.load(), 1);
+   CHECK(!group->has_shared_space_isolate());
+-  group->page_allocator_ = nullptr;
+-  group->code_range_.reset();
+-  group->init_code_range_ = base::ONCE_STATE_UNINITIALIZED;
+-#ifdef V8_COMPRESS_POINTERS
+-  group->trusted_pointer_compression_cage_ = nullptr;
+-  group->pointer_compression_cage_ = nullptr;
+-  DCHECK(group->reservation_.IsReserved());
+-  group->reservation_.Free();
+-#endif  // V8_COMPRESS_POINTERS
+-
+-#ifdef V8_ENABLE_LEAPTIERING
+-  group->js_dispatch_table_.TearDown();
+-#endif  // V8_ENABLE_LEAPTIERING
++  group->Release();
++  default_isolate_group_ = nullptr;
+ }
+ 
+ }  // namespace internal
+diff --git a/src/init/isolate-group.h b/src/init/isolate-group.h
+index 1014f9af24991acbb9aea5c3f84935855b3e8a9a..09ad3a750f06b66de08ec87ab39acf472bae6f82 100644
+--- a/src/init/isolate-group.h
++++ b/src/init/isolate-group.h
+@@ -186,7 +186,7 @@ class V8_EXPORT_PRIVATE IsolateGroup final {
+   // that default group.
+   static IsolateGroup* default_isolate_group_;
+ 
+-  IsolateGroup();
++  IsolateGroup() = default;
+   ~IsolateGroup();
+   IsolateGroup(const IsolateGroup&) = delete;
+   IsolateGroup& operator=(const IsolateGroup&) = delete;

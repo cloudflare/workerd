@@ -28,14 +28,13 @@ namespace {
 jsg::V8System testV8System;
 
 class MockCacheClient final: public CacheClient {
-  kj::Own<kj::HttpClient> getDefault(
-      kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) override {
+  kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {
     KJ_FAIL_REQUIRE("Not implemented");
   }
 
   kj::Own<kj::HttpClient> getNamespace(
-      kj::StringPtr name, kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) override {
-    return getDefault(kj::mv(cfBlobJson), kj::mv(parentSpan));
+      kj::StringPtr name, CacheClient::SubrequestMetadata metadata) override {
+    return getDefault(kj::mv(metadata));
   }
 };
 

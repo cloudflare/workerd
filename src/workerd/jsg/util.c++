@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "dom-exception.h"
 #include "jsg.h"  // can't include util.h directly due to weird cyclic dependency...
 #include "ser.h"
 #include "setup.h"
@@ -16,9 +17,6 @@
 #if !_WIN32
 #include <cxxabi.h>
 #endif
-
-#include <workerd/util/autogate.h>
-#include <workerd/util/sentry.h>
 
 namespace workerd::jsg {
 
@@ -126,11 +124,7 @@ InternalErrorId makeInternalErrorId() {
 }
 
 kj::String renderInternalError(InternalErrorId& internalErrorId) {
-  if (util::Autogate::isEnabled(util::AutogateKey::INTERNAL_ERROR_ID)) {
-    return kj::str("internal error; reference = ", internalErrorId);
-  } else {
-    return kj::str("internal error");
-  }
+  return kj::str("internal error; reference = ", internalErrorId);
 }
 
 }  // namespace

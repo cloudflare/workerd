@@ -96,6 +96,32 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   }
 }
 
+namespace {
+template <typename T>
+jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& function) {
+  return function.map([&](T& a) { return a.addRef(js); });
+}
+}  // namespace
+
+ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
+  return ExportedHandler{
+    .fetch{mapAddRef(js, fetch)},
+    .tail{mapAddRef(js, tail)},
+    .trace{mapAddRef(js, trace)},
+    .tailStream{mapAddRef(js, tailStream)},
+    .scheduled{mapAddRef(js, scheduled)},
+    .alarm{mapAddRef(js, alarm)},
+    .test{mapAddRef(js, test)},
+    .webSocketMessage{mapAddRef(js, webSocketMessage)},
+    .webSocketClose{mapAddRef(js, webSocketClose)},
+    .webSocketError{mapAddRef(js, webSocketError)},
+    .self{js.v8Isolate, self.getHandle(js.v8Isolate)},
+    .env{env.addRef(js)},
+    .ctx{getCtx()},
+    .missingSuperclass = missingSuperclass,
+  };
+}
+
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
     : unhandledRejections([this](jsg::Lock& js,
                               v8::PromiseRejectEvent event,
@@ -267,6 +293,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
                         canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+      JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
+          "Return value from serve handler must not be an error response (like Response.error())");
+
       auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
@@ -830,47 +859,36 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   }
 }
 
-namespace {
-jsg::JsValue resolveFromRegistry(jsg::Lock& js, kj::StringPtr specifier) {
-  auto moduleRegistry = jsg::ModuleRegistry::from(js);
-  if (moduleRegistry == nullptr) {
-    // TODO: Return the known built-in instead? This gets a bit tricky as we currently
-    // have no mechanism defined for accessing and caching the built-in module without
-    // the module registry. Should we even support this case at all? Without the module
-    // registry the user can't access the other importable modules anyway. For now, just
-    // returning undefined in this case seems the most appropriate.
-    return js.undefined();
-  }
-
-  auto spec = kj::Path::parse(specifier);
-  auto& info = JSG_REQUIRE_NONNULL(
-      moduleRegistry->resolve(js, spec), Error, kj::str("No such module: ", specifier));
-  auto module = info.module.getHandle(js);
-
-  jsg::instantiateModule(js, module);
-  return jsg::JsValue(js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj));
-}
-}  // namespace
-
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
   KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
-  auto value = resolveFromRegistry(js, "node:buffer"_kj);
-  auto obj = JSG_REQUIRE_NONNULL(
-      value.tryCast<jsg::JsObject>(), TypeError, "Invalid node:buffer implementation");
-  // Unlike the getProcess() case below, this getter is returning an object that
-  // is exported by the node:buffer module and not the module itself, so we need
-  // this additional get to the grab the reference to the thing we're actually
-  // returning.
-  auto buffer = obj.get(js, "Buffer"_kj);
-  JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
-  return buffer;
+  constexpr auto kSpecifier = "node:buffer"_kj;
+  KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+    auto def = module.get(js, "default"_kj);
+    auto obj = KJ_ASSERT_NONNULL(def.tryCast<jsg::JsObject>());
+    auto buffer = obj.get(js, "Buffer"_kj);
+    JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
+    return buffer;
+  } else {
+    // If we are unable to resolve the node:buffer module here, it likely
+    // means that we don't actually have a module registry installed. Just
+    // return undefined in this case.
+    return js.undefined();
+  }
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
-  auto value = resolveFromRegistry(js, "node:process"_kj);
-  JSG_REQUIRE(value.isObject(), TypeError, "Invalid node:process implementation");
-  return value;
+  constexpr auto kSpecifier = "node:process"_kj;
+  KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+    auto def = module.get(js, "default"_kj);
+    JSG_REQUIRE(def.isObject(), TypeError, "Invalid node:process implementation");
+    return def;
+  } else {
+    // If we are unable to resolve the node:process module here, it likely
+    // means that we don't actually have a module registry installed. Just
+    // return undefined in this case.
+    return js.undefined();
+  }
 }
 
 double Performance::now() {

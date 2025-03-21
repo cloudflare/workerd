@@ -102,6 +102,31 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
       expectType<{ count: number; duration: number }>(response);
     }
 
+    // WITHSESSION
+    {
+      expectType<D1DatabaseSession>(env.DB.withSession());
+      const session = env.DB.withSession("first-primary");
+      expectType<D1DatabaseSession>(session);
+
+      const bookmark = session.getBookmark();
+      expectType<D1SessionBookmark | null>(bookmark);
+
+      // SESSION PREPARE
+      const stmt = session.prepare(`SELECT * FROM tbl WHERE id = ?`);
+
+      // SESSION BATCH
+      {
+        const results = await env.DB.batch([stmt.bind(1), stmt.bind(2)]);
+        expectType<D1Result[]>(results);
+        expectType<unknown[]>(results[0].results);
+      }
+      {
+        const results = await env.DB.batch<Row>([stmt.bind(1), stmt.bind(2)]);
+        expectType<D1Result<Row>[]>(results);
+        expectType<Row[]>(results[0].results);
+      }
+    }
+
     return new Response();
   },
 };

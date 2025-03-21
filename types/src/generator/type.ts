@@ -22,7 +22,7 @@ import { getParameterName } from "./parameter-names";
 export function findLastIndex<T>(
   array: T[],
   predicate: (value: T, index: number, array: T[]) => unknown
-) {
+): number {
   for (let i = array.length - 1; i >= 0; i--) {
     if (predicate(array[i], i, array)) return i;
   }
@@ -39,6 +39,7 @@ export function maybeUnwrapOptional(
     typeNode.types.length === 2 &&
     ts.isTypeReferenceNode(typeNode.types[1]) &&
     ts.isIdentifier(typeNode.types[1].typeName) &&
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
     typeNode.types[1].typeName.escapedText === "undefined"
   ) {
     return typeNode.types[0];
@@ -46,27 +47,27 @@ export function maybeUnwrapOptional(
 }
 
 // Returns `true` iff this maybe type represents `T | null`, not `T | undefined`
-function isNullMaybe(maybe: MaybeType) {
+function isNullMaybe(maybe: MaybeType): boolean {
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/jsg.h#L220-L221
   return maybe.getName() === "kj::Maybe";
 }
 
 // Returns `true` iff this number type represents a character
-function isCharNumber(number: NumberType) {
+function isCharNumber(number: NumberType): boolean {
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/rtti.h#L158
   const name = number.getName();
   return name === "char";
 }
 
 // Returns `true` iff this number type represents a byte
-function isByteNumber(number: NumberType) {
+function isByteNumber(number: NumberType): boolean {
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/rtti.h#L160
   const name = number.getName();
   return name === "unsigned char";
 }
 
 // Returns `true` iff this number type represents `number | bigint`
-function isBigNumber(number: NumberType) {
+function isBigNumber(number: NumberType): boolean {
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/README.md?plain=1#L56-L82
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/rtti.h#L157-L167
   const name = number.getName();
@@ -80,18 +81,18 @@ function isBigNumber(number: NumberType) {
 }
 
 // Returns `true` iff this array type represents a pointer to an array
-function isArrayPointer(array: ArrayType) {
+function isArrayPointer(array: ArrayType): boolean {
   return array.getName() === "kj::ArrayPtr";
 }
 
 // Returns `true` iff this array type represents an iterable
-function isIterable(array: ArrayType) {
+function isIterable(array: ArrayType): boolean {
   // https://github.com/cloudflare/workerd/blob/33e692f2216704b7226c8c59b1455eefedf79068/src/workerd/jsg/README.md?plain=1#L185-L186
   return array.getName() === "jsg::Sequence";
 }
 
 // Returns `true` iff `typeNode` is `never`
-export function isUnsatisfiable(typeNode: ts.TypeNode) {
+export function isUnsatisfiable(typeNode: ts.TypeNode): boolean {
   const isNeverTypeReference =
     ts.isTypeReferenceNode(typeNode) &&
     ts.isIdentifier(typeNode.typeName) &&
@@ -228,7 +229,7 @@ export function createTypeNode(
       return f.createTypeReferenceNode("void");
     case Type_Which.BOOLT:
       return f.createTypeReferenceNode("boolean");
-    case Type_Which.NUMBER:
+    case Type_Which.NUMBER: {
       const number = type.getNumber();
       if (isBigNumber(number)) {
         return f.createUnionTypeNode([
@@ -238,7 +239,8 @@ export function createTypeNode(
       } else {
         return f.createTypeReferenceNode("number");
       }
-    case Type_Which.PROMISE:
+    }
+    case Type_Which.PROMISE: {
       const value = type.getPromise().getValue();
 
       if (allowMethodParameterCoercion && value.which() === Type_Which.VOIDT) {
@@ -258,13 +260,14 @@ export function createTypeNode(
       } else {
         return promiseType;
       }
+    }
     case Type_Which.STRUCTURE:
       return f.createTypeReferenceNode(getTypeName(type.getStructure()));
     case Type_Which.STRING:
       return f.createTypeReferenceNode("string");
     case Type_Which.OBJECT:
       return f.createTypeReferenceNode("any");
-    case Type_Which.ARRAY:
+    case Type_Which.ARRAY: {
       const array = type.getArray();
       const element = array.getElement();
       if (element.isNumber() && isCharNumber(element.getNumber())) {
@@ -294,26 +297,30 @@ export function createTypeNode(
         // Otherwise, return a regular array
         return f.createArrayTypeNode(createTypeNode(element, allowCoercion));
       }
-    case Type_Which.MAYBE:
+    }
+    case Type_Which.MAYBE: {
       const maybe = type.getMaybe();
       const alternative = isNullMaybe(maybe) ? "null" : "undefined";
       return f.createUnionTypeNode([
         createTypeNode(maybe.getValue(), allowCoercion),
         f.createTypeReferenceNode(alternative),
       ]);
-    case Type_Which.DICT:
+    }
+    case Type_Which.DICT: {
       const dict = type.getDict();
       return f.createTypeReferenceNode("Record", [
         createTypeNode(dict.getKey(), allowCoercion),
         createTypeNode(dict.getValue(), allowCoercion),
       ]);
-    case Type_Which.ONE_OF:
+    }
+    case Type_Which.ONE_OF: {
       const variants = type
         .getOneOf()
         .getVariants()
         .map((variant) => createTypeNode(variant, allowCoercion));
       return f.createUnionTypeNode(variants);
-    case Type_Which.BUILTIN:
+    }
+    case Type_Which.BUILTIN: {
       const builtin = type.getBuiltin().getType();
       switch (builtin) {
         case BuiltinType_Type.V8UINT8ARRAY:
@@ -341,7 +348,9 @@ export function createTypeNode(
         default:
           assert.fail(`Unknown builtin type: ${builtin satisfies never}`);
       }
-    case Type_Which.INTRINSIC:
+      break;
+    }
+    case Type_Which.INTRINSIC: {
       const intrinsic = type.getIntrinsic().getName();
       switch (intrinsic) {
         case "v8::kErrorPrototype":
@@ -357,7 +366,9 @@ export function createTypeNode(
         default:
           assert.fail(`Unknown intrinsic type: ${intrinsic}`);
       }
-    case Type_Which.FUNCTION:
+      break;
+    }
+    case Type_Which.FUNCTION: {
       const func = type.getFunction();
       const params = createParamDeclarationNodes(
         "FUNCTION_TODO",
@@ -373,7 +384,8 @@ export function createTypeNode(
         params,
         result
       );
-    case Type_Which.JSG_IMPL:
+    }
+    case Type_Which.JSG_IMPL: {
       const impl = type.getJsgImpl().getType();
       switch (impl) {
         case JsgImplType_Type.CONFIGURATION:
@@ -395,10 +407,15 @@ export function createTypeNode(
             `Unknown JSG implementation type: ${impl satisfies never}`
           );
       }
-    case Type_Which.JS_BUILTIN:
+      break;
+    }
+    case Type_Which.JS_BUILTIN: {
       // TODO(soon): implement
       assert.fail("`JS_BUILTIN`s are not yet supported");
-    default:
+      break;
+    }
+    default: {
       assert.fail(`Unknown type: ${which satisfies never}`);
+    }
   }
 }

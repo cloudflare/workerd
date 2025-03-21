@@ -1,6 +1,8 @@
 #include "commonjs.h"
 
+#include "jsvalue.h"
 #include "modules.h"
+#include "resource.h"
 
 namespace workerd::jsg {
 

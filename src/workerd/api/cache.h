@@ -41,16 +41,20 @@ class Cache: public jsg::Object {
   jsg::Unimplemented add(Request::Info request);
   jsg::Unimplemented addAll(kj::Array<Request::Info> requests);
 
-  jsg::Promise<jsg::Optional<jsg::Ref<Response>>> match(
-      jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);
+  jsg::Promise<jsg::Optional<jsg::Ref<Response>>> match(jsg::Lock& js,
+      Request::Info request,
+      jsg::Optional<CacheQueryOptions> options,
+      CompatibilityFlags::Reader flags);
 
   jsg::Promise<void> put(jsg::Lock& js,
       Request::Info request,
       jsg::Ref<Response> response,
       CompatibilityFlags::Reader flags);
 
-  jsg::Promise<bool> delete_(
-      jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);
+  jsg::Promise<bool> delete_(jsg::Lock& js,
+      Request::Info request,
+      jsg::Optional<CacheQueryOptions> options,
+      CompatibilityFlags::Reader flags);
 
   // Our cache does not support one-to-many matching, so this is not possible to implement.
   jsg::WontImplement matchAll(jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) {
@@ -89,7 +93,8 @@ class Cache: public jsg::Object {
       kj::Maybe<kj::String> cfBlobJson,
       kj::LiteralStringConst operationName,
       kj::StringPtr url,
-      kj::Maybe<jsg::ByteString> cacheControl = kj::none);
+      kj::Maybe<jsg::ByteString> cacheControl,
+      bool enableCompatFlags);
 };
 
 // =======================================================================================

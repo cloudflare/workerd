@@ -112,6 +112,10 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class InspectorService;
   class InspectorServiceIsolateRegistrar;
 
+  void handleReportConfigError(kj::String error) {
+    reportConfigError(kj::mv(error));
+  }
+
  private:
   kj::Filesystem& fs;
   kj::Timer& timer;

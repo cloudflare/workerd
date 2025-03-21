@@ -11,3 +11,4 @@ export function format(
   auth: boolean
 ): string;
 export function toASCII(input: string): string;
+export function canonicalizeIp(input: string): string;

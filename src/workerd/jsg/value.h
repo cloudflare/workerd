@@ -9,9 +9,13 @@
 // arrays, buffers, dicts.
 
 #include "simdutf.h"
-#include "util.h"
-#include "web-idl.h"
-#include "wrappable.h"
+
+#include <workerd/jsg/util.h>
+#include <workerd/jsg/web-idl.h>
+#include <workerd/jsg/wrappable.h>
+
+#include <v8-container.h>
+#include <v8-date.h>
 
 #include <kj/debug.h>
 #include <kj/one-of.h>
@@ -412,8 +416,10 @@ class StringWrapper {
   static constexpr const char* getName(kj::String*) {
     return "string";
   }
-  // TODO(someday): This conflates USVStrings, which must have valid code points, with DOMStrings,
-  //   which needn't have valid code points.
+
+  // TODO(someday): The conversion to kj::String doesn't explicitly consider the distinction
+  // between DOMString (~ WTF-8; could contain invalid code points) and USVString (invalid code
+  // points are always replaced with U+FFFD). Code should make an explict choice between the two.
 
   static constexpr const char* getName(kj::ArrayPtr<const char>*) {
     return "string";
@@ -426,6 +432,14 @@ class StringWrapper {
     return "ByteString";
   }
   // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+
+  static constexpr const char* getName(USVString*) {
+    return "USVString";
+  }
+
+  static constexpr const char* getName(DOMString*) {
+    return "DOMString";
+  }
 
   v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -448,6 +462,18 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const USVString& value) {
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const DOMString& value) {
     return wrap(context, creator, value.asPtr());
   }
 
@@ -486,6 +512,29 @@ class StringWrapper {
     }
 
     return kj::mv(result);
+  }
+
+  kj::Maybe<USVString> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      USVString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Isolate* isolate = context->GetIsolate();
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
+    str->WriteUtf8V2(isolate, buf.begin(), buf.size(),
+        v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
+    return USVString(kj::mv(buf));
+  }
+
+  kj::Maybe<DOMString> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      DOMString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Isolate* isolate = context->GetIsolate();
+    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
+    str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+    return DOMString(kj::mv(buf));
   }
 };
 
@@ -798,9 +847,7 @@ class ArrayWrapper {
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)
-                     ->wrap(context, creator, kj::mv(array[n]))
-                     .template As<v8::Value>();
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
@@ -815,9 +862,7 @@ class ArrayWrapper {
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)
-                     ->wrap(context, creator, kj::mv(array[n]))
-                     .template As<v8::Value>();
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
@@ -848,6 +893,62 @@ class ArrayWrapper {
           context, element, TypeErrorContext::arrayElement(i)));
     }
     return builder.finish();
+  }
+};
+
+// =======================================================================================
+// Sets
+
+// TypeWrapper mixin for sets.
+template <typename TypeWrapper>
+class SetWrapper {
+ public:
+  static auto constexpr MAX_STACK = 64;
+  template <typename U>
+  static constexpr const char* getName(kj::HashSet<U>*) {
+    return "Set";
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::HashSet<U> set) {
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+
+    auto out = v8::Set::New(isolate);
+    for (auto& item: set) {
+      v8::HandleScope scope(isolate);
+      check(
+          out->Add(context, static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(item))));
+    }
+
+    return handleScope.Escape(out);
+  }
+
+  template <typename U>
+  kj::Maybe<kj::HashSet<U>> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      kj::HashSet<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsSet()) {
+      return kj::none;
+    }
+
+    auto set = handle.As<v8::Set>();
+    auto array = set->AsArray();
+    auto length = array->Length();
+    auto builder = kj::HashSet<U>();
+    builder.reserve(length);
+    for (auto i: kj::zeroTo(length)) {
+      v8::Local<v8::Value> element = check(array->Get(context, i));
+      auto value = static_cast<TypeWrapper*>(this)->template unwrap<U>(
+          context, element, TypeErrorContext::other());
+      builder.upsert(kj::mv(value), [&](U& existing, U&& replacement) {
+        JSG_FAIL_REQUIRE(TypeError, "Duplicate values in the set after unwrapping.");
+      });
+    }
+    return kj::mv(builder);
   }
 };
 
@@ -1130,7 +1231,8 @@ class NonCoercibleWrapper {
       NonCoercible<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto& wrapper = static_cast<TypeWrapper&>(*this);
-    if constexpr (kj::isSameType<kj::String, T>()) {
+    if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
+        kj::isSameType<jsg::DOMString, T>()) {
       if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
         return NonCoercible<T>{

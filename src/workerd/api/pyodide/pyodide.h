@@ -67,6 +67,37 @@ class ReadOnlyBuffer: public jsg::Object {
   }
 };
 
+class PythonModuleInfo {
+ public:
+  PythonModuleInfo(kj::Array<kj::String> names, kj::Array<kj::Array<kj::byte>> contents)
+      : names(kj::mv(names)),
+        contents(kj::mv(contents)) {
+    KJ_REQUIRE(this->names.size() == this->contents.size());
+  }
+  kj::Array<kj::String> names;
+  kj::Array<kj::Array<kj::byte>> contents;
+
+  // Return the list of names to import into a package snapshot.
+  kj::Array<kj::String> getPackageSnapshotImports();
+  // Takes in a list of Python files (their contents). Parses these files to find the import
+  // statements, then returns a list of modules imported via those statements.
+  //
+  // For example:
+  // import a, b, c
+  // from z import x
+  // import t.y.u
+  // from . import k
+  //
+  // -> ["a", "b", "c", "z", "t.y.u"]
+  //
+  // Package relative imports are ignored.
+  static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
+  kj::HashSet<kj::String> getWorkerModuleSet();
+  kj::Array<kj::String> getPythonFileContents();
+  static kj::Array<kj::String> filterPythonScriptImports(
+      kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);
+};
+
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
 // and metadata about the worker.
 //
@@ -75,9 +106,9 @@ class ReadOnlyBuffer: public jsg::Object {
 class PyodideMetadataReader: public jsg::Object {
  private:
   kj::String mainModule;
-  kj::Array<kj::String> names;
-  kj::Array<kj::Array<kj::byte>> contents;
+  PythonModuleInfo moduleInfo;
   kj::Array<kj::String> requirements;
+  kj::String pyodideVersion;
   kj::String packagesVersion;
   kj::String packagesLock;
   bool isWorkerdFlag;
@@ -92,6 +123,7 @@ class PyodideMetadataReader: public jsg::Object {
       kj::Array<kj::String> names,
       kj::Array<kj::Array<kj::byte>> contents,
       kj::Array<kj::String> requirements,
+      kj::String pyodideVersion,
       kj::String packagesVersion,
       kj::String packagesLock,
       bool isWorkerd,
@@ -101,9 +133,9 @@ class PyodideMetadataReader: public jsg::Object {
       bool usePackagesInArtifactBundler,
       kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
       : mainModule(kj::mv(mainModule)),
-        names(kj::mv(names)),
-        contents(kj::mv(contents)),
+        moduleInfo(kj::mv(names), kj::mv(contents)),
         requirements(kj::mv(requirements)),
+        pyodideVersion(kj::mv(pyodideVersion)),
         packagesVersion(kj::mv(packagesVersion)),
         packagesLock(kj::mv(packagesLock)),
         isWorkerdFlag(isWorkerd),
@@ -135,16 +167,15 @@ class PyodideMetadataReader: public jsg::Object {
 
   // Returns the filenames of the files inside of the WorkerBundle that end with the specified
   // file extension.
+  // TODO: Remove this.
   kj::Array<jsg::JsRef<jsg::JsString>> getNames(
       jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
+  kj::Array<int> getSizes(jsg::Lock& js);
 
-  // Returns files inside the WorkerBundle that end with the specified file extension.
-  // Usually called to get all the Python source files with a `py` extension.
-  kj::Array<jsg::JsRef<jsg::JsString>> getWorkerFiles(jsg::Lock& js, kj::String ext);
+  // Return the list of names to import into a package snapshot.
+  kj::Array<kj::String> getPackageSnapshotImports();
 
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
-
-  kj::Array<int> getSizes(jsg::Lock& js);
 
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
@@ -167,6 +198,10 @@ class PyodideMetadataReader: public jsg::Object {
     return usePackagesInArtifactBundler;
   }
 
+  kj::String getPyodideVersion() {
+    return kj::str(pyodideVersion);
+  }
+
   kj::String getPackagesVersion() {
     return kj::str(packagesVersion);
   }
@@ -175,14 +210,16 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::str(packagesLock);
   }
 
+  kj::HashSet<kj::String> getTransitiveRequirements();
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
     JSG_METHOD(getMainModule);
     JSG_METHOD(getRequirements);
     JSG_METHOD(getNames);
-    JSG_METHOD(getWorkerFiles);
     JSG_METHOD(getSizes);
+    JSG_METHOD(getPackageSnapshotImports);
     JSG_METHOD(read);
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -190,17 +227,19 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(shouldUsePackagesInArtifactBundler);
+    JSG_METHOD(getPyodideVersion);
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
+    JSG_METHOD(getTransitiveRequirements);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("mainModule", mainModule);
-    for (const auto& name: names) {
+    for (const auto& name: this->moduleInfo.names) {
       tracker.trackField("name", name);
     }
-    for (const auto& content: contents) {
+    for (const auto& content: this->moduleInfo.contents) {
       tracker.trackField("content", content);
     }
     for (const auto& requirement: requirements) {
@@ -290,25 +329,6 @@ class ArtifactBundler: public jsg::Object {
     return kj::none;
   }
 
-  // Takes in a list of Python files (their contents). Parses these files to find the import
-  // statements, then returns a list of modules imported via those statements.
-  //
-  // For example:
-  // import a, b, c
-  // from z import x
-  // import t.y.u
-  // from . import k
-  //
-  // -> ["a", "b", "c", "z", "t.y.u"]
-  //
-  // Package relative imports are ignored.
-  static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
-  // Takes in a list of imported modules and filters them in such a way to avoid local imports and
-  // redundant imports in the package snapshot list.
-  static kj::Array<kj::String> filterPythonScriptImports(
-      kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);
-  static kj::Array<kj::String> filterPythonScriptImportsJs(
-      kj::Array<kj::String> workerModules, kj::Array<kj::String> imports);
   static kj::Array<kj::StringPtr> getSnapshotImports();
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
@@ -320,8 +340,6 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
-    JSG_STATIC_METHOD(parsePythonScriptImports);
-    JSG_STATIC_METHOD(filterPythonScriptImportsJs);
     JSG_STATIC_METHOD(getSnapshotImports);
   }
 

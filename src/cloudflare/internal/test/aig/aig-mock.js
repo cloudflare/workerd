@@ -20,6 +20,15 @@ export default {
         );
       }
 
+      if (request.url.endsWith('url/openai')) {
+        return Response.json({
+          result: {
+            url: 'https://gateway.ai.cloudflare.com/v1/account-tag-abc/my-gateway/openai',
+          },
+          success: true,
+        });
+      }
+
       if (request.url.endsWith('logs/500')) {
         return Response.json(
           {

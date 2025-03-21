@@ -19,6 +19,14 @@ namespace workerd {
 
 static thread_local IoContext* threadLocalRequest = nullptr;
 
+SuppressIoContextScope::SuppressIoContextScope(): cached(threadLocalRequest) {
+  threadLocalRequest = nullptr;
+}
+
+SuppressIoContextScope::~SuppressIoContextScope() noexcept(false) {
+  threadLocalRequest = cached;
+}
+
 static const kj::EventLoopLocal<int> threadId;
 
 static void* getThreadId() {
@@ -125,7 +133,7 @@ IoContext::IoContext(ThreadContext& thread,
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       threadId(getThreadId()),
-      deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
+      deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
       waitUntilTasks(*this),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
@@ -988,11 +996,10 @@ void IoContext::requireCurrent() {
   KJ_REQUIRE(threadLocalRequest == this, "request is not current in this thread");
 }
 
-void IoContext::checkFarGet(const DeleteQueue* expectedQueue, const std::type_info& type) {
-  KJ_ASSERT(expectedQueue);
+void IoContext::checkFarGet(const DeleteQueue& expectedQueue, const std::type_info& type) {
   requireCurrent();
 
-  if (expectedQueue == deleteQueue.get()) {
+  if (&expectedQueue == deleteQueue.queue.get()) {
     // same request or same actor, success
   } else {
     throwNotCurrentJsError(type);
@@ -1013,8 +1020,7 @@ void IoContext::runInContextScope(Worker::LockType lockType,
   // common for child objects to contain pointers back to stuff owned by the parent that could
   // then be dangling.
   KJ_REQUIRE(threadId == getThreadId(), "IoContext cannot switch threads");
-  IoContext* previousRequest = threadLocalRequest;
-  KJ_DEFER(threadLocalRequest = previousRequest);
+  SuppressIoContextScope previousRequest;
   threadLocalRequest = this;
 
   worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
@@ -1031,7 +1037,7 @@ void IoContext::runInContextScope(Worker::LockType lockType,
       {
         // Handle any pending deletions that arrived while the worker was processing a different
         // request.
-        auto l = deleteQueue->crossThreadDeleteQueue.lockExclusive();
+        auto l = deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
         auto& state = KJ_ASSERT_NONNULL(*l);
         for (auto& object: state.queue) {
           OwnedObjectList::unlink(*object);
@@ -1167,12 +1173,9 @@ static constexpr auto kAsyncIoErrorMessage =
 IoContext& IoContext::current() {
   if (threadLocalRequest == nullptr) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
-    if (isolate == nullptr) {
-      KJ_FAIL_REQUIRE("there is no current request on this thread");
-    } else {
-      isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
-      throw jsg::JsExceptionThrown();
-    }
+    KJ_REQUIRE(isolate != nullptr, "there is no current request on this thread");
+    isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
+    throw jsg::JsExceptionThrown();
   } else {
     return *threadLocalRequest;
   }
@@ -1205,8 +1208,7 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     // Don't bother fulfilling `abortFulfiller` if limits were exceeded because in that case the
     // abort promise will be fulfilled shortly anyway.
     if (limitEnforcer->getLimitsExceeded() == kj::none) {
-      abortFulfiller->reject(
-          JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
+      abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
     }
   }
 
@@ -1346,7 +1348,7 @@ void IoContext::throwNotCurrentJsError(kj::Maybe<const std::type_info&> maybeTyp
 
 jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
   if (promiseContextTag == kj::none) {
-    auto deferral = kj::heap<IoCrossContextExecutor>(kj::atomicAddRef(*deleteQueue));
+    auto deferral = kj::heap<IoCrossContextExecutor>(deleteQueue.queue.addRef());
     promiseContextTag = jsg::JsRef(js, js.opaque(kj::mv(deferral)));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
@@ -1361,10 +1363,10 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // the DeleteQueue.
   try {
     for (;;) {
-      co_await context->deleteQueue->resetCrossThreadSignal();
+      co_await context->deleteQueue.queue->resetCrossThreadSignal();
       co_await context->run([](auto& lock) {
         auto& context = IoContext::current();
-        auto l = context.deleteQueue->crossThreadDeleteQueue.lockExclusive();
+        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
         auto& state = KJ_ASSERT_NONNULL(*l);
         for (auto& action: state.actions) {
           action(lock);

@@ -19,6 +19,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/script.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
@@ -610,7 +611,7 @@ struct Worker::Isolate::Impl {
           i.get()->contextDestroyed(context.getHandle(*lock));
         }
         { auto drop = kj::mv(context); }
-        lock->v8Isolate->ContextDisposedNotification(false);
+        lock->v8Isolate->ContextDisposedNotification(v8::ContextDependants::kNoDependants);
       });
     }
 
@@ -799,6 +800,9 @@ struct Worker::Script::Impl {
   using DynamicImportHandler = kj::Function<jsg::Value()>;
 
   void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
+    // This is only used with the original module registry implementation.
+    KJ_ASSERT(!FeatureFlags::get(js).getNewModuleRegistry(),
+        "legacy dynamic imports must not be used with the new module registry");
     static auto constexpr handleDynamicImport =
         [](kj::Own<const Worker> worker, DynamicImportHandler handler,
             kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext)
@@ -1024,7 +1028,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
                 error, api->getErrorInterfaceTypeHandler(js));
           }
 
-          ioContext.getMetrics().reportTailEvent(ioContext, [&] {
+          ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(), [&] {
             KJ_IF_SOME(obj, error.tryCast<jsg::JsObject>()) {
               auto name = obj.get(js, "name"_kj);
               auto message = obj.get(js, "message"_kj);
@@ -1266,9 +1270,9 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
       } else {
-        // Although we're going to compile a script independent of context, V8 requires that there be
-        // an active context, otherwise it will segfault, I guess. So we create a dummy context.
-        // (Undocumented, as usual.)
+        // Although we're going to compile a script independent of context, V8 requires that
+        // there be an active context, otherwise it will segfault, I guess. So we create a
+        // dummy context. (Undocumented, as usual.)
         context =
             v8::Context::New(lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
         // We need to set the highest used index in every context we create to be a nullptr
@@ -1284,32 +1288,32 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         if (logNewScript) {
           // HACK: Log a message indicating that a new script was loaded. This is used only when the
           //   inspector is enabled. We want to do this immediately after the context is created,
-          //   before the user gets a chance to modify the behavior of the console, which if they did,
-          //   we'd then need to be more careful to apply time limits and such.
+          //   before the user gets a chance to modify the behavior of the console, which if they
+          //   did, we'd then need to be more careful to apply time limits and such.
           lockedWorkerIsolate.logMessage(lock, static_cast<uint16_t>(cdp::LogType::WARNING),
               "Script modified; context reset.");
         }
 
-        // We need to register this context with the inspector, otherwise errors won't be reported. But
-        // we want it to be un-registered as soon as the script has been compiled, otherwise the
-        // inspector will end up with multiple contexts active which is very confusing for the user
-        // (since they'll have to select from the drop-down which context to use).
+        // We need to register this context with the inspector, otherwise errors won't be
+        // reported. But we want it to be un-registered as soon as the script has been
+        // compiled, otherwise the inspector will end up with multiple contexts active which
+        // is very confusing for the user (since they'll have to select from the drop-down
+        // which context to use).
         //
         // (For modules, the context was already registered by `setupContext()`, above.
         KJ_IF_SOME(i, isolate->impl->inspector) {
-          if (!source.is<ModulesSource>()) {
+          if (!modular) {
             i.get()->contextCreated(
                 v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Compiler")));
           }
         } else {
         }  // Here to squash a compiler warning
         KJ_DEFER({
-          if (!source.is<ModulesSource>()) {
+          if (!modular) {
             KJ_IF_SOME(i, isolate->impl->inspector) {
               i.get()->contextDestroyed(context);
             } else {
-              // Else block to avoid dangling else clang warning.
-            }
+            }  // Here to squash a compiler warning
           }
         });
 
@@ -1320,23 +1324,26 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
           try {
             KJ_SWITCH_ONEOF(source) {
               KJ_CASE_ONEOF(script, ScriptSource) {
+                // This path is used for the older, service worker syntax workers.
+
                 impl->globals =
                     script.compileGlobals(lock, isolate->getApi(), isolate->getApi().getObserver());
 
                 {
-                  // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
-                  // excessively-expensive computation requiring a time limit. We'll go ahead and apply a time
-                  // limit just to be safe. Don't add it to the rollover bank, though.
+                  // It's unclear to me if CompileUnboundScript() can get trapped in any
+                  // infinite loops or excessively-expensive computation requiring a time
+                  // limit. We'll go ahead and apply a time limit just to be safe. Don't
+                  // add it to the rollover bank, though.
                   auto limitScope =
                       isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
                   impl->unboundScriptOrMainModule =
                       jsg::NonModuleScript::compile(lock, script.mainScript, script.mainScriptName);
                 }
-
-                break;
               }
 
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
+                // This path is used for the new ESM worker syntax.
+
                 this->isPython = modulesSource.isPython;
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
                   kj::Own<void> limitScope;
@@ -1351,7 +1358,6 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   modulesSource.compileModules(lock, isolate->getApi());
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
-                break;
               }
             }
 
@@ -1477,21 +1483,6 @@ void Worker::setupContext(
 // =======================================================================================
 
 namespace {
-
-jsg::JsObject resolveNodeInspectModule(jsg::Lock& js) {
-  static constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
-  if (FeatureFlags::get(js).getNewModuleRegistry()) {
-    return KJ_ASSERT_NONNULL(
-        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, kSpecifier));
-  }
-
-  // Use the original module registry implementation
-  auto registry = jsg::ModuleRegistry::from(js);
-  KJ_ASSERT(registry != nullptr);
-  auto inspectModule = registry->resolveInternalImport(js, kSpecifier);
-  return jsg::JsObject(inspectModule.getHandle(js).As<v8::Object>());
-}
-
 kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     const kj::Path& mainModule,
     jsg::JsContext<api::ServiceWorkerGlobalScope>& jsContext,
@@ -1627,6 +1618,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             if (script->isModular()) {
               // Use `env` variable.
               bindingsScope = v8::Object::New(lock.v8Isolate);
+              if (!FeatureFlags::get(js).getDisableImportableEnv()) {
+                lock.setWorkerEnv(lock.v8Ref(bindingsScope.As<v8::Value>()));
+              }
             } else {
               // Use global-scope bindings.
               bindingsScope = context->Global();
@@ -1667,11 +1661,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                     KJ_SWITCH_ONEOF(handler.value) {
                       KJ_CASE_ONEOF(obj, api::ExportedHandler) {
                         obj.env = lock.v8Ref(bindingsScope.As<v8::Value>());
-                        // TODO(cleanup): Unfortunately, for non-class-based handlers, we have
-                        //   always created only a single `ctx` object and reused it for all
-                        //   requests. This is weird and obviously wrong but changing it probably
-                        //   requires a compat flag. Until then, connection properties will not be
-                        //   available for non-class handlers.
+                        // Historically, non-class-based handlers reused the same ctx object for all requests.
+                        // This was an accident, but some Workers depend on it.
+                        // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
                         obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
                         impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
@@ -1856,8 +1848,8 @@ void Worker::handleLog(jsg::Lock& js,
       tracer.addLog(timestamp, level, message());
     }
 
-    ioContext.getMetrics().reportTailEvent(
-        ioContext, [&] { return tracing::Mark(tracing::Log(ioContext.now(), level, message())); });
+    ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(),
+        [&] { return tracing::Mark(tracing::Log(ioContext.now(), level, message())); });
   }
 
   if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
@@ -1866,7 +1858,8 @@ void Worker::handleLog(jsg::Lock& js,
     // not even evaluate its arguments, so `message()` will not be called at all.
     KJ_LOG(INFO, "console.log()", message());
   } else {
-    // Write to stdio if allowed by console mode
+    // Write to stdio if allowed by console mode. This is making use of our internal
+    // built-in implementation of the node:util inspect API.
     static const ColorMode COLOR_MODE = permitsColor();
 #if _WIN32
     static bool STDOUT_TTY = _isatty(_fileno(stdout));
@@ -1883,7 +1876,8 @@ void Worker::handleLog(jsg::Lock& js,
     auto colors =
         COLOR_MODE == ColorMode::ENABLED || (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
-    auto inspectModule = resolveNodeInspectModule(js);
+    constexpr auto kSpecifier = "node-internal:internal_inspect"_kj;
+    auto inspectModule = KJ_ASSERT_NONNULL(js.resolveInternalModule(kSpecifier));
     v8::Local<v8::Value> formatLogVal = inspectModule.get(js, "formatLog"_kj);
     KJ_ASSERT(formatLogVal->IsFunction());
     auto formatLog = formatLogVal.As<v8::Function>();
@@ -1973,6 +1967,14 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
 
   kj::StringPtr n = name.orDefault("default"_kj);
   KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
+    jsg::Lock& js = *this;
+    if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
+      api::ExportedHandler constructedHandler = h.clone(js);
+
+      constructedHandler.ctx = jsg::alloc<api::ExecutionContext>(js,
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
+      return kj::heap(kj::mv(constructedHandler));
+    }
     return fakeOwn(h);
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     jsg::Lock& js = *this;
@@ -2062,7 +2064,7 @@ void Worker::Lock::logUncaughtException(
       });
     }
 
-    ioContext.getMetrics().reportTailEvent(ioContext, [&] {
+    ioContext.getMetrics().reportTailEvent(ioContext.getInvocationSpanContext(), [&] {
       KJ_IF_SOME(obj, exception.tryCast<jsg::JsObject>()) {
         auto name = obj.get(*this, "name"_kj);
         auto message = obj.get(*this, "message"_kj);
@@ -2147,6 +2149,44 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
     ignoredHandlers.insert("unhandledrejection"_kj);
     ignoredHandlers.insert("rejectionhandled"_kj);
 
+    // Helper function to collect methods from a prototype chain
+    auto collectMethodsFromPrototypeChain = [&](jsg::JsValue startProto,
+                                                kj::HashSet<kj::String>& seenNames) {
+      // Find the prototype for `Object` by creating one.
+      auto obj = js.obj();
+      jsg::JsValue prototypeOfObject = obj.getPrototype(js);
+
+      // Walk the prototype chain.
+      jsg::JsValue proto = startProto;
+      for (;;) {
+        auto protoObj = JSG_REQUIRE_NONNULL(proto.tryCast<jsg::JsObject>(), TypeError,
+            "Exported value's prototype chain does not end in Object.");
+        if (protoObj == prototypeOfObject) {
+          // Reached the prototype for `Object`. Stop here.
+          break;
+        }
+
+        // Awkwardly, the prototype's members are not typically enumerable, so we have to
+        // enumerate them rather directly.
+        jsg::JsArray properties = protoObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+            jsg::PropertyFilter::SKIP_SYMBOLS, jsg::IndexFilter::SKIP_INDICES);
+        for (auto i: kj::zeroTo(properties.size())) {
+          auto name = properties.get(js, i).toString(js);
+          if (name == "constructor"_kj) {
+            // Don't treat special method `constructor` as an exported handler.
+            continue;
+          }
+
+          if (!ignoredHandlers.contains(name)) {
+            // Only report each method name once, even if it overrides a method in a superclass.
+            seenNames.upsert(kj::mv(name), [&](auto&, auto&&) {});
+          }
+        }
+
+        proto = protoObj.getPrototype(js);
+      }
+    };
+
     KJ_IF_SOME(c, worker.impl->context) {
       // Service workers syntax.
       auto handlerNames = c->getHandlerNames();
@@ -2163,7 +2203,6 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       errorReporter.addEntrypoint(kj::none, handlers.releaseAsArray());
     } else {
       auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
-        kj::Vector<kj::String> methods;
         auto handle = exported.self.getHandle(js);
         if (handle->IsArray()) {
           // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
@@ -2173,15 +2212,28 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           //   hence we will see it here. Rather than try to correct this inconsistency between
           //   struct and dict handling (which could have unintended consequences), let's just
           //   work around by ignoring arrays here.
+          errorReporter.addEntrypoint(name, kj::Array<kj::String>());
         } else {
+          // Use a HashSet to avoid duplicates when methods exist both as own properties
+          // and in the prototype chain
+          kj::HashSet<kj::String> methodSet;
+
+          // First, check for own properties (like a plain object literal)
           auto dict = js.toDict(handle);
           for (auto& field: dict.fields) {
             if (!ignoredHandlers.contains(field.name)) {
-              methods.add(kj::mv(field.name));
+              methodSet.upsert(kj::mv(field.name), [&](auto&, auto&&) {});
             }
           }
+
+          // Then, check for methods in the prototype chain (like a class instance)
+          js.withinHandleScope([&]() {
+            collectMethodsFromPrototypeChain(jsg::JsObject(handle).getPrototype(js), methodSet);
+          });
+
+          // Convert HashSet to Array for reporting
+          errorReporter.addEntrypoint(name, KJ_MAP(n, methodSet) { return kj::mv(n); });
         }
-        errorReporter.addEntrypoint(name, methods.releaseAsArray());
       };
 
       auto getEntrypointName = [&](kj::StringPtr key) -> kj::Maybe<kj::StringPtr> {
@@ -2211,52 +2263,20 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         }
       }
 
-      auto getHandlersForClass = [&](EntrypointClass& entrypointClass) -> kj::Array<kj::String> {
-        kj::HashSet<kj::String> seenNames;
-        js.withinHandleScope([&]() {
-          // Find the prototype for `Object` by creating one.
-          auto obj = js.obj();
-          jsg::JsValue prototypeOfObject = obj.getPrototype(js);
-
-          // Walk the prototype chain.
-          jsg::JsObject ctor(KJ_ASSERT_NONNULL(entrypointClass.tryGetHandle(js.v8Isolate)));
-          jsg::JsValue proto = ctor.get(js, "prototype");
-          for (;;) {
-            auto protoObj = JSG_REQUIRE_NONNULL(proto.tryCast<jsg::JsObject>(), TypeError,
-                "Exported entrypoint class's prototype chain does not end in Object.");
-            if (protoObj == prototypeOfObject) {
-              // Reached the prototype for `Object`. Stop here.
-              break;
-            }
-
-            // Awkwardly, the prototype's members are not typically enumerable, so we have to
-            // enumerate them rather directly.
-            jsg::JsArray properties =
-                protoObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
-                    jsg::PropertyFilter::SKIP_SYMBOLS, jsg::IndexFilter::SKIP_INDICES);
-            for (auto i: kj::zeroTo(properties.size())) {
-              auto name = properties.get(js, i).toString(js);
-              if (name == "constructor"_kj) {
-                // Don't treat special method `constructor` as an exported handler.
-                continue;
-              }
-
-              // Only report each method name once, even if it overrides a method in a superclass.
-              seenNames.upsert(kj::mv(name), [&](auto&, auto&&) {});
-            }
-
-            proto = protoObj.getPrototype(js);
-          }
-        });
-        return KJ_MAP(n, seenNames) { return kj::mv(n); };
-      };
-
       for (auto& entry: worker.impl->workflowClasses) {
         KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
           // We also want to check for handlers in workflows - we primarily want to see if the provided worker
           // has exposed the `run` handler inside of the class.
-          auto methods = getHandlersForClass(entry.value);
-          errorReporter.addWorkflowClass(entrypointName, kj::mv(methods));
+          kj::HashSet<kj::String> seenNames;
+
+          js.withinHandleScope([&]() {
+            // For stateless classes, we need to get the class's prototype property
+            jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
+            jsg::JsValue proto = ctor.get(js, "prototype");
+            collectMethodsFromPrototypeChain(proto, seenNames);
+          });
+
+          errorReporter.addWorkflowClass(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
         } else {
           // Similiar to Durable Objects, Workflow cannot be the default entrypoint (at the time of writing).
           LOG_PERIODICALLY(ERROR,
@@ -2270,8 +2290,16 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         // prototype, and its prototype's prototype, and so on, until we get to Object's
         // prototype, which we ignore.
         auto entrypointName = getEntrypointName(entry.key);
-        auto methods = getHandlersForClass(entry.value);
-        errorReporter.addEntrypoint(entrypointName, kj::mv(methods));
+        kj::HashSet<kj::String> seenNames;
+
+        js.withinHandleScope([&]() {
+          // For stateless classes, we need to get the class's prototype property
+          jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
+          jsg::JsValue proto = ctor.get(js, "prototype");
+          collectMethodsFromPrototypeChain(proto, seenNames);
+        });
+
+        errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
       }
     }
   });
@@ -3460,6 +3488,19 @@ Worker::Actor::Actor(const Worker& worker,
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
   KJ_IF_SOME(info, impl->classInstance.tryGet<ActorClassInfo*>()) {
+    // IMPORTANT: We need to set the state to "Initializing" synchronously, before
+    // ensureConstructedImpl() actually executes and acquires the input lock.
+    // This prevents multiple concurrent initialization attempts if multiple calls to
+    // ensureConstructed() arrive back-to-back.
+    //
+    // This doesn't create a race condition with getHandler() because InputGate::wait()
+    // synchronously adds the caller to the wait queue, even though it completes
+    // asynchronously. Any call to getHandler() that arrives after this point will
+    // have to wait for the input lock, which is only acquired and released by
+    // ensureConstructedImpl() when it completes initialization.
+    //
+    // So the "actor still initializing" error in getHandler() should be impossible
+    // unless a code path is bypassing the input lock mechanism.
     context.addWaitUntil(ensureConstructedImpl(context, *info));
     impl->classInstance = Impl::Initializing();
   }
@@ -3468,56 +3509,60 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
   InputGate::Lock inputLock = co_await impl->inputGate.wait();
 
-  bool containerRunning = false;
-  KJ_IF_SOME(c, impl->container) {
-    // We need to do an RPC to check if the container is running.
-    // TODO(perf): It would be nice if we could have started this RPC earlier, e.g. in parallel
-    //   with starting the script, and also if we could save the status across hibernations. But
-    //   that would require some refactoring, and this RPC should (eventally) be local, so it's
-    //   not a huge deal.
-    auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
-    containerRunning = status.getRunning();
-  }
-
-  co_await context
-      .run(
-          [this, &info, containerRunning](Worker::Lock& lock) {
-    jsg::Lock& js = lock;
-
-    kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
-    KJ_IF_SOME(c, impl->actorCache) {
-      storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
+  try {
+    bool containerRunning = false;
+    KJ_IF_SOME(c, impl->container) {
+      // We need to do an RPC to check if the container is running.
+      // TODO(perf): It would be nice if we could have started this RPC earlier, e.g. in parallel
+      //   with starting the script, and also if we could save the status across hibernations. But
+      //   that would require some refactoring, and this RPC should (eventally) be local, so it's
+      //   not a huge deal.
+      auto status = co_await c.statusRequest(capnp::MessageSize{4, 0}).send();
+      containerRunning = status.getRunning();
     }
-    auto handler = info.cls(lock,
-        jsg::alloc<api::DurableObjectState>(cloneId(),
-            jsg::JsRef<jsg::JsValue>(
-                js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-            kj::mv(storage), kj::mv(impl->container), containerRunning),
-        KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
-    // HACK: We set handler.env to undefined because we already passed the real env into the
-    //   constructor, and we want the handler methods to act like they take just one parameter.
-    //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
-    //   on the actor's state field instead.
-    handler.env = js.v8Ref(js.v8Undefined());
-    handler.ctx = kj::none;
-    handler.missingSuperclass = info.missingSuperclass;
+    co_await context.run([this, &info, containerRunning](Worker::Lock& lock) {
+      jsg::Lock& js = lock;
 
-    impl->classInstance = kj::mv(handler);
-  }, kj::mv(inputLock))
-      .catch_([this](kj::Exception&& e) {
+      kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
+      KJ_IF_SOME(c, impl->actorCache) {
+        storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
+      }
+      auto handler = info.cls(lock,
+          jsg::alloc<api::DurableObjectState>(cloneId(),
+              jsg::JsRef<jsg::JsValue>(
+                  js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
+              kj::mv(storage), kj::mv(impl->container), containerRunning),
+          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+      // HACK: We set handler.env to undefined because we already passed the real env into the
+      //   constructor, and we want the handler methods to act like they take just one parameter.
+      //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
+      //   on the actor's state field instead.
+      handler.env = js.v8Ref(js.v8Undefined());
+      handler.ctx = kj::none;
+      handler.missingSuperclass = info.missingSuperclass;
+
+      impl->classInstance = kj::mv(handler);
+    }, inputLock.addRef());
+    // We addRef() the inputLock above rather than kj::mv() it so that the lock remains held
+    // through the catch block below, if an exception is thrown. This is important since we
+    // MUST update `impl->classInstance` to something other than `Initializing` before we
+    // release the lock.
+  } catch (...) {
+    // Get the KJ exception
+    auto e = kj::getCaughtExceptionAsKj();
+
     auto msg = e.getDescription();
-
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
       // If we already set up a brokenness reason, we shouldn't override it.
-
       auto description = jsg::annotateBroken(msg, "broken.constructorFailed");
       e.setDescription(kj::mv(description));
     }
 
     impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
     impl->classInstance = kj::mv(e);
-  });
+  }
 }
 
 Worker::Actor::~Actor() noexcept(false) {

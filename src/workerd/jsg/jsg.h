@@ -7,24 +7,25 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
-#include "macro-meta.h"
 #include "util.h"
 #include "wrappable.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
 
 #include <v8-external-memory-accounter.h>
+#include <v8-forward.h>
+#include <v8-locker.h>
 #include <v8-profiler.h>
-#include <v8.h>
+#include <v8-regexp.h>
 
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
-
-#include <type_traits>
+#include <kj/time.h>
 
 using kj::byte;
 using kj::uint;
@@ -587,7 +588,7 @@ using HasGetTemplateOverload =
       JSG_STRING_LITERAL(__VA_ARGS__)
 
 // Like JSG_STRUCT_TS_OVERRIDE, however it enables dynamic selection of TS_OVERRIDE.
-// Should be placed adjacent to the JSG_STRUCT delcaration, inside the same struct definition.
+// Should be placed adjacent to the JSG_STRUCT declaration, inside the same struct definition.
 #define JSG_STRUCT_TS_OVERRIDE_DYNAMIC(...)                                                        \
   static void jsgConfiguration(__VA_ARGS__);                                                       \
   template <typename Registry>                                                                     \
@@ -1048,6 +1049,31 @@ class ByteString: public kj::String {
   //   have access to the IoContext to print a warning in the inspector.
   //
   //   We default the enum to NONE so that ByteString(kj::str(otherHeader)) works as expected.
+};
+
+// A USVString has the exact same representation as a kj::String, but we guarantee that it meets
+// the WHATWG definition of a "scalar value string". Particularly, a USVString will never contain
+// invalid surrogate characters. A USVString should be used when implementing a Web API that
+// requires this behaviour.
+// See <https://infra.spec.whatwg.org/#scalar-value-string>
+class USVString: public kj::String {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
+};
+
+// A DOMString has the exact same representation as a kj::String, but may contain WTF-8 encoded
+// data like unpaired surrogate characters, that are not strictly valid in UTF-8. A DOMString
+// should be used when implementing a Web API that requires this behaviour, or when an explicit
+// decision is made to accept potentially invalid strings.
+class DOMString: public kj::String {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  explicit DOMString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
 };
 
 // A Dict<V, K> in C++ corresponds to a JavaScript object that is being used as a string -> value
@@ -2006,8 +2032,8 @@ class PropertyReflection {
 };
 
 template <typename T>
-concept CoercibleType =
-    kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>();
+concept CoercibleType = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>() ||
+    kj::isSameType<DOMString, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>();
 // When updating this list, be sure to keep the corresponding checks in the NonCoercibleWrapper
 // class in value.h updated as well.
 
@@ -2019,7 +2045,7 @@ concept CoercibleType =
 //
 // Here, T can be only one of several types that support coercion:
 //
-// * kj::String (value must be a string)
+// * kj::String, jsg::USVString, jsg::DOMString (value must be a string)
 // * bool (value must be a boolean)
 // * double (value must be a number)
 //
@@ -2679,6 +2705,27 @@ class Lock {
   // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
 
+  // Sets an env value that will be expressed on the process.env
+  // if/when nodejs-compat mode is used.
+  virtual void setProcessEnvField(const JsValue& name, const JsValue& value) = 0;
+
+  // Returns the process.env base object.
+  virtual JsObject getProcessEnv(bool release = false) = 0;
+
+  // Store the worker environment.
+  virtual void setWorkerEnv(Value value) = 0;
+
+  // Retrieve the worker environment.
+  virtual kj::Maybe<Value> getWorkerEnv() = 0;
+
+  // Resolve an internal module namespace from the given specifier.
+  // This variation can be used only for internal built-ins.
+  kj::Maybe<JsObject> resolveInternalModule(kj::StringPtr specifier);
+
+  // Resolve a module namespace from the given specifier.
+  // This variation includes modules from the worker bundle.
+  kj::Maybe<JsObject> resolveModule(kj::StringPtr specifier);
+
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
   // a kj promise coroutine. Note that this only blocks directly passing the Lock
@@ -2832,14 +2879,16 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 }  // namespace workerd::jsg
 
 // clang-format off
-// These two includes are needed for the JSG type glue macros to work.
-#include "buffersource.h"
+// These includes are needed for the JSG type glue macros to work.
 #include "modules.h"
 #include "resource.h"
-#include "dom-exception.h"
-#include "struct.h"
-#include "promise.h"
-#include "function.h"
-#include "iterator.h"
 #include "jsvalue.h"
 // clang-format on
+
+// The main JSG API no longer depends on the Type Wrapper, but to avoid extensive changes in
+// external code using JSG we still want it to be available when including jsg.h. This technically
+// violates Bazel's encapsulation philosophy (type-wrapper.h should not be visible from jsg.h), so
+// we only make jsg.h available for external code as part of the main jsg target including type-wrapper.h.
+#ifndef JSG_IMPLEMENTATION
+#include <workerd/jsg/type-wrapper.h>
+#endif  // JSG_IMPLEMENTATION

@@ -5,6 +5,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/rtti-test.capnp.h>
 #include <workerd/jsg/rtti.h>
+#include <workerd/jsg/type-wrapper.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>

@@ -23,14 +23,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-'use strict';
-
 import { Buffer } from 'node-internal:internal_buffer';
 
-import { default as cryptoImpl } from 'node-internal:crypto';
+import { default as cryptoImpl, type ECDHFormat } from 'node-internal:crypto';
 type ArrayLike = cryptoImpl.ArrayLike;
 
 import {
@@ -43,9 +38,15 @@ import {
 import {
   ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 
-import { validateInt32, validateObject } from 'node-internal:validators';
+import {
+  validateInt32,
+  validateObject,
+  validateOneOf,
+  validateString,
+} from 'node-internal:validators';
 
 import {
   isArrayBufferView,
@@ -60,19 +61,38 @@ import {
 
 const DH_GENERATOR = 2;
 
-interface DiffieHellman {
-  [kHandle]: cryptoImpl.DiffieHellmanHandle;
+declare class SharedDiffieHellman {
+  public generateKeys: typeof dhGenerateKeys;
+  public computeSecret: typeof dhComputeSecret;
+  public getPrime: typeof dhGetPrime;
+  public getGenerator: typeof dhGetGenerator;
+  public getPublicKey: typeof dhGetPublicKey;
+  public getPrivateKey: typeof dhGetPrivateKey;
+  public setPrivateKey: typeof dhSetPrivateKey;
+  public setPublicKey: typeof dhSetPublicKey;
 }
 
-let DiffieHellman = function (
-  this: DiffieHellman,
+declare class DiffieHellman extends SharedDiffieHellman {
+  public [kHandle]: cryptoImpl.DiffieHellmanHandle;
+
+  public constructor(
+    sizeOrKey: number | ArrayLike,
+    keyEncoding?: number | string,
+    generator?: number | ArrayLike,
+    genEncoding?: string
+  );
+}
+
+function DiffieHellman(
+  this: unknown,
   sizeOrKey: number | ArrayLike,
   keyEncoding?: number | string,
   generator?: number | ArrayLike,
   genEncoding?: string
 ): DiffieHellman {
-  if (!(this instanceof DiffieHellman))
+  if (!(this instanceof DiffieHellman)) {
     return new DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding);
+  }
   if (
     typeof sizeOrKey !== 'number' &&
     typeof sizeOrKey !== 'string' &&
@@ -97,7 +117,7 @@ let DiffieHellman = function (
     keyEncoding !== 'buffer' &&
     !Buffer.isEncoding(keyEncoding)
   ) {
-    genEncoding = generator as any;
+    genEncoding = generator as string;
     generator = keyEncoding;
     keyEncoding = 'utf-8'; // default encoding
   }
@@ -122,50 +142,39 @@ let DiffieHellman = function (
     );
   }
 
-  this[kHandle] = new cryptoImpl.DiffieHellmanHandle(
-    sizeOrKey as any,
-    generator as any
-  );
+  this[kHandle] = new cryptoImpl.DiffieHellmanHandle(sizeOrKey, generator);
   Object.defineProperty(DiffieHellman.prototype, 'verifyError', {
-    get: function () {
+    get: function (this: DiffieHellman) {
       return this[kHandle].getVerifyError();
     },
     configurable: true,
     enumerable: true,
   });
   return this;
-} as any as {
-  new (
-    sizeOrKey: number | ArrayLike,
-    keyEncoding?: number | string,
-    generator?: number | ArrayLike,
-    genEncoding?: string
-  ): DiffieHellman;
-};
-
-interface DiffieHellmanGroup {
-  [kHandle]: cryptoImpl.DiffieHellmanHandle;
 }
 
-let DiffieHellmanGroup = function (
-  this: DiffieHellmanGroup,
-  name: string
-): DiffieHellmanGroup {
-  if (!(this instanceof DiffieHellmanGroup))
+declare class DiffieHellmanGroup extends SharedDiffieHellman {
+  public [kHandle]: cryptoImpl.DiffieHellmanHandle;
+  public constructor(name: string);
+}
+
+function DiffieHellmanGroup(this: unknown, name: string): DiffieHellmanGroup {
+  if (!(this instanceof DiffieHellmanGroup)) {
     return new DiffieHellmanGroup(name);
+  }
 
   // The C++-based handle is shared between both classes, so DiffieHellmanGroupHandle() is merely
   // a different constructor for a DiffieHellmanHandle.
   this[kHandle] = cryptoImpl.DiffieHellmanGroupHandle(name);
   Object.defineProperty(DiffieHellmanGroup.prototype, 'verifyError', {
-    get: function () {
+    get: function (this: DiffieHellmanGroup): number {
       return this[kHandle].getVerifyError();
     },
     configurable: true,
     enumerable: true,
   });
   return this;
-} as any as { new (name: string): DiffieHellmanGroup };
+}
 
 DiffieHellmanGroup.prototype.generateKeys =
   DiffieHellman.prototype.generateKeys = dhGenerateKeys;
@@ -270,7 +279,7 @@ export interface DiffieHellmanKeyPair {
   privateKey: PrivateKeyObject;
 }
 
-export function diffieHellman(options: DiffieHellmanKeyPair) {
+export function diffieHellman(options: DiffieHellmanKeyPair): Buffer {
   validateObject(options, 'options');
   const { publicKey, privateKey } = options;
   if (!isKeyObject(publicKey)) {
@@ -297,15 +306,182 @@ export function diffieHellman(options: DiffieHellmanKeyPair) {
       privateKey
     );
   }
-  if (
-    publicKey.asymmetricKeyType !== 'dh' ||
-    privateKey.asymmetricKeyType !== 'dh'
-  ) {
-    throw new ERR_INVALID_ARG_TYPE('options', 'DiffieHellman keys', options);
+  if (publicKey.asymmetricKeyType !== privateKey.asymmetricKeyType) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options.publicKey.asymmetricKeyType',
+      publicKey.asymmetricKeyType,
+      'must equal privateKey.asymmetricKeyType'
+    );
   }
   const res = cryptoImpl.statelessDH(
     getKeyObjectHandle(privateKey),
     getKeyObjectHandle(publicKey)
   );
   return Buffer.from(res);
+}
+
+// =============================================================================
+
+export interface ECDH {
+  [kHandle]: cryptoImpl.ECDHHandle;
+  computeSecret(
+    otherPublicKey: string | ArrayBufferView | ArrayBuffer,
+    inputEncoding?: string,
+    outputEncoding?: string
+  ): Buffer | string;
+  generateKeys(encoding?: string, format?: string): Buffer | string;
+  getPrivateKey(encoding?: string): Buffer | string;
+  getPublicKey(encoding?: string, format?: string): Buffer | string;
+  setPrivateKey(
+    key: string | ArrayBufferView | ArrayBuffer,
+    encoding?: string
+  ): void;
+}
+
+export const ECDH = function (this: ECDH, curveName: string) {
+  if (!(this instanceof ECDH)) {
+    return new ECDH(curveName);
+  }
+  validateString(curveName, 'curveName');
+  this[kHandle] = new cryptoImpl.ECDHHandle(curveName);
+  return this;
+} as unknown as {
+  new (curveName: string): ECDH;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+ECDH.prototype.computeSecret = function (
+  this: ECDH,
+  otherPublicKey: string | ArrayBufferView | ArrayBuffer,
+  inputEncoding?: string,
+  outputEncoding?: string
+): Buffer | string {
+  if (typeof otherPublicKey === 'string') {
+    otherPublicKey = Buffer.from(otherPublicKey, inputEncoding);
+  }
+  if (!isArrayBufferView(otherPublicKey)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'otherPublicKey',
+      ['string', 'Buffer', 'TypedArray', 'DataView'],
+      otherPublicKey
+    );
+  }
+  if (inputEncoding != null) {
+    validateString(inputEncoding, 'inputEncoding');
+  }
+  if (outputEncoding != null) {
+    validateString(outputEncoding, 'outputEncoding');
+  }
+  const ret = this[kHandle].computeSecret(otherPublicKey);
+  if (typeof outputEncoding === 'string') {
+    return Buffer.from(ret).toString(outputEncoding);
+  }
+  return Buffer.from(ret);
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+ECDH.prototype.generateKeys = function (
+  this: ECDH,
+  encoding?: string,
+  format?: string
+): Buffer | string {
+  if (encoding != null) {
+    validateString(encoding, 'encoding');
+  }
+  if (format != null) {
+    validateOneOf(format, 'format', ['compressed', 'uncompressed', 'hybrid']);
+  }
+  this[kHandle].generateKeys();
+  return this.getPublicKey(encoding, format);
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+ECDH.prototype.getPrivateKey = function (
+  this: ECDH,
+  encoding?: string
+): Buffer | string {
+  if (encoding != null) {
+    validateString(encoding, 'encoding');
+  }
+  const pvt = this[kHandle].getPrivateKey();
+  if (typeof encoding === 'string') {
+    return Buffer.from(pvt).toString(encoding);
+  }
+  return Buffer.from(pvt);
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+ECDH.prototype.getPublicKey = function (
+  this: ECDH,
+  encoding?: string,
+  format: ECDHFormat = 'uncompressed'
+): Buffer | string {
+  if (encoding != null) {
+    validateString(encoding, 'encoding');
+  }
+  validateOneOf(format, 'format', ['compressed', 'uncompressed', 'hybrid']);
+  const pub = this[kHandle].getPublicKey(format);
+  if (typeof encoding === 'string') {
+    return Buffer.from(pub).toString(encoding);
+  }
+  return Buffer.from(pub);
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+ECDH.prototype.setPrivateKey = function (
+  this: ECDH,
+  key: string | ArrayBufferView | ArrayBuffer,
+  encoding?: string
+): void {
+  if (encoding != null) {
+    validateString(encoding, 'encoding');
+  }
+  if (typeof key === 'string') {
+    key = Buffer.from(key, encoding);
+  }
+  if (!isArrayBufferView(key)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'key',
+      ['string', 'Buffer', 'TypedArray', 'DataView'],
+      key
+    );
+  }
+  this[kHandle].setPrivateKey(key);
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-member-access
+(ECDH as any).convertKey = function (
+  key: string | ArrayBufferView | ArrayBuffer,
+  curve: string,
+  inputEncoding?: string,
+  outputEncoding?: string,
+  format: ECDHFormat = 'uncompressed'
+): Buffer | string {
+  if (typeof key === 'string') {
+    key = Buffer.from(key, inputEncoding);
+  }
+  if (!isArrayBufferView(key)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'key',
+      ['string', 'Buffer', 'TypedArray', 'DataView'],
+      key
+    );
+  }
+  validateString(curve, 'curve');
+  if (inputEncoding != null) {
+    validateString(inputEncoding, 'inputEncoding');
+  }
+  if (outputEncoding != null) {
+    validateString(outputEncoding, 'outputEncoding');
+  }
+  validateOneOf(format, 'format', ['compressed', 'uncompressed', 'hybrid']);
+  const ret = cryptoImpl.ECDHHandle.convertKey(key, curve, format);
+  if (typeof outputEncoding === 'string') {
+    return Buffer.from(ret).toString(outputEncoding);
+  }
+  return Buffer.from(ret);
+};
+
+export function createECDH(curveName: string): ECDH {
+  return new ECDH(curveName);
 }

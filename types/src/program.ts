@@ -42,7 +42,7 @@ export function createMemoryProgram(
     getDefaultLibFileName(_options: ts.CompilerOptions): string {
       return "";
     },
-    getDefaultLibLocation() {
+    getDefaultLibLocation(): string {
       return "/node_modules/typescript/lib";
     },
     getNewLine(): string {

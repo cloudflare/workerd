@@ -8,8 +8,12 @@
 // Handles wrapping a C++ function so that it can be called from JavaScript, and vice versa.
 
 #include "jsg.h"
-#include "meta.h"
 #include "wrappable.h"
+
+#include <workerd/jsg/meta.h>
+
+#include <v8-context.h>
+#include <v8-function.h>
 
 #include <kj/function.h>
 

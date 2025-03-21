@@ -56,7 +56,7 @@ To update the version of V8 used by workerd, the steps are:
    the command would be:
 
    ```sh
-   git format-patch --full-index -k --no-signature --no-stat HEAD~19
+   git format-patch --full-index -k --no-signature --no-stat --zero-commit HEAD~19
    ```
 
 8. Remove the existing patches from `workerd/patches/v8` and copy over the latest generated patches

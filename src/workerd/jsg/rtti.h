@@ -247,6 +247,8 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
   F(kj::StringPtr)                                                                                 \
   F(v8::String)                                                                                    \
   F(ByteString)                                                                                    \
+  F(USVString)                                                                                     \
+  F(DOMString)                                                                                     \
   F(jsg::JsString)
 
 FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)
@@ -379,6 +381,7 @@ FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
 #define FOR_EACH_ARRAY_TYPE(F)                                                                     \
   F(kj::Array)                                                                                     \
   F(kj::ArrayPtr)                                                                                  \
+  F(kj::HashSet)                                                                                   \
   F(jsg::Sequence)                                                                                 \
   F(jsg::AsyncGenerator)
 

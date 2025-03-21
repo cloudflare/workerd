@@ -7,15 +7,20 @@
 //
 // The TypeWrapper knows how to convert a variety of types between C++ and JavaScript.
 
-#include "buffersource.h"
-#include "function.h"
-#include "jsvalue.h"
-#include "resource.h"
-#include "struct.h"
-#include "util.h"
-#include "value.h"
-#include "web-idl.h"
-#include "wrappable.h"
+#include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/dom-exception.h>
+#include <workerd/jsg/function.h>
+#include <workerd/jsg/iterator.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/resource.h>
+#include <workerd/jsg/struct.h>
+#include <workerd/jsg/util.h>
+#include <workerd/jsg/value.h>
+#include <workerd/jsg/web-idl.h>
+#include <workerd/jsg/wrappable.h>
+
+#include <v8-wasm.h>
 
 namespace workerd::jsg {
 
@@ -378,6 +383,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public MaybeWrapper<Self>,
                    public OneOfWrapper<Self>,
                    public ArrayWrapper<Self>,
+                   public SetWrapper<Self>,
                    public SequenceWrapper<Self>,
                    public GeneratorWrapper<Self>,
                    public ArrayBufferWrapper<Self>,
@@ -435,6 +441,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(MaybeWrapper<Self>);
   USING_WRAPPER(OneOfWrapper<Self>);
   USING_WRAPPER(ArrayWrapper<Self>);
+  USING_WRAPPER(SetWrapper<Self>);
   USING_WRAPPER(SequenceWrapper<Self>);
   USING_WRAPPER(GeneratorWrapper<Self>);
   USING_WRAPPER(ArrayBufferWrapper<Self>);
@@ -575,5 +582,25 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
     return TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, kj::none);
   }
 };
+
+// This macro helps cut down on template spam in error messages. Instead of instantiating Isolate
+// directly, do:
+//
+//     JSG_DECLARE_ISOLATE_TYPE(MyIsolate, SomeApiType, AnotherApiType, ...);
+//
+// `MyIsolate` becomes your custom Isolate type, which will support wrapping all of the listed
+// API types.
+#define JSG_DECLARE_ISOLATE_TYPE(Type, ...)                                                        \
+  class Type##_TypeWrapper;                                                                        \
+  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>        \
+      Type##_TypeWrapperBase;                                                                      \
+  class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
+   public:                                                                                         \
+    using Type##_TypeWrapperBase::TypeWrapper;                                                     \
+  };                                                                                               \
+  class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
+   public:                                                                                         \
+    using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
+  }
 
 }  // namespace workerd::jsg

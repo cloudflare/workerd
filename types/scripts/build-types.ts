@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import prettier from "prettier";
 import ts from "typescript";
-import { SourcesMap, createMemoryProgram } from "../src/program.js";
+import { SourcesMap, createMemoryProgram } from "../src/program";
 import { getFilePath } from "../src/utils";
 
 const OUTPUT_PATH = getFilePath("types/definitions");
@@ -54,7 +54,7 @@ function loadLibFiles(): SourcesMap {
   return lib;
 }
 
-function checkDiagnostics(sources: SourcesMap) {
+function checkDiagnostics(sources: SourcesMap): void {
   const program = createMemoryProgram(
     sources,
     undefined,
@@ -105,8 +105,11 @@ function spawnWorkerd(
       { stdio: ["inherit", "inherit", "inherit", "pipe"] }
     );
     const exitPromise = events.once(workerdProcess, "exit");
-    workerdProcess.stdio?.[3]?.on("data", (chunk) => {
-      const message = JSON.parse(chunk.toString().trim());
+    workerdProcess.stdio[3]?.on("data", (chunk: Buffer): void => {
+      const message = JSON.parse(chunk.toString().trim()) as {
+        event: string
+        port: number
+      };
       assert.strictEqual(message.event, "listen");
       resolve({
         url: new URL(`http://127.0.0.1:${message.port}`),
@@ -122,7 +125,7 @@ function spawnWorkerd(
 async function buildEntrypoint(
   entrypoint: (typeof ENTRYPOINTS)[number],
   workerUrl: URL
-) {
+): Promise<void> {
   const url = new URL(`/${entrypoint.compatDate}.bundle`, workerUrl);
   const response = await fetch(url);
   if (!response.ok) throw new Error(await response.text());
@@ -146,11 +149,11 @@ async function buildEntrypoint(
   }
 }
 
-async function buildAllEntrypoints(workerUrl: URL) {
+async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
   for (const entrypoint of ENTRYPOINTS)
     await buildEntrypoint(entrypoint, workerUrl);
 }
-export async function main() {
+export async function main(): Promise<void> {
   const worker = await spawnWorkerd(getFilePath("types/scripts/config.capnp"));
   try {
     await buildAllEntrypoints(worker.url);
