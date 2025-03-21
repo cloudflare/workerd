@@ -112,5 +112,5 @@ const logLegacy :Workerd.Worker = (
     (name = "worker", esModule = embed "tail-worker-test-dummy.js")
   ],
   compatibilityDate = "2024-10-14",
-  streamingTails = ["log"],
+  # streamingTails = ["log"],
 );

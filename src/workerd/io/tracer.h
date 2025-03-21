@@ -148,6 +148,7 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
+  void addTailStreamWriter(kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       LogLevel logLevel,
@@ -175,6 +176,8 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   // Sets the main trace of this Tracer to match the content of `reader`. This is used in the
   // parent process after receiving a trace from a process sandbox.
   void setTrace(rpc::Trace::Reader reader);
+
+  kj::Own<Trace> getTrace();
 
   kj::Own<WeakRef<WorkerTracer>> addWeakRef() {
     return self->addRef();

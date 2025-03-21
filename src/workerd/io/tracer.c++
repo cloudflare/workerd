@@ -24,6 +24,7 @@ TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
     : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
 
 void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::Event&& event) {
+  KJ_LOG(WARNING, "report invoked", event.is<tracing::Onset>(), event.is<tracing::Outcome>());
   // Becomes a non-op if a terminal event (close or hibernate) has been reported.
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
@@ -131,6 +132,10 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
+void WorkerTracer::addTailStreamWriter(
+    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter) {
+  this->maybeTailStreamWriter = kj::mv(maybeTailStreamWriter);
+}
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
@@ -311,4 +316,9 @@ void WorkerTracer::extractTrace(rpc::Trace::Builder builder) {
 void WorkerTracer::setTrace(rpc::Trace::Reader reader) {
   trace->mergeFrom(reader, pipelineLogLevel);
 }
+
+kj::Own<Trace> WorkerTracer::getTrace() {
+  return kj::addRef(*trace);
+}
+
 }  // namespace workerd
