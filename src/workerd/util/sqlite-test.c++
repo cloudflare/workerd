@@ -1487,13 +1487,11 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
-  int capturedErrorCode = 0;
   kj::String capturedErrorMessage = nullptr;
 
   // Register a critical error callback
-  db.onCriticalError([&](int sqliteErrorCode, kj::StringPtr message) {
+  db.onCriticalError([&](kj::StringPtr message) {
     criticalErrorCallbackCalled = true;
-    capturedErrorCode = sqliteErrorCode;
     capturedErrorMessage = kj::str(message);
   });
 
@@ -1513,12 +1511,10 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   )")));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
-  KJ_EXPECT(capturedErrorCode == SQLITE_IOERR);
   KJ_EXPECT(capturedErrorMessage.startsWith("disk I/O error"));
 }
 
-void testCriticalError(int expectedErrorCode,
-    const char* expectedErrorMessage,
+void testCriticalError(const char* expectedErrorMessage,
     kj::Function<void(SqliteDatabase&, SqliteDatabase::Vfs& vfs)> triggerErrorFn) {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1526,26 +1522,22 @@ void testCriticalError(int expectedErrorCode,
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
-  int capturedErrorCode = 0;
   kj::String capturedErrorMessage = nullptr;
 
   // Register a critical error callback
-  db.onCriticalError([&](int sqliteErrorCode, kj::StringPtr message) {
+  db.onCriticalError([&](kj::StringPtr message) {
     criticalErrorCallbackCalled = true;
-    capturedErrorCode = sqliteErrorCode;
     capturedErrorMessage = kj::str(message);
   });
 
   KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
-  KJ_EXPECT(capturedErrorCode == expectedErrorCode);
   KJ_EXPECT(capturedErrorMessage.startsWith(expectedErrorMessage));
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
-  testCriticalError(
-      SQLITE_BUSY, "database is locked", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+  testCriticalError("database is locked", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
     // Create a second database connection to hold an exclusive lock
     SqliteDatabase lockDb(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
@@ -1563,15 +1555,13 @@ KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
-  testCriticalError(
-      SQLITE_FULL, "database or disk is full", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+  testCriticalError("database or disk is full", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
     // Set up a database with limited size
     db.run("PRAGMA max_page_count = 10");
     db.run("CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)");
 
     // Create a large blob to quickly fill the database
-    auto largeData = kj::heapArray<byte>(100000);  // 100KB
-    memset(largeData.begin(), 'X', largeData.size());
+    auto largeData = kj::heapArray<byte>(100000, 'X');  // 100KB
 
     // This should eventually trigger SQLITE_FULL
     db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_full VALUES (?, ?)", 1, largeData.asPtr());
@@ -1579,16 +1569,14 @@ KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
-  testCriticalError(
-      SQLITE_NOMEM, "out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+  testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
     db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
 
     // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
     db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
 
     // Create data that will exceed the memory limit
-    auto largeData = kj::heapArray<byte>(50000);  // 50KB
-    memset(largeData.begin(), 'X', largeData.size());
+    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
 
     // This operation should trigger SQLITE_NOMEM when SQLite tries to allocate
     // memory for the large parameter

@@ -197,19 +197,11 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
   }
 }
 
-void ActorSqlite::onCriticalError(int sqliteErrorCode, kj::StringPtr message) {
-  switch (sqliteErrorCode) {
-    case SQLITE_FULL:
-      JSG_FAIL_REQUIRE(Error, "Database or disk full: ", message);
-    case SQLITE_IOERR:
-      JSG_FAIL_REQUIRE(Error, "Disk I/O error: ", message);
-    case SQLITE_BUSY:
-      JSG_FAIL_REQUIRE(Error, "Database in use by another process: ", message);
-    case SQLITE_NOMEM:
-      JSG_FAIL_REQUIRE(Error, "Out of memory: ", message);
-    case SQLITE_INTERRUPT:
-      JSG_FAIL_REQUIRE(Error, "Out of memory: ", message);
-  }
+void ActorSqlite::onCriticalError(kj::StringPtr message) {
+  auto exception =
+      kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::heapString(message));
+  broken.emplace(kj::mv(exception));
+  requireNotBroken();
 }
 
 void ActorSqlite::onWrite() {

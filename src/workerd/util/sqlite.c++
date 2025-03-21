@@ -535,13 +535,13 @@ void SqliteDatabase::notifyWrite() {
 void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode, kj::StringPtr errorMessage) {
   KJ_IF_SOME(code, errorCode) {
     if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_BUSY ||
-        code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
+        code == SQLITE_NOMEM) {
 
       sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
       // The transaction was rolledback, re-enabling the auto commit mode, so we should fail
       if (sqlite3_get_autocommit(db) != 0) {
         KJ_IF_SOME(cb, onCriticalErrorCallback) {
-          cb(code, errorMessage);
+          cb(errorMessage);
         }
       }
     }
