@@ -14,7 +14,7 @@
       "type": "github_tarball",
       "owner": "google",
       "repo": "boringssl",
-      "branch": "master",
+      "branch": "main",
       // BoringSSL may subtly break backwards compatibility and behave differently than the latest
       // FIPS version, often by rejecting key values that it considers invalid/unsafe even though
       // they are still accepted by BoringSSL. Update with caution and only after confirming this

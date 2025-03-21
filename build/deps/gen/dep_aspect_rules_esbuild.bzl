@@ -3,9 +3,9 @@
 load("@//:build/http.bzl", "http_archive")
 
 TAG_NAME = "v0.21.0"
-URL = "https://api.github.com/repos/aspect-build/rules_esbuild/tarball/v0.21.0"
-STRIP_PREFIX = "aspect-build-rules_esbuild-798abd3"
-SHA256 = "695a967d5e327b239618adc421ae62120bf4d3096bbac7c3550a6a31731fb03c"
+URL = "https://github.com/aspect-build/rules_esbuild/releases/download/v0.21.0/rules_esbuild-v0.21.0.tar.gz"
+STRIP_PREFIX = "rules_esbuild-0.21.0"
+SHA256 = "550e33ddeb86a564b22b2c5d3f84748c6639b1b2b71fae66bf362c33392cbed8"
 TYPE = "tgz"
 
 def dep_aspect_rules_esbuild():
