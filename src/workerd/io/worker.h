@@ -510,6 +510,8 @@ class Worker::Api {
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
 
+  virtual NamedExport unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const = 0;
+
   struct EntrypointClasses {
     // Class constructor for WorkerEntrypoint.
     jsg::JsObject workerEntrypoint;
