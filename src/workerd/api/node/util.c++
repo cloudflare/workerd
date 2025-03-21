@@ -274,8 +274,9 @@ namespace {
     // JSG_KJ_EXCEPTION would not give us that, and we only want to incur the cost
     // of creating and capturing the stack when we actually need it.
     auto ex = KJ_ASSERT_NONNULL(js.error(message).tryCast<jsg::JsObject>());
-    tracer.addException(ioContext.now(), ex.get(js, "name"_kj).toString(js),
-        ex.get(js, "message"_kj).toString(js), ex.get(js, "stack"_kj).toString(js));
+    tracer.addException(ioContext.getInvocationSpanContext(), ioContext.now(),
+        ex.get(js, "name"_kj).toString(js), ex.get(js, "message"_kj).toString(js),
+        ex.get(js, "stack"_kj).toString(js));
     ioContext.abort(js.exceptionToKj(ex));
   } else {
     ioContext.abort(JSG_KJ_EXCEPTION(FAILED, Error, kj::mv(message)));

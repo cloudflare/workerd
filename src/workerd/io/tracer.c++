@@ -74,23 +74,28 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Array<kj::String> scriptTags,
-    kj::Maybe<kj::String> entrypoint) {
+    kj::Maybe<kj::String> entrypoint,
+    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter) {
   auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
       kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
       executionModel);
   traces.add(kj::addRef(*trace));
-  return kj::refcounted<WorkerTracer>(addRefToThis(), kj::mv(trace), pipelineLogLevel);
+  return kj::refcounted<WorkerTracer>(
+      addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter));
 }
 
 void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
   traces.add(kj::refcounted<Trace>(reader));
 }
 
-WorkerTracer::WorkerTracer(
-    kj::Rc<PipelineTracer> parentPipeline, kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel)
+WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
+    kj::Own<Trace> trace,
+    PipelineLogLevel pipelineLogLevel,
+    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
+      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)),
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
@@ -101,7 +106,10 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
 constexpr kj::LiteralStringConst logSizeExceeded =
     "[\"Log size limit exceeded: More than 128KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
 
-void WorkerTracer::addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) {
+void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    LogLevel logLevel,
+    kj::String message) {
   if (trace->exceededLogLimit) {
     return;
   }
@@ -117,6 +125,12 @@ void WorkerTracer::addLog(kj::Date timestamp, LogLevel logLevel, kj::String mess
     return;
   }
   trace->bytesUsed = newSize;
+  // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
+  // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
+  // to the legacy trace object is not needed; this will be addressed in a future refactor.
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    writer->report(context, tracing::Mark(tracing::Log(timestamp, logLevel, kj::str(message))));
+  }
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
@@ -165,8 +179,11 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
   trace->numSpans++;
 }
 
-void WorkerTracer::addException(
-    kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) {
+void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    kj::String name,
+    kj::String message,
+    kj::Maybe<kj::String> stack) {
   if (trace->exceededExceptionLimit) {
     return;
   }
@@ -188,11 +205,18 @@ void WorkerTracer::addException(
     return;
   }
   trace->bytesUsed = newSize;
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    writer->report(context,
+        tracing::Mark(tracing::Exception(timestamp, kj::str(name), kj::str(message),
+            stack.map([](kj::String& stack) -> kj::String { return kj::str(stack); }))));
+  }
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
-void WorkerTracer::addDiagnosticChannelEvent(
-    kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) {
+void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    kj::String channel,
+    kj::Array<kj::byte> message) {
   if (trace->exceededDiagnosticChannelEventLimit) {
     return;
   }
@@ -209,10 +233,17 @@ void WorkerTracer::addDiagnosticChannelEvent(
     return;
   }
   trace->bytesUsed = newSize;
+
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    writer->report(context,
+        tracing::Mark(tracing::DiagnosticChannelEvent(
+            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))));
+  }
   trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
 }
 
-void WorkerTracer::setEventInfo(kj::Date timestamp, tracing::EventInfo&& info) {
+void WorkerTracer::setEventInfo(
+    const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
@@ -245,6 +276,11 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, tracing::EventInfo&& info) {
     KJ_CASE_ONEOF_DEFAULT {}
   }
   trace->bytesUsed = newSize;
+
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    writer->report(
+        context, tracing::Onset(cloneEventInfo(info), tracing::Onset::WorkerInfo{}, kj::none));
+  }
   trace->eventInfo = kj::mv(info);
 }
 
@@ -265,6 +301,10 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
   KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
   trace->fetchResponseInfo = kj::mv(info);
+}
+
+kj::Maybe<kj::Own<tracing::TailStreamWriter>>& WorkerTracer::getTailStreamWriter() {
+  return maybeTailStreamWriter;
 }
 
 void WorkerTracer::extractTrace(rpc::Trace::Builder builder) {
