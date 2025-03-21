@@ -752,7 +752,7 @@ static const std::set<kj::StringPtr> NODEJS_BUILTINS{"_http_agent"_kj, "_http_cl
   "domain"_kj, "events"_kj, "fs"_kj, "fs/promises"_kj, "http"_kj, "http2"_kj, "https"_kj,
   "inspector"_kj, "inspector/promises"_kj, "module"_kj, "net"_kj, "os"_kj, "path"_kj,
   "path/posix"_kj, "path/win32"_kj, "perf_hooks"_kj, "process"_kj, "punycode"_kj, "querystring"_kj,
-  "readline"_kj, "readline/promises"_kj, "repl"_kj, "stream"_kj, "stream/consumers"_kj,
+  "readline"_kj, "readline/promises"_kj, "repl"_kj, "sqlite"_kj, "stream"_kj, "stream/consumers"_kj,
   "stream/promises"_kj, "stream/web"_kj, "string_decoder"_kj, "sys"_kj, "timers"_kj,
   "timers/promises"_kj, "tls"_kj, "trace_events"_kj, "tty"_kj, "url"_kj, "util"_kj, "util/types"_kj,
   "v8"_kj, "vm"_kj, "wasi"_kj, "worker_threads"_kj, "zlib"_kj};
