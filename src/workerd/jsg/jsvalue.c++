@@ -323,8 +323,7 @@ JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options) const {
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
-    result.written =
-        inner->WriteUtf8(js.v8Isolate, buffer.begin(), buffer.size(), &result.read, options);
+    result.written = inner->WriteUtf8V2(js.v8Isolate, buffer.begin(), buffer.size(), options, &result.read);
   }
   return result;
 }
@@ -333,7 +332,9 @@ JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteOptions options) const {
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
-    result.written = inner->Write(js.v8Isolate, buffer.begin(), 0, buffer.size(), options);
+    result.written = kj::min(buffer.size(), length(js));
+    inner->WriteV2(js.v8Isolate, 0, result.written, buffer.begin(), options);
+    result.read = length(js);
   }
   return result;
 }
@@ -342,7 +343,9 @@ JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteOptions options) const {
   WriteIntoStatus result = {0, 0};
   if (buffer.size() > 0) {
-    result.written = inner->WriteOneByte(js.v8Isolate, buffer.begin(), 0, buffer.size(), options);
+    result.written = kj::min(buffer.size(), length(js));
+    inner->WriteOneByteV2(js.v8Isolate, 0, kj::min(length(js), buffer.size()), buffer.begin(), options);
+    result.read = length(js);
   }
   return result;
 }

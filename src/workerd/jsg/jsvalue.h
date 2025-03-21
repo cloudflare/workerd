@@ -250,10 +250,9 @@ class JsString final: public JsBase<v8::String, JsString> {
   static JsString concat(Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
 
   enum WriteOptions {
-    NONE = v8::String::NO_OPTIONS,
-    NO_NULL_TERMINATION = v8::String::NO_NULL_TERMINATION,
-    PRESERVE_ONE_BYTE_NULL = v8::String::PRESERVE_ONE_BYTE_NULL,
-    REPLACE_INVALID_UTF8 = v8::String::REPLACE_INVALID_UTF8,
+    NONE = v8::String::WriteFlags::kNone,
+    NULL_TERMINATION = v8::String::WriteFlags::kNullTerminate,
+    REPLACE_INVALID_UTF8 = v8::String::WriteFlags::kReplaceInvalidUtf8,
   };
 
   template <typename T>
@@ -262,9 +261,9 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   struct WriteIntoStatus {
     // The number of elements (e.g. char, byte, uint16_t) read from this string.
-    int read;
+    size_t read;
     // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
-    int written;
+    size_t written;
   };
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options = WriteOptions::NONE) const;

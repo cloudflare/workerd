@@ -468,11 +468,10 @@ namespace {
 TextEncoder::EncodeIntoResult encodeIntoImpl(
     jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
   auto result = input.writeInto(js, buffer.asArrayPtr().asChars(),
-      static_cast<jsg::JsString::WriteOptions>(
-          jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8));
+      jsg::JsString::WriteOptions::REPLACE_INVALID_UTF8);
   return TextEncoder::EncodeIntoResult{
-    .read = result.read,
-    .written = result.written,
+    .read = static_cast<int>(result.read),
+    .written = static_cast<int>(result.written),
   };
 }
 }  // namespace
