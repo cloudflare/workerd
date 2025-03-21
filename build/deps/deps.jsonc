@@ -86,7 +86,8 @@
       "name": "com_google_protobuf",
       "owner": "protocolbuffers",
       "repo": "protobuf",
-      "file_regex": "protobuf-.*\\.tar\\.gz"
+      "file_regex": "protobuf-.*\\.tar\\.gz",
+      "freeze_version": "v29.3"
     },
     {
       "type": "github_release",
