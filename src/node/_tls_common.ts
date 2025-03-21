@@ -26,7 +26,8 @@
 import {
   createSecureContext,
   SecureContext,
+  translatePeerCertificate,
 } from 'node-internal:internal_tls_common';
 
-export { createSecureContext, SecureContext };
-export default { createSecureContext, SecureContext };
+export { createSecureContext, SecureContext, translatePeerCertificate };
+export default { createSecureContext, SecureContext, translatePeerCertificate };
