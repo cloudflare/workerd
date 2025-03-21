@@ -926,7 +926,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   incomingRequest->delivered();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.now(), TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
+        TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
   }
 
   // TODO(streaming-tail): Support instrementation for streaming tail workers themselves – need to
@@ -1114,7 +1115,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
 
   auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
 
-  return kj::heap<tracing::TailStreamWriter>(
+  return kj::refcounted<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lamba holds a bare
