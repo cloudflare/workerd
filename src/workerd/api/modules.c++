@@ -20,10 +20,8 @@ kj::Maybe<jsg::JsObject> EnvModule::getCurrent(jsg::Lock& js) {
   if (FeatureFlags::get(js).getDisableImportableEnv()) return kj::none;
 
   // Otherwise, fallback to provide the stored environment.
-  return js.getWorkerEnv().map([&](const jsg::Value& val) -> jsg::JsObject {
-    auto handle = val.getHandle(js);
-    JSG_REQUIRE(handle->IsObject(), TypeError, "Expected environment to be an object.");
-    return jsg::JsObject(handle.As<v8::Object>());
+  return js.getWorkerEnv().map([&](const jsg::V8Ref<v8::Object>& val) -> jsg::JsObject {
+    return jsg::JsObject(val.getHandle(js));
   });
 }
 

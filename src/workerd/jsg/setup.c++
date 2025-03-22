@@ -428,7 +428,6 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(symbolAsyncDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
-    KJ_DEFER(envObj.Reset());
     KJ_DEFER(workerEnvObj.Reset());
 
     // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable
