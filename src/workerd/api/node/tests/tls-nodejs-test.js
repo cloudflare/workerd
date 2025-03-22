@@ -23,10 +23,18 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 import tls from 'node:tls';
-import { strictEqual, ok, rejects, throws, doesNotThrow } from 'node:assert';
+import {
+  strictEqual,
+  ok,
+  rejects,
+  throws,
+  doesNotThrow,
+  deepStrictEqual,
+} from 'node:assert';
 import { once } from 'node:events';
 import { inspect } from 'node:util';
 import net from 'node:net';
+import { translatePeerCertificate } from '_tls_common';
 
 // Tests are taken from
 // https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/parallel/test-tls-connect-abort-controller.js
@@ -638,6 +646,70 @@ export const testCheckServerIdentity = {
         `Test# ${i} failed: ${inspect(test)} \n` +
           `${test.error} != ${err?.reason}`
       );
+    });
+  },
+};
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/1b5b019de1be9259e4374ca1d6ee7b3b28c48856/test/parallel/test-tls-translate-peer-certificate.js
+export const testTlsTranslatePeerCertificate = {
+  async test() {
+    const certString = '__proto__=42\nA=1\nB=2\nC=3';
+
+    strictEqual(translatePeerCertificate(null), null);
+    strictEqual(translatePeerCertificate(undefined), null);
+
+    strictEqual(translatePeerCertificate(0), null);
+    strictEqual(translatePeerCertificate(1), 1);
+
+    deepStrictEqual(translatePeerCertificate({}), {});
+
+    // Earlier versions of Node.js parsed the issuer property but did so
+    // incorrectly. This behavior has now reached end-of-life and user-supplied
+    // strings will not be parsed at all.
+    deepStrictEqual(translatePeerCertificate({ issuer: '' }), { issuer: '' });
+    deepStrictEqual(translatePeerCertificate({ issuer: null }), {
+      issuer: null,
+    });
+    deepStrictEqual(translatePeerCertificate({ issuer: certString }), {
+      issuer: certString,
+    });
+
+    // Earlier versions of Node.js parsed the issuer property but did so
+    // incorrectly. This behavior has now reached end-of-life and user-supplied
+    // strings will not be parsed at all.
+    deepStrictEqual(translatePeerCertificate({ subject: '' }), { subject: '' });
+    deepStrictEqual(translatePeerCertificate({ subject: null }), {
+      subject: null,
+    });
+    deepStrictEqual(translatePeerCertificate({ subject: certString }), {
+      subject: certString,
+    });
+
+    deepStrictEqual(translatePeerCertificate({ issuerCertificate: '' }), {
+      issuerCertificate: null,
+    });
+    deepStrictEqual(translatePeerCertificate({ issuerCertificate: null }), {
+      issuerCertificate: null,
+    });
+    deepStrictEqual(
+      translatePeerCertificate({ issuerCertificate: { subject: certString } }),
+      { issuerCertificate: { subject: certString } }
+    );
+
+    {
+      const cert = {};
+      cert.issuerCertificate = cert;
+      deepStrictEqual(translatePeerCertificate(cert), {
+        issuerCertificate: cert,
+      });
+    }
+
+    deepStrictEqual(translatePeerCertificate({ infoAccess: '' }), {
+      infoAccess: { __proto__: null },
+    });
+    deepStrictEqual(translatePeerCertificate({ infoAccess: null }), {
+      infoAccess: null,
     });
   },
 };
