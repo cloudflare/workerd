@@ -21,5 +21,8 @@ export default {
       'Pattern: [{"pathname":"\\ud83d \\udeb2"}] Inputs: []',
     ],
   },
-  'urlpattern.https.any.js': {},
+  'urlpattern.https.any.js': {
+    comment: 'Test cases are identical to urlpattern.any.js.',
+    skipAllTests: true,
+  },
 } satisfies TestRunnerConfig;
