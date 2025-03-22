@@ -654,67 +654,6 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
   KJ_SWITCH_ONEOF(global.value) {
     KJ_CASE_ONEOF(json, Global::Json) {
       value = jsg::check(v8::JSON::Parse(context, lock.str(json.text)));
-      if (featureFlags.getPopulateProcessEnv() && featureFlags.getNodeJsCompat()) {
-        // Generally speaking, process.env has the TEXT and JSON bindings from env.
-        // TEXT bindings are simple enough and env.{name} will strictly equal
-        // process.env.{name}. With JSON bindings it a bit trickier due to architectural
-        // quirks and history in our runtime.
-        // If you set the JSON environment variable to a value that parses to a string
-        // then it will be exposed on process.env and env as that parsed string such
-        // that env.{name} will strictly equal process.env{name} like with TEXT bindings.
-        // If, however, the value parses to any type other than a string, the
-        // process.env.{name} will instead be the raw parseable JSON string and will
-        // *not* strictly equal env.{name}.
-        //
-        // So, for example, given the bindings:
-        //
-        //    (name = "FOO", json = "{}"),
-        //    (name = "BAR", json = "\"abc\""),
-        //    (name = "BAZ", json = "\"\\\"abc\\\"\"")
-        //
-        // In the worker:
-        //
-        //    env.FOO === process.env.FOO;                      // false
-        //    console.log(typeof env.FOO);                      // 'object'
-        //    console.log(typeof process.env.FOO);              // 'string'
-        //    console.log(env.FOO);                             // [object Object]
-        //    console.log(process.env.FOO);                     // '{}'
-        //    console.log(typeof JSON.parse(process.env.FOO));  // 'object'
-        //
-        //    env.BAR === process.env.BAR;                      // true
-        //    console.log(typeof env.BAR);                      // 'string'
-        //    console.log(typeof process.env.BAR);              // 'string'
-        //    console.log(env.BAR);                             // 'abc'
-        //    console.log(process.env.BAR);                     // 'abc'
-        //    console.log(typeof JSON.parse(process.env.BAR));  // throws!!
-        //
-        //    env.BAZ === process.env.BAZ;                      // true
-        //    console.log(typeof enf.BAZ);                      // 'string'
-        //    console.log(typeof process.env.BAZ);              // 'string'
-        //    console.log(env.BAZ);                             // '"abc"'
-        //    console.log(process.env.BAZ);                     // '"abc"
-        //    console.log(typeof JSON.parse(process.env.BAZ));  // 'string'
-        //
-        // JSON.parse(process.env.FOO) works because the value is a parseable
-        // JSON string. JSON.parse(process.env.BAR) throws an error because
-        // the value is not a parseable JSON string, even tho the binding uses
-        // type JSON. JSON.parse(process.env.BAZ)` works because the original
-        // JSON-encoded value was double-escaped and the result of the above
-        // v8::JSON::Parse is itself a parseable JSON string.
-        //
-        // Practically speaking this means that developers can never really
-        // count on environment variables accessed via `env` always being
-        // strictly equal to the same environment variable accessed via
-        // process.env because, despite being defined as JSON bindings,
-        // the resulting value may or may not be JSON parseable or may be
-        // parsed in one context (env) and unparsed in another (process.env).
-
-        if (value->IsString()) {
-          lock.setProcessEnvField(lock.str(global.name), jsg::JsValue(value));
-        } else {
-          lock.setProcessEnvField(lock.str(global.name), lock.str(json.text));
-        }
-      }
     }
 
     KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
@@ -800,9 +739,6 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(text, kj::String) {
       value = lock.wrap(context, kj::mv(text));
-      if (featureFlags.getPopulateProcessEnv() && featureFlags.getNodeJsCompat()) {
-        lock.setProcessEnvField(lock.str(global.name), jsg::JsValue(value));
-      }
     }
 
     KJ_CASE_ONEOF(data, kj::Array<byte>) {

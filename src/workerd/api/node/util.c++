@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "util.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 
@@ -242,7 +243,17 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
 }
 
 jsg::JsObject UtilModule::getEnvObject(jsg::Lock& js) {
-  return js.getProcessEnv(true);
+  if (FeatureFlags::get(js).getPopulateProcessEnv()) {
+    KJ_IF_SOME(env, js.getWorkerEnv()) {
+      jsg::JsValue val(env.getHandle(js));
+      KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
+        return obj;
+      }
+    }
+  }
+
+  // Default to empty object.
+  return js.obj();
 }
 
 namespace {
