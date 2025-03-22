@@ -553,7 +553,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     .featureFlagsForFl = kj::none,
   };
   if (enableCompatFlags) {
-    metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
+    metadata.featureFlagsForFl = context.getWorker()->getIsolate().getFeatureFlagsForFl();
   }
   auto httpClient =
       cacheName.map([&](kj::String& n) {
