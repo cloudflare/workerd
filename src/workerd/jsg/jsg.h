@@ -2706,10 +2706,10 @@ class Lock {
   virtual void reportError(const JsValue& value) = 0;
 
   // Store the worker environment.
-  virtual void setWorkerEnv(Value value) = 0;
+  virtual void setWorkerEnv(V8Ref<v8::Object> value) = 0;
 
   // Retrieve the worker environment.
-  virtual kj::Maybe<Value> getWorkerEnv() = 0;
+  virtual kj::Maybe<V8Ref<v8::Object>> getWorkerEnv() = 0;
 
   // Resolve an internal module namespace from the given specifier.
   // This variation can be used only for internal built-ins.
