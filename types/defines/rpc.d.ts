@@ -78,6 +78,25 @@ declare namespace Rpc {
   }
   export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
 
+  type BaseType =
+		| void
+		| undefined
+		| null
+		| boolean
+		| number
+		| bigint
+		| string
+		| TypedArray
+		| ArrayBuffer
+		| DataView
+		| Date
+		| Error
+		| RegExp
+		| ReadableStream<Uint8Array>
+		| WritableStream<Uint8Array>
+		| Request
+		| Response
+		| Headers;
   // Recursively rewrite all `Stubable` types with `Stub`s
   // prettier-ignore
   type Stubify<T> =
@@ -86,7 +105,7 @@ declare namespace Rpc {
     : T extends Set<infer V> ? Set<Stubify<V>>
     : T extends Array<infer V> ? Array<Stubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Stubify<V>>
-    : T extends Rpc.Serializable<T> ? T
+    : T extends BaseType ? T
     // When using "unknown" instead of "any", interfaces are not stubified.
     : T extends { [key: string | number]: any } ? { [K in keyof T]: Stubify<T[K]> }
     : T;
@@ -101,7 +120,7 @@ declare namespace Rpc {
     : T extends Set<infer V> ? Set<Unstubify<V>>
     : T extends Array<infer V> ? Array<Unstubify<V>>
     : T extends ReadonlyArray<infer V> ? ReadonlyArray<Unstubify<V>>
-    : T extends Rpc.Serializable<T> ? T
+    : T extends BaseType ? T
     : T extends { [key: string | number]: unknown } ? { [K in keyof T]: Unstubify<T[K]> }
     : T;
   type UnstubifyAll<A extends any[]> = { [I in keyof A]: Unstubify<A[I]> };
