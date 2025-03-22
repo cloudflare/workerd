@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
+class TailStreamWriter final: public kj::Refcounted {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -71,7 +71,8 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
       kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion,
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Array<kj::String> scriptTags,
-      kj::Maybe<kj::String> entrypoint);
+      kj::Maybe<kj::String> entrypoint,
+      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
 
   // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
   // to the host where tracing was initiated.
@@ -95,21 +96,34 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
 
 // An abstract class that defines shares functionality for tracers
 // that have different characteristics.
+// TODO(streaming-tail): When further consolidating the tail worker implementations, the interface
+// of the add* methods below should make more sense: The invocation span context below is currently
+// only being used in the streaming model, when we have switched the legacy model to streaming
+// there will be plenty of cleanup potential.
 class BaseTracer {
  public:
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
-  virtual void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) = 0;
+  virtual void addLog(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      LogLevel logLevel,
+      kj::String message) = 0;
   // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
   virtual void addSpan(CompleteSpan&& span) = 0;
 
-  virtual void addException(
-      kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack) = 0;
+  virtual void addException(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) = 0;
 
-  virtual void addDiagnosticChannelEvent(
-      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) = 0;
+  virtual void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      kj::String channel,
+      kj::Array<kj::byte> message) = 0;
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  virtual void setEventInfo(kj::Date timestamp, tracing::EventInfo&&) = 0;
+  virtual void setEventInfo(
+      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&&) = 0;
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
@@ -126,22 +140,31 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
-      PipelineLogLevel pipelineLogLevel);
+      PipelineLogLevel pipelineLogLevel,
+      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
   ~WorkerTracer() {
     self->invalidate();
   }
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
-  void addLog(kj::Date timestamp, LogLevel logLevel, kj::String message) override;
+  void addLog(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      LogLevel logLevel,
+      kj::String message) override;
   void addSpan(CompleteSpan&& span) override;
-  void addException(kj::Date timestamp,
+  void addException(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
       kj::String name,
       kj::String message,
       kj::Maybe<kj::String> stack) override;
-  void addDiagnosticChannelEvent(
-      kj::Date timestamp, kj::String channel, kj::Array<kj::byte> message) override;
-  void setEventInfo(kj::Date timestamp, tracing::EventInfo&&) override;
+  void addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      kj::String channel,
+      kj::Array<kj::byte> message) override;
+  void setEventInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      tracing::EventInfo&&) override;
   void setFetchResponseInfo(tracing::FetchResponseInfo&&) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
 
@@ -157,6 +180,8 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
     return self->addRef();
   }
 
+  kj::Maybe<kj::Own<tracing::TailStreamWriter>>& getTailStreamWriter();
+
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
@@ -164,6 +189,9 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
+
+  kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
   // A weak reference for the internal span submitter. We use this so that the span submitter can
   // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
   // which would interfere with span submission (traces get submitted when the worker returns its

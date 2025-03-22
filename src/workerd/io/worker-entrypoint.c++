@@ -275,14 +275,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
-    t.setEventInfo(timestamp,
-        tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
+    t.setEventInfo(context.getInvocationSpanContext(), timestamp,
+        tracing::FetchEventInfo(method, kj::str(url), kj::str(cfJson), kj::mv(traceHeadersArray)));
   }
-
-  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
-    return tracing::Onset(tracing::FetchEventInfo(method, kj::str(url), kj::str("{}"), nullptr),
-        tracing::Onset::WorkerInfo{}, kj::none);
-  });
 
   // At the conclusion of an invocation we need to dispatch the outcome
   // event to the streaming tail worker (if any). We essentially have a race
@@ -540,13 +535,9 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    t.setEventInfo(context.now(), tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
+    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
+        tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
-
-  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
-    return tracing::Onset(tracing::ScheduledEventInfo(eventTime, kj::str(cron)),
-        tracing::Onset::WorkerInfo{}, kj::none);
-  });
 
   auto outcomeObserver = kj::rc<OutcomeObserver>(
       kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
@@ -608,12 +599,9 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   incomingRequest->delivered();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), tracing::AlarmEventInfo(scheduledTime));
+    t.setEventInfo(
+        context.getInvocationSpanContext(), context.now(), tracing::AlarmEventInfo(scheduledTime));
   }
-  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
-    return tracing::Onset(
-        tracing::AlarmEventInfo(scheduledTime), tracing::Onset::WorkerInfo{}, kj::none);
-  });
 
   // TODO(streaming-tail): Ensure that lifetime of outcomeObserver is handled correctly.
   auto outcomeObserver = kj::rc<OutcomeObserver>(

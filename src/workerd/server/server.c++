@@ -1480,9 +1480,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer,
       kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
       kj::TaskSet& waitUntilTasks)
-      : tracer(kj::mv(tracer)),
-        maybeTailStreamWriter(
-            tracing::initializeTailStreamWriter(kj::mv(streamingTailWorkers), waitUntilTasks)) {}
+      : tracer(kj::mv(tracer)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
@@ -1495,7 +1493,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   }
 
   WorkerInterface& wrapWorkerInterface(WorkerInterface& worker) override {
-    if (tracer != kj::none || maybeTailStreamWriter != kj::none) {
+    if (tracer != kj::none) {
       inner = worker;
       return *this;
     }
@@ -1510,17 +1508,12 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     outcome = newOutcome;
   }
 
-  void reportTailEvent(const tracing::InvocationSpanContext& context,
-      kj::FunctionParam<tracing::TailEvent::Event()> fn) override {
-    KJ_IF_SOME(writer, maybeTailStreamWriter) {
-      writer->report(context, fn());
-    }
-  }
-
   void reportOutcome(const tracing::InvocationSpanContext& context) override {
-    KJ_IF_SOME(writer, maybeTailStreamWriter) {
-      writer->report(
-          context, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+    KJ_IF_SOME(t, tracer) {
+      KJ_IF_SOME(writer, t->getTailStreamWriter()) {
+        writer->report(
+            context, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+      }
     }
   }
 
@@ -1609,7 +1602,6 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
  private:
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
-  kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
   EventOutcome outcome = EventOutcome::OK;
   kj::uint fetchStatus = 0;
 };
@@ -1884,16 +1876,17 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
     kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
-    if (legacyTailWorkers.size() > 0) {
+    if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
       // Setting up legacy tail workers support, but only if we actually have tail workers
       // configured.
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
-          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
-          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
-          kj::none /* entrypoint */);
+      workerTracer =
+          tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel, kj::none /* scriptId */,
+              kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
+              kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */,
+              tracing::initializeTailStreamWriter(kj::mv(streamingTailWorkers), waitUntilTasks));
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
