@@ -697,15 +697,13 @@ class Isolate: public IsolateBase {
       }
     }
 
-    void setWorkerEnv(Value value) override {
-      auto handle = value.getHandle(*this);
-      KJ_ASSERT(handle->IsObject());
-      jsgIsolate.workerEnvObj.Reset(v8Isolate, handle.template As<v8::Object>());
+    void setWorkerEnv(V8Ref<v8::Object> value) override {
+      jsgIsolate.workerEnvObj.Reset(v8Isolate, value.getHandle(*this));
     }
 
-    kj::Maybe<Value> getWorkerEnv() override {
+    kj::Maybe<V8Ref<v8::Object>> getWorkerEnv() override {
       if (jsgIsolate.workerEnvObj.IsEmpty()) return kj::none;
-      return v8Ref<v8::Value>(jsgIsolate.workerEnvObj.Get(v8Isolate));
+      return v8Ref<v8::Object>(jsgIsolate.workerEnvObj.Get(v8Isolate));
     }
 
    private:

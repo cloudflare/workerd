@@ -252,10 +252,7 @@ jsg::JsValue UtilModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
 jsg::JsObject UtilModule::getEnvObject(jsg::Lock& js) {
   if (FeatureFlags::get(js).getPopulateProcessEnv()) {
     KJ_IF_SOME(env, js.getWorkerEnv()) {
-      jsg::JsValue val(env.getHandle(js));
-      KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
-        return obj;
-      }
+      return jsg::JsObject(env.getHandle(js));
     }
   }
 
