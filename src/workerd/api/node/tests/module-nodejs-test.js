@@ -80,3 +80,17 @@ export const isBuiltinTest = {
     });
   },
 };
+
+export const testErrorMethodNotImplemented = {
+  async test() {
+    const m = await import('node:module');
+    const methods = ['findSourceMap', 'register', 'syncBuiltinESMExports'];
+
+    for (const method of methods) {
+      throws(() => m[method](), {
+        name: 'Error',
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      });
+    }
+  },
+};
