@@ -2705,13 +2705,6 @@ class Lock {
   // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
 
-  // Sets an env value that will be expressed on the process.env
-  // if/when nodejs-compat mode is used.
-  virtual void setProcessEnvField(const JsValue& name, const JsValue& value) = 0;
-
-  // Returns the process.env base object.
-  virtual JsObject getProcessEnv(bool release = false) = 0;
-
   // Store the worker environment.
   virtual void setWorkerEnv(Value value) = 0;
 
