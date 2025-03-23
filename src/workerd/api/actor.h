@@ -12,6 +12,7 @@
 #include <workerd/api/http.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/internal-subrequest-type.h>
 #include <workerd/jsg/jsg.h>
 
 #include <capnp/compat/byte-stream.h>
@@ -88,7 +89,7 @@ class DurableObject final: public Fetcher {
   DurableObject(jsg::Ref<DurableObjectId> id,
       IoOwn<OutgoingFactory> outgoingFactory,
       RequiresHostAndProtocol requiresHost)
-      : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
+      : Fetcher(kj::mv(outgoingFactory), requiresHost, InternalSubrequestType{DOSubrequest{}}),
         id(kj::mv(id)) {}
 
   jsg::Ref<DurableObjectId> getId() {

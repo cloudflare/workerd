@@ -5,6 +5,7 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/io/internal-subrequest-type.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -261,8 +262,8 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
       kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
           ioctx.getHeaderTable(), req.send().getPort());
 
-  return jsg::alloc<Fetcher>(
-      ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+  return jsg::alloc<Fetcher>(ioctx.addObject(kj::mv(factory)),
+      Fetcher::RequiresHostAndProtocol::YES, InternalSubrequestType{GenericInternalSubrequest{}});
 }
 
 }  // namespace workerd::api

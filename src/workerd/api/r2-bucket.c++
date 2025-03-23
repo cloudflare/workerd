@@ -36,7 +36,8 @@ kj::Own<kj::HttpClient> r2GetClient(
     tags.add(tag.key, kj::str(tag.value));
   }
 
-  return context.getHttpClientWithSpans(subrequestChannel, true, kj::none, user.op, kj::mv(tags));
+  return context.getHttpClientWithSpans(subrequestChannel,
+      InternalSubrequestType{GenericInternalSubrequest{}}, kj::none, user.op, kj::mv(tags));
 }
 
 static bool isWholeNumber(double x) {

@@ -206,7 +206,8 @@ kj::Promise<void> WorkerQueue::send(
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
   // we have to do is provide the end of the path (which is "/message") to send a single message.
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto client = context.getHttpClient(subrequestChannel,
+      InternalSubrequestType{GenericInternalSubrequest{}}, kj::none, "queue_send"_kjc);
   auto req = client->request(
       kj::HttpMethod::POST, "https://fake-host/message"_kjc, headers, serialized.data.size());
 
@@ -299,7 +300,8 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto client = context.getHttpClient(subrequestChannel,
+      InternalSubrequestType{GenericInternalSubrequest{}}, kj::none, "queue_send"_kjc);
 
   // We add info about the size of the batch to the headers so that the queue implementation can
   // decide whether it's too large.

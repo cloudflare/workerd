@@ -667,9 +667,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   static constexpr uint SPECIAL_SUBREQUEST_CHANNEL_COUNT = 2;
 
   struct SubrequestOptions final {
-    // When inHouse is true, the subrequest is to an API provided internally. For example calls
-    // to KV. This primarily affects metrics and limits.
-    bool inHouse;
+    // Type of internal subrequest, if any. kj::none means it's not an internal subrequest.
+    // This primarily affects metrics and limits.
+    kj::Maybe<InternalSubrequestType> internalSubrequestType;
 
     // When true, the client is wrapped by metrics.wrapSubrequestClient() ensuring appropriate
     // metrics collection.
@@ -702,42 +702,42 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // bindings declared via Worker::Global::Fetcher have a corresponding `channel` property to refer
   // to these outgoing bindings.
   //
-  // `isInHouse` is true if this client represents an "in house" endpoint, i.e. some API provided
-  // by the Workers platform. For example, KV namespaces are in-house. This primarily affects
-  // metrics and limits:
-  // - In-house requests do not count as "subrequests" for metrics and logging purposes.
-  // - In-house requests are not subject to the same limits on the number of subrequests per
+  // `internalSubrequestType` is true if this client represents an internal endpoint, i.e. some API
+  // provided by the Workers platform. For example, KV namespaces are internal. This primarily
+  // affects metrics and limits:
+  // - Internal requests do not count as "subrequests" for metrics and logging purposes.
+  // - Internal requests are not subject to the same limits on the number of subrequests per
   //   request.
-  // - In preview, in-house requests do not show up in the network tab.
+  // - In preview, internal requests do not show up in the network tab.
   //
   // `operationName` is the name to use for the request's span, if tracing is turned on.
   kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
   kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName,
       kj::Vector<Span::Tag> tags);
 
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<kj::ConstString> operationName = kj::none);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
   kj::Own<kj::HttpClient> getHttpClient(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
   // As above, but with list of span tags to add, analogous to getSubrequestChannelWithSpans().
   kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName,
       kj::Vector<Span::Tag> tags);
@@ -745,7 +745,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
   kj::Own<kj::HttpClient> getHttpClientNoChecks(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<kj::ConstString> operationName = kj::none);
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
@@ -902,7 +902,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<TimeoutManager> timeoutManager;
 
   kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
-      bool isInHouse,
+      kj::Maybe<InternalSubrequestType> internalSubrequestType,
       kj::Maybe<kj::String> cfBlobJson,
       TraceContext& tracing,
       IoChannelFactory& channelFactory);

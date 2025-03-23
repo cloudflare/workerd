@@ -112,6 +112,7 @@ wd_cc_library(
         ":cdp_capnp",
         ":container_capnp",
         ":frankenvalue",
+        ":internal-subrequest-type",
         ":io-gate",
         ":io-helpers",
         ":limit-enforcer",
@@ -238,6 +239,7 @@ wd_cc_library(
     hdrs = ["limit-enforcer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":internal-subrequest-type",
         ":observer",
         "//src/workerd/jsg",
     ],
@@ -305,6 +307,15 @@ wd_capnp_library(
         ":script-version_capnp",
         ":trace_capnp",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
+    ],
+)
+
+wd_cc_library(
+    name = "internal-subrequest-type",
+    hdrs = ["internal-subrequest-type.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
     ],
 )
 

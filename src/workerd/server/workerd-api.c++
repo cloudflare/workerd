@@ -722,7 +722,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           jsg::alloc<api::Fetcher>(pipeline.channel,
               pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
                                     : api::Fetcher::RequiresHostAndProtocol::NO,
-              pipeline.isInHouse));
+              pipeline.internalSubrequestType));
     }
 
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {

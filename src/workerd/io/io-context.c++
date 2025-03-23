@@ -825,26 +825,28 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
 kj::Own<WorkerInterface> IoContext::getSubrequest(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  limitEnforcer->newSubrequest(options.inHouse);
+  limitEnforcer->newSubrequest(options.internalSubrequestType);
   return getSubrequestNoChecks(kj::mv(func), kj::mv(options));
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+        channel, internalSubrequestType, kj::mv(cfBlobJson), tracing, channelFactory);
   },
       SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
+        .internalSubrequestType = internalSubrequestType,
+        .wrapMetrics = internalSubrequestType == kj::none,
         .operationName = kj::mv(operationName),
       });
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
-    bool isInHouse,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
     kj::Maybe<kj::String> cfBlobJson,
     kj::ConstString operationName,
     kj::Vector<Span::Tag> tags) {
@@ -854,33 +856,33 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
       tracing.userSpan.setTag(kj::mv(tag.key), kj::mv(tag.value));
     }
     return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+        channel, internalSubrequestType, kj::mv(cfBlobJson), tracing, channelFactory);
   },
       SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
+        .internalSubrequestType = internalSubrequestType,
+        .wrapMetrics = internalSubrequestType == kj::none,
         .operationName = kj::mv(operationName),
       });
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(uint channel,
-    bool isInHouse,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<kj::ConstString> operationName) {
   return getSubrequestNoChecks(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     return getSubrequestChannelImpl(
-        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+        channel, internalSubrequestType, kj::mv(cfBlobJson), tracing, channelFactory);
   },
       SubrequestOptions{
-        .inHouse = isInHouse,
-        .wrapMetrics = !isInHouse,
+        .internalSubrequestType = internalSubrequestType,
+        .wrapMetrics = internalSubrequestType == kj::none,
         .operationName = kj::mv(operationName),
       });
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
-    bool isInHouse,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
     kj::Maybe<kj::String> cfBlobJson,
     TraceContext& tracing,
     IoChannelFactory& channelFactory) {
@@ -895,35 +897,37 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
   return client;
 }
 
-kj::Own<kj::HttpClient> IoContext::getHttpClient(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
-  return asHttpClient(
-      getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+kj::Own<kj::HttpClient> IoContext::getHttpClient(uint channel,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName) {
+  return asHttpClient(getSubrequestChannel(
+      channel, internalSubrequestType, kj::mv(cfBlobJson), kj::mv(operationName)));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
-    bool isInHouse,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
     kj::Maybe<kj::String> cfBlobJson,
     kj::ConstString operationName,
     kj::Vector<Span::Tag> tags) {
   return asHttpClient(getSubrequestChannelWithSpans(
-      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
+      channel, internalSubrequestType, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
-    bool isInHouse,
+    kj::Maybe<InternalSubrequestType> internalSubrequestType,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<kj::ConstString> operationName) {
-  return asHttpClient(
-      getSubrequestChannelNoChecks(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+  return asHttpClient(getSubrequestChannelNoChecks(
+      channel, internalSubrequestType, kj::mv(cfBlobJson), kj::mv(operationName)));
 }
 
 kj::Own<CacheClient> IoContext::getCacheClient() {
-  // TODO(someday): Should Cache API requests be considered in-house? They are already not counted
-  //   as subrequests in metrics and logs (like in-house requests aren't), but historically the
+  // TODO(someday): Should Cache API requests be considered internal? They are already not counted
+  //   as subrequests in metrics and logs (like internal requests aren't), but historically the
   //   subrequest limit still applied. Since I can't currently think of a use case for more than 50
   //   cache API requests per request, I'm leaving it as-is for now.
-  limitEnforcer->newSubrequest(false);
+  limitEnforcer->newSubrequest(kj::none);
   return getIoChannelFactory().getCache();
 }
 

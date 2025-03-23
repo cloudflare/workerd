@@ -146,8 +146,8 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
       }
     }
   }
-  auto client = context.getHttpClientWithSpans(
-      subrequestChannel, true, kj::none, operationName, kj::mv(tags));
+  auto client = context.getHttpClientWithSpans(subrequestChannel,
+      InternalSubrequestType{GenericInternalSubrequest{}}, kj::none, operationName, kj::mv(tags));
 
   headers.add(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {

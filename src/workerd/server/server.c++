@@ -16,6 +16,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/io/internal-subrequest-type.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace-stream.h>
@@ -2583,7 +2584,8 @@ class Server::WorkerService final: public Service,
     auto& context = IoContext::current();
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
-    auto client = context.getHttpClient(channel, true, kj::none, "writeLogfwdr"_kjc);
+    auto client = context.getHttpClient(
+        channel, InternalSubrequestType{GenericInternalSubrequest{}}, kj::none, "writeLogfwdr"_kjc);
 
     auto urlStr = kj::str("https://fake-host");
 
@@ -2678,7 +2680,7 @@ class Server::WorkerService final: public Service,
     return {};
   }
   void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
+  void newSubrequest(kj::Maybe<InternalSubrequestType> internalSubrequestType) override {}
   void newKvRequest(KvOpType op) override {}
   void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override {
@@ -2854,8 +2856,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     case config::Worker::Binding::SERVICE: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getService(), kj::mv(errorContext)});
-      return makeGlobal(
-          Global::Fetcher{.channel = channel, .requiresHost = true, .isInHouse = false});
+      return makeGlobal(Global::Fetcher{
+        .channel = channel, .requiresHost = true, .internalSubrequestType = kj::none});
     }
 
     case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
@@ -3311,13 +3313,15 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
     if (errorReporter.defaultEntrypoint != kj::none) {
       ctxExports.add(Global{.name = kj::str("default"),
-        .value = Global::Fetcher{
-          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+        .value = Global::Fetcher{.channel = nextSubrequestChannel++,
+          .requiresHost = true,
+          .internalSubrequestType = kj::none}});
     }
     for (auto& ep: errorReporter.namedEntrypoints) {
       ctxExports.add(Global{.name = kj::str(ep.key),
-        .value = Global::Fetcher{
-          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+        .value = Global::Fetcher{.channel = nextSubrequestChannel++,
+          .requiresHost = true,
+          .internalSubrequestType = kj::none}});
     }
 
     // Start numbering loopback channels for actor classes after the last actor channel used by

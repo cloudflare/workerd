@@ -78,7 +78,7 @@ class WorkerdApi final: public Worker::Api {
     struct Fetcher {
       uint channel;
       bool requiresHost;
-      bool isInHouse;
+      kj::Maybe<InternalSubrequestType> internalSubrequestType;
 
       Fetcher clone() const {
         return *this;

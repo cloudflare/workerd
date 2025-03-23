@@ -38,7 +38,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       return KJ_REQUIRE_NONNULL(actorChannel)
           ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
     },
-        {.inHouse = true,
+        {.internalSubrequestType = InternalSubrequestType{DOSubrequest{}},
           .wrapMetrics = true,
           .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
   }
@@ -80,7 +80,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       return KJ_REQUIRE_NONNULL(actorChannel)
           ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
     },
-        {.inHouse = true,
+        {.internalSubrequestType = InternalSubrequestType{DOSubrequest{}},
           .wrapMetrics = true,
           .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
   }
@@ -108,7 +108,7 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
     // already open prior to this DO starting up.
     return actorChannel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
   },
-      {.inHouse = true,
+      {.internalSubrequestType = InternalSubrequestType{DOSubrequest{}},
         .wrapMetrics = true,
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
 }
@@ -123,9 +123,8 @@ jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
       kj::heap<LocalActorOutgoingFactory>(channel, kj::mv(actorId));
   auto outgoingFactory = context.addObject(kj::mv(factory));
 
-  bool isInHouse = true;
-  return jsg::alloc<Fetcher>(
-      kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES, isInHouse);
+  return jsg::alloc<Fetcher>(kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES,
+      InternalSubrequestType{DOSubrequest{}});
 }
 
 // =======================================================================================

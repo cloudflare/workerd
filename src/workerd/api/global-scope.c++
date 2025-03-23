@@ -264,7 +264,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       return addNoopDeferredProxy(
           response.sendError(500, "Internal Server Error", ioContext.getHeaderTable()));
     } else {
-      auto client = ioContext.getHttpClient(IoContext::NEXT_CLIENT_CHANNEL, false,
+      auto client = ioContext.getHttpClient(IoContext::NEXT_CLIENT_CHANNEL,
+          kj::none /*internalSubrequestType*/,
           cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); }), "fetch_default"_kjc);
       auto adapter = kj::newHttpService(*client);
       auto promise = adapter->request(method, url, headers, requestBody, response);

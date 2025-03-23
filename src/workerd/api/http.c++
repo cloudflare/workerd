@@ -2561,7 +2561,7 @@ kj::Own<WorkerInterface> Fetcher::getClient(
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       return ioContext.getSubrequestChannel(
-          channel, isInHouse, kj::mv(cfStr), kj::mv(operationName));
+          channel, internalSubrequestType, kj::mv(cfStr), kj::mv(operationName));
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       return outgoingFactory->newSingleUseClient(kj::mv(cfStr));

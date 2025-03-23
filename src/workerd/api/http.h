@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/internal-subrequest-type.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/async-context.h>
 #include <kj/compat/http.h>
@@ -455,9 +456,9 @@ public:
   // If `requiresHost` is false, then requests using this Fetcher are allowed to specify a
   // URL that has no protocol or host.
   //
-  // See pipeline.capnp or request-context.h for an explanation of `isInHouse`.
-  explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, bool isInHouse = false)
-      : channelOrClientFactory(channel), requiresHost(requiresHost), isInHouse(isInHouse) {}
+  // See pipeline.capnp (see isInHouse) or request-context.h for an explanation of `internalSubrequestType`.
+  explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, kj::Maybe<InternalSubrequestType> internalSubrequestType = kj::none)
+      : channelOrClientFactory(channel), requiresHost(requiresHost), internalSubrequestType(internalSubrequestType) {}
 
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
@@ -478,19 +479,19 @@ public:
   // created for Actors.
   Fetcher(IoOwn<OutgoingFactory> outgoingFactory,
           RequiresHostAndProtocol requiresHost,
-          bool isInHouse = false)
+          kj::Maybe<InternalSubrequestType> internalSubrequestType = kj::none)
       : channelOrClientFactory(kj::mv(outgoingFactory)),
         requiresHost(requiresHost),
-        isInHouse(isInHouse) {}
+        internalSubrequestType(internalSubrequestType) {}
 
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, but doesn't
   // require an IoContext
   Fetcher(kj::Own<CrossContextOutgoingFactory> outgoingFactory,
           RequiresHostAndProtocol requiresHost,
-          bool isInHouse = false)
+          kj::Maybe<InternalSubrequestType> internalSubrequestType = kj::none)
       : channelOrClientFactory(kj::mv(outgoingFactory)),
         requiresHost(requiresHost),
-        isInHouse(isInHouse) {}
+        internalSubrequestType(internalSubrequestType) {}
 
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
@@ -651,7 +652,7 @@ public:
 private:
   kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>> channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
-  bool isInHouse;
+  kj::Maybe<InternalSubrequestType> internalSubrequestType;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter

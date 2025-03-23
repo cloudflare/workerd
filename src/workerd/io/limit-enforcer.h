@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/internal-subrequest-type.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
 
@@ -106,10 +107,12 @@ class LimitEnforcer {
   // Called before starting a new subrequest. Throws a JSG exception if the limit has been
   // reached.
   //
-  // `isInHouse` is true for types of subrequests which we need to be "in house" (i.e. to another
-  // Cloudflare service, like Workers KV) and thus should not be subject to the same limits as
-  // external subrequests.
-  virtual void newSubrequest(bool isInHouse) = 0;
+  // `internalSubrequestType` is set for types of subrequests which we need to mark as internal
+  // (i.e. to another Cloudflare service, like Workers KV) and thus should not be subject to the
+  // same limits as external subrequests. InternalSubrequestType is a kj::OneOf instead of a
+  // bool to allow to differentiation between internal subrequests, so that they can be limited
+  // in the appropriate manner. (e.g. for various free tiers of Cloudflare products).
+  virtual void newSubrequest(kj::Maybe<InternalSubrequestType> internalSubrequestType) = 0;
 
   enum class KvOpType { GET, GET_WITH, PUT, LIST, DELETE, GET_BULK };
   // Called before starting a KV operation. Throws a JSG exception if the operation should be

@@ -145,7 +145,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
     return {};
   }
   void topUpActor() override {}
-  void newSubrequest(bool isInHouse) override {}
+  void newSubrequest(kj::Maybe<InternalSubrequestType> internalSubrequestType) override {}
   void newKvRequest(KvOpType op) override {}
   void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override {

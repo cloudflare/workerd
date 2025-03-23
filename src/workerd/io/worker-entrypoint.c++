@@ -363,7 +363,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // Fail-open behavior has been chosen, we'd better save an interface that we can use for
       // that purpose later.
       failOpenService = context.getSubrequestChannelNoChecks(
-          IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+          IoContext::NEXT_CLIENT_CHANNEL, kj::none, kj::mv(cfBlobJson));
     }
     auto promise =
         incomingRequest->drain().attach(kj::mv(incomingRequest).attach(kj::mv(outcomeObserver)));
