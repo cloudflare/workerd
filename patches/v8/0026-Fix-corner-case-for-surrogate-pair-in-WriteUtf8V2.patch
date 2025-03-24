@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ketan Gupta <ketan@cloudflare.com>
+Date: Fri, 21 Mar 2025 20:12:21 +0000
+Subject: Fix corner case for surrogate pair in WriteUtf8V2
+
+If there isn't enough capacity in the output buffer while in the middle
+of writing a surrogate pair, WriteUtf8V2 incorrectly returns processed
+character count, along with populating the buffer with a invalid
+replacement character which the older WriteUtf8 interface handled
+correctly.
+
+Change-Id: I5a3b202f7a88b539d054b52ac94867bbbb6168c5
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/6369297
+Reviewed-by: Erik Corry <erikcorry@chromium.org>
+Commit-Queue: Erik Corry <erikcorry@chromium.org>
+Reviewed-by: Shu-yu Guo <syg@chromium.org>
+Cr-Commit-Position: refs/heads/main@{#99401}
+
+diff --git a/src/strings/unicode-inl.h b/src/strings/unicode-inl.h
+index 0562ff21d506a86220c8930581026e9643030cc4..ae6c2089dfc2892ad1683cea6cae1619febcd4fb 100644
+--- a/src/strings/unicode-inl.h
++++ b/src/strings/unicode-inl.h
+@@ -246,10 +246,13 @@ Utf8::EncodingResult Utf8::Encode(v8::base::Vector<const Char> string,
+     size_t remaining_capacity = content_capacity - write_index;
+     if (remaining_capacity < required_capacity) {
+       // Not enough space left, so stop here.
+-      if (replace_invalid_utf8 && Utf16::IsLeadSurrogate(last)) {
++      if (Utf16::IsSurrogatePair(last, character)) {
+         DCHECK_GE(write_index, Utf8::kSizeOfUnmatchedSurrogate);
+         // We're in the middle of a surrogate pair. Delete the first part again.
+         write_index -= Utf8::kSizeOfUnmatchedSurrogate;
++        // We've already read at least one character which is a lead surrogate
++        DCHECK_NE(read_index, 0);
++        --read_index;
+       }
+       break;
+     }
+@@ -257,8 +260,14 @@ Utf8::EncodingResult Utf8::Encode(v8::base::Vector<const Char> string,
+     if constexpr (kSourceIsOneByte) {
+       write_index += Utf8::EncodeOneByte(buffer + write_index, character);
+     } else {
+-      write_index += Utf8::Encode(buffer + write_index, character, last,
+-                                  replace_invalid_utf8);
++      // Handle the case where we cut off in the middle of a surrogate pair.
++      if ((read_index + 1 < string.size()) &&
++          Utf16::IsSurrogatePair(character, characters[read_index + 1])) {
++        write_index += Utf8::kSizeOfUnmatchedSurrogate;
++      } else {
++        write_index += Utf8::Encode(buffer + write_index, character, last,
++                                    replace_invalid_utf8);
++      }
+     }
+ 
+     last = character;
+diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
+index 434a6f56ce6389f9eec463386e19cb61c08e6206..6af60fe8479ea5738886fa7e2b66eff2f0d3c7b6 100644
+--- a/test/cctest/test-api.cc
++++ b/test/cctest/test-api.cc
+@@ -8693,6 +8693,24 @@ THREADED_TEST(StringWrite) {
+   CHECK_EQ(13, len);
+   CHECK_EQ(0, strcmp(utf8buf, "ab\xEF\xBF\xBDwx\xEF\xBF\xBDyz"));
+ 
++  // replace orphan lead surrogates even if we hit buffer capacity
++  memset(utf8buf, 0x1, 1000);
++  len = orphans_str->WriteUtf8V2(isolate, utf8buf, 5,
++                                 String::WriteFlags::kReplaceInvalidUtf8,
++                                 &processed_characters);
++  CHECK_EQ(5, len);
++  CHECK_EQ(0, strncmp(utf8buf, "ab\xEF\xBF\xBD", 5));
++  CHECK_EQ(3, processed_characters);
++
++  // Encode orphan lead surrogates as their WTF-8 equivalent
++  // if ReplaceInvalidUtf8 flag is not passed
++  memset(utf8buf, 0x1, 1000);
++  len = orphans_str->WriteUtf8V2(isolate, utf8buf, 5, String::WriteFlags::kNone,
++                                 &processed_characters);
++  CHECK_EQ(5, len);
++  CHECK_EQ(0, strncmp(utf8buf, "ab\xED\xA0\x80", 5));
++  CHECK_EQ(3, processed_characters);
++
+   // replace single lead surrogate with Unicode replacement character
+   memset(utf8buf, 0x1, 1000);
+   len = lead_str->WriteUtf8V2(isolate, utf8buf, sizeof(utf8buf),
+@@ -8713,8 +8731,20 @@ THREADED_TEST(StringWrite) {
+   // space
+   memset(utf8buf, 0x1, 1000);
+   len = pair_str->WriteUtf8V2(isolate, utf8buf, 3,
+-                              String::WriteFlags::kReplaceInvalidUtf8);
++                              String::WriteFlags::kReplaceInvalidUtf8,
++                              &processed_characters);
++  CHECK_EQ(0, len);
++  CHECK_EQ(0, processed_characters);
++  CHECK_EQ(0, strncmp(utf8buf, "\x01\x01\x01", 3));
++
++  // do not replace / write anything if surrogate pair does not fit the buffer
++  // space regardless of String::WriteFlags::kReplaceInvalidUtf8
++  memset(utf8buf, 0x1, 1000);
++  len = pair_str->WriteUtf8V2(isolate, utf8buf, 3, String::WriteFlags::kNone,
++                              &processed_characters);
+   CHECK_EQ(0, len);
++  CHECK_EQ(0, processed_characters);
++  CHECK_EQ(0, strncmp(utf8buf, "\x01\x01\x01", 3));
+ 
+   memset(utf8buf, 0x1, sizeof(utf8buf));
+   len = left_tree->Utf8LengthV2(isolate);
