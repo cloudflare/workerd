@@ -6,13 +6,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'IdnaTestV2-removed.window.js': {},
-  'IdnaTestV2.window.js': {
-    comment:
-      'WPT recently updated this test to check for Unicode 16 compliance',
-    // We now have a huge number of failures
-    // https://github.com/web-platform-tests/wpt/commit/d0cd7c05f70f6928234e90ddff90b39ef9c1eebc
-    skipAllTests: true,
-  },
+  'IdnaTestV2.window.js': {},
   'historical.any.js': {},
   'idlharness.any.js': {
     comment: 'Does not contain any relevant tests',
