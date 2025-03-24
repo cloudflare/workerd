@@ -83,7 +83,8 @@ uint32_t writeInto(jsg::Lock& js,
     return 0;
   }
 
-  static constexpr jsg::JsString::WriteOptions flags = jsg::JsString::WriteOptions::REPLACE_INVALID_UTF8;
+  static constexpr jsg::JsString::WriteFlags flags =
+      jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8;
 
   switch (encoding) {
     case Encoding::ASCII:
@@ -136,7 +137,7 @@ jsg::BackingStore decodeStringImpl(
   auto length = string.length(js);
   if (length == 0) return jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
 
-  static constexpr jsg::JsString::WriteOptions options = jsg::JsString::REPLACE_INVALID_UTF8;
+  static constexpr jsg::JsString::WriteFlags options = jsg::JsString::REPLACE_INVALID_UTF8;
 
   switch (encoding) {
     case Encoding::ASCII:
