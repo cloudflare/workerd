@@ -29,8 +29,8 @@ const helloWorldExample :Workerd.Config = (
 const helloWorld :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "worker.js"),
-    (name = "split2", nodeJsCompatModule = embed "split2.js")
+    (name = "split2", commonJsModule = embed "split2.js")
   ],
-  compatibilityDate = "2023-03-01",
-  compatibilityFlags = ["nodejs_compat", "experimental"]
+  compatibilityDate = "2025-03-01",
+  compatibilityFlags = ["nodejs_compat_v2", "experimental"]
 );

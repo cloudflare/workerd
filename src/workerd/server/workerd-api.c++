@@ -124,9 +124,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
     Worker::Api::ErrorInterface,
     jsg::CommonJsModuleObject,
-    jsg::CommonJsModuleContext,
-    jsg::NodeJsModuleObject,
-    jsg::NodeJsModuleContext);
+    jsg::CommonJsModuleContext);
 
 static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
@@ -510,18 +508,6 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
           jsg::ModuleRegistry::CommonJsModuleInfo(
               lock, module.getName(), module.getCommonJsModule()));
     }
-    case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
-      KJ_REQUIRE(featureFlags.getNodeJsCompat(),
-          "The nodejs_compat compatibility flag is required to use the nodeJsCompatModule type.");
-      kj::Maybe<kj::Array<kj::StringPtr>> named = kj::none;
-      if (module.hasNamedExports()) {
-        named = compileNamedExports(module.getNamedExports());
-      }
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(),
-          named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
-          jsg::ModuleRegistry::NodeJsModuleInfo(
-              lock, module.getName(), module.getNodeJsCompatModule()));
-    }
     case config::Worker::Module::PYTHON_MODULE: {
       // Nothing to do. Handled in compileModules.
       return kj::none;
@@ -529,6 +515,10 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
     case config::Worker::Module::PYTHON_REQUIREMENT: {
       // Nothing to do. Handled in compileModules.
       return kj::none;
+    }
+    case config::Worker::Module::OBSOLETE: {
+      // A non-supported or obsolete module type was configured
+      KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
     }
   }
   KJ_UNREACHABLE;
@@ -955,15 +945,6 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         //             kj::str(def.getName())));
         break;
       }
-      case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
-        // bundleBuilder.addSyntheticModule(
-        //     def.getName(), jsg::modules::Module::newCjsStyleModuleHandler<
-        //         jsg::NodeJsModuleContext,
-        //         JsgWorkerdIsolate_TypeWrapper>(
-        //             kj::str(def.getNodeJsCompatModule()),
-        //             kj::str(def.getName())));
-        break;
-      }
       case config::Worker::Module::PYTHON_MODULE: {
         KJ_REQUIRE(featureFlags.getPythonWorkers(),
             "The python_workers compatibility flag is required to use Python.");
@@ -974,6 +955,10 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       case config::Worker::Module::PYTHON_REQUIREMENT: {
         // Handled separately
         break;
+      }
+      case config::Worker::Module::OBSOLETE: {
+        // A non-supported or obsolete module type was configured
+        KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
       }
     }
   }

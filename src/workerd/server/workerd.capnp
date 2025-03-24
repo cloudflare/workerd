@@ -267,11 +267,9 @@ struct Worker {
       json @6 :Text;
       # Importing this will produce the result of parsing the given text as JSON.
 
-      nodeJsCompatModule @7 :Text;
-      # A Node.js module is a specialization of a commonJsModule that:
-      # (a) allows for importing Node.js-compat built-ins without the node: specifier-prefix
-      # (b) exposes the subset of common Node.js globals such as process, Buffer, etc that
-      #     we implement in the workerd runtime.
+      obsolete @7 :Text;
+      # This position used to be the nodeJsCompatModule type that has now been
+      # obsoleted.
 
       pythonModule @8 :Text;
       # A Python module. All bundles containing this value type are converted into a JS/WASM Worker
@@ -284,7 +282,7 @@ struct Worker {
     }
 
     namedExports @10 :List(Text);
-    # For commonJsModule and nodeJsCompatModule, this is a list of named exports that the
+    # For commonJsModule modules, this is a list of named exports that the
     # module expects to be exported once the evaluation is complete.
   }
 
