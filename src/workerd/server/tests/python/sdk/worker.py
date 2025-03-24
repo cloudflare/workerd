@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
-from workers import Blob, File, FormData, Request, Response, fetch
+from workers import Blob, File, FormData, Request, Response, fetch, handler
 
 import pyodide.http
 from pyodide.ffi import to_js
@@ -24,7 +24,9 @@ async def _mock_fetch(check):
 
 # Each path in this handler is its own test. The URLs that are being fetched
 # here are defined in server.py.
+@handler
 async def on_fetch(request):
+    assert isinstance(request, Request)
     if request.url.endswith("/modify"):
         resp = await fetch("https://example.com/sub")
         return Response(
@@ -123,6 +125,15 @@ async def on_fetch(request):
             cf={"cacheTtl": 5, "cacheEverything": True, "cacheKey": "someCustomKey"},
         )
         assert resp.status == 301
+        return Response("success")
+    elif request.url.endswith("/event_decorator"):
+        # Verify that the `@event`` decorator has transformed the `request` parameter to the correct
+        # type.
+        #
+        # Try to grab headers which should contain a duplicated header.
+        headers = request.headers.get_all("X-Custom-Header")
+        assert "some_value" in headers
+        assert "some_other_value" in headers
         return Response("success")
     else:
         resp = await fetch("https://example.com/sub")
@@ -373,6 +384,17 @@ async def request_unit_tests(env):
     assert form_data["foobar"] == "123"
 
 
+async def can_use_event_decorator(env):
+    js_headers = js.Headers.new()
+    js_headers.append("X-Custom-Header", "some_value")
+    js_headers.append("X-Custom-Header", "some_other_value")
+    response = await env.SELF.fetch(
+        "http://example.com/event_decorator", headers=js_headers
+    )
+    text = await response.text()
+    assert text == "success"
+
+
 async def test(ctrl, env):
     await can_return_custom_fetch_response(env)
     await can_modify_response(env)
@@ -390,3 +412,4 @@ async def test(ctrl, env):
     await replace_body_unit_tests(env)
     await can_use_cf_fetch_opts(env)
     await request_unit_tests(env)
+    await can_use_event_decorator(env)

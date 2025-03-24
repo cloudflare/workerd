@@ -1,6 +1,7 @@
 # This module defines a Workers API for Python. It is similar to the API provided by
 # JS Workers, but with changes and additions to be more idiomatic to the Python
 # programming language.
+import functools
 import http.client
 import json
 from collections.abc import Generator, Iterable, MutableMapping
@@ -604,3 +605,24 @@ class Request:
     async def text(self) -> str:
         self._raise_if_failed()
         return await self.js_object.text()
+
+
+def handler(func):
+    """
+    When applied to handlers such as `on_fetch` it will rewrite arguments passed in to native Python
+    types defined in this module. For example, the `request` argument to `on_fetch` gets converted
+    to an instance of the Request class defined in this module.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # TODO: wrap `env` so that bindings can be used without to_js.
+        if (
+            len(args) > 0
+            and hasattr(args[0], "constructor")
+            and args[0].constructor.name == "Request"
+        ):
+            args = (Request(args[0]),) + args[1:]
+        return func(*args, **kwargs)
+
+    return wrapper
