@@ -95,7 +95,6 @@ wd_cc_library(
         "modules.h",
         "rtti.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
-        "//src/workerd/server:workerd.capnp.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -111,7 +110,6 @@ wd_cc_library(
         "//src/workerd/api/node",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
-        "//src/workerd/server:workerd_capnp",
     ],
 )
 
