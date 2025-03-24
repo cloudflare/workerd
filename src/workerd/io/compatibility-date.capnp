@@ -688,7 +688,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   requestCfOverridesCacheRules @72 :Bool
       $compatEnableFlag("request_cf_overrides_cache_rules")
-      $experimental
+      $compatDisableFlag("no_request_cf_overrides_cache_rules")
+      $compatEnableDate("2025-04-02")
       $neededByFl;
   # Enables cache settings specified request in fetch api cf object to override cache rules. (only for user owned or grey-clouded sites)
 
