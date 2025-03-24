@@ -137,6 +137,10 @@ class SqliteCallScope {
     }
   }
 
+  kj::Maybe<kj::Exception> getException() {
+    return error;
+  }
+
   // Hack to allow block syntax with for(); see SQLITE_CALL_SCOPE.
   bool done = false;
 
@@ -150,9 +154,9 @@ class SqliteCallScope {
 // the return value of sqlite3_errmsg() or a string literal containing a similarly
 // application-approriate error message. A reference called `regulator` must be in-scope.
 // sqliteErrorCode is a kj::Maybe<int> and represents the error code from sqlite.
-#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, ...)                              \
+#define SQLITE_REQUIRE(condition, sqliteErrorCode, errorMessage, maybeException, ...)              \
   if (!(condition)) {                                                                              \
-    handleCriticalError(sqliteErrorCode, errorMessage);                                            \
+    handleCriticalError(sqliteErrorCode, errorMessage, maybeException);                            \
     regulator.onError(sqliteErrorCode, errorMessage);                                              \
     KJ_FAIL_REQUIRE("SQLite failed", errorMessage, ##__VA_ARGS__);                                 \
   }
@@ -174,7 +178,8 @@ class SqliteCallScope {
     int _ec = code;                                                                                \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
-    SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
+    SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), sqliteCallScope.getException(), \
+        ##__VA_ARGS__);                                                                            \
   } while (false)
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
@@ -182,7 +187,8 @@ class SqliteCallScope {
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
-    SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
+    SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db),                           \
+        sqliteCallScope.getException(), ##__VA_ARGS__);                                            \
   } while (false);
 
 // When using SQLITE_CALL_FAILED(), you must place the actual sqlite call and the
@@ -532,16 +538,23 @@ void SqliteDatabase::notifyWrite() {
   }
 }
 
-void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode, kj::StringPtr errorMessage) {
+void SqliteDatabase::handleCriticalError(
+    kj::Maybe<int> errorCode, kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
   KJ_IF_SOME(code, errorCode) {
     if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_BUSY ||
-        code == SQLITE_NOMEM) {
+        code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
 
       sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
       // The transaction was rolledback, re-enabling the auto commit mode, so we should fail
       if (sqlite3_get_autocommit(db) != 0) {
         KJ_IF_SOME(cb, onCriticalErrorCallback) {
-          cb(errorMessage);
+          KJ_IF_SOME(e, maybeException) {
+            cb(kj::mv(e));
+          } else {
+            auto exception = kj::Exception(
+                kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::heapString(errorMessage));
+            cb(kj::mv(exception));
+          }
         }
       }
     }
@@ -699,7 +712,8 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
       }
     }
 
-    SQLITE_REQUIRE(result != nullptr, kj::none, "SQL code did not contain a statement.", sqlCode);
+    SQLITE_REQUIRE(
+        result != nullptr, kj::none, "SQL code did not contain a statement.", kj::none, sqlCode);
     auto ownResult = ownSqlite(result);
 
     while (*tail == ' ' || *tail == '\t' || *tail == '\n' || *tail == '\r' || *tail == '\v' ||
@@ -709,7 +723,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
     switch (multi) {
       case SINGLE:
         SQLITE_REQUIRE(tail == sqlCode.end(), kj::none,
-            "A prepared SQL statement must contain only one statement.", tail);
+            "A prepared SQL statement must contain only one statement.", kj::none, tail);
         break;
 
       case MULTI:
@@ -718,7 +732,8 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
 
           SQLITE_REQUIRE(sqlite3_bind_parameter_count(result) == 0, kj::none,
               "When executing multiple SQL statements in a single call, only the last statement "
-              "can have parameters.");
+              "can have parameters.",
+              kj::none);
 
           // Be sure to call the onWrite callback if necessary for this statement.
           KJ_IF_SOME(cb, onWriteCallback) {
@@ -1336,9 +1351,9 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
   sqlite3_stmt* statement = getStatement();
 
   SQLITE_REQUIRE(!sqlite3_stmt_busy(statement), kj::none,
-      "A SQL prepared statement can only be executed once at a time.");
+      "A SQL prepared statement can only be executed once at a time.", kj::none);
   SQLITE_REQUIRE(size == sqlite3_bind_parameter_count(statement), kj::none,
-      "Wrong number of parameter bindings for SQL query.");
+      "Wrong number of parameter bindings for SQL query.", kj::none);
 
   KJ_IF_SOME(cb, db.onWriteCallback) {
     if (!sqlite3_stmt_readonly(statement)) {

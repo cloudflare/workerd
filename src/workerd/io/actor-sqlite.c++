@@ -197,11 +197,11 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
   }
 }
 
-void ActorSqlite::onCriticalError(kj::StringPtr message) {
-  auto exception =
-      kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::heapString(message));
-  broken.emplace(kj::mv(exception));
-  requireNotBroken();
+void ActorSqlite::onCriticalError(kj::Exception exception) {
+  // If we have already experienced a terminal exception, no need to replace it
+  if (broken == kj::none) {
+    broken.emplace(kj::mv(exception));
+  }
 }
 
 void ActorSqlite::onWrite() {

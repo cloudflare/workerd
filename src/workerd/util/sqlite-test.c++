@@ -1487,12 +1487,11 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
-  kj::String capturedErrorMessage = nullptr;
-
+  kj::Maybe<kj::Exception> capturedException;
   // Register a critical error callback
-  db.onCriticalError([&](kj::StringPtr message) {
+  db.onCriticalError([&](kj::Exception exception) {
     criticalErrorCallbackCalled = true;
-    capturedErrorMessage = kj::str(message);
+    capturedException = exception;
   });
 
   db.run(SqliteDatabase::TRUSTED, kj::str(R"(
@@ -1511,7 +1510,10 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   )")));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
-  KJ_EXPECT(capturedErrorMessage.startsWith("disk I/O error"));
+  KJ_ASSERT(capturedException != kj::none);
+  KJ_IF_SOME(exception, capturedException) {
+    KJ_EXPECT(exception.getDescription().startsWith("test-vfs-error"));
+  }
 }
 
 void testCriticalError(const char* expectedErrorMessage,
@@ -1522,18 +1524,21 @@ void testCriticalError(const char* expectedErrorMessage,
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
-  kj::String capturedErrorMessage = nullptr;
+  kj::Maybe<kj::Exception> capturedException = kj::none;
 
   // Register a critical error callback
-  db.onCriticalError([&](kj::StringPtr message) {
+  db.onCriticalError([&](kj::Maybe<kj::Exception> exception) {
     criticalErrorCallbackCalled = true;
-    capturedErrorMessage = kj::str(message);
+    capturedException = exception;
   });
 
   KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
-  KJ_EXPECT(capturedErrorMessage.startsWith(expectedErrorMessage));
+  KJ_ASSERT(capturedException != kj::none);
+  KJ_IF_SOME(exception, capturedException) {
+    KJ_EXPECT(exception.getDescription().startsWith(expectedErrorMessage));
+  }
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
