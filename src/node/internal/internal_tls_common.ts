@@ -86,3 +86,46 @@ export function createSecureContext(
     options.maxVersion
   );
 }
+
+// Translate some fields from the handle's C-friendly format into more idiomatic
+// javascript object representations before passing them back to the user.  Can
+// be used on any cert object, but changing the name would be semver-major.
+export function translatePeerCertificate(
+  c?: tls.DetailedPeerCertificate
+): null | tls.DetailedPeerCertificate {
+  if (!c) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (c.issuerCertificate != null && c.issuerCertificate !== c) {
+    c.issuerCertificate = translatePeerCertificate(
+      c.issuerCertificate
+    ) as tls.DetailedPeerCertificate;
+  }
+  if (c.infoAccess != null) {
+    // Type is ignored due to @types/node inconsistency
+    const info = c.infoAccess as unknown as string;
+    // @ts-expect-error TS2322 Ignored due to missing __proto__ type.
+    c.infoAccess = { __proto__: null };
+
+    // XXX: More key validation?
+    info.replace(
+      /([^\n:]*):([^\n]*)(?:\n|$)/g,
+      // @ts-expect-error TS2349 @types/node inconsistency
+      (_all: string, key: string, val: string): void => {
+        if (val.charCodeAt(0) === 0x22) {
+          // The translatePeerCertificate function is only
+          // used on internally created legacy certificate
+          // objects, and any value that contains a quote
+          // will always be a valid JSON string literal,
+          // so this should never throw.
+          val = JSON.parse(val) as string;
+        }
+        if (c.infoAccess != null) {
+          c.infoAccess[key] ??= [];
+          c.infoAccess[key].push(val);
+        }
+      }
+    );
+  }
+  return c;
+}
