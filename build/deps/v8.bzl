@@ -28,7 +28,7 @@ PATCHES = [
     "0020-Modify-where-to-look-for-fast_float-and-simdutf.patch",
     "0021-Remove-unneded-latomic-linker-flag.patch",
     "0022-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
-    "0027-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
+    "0023-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
 ]
 
 # V8 and its dependencies

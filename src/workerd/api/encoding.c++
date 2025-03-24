@@ -467,8 +467,8 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
 namespace {
 TextEncoder::EncodeIntoResult encodeIntoImpl(
     jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
-  auto result = input.writeInto(js, buffer.asArrayPtr().asChars(),
-      jsg::JsString::WriteOptions::REPLACE_INVALID_UTF8);
+  auto result = input.writeInto(
+      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
   return TextEncoder::EncodeIntoResult{
     .read = static_cast<int>(result.read),
     .written = static_cast<int>(result.written),

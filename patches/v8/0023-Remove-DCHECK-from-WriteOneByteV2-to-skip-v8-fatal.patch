@@ -7,10 +7,10 @@ We already check for this after calling WriteOneByteV2()
 and throw a TypeError if the input string isn't one-byte only.
 
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 43540a968a5b7e94c3e883d1bf8b5f51072bae05..da393be16944058da30acc9d0e3d94de0203257a 100644
+index b8cf3fc6ce105490ae19f569bd45dc85fc5a384d..45d538e79cd1a830cdd070315c2bb3221cf6e686 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -6157,7 +6157,8 @@ void String::WriteV2(Isolate* v8_isolate, uint32_t offset, uint32_t length,
+@@ -6018,7 +6018,8 @@ void String::WriteV2(Isolate* v8_isolate, uint32_t offset, uint32_t length,
  
  void String::WriteOneByteV2(Isolate* v8_isolate, uint32_t offset,
                              uint32_t length, uint8_t* buffer, int flags) const {

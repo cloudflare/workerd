@@ -249,15 +249,14 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   static JsString concat(Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
 
-  enum WriteOptions {
+  enum WriteFlags {
     NONE = v8::String::WriteFlags::kNone,
     NULL_TERMINATION = v8::String::WriteFlags::kNullTerminate,
     REPLACE_INVALID_UTF8 = v8::String::WriteFlags::kReplaceInvalidUtf8,
   };
 
   template <typename T>
-  kj::Array<T> toArray(
-      Lock& js, WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
+  kj::Array<T> toArray(Lock& js, WriteFlags options = WriteFlags::NONE) const KJ_WARN_UNUSED_RESULT;
 
   struct WriteIntoStatus {
     // The number of elements (e.g. char, byte, uint16_t) read from this string.
@@ -266,11 +265,11 @@ class JsString final: public JsBase<v8::String, JsString> {
     size_t written;
   };
   WriteIntoStatus writeInto(
-      Lock& js, kj::ArrayPtr<char> buffer, WriteOptions options = WriteOptions::NONE) const;
+      Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
-      Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteOptions options = WriteOptions::NONE) const;
+      Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
-      Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteOptions options = WriteOptions::NONE) const;
+      Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options = WriteFlags::NONE) const;
 
   using JsBase<v8::String, JsString>::JsBase;
 };
@@ -447,7 +446,7 @@ inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
 }
 
 template <typename T>
-inline kj::Array<T> JsString::toArray(Lock& js, WriteOptions options) const {
+inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
