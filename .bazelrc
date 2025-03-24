@@ -100,6 +100,8 @@ build --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
 build --per_file_copt=external/perfetto@-fno-exceptions
 build --per_file_copt=external/ssl@-fno-exceptions
 build --per_file_copt=external/v8@-fno-exceptions
+build --per_file_copt=external/ada-url@-fno-exceptions
+build --per_file_copt=external/simdutf@-fno-exceptions
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
 build --per_file_copt=external/v8/src/torque@-fexceptions
 
