@@ -492,9 +492,8 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
 // define a constructor.
 class WorkerEntrypoint: public jsg::Object {
  public:
-  static jsg::Ref<WorkerEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<ExecutionContext> ctx,
-      jsg::JsObject env);
+  static jsg::Ref<WorkerEntrypoint> constructor(
+      const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
 };

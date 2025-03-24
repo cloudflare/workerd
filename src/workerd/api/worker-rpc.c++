@@ -1967,9 +1967,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::s
 // =======================================================================================
 
 jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    jsg::Ref<ExecutionContext> ctx,
-    jsg::JsObject env) {
+    const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
   //   `This()`. There ought to be a better way to get access to `this` in a constructor.
   //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.

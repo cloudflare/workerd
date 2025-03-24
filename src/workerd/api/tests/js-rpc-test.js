@@ -1731,3 +1731,19 @@ export let proxiedRpcTarget = {
     }
   },
 };
+
+// Test that we can construct a WorkerEntrypoint
+export class MyEntrypoint extends WorkerEntrypoint {
+  rpcFunc() {
+    return 'hello from entrypoint';
+  }
+}
+function constructEntrypoint(cls, env) {
+  return new cls({ waitUntil: () => {} }, env);
+}
+export let testConstructEntrypoint = {
+  async test(controller, env, ctx) {
+    const constructed = constructEntrypoint(MyEntrypoint, env);
+    assert.strictEqual(await constructed.rpcFunc(), 'hello from entrypoint');
+  },
+};
