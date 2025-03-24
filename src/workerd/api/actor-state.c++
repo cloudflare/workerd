@@ -764,6 +764,10 @@ void DurableObjectStorage::ensureReplicas() {
   return cache->ensureReplicas();
 }
 
+void DurableObjectStorage::disableReplicas() {
+  return cache->disableReplicas();
+}
+
 jsg::Optional<jsg::Ref<DurableObject>> DurableObjectStorage::getPrimary(jsg::Lock& js) {
   KJ_IF_SOME(primary, maybePrimary) {
     return primary.addRef();
