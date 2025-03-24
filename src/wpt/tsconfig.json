@@ -22,6 +22,7 @@
     "declaration": true,
     "composite": true,
     "sourceMap": true,
+    "types": ["@types/node"],
     "paths": {
       "harness/*": ["./harness/*"]
     }
