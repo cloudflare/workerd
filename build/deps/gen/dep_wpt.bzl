@@ -15,5 +15,5 @@ def dep_wpt():
         strip_prefix = STRIP_PREFIX,
         type = TYPE,
         sha256 = SHA256,
-        build_file = "//:build/BUILD.wpt",
+        build_file = "@workerd//:build/BUILD.wpt",
     )

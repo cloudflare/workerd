@@ -74,7 +74,7 @@
       "owner": "cloudflare",
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
-      "build_file": "//:build/BUILD.wpt",
+      "build_file": "@workerd//:build/BUILD.wpt",
       "freeze_version": "wpt-afa16aa1d"
     }
   ]

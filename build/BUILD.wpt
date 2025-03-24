@@ -2,7 +2,7 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-load("@workerd//:build/wpt_test.bzl", "wpt_get_directories")
+load("@workerd//:build/wpt_get_directories.bzl", "wpt_get_directories")
 
 [filegroup(
     name = dir,
