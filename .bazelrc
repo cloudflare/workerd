@@ -91,6 +91,20 @@ build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
 # V8 is heavily using absl for hashing now, optimize it too.
 build:v8-codegen-opt --per_file_copt=external/com_google_absl@-O2
 
+# In Google projects, exceptions are not used as a rule. Disabling them is more consistent with the
+# canonical V8 build and improves code size.
+build --per_file_copt=external/com_google_absl@-fno-exceptions
+build --per_file_copt=external/com_google_protobuf@-fno-exceptions
+build --per_file_copt=external/com_google_tcmalloc@-fno-exceptions
+build --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
+build --per_file_copt=external/perfetto@-fno-exceptions
+build --per_file_copt=external/ssl@-fno-exceptions
+build --per_file_copt=external/v8@-fno-exceptions
+build --per_file_copt=external/ada-url@-fno-exceptions
+build --per_file_copt=external/simdutf@-fno-exceptions
+# V8 torque is an exception from this policy, see v8 BUILD.gn.
+build --per_file_copt=external/v8/src/torque@-fexceptions
+
 # Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
 # performance improvements but makes code size worse. This will be the default in LLVM19.
 # https://maskray.me/blog/2024-04-27-clang-o0-output-branch-displacement-and-size-increase
