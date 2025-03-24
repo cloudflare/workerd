@@ -34,7 +34,7 @@ export default {
           }
           const val = { example: `values-${key}` };
           if (parsedBody.withMetadata) {
-            result[key] = { value: val, metadata: 'example-metadata' };
+            result[key] = { value: val, metadata: {"a": 1, "b": "c"} };
           } else {
             result[key] = val;
           }
@@ -45,7 +45,7 @@ export default {
           if (key == 'not-found') {
             result[key] = null;
           } else if (parsedBody.withMetadata) {
-            result[key] = { value: val, metadata: 'example-metadata' };
+            result[key] = { value: val, metadata: {"a": 1, "b": "c"} };
           } else {
             result[key] = val;
           }
@@ -178,7 +178,7 @@ export default {
     expected = new Map([
       [
         'key1',
-        { metadata: 'example-metadata', value: '{"example":"values-key1"}' },
+        { metadata: {"a": 1, "b": "c"}, value: '{"example":"values-key1"}' },
       ],
     ]);
     assert.deepStrictEqual(response, expected);
@@ -187,7 +187,7 @@ export default {
     expected = new Map([
       [
         'key1',
-        { metadata: 'example-metadata', value: { example: 'values-key1' } },
+        { metadata: {"a": 1, "b": "c"}, value: { example: 'values-key1' } },
       ],
     ]);
     assert.deepStrictEqual(response, expected);
@@ -195,11 +195,11 @@ export default {
     expected = new Map([
       [
         'key1',
-        { metadata: 'example-metadata', value: { example: 'values-key1' } },
+        { metadata: {"a": 1, "b": "c"}, value: { example: 'values-key1' } },
       ],
       [
         'key2',
-        { metadata: 'example-metadata', value: { example: 'values-key2' } },
+        { metadata: {"a": 1, "b": "c"}, value: { example: 'values-key2' } },
       ],
     ]);
     assert.deepStrictEqual(response, expected);
