@@ -76,28 +76,41 @@ export function validateInteger(
   }
 }
 
-export interface ValidateObjectOptions {
-  allowArray?: boolean;
-  allowFunction?: boolean;
-  nullable?: boolean;
-}
-
 export function validateObject(
   value: unknown,
   name: string,
-  options?: ValidateObjectOptions
+  options: number = kValidateObjectNone
 ): asserts value is Record<string, unknown> {
-  const useDefaultOptions = options == null;
-  const allowArray = useDefaultOptions ? false : options.allowArray;
-  const allowFunction = useDefaultOptions ? false : options.allowFunction;
-  const nullable = useDefaultOptions ? false : options.nullable;
-  if (
-    (!nullable && value === null) ||
-    (!allowArray && Array.isArray(value)) ||
-    (typeof value !== 'object' &&
-      (!allowFunction || typeof value !== 'function'))
-  ) {
-    throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+  if (options === kValidateObjectNone) {
+    if (value === null || Array.isArray(value)) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+
+    if (typeof value !== 'object') {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+  } else {
+    const throwOnNullable = (kValidateObjectAllowNullable & options) === 0;
+
+    if (throwOnNullable && value === null) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+
+    const throwOnArray = (kValidateObjectAllowArray & options) === 0;
+
+    if (throwOnArray && Array.isArray(value)) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
+
+    const throwOnFunction = (kValidateObjectAllowFunction & options) === 0;
+    const typeofValue = typeof value;
+
+    if (
+      typeofValue !== 'object' &&
+      (throwOnFunction || typeofValue !== 'function')
+    ) {
+      throw new ERR_INVALID_ARG_TYPE(name, 'Object', value);
+    }
   }
 }
 
@@ -333,6 +346,39 @@ export function validatePort(
   return +port | 0;
 }
 
+const octalReg = /^[0-7]+$/;
+const modeDesc = 'must be a 32-bit unsigned integer or an octal string';
+
+export function parseFileMode(
+  value: unknown,
+  name: string,
+  def?: number
+): number {
+  if (def != null) {
+    value ??= def;
+  }
+  if (typeof value === 'string') {
+    if (!octalReg.test(value)) {
+      throw new ERR_INVALID_ARG_VALUE(name, value, modeDesc);
+    }
+    value = Number.parseInt(value, 8);
+  }
+
+  validateUint32(value, name);
+  return value;
+}
+
+export const kValidateObjectNone = 0;
+export const kValidateObjectAllowNullable = 1 << 0;
+export const kValidateObjectAllowArray = 1 << 1;
+export const kValidateObjectAllowFunction = 1 << 2;
+export const kValidateObjectAllowObjects =
+  kValidateObjectAllowArray | kValidateObjectAllowFunction;
+export const kValidateObjectAllowObjectsAndNull =
+  kValidateObjectAllowNullable |
+  kValidateObjectAllowArray |
+  kValidateObjectAllowFunction;
+
 export default {
   isInt32,
   isUint32,
@@ -353,4 +399,13 @@ export default {
   // Zlib specific
   checkFiniteNumber,
   checkRangesOrGetDefault,
+
+  // Filesystem specific
+  parseFileMode,
+  kValidateObjectNone,
+  kValidateObjectAllowNullable,
+  kValidateObjectAllowArray,
+  kValidateObjectAllowFunction,
+  kValidateObjectAllowObjects,
+  kValidateObjectAllowObjectsAndNull,
 };
