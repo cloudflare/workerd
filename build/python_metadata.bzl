@@ -47,3 +47,45 @@ def verify_no_packages_were_removed():
                 fail(pkg + " from packages version ", package_dates[i], " not in ", package_dates[i + 1])
 
 verify_no_packages_were_removed()
+
+def make_bundle_version_info(versions):
+    result = {}
+    for entry in versions:
+        name = entry["name"]
+        if entry["name"] != "development":
+            entry["id"] = entry["pyodide_version"] + "_" + entry["pyodide_date"] + "_" + entry["backport"]
+        result[name] = entry
+    return result
+
+BUNDLE_VERSION_INFO = make_bundle_version_info([
+    {
+        "name": "0.26.0a2",
+        "pyodide_version": "0.26.0a2",
+        "pyodide_date": "2024-03-01",
+        "backport": "21",
+        "integrity": "sha256-DTYjdnJ41I1Gq5BsUcgh4DmHcgq1CZlwvWYF/UbV2v4=",
+        "feature_flags": [],
+        "emscripten_version": "3.1.52",
+        "python_version": "3.12.1",
+        "baseline_snapshot": "baseline-d13ce2f4a.bin",
+    },
+    {
+        "name": "0.27.1",
+        "pyodide_version": "0.27.1",
+        "pyodide_date": "2025-01-16",
+        "backport": "9",
+        "integrity": "sha256-4c+GXQ3lL83v7z2DR1HCNGHARAUWTu669GHmlt+xpB4=",
+        "feature_flags": ["pythonWorkers20250116"],
+        "emscripten_version": "3.1.58",
+        "python_version": "3.12.7",
+        "baseline_snapshot": "baseline-700487b8d.bin",
+    },
+    {
+        "name": "development",
+        "id": "dev",
+        "feature_flags": ["pythonWorkersDevPyodide", "pythonExternalPackages"],
+        "emscripten_version": "3.1.52",
+        "python_version": "3.12.1",
+        "baseline_snapshot": "baseline-d13ce2f4a.bin",
+    },
+])
