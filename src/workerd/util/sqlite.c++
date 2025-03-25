@@ -545,15 +545,18 @@ void SqliteDatabase::handleCriticalError(
         code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
 
       sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
-      // The transaction was rolledback, re-enabling the auto commit mode, so we should fail
-      if (sqlite3_get_autocommit(db) != 0) {
-        KJ_IF_SOME(cb, onCriticalErrorCallback) {
-          KJ_IF_SOME(e, maybeException) {
-            cb(kj::mv(e));
-          } else {
-            auto exception = kj::Exception(
-                kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::heapString(errorMessage));
-            cb(kj::mv(exception));
+      // We are in a transaction
+      if (inTransaction || !savepoints.empty()) {
+        // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
+        if (sqlite3_get_autocommit(db) != 0) {
+          KJ_IF_SOME(cb, onCriticalErrorCallback) {
+            KJ_IF_SOME(e, maybeException) {
+              cb(kj::mv(e));
+            } else {
+              auto exception = kj::Exception(
+                  kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::heapString(errorMessage));
+              cb(kj::mv(exception));
+            }
           }
         }
       }

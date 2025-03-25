@@ -1494,6 +1494,9 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
     capturedException = exception;
   });
 
+  // Use a small cache size to force flushing to disk on even a small write
+  db.run(SqliteDatabase::TRUSTED, "PRAGMA cache_size = 1");  // 1 page cache
+
   db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1501,6 +1504,8 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
     );
     INSERT INTO things(value) VALUES (123);
   )"));
+
+  db.run("BEGIN TRANSACTION");
 
   // Now arrange for an error on write().
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
@@ -1553,9 +1558,13 @@ KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
     lockDb.run("BEGIN EXCLUSIVE TRANSACTION");
     lockDb.run("UPDATE lock_test SET id = 2 WHERE id = 1");
 
+    db.run("BEGIN TRANSACTION");
+
     // Attempt to start another exclusive transaction in the main database
     // This should trigger SQLITE_BUSY
-    db.run(SqliteDatabase::TRUSTED, "BEGIN EXCLUSIVE TRANSACTION");
+    // TODO: This should ideally trigger an auto-rollback, but it doesn't, need to figure out why
+    // It does trigger the auto-rollback if not executed inside a transaction
+    db.run("BEGIN EXCLUSIVE TRANSACTION");
   });
 }
 
@@ -1564,6 +1573,8 @@ KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
     // Set up a database with limited size
     db.run("PRAGMA max_page_count = 10");
     db.run("CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)");
+
+    db.run("BEGIN TRANSACTION");
 
     // Create a large blob to quickly fill the database
     auto largeData = kj::heapArray<byte>(100000, 'X');  // 100KB
@@ -1577,6 +1588,8 @@ KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
   testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
     db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
 
+    db.run("BEGIN TRANSACTION");
+
     // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
     db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
 
@@ -1585,6 +1598,8 @@ KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
 
     // This operation should trigger SQLITE_NOMEM when SQLite tries to allocate
     // memory for the large parameter
+    // TODO: This should ideally trigger an auto-rollback, but it doesn't, need to figure out why
+    // It does trigger the auto-rollback if not executed inside a transaction
     db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_nomem VALUES (?, ?)", 1, largeData.asPtr());
   });
 }
