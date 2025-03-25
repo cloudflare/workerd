@@ -294,7 +294,9 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap) {
+static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
+                               v8::CppHeap* cppHeap,
+                               const v8::IsolateGroup* group) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -312,27 +314,30 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
 
     if (params.array_buffer_allocator == nullptr &&
         params.array_buffer_allocator_shared == nullptr) {
-      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-          v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+      if (group != nullptr) {
+        params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+            v8::ArrayBuffer::Allocator::NewDefaultAllocator(*group));
+      } else {
+        params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+            v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+      }
     }
-#if V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
-    // Create new isolate group so that isolate is in its own group and not in a shared group. That
-    // way the isolates don't all use the same pointer cage.
-    v8::IsolateGroup group = v8::IsolateGroup::Create();
-    return v8::Isolate::New(group, params);
-#else
-    return v8::Isolate::New(params);
-#endif
+    if (group != nullptr) {
+      return v8::Isolate::New(*group, params);
+    } else {
+      return v8::Isolate::New(params);
+    }
   });
 }
 }  // namespace
 
 IsolateBase::IsolateBase(const V8System& system,
     v8::Isolate::CreateParams&& createParams,
-    kj::Own<IsolateObserver> observer)
+    kj::Own<IsolateObserver> observer,
+    const v8::IsolateGroup* group)
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
+      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
