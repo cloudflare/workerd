@@ -3947,28 +3947,28 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
   }
 
   ~ResponseStreamWrapper() noexcept(false) {
-    jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-      Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics), stackScope);
-      auto& isolate = const_cast<Isolate&>(*constIsolate);
-
-      KJ_IF_SOME(i, isolate.currentInspectorSession) {
-        capnp::MallocMessageBuilder message;
-
-        auto event = message.initRoot<cdp::Event>();
-
-        auto params = event.initNetworkLoadingFinished();
-        params.setRequestId(requestId);
-        params.setEncodedDataLength(rawSize);
-        params.setTimestamp(getMonotonicTimeForProcessSandboxOnly());
-        auto response = params.initCfResponse();
-        KJ_IF_SOME(body, decodedBuf.getArray()) {
-          response.setBase64Encoded(true);
-          response.setBody(kj::encodeBase64(body));
-        }
-
-        i.sendNotification(event);
-      }
-    });
+    // It's possible that we already have an isolate lock, in which case we
+    // don't want to grab another one. Here, we can determine if we have a
+    // lock by checking if there is a current IoContext, if we do then we
+    // definitely have a current lock.
+    // While it is possible for us to have an isolate lock without a current
+    // IoContext, it is quite unlikely that we'd be cleaning up a
+    // ResponseStreamWrapper in that situation, so checking for the current
+    // IoContext should work fine.
+    if (IoContext::hasCurrent()) {
+      reportToInspector();
+    } else {
+      // In this case we assume we don't have a lock and need to grab one.
+      // If we continue to get warnings that we're taking the isolate lock
+      // recursively here, that means we're cleaning these outside of the
+      // IoContext but still have the isolate lock. In that case, we would
+      // likely need to add an API to jsg::Lock to get the current lock
+      // rather than relying on the IoContext.
+      jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+        Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics), stackScope);
+        reportToInspector();
+      });
+    }
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
@@ -4048,6 +4048,30 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
   LimitedBodyWrapper decodedBuf;
   kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream>> compStream;
   RequestObserver& requestMetrics;
+
+  // Called when the wrapper is destroyed.
+  // This should only ever be called when we are holding the isolate lock.
+  void reportToInspector() {
+    auto& isolate = const_cast<Isolate&>(*constIsolate);
+
+    KJ_IF_SOME(i, isolate.currentInspectorSession) {
+      capnp::MallocMessageBuilder message;
+
+      auto event = message.initRoot<cdp::Event>();
+
+      auto params = event.initNetworkLoadingFinished();
+      params.setRequestId(requestId);
+      params.setEncodedDataLength(rawSize);
+      params.setTimestamp(getMonotonicTimeForProcessSandboxOnly());
+      auto response = params.initCfResponse();
+      KJ_IF_SOME(body, decodedBuf.getArray()) {
+        response.setBase64Encoded(true);
+        response.setBody(kj::encodeBase64(body));
+      }
+
+      i.sendNotification(event);
+    }
+  }
 };
 
 class Worker::Isolate::SubrequestClient final: public WorkerInterface {
