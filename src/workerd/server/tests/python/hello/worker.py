@@ -1,4 +1,5 @@
 def test():
+    from pyodide import __version__ as v; print(v)
     from js import console
     from js.WebAssembly import Suspending
 
