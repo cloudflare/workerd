@@ -763,7 +763,7 @@ class Worker::Actor final: public kj::Refcounted {
 
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
-  Actor(const Worker& worker,
+  Actor(kj::Arc<Worker> worker,
       kj::Maybe<RequestTracker&> tracker,
       Id actorId,
       bool hasTransient,
@@ -849,8 +849,8 @@ class Worker::Actor final: public kj::Refcounted {
   // Only needs to be called when allocating a HibernationManager!
   kj::Maybe<uint16_t> getHibernationEventType();
 
-  inline const Worker& getWorker() {
-    return *worker;
+  inline kj::Arc<Worker> getWorker() {
+    return worker.addRef();
   }
 
   void assertCanSetAlarm();
@@ -872,7 +872,7 @@ class Worker::Actor final: public kj::Refcounted {
  private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
 
-  kj::Own<const Worker> worker;
+  kj::Arc<Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
   struct Impl;
   kj::Own<Impl> impl;
