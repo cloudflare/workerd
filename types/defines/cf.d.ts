@@ -30,8 +30,10 @@ interface BasicImageTransformations {
    *    (white by default). Use of this mode is not recommended, as the same
    *    effect can be more efficiently achieved with the contain mode and the
    *    CSS object-fit: contain property.
+   *  - squeeze: Stretches and deforms to the width and height given, even if it
+   *    breaks aspect ratio
    */
-  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad";
+  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
   /**
    * When cropping with fit: "cover", this defines the side or point that should
    * be left uncropped. The value is either a string
@@ -45,12 +47,13 @@ interface BasicImageTransformations {
    * source image.
    */
   gravity?:
-    | "left"
-    | "right"
-    | "top"
-    | "bottom"
-    | "center"
-    | "auto"
+    | 'left'
+    | 'right'
+    | 'top'
+    | 'bottom'
+    | 'center'
+    | 'auto'
+    | 'entropy'
     | BasicImageTransformationsGravityCoordinates;
   /**
    * Background color to add underneath the image. Applies only to images with
@@ -66,8 +69,9 @@ interface BasicImageTransformations {
 }
 
 interface BasicImageTransformationsGravityCoordinates {
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
+  mode?: 'remainder' | 'box-center';
 }
 
 /**
@@ -176,23 +180,41 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    */
   dpr?: number;
   /**
-   * An object with four properties {left, top, right, bottom} that specify
-   * a number of pixels to cut off on each side. Allows removal of borders
-   * or cutting out a specific fragment of an image. Trimming is performed
-   * before resizing or rotation. Takes dpr into account.
+   * Allows you to trim your image. Takes dpr into account and is performed before
+   * resizing or rotation.
+   *
+   * It can be used as:
+   * - left, top, right, bottom - it will specify the number of pixels to cut
+   *   off each side
+   * - width, height - the width/height you'd like to end up with - can be used
+   *   in combination with the properties above
+   * - border - this will automatically trim the surroundings of an image based on
+   *   it's color. It consists of three properties:
+   *    - color: rgb or hex representation of the color you wish to trim (todo: verify the rgba bit)
+   *    - tolerance: difference from color to treat as color
+   *    - keep: the number of pixels of border to keep
    */
-  trim?: {
-    left?: number;
+  trim?: "border" | {
     top?: number;
-    right?: number;
     bottom?: number;
+    left?: number;
+    right?: number;
+    width?: number;
+    height?: number;
+    border?:
+      | boolean
+      | {
+          color?: string;
+          tolerance?: number;
+          keep?: number;
+        };
   };
   /**
    * Quality setting from 1-100 (useful values are in 60-90 range). Lower values
    * make images look worse, but load faster. The default is 85. It applies only
    * to JPEG and WebP images. It doesn’t have any effect on PNG.
    */
-  quality?: number;
+  quality?: number | "low" | "medium-low" | "medium-high" | "high";
   /**
    * Output format to generate. It can be:
    *  - avif: generate images in AVIF format.
@@ -204,7 +226,7 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * - jpeg: generate images in JPEG format.
    * - png: generate images in PNG format.
    */
-  format?: "avif" | "webp" | "json" | "jpeg" | "png";
+  format?: "avif" | "webp" | "json" | "jpeg" | "png" | "baseline-jpeg" | "png-force" | "svg";
   /**
    * Whether to preserve animation frames from input files. Default is true.
    * Setting it to false reduces animations to still images. This setting is
@@ -284,6 +306,21 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * 0.5 darkens the image, and a value of 2.0 lightens the image. 0 is ignored.
    */
   gamma?: number;
+
+  /**
+   * Increase contrast by a factor. A value of 1.0 equals no change, a value of
+   * 0.5 equals low contrast, and a value of 2.0 equals high contrast. 0 is
+   * ignored.
+   */
+  saturation?: number;
+
+  /**
+   * Flips the images horizontally, vertically, or both. Flipping is applied before
+   * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
+   * horizontally, then rotated by 90 degrees.
+   */
+  flip?: 'h' | 'v' | 'hv',
+
   /**
    * Slightly reduces latency on a cache miss by selecting a
    * quickest-to-compress file format, at a cost of increased file size and
