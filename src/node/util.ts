@@ -13,6 +13,7 @@ import {
   validateFunction,
   validateAbortSignal,
   validateObject,
+  kValidateObjectAllowObjects,
 } from 'node-internal:validators';
 
 import { debuglog } from 'node-internal:debuglog';
@@ -185,10 +186,7 @@ export async function aborted(signal: AbortSignal, resource: object) {
   // this additional option. Unfortunately Node.js does not make this argument optional.
   // We'll just ignore it.
   validateAbortSignal(signal, 'signal');
-  validateObject(resource, 'resource', {
-    allowArray: true,
-    allowFunction: true,
-  });
+  validateObject(resource, 'resource', kValidateObjectAllowObjects);
   if (signal.aborted) return Promise.resolve();
   const { promise, resolve } = Promise.withResolvers();
   const opts = { __proto__: null, once: true };

@@ -284,7 +284,7 @@ export function tracingChannel(
         this[kAsyncEnd] = channel(`tracing:${nameOrChannels}:asyncEnd`);
         this[kError] = channel(`tracing:${nameOrChannels}:error`);
       } else {
-        validateObject(nameOrChannels, 'channels', {});
+        validateObject(nameOrChannels, 'channels');
         const channels = nameOrChannels as TracingChannels;
         this[kStart] = validateChannel(channels.start, 'channels.start');
         this[kEnd] = validateChannel(channels.end, 'channels.end');

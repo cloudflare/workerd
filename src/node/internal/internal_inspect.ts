@@ -59,7 +59,11 @@ import {
   isBigIntObject,
 } from 'node-internal:internal_types';
 // import { ALL_PROPERTIES, ONLY_ENUMERABLE, getOwnNonIndexProperties } from "node-internal:internal_utils";
-import { validateObject, validateString } from 'node-internal:validators';
+import {
+  validateObject,
+  validateString,
+  kValidateObjectAllowArray,
+} from 'node-internal:validators';
 
 // Simplified assertions to avoid `Assertions require every name in the call target to be
 // declared with an explicit type` TypeScript error
@@ -2710,7 +2714,7 @@ export function formatWithOptions(
   inspectOptions: InspectOptions,
   ...args: unknown[]
 ): string {
-  validateObject(inspectOptions, 'inspectOptions', { allowArray: true });
+  validateObject(inspectOptions, 'inspectOptions', kValidateObjectAllowArray);
   return formatWithOptionsInternal(inspectOptions, args);
 }
 

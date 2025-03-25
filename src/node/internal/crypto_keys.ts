@@ -112,7 +112,7 @@ function validateExportOptions(
   type: KeyObjectType,
   name = 'options'
 ): asserts options is ExportOptions {
-  validateObject(options, name, {});
+  validateObject(options, name);
   // Yes, converting to any is a bit of a cheat, but it allows us to check
   // each option individually without having to do a bunch of type guards.
   const opts = options;
@@ -182,7 +182,7 @@ export abstract class KeyObject {
   }
 
   public export(options: ExportOptions = {}): KeyExportResult {
-    validateObject(options, 'options', {});
+    validateObject(options, 'options');
 
     validateExportOptions(options, this.type);
 
