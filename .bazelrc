@@ -137,7 +137,7 @@ common --@aspect_rules_ts//ts:skipLibCheck=honor_tsconfig
 common --@aspect_rules_ts//ts:default_to_tsc_transpiler
 
 # optimized LTO build. you'll need a fairly recent clang for this to work
-build:thin-lto -c opt
+build:thin-lto --config=opt
 build:thin-lto --cxxopt='-flto=thin'
 build:thin-lto --linkopt='-flto=thin'
 
@@ -173,8 +173,9 @@ build:limited-dbg-info --copt='-g1' --copt="-fdebug-info-for-profiling"
 # Miscellaneous platform-independent options
 build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
 build --@capnp-cpp//src/capnp:gen_rust=True
+# overriden in config=opt
+build --@capnp-cpp//src/kj:debug_memory=True
 build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
-build --@capnp-cpp//src/capnp:gen_rust=True
 
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
 # Need to disable debug-assertions for fastbuild, should be off automatically for opt.
@@ -342,8 +343,12 @@ build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 # a shared library.
 build:windows --copt='/Zc:dllexportInlines-'
 
+# optimized configuration
+build:opt -c opt
+build:opt --@capnp-cpp//src/kj:debug_memory=False
+
 # Release configuration.
-build:release -c opt
+build:release --config=opt
 build:release --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 
 # enable -O3 for the release configuration. Based on benchmarking there is little difference in
