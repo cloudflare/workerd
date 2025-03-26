@@ -284,9 +284,6 @@ class IsolateBase {
   // object with 2 internal fields.
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
 
-  // Object that is used as the underlying target of process.env when nodejs-compat mode is used.
-  v8::Global<v8::Object> envObj;
-
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
 
@@ -700,33 +697,13 @@ class Isolate: public IsolateBase {
       }
     }
 
-    // Sets an env value that will be expressed on the process.env
-    // if/when nodejs-compat mode is used.
-    void setProcessEnvField(const JsValue& name, const JsValue& value) override {
-      getProcessEnv().set(*this, name, value);
+    void setWorkerEnv(V8Ref<v8::Object> value) override {
+      jsgIsolate.workerEnvObj.Reset(v8Isolate, value.getHandle(*this));
     }
 
-    // Returns the env base object.
-    JsObject getProcessEnv(bool release = false) override {
-      KJ_DEFER({
-        if (release) jsgIsolate.envObj.Reset();
-      });
-      if (jsgIsolate.envObj.IsEmpty()) {
-        v8::Local<v8::Object> env = obj();
-        jsgIsolate.envObj.Reset(v8Isolate, env);
-      }
-      return JsObject(jsgIsolate.envObj.Get(v8Isolate));
-    }
-
-    void setWorkerEnv(Value value) override {
-      auto handle = value.getHandle(*this);
-      KJ_ASSERT(handle->IsObject());
-      jsgIsolate.workerEnvObj.Reset(v8Isolate, handle.template As<v8::Object>());
-    }
-
-    kj::Maybe<Value> getWorkerEnv() override {
+    kj::Maybe<V8Ref<v8::Object>> getWorkerEnv() override {
       if (jsgIsolate.workerEnvObj.IsEmpty()) return kj::none;
-      return v8Ref<v8::Value>(jsgIsolate.workerEnvObj.Get(v8Isolate));
+      return v8Ref<v8::Object>(jsgIsolate.workerEnvObj.Get(v8Isolate));
     }
 
    private:

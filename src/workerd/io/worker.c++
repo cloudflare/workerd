@@ -1618,7 +1618,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               // Use `env` variable.
               bindingsScope = v8::Object::New(lock.v8Isolate);
               if (!FeatureFlags::get(js).getDisableImportableEnv()) {
-                lock.setWorkerEnv(lock.v8Ref(bindingsScope.As<v8::Value>()));
+                lock.setWorkerEnv(lock.v8Ref(bindingsScope));
               }
             } else {
               // Use global-scope bindings.
