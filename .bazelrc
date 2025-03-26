@@ -324,7 +324,7 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 # In an optional configuration, use the opt configuration and manually disable optimizations as a
 # workaround.
 
-build:windows_no_dbg --config=opt
+build:windows_no_dbg -c opt
 build:windows_no_dbg --copt='-O0'
 build:windows_no_dbg --copt='/Od'
 build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
