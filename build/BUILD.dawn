@@ -6,12 +6,16 @@ COPTS_UNIX = [
     "-fno-exceptions",
 ]
 
-# TODO(debloat): Disable exceptions and RTTI for dawn, this greatly improves binary size. Note that
-# these flags are not supported by clang-cl and cause warnings there – explore enabling the
-# corresponding flags '/GX-', '/GR-' on Windows after confirming they are safe.
+COPTS_WINDOWS = [
+    "/GR-",
+    "/GX-",
+]
+
+# Disable exceptions and RTTI for dawn, this greatly improves binary size.
 COPTS = select({
     "@platforms//os:osx": COPTS_UNIX,
     "@platforms//os:linux": COPTS_UNIX,
+    "@platforms//os:windows": COPTS_WINDOWS,
     "//conditions:default": [],
 })
 
