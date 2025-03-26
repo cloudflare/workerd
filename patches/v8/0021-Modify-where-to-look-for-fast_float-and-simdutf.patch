@@ -6,19 +6,10 @@ Subject: Modify where to look for fast_float and simdutf.
 Similar to fp16, these dependencies now needs to be downloaded by bazel.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index f19f85b5b94a36b0b00c37b075e6cc7291ee0b34..19d7d942c9dc49b48425285d92d6c93e27371ab9 100644
+index 8cd55daf968fabf72345edad61e9a303335b6a8e..5a00e6b29abfefaac6a9ec73cfbe47c63a69c616 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -2542,8 +2542,6 @@ filegroup(
-         "src/zone/zone-type-traits.h",
-         "src/zone/zone-utils.h",
-         "third_party/rapidhash-v8/rapidhash.h",
--        "third_party/simdutf/simdutf.cpp",
--        "third_party/simdutf/simdutf.h",
-         "third_party/siphash/halfsiphash.cc",
-         "third_party/siphash/halfsiphash.h",
-         "third_party/utf8-decoder/utf8-decoder.h",
-@@ -4325,12 +4323,6 @@ cc_library(
+@@ -4343,12 +4343,6 @@ cc_library(
      ],
  )
  
@@ -31,7 +22,7 @@ index f19f85b5b94a36b0b00c37b075e6cc7291ee0b34..19d7d942c9dc49b48425285d92d6c93e
  v8_library(
      name = "v8_libshared",
      srcs = [
-@@ -4359,9 +4351,9 @@ v8_library(
+@@ -4377,9 +4371,9 @@ v8_library(
          ":noicu/generated_torque_definitions",
      ],
      deps = [
@@ -44,15 +35,28 @@ index f19f85b5b94a36b0b00c37b075e6cc7291ee0b34..19d7d942c9dc49b48425285d92d6c93e
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index 19d9d3ba904bbaf791578035f65b225042fca590..f3c54b5c1c91545b97e2a38aa2933e495948ebf7 100644
+index d75bc54dab07d62abaa5c94692c9054c324736e0..52b1189b5e9aa4a50c00d2e70eab37899fa4e59b 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
-@@ -11,7 +11,7 @@
- #include "src/objects/heap-number-inl.h"
+@@ -12,7 +12,7 @@
  #include "src/objects/js-array-buffer-inl.h"
  #include "src/objects/objects-inl.h"
+ #include "src/objects/simd.h"
 -#include "third_party/simdutf/simdutf.h"
 +#include "simdutf.h"
  
  namespace v8 {
  namespace internal {
+diff --git a/src/objects/string.h b/src/objects/string.h
+index 3a4d45102ba312704f54b7b756321e0ac76980c6..0447631a382f55e89941bff80300dc1321c5d8c7 100644
+--- a/src/objects/string.h
++++ b/src/objects/string.h
+@@ -21,7 +21,7 @@
+ #include "src/objects/tagged.h"
+ #include "src/sandbox/external-pointer.h"
+ #include "src/strings/unicode-decoder.h"
+-#include "third_party/simdutf/simdutf.h"
++#include "simdutf.h"
+ 
+ // Has to be the last include (doesn't have include guards):
+ #include "src/objects/object-macros.h"

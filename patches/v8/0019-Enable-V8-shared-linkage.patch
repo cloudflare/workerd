@@ -5,10 +5,10 @@ Subject: Enable V8 shared linkage
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad700f1c400 100644
+index 653d4409c14e639d1f04df20c0ae8b8ad6b5b837..d17a4d15241b5b7a45e0cdad569efbc99152c758 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1372,6 +1372,7 @@ filegroup(
+@@ -1388,6 +1388,7 @@ filegroup(
          "src/builtins/constants-table-builder.cc",
          "src/builtins/constants-table-builder.h",
          "src/builtins/data-view-ops.h",
@@ -16,7 +16,7 @@ index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad7
          "src/builtins/profile-data-reader.h",
          "src/codegen/aligned-slot-allocator.cc",
          "src/codegen/aligned-slot-allocator.h",
-@@ -1553,7 +1554,6 @@ filegroup(
+@@ -1569,7 +1570,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -24,7 +24,7 @@ index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad7
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3079,7 +3079,6 @@ filegroup(
+@@ -3097,7 +3097,6 @@ filegroup(
  filegroup(
      name = "v8_compiler_files",
      srcs = [
@@ -32,7 +32,7 @@ index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad7
          "src/compiler/access-builder.cc",
          "src/compiler/access-builder.h",
          "src/compiler/access-info.cc",
-@@ -3644,8 +3643,6 @@ filegroup(
+@@ -3663,8 +3662,6 @@ filegroup(
          "src/builtins/growable-fixed-array-gen.cc",
          "src/builtins/growable-fixed-array-gen.h",
          "src/builtins/number-builtins-reducer-inl.h",
@@ -41,7 +41,7 @@ index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad7
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -3907,6 +3904,7 @@ filegroup(
+@@ -3926,6 +3923,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -49,7 +49,7 @@ index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad7
      ],
  )
  
-@@ -4017,6 +4015,10 @@ filegroup(
+@@ -4036,6 +4034,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -60,7 +60,7 @@ index bfc3ab07e3efddc81965bb8dfbe7ce1f50aa72b2..aa72436fed2ce640b919caefac2ccad7
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4034,6 +4036,7 @@ filegroup(
+@@ -4053,6 +4055,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",

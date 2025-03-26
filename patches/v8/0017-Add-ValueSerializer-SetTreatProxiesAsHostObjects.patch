@@ -28,10 +28,10 @@ index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a507
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index fb819c77d9828bc1cc4b50b94a839cee016d3961..fccbd853f957617c79d97dbdd69fec7c39f65af5 100644
+index 44661d69dc354b61f815a42f3c4fc55cc3c34ae7..ac0e581fe1c35a88f1f3814a8aa2357141816dea 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3519,6 +3519,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -3341,6 +3341,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    private_->serializer.SetTreatFunctionsAsHostObjects(mode);
  }
  
@@ -43,7 +43,7 @@ index fb819c77d9828bc1cc4b50b94a839cee016d3961..fccbd853f957617c79d97dbdd69fec7c
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 13f07a5314f10d806822a138ed1faf29890fa7aa..aad7276ecd155449f72f14c45e34b7c36f98deb7 100644
+index f003465b77be950dad901fd776eb38c63deb14fa..f294665d99c54e8dbec85f100a8961d72bffdc10 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -332,6 +332,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
@@ -57,7 +57,7 @@ index 13f07a5314f10d806822a138ed1faf29890fa7aa..aad7276ecd155449f72f14c45e34b7c3
  void ValueSerializer::WriteTag(SerializationTag tag) {
    uint8_t raw_tag = static_cast<uint8_t>(tag);
    WriteRawBytes(&raw_tag, sizeof(raw_tag));
-@@ -602,7 +606,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(Handle<JSReceiver> receiver) {
+@@ -603,7 +607,12 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
    InstanceType instance_type = receiver->map()->instance_type();
    if (IsCallable(*receiver)) {
      if (treat_functions_as_host_objects_) {
@@ -71,17 +71,17 @@ index 13f07a5314f10d806822a138ed1faf29890fa7aa..aad7276ecd155449f72f14c45e34b7c3
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
-@@ -1208,7 +1217,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+@@ -1213,7 +1222,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
    return ThrowIfOutOfMemory();
  }
  
--Maybe<bool> ValueSerializer::WriteHostObject(Handle<JSObject> object) {
-+Maybe<bool> ValueSerializer::WriteHostObject(Handle<JSReceiver> object) {
+-Maybe<bool> ValueSerializer::WriteHostObject(DirectHandle<JSObject> object) {
++Maybe<bool> ValueSerializer::WriteHostObject(DirectHandle<JSReceiver> object) {
    WriteTag(SerializationTag::kHostObject);
    if (!delegate_) {
      isolate_->Throw(*isolate_->factory()->NewError(
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index de1a8c71c6a0c22a10f82ce6cf3f6523343aac29..d8764705a5bd84017a6fa10ca73a41722da4a9e3 100644
+index 2d0a746c90522500fcf17d73f3024512b1bb5481..7ec442c5e002e8a7e00c7d0ea5dc3e77744bb55d 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -111,6 +111,15 @@ class ValueSerializer {
@@ -100,16 +100,17 @@ index de1a8c71c6a0c22a10f82ce6cf3f6523343aac29..d8764705a5bd84017a6fa10ca73a4172
   private:
    // Managing allocations of the internal buffer.
    Maybe<bool> ExpandBuffer(size_t required_capacity);
-@@ -161,7 +170,7 @@ class ValueSerializer {
+@@ -161,8 +170,7 @@ class ValueSerializer {
  #endif  // V8_ENABLE_WEBASSEMBLY
    Maybe<bool> WriteSharedObject(DirectHandle<HeapObject> object)
        V8_WARN_UNUSED_RESULT;
--  Maybe<bool> WriteHostObject(Handle<JSObject> object) V8_WARN_UNUSED_RESULT;
-+  Maybe<bool> WriteHostObject(Handle<JSReceiver> object) V8_WARN_UNUSED_RESULT;
+-  Maybe<bool> WriteHostObject(DirectHandle<JSObject> object)
+-      V8_WARN_UNUSED_RESULT;
++  Maybe<bool> WriteHostObject(DirectHandle<JSReceiver> object) V8_WARN_UNUSED_RESULT;
  
    /*
     * Reads the specified keys from the object and writes key-value pairs to the
-@@ -194,6 +203,7 @@ class ValueSerializer {
+@@ -195,6 +203,7 @@ class ValueSerializer {
    bool has_custom_host_objects_ = false;
    bool treat_array_buffer_views_as_host_objects_ = false;
    bool treat_functions_as_host_objects_ = false;

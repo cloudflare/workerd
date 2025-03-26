@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.4.114.17"
+VERSION = "13.5.212.10"
 
-INTEGRITY = "sha256-2oHxjMY9AI8zSRf4VU+eJE1q5lWHWKiZ/pnOJBuV2JM="
+INTEGRITY = "sha256-LEez3iJZH0OE91qkYjAeuf251mHuB/c8q5WonQp11a4="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -26,11 +26,7 @@ PATCHES = [
     "0018-Disable-memory-leak-assert-when-shutting-down-V8.patch",
     "0019-Enable-V8-shared-linkage.patch",
     "0020-Fix-macOS-build.patch",
-    "0021-Delete-IsolateGroup-in-V8-Dispose.patch",
-    "0022-Reset-code_range_-before-pointer-compression-cage.patch",
-    "0023-Move-tear-down-in-IsolateGroup-Release-into-destruct.patch",
-    "0024-Modify-where-to-look-for-fast_float-and-simdutf.patch",
-    "0025-add-processed_characters-option-to-WriteUtf8V2.patch",
+    "0021-Modify-where-to-look-for-fast_float-and-simdutf.patch",
 ]
 
 # V8 and its dependencies
@@ -60,7 +56,7 @@ def deps_v8():
     git_repository(
         name = "com_googlesource_chromium_icu",
         build_file = "@v8//:bazel/BUILD.icu",
-        commit = "bbccc2f6efc1b825de5f2c903c48be685cd0cf22",
+        commit = "d30b7b0bb3829f2e220df403ed461a1ede78b774",
         patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
