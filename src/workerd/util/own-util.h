@@ -6,6 +6,7 @@
 
 #include <kj/array.h>
 #include <kj/refcount.h>
+#include <kj/string.h>
 
 namespace workerd {
 
@@ -37,6 +38,10 @@ inline auto mapAddRef(kj::ArrayPtr<kj::Own<T>>& array) -> kj::Array<kj::Own<T>> 
 template <typename T>
 inline auto mapAddRef(kj::Array<kj::Own<T>>& array) -> kj::Array<kj::Own<T>> {
   return KJ_MAP(t, array) { return kj::addRef(*t); };
+}
+
+inline auto mapCopyString(kj::Maybe<kj::String>& string) -> kj::Maybe<kj::String> {
+  return string.map([](kj::String& s) { return kj::str(s); });
 }
 
 }  // namespace workerd
