@@ -94,15 +94,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     KJ_UNREACHABLE;
   };
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), tracing::HibernatableWebSocketEventInfo(getType()));
-  }
-
   // TODO(streaming-tail-workers): Support Hibernate and Resume events properly.
-  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
-    return tracing::Onset(
-        tracing::HibernatableWebSocketEventInfo(getType()), tracing::Onset::WorkerInfo{}, kj::none);
-  });
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(incomingRequest->getContext().getInvocationSpanContext(), context.now(),
+        tracing::HibernatableWebSocketEventInfo(getType()));
+  }
 
   auto outcomeObserver = kj::rc<OutcomeObserver>(
       kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());

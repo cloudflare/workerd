@@ -653,12 +653,10 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& metrics = incomingRequest->getMetrics();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), tracing::TraceEventInfo(traces));
+    t.setEventInfo(
+        context.getInvocationSpanContext(), context.now(), tracing::TraceEventInfo(traces));
   }
 
-  metrics.reportTailEvent(context.getInvocationSpanContext(), [&] {
-    return tracing::Onset(tracing::TraceEventInfo(traces), tracing::Onset::WorkerInfo{}, kj::none);
-  });
   auto outcomeObserver = kj::rc<OutcomeObserver>(
       kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
 

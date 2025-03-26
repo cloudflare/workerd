@@ -556,13 +556,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   }
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.now(), tracing::QueueEventInfo(kj::str(queueName), batchSize));
+    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
+        tracing::QueueEventInfo(kj::str(queueName), batchSize));
   }
-
-  context.getMetrics().reportTailEvent(context.getInvocationSpanContext(), [&] {
-    return tracing::Onset(tracing::QueueEventInfo(kj::mv(queueName), batchSize),
-        tracing::Onset::WorkerInfo{}, kj::none);
-  });
 
   auto outcomeObserver = kj::rc<OutcomeObserver>(
       kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
