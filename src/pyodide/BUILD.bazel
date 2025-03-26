@@ -1,7 +1,6 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
@@ -210,9 +209,12 @@ js_file(
 
 esbuild(
     name = "generated/emscriptenSetup",
-    srcs = glob([
-        "internal/pool/*.ts",
-    ]) + [
+    # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
+    # for it. The file is provided in entry_point instead.
+    srcs = glob(
+        ["internal/pool/*.ts"],
+        exclude = ["internal/pool/emscriptenSetup.ts"],
+    ) + [
         "generated/pyodide.asm.js",
         "internal/util.ts",
     ],
@@ -244,7 +246,7 @@ INTERNAL_MODULES = glob(
         "internal/*.ts",
         "internal/topLevelEntropy/*.ts",
         # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-        "internal/pool/*.ts",
+        # "internal/pool/*.ts",
         "types/*.ts",
         "types/*/*.ts",
     ],
@@ -270,7 +272,6 @@ wd_ts_bundle(
     internal_data_modules = INTERNAL_DATA_MODULES,
     internal_modules = INTERNAL_MODULES,
     js_deps = [
-        "generated/emscriptenSetup",
         "pyodide.asm.wasm@rule",
         "python_stdlib.zip@rule",
     ],
