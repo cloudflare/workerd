@@ -31,6 +31,8 @@ PATCHES = [
     "0023-Move-tear-down-in-IsolateGroup-Release-into-destruct.patch",
     "0024-Modify-where-to-look-for-fast_float-and-simdutf.patch",
     "0025-add-processed_characters-option-to-WriteUtf8V2.patch",
+    "0026-Fix-corner-case-for-surrogate-pair-in-WriteUtf8V2.patch",
+    "0027-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
 ]
 
 # V8 and its dependencies
