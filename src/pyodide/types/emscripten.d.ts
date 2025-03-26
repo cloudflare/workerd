@@ -20,11 +20,15 @@ interface API {
     stdout?: (a: string) => void,
     stderr?: (a: string) => void
   ) => void;
+  version: string;
 }
 
 interface LDSO {
   loadedLibsByHandle: {
     [handle: string]: DSO;
+  };
+  loadedLibsByName: {
+    [name: string]: DSO;
   };
 }
 
@@ -67,7 +71,8 @@ interface Module {
   loadWebAssemblyModule: (
     mod: WebAssembly.Module,
     opt: object,
-    path: string
+    path: string,
+    localScope: object
   ) => WebAssembly.Exports;
   growMemory(newSize: number): void;
   addRunDependency(x: string): void;
@@ -77,4 +82,12 @@ interface Module {
   setGetRandomValues(
     func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
   ): void;
+  getMemory(size: number): number;
+  getMemoryPatched(
+    Module: Module,
+    libName: string,
+    handle: number,
+    size: number
+  ): number;
+  promise: Promise<void>;
 }

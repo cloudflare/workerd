@@ -415,7 +415,9 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     // don't include modules that we provide and that are likely to be imported by most
     // workers.
     if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray() ||
-        firstComponent == "asgi"_kj.asArray() || firstComponent == "workers"_kj.asArray()) {
+        firstComponent == "asgi"_kj.asArray() || firstComponent == "workers"_kj.asArray() ||
+        firstComponent == "httpx"_kj.asArray() || firstComponent == "openai"_kj.asArray() ||
+        firstComponent == "starlette"_kj.asArray() || firstComponent == "urllib3"_kj.asArray()) {
       continue;
     }
 

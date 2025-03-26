@@ -6,13 +6,13 @@ import {
   LOAD_WHEELS_FROM_R2,
   LOCKFILE,
   LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
-  USING_OLDEST_PACKAGES_VERSION,
 } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 const canonicalizeNameRegex = /[-_.]+/g;
+const DYNLIB_PATH = '/usr/lib';
 
 /**
  * Canonicalize a package name. Port of Python's packaging.utils.canonicalize_name.
@@ -153,8 +153,13 @@ class VirtualizedDir {
   }
 
   mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>) {
-    const path = getSitePackagesPath(Module);
-    Module.FS.mount(tarFS, { info: this.rootInfo }, path);
+    Module.FS.mkdirTree(Module.FS.sessionSitePackages);
+    Module.FS.mount(
+      tarFS,
+      { info: this.rootInfo },
+      Module.FS.sessionSitePackages
+    );
+    Module.FS.mkdirTree(DYNLIB_PATH);
     Module.FS.mount(tarFS, { info: this.dynlibTarFs }, DYNLIB_PATH);
   }
 }
@@ -215,14 +220,6 @@ function disabledLoadPackage(): never {
   );
 }
 
-export function getSitePackagesPath(Module: Module): string {
-  const pymajor = Module._py_version_major();
-  const pyminor = Module._py_version_minor();
-  return `/session/lib/python${pymajor}.${pyminor}/site-packages`;
-}
-
-export const DYNLIB_PATH = '/usr/lib';
-
 /**
  * This mounts a TarFS representing the site-packages directory (which contains the Python packages)
  * and another TarFS representing the dynlib directory (where dynlibs like libcrypto.so live).
@@ -233,9 +230,6 @@ export const DYNLIB_PATH = '/usr/lib';
  */
 export function mountSitePackages(Module: Module, pkgs: VirtualizedDir): void {
   const tarFS = createTarFS(Module);
-  const site_packages = getSitePackagesPath(Module);
-  Module.FS.mkdirTree(site_packages);
-  Module.FS.mkdirTree(DYNLIB_PATH);
   if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
     // if we are not loading additional wheels, then we're done
     // with site-packages and we can mount it here. Otherwise, we must mount it in
@@ -262,53 +256,11 @@ export function mountWorkerFiles(Module: Module) {
  * Has to run after the runtime is initialized.
  */
 export function adjustSysPath(Module: Module): void {
-  const site_packages = getSitePackagesPath(Module);
+  const site_packages = Module.FS.sessionSitePackages;
   simpleRunPython(
     Module,
     `import sys; sys.path.append("/session/metadata"); sys.path.append("${site_packages}"); del sys`
   );
-}
-
-function recursiveDependencies(
-  lockfile: PackageLock,
-  names: string[]
-): PackageDeclaration[] {
-  const toLoad = new Map();
-  for (const name of names) {
-    addPackageToLoad(lockfile, name, toLoad);
-  }
-  return Array.from(toLoad.values());
-}
-
-/**
- * Recursively add a package and its dependencies to toLoad.
- * A helper function for recursiveDependencies.
- * @param name The package to add
- * @param toLoad The set of names of packages to load
- * @private
- */
-function addPackageToLoad(
-  lockfile: PackageLock,
-  name: string,
-  toLoad: Map<string, PackageDeclaration>
-): void {
-  const normalizedName = canonicalizePackageName(name);
-  if (toLoad.has(normalizedName)) {
-    return;
-  }
-  const pkgInfo = lockfile.packages[normalizedName];
-  if (!pkgInfo) {
-    throw new Error(
-      `It appears that a package ("${name}") you requested is not available yet in workerd. \n` +
-        'If you would like this package to be included, please open an issue at https://github.com/cloudflare/workerd/discussions/new?category=python-packages.'
-    );
-  }
-
-  toLoad.set(normalizedName, pkgInfo);
-
-  for (let depName of pkgInfo.depends) {
-    addPackageToLoad(lockfile, depName, toLoad);
-  }
 }
 
 export { REQUIREMENTS };

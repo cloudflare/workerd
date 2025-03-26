@@ -49,7 +49,7 @@ async function injectSitePackagesModule(
 ): Promise<void> {
   const mod = await import(`pyodide-internal:${jsModName}.py`);
   pyodide.FS.writeFile(
-    `${pyodide.site_packages}/${pyModName}.py`,
+    `${pyodide.FS.sitePackages}/${pyModName}.py`,
     new Uint8Array(mod.default),
     { canOwn: true }
   );
@@ -74,10 +74,8 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
   return await enterJaegerSpan('setup_patches', async () => {
     patchLoadPackage(pyodide);
 
-    // install any extra packages into the site-packages directory, so calculate where that is.
-    const pymajor = pyodide._module._py_version_major();
-    const pyminor = pyodide._module._py_version_minor();
-    pyodide.site_packages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+    // install any extra packages into the site-packages directory
+    const sitePackages = pyodide.FS.sitePackages;
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     //
@@ -85,7 +83,7 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     // shouldn't be part of the snapshot and should filtered out in filterPythonScriptImports.
     if (USING_OLDEST_PYODIDE_VERSION) {
       // Inject at cloudflare.workers for backwards compatibility
-      pyodide.FS.mkdir(`${pyodide.site_packages}/cloudflare`);
+      pyodide.FS.mkdir(`${sitePackages}/cloudflare`);
       await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
     }
     // The SDK was moved from `cloudflare.workers` to just `workers`.
@@ -95,7 +93,11 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
       await applyPatch(pyodide, 'aiohttp');
     }
-    if (TRANSITIVE_REQUIREMENTS.has('httpx')) {
+    // Other than the oldest version of httpx, we apply the patch at the build step.
+    if (
+      pyodide._module.API.version === '0.26.0a2' &&
+      TRANSITIVE_REQUIREMENTS.has('httpx')
+    ) {
       await applyPatch(pyodide, 'httpx');
     }
     if (TRANSITIVE_REQUIREMENTS.has('fastapi')) {

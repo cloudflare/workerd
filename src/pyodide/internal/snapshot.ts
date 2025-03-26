@@ -1,11 +1,7 @@
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
-import {
-  FilePath,
-  VIRTUALIZED_DIR,
-  getSitePackagesPath,
-} from 'pyodide-internal:setupPackages';
+import { FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
@@ -39,7 +35,7 @@ export let SHOULD_RESTORE_SNAPSHOT = false;
 /**
  * Record the dlopen handles that are needed by the MEMORY.
  */
-let DSO_METADATA: any = {}; // TODO
+let DSO_METADATA: DylinkInfo = {};
 
 /**
  * Preload a dynamic library.
@@ -63,7 +59,18 @@ function loadDynlib(
   dso.refcount = Infinity;
   // Hopefully they are used with dlopen
   dso.global = false;
-  dso.exports = Module.loadWebAssemblyModule(wasmModule, {}, path);
+  const options = {};
+  // Passing this empty object as dylibLocalScope fixes symbol lookup in dependent shared libraries
+  // that are not loaded globally, thus fixing one of our problems with the upstream shift away from
+  // RLTD_GLOBAL. Emscripten should probably be updated so that if dylibLocalScope is undefined it
+  // will give the dynamic library a new empty loading scope.
+  const dylibLocalScope = {};
+  dso.exports = Module.loadWebAssemblyModule(
+    wasmModule,
+    options,
+    path,
+    dylibLocalScope
+  );
   // "handles" are dlopen handles. There will be one entry in the `handles` list
   // for each dlopen handle that has not been dlclosed. We need to keep track of
   // these across
@@ -71,6 +78,7 @@ function loadDynlib(
   for (const handle of handles) {
     Module.LDSO.loadedLibsByHandle[handle] = dso;
   }
+  Module.LDSO.loadedLibsByName[path.split('/').at(-1)!] = dso;
 }
 
 /**
@@ -117,7 +125,39 @@ function sortSoFiles(filePaths: FilePath[]): FilePath[] {
 }
 
 // used for checkLoadedSoFiles a snapshot sanity check
-const PRELOADED_SO_FILES: string[] = [];
+const SO_LOAD_ORDER: string[] = [];
+const SO_MEMORY_BASES: { [libName: string]: number } = {};
+
+// Used to ensure that the memoryBase of the dynamic library is stable when restoring snapshots.
+function getMemoryPatched(
+  Module: Module,
+  libPath: string,
+  size: number
+): number {
+  if (Module.API.version === '0.26.0a2') {
+    return Module.getMemory(size);
+  }
+  // If we loaded this library before taking the snapshot, we already allocated the memory and the
+  // allocator remembers because its state is in the linear memory. We just have to look it up.
+  if (DSO_METADATA.soMemoryBases?.[libPath]) {
+    return DSO_METADATA.soMemoryBases[libPath];
+  }
+  // Sometimes the module is loaded once by path and once by name, in either order. I'm not really
+  // sure why. But let's check if we snapshoted a load of the library by name.
+  const libName = libPath.split('/').at(-1)!;
+  if (DSO_METADATA.soMemoryBases?.[libName]) {
+    return DSO_METADATA.soMemoryBases[libName];
+  }
+  // Okay, we didn't load this before so we need to allocate new memory for it. Also record what we
+  // did in case someone makes a snapshot from this run.
+  SO_LOAD_ORDER.push(libPath);
+  const memoryBase = Module.getMemory(size);
+  // Just to be paranoid, track both by full path and by name. That gives us a chance to resolve
+  // conflicts in name by the full path.
+  SO_MEMORY_BASES[libPath] = memoryBase;
+  SO_MEMORY_BASES[libName] = memoryBase;
+  return memoryBase;
+}
 
 /**
  * This loads all dynamic libraries visible in the site-packages directory. They
@@ -131,29 +171,40 @@ const PRELOADED_SO_FILES: string[] = [];
  * there.
  */
 export function preloadDynamicLibs(Module: Module): void {
-  let SO_FILES_TO_LOAD = VIRTUALIZED_DIR.getSoFilesToLoad();
-  if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
-    SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
+  Module.getMemoryPatched = getMemoryPatched;
+  Module.growMemory(SNAPSHOT_SIZE!);
+  let SO_FILES_TO_LOAD: string[][] = [];
+  const sitePackages = Module.FS.sessionSitePackages + '/';
+  if (Module.API.version === '0.26.0a2') {
+    if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
+      SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
+    } else {
+      SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
+    }
+  } else if (DSO_METADATA.loadOrder) {
+    SO_FILES_TO_LOAD = DSO_METADATA.loadOrder.map((x) => {
+      // We need the path relative to the site-packages directory, not relative to the root of the file
+      // system.
+      if (x.startsWith(sitePackages)) {
+        x = x.slice(sitePackages.length);
+      }
+      return x.split('/');
+    });
   }
-  // The order in which we load the SO_FILES matters. For example, if a snapshot was generated with
-  // SO_FILES loaded in a certain way, then if we load that snapshot and load the SO_FILES
-  // differently here then Python will crash.
-  SO_FILES_TO_LOAD = sortSoFiles(SO_FILES_TO_LOAD);
 
   try {
-    const sitePackages = getSitePackagesPath(Module);
     for (const soFile of SO_FILES_TO_LOAD) {
       let node: TarFSInfo | undefined = VIRTUALIZED_DIR.getSitePackagesRoot();
       for (const part of soFile) {
         node = node?.children?.get(part);
       }
-      if (!node) {
+      if (!node?.contentsOffset) {
         node = VIRTUALIZED_DIR.getDynlibRoot();
         for (const part of soFile) {
           node = node?.children?.get(part);
         }
       }
-      if (!node) {
+      if (!node?.contentsOffset) {
         throw Error('fs node could not be found for ' + soFile);
       }
       const { contentsOffset, size } = node;
@@ -165,8 +216,7 @@ export function preloadDynamicLibs(Module: Module): void {
         contentsOffset,
         wasmModuleData
       );
-      const path = sitePackages + '/' + soFile.join('/');
-      PRELOADED_SO_FILES.push(path);
+      const path = sitePackages + soFile.join('/');
       loadDynlib(Module, path, wasmModuleData);
     }
   } catch (e) {
@@ -179,6 +229,8 @@ type DylinkInfo = {
   [name: string]: { handles: string[] };
 } & {
   settings?: { baselineSnapshot?: boolean };
+  loadOrder?: string[];
+  soMemoryBases?: { [name: string]: number };
 };
 
 /**
@@ -199,10 +251,11 @@ function recordDsoHandles(Module: Module): DylinkInfo {
     }
     dylinkInfo[name].handles.push(handle);
   }
-  dylinkInfo.settings = {};
-  if (IS_CREATING_BASELINE_SNAPSHOT) {
-    dylinkInfo.settings.baselineSnapshot = true;
-  }
+  dylinkInfo.settings = {
+    baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
+  };
+  dylinkInfo.loadOrder = SO_LOAD_ORDER;
+  dylinkInfo.soMemoryBases = SO_MEMORY_BASES;
   return dylinkInfo;
 }
 
@@ -266,21 +319,6 @@ function memorySnapshotDoImports(Module: Module): string[] {
   }
 
   return deduplicatedModules;
-}
-
-function checkLoadedSoFiles(dsoJSON: DylinkInfo): void {
-  PRELOADED_SO_FILES.sort();
-  const keys = Object.keys(dsoJSON).filter((k) => k.startsWith('/'));
-  keys.sort();
-  const msg = `Internal error taking snapshot: mismatch: ${JSON.stringify(keys)} vs ${JSON.stringify(PRELOADED_SO_FILES)}`;
-  if (keys.length !== PRELOADED_SO_FILES.length) {
-    throw new Error(msg);
-  }
-  for (let i = 0; i < keys.length; i++) {
-    if (PRELOADED_SO_FILES[i] !== keys[i]) {
-      throw new Error(msg);
-    }
-  }
 }
 
 /**

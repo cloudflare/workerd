@@ -51,7 +51,7 @@ def py_wd_test(
         **kwargs):
     if python_flags == "all":
         python_flags = FEATURE_FLAGS.keys()
-    python_flags = [flag for flag in python_flags if flag not in skip_python_flags]
+    python_flags = [flag for flag in python_flags if flag not in skip_python_flags and flag in FEATURE_FLAGS]
     if data == None and directory != None:
         data = native.glob(
             [
