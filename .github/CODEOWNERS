@@ -5,8 +5,8 @@ build-releases.sh @cloudflare/wrangler @cloudflare/workers-runtime-1
 RELEASE.md @cloudflare/wrangler @cloudflare/workers-runtime-1
 package.json @cloudflare/wrangler @cloudflare/workers-runtime-1
 pnpm-lock.yaml @cloudflare/wrangler @cloudflare/workers-runtime-1
-types/ @cloudflare/wrangler
-src/cloudflare/ @cloudflare/wrangler
+/types/ @cloudflare/wrangler
+/src/cloudflare/ @cloudflare/wrangler
 src/workerd/tools/ @cloudflare/wrangler @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects
 src/workerd/io/supported-compatibility-date.txt @cloudflare/wrangler @cloudflare/workers-runtime-1
 src/node/ @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects @cloudflare/workers-frameworks
