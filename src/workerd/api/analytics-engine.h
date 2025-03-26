@@ -70,6 +70,10 @@ class AnalyticsEngine: public jsg::Object {
     return m * 1000000;
   }
 
+  // Called within writeDataPoint after waiting for output locks
+  void writeDataPointNoOutputLock(
+      jsg::Lock& js, jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent>&& event);
+
   uint logfwdrChannel;
   kj::String dataset;
   int64_t version;
