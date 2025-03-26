@@ -5,7 +5,7 @@ Subject: Add another slot in the isolate for embedder
 
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index 676aec370a557eab7b670a42b6be62083e7df5bd..d6148fefba814b99252eec034b5c91397097cfc4 100644
+index a6cf2f89352d7b584f568502b0b93eb973ed93b4..fc7666e6ffb0644feb108313e6bd73b49337090f 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
 @@ -866,7 +866,7 @@ class Internals {

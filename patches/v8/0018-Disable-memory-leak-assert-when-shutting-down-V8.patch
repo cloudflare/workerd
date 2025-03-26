@@ -5,7 +5,7 @@ Subject: Disable memory leak assert when shutting down V8
 
 
 diff --git a/src/wasm/wasm-code-pointer-table.cc b/src/wasm/wasm-code-pointer-table.cc
-index d65f7c30d5396a99a03802c230cea0e1fcb88eb5..8717260cdd4f83a4cdfe138ae6f1fe10e1ba4f03 100644
+index 51a20ad8d94e271218be4b993bce7067aaa176fa..c135cd7fc66b3f3ef0c9fba801a6936d9436c846 100644
 --- a/src/wasm/wasm-code-pointer-table.cc
 +++ b/src/wasm/wasm-code-pointer-table.cc
 @@ -14,7 +14,10 @@ void WasmCodePointerTable::Initialize() { Base::Initialize(); }

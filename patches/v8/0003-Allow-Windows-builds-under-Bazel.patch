@@ -5,10 +5,10 @@ Subject: Allow Windows builds under Bazel
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 967f7bbfb2810366de89b7a7a90f284efab6c9c6..702648004a7c68721c80e7b43cdcd355ceb16710 100644
+index f8c653bd7eaf1df8b484c1badef4f411387a8fb5..7521eac6a6a0ef4777e2d7602bda9e7495a00d24 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3829,6 +3829,8 @@ filegroup(
+@@ -3848,6 +3848,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],

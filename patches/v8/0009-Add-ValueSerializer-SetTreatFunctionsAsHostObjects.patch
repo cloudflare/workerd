@@ -28,10 +28,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 18e131b04e9d86f95c8263d736b680a2ac7f64e3..e44379fd53524a637bdab085e542af25bc055787 100644
+index 10b0957774479a5f7afd04b28fb50f37e5dfded4..b582c2f699bbf1a081be1c1e37ea5674bb52562b 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3515,6 +3515,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3337,6 +3337,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -43,7 +43,7 @@ index 18e131b04e9d86f95c8263d736b680a2ac7f64e3..e44379fd53524a637bdab085e542af25
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 1b3dcf71d4c682ff2db23718ee54b86121f1f1c8..13f07a5314f10d806822a138ed1faf29890fa7aa 100644
+index 9bd318b43b7ac3a9ef54af0be077e29155cdcfa0..f003465b77be950dad901fd776eb38c63deb14fa 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -328,6 +328,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -57,7 +57,7 @@ index 1b3dcf71d4c682ff2db23718ee54b86121f1f1c8..13f07a5314f10d806822a138ed1faf29
  void ValueSerializer::WriteTag(SerializationTag tag) {
    uint8_t raw_tag = static_cast<uint8_t>(tag);
    WriteRawBytes(&raw_tag, sizeof(raw_tag));
-@@ -596,8 +600,13 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(Handle<JSReceiver> receiver) {
+@@ -597,8 +601,13 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
  
    // Eliminate callable and exotic objects, which should not be serialized.
    InstanceType instance_type = receiver->map()->instance_type();
@@ -74,7 +74,7 @@ index 1b3dcf71d4c682ff2db23718ee54b86121f1f1c8..13f07a5314f10d806822a138ed1faf29
    }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index ec79ccae64617547239b2b48c01a2be6ce43d035..de1a8c71c6a0c22a10f82ce6cf3f6523343aac29 100644
+index a463753df6ee29e79768829c7b7d5b3136bd997d..2d0a746c90522500fcf17d73f3024512b1bb5481 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -102,6 +102,15 @@ class ValueSerializer {
@@ -93,7 +93,7 @@ index ec79ccae64617547239b2b48c01a2be6ce43d035..de1a8c71c6a0c22a10f82ce6cf3f6523
   private:
    // Managing allocations of the internal buffer.
    Maybe<bool> ExpandBuffer(size_t required_capacity);
-@@ -184,6 +193,7 @@ class ValueSerializer {
+@@ -185,6 +194,7 @@ class ValueSerializer {
    size_t buffer_capacity_ = 0;
    bool has_custom_host_objects_ = false;
    bool treat_array_buffer_views_as_host_objects_ = false;
