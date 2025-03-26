@@ -423,37 +423,80 @@ KJ_TEST("jsg::Lock getUuid") {
 KJ_TEST("External memory adjustment") {
   IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
-    // Creating with a specific amount works as expected
-    auto adjuster = lock.getExternalMemoryAdjustment(100);
-    KJ_ASSERT(adjuster.getAmount() == 100);
+    // Creating an inner scope to check the case where the adjustment object does not outlive the isolate
+    {
+      // Creating with a specific amount works as expected
+      auto adjuster = lock.getExternalMemoryAdjustment(100);
+      KJ_ASSERT(adjuster.getAmount() == 100);
 
-    // Adjusting up works as expected
-    adjuster.adjust(lock, 10);
-    KJ_ASSERT(adjuster.getAmount() == 110);
+      // Adjusting up works as expected
+      adjuster.adjust(10);
+      KJ_ASSERT(adjuster.getAmount() == 110);
 
-    // Adjusting down works as expected
-    adjuster.adjust(lock, -10);
-    KJ_ASSERT(adjuster.getAmount() == 100);
+      // Adjusting down works as expected
+      adjuster.adjust(-10);
+      KJ_ASSERT(adjuster.getAmount() == 100);
 
-    // Setting an explicit value just works
-    adjuster.set(lock, 50);
-    KJ_ASSERT(adjuster.getAmount() == 50);
+      // Setting an explicit value just works
+      adjuster.set(50);
+      KJ_ASSERT(adjuster.getAmount() == 50);
 
-    // Decrementing by more than the amount just sets to 0
-    adjuster.adjust(lock, -200);
-    KJ_ASSERT(adjuster.getAmount() == 0);
+      // Decrementing by more than the amount just sets to 0
+      adjuster.adjust(-200);
+      KJ_ASSERT(adjuster.getAmount() == 0);
 
-    adjuster.set(lock, 100);
-    auto adjuster2 = kj::mv(adjuster);
-    KJ_ASSERT(adjuster2.getAmount() == 100);
-    KJ_ASSERT(adjuster.getAmount() == 0);
-
+      adjuster.set(100);
+      auto adjuster2 = kj::mv(adjuster);
+      KJ_ASSERT(adjuster2.getAmount() == 100);
+      KJ_ASSERT(adjuster.getAmount() == 0);
+    }
     // Note that we are not testing the actual effect on the isolate itself here.
     // While we have added a getExternalMemory() API to the isolate via a patch in
     // the internal repo, we have not added that patch to workerd so testing the
     // specific external memory reported by the isolate is possible but a bit
     // more cumbersome here.
   });
+}
+
+KJ_TEST("External memory adjustment - defered") {
+  auto target = kj::refcounted<ExternalMemoryPtr>();
+
+  {
+    IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+    target = isolate.runInLockScope(
+        [&](IsolateUuidIsolate::Lock& lock) { return lock.getExternalMemoryTarget(); });
+
+    // Adjustment to memory while not holding lock will be applied later
+    auto adjuster1 = target->getAdjustment(1000);
+    KJ_ASSERT(adjuster1.getAmount() == 1000);
+    KJ_ASSERT(target->getPendingMemoryUpdate() == 1000);
+
+    {
+      // This adjustment has no effect because the adjuster is destroyed before we take the lock again
+      auto adjuster2 = target->getAdjustment(1000);
+      KJ_ASSERT(adjuster2.getAmount() == 1000);
+      KJ_ASSERT(target->getPendingMemoryUpdate() == 2000);
+    }
+
+    KJ_ASSERT(target->getPendingMemoryUpdate() == 1000);
+    KJ_ASSERT(target->isIsolateAlive());
+
+    isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+      // Once lock is taken, the amount is applied
+      KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
+
+      // Adjustment made while holding lock applies immediately
+      adjuster1.adjust(-500);
+      KJ_ASSERT(adjuster1.getAmount() == 500);
+      KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
+      KJ_ASSERT(target->isIsolateAlive());
+    });
+  }
+
+  KJ_ASSERT(!target->isIsolateAlive());
+  // Making an adjustment anyway won't do anything but also won't crash
+  auto adjuster3 = target->getAdjustment(500);
+  KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
 }
 
 }  // namespace
