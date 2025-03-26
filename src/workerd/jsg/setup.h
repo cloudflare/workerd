@@ -308,7 +308,7 @@ class IsolateBase {
   // operation) outside of the queue lock.
   const kj::MutexGuarded<BatchQueue<Item>> queue{
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
-  std::atomic<int64_t> pendingExternalMemoryDecrement = {0};
+  std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -344,11 +344,14 @@ class IsolateBase {
 
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
   void deferDestruction(Item item);
-  void deferExternalMemoryDecrement(int64_t size);
+  void deferExternalMemoryUpdate(int64_t size);
 
   // Destroy everything in the deferred destruction queue. Must be called under the isolate lock.
   void clearDestructionQueue();
-  void clearPendingExternalMemoryDecrement();
+  void clearPendingExternalMemoryUpdate();
+
+  // Get current value of external memory update
+  int64_t getPendingExternalMemoryUpdate();
 
   static void fatalError(const char* location, const char* message);
   static void oomError(const char* location, const v8::OOMDetails& details);
@@ -370,6 +373,7 @@ class IsolateBase {
   friend class Wrappable;
   friend class HeapTracer;
   friend class ExternalMemoryAdjustment;
+  friend class ExternalMemoryTarget;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);
@@ -522,7 +526,7 @@ class Isolate: public IsolateBase {
         : jsg::Lock(isolate.ptr),
           jsgIsolate(const_cast<Isolate&>(isolate)) {
       jsgIsolate.clearDestructionQueue();
-      jsgIsolate.clearPendingExternalMemoryDecrement();
+      jsgIsolate.clearPendingExternalMemoryUpdate();
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
     KJ_DISALLOW_AS_COROUTINE_PARAM;

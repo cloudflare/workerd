@@ -428,22 +428,22 @@ KJ_TEST("External memory adjustment") {
     KJ_ASSERT(adjuster.getAmount() == 100);
 
     // Adjusting up works as expected
-    adjuster.adjust(lock, 10);
+    adjuster.adjust(10);
     KJ_ASSERT(adjuster.getAmount() == 110);
 
     // Adjusting down works as expected
-    adjuster.adjust(lock, -10);
+    adjuster.adjust(-10);
     KJ_ASSERT(adjuster.getAmount() == 100);
 
     // Setting an explicit value just works
-    adjuster.set(lock, 50);
+    adjuster.set(50);
     KJ_ASSERT(adjuster.getAmount() == 50);
 
     // Decrementing by more than the amount just sets to 0
-    adjuster.adjust(lock, -200);
+    adjuster.adjust(-200);
     KJ_ASSERT(adjuster.getAmount() == 0);
 
-    adjuster.set(lock, 100);
+    adjuster.set(100);
     auto adjuster2 = kj::mv(adjuster);
     KJ_ASSERT(adjuster2.getAmount() == 100);
     KJ_ASSERT(adjuster.getAmount() == 0);
@@ -453,6 +453,36 @@ KJ_TEST("External memory adjustment") {
     // the internal repo, we have not added that patch to workerd so testing the
     // specific external memory reported by the isolate is possible but a bit
     // more cumbersome here.
+  });
+}
+
+KJ_TEST("External memory adjustment - defered") {
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  auto target = isolate.runInLockScope(
+      [&](IsolateUuidIsolate::Lock& lock) { return lock.getExternalMemoryTarget(); });
+
+  // Adjustment to memory while not holding lock will be applied later
+  auto adjuster1 = target.getAdjustment(1000);
+  KJ_ASSERT(adjuster1.getAmount() == 1000);
+  KJ_ASSERT(target.getPendingMemoryUpdate() == 1000);
+
+  {
+    // This adjustment has no effect because the adjuster is destroyed before we take the lock again
+    auto adjuster2 = target.getAdjustment(1000);
+    KJ_ASSERT(adjuster2.getAmount() == 1000);
+    KJ_ASSERT(target.getPendingMemoryUpdate() == 2000);
+  }
+
+  KJ_ASSERT(target.getPendingMemoryUpdate() == 1000);
+
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    // Once lock is taken, the amount is applied
+    KJ_ASSERT(target.getPendingMemoryUpdate() == 0);
+
+    // Adjustment made while holding lock applies immediately
+    adjuster1.adjust(-500);
+    KJ_ASSERT(adjuster1.getAmount() == 500);
+    KJ_ASSERT(target.getPendingMemoryUpdate() == 0);
   });
 }
 
