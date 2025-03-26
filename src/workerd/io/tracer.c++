@@ -4,6 +4,8 @@
 
 #include <workerd/io/tracer.h>
 
+#include <capnp/message.h>  // for capnp::clone()
+
 namespace workerd {
 
 namespace {
@@ -55,7 +57,7 @@ void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
 }
 
 void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
-  maybeTailStreamWriter = kj::mv(writer);
+  tailStreamWriters.add(kj::mv(writer));
 }
 
 kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
@@ -134,6 +136,26 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
+// TODO(cleanup): Needed to convert between span value definitions in LTW/STW. These should be the
+// same really.
+workerd::tracing::Attribute::Value convertSpanTag(const Span::TagValue& tag) {
+  KJ_SWITCH_ONEOF(tag) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      return kj::str(str);
+    }
+    KJ_CASE_ONEOF(val, int64_t) {
+      return kj::str(val);
+    }
+    KJ_CASE_ONEOF(val, double) {
+      return val;
+    }
+    KJ_CASE_ONEOF(val, bool) {
+      return val;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
@@ -174,6 +196,19 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     trace->logs.add(span.endTime, LogLevel::WARN, kj::str(logSizeExceeded));
     return;
   }
+
+  // Span events are transmitted together for now.
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto& context = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+    writer->report(context, workerd::tracing::SpanOpen(kj::str(span.operationName)));
+    kj::Vector<workerd::tracing::Attribute> attr;
+    for (auto& tag: span.tags) {
+      attr.add(workerd::tracing::Attribute(kj::str(tag.key), convertSpanTag(tag.value)));
+    }
+    writer->report(context, workerd::tracing::Mark(attr.releaseAsArray()));
+    writer->report(context, workerd::tracing::SpanClose());
+  }
+
   trace->bytesUsed = newSize;
   trace->spans.add(kj::mv(span));
   trace->numSpans++;
@@ -207,8 +242,8 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
   trace->bytesUsed = newSize;
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
-        tracing::Mark(tracing::Exception(timestamp, kj::str(name), kj::str(message),
-            stack.map([](kj::String& stack) -> kj::String { return kj::str(stack); }))));
+        tracing::Mark(
+            tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))));
   }
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
@@ -256,6 +291,7 @@ void WorkerTracer::setEventInfo(
   }
 
   trace->eventTimestamp = timestamp;
+  this->topLevelInvocationSpanContext = context.clone();
 
   size_t newSize = trace->bytesUsed;
   KJ_SWITCH_ONEOF(info) {
@@ -278,8 +314,21 @@ void WorkerTracer::setEventInfo(
   trace->bytesUsed = newSize;
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(
-        context, tracing::Onset(cloneEventInfo(info), tracing::Onset::WorkerInfo{}, kj::none));
+    // Provide WorkerInfo to the streaming tail worker if available. This data is provided when the
+    // WorkerTracer is created, but the actual onset event is the best time to send it.
+    auto workerInfo = tracing::Onset::WorkerInfo{
+      .executionModel = trace->executionModel,
+      .scriptName = mapCopyString(trace->scriptName),
+      .scriptVersion =
+          trace->scriptVersion.map([](auto& scriptVersion) -> kj::Own<ScriptVersion::Reader> {
+      return capnp::clone(*scriptVersion);
+    }),
+      .dispatchNamespace = mapCopyString(trace->dispatchNamespace),
+      .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
+      .entrypoint = mapCopyString(trace->entrypoint),
+    };
+
+    writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
   }
   trace->eventInfo = kj::mv(info);
 }
@@ -300,6 +349,10 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
 
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
   KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    writer->report(KJ_ASSERT_NONNULL(topLevelInvocationSpanContext),
+        tracing::Return(tracing::Return::Info(info.clone())));
+  }
   trace->fetchResponseInfo = kj::mv(info);
 }
 

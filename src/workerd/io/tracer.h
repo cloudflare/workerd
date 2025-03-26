@@ -91,7 +91,8 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
   friend class WorkerTracer;
 
  public:
-  kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+  // tail stream writers for worker stages in the given pipeline.
+  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 };
 
 // An abstract class that defines shares functionality for tracers
@@ -185,6 +186,11 @@ class WorkerTracer final: public kj::Refcounted, public BaseTracer {
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
+
+  // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
+  // for trace events. This should no longer be needed after merging the existing span ID and
+  // InvocationSpanContext interfaces.
+  kj::Maybe<tracing::InvocationSpanContext> topLevelInvocationSpanContext;
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing

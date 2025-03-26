@@ -1478,9 +1478,7 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 namespace {
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
  public:
-  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer,
-      kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
-      kj::TaskSet& waitUntilTasks)
+  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
       : tracer(kj::mv(tracer)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
@@ -1912,8 +1910,7 @@ class Server::WorkerService final: public Service,
       })));
     }
 
-    observer = kj::refcounted<RequestObserverWithTracer>(
-        mapAddRef(workerTracer), kj::mv(streamingTailWorkers), waitUntilTasks);
+    observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),

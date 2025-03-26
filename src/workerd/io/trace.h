@@ -632,7 +632,7 @@ struct Link final {
   Link clone() const;
 };
 
-using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, kj::Array<Attribute>>;
+using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, CustomInfo>;
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
