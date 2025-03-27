@@ -197,10 +197,6 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
         if (ok) result = makeResolvedPromise();
         // If ok is false, we leave result empty to propagate the JS exception
       }
-      KJ_CASE_ONEOF(info, ModuleRegistry::NodeJsModuleInfo) {
-        result = info.evaluate(js, const_cast<ModuleRegistry::NodeJsModuleInfo&>(info), module,
-            ref.module.maybeNamedExports);
-      }
       KJ_CASE_ONEOF(info, ModuleRegistry::TextModuleInfo) {
         if (module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, info.value.getHandle(js))
                 .IsJust()) {
@@ -424,66 +420,6 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
 
 // ======================================================================================
 
-jsg::Ref<NodeJsModuleContext> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
-    jsg::Lock& js, kj::StringPtr name) {
-  return jsg::alloc<NodeJsModuleContext>(js, kj::Path::parse(name));
-}
-
-v8::MaybeLocal<v8::Value> ModuleRegistry::NodeJsModuleInfo::evaluate(jsg::Lock& js,
-    ModuleRegistry::NodeJsModuleInfo& info,
-    v8::Local<v8::Module> module,
-    const kj::Maybe<kj::Array<kj::String>>& maybeExports) {
-  const auto makeResolvedPromise = [&]() {
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(js.v8Context()).ToLocal(&resolver)) {
-      // Return empty local and allow error to propagate.
-      return v8::Local<v8::Promise>();
-    }
-    if (!resolver->Resolve(js.v8Context(), js.v8Undefined()).IsJust()) {
-      // Return empty local and allow error to propagate.
-      return v8::Local<v8::Promise>();
-    }
-    return resolver->GetPromise();
-  };
-
-  v8::MaybeLocal<v8::Value> result;
-  v8::TryCatch catcher(js.v8Isolate);
-  try {
-    info.evalFunc(js);
-  } catch (const JsExceptionThrown&) {
-    if (catcher.CanContinue()) catcher.ReThrow();
-    // leave `result` empty to propagate the JS exception
-    return v8::MaybeLocal<v8::Value>();
-  }
-
-  auto ctx = static_cast<NodeJsModuleContext*>(info.moduleContext.get());
-  bool ok = true;
-
-  auto exports = ctx->module->getExports(js);
-  if (!module->SetSyntheticModuleExport(js.v8Isolate, js.strIntern("default"_kj), exports)
-           .IsJust()) {
-    ok = false;
-  }
-
-  if (ok && exports->IsObject()) {
-    JsObject obj = JsObject(exports.As<v8::Object>());
-    KJ_IF_SOME(exports, maybeExports) {
-      for (auto& name: exports) {
-        if (name == "default"_kj) continue;
-        if (!module->SetSyntheticModuleExport(js.v8Isolate, js.strIntern(name), obj.get(js, name))
-                 .IsJust()) {
-          ok = false;
-          break;
-        }
-      }
-    }
-  }
-
-  if (ok) result = makeResolvedPromise();
-  // If ok is false, leave result empty to propagate the JS exception
-  return result;
-}
-
 kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallbackService(Lock& js,
     const kj::Path& specifier,
     kj::Maybe<const kj::Path&>& referrer,
@@ -511,9 +447,6 @@ JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptio
       module->GetStatus() == v8::Module::Status::kInstantiating) {
     KJ_IF_SOME(synth, info.maybeSynthetic) {
       KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::CommonJsModuleInfo>()) {
-        return JsValue(cjs.moduleContext->getExports(js));
-      }
-      KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::NodeJsModuleInfo>()) {
         return JsValue(cjs.moduleContext->getExports(js));
       }
     }

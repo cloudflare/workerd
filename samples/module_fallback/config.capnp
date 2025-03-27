@@ -11,7 +11,7 @@ const helloWorldExample :Workerd.Config = (
 const helloWorld :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "worker.js"),
-    (name = "cjs", nodeJsCompatModule = embed "cjs.js"),
+    (name = "cjs", commonJsModule = embed "cjs.js"),
   ],
   compatibilityDate = "2023-02-28",
   compatibilityFlags = ["nodejs_compat"],

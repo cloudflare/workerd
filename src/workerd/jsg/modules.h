@@ -21,8 +21,6 @@ namespace workerd::jsg {
 
 class CommonJsModuleContext;
 class CommonJsModuleObject;
-class NodeJsModuleObject;
-class NodeJsModuleContext;
 
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause
@@ -87,38 +85,6 @@ class ModuleRegistry {
     CapnpModuleInfo& operator=(CapnpModuleInfo&&) = default;
   };
 
-  struct NodeJsModuleInfo {
-    jsg::Ref<NodeJsModuleContext> moduleContext;
-    jsg::Function<void()> evalFunc;
-
-    NodeJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
-        : moduleContext(initModuleContext(lock, name)),
-          evalFunc(initEvalFunc(lock, moduleContext, name, content)) {}
-
-    NodeJsModuleInfo(NodeJsModuleInfo&&) = default;
-    NodeJsModuleInfo& operator=(NodeJsModuleInfo&&) = default;
-
-    static jsg::Ref<NodeJsModuleContext> initModuleContext(jsg::Lock& js, kj::StringPtr name);
-
-    static v8::MaybeLocal<v8::Value> evaluate(jsg::Lock& js,
-        NodeJsModuleInfo& info,
-        v8::Local<v8::Module> module,
-        const kj::Maybe<kj::Array<kj::String>>& maybeExports);
-
-    jsg::Function<void()> initEvalFunc(auto& lock,
-        jsg::Ref<jsg::NodeJsModuleContext>& moduleContext,
-        kj::StringPtr name,
-        kj::StringPtr content) {
-      v8::ScriptOrigin origin(v8StrIntern(lock.v8Isolate, name));
-      v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
-      auto context = lock.v8Context();
-      auto handle = lock.wrap(context, moduleContext.addRef());
-      auto fn =
-          jsg::check(v8::ScriptCompiler::CompileFunction(context, &source, 0, nullptr, 1, &handle));
-      return lock.template unwrap<jsg::Function<void()>>(context, fn);
-    }
-  };
-
   struct CommonJsModuleInfo {
     Ref<CommonJsModuleContext> moduleContext;
     jsg::Function<void()> evalFunc;
@@ -171,8 +137,7 @@ class ModuleRegistry {
         TextModuleInfo,
         WasmModuleInfo,
         JsonModuleInfo,
-        ObjectModuleInfo,
-        NodeJsModuleInfo>;
+        ObjectModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
     kj::Maybe<kj::Array<kj::String>> maybeNamedExports;
 
