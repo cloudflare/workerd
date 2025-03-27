@@ -184,13 +184,10 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   auto& context = IoContext::current();
 
   // Check if we have a valid URL
-  kj::Url urlRecord;
-  kj::Maybe<kj::Exception> maybeException =
-      kj::runCatchingExceptions([&]() { urlRecord = kj::Url::parse(url); });
-
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
+  kj::Url urlRecord =
+      JSG_REQUIRE_NONNULL(kj::Url::tryParse(url), DOMSyntaxError, wsErr, "The url is invalid.");
 
-  JSG_REQUIRE(maybeException == kj::none, DOMSyntaxError, wsErr, "The url is invalid.");
   JSG_REQUIRE(urlRecord.scheme == "ws" || urlRecord.scheme == "wss", DOMSyntaxError, wsErr,
       "The url scheme must be ws or wss.");
   // We want the caller to pass `ws/wss` as per the spec, but FL would treat these as http in
