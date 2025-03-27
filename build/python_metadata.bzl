@@ -1,41 +1,38 @@
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
 load("//:build/python/packages_20250324_1.bzl", "PACKAGES_20250324_1")
 
-# The below is a list of pyodide-lock.json files for each package bundle version that we support.
-# Each of these gets embedded in the workerd and EW binary.
-#
-# The key is the `packages` field in pythonSnapshotRelease and the value is the sha256 checksum of
-# the lock file.
-PYTHON_LOCKFILES = {
-    "20240829.4": "c2d9c67ea55a672b95a3beb8d66bfbe7df736edb4bb657383b263151e7e85ef4",
-    "20250324.1": "3e5a9317dc0cfcf63e556034bf0e87b958bd6debcfdccdfffc8ce477cc439626",
-}
-
-# This is a dictionary mapping a `packages` date/version (the `packages` field in
-# pythonSnapshotRelease) to a list of package names which are in that packages bundle. The list is
-# also in the form of a dictionary and maps to the import names for that package which should be
-# tested (as some packages may expose more than one module).
+# This is the list of all the package metadata that we use.
 #
 # IMPORTANT: packages that are present here should never be removed after the package version is
 # released to the public. This is so that we don't break workers using those packages.
 #
 # ORDER MATTERS: the order of the keys in this dictionary matters, older package bundles should come
 # first.
-PYTHON_IMPORTS_TO_TEST = {
-    "20240829.4": PACKAGES_20240829_4,
-    "20250324.1": PACKAGES_20250324_1,
-}
+_package_lockfiles = [
+    PACKAGES_20240829_4,
+    PACKAGES_20250324_1,
+]
+
+# The below is a list of pyodide-lock.json files for each package bundle version that we support.
+# Each of these gets embedded in the workerd and EW binary.
+#
+# The key is the `packages` field in pythonSnapshotRelease and the value is the sha256 checksum of
+# the lock file. Used by both workerd and edgeworker to download the package lockfiles.
+PYTHON_LOCKFILES = {meta["info"]["tag"]: meta["info"]["lockfile_hash"] for meta in _package_lockfiles}
+
+# Used to generate the import tests, where we import each top level name from each package and check
+# that it doesn't fail.
+PYTHON_IMPORTS_TO_TEST = {meta["info"]["tag"]: meta["import_tests"] for meta in _package_lockfiles}
 
 # Each new package bundle should contain the same packages as the previous. We verify this
 # constraint here.
 def verify_no_packages_were_removed():
-    package_dates = PYTHON_IMPORTS_TO_TEST.keys()  # Assuming dict order is stable in Skylark.
-    for i in range(0, len(package_dates) - 1):
-        curr_pkgs = PYTHON_IMPORTS_TO_TEST[package_dates[i]]
-        next_pkgs = PYTHON_IMPORTS_TO_TEST[package_dates[i + 1]]
+    for curr_info, next_info in zip(_package_lockfiles[:-1], _package_lockfiles[1:]):
+        curr_pkgs = curr_info["import_tests"]
+        next_pkgs = next_info["import_tests"]
         missing_pkgs = [pkg for pkg in curr_pkgs if pkg not in next_pkgs]
         if missing_pkgs:
-            fail(str(missing_pkgs) + " from packages version ", package_dates[i], " not in ", package_dates[i + 1])
+            fail("Some packages from version ", curr_info["info"]["tag"], " missing in version", next_info["info"]["tag"], ":\n", "   ", ", ".join(missing_pkgs), "\n\n")
 
 verify_no_packages_were_removed()
 
