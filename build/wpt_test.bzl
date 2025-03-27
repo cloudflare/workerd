@@ -192,7 +192,6 @@ def _wpt_wd_test_gen_impl(ctx):
     """
     src = ctx.actions.declare_file("{}.wd-test".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
-
     ctx.actions.write(
         output = src,
         content = WPT_WD_TEST_TEMPLATE.format(
@@ -369,14 +368,75 @@ def module_relative_path(module_base, file):
 
     return paths.relativize(file.short_path, module_base.short_path)
 
+def relative_path(from_path, to_path):
+    """
+    Finds the relative path from from_path to to_path.
+    Based on <https://github.com/nodejs/node/blob/0a91e988cfe2a994e60780a4ce001e44812a9ad9/lib/path.js#L1280>
+    """
+
+    # The algorithm we got from Node assumes both paths are absolute,
+    # so add a slash rather than change all the logic below
+    from_path = "/{}".format(from_path)
+    to_path = "/{}".format(to_path)
+
+    from_start = 1
+    from_end = len(from_path)
+    from_len = from_end - from_start
+    to_start = 1
+    to_len = len(to_path) - to_start
+
+    length = from_len if from_len < to_len else to_len
+    last_common_sep = -1
+    i = 0
+
+    for i in range(length):
+        from_ch = from_path[from_start + i]
+        if from_ch != to_path[to_start + i]:
+            break
+        elif from_ch == "/":
+            last_common_sep = i
+
+    # Compare paths to find the longest common path from root
+    if i == length:
+        if to_len > length:
+            if to_path[to_start + i] == "/":
+                # We get here if `from_path` is the exact base path for `to_path`.
+                # For example: from='/foo/bar'; to='/foo/bar/baz'
+                return to_path[to_start + i + 1:]
+
+            if i == 0:
+                # We get here if `from` is the root
+                # For example: from='/'; to='/foo'
+                return to_path[to_start + i:]
+    elif from_len > length:
+        if from_path[from_start + i] == "/":
+            # We get here if `to` is the exact base path for `from`.
+            # For example: from='/foo/bar/baz'; to='/foo/bar'
+            last_common_sep = i
+        elif i == 0:
+            # We get here if `to` is the root.
+            # For example: from='/foo/bar'; to='/'
+            last_common_sep = 0
+
+    out = ""
+
+    # Generate the relative path based on the path difference between `to`
+    # and `from`.
+    for i in range(from_start + last_common_sep + 1, from_end + 1):
+        if i == from_end or from_path[i] == "/":
+            out += ".." if len(out) == 0 else "/.."
+
+    # Lastly, append the rest of the destination (`to`) path that comes after
+    # the common path parts.
+    return out + to_path[to_start + last_common_sep:]
+
 def wd_test_relative_path(wd_test_file, file):
     """
     Generates a path that can be used in a .wd-test file to refer to another file.
 
     Paths are relative to the .wd-test file.
     """
-
-    return "../" * (wd_test_file.short_path.count("/")) + file.short_path
+    return relative_path(paths.dirname(wd_test_file.short_path), file.short_path)
 
 def is_in_resources_directory(file):
     """
