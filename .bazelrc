@@ -25,6 +25,9 @@ build --experimental_remote_cache_eviction_retries=5
 # where possible. While several previous BwoB bugs have been fixed, this is slower than it could be
 # due to https://github.com/bazelbuild/bazel/issues/20576.
 
+# TODO: Investigate warnings about unused -c with LLVM 20
+build --per_file_copt='src/workerd/tools@-Wno-error,-Wno-unused-command-line-argument' --host_per_file_copt='src/workerd/tools@-Wno-error,-Wno-unused-command-line-argument'
+
 # Import CI-specific configuration. As the amount of custom configuration settings we use grows,
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
@@ -42,6 +45,8 @@ build --incompatible_disallow_empty_glob
 
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
+
+build --@rules_rust//rust/toolchain/channel=nightly
 
 # Dawn tint build flags
 build --@dawn//src/tint:tint_build_glsl_writer=False
