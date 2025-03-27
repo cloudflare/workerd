@@ -50,4 +50,22 @@ cc_capnp_library(
     ],
 )
 
-python_bundle()
+python_bundle("0.26.0a2")
+
+alias(
+    name = "pyodide.capnp.bin",
+    actual = "pyodide.capnp.bin@rule@0.26.0a2",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "pyodide.capnp.bin@rule",
+    actual = "pyodide.capnp.bin@rule@0.26.0a2",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "pyodide",
+    actual = "pyodide@0.26.0a2",
+    visibility = ["//visibility:public"],
+)
