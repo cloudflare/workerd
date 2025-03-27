@@ -29,7 +29,7 @@ class InvocationSpanContext;
 //   - Or, falling back to proxying if passThroughOnException() was used.
 // - Finish waitUntil() tasks.
 kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
-    kj::Arc<Worker> worker,
+    kj::Own<const Worker> worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::Own<Worker::Actor>> actor,
