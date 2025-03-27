@@ -57,6 +57,10 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
 
+  virtual ~WorkerEntrypoint() {
+    worker->onRequestFinished();
+  }
+
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
@@ -78,6 +82,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
   // Members initialized at startup.
 
+  kj::Arc<Worker> worker;
   ThreadContext& threadContext;
   kj::TaskSet& waitUntilTasks;
   kj::Maybe<kj::Own<IoContext::IncomingRequest>> incomingRequest;
@@ -93,8 +98,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
 
-  void init(kj::Arc<Worker> worker,
-      kj::Maybe<kj::Own<Worker::Actor>> actor,
+  void init(kj::Maybe<kj::Own<Worker::Actor>> actor,
       kj::Own<LimitEnforcer> limitEnforcer,
       kj::Own<void> ioContextDependency,
       kj::Own<IoChannelFactory> ioChannelFactory,
@@ -112,6 +116,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
  public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
+      kj::Arc<Worker> worker,
       ThreadContext& threadContext,
       kj::TaskSet& waitUntilTasks,
       bool tunnelExceptions,
@@ -174,9 +179,10 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
           [](auto& trigger) -> tracing::InvocationSpanContext& { return trigger; }),
       threadContext.getEntropySource());
 
-  auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
-      waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(props), kj::mv(cfBlobJson));
-  obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
+  auto obj =
+      kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), kj::mv(worker), threadContext,
+          waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(props), kj::mv(cfBlobJson));
+  obj->init(kj::mv(actor), kj::mv(limitEnforcer), kj::mv(ioContextDependency),
       kj::mv(ioChannelFactory), kj::addRef(*metrics), kj::mv(workerTracer),
       kj::mv(invocationSpanContext));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
@@ -184,21 +190,24 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
 }
 
 WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
+    kj::Arc<Worker> worker,
     ThreadContext& threadContext,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson)
-    : threadContext(threadContext),
+    : worker(kj::mv(worker)),
+      threadContext(threadContext),
       waitUntilTasks(waitUntilTasks),
       tunnelExceptions(tunnelExceptions),
       entrypointName(entrypointName),
       props(kj::mv(props)),
-      cfBlobJson(kj::mv(cfBlobJson)) {}
+      cfBlobJson(kj::mv(cfBlobJson)) {
+  this->worker->onRequestStarted();
+}
 
-void WorkerEntrypoint::init(kj::Arc<Worker> worker,
-    kj::Maybe<kj::Own<Worker::Actor>> actor,
+void WorkerEntrypoint::init(kj::Maybe<kj::Own<Worker::Actor>> actor,
     kj::Own<LimitEnforcer> limitEnforcer,
     kj::Own<void> ioContextDependency,
     kj::Own<IoChannelFactory> ioChannelFactory,
@@ -206,6 +215,8 @@ void WorkerEntrypoint::init(kj::Arc<Worker> worker,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
     tracing::InvocationSpanContext invocationSpanContext) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
+
+  worker->onRequestStarted();
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
 
@@ -213,7 +224,8 @@ void WorkerEntrypoint::init(kj::Arc<Worker> worker,
     TRACE_EVENT("workerd", "WorkerEntrypoint::init() create new IoContext");
     auto actorRef = actor.map([](kj::Own<Worker::Actor>& ptr) -> Worker::Actor& { return *ptr; });
 
-    return kj::refcounted<IoContext>(threadContext, kj::mv(worker), actorRef, kj::mv(limitEnforcer))
+    return kj::refcounted<IoContext>(
+        threadContext, worker.addRef(), actorRef, kj::mv(limitEnforcer))
         .attach(kj::mv(ioContextDependency));
   };
 
