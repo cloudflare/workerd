@@ -1741,6 +1741,18 @@ Worker::~Worker() noexcept(false) {
   lock->push(kj::mv(impl));
 }
 
+void Worker::onRequestStarted() const {
+  requestsInFlight.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Worker::onRequestFinished() const {
+  requestsInFlight.fetch_sub(1, std::memory_order_relaxed);
+}
+
+uint64_t Worker::numRequestsInFlight() const {
+  return requestsInFlight.load(std::memory_order_relaxed);
+}
+
 void Worker::handleLog(jsg::Lock& js,
     ConsoleMode consoleMode,
     LogLevel level,

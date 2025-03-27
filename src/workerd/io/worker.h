@@ -26,6 +26,8 @@
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
+#include <atomic>
+
 namespace v8 {
 class Isolate;
 }
@@ -165,7 +167,15 @@ class Worker: public kj::AtomicRefcounted {
   static void setupContext(
       jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode);
 
+  void onRequestStarted() const;
+
+  void onRequestFinished() const;
+
+  uint64_t numRequestsInFlight() const;
+
  private:
+  mutable std::atomic<uint64_t> requestsInFlight;
+
   kj::Own<const Script> script;
 
   kj::Own<WorkerObserver> metrics;
