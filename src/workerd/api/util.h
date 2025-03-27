@@ -87,4 +87,6 @@ void maybeWarnIfNotText(jsg::Lock& js, kj::StringPtr str);
 kj::String fastEncodeBase64Url(kj::ArrayPtr<const byte> bytes);
 kj::Array<char16_t> fastEncodeUtf16(kj::ArrayPtr<const char> bytes);
 
+kj::String uriEncodeControlChars(kj::ArrayPtr<const byte> bytes);
+
 }  // namespace workerd::api

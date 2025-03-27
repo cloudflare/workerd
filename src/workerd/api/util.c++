@@ -238,4 +238,23 @@ kj::Array<char16_t> fastEncodeUtf16(kj::ArrayPtr<const char> bytes) {
   return output.first(actual_length).attach(kj::mv(output));
 }
 
+// URI-encode control characters and spaces.
+kj::String uriEncodeControlChars(kj::ArrayPtr<const byte> bytes) {
+  // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
+  const char HEX_DIGITS_URI[] = "0123456789ABCDEF";
+
+  kj::Vector<char> result(bytes.size() + 1);
+  for (byte b: bytes) {
+    if (b > 0x20) {
+      result.add(b);
+    } else {
+      result.add('%');
+      result.add(HEX_DIGITS_URI[b / 16]);
+      result.add(HEX_DIGITS_URI[b % 16]);
+    }
+  }
+  result.add('\0');
+  return kj::String(result.releaseAsArray());
+}
+
 }  // namespace workerd::api
