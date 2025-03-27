@@ -7,35 +7,15 @@ load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
 load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
+load(":helpers.bzl", "copy_and_capnp_embed", "copy_to_generated")
 
-copy_file(
-    name = "pyodide_packages_archive",
-    src = "@pyodide_packages//:pyodide_packages.tar",
-    out = "generated/pyodide_packages.tar",
-)
+copy_and_capnp_embed("@pyodide_packages//:pyodide_packages.tar")
 
-capnp_embed(
-    name = "pyodide_packages_archive_embed",
-    src = "generated/pyodide_packages.tar",
-    deps = ["pyodide_packages_archive"],
-)
+copy_and_capnp_embed("python-entrypoint.js")
 
-copy_file(
-    name = "python_entrypoint_file",
-    src = "python-entrypoint.js",
-    out = "generated/python-entrypoint.js",
-)
-
-capnp_embed(
-    name = "python_entrypoint_file_embed",
-    src = "generated/python-entrypoint.js",
-    deps = ["python_entrypoint_file"],
-)
-
-copy_file(
-    name = "pyodide_extra_capnp_file",
-    src = "pyodide_extra.capnp",
-    out = "generated/pyodide_extra_tmpl.capnp",
+copy_to_generated(
+    "pyodide_extra.capnp",
+    out_name = "pyodide_extra_tmpl.capnp",
 )
 
 expand_template(
@@ -53,7 +33,7 @@ expand_template(
 capnp_embed(
     name = "pyodide_extra_file_embed",
     src = "generated/pyodide_extra.capnp",
-    deps = ["pyodide_extra_capnp_file"],
+    deps = ["pyodide_extra_expand_template@rule"],
 )
 
 cc_capnp_library(
@@ -62,42 +42,21 @@ cc_capnp_library(
     visibility = ["//visibility:public"],
     deps = [
         ":pyodide_extra_file_embed",
-        ":pyodide_packages_archive_embed",
-        ":python_entrypoint_file_embed",
+        ":pyodide_packages.tar@capnp",
+        ":python-entrypoint.js@capnp",
     ] + [
-        ":pyodide_lock_" + package_date + "_file_embed"
+        ":pyodide-lock_" + package_date + ".json@capnp"
         for package_date in PYTHON_LOCKFILES.keys()
     ],
 )
 
-copy_file(
-    name = "pyodide.asm.wasm@rule",
-    src = "@pyodide//:pyodide/pyodide.asm.wasm",
-    out = "generated/pyodide.asm.wasm",
-)
+copy_to_generated("@pyodide//:pyodide/pyodide.asm.wasm")
 
-copy_file(
-    name = "python_stdlib.zip@rule",
-    src = "@pyodide//:pyodide/python_stdlib.zip",
-    out = "generated/python_stdlib.zip",
-)
+copy_to_generated("@pyodide//:pyodide/python_stdlib.zip")
 
 [
-    copy_file(
-        name = "pyodide-lock_" + package_date + ".json@copy_file_rule",
-        src = "@pyodide-lock_" + package_date + ".json//file",
-        out = "generated/pyodide-lock_" + package_date + ".json",
-    )
-    for package_date, package_lock_sha in PYTHON_LOCKFILES.items()
-]
-
-[
-    capnp_embed(
-        name = "pyodide_lock_" + package_date + "_file_embed",
-        src = "generated/pyodide-lock_" + package_date + ".json",
-        deps = ["pyodide-lock_" + package_date + ".json@copy_file_rule"],
-    )
-    for package_date, package_lock_sha in PYTHON_LOCKFILES.items()
+    copy_and_capnp_embed("@pyodide-lock_" + package_date + ".json//file")
+    for package_date in PYTHON_LOCKFILES
 ]
 
 # pyodide.asm.js patches
@@ -271,8 +230,8 @@ wd_ts_bundle(
     internal_modules = INTERNAL_MODULES,
     js_deps = [
         "generated/emscriptenSetup",
-        "pyodide.asm.wasm@rule",
-        "python_stdlib.zip@rule",
+        "pyodide.asm.wasm@copy",
+        "python_stdlib.zip@copy",
     ],
     lint = False,
     modules = MODULES,
