@@ -3870,6 +3870,10 @@ class Server::HttpListener final: public kj::Refcounted {
 
     kj::Promise<void> handleApplicationError(
         kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
+      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+        // Don't send a response, just close connection.
+        co_return;
+      }
       KJ_LOG(ERROR, kj::str("Uncaught exception: ", exception));
       KJ_IF_SOME(r, response) {
         co_return co_await r.sendError(500, "Internal Server Error", parent.headerTable);
