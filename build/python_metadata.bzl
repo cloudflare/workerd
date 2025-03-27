@@ -11,15 +11,6 @@ PYTHON_LOCKFILES = {
     "20250324.1": "3e5a9317dc0cfcf63e556034bf0e87b958bd6debcfdccdfffc8ce477cc439626",
 }
 
-# This is a dictionary mapping a Python version with its packages version.
-#
-# NOTE: this needs to be kept in sync with compatibility-date.capnp.
-PYTHON_VERSION_TO_PACKAGES = {
-    "0.26.0a2": "20240829.4",
-    "0.27.1": "20250324.1",
-    "development": "20240829.4",
-}
-
 # This is a dictionary mapping a `packages` date/version (the `packages` field in
 # pythonSnapshotRelease) to a list of package names which are in that packages bundle. The list is
 # also in the form of a dictionary and maps to the import names for that package which should be
@@ -57,11 +48,14 @@ def make_bundle_version_info(versions):
         result[name] = entry
     return result
 
+# NOTE: This data needs to be kept in sync with compatibility-date.capnp.
+# Particularly the packages and backport fields.
 BUNDLE_VERSION_INFO = make_bundle_version_info([
     {
         "name": "0.26.0a2",
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
+        "packages": "20240829.4",
         "backport": "26",
         "integrity": "sha256-PGbANe9AeoPAf2EO4BCrw0iUox+C7CgJLGR/79r04yM=",
         "feature_flags": [],
@@ -73,6 +67,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "name": "0.27.1",
         "pyodide_version": "0.27.1",
         "pyodide_date": "2025-01-16",
+        "packages": "20250324.1",
         "backport": "14",
         "integrity": "sha256-yJduukBGEXPOlWEZkg6gz0j31Kw1AHyy/t9+FYJcagw=",
         "feature_flags": ["pythonWorkers20250116"],
@@ -86,6 +81,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "feature_flags": ["pythonWorkersDevPyodide", "pythonExternalPackages"],
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
+        "packages": "20240829.4",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
     },
 ])

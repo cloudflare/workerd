@@ -1,5 +1,5 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("//:build/python_metadata.bzl", "PYTHON_IMPORTS_TO_TEST", "PYTHON_LOCKFILES", "PYTHON_VERSION_TO_PACKAGES")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYTHON_IMPORTS_TO_TEST", "PYTHON_LOCKFILES")
 load("//src/workerd/server/tests/python:import_tests.bzl", "gen_import_tests")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
@@ -41,7 +41,7 @@ py_wd_test("seek-metadatafs")
 
 [
     gen_import_tests(
-        PYTHON_IMPORTS_TO_TEST[package_version],
+        PYTHON_IMPORTS_TO_TEST[info["packages"]],
         python_version,
         # TODO: Micropip version mismatch for 0.27.0
         #
@@ -65,7 +65,7 @@ py_wd_test("seek-metadatafs")
             ],
         },
     )
-    for python_version, package_version in PYTHON_VERSION_TO_PACKAGES.items()
+    for python_version, info in BUNDLE_VERSION_INFO.items()
 ]
 
 py_wd_test(
