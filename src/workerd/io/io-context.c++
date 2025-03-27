@@ -125,7 +125,7 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
 };
 
 IoContext::IoContext(ThreadContext& thread,
-    kj::Arc<Worker> workerParam,
+    kj::Own<const Worker> workerParam,
     kj::Maybe<Worker::Actor&> actorParam,
     kj::Own<LimitEnforcer> limitEnforcerParam)
     : thread(thread),
@@ -1382,7 +1382,7 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
 // ======================================================================================
 
 WarningAggregator::WarningAggregator(IoContext& context, EmitCallback emitter)
-    : worker(context.getWorker().addRef()),
+    : worker(kj::atomicAddRef(context.getWorker())),
       requestMetrics(kj::addRef(context.getMetrics())),
       emitter(kj::mv(emitter)) {}
 

@@ -1726,7 +1726,7 @@ class Server::WorkerService final: public Service,
   using AbortActorsCallback = kj::Function<void()>;
 
   WorkerService(ThreadContext& threadContext,
-      kj::Arc<Worker> worker,
+      kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
       kj::HashSet<kj::String> actorClassEntrypoints,
@@ -1914,8 +1914,8 @@ class Server::WorkerService final: public Service,
     observer = kj::refcounted<RequestObserverWithTracer>(
         mapAddRef(workerTracer), kj::mv(streamingTailWorkers), waitUntilTasks);
 
-    return newWorkerEntrypoint(threadContext, worker.addRef(), entrypointName, kj::mv(props),
-        kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
+    return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
+        kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},  // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance), kj::mv(observer),
         waitUntilTasks,
@@ -2074,15 +2074,16 @@ class Server::WorkerService final: public Service,
             co_return;
           }
           KJ_IF_SOME(m, manager) {
-            auto worker = a->getWorker();
+            auto& worker = a->getWorker();
+            auto workerStrongRef = kj::atomicAddRef(worker);
             // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
             // have an `IncomingRequest` at this point.
             //
             // Note that we do not have a race here because this is part of the `shutdownTask`
             // promise. If a new request comes in while we're waiting to get the lock then we will
             // cancel this promise.
-            Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
-            worker->runInLockScope(
+            Worker::AsyncLock asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
+            workerStrongRef->runInLockScope(
                 asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
           }
           a->shutdown(
@@ -2367,7 +2368,7 @@ class Server::WorkerService final: public Service,
             static constexpr uint16_t hibernationEventTypeId = 8;
 
             actorContainer->actor.emplace(
-                kj::refcounted<Worker::Actor>(service.worker.addRef(), actorContainer->getTracker(),
+                kj::refcounted<Worker::Actor>(*service.worker, actorContainer->getTracker(),
                     kj::str(idPtr), true, kj::mv(makeActorCache), className, kj::mv(makeStorage),
                     lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
                     actorContainer->tryGetManagerRef(), hibernationEventTypeId));
@@ -2458,7 +2459,7 @@ class Server::WorkerService final: public Service,
   // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
   kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
 
-  kj::Arc<Worker> worker;
+  kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::HashSet<kj::String> actorClassEntrypoints;
@@ -3277,7 +3278,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   }
 
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
-  auto worker = kj::arc<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
+  auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
           v8::Local<v8::Object> ctxExports) {
     // We can't fill in ctx.exports yet because we need to run the validator first to discover

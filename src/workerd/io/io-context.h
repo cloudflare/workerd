@@ -87,7 +87,7 @@ class WarningAggregator final: public kj::AtomicRefcounted {
   using Map = kj::HashMap<const Key&, kj::Own<WarningAggregator>>;
 
  private:
-  kj::Arc<Worker> worker;
+  kj::Own<const Worker> worker;
   kj::Own<RequestObserver> requestMetrics;
   EmitCallback emitter;
   kj::MutexGuarded<kj::Vector<kj::Own<WarningContext>>> warnings;
@@ -224,7 +224,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Construct a new IoContext. Before using it, you must also create an IncomingRequest.
   IoContext(ThreadContext& thread,
-      kj::Arc<Worker> worker,
+      kj::Own<const Worker> worker,
       kj::Maybe<Worker::Actor&> actor,
       kj::Own<LimitEnforcer> limitEnforcer);
 
@@ -233,8 +233,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   using IncomingRequest = IoContext_IncomingRequest;
 
-  const kj::Arc<Worker>& getWorker() {
-    return worker;
+  const Worker& getWorker() {
+    return *worker;
   }
   Worker::Lock& getCurrentLock() {
     return KJ_REQUIRE_NONNULL(currentLock);
@@ -835,7 +835,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
 
-  kj::Arc<Worker> worker;
+  kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
   kj::Own<LimitEnforcer> limitEnforcer;
 
