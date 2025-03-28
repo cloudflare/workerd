@@ -38,7 +38,7 @@ class Ec final {
 
   jsg::BufferSource getRawPublicKey(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT;
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const;
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const;
 
  private:
   EC_KEY* key;

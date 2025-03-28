@@ -30,7 +30,7 @@ class Rsa final {
 
   jsg::BufferSource getPublicExponent(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const KJ_WARN_UNUSED_RESULT;
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   jsg::BufferSource sign(
       jsg::Lock& js, const kj::ArrayPtr<const kj::byte> data) const KJ_WARN_UNUSED_RESULT;
