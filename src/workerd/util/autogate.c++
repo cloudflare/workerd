@@ -19,8 +19,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "test-workerd"_kj;
     case AutogateKey::STREAMING_TAIL_WORKERS:
       return "streaming-tail-workers"_kj;
-    case AutogateKey::PYTHON_FETCH_INDIVIDUAL_PACKAGES:
-      return "python-fetch-individual-packages";
     case AutogateKey::URLPATTERN:
       return "urlpattern";
     case AutogateKey::NumOfKeys:

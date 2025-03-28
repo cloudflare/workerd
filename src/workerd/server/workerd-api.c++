@@ -568,15 +568,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
-      if (featureFlags.getPythonExternalPackages() ||
-          util::Autogate::isEnabled(util::AutogateKey::PYTHON_FETCH_INDIVIDUAL_PACKAGES)) {
-        modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
-            workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
-      } else {
-        modules->addBuiltinModule("pyodide-internal:packages_tar_reader",
-            jsg::alloc<ReadOnlyBuffer>(PYODIDE_PACKAGES_TAR.get()),
-            workerd::jsg::ModuleRegistry::Type::INTERNAL);
-      }
+      modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
+          workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
 
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",

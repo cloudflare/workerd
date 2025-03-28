@@ -645,12 +645,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the behavior to uppercase all methods prior to parsing to that the method is always
   # recognized if it is a known method.
 
-  pythonExternalPackages @66 :Bool
+  obsolete66 @66 :Bool
       $compatEnableFlag("python_external_packages");
-  # Temporary flag to load Python packages from external bundle loaded at runtime.
-  #
-  # This is a compat flag so that we can opt in our test workers into it before rolling out to
-  # everyone.
 
   noTopLevelAwaitInRequire @67 :Bool
       $compatEnableFlag("disable_top_level_await_in_require")
