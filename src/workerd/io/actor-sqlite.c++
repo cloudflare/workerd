@@ -5,6 +5,7 @@
 #include "actor-sqlite.h"
 
 #include "io-gate.h"
+#include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
 #include <workerd/util/sentry.h>
@@ -37,6 +38,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
+  db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
 
   // Because we preserve an invariant that scheduled alarms are always at or earlier than
@@ -192,6 +194,13 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
     alarmDirty = p->alarmDirty;
   } else {
     alarmDirty = false;
+  }
+}
+
+void ActorSqlite::onCriticalError(kj::Exception exception) {
+  // If we have already experienced a terminal exception, no need to replace it
+  if (broken == kj::none) {
+    broken.emplace(kj::mv(exception));
   }
 }
 
