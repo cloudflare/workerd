@@ -64,7 +64,7 @@ class AsymmetricKeyCryptoKeyImpl: public CryptoKey::Impl {
 
   // Convert OpenSSL-format signature to WebCrypto-format signature, if different.
   virtual jsg::BufferSource signatureSslToWebCrypto(
-      jsg::Lock& js, kj::Array<kj::byte> signature) const;
+      jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const;
 
   // Convert WebCrypto-format signature to OpenSSL-format signature, if different.
   virtual jsg::BufferSource signatureWebCryptoToSsl(
