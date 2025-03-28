@@ -169,7 +169,7 @@ gen_api_bundle_capnpn = rule(
     },
 )
 
-def _copy_modules(modules, declarations):
+def _copy_modules(modules, declarations, out_dir = ""):
     """Copy files from the modules map to the current package.
 
     Returns new module map using file copies.
@@ -178,7 +178,7 @@ def _copy_modules(modules, declarations):
     result = dict()
     declarations_result = dict()
     for m in modules:
-        new_filename = modules[m].replace(":", "_").replace("/", "_")
+        new_filename = out_dir + modules[m].replace(":", "_").replace("/", "_")
         copy_file(name = new_filename + "@copy", src = m, out = new_filename)
 
         m_d_ts = _to_d_ts(m)
@@ -201,7 +201,8 @@ def wd_js_bundle(
         internal_json_modules = [],
         declarations = [],
         deps = [],
-        gen_compile_cache = False):
+        gen_compile_cache = False,
+        out_dir = ""):
     """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
@@ -226,45 +227,50 @@ def wd_js_bundle(
      gen_compile_cache: generate compilation cache of every file and include into the bundle
     """
     builtin_modules_dict = {
-        m: "{}:{}".format(import_name, _to_name(m))
+        m: "{}:{}".format(import_name, _to_name(m).removeprefix(out_dir))
         for m in builtin_modules
     }
     internal_modules_dict = {
-        m: "{}-internal:{}".format(import_name, _to_name(m.removeprefix("internal/")))
+        m: "{}-internal:{}".format(import_name, _to_name(m.removeprefix(out_dir).removeprefix("internal/")))
         for m in internal_modules
     }
     internal_wasm_modules_dict = {
-        m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        m: "{}-internal:{}".format(import_name, m.removeprefix(out_dir).removeprefix("internal/"))
         for m in internal_wasm_modules
     }
     internal_data_modules_dict = {
-        m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        m: "{}-internal:{}".format(import_name, m.removeprefix(out_dir).removeprefix("internal/"))
         for m in internal_data_modules
     }
     internal_json_modules_dict = {
-        m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        m: "{}-internal:{}".format(import_name, m.removeprefix(out_dir).removeprefix("internal/"))
         for m in internal_json_modules
     }
 
     builtin_modules_dict, builtin_declarations = _copy_modules(
         builtin_modules_dict,
         declarations,
+        out_dir,
     )
     internal_modules_dict, internal_declarations = _copy_modules(
         internal_modules_dict,
         declarations,
+        out_dir,
     )
     internal_wasm_modules_dict, _ = _copy_modules(
         internal_wasm_modules_dict,
         declarations,
+        out_dir,
     )
     internal_data_modules_dict, _ = _copy_modules(
         internal_data_modules_dict,
         declarations,
+        out_dir,
     )
     internal_json_modules_dict, _ = _copy_modules(
         internal_json_modules_dict,
         declarations,
+        out_dir,
     )
 
     data = (

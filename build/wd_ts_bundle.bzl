@@ -27,7 +27,8 @@ def wd_ts_bundle(
         lint = True,
         deps = [],
         js_deps = [],
-        gen_compile_cache = False):
+        gen_compile_cache = False,
+        out_dir = ""):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -64,6 +65,7 @@ def wd_ts_bundle(
         declaration = True,
         tsconfig = name + "@tsconfig",
         deps = deps,
+        out_dir = out_dir.removesuffix("/"),
         visibility = ["//visibility:public"],
     )
 
@@ -71,10 +73,10 @@ def wd_ts_bundle(
         name = name,
         import_name = import_name,
         # builtin modules are accessible under "<import_name>:<module_name>" name
-        builtin_modules = [_to_js(m) for m in modules],
+        builtin_modules = [out_dir + _to_js(m) for m in modules],
         # internal modules are accessible under "<import_name>-internal:<module_name>" name
         # without "internal/" folder prefix.
-        internal_modules = [_to_js(m) for m in internal_modules if not m.endswith(".d.ts")],
+        internal_modules = [out_dir + _to_js(m) for m in internal_modules if not m.endswith(".d.ts")],
         internal_wasm_modules = internal_wasm_modules,
         internal_data_modules = internal_data_modules,
         internal_json_modules = internal_json_modules,
@@ -82,6 +84,7 @@ def wd_ts_bundle(
         schema_id = schema_id,
         deps = deps + js_deps,
         gen_compile_cache = gen_compile_cache,
+        out_dir = out_dir,
     )
 
     if lint:
