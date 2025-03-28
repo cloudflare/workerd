@@ -14,6 +14,7 @@ import {
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
   USING_OLDEST_PYODIDE_VERSION,
+  DURABLE_OBJECT_CLASSES,
 } from 'pyodide-internal:metadata';
 import { reportError } from 'pyodide-internal:util';
 import { default as Limiter } from 'pyodide-internal:limiter';
@@ -164,26 +165,90 @@ function makeHandler(pyHandlerName: string): Handler {
     }
   };
 }
+
+function makeDurableObjectClass(className: string, classKind: AnyClass) {
+  class DurableObjectWrapper extends classKind {
+    pyInstance: Promise<PyModule>;
+
+    constructor(...args: any[]) {
+      super(...args);
+      // Initialise a Python instance of the class.
+      this.pyInstance = this.initPyInstance(args);
+      // We do not know the methods that are defined on the RPC class, so we need a proxy to
+      // support any possible method name.
+      return new Proxy(this, {
+        get(target, prop, receiver) {
+          if (typeof prop !== 'string') {
+            return Reflect.get(target, prop, receiver);
+          }
+          const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
+          if (isKnownHandler) {
+            prop = 'on_' + prop;
+          }
+          return async function (...args: any[]) {
+            const pyInstance = await target.pyInstance;
+            if (typeof pyInstance[prop] === 'function') {
+              const res = await pyInstance[prop](...args);
+              if (isKnownHandler) {
+                return res?.js_object ?? res;
+              }
+              return res;
+            } else {
+              throw new TypeError(`Method ${prop} does not exist`);
+            }
+          };
+        },
+      });
+    }
+
+    async initPyInstance(args: any[]) {
+      const mainModule = await getMainModule();
+      const pyClassConstructor = mainModule[className] as unknown as (
+        ...args: any[]
+      ) => PyModule;
+      if (typeof pyClassConstructor !== 'function') {
+        throw new TypeError(
+          `There is no '${className}' class defined in the Python Worker's main module`
+        );
+      }
+
+      return pyClassConstructor(...args);
+    }
+  }
+
+  return DurableObjectWrapper;
+}
+
+const SUPPORTED_HANDLER_NAMES = [
+  'fetch',
+  'alarm',
+  'scheduled',
+  'trace',
+  'queue',
+  'pubsub',
+];
 const handlers: {
   [handlerName: string]: Handler;
 } = {};
+
+let pythonDurableObjectClasses: string[] = [];
 
 try {
   // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
   // needs to be called inside an IO context.
   if (IS_WORKERD || IS_TRACING) {
-    handlers.fetch = makeHandler('on_fetch');
+    pythonDurableObjectClasses.push(...(DURABLE_OBJECT_CLASSES ?? []));
+
+    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+      const pyHandlerName = 'on_' + handlerName;
+      handlers[handlerName] = makeHandler(pyHandlerName);
+    }
+
     handlers.test = makeHandler('test');
   } else {
+    // TODO: introspection to fill pythonDurableObjectClasses.
     const mainModule = await getMainModule();
-    for (const handlerName of [
-      'fetch',
-      'alarm',
-      'scheduled',
-      'trace',
-      'queue',
-      'pubsub',
-    ]) {
+    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
       const pyHandlerName = 'on_' + handlerName;
       if (typeof mainModule[pyHandlerName] === 'function') {
         handlers[handlerName] = makeHandler(pyHandlerName);
@@ -195,4 +260,5 @@ try {
   reportError(e);
 }
 
+export { pythonDurableObjectClasses, makeDurableObjectClass };
 export default handlers;
