@@ -21,7 +21,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "nix",
+    name = "anyhow",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -40,9 +40,10 @@ rust_library(
     ),
     crate_features = [
         "default",
+        "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -51,17 +52,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=nix",
+        "crate-name=anyhow",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.29.0",
+    version = "1.0.98",
     deps = [
-        "@crates_vendor__bitflags-2.9.0//:bitflags",
-        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-        "@crates_vendor__libc-0.2.172//:libc",
-        "@crates_vendor__nix-0.29.0//:build_script_build",
+        "@crates_vendor__anyhow-1.0.98//:build_script_build",
     ],
 )
 
@@ -86,6 +84,7 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -101,8 +100,8 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "nix",
+    edition = "2018",
+    pkg_name = "anyhow",
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -111,16 +110,13 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=nix",
+        "crate-name=anyhow",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.29.0",
+    version = "1.0.98",
     visibility = ["//visibility:private"],
-    deps = [
-        "@crates_vendor__cfg_aliases-0.2.1//:cfg_aliases",
-    ],
 )
 
 alias(

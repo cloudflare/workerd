@@ -56,6 +56,6 @@ rust_library(
     ],
     version = "0.6.4",
     deps = [
-        "@crates_vendor__getrandom-0.2.15//:getrandom",
+        "@crates_vendor__getrandom-0.2.16//:getrandom",
     ],
 )

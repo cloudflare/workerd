@@ -41,7 +41,7 @@ rust_library(
     crate_root = "lib.rs",
     edition = "2015",
     proc_macro_deps = [
-        "@crates_vendor__derive_more-0.99.19//:derive_more",
+        "@crates_vendor__derive_more-0.99.20//:derive_more",
     ],
     rustc_env_files = [
         ":cargo_toml_env_vars",

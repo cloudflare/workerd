@@ -7,7 +7,7 @@
 ###############################################################################
 
 load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -16,8 +16,8 @@ cargo_toml_env_vars(
     src = "Cargo.toml",
 )
 
-rust_proc_macro(
-    name = "derive_more",
+rust_library(
+    name = "cxxbridge_flags",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,35 +35,10 @@ rust_proc_macro(
         ],
     ),
     crate_features = [
-        "add",
-        "add_assign",
-        "as_mut",
-        "as_ref",
-        "constructor",
-        "convert_case",
         "default",
-        "deref",
-        "deref_mut",
-        "display",
-        "error",
-        "from",
-        "from_str",
-        "index",
-        "index_mut",
-        "into",
-        "into_iterator",
-        "is_variant",
-        "iterator",
-        "mul",
-        "mul_assign",
-        "not",
-        "rustc_version",
-        "sum",
-        "try_into",
-        "unwrap",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -72,16 +47,10 @@ rust_proc_macro(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=derive_more",
+        "crate-name=cxxbridge-flags",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.99.19",
-    deps = [
-        "@crates_vendor__convert_case-0.4.0//:convert_case",
-        "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
-        "@crates_vendor__quote-1.0.40//:quote",
-        "@crates_vendor__syn-2.0.100//:syn",
-    ],
+    version = "1.0.151",
 )

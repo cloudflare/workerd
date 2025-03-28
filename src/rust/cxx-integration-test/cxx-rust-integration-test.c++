@@ -17,8 +17,14 @@ KJ_TEST("init cxx_integration") {
   rust::cxx_integration::init();
 }
 
-KJ_TEST("panic results in abort") {
-  KJ_EXPECT_SIGNAL(SIGABRT, rust::cxx_integration::trigger_panic("foobar"));
+KJ_TEST("panic results in exception") {
+  try {
+    rust::cxx_integration::trigger_panic("foobar");
+    KJ_UNREACHABLE;
+  } catch (::rust::Error e) {
+    // this is expected
+    KJ_EXPECT(e.what() == "panic in cxx_integration::ffi::trigger_panic: foobar"_kj);
+  }
 }
 
 KJ_TEST("ok Result") {

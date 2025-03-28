@@ -5,6 +5,11 @@ load("@rules_rust//crate_universe:defs.bzl", "crate")
 
 # We prefer single-digit dependencies to stay up to date as much as possible
 PACKAGES = {
+    # CXX dependencies
+    # our own cxx fork
+    "cxx": crate.spec(git = "https://github.com/cloudflare/workerd-cxx.git"),
+    "cxxbridge-cmd": crate.spec(git = "https://github.com/cloudflare/workerd-cxx.git"),
+} | {
     # When adding packages here, please only enable features as needed to keep compile times and
     # binary sizes bounded.
     "anyhow": crate.spec(version = "1"),
@@ -13,8 +18,6 @@ PACKAGES = {
     "clang-ast": crate.spec(version = "0"),
     "clap": crate.spec(version = "4", default_features = False, features = ["derive"]),
     "codespan-reporting": crate.spec(version = "0"),
-    "cxx": crate.spec(version = "1"),
-    "cxxbridge-cmd": crate.spec(version = "1"),
     "flate2": crate.spec(version = "1"),
     "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", tag = "v2.2.0"),
     "nix": crate.spec(version = "0"),

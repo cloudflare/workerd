@@ -4,8 +4,8 @@ def rust_cxx_include(name, visibility = [], include_prefix = None):
     native.genrule(
         name = "%s/generated" % name,
         outs = ["cxx.h"],
-        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) --header > \"$@\"",
-        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
+        cmd = "$(location @crates_vendor//:cxxbridge-cmd__cxxbridge) --header > \"$@\"",
+        tools = ["@crates_vendor//:cxxbridge-cmd__cxxbridge"],
     )
 
     native.cc_library(
@@ -30,8 +30,8 @@ def rust_cxx_bridge(
             src + ".h",
             src + ".cc",
         ],
-        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
-        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
+        cmd = "$(location @crates_vendor//:cxxbridge-cmd__cxxbridge) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        tools = ["@crates_vendor//:cxxbridge-cmd__cxxbridge"],
     )
 
     native.cc_library(

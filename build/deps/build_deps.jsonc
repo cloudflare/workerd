@@ -82,11 +82,6 @@
       "downloaded_file_path": "downloaded.exe"
     },
     {
-      "name": "cxxbridge-cmd",
-      "type": "crate",
-      "build_file": "//deps/rust:BUILD.cxxbridge-cmd"
-    },
-    {
       "name": "rules_cc",
       "type": "github_release",
       "owner": "bazelbuild",

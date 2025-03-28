@@ -21,7 +21,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "clap",
+    name = "cxxbridge_cmd",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -38,19 +38,8 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.32//:clap_derive",
-    ],
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -59,19 +48,23 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=cxxbridge-cmd",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.35",
+    version = "1.0.151",
     deps = [
-        "@crates_vendor__clap_builder-4.5.35//:clap_builder",
+        "@crates_vendor__clap-4.5.37//:clap",
+        "@crates_vendor__codespan-reporting-0.12.0//:codespan_reporting",
+        "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
+        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__syn-2.0.100//:syn",
     ],
 )
 
 rust_binary(
-    name = "stdio-fixture__bin",
+    name = "cxxbridge__bin",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -88,19 +81,8 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
-    ],
-    crate_root = "src/bin/stdio-fixture.rs",
+    crate_root = "src/main.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.32//:clap_derive",
-    ],
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -109,14 +91,18 @@ rust_binary(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=cxxbridge-cmd",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.35",
+    version = "1.0.151",
     deps = [
-        ":clap",
-        "@crates_vendor__clap_builder-4.5.35//:clap_builder",
+        ":cxxbridge_cmd",
+        "@crates_vendor__clap-4.5.37//:clap",
+        "@crates_vendor__codespan-reporting-0.12.0//:codespan_reporting",
+        "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
+        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__syn-2.0.100//:syn",
     ],
 )

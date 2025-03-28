@@ -21,7 +21,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "libc",
+    name = "proc_macro2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -40,8 +40,8 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "extra_traits",
-        "std",
+        "proc-macro",
+        "span-locations",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -53,14 +53,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.171",
+    version = "1.0.95",
     deps = [
-        "@crates_vendor__libc-0.2.171//:build_script_build",
+        "@crates_vendor__proc-macro2-1.0.95//:build_script_build",
+        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
     ],
 )
 
@@ -85,8 +86,8 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
-        "extra_traits",
-        "std",
+        "proc-macro",
+        "span-locations",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -103,7 +104,7 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "libc",
+    pkg_name = "proc-macro2",
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -112,12 +113,12 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.171",
+    version = "1.0.95",
     visibility = ["//visibility:private"],
 )
 

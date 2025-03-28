@@ -32,14 +32,14 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "anyhow-1.0.97",
-    actual = "@crates_vendor__anyhow-1.0.97//:anyhow",
+    name = "anyhow-1.0.98",
+    actual = "@crates_vendor__anyhow-1.0.98//:anyhow",
     tags = ["manual"],
 )
 
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.97//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.98//:anyhow",
     tags = ["manual"],
 )
 
@@ -80,14 +80,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.35",
-    actual = "@crates_vendor__clap-4.5.35//:clap",
+    name = "clap-4.5.37",
+    actual = "@crates_vendor__clap-4.5.37//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.35//:clap",
+    actual = "@crates_vendor__clap-4.5.37//:clap",
     tags = ["manual"],
 )
 
@@ -104,20 +104,32 @@ alias(
 )
 
 alias(
-    name = "cxx-1.0.156",
-    actual = "@crates_vendor__cxx-1.0.156//:cxx",
+    name = "cxx-1.0.151",
+    actual = "@crates_vendor__cxx-1.0.151//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.156//:cxx",
+    actual = "@crates_vendor__cxx-1.0.151//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.156//:cxx_cc",
+    actual = "@crates_vendor__cxx-1.0.151//:cxx_cc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxxbridge-cmd-1.0.151",
+    actual = "@crates_vendor__cxxbridge-cmd-1.0.151//:cxxbridge_cmd",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxxbridge-cmd",
+    actual = "@crates_vendor__cxxbridge-cmd-1.0.151//:cxxbridge_cmd",
     tags = ["manual"],
 )
 
@@ -170,14 +182,14 @@ alias(
 )
 
 alias(
-    name = "proc-macro2-1.0.94",
-    actual = "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
+    name = "proc-macro2-1.0.95",
+    actual = "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
     tags = ["manual"],
 )
 
@@ -310,7 +322,13 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.35//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.37//:stdio-fixture__bin",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxxbridge-cmd__cxxbridge",
+    actual = "@crates_vendor__cxxbridge-cmd-1.0.151//:cxxbridge__bin",
     tags = ["manual"],
 )
 
