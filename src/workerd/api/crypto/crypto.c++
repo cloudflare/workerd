@@ -652,14 +652,14 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
   });
 }
 
-bool SubtleCrypto::timingSafeEqual(kj::Array<kj::byte> a, kj::Array<kj::byte> b) {
+bool SubtleCrypto::timingSafeEqual(jsg::BufferSource a, jsg::BufferSource b) {
   JSG_REQUIRE(a.size() == b.size(), TypeError, "Input buffers must have the same byte length.");
 
   // The implementation here depends entirely on the characteristics of the CRYPTO_memcmp
   // implementation. We do not perform any additional verification that the operation is
   // actually timing safe other than checking the input types and lengths.
 
-  return CRYPTO_memcmp(a.begin(), b.begin(), a.size()) == 0;
+  return CRYPTO_memcmp(a.asArrayPtr().begin(), b.asArrayPtr().begin(), a.size()) == 0;
 }
 
 // =======================================================================================

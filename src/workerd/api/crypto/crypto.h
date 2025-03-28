@@ -620,7 +620,7 @@ class SubtleCrypto: public jsg::Object {
       const jsg::TypeHandler<JsonWebKey>& jwkHandler);
 
   // This is a non-standard extension based off Node.js' implementation of crypto.timingSafeEqual.
-  bool timingSafeEqual(kj::Array<kj::byte> a, kj::Array<kj::byte> b);
+  bool timingSafeEqual(jsg::BufferSource a, jsg::BufferSource b);
 
   JSG_RESOURCE_TYPE(SubtleCrypto) {
     JSG_METHOD(encrypt);
