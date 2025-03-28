@@ -41,7 +41,8 @@ class Pbkdf2Key final: public CryptoKey::Impl {
         JSG_REQUIRE_NONNULL(algorithm.hash, TypeError, "Missing field \"hash\" in \"algorithm\"."));
     auto hashType = lookupDigestAlgorithm(hashName).second;
     kj::ArrayPtr<kj::byte> salt =
-        JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".");
+        JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".")
+            .asArrayPtr();
     int iterations = JSG_REQUIRE_NONNULL(
         algorithm.iterations, TypeError, "Missing field \"iterations\" in \"algorithm\".");
 

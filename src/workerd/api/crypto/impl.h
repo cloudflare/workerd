@@ -137,7 +137,7 @@ class CryptoKey::Impl {
 
   Impl(bool extractable, CryptoKeyUsageSet usages): extractable(extractable), usages(usages) {}
 
-  static kj::Own<CryptoKey::Impl> from(kj::Own<EVP_PKEY> key);
+  static kj::Own<CryptoKey::Impl> from(jsg::Lock& js, kj::Own<EVP_PKEY> key);
 
   bool isExtractable() const {
     return extractable;
@@ -221,7 +221,7 @@ class CryptoKey::Impl {
 
   virtual kj::StringPtr getAlgorithmName() const = 0;
 
-  virtual CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const {
+  virtual CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
         "The getAsymmetricKeyDetail operation is not implemented for \"", getAlgorithmName(),
         "\".");
@@ -430,7 +430,7 @@ void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
 // is properly seeded without consuming entropy.
 bool CSPRNG(kj::ArrayPtr<kj::byte> buffer);
 
-kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key);
+kj::Own<CryptoKey::Impl> fromRsaKey(jsg::Lock& js, kj::Own<EVP_PKEY> key);
 kj::Own<CryptoKey::Impl> fromEcKey(kj::Own<EVP_PKEY> key);
 kj::Own<CryptoKey::Impl> fromEd25519Key(kj::Own<EVP_PKEY> key);
 

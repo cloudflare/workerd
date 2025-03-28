@@ -306,8 +306,8 @@ bool CryptoKey::operator==(const CryptoKey& other) const {
   return this == &other || (getType() == other.getType() && impl->equals(*other.impl));
 }
 
-CryptoKey::AsymmetricKeyDetails CryptoKey::getAsymmetricKeyDetails() const {
-  return impl->getAsymmetricKeyDetail();
+CryptoKey::AsymmetricKeyDetails CryptoKey::getAsymmetricKeyDetails(jsg::Lock& js) const {
+  return impl->getAsymmetricKeyDetail(js);
 }
 
 bool CryptoKey::verifyX509Public(const X509* cert) const {

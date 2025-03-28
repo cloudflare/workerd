@@ -654,12 +654,12 @@ jsg::BufferSource X509Certificate::getRaw(jsg::Lock& js) {
   return jsg::BufferSource(js, kj::mv(buf));
 }
 
-kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey() {
+kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey(jsg::Lock& js) {
   ClearErrorOnReturn clear_error_on_return;
   auto ptr = X509_get_pubkey(cert_.get());
   if (ptr == nullptr) return kj::none;
   auto pkey = kj::disposeWith<EVP_PKEY_free>(ptr);
-  return jsg::alloc<CryptoKey>(CryptoKey::Impl::from(kj::mv(pkey)));
+  return jsg::alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
 }
 
 kj::Maybe<kj::String> X509Certificate::getPem() {

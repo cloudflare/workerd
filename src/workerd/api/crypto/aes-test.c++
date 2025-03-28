@@ -106,10 +106,16 @@ KJ_TEST("AES-CTR key wrap") {
         {kj::str("wrapKey"), kj::str("unwrapKey")});
   };
 
-  static constexpr auto getEnc = [] {
+  static constexpr auto getEnc = [](jsg::Lock& js) {
+    static constexpr auto kRaw =
+        "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F\x10"_kjb;
+    auto backing = jsg::BackingStore::alloc(js, 16);
+    auto buffersource = jsg::BufferSource(js, kj::mv(backing));
+    buffersource.asArrayPtr().copyFrom(kRaw);
+
     return SubtleCrypto::EncryptAlgorithm{
       .name = kj::str("AES-CTR"),
-      .counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
+      .counter = kj::mv(buffersource),
       .length = 5,
     };
   };
@@ -133,12 +139,12 @@ KJ_TEST("AES-CTR key wrap") {
               kj::arr(kj::str("decrypt")))
           .then(js,
               [&](jsg::Lock&, jsg::Ref<CryptoKey> toWrap) {
-        return subtle.wrapKey(js, kj::str("raw"), *toWrap, *wrappingKey, getEnc(), *jwkHandler);
+        return subtle.wrapKey(js, kj::str("raw"), *toWrap, *wrappingKey, getEnc(js), *jwkHandler);
       })
           .then(js,
               [&](jsg::Lock&, jsg::BufferSource wrapped) {
         auto data = kj::heapArray(wrapped.asArrayPtr());
-        return subtle.unwrapKey(js, kj::str("raw"), kj::mv(data), *wrappingKey, getEnc(),
+        return subtle.unwrapKey(js, kj::str("raw"), kj::mv(data), *wrappingKey, getEnc(js),
             getImportKeyAlg(), true, kj::arr(kj::str("encrypt")), *jwkHandler);
       })
           .then(js, [&](jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
