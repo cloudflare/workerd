@@ -115,10 +115,10 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 16
-          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
+          sudo ./llvm.sh 18
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
       - name: Setup macOS
         if: runner.os == 'macOS'
         run: |
@@ -294,10 +294,10 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 16
-          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
+          sudo ./llvm.sh 18
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
       - name: Build type generating Worker
         run: |
           bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types_worker
@@ -355,10 +355,10 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 16
-          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
+          sudo ./llvm.sh 18
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
       - name: build types
         run: |
             bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
