@@ -1,0 +1,35 @@
+name: Dependency updater
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  group: deps-updater
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Update dependencies
+        run: build/deps/update-deps.py
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@6d6857d36972b65feb161a90e484f2984215f83e #v6.0.5
+        with:
+          commit-message: "update dependencies to latest version"
+          branch: "automatic-update-deps"
+          title: "Update dependencies"
+          body: |
+            This is an automated pull request for updating the dependencies of workerd.
+          delete-branch: true
