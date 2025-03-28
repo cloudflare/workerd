@@ -192,15 +192,20 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
-void IsolateBase::deferExternalMemoryDecrement(int64_t size) {
-  pendingExternalMemoryDecrement.fetch_add(size, std::memory_order_relaxed);
+void IsolateBase::deferExternalMemoryUpdate(int64_t size) {
+  pendingExternalMemoryUpdate.fetch_add(size, std::memory_order_relaxed);
 }
-void IsolateBase::clearPendingExternalMemoryDecrement() {
+void IsolateBase::clearPendingExternalMemoryUpdate() {
   KJ_ASSERT(v8::Locker::IsLocked(ptr));
-  int64_t amount = pendingExternalMemoryDecrement.exchange(0, std::memory_order_relaxed);
-  if (amount > 0) {
-    externalMemoryAccounter.Decrease(ptr, amount);
+
+  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
+  if (amount != 0) {
+    externalMemoryAccounter.Update(ptr, amount);
   }
+}
+
+int64_t IsolateBase::getPendingExternalMemoryUpdate() {
+  return pendingExternalMemoryUpdate;
 }
 
 void IsolateBase::terminateExecution() const {
@@ -419,7 +424,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Make sure everything in the deferred destruction queue is dropped.
     clearDestructionQueue();
-    clearPendingExternalMemoryDecrement();
+    clearPendingExternalMemoryUpdate();
 
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.

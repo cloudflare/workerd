@@ -322,26 +322,36 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
-void ExternalMemoryAdjustment::maybeDeferAdjustment(
-    v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount) {
+ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
+  return ExternalMemoryAdjustment(
+      IsolateBase::from(v8Isolate).getExternalMemoryAccounter(), v8Isolate, amount);
+}
+
+ExternalMemoryTarget Lock::getExternalMemoryTarget() {
+  return ExternalMemoryTarget(IsolateBase::from(v8Isolate).getExternalMemoryAccounter(), v8Isolate);
+}
+
+void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   if (isolate == nullptr) return;
+
+  this->amount += amount;
+
   if (v8::Locker::IsLocked(isolate)) {
-    externalMemoryAccounter.Decrease(isolate, amount);
+    externalMemoryAccounter.Update(isolate, amount);
   } else {
     // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
     // time that we do.
     auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-    jsgIsolate.deferExternalMemoryDecrement(static_cast<int64_t>(amount));
+    jsgIsolate.deferExternalMemoryUpdate(static_cast<int64_t>(amount));
   }
 }
 
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(
     v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount)
     : externalMemoryAccounter(externalMemoryAccounter),
-      isolate(isolate),
-      amount(amount) {
+      isolate(isolate) {
   KJ_DASSERT(isolate != nullptr);
-  externalMemoryAccounter.Increase(isolate, amount);
+  maybeDeferAdjustment(amount);
 }
 
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other)
@@ -356,7 +366,8 @@ ExternalMemoryAdjustment& ExternalMemoryAdjustment::operator=(ExternalMemoryAdju
   // If we currently have an amount, adjust it back to zero.
   // In the case we don't have the isolate lock here, the adjustment
   // will be deferred until the next time we do.
-  if (amount > 0) maybeDeferAdjustment(externalMemoryAccounter, isolate, amount);
+
+  if (amount > 0) maybeDeferAdjustment(-amount);
   externalMemoryAccounter = kj::mv(other.externalMemoryAccounter);
   amount = other.amount;
   isolate = other.isolate;
@@ -367,23 +378,33 @@ ExternalMemoryAdjustment& ExternalMemoryAdjustment::operator=(ExternalMemoryAdju
 
 ExternalMemoryAdjustment::~ExternalMemoryAdjustment() noexcept(false) {
   if (amount != 0) {
-    maybeDeferAdjustment(externalMemoryAccounter, isolate, amount);
+    maybeDeferAdjustment(-amount);
   }
 }
 
-void ExternalMemoryAdjustment::adjust(Lock& js, ssize_t amount) {
+void ExternalMemoryAdjustment::adjust(ssize_t amount) {
   amount = kj::max(amount, -static_cast<ssize_t>(this->amount));
-  this->amount += amount;
-  externalMemoryAccounter.Update(isolate, amount);
+  maybeDeferAdjustment(amount);
 }
 
-void ExternalMemoryAdjustment::set(Lock& js, size_t amount) {
-  adjust(js, amount - this->amount);
+void ExternalMemoryAdjustment::set(size_t amount) {
+  adjust(amount - this->amount);
 }
 
-ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
-  return ExternalMemoryAdjustment(
-      IsolateBase::from(v8Isolate).getExternalMemoryAccounter(), v8Isolate, amount);
+ExternalMemoryTarget::ExternalMemoryTarget(
+    v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate)
+    : externalMemoryAccounter(externalMemoryAccounter),
+      isolate(isolate) {
+  KJ_DASSERT(isolate != nullptr);
+}
+
+ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(int64_t amount) {
+  return ExternalMemoryAdjustment(externalMemoryAccounter, isolate, amount);
+}
+
+int64_t ExternalMemoryTarget::getPendingMemoryUpdate() {
+  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  return jsgIsolate.getPendingExternalMemoryUpdate();
 }
 
 Name::Name(kj::String string): hash(kj::hashCode(string)), inner(kj::mv(string)) {}
