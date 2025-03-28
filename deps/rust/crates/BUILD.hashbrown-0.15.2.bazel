@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "hashbrown",
@@ -38,6 +44,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -51,7 +60,7 @@ rust_library(
     version = "0.15.2",
     deps = [
         "@crates_vendor__allocator-api2-0.2.21//:allocator_api2",
-        "@crates_vendor__equivalent-1.0.1//:equivalent",
-        "@crates_vendor__foldhash-0.1.4//:foldhash",
+        "@crates_vendor__equivalent-1.0.2//:equivalent",
+        "@crates_vendor__foldhash-0.1.5//:foldhash",
     ],
 )

@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "ruff_python_parser",
@@ -30,6 +36,9 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -42,7 +51,7 @@ rust_library(
     ],
     version = "0.0.0",
     deps = [
-        "@crates_vendor__bitflags-2.8.0//:bitflags",
+        "@crates_vendor__bitflags-2.9.0//:bitflags",
         "@crates_vendor__bstr-1.11.3//:bstr",
         "@crates_vendor__memchr-2.7.4//:memchr",
         "@crates_vendor__ruff_python_ast-0.0.0//:ruff_python_ast",
@@ -50,7 +59,7 @@ rust_library(
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
         "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
         "@crates_vendor__static_assertions-1.1.0//:static_assertions",
-        "@crates_vendor__unicode-ident-1.0.16//:unicode_ident",
+        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
         "@crates_vendor__unicode-normalization-0.1.24//:unicode_normalization",
         "@crates_vendor__unicode_names2-1.3.0//:unicode_names2",
     ],
