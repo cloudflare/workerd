@@ -68,26 +68,6 @@ wd_cc_library(
 # why the Windows build is failing, we could simplify things here a bit.
 
 wd_cc_library(
-    name = "util",
-    visibility = ["//visibility:public"],
-    deps = [
-        ":abortable",
-        ":batch-queue",
-        ":canceler",
-        ":color-util",
-        ":duration-exceeded-logger",
-        ":http-util",
-        ":stream-utils",
-        ":uncaught-exception-source",
-        ":wait-list",
-        ":weak-refs",
-        ":xthreadnotifier",
-        "@capnp-cpp//src/kj",
-        "@capnp-cpp//src/kj:kj-async",
-    ],
-)
-
-wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
