@@ -6,26 +6,41 @@ load("//:build/wpt_test.bzl", "wpt_test")
 wpt_test(
     name = "url",
     config = "url-test.ts",
-    wpt_directory = "@wpt//:url",
+    wpt_directory = "@wpt//:url@module",
 )
 
 wpt_test(
     name = "urlpattern",
     config = "urlpattern-test.ts",
-    wpt_directory = "@wpt//:urlpattern",
+    wpt_directory = "@wpt//:urlpattern@module",
 )
 
 wpt_test(
     name = "urlpattern-standard",
     autogates = ["workerd-autogate-urlpattern"],
     config = "urlpattern-standard-test.ts",
-    wpt_directory = "@wpt//:urlpattern",
+    wpt_directory = "@wpt//:urlpattern@module",
 )
 
 wpt_test(
     name = "dom/abort",
     config = "dom/abort-test.ts",
-    wpt_directory = "@wpt//:dom/abort",
+    wpt_directory = "@wpt//:dom/abort@module",
+)
+
+wpt_test(
+    name = "fetch/api",
+    size = "large",
+    config = "fetch/api-test.ts",
+    # TODO(soon): Only a single test can have start_server=True
+    # Solution: Upgrade sidecar to allow dynamic port assignment
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(soon): Improve sidecar compatibility with Windows
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:fetch/api@module",
 )
 
 srcs = glob(

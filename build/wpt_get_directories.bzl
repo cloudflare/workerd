@@ -1,6 +1,7 @@
 def wpt_get_directories(root, excludes = []):
     """
     Globs for files within a WPT directory structure, starting from root.
+
     In addition to an explicitly provided excludes argument, hidden directories
     and top-level files are also excluded as they don't contain test content.
     """

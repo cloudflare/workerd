@@ -167,7 +167,7 @@ export default {
     ],
   },
   'urlpattern.https.any.js': {
-    comment:
-      'No test cases will run because urlpatterntests.js is already loaded.',
+    comment: 'Test cases are identical to urlpattern.any.js.',
+    skipAllTests: true,
   },
 } satisfies TestRunnerConfig;
