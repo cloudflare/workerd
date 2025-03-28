@@ -42,9 +42,11 @@ class HkdfKey final: public CryptoKey::Impl {
     const EVP_MD* hashType = lookupDigestAlgorithm(hashName).second;
 
     const auto& salt =
-        JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".");
+        JSG_REQUIRE_NONNULL(algorithm.salt, TypeError, "Missing field \"salt\" in \"algorithm\".")
+            .asArrayPtr();
     const auto& info =
-        JSG_REQUIRE_NONNULL(algorithm.info, TypeError, "Missing field \"info\" in \"algorithm\".");
+        JSG_REQUIRE_NONNULL(algorithm.info, TypeError, "Missing field \"info\" in \"algorithm\".")
+            .asArrayPtr();
 
     uint32_t length = JSG_REQUIRE_NONNULL(
         maybeLength, DOMOperationError, "HKDF cannot derive a key with null length.");

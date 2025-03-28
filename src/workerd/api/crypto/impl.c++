@@ -222,10 +222,10 @@ bool CryptoKey::Impl::equals(const jsg::BufferSource& other) const {
   KJ_FAIL_REQUIRE("Unable to compare raw key material for this key");
 }
 
-kj::Own<CryptoKey::Impl> CryptoKey::Impl::from(kj::Own<EVP_PKEY> key) {
+kj::Own<CryptoKey::Impl> CryptoKey::Impl::from(jsg::Lock& js, kj::Own<EVP_PKEY> key) {
   switch (EVP_PKEY_id(key.get())) {
     case EVP_PKEY_RSA:
-      return fromRsaKey(kj::mv(key));
+      return fromRsaKey(js, kj::mv(key));
     case EVP_PKEY_EC:
       return fromEcKey(kj::mv(key));
     case EVP_PKEY_ED25519:

@@ -114,7 +114,7 @@ jsg::BufferSource Ec::getRawPublicKey(jsg::Lock& js) const {
   return jsg::BufferSource(js, kj::mv(backing));
 }
 
-CryptoKey::AsymmetricKeyDetails Ec::getAsymmetricKeyDetail() const {
+CryptoKey::AsymmetricKeyDetails Ec::getAsymmetricKeyDetail(jsg::Lock& js) const {
   // Adapted from Node.js' GetEcKeyDetail
   return CryptoKey::AsymmetricKeyDetails{
     .namedCurve = kj::str(OBJ_nid2sn(EC_GROUP_get_curve_name(group)))};
@@ -418,9 +418,9 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
         .getRawPublicKey(js);
   }
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const override {
     // Adapted from Node.js' GetEcKeyDetail
-    return KJ_ASSERT_NONNULL(Ec::tryGetEc(getEvpPkey())).getAsymmetricKeyDetail();
+    return KJ_ASSERT_NONNULL(Ec::tryGetEc(getEvpPkey())).getAsymmetricKeyDetail(js);
   }
 
   CryptoKey::EllipticKeyAlgorithm keyAlgorithm;
@@ -971,7 +971,7 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     return jsg::BufferSource(js, kj::mv(backing));
   }
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const override {
     // Node.js implementation for EdDsa keys currently does not provide any detail
     return CryptoKey::AsymmetricKeyDetails{};
   }
