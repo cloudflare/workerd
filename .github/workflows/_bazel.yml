@@ -57,10 +57,10 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 16
+          sudo ./llvm.sh 18
           # keep in sync with build/ci.bazelrc
-          sudo apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev llvm-16
-          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-16/bin/llvm-symbolizer%" .bazelrc
+          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev libclang-rt-18-dev llvm-18
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-18/bin/llvm-symbolizer%" .bazelrc
       - name: Setup Windows
         if: inputs.os_name == 'windows'
         # Set a custom output root directory to avoid long file name issues.
