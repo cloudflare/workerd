@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "unicode_names2_generator",
@@ -33,6 +39,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -46,7 +55,7 @@ rust_library(
     version = "1.3.0",
     deps = [
         "@crates_vendor__getopts-0.2.21//:getopts",
-        "@crates_vendor__log-0.4.25//:log",
+        "@crates_vendor__log-0.4.27//:log",
         "@crates_vendor__phf_codegen-0.11.3//:phf_codegen",
         "@crates_vendor__rand-0.8.5//:rand",
     ],

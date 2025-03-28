@@ -6,10 +6,19 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load(
+    "@rules_rust//cargo:defs.bzl",
+    "cargo_build_script",
+    "cargo_toml_env_vars",
+)
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "nix",
@@ -34,6 +43,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -46,9 +58,9 @@ rust_library(
     ],
     version = "0.29.0",
     deps = [
-        "@crates_vendor__bitflags-2.8.0//:bitflags",
+        "@crates_vendor__bitflags-2.9.0//:bitflags",
         "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-        "@crates_vendor__libc-0.2.169//:libc",
+        "@crates_vendor__libc-0.2.171//:libc",
         "@crates_vendor__nix-0.29.0//:build_script_build",
     ],
 )

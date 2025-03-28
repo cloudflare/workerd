@@ -6,6 +6,7 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load(
     "@rules_rust//rust:defs.bzl",
     "rust_binary",
@@ -13,6 +14,11 @@ load(
 )
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "capnpc",
@@ -34,6 +40,9 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -46,7 +55,7 @@ rust_library(
     ],
     version = "0.20.1",
     deps = [
-        "@crates_vendor__capnp-0.20.3//:capnp",
+        "@crates_vendor__capnp-0.20.6//:capnp",
     ],
 )
 
@@ -70,6 +79,9 @@ rust_binary(
     ),
     crate_root = "src/capnpc-rust.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -83,7 +95,7 @@ rust_binary(
     version = "0.20.1",
     deps = [
         ":capnpc",
-        "@crates_vendor__capnp-0.20.3//:capnp",
+        "@crates_vendor__capnp-0.20.6//:capnp",
     ],
 )
 
@@ -107,6 +119,9 @@ rust_binary(
     ),
     crate_root = "src/capnpc-rust-bootstrap.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -120,6 +135,6 @@ rust_binary(
     version = "0.20.1",
     deps = [
         ":capnpc",
-        "@crates_vendor__capnp-0.20.3//:capnp",
+        "@crates_vendor__capnp-0.20.6//:capnp",
     ],
 )

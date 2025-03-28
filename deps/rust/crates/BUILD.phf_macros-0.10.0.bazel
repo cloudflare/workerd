@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_proc_macro(
     name = "phf_macros",
@@ -33,6 +39,9 @@ rust_proc_macro(
     proc_macro_deps = [
         "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:proc_macro_hack",
     ],
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -47,8 +56,8 @@ rust_proc_macro(
     deps = [
         "@crates_vendor__phf_generator-0.10.0//:phf_generator",
         "@crates_vendor__phf_shared-0.10.0//:phf_shared",
-        "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
-        "@crates_vendor__quote-1.0.38//:quote",
+        "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
+        "@crates_vendor__quote-1.0.40//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )
