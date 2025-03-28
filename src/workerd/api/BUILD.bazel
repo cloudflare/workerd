@@ -174,8 +174,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
-        "//src/workerd/util",
         "//src/workerd/util:mimetype",
+        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -189,7 +189,7 @@ wd_cc_library(
         ":util",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util",
+        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -204,8 +204,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:url",
-        "//src/workerd/util",
         "//src/workerd/util:mimetype",
+        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )
