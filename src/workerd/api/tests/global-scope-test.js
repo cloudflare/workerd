@@ -751,3 +751,16 @@ export const validateGlobalThis = {
     util.inspect(globalThis);
   },
 };
+
+export const webSocketUrlValidation = {
+  async test() {
+    // Username and password should have been set in Authorization header
+    // but we silently ignore it to match the fetch() implementation.
+    doesNotThrow(() => new WebSocket('ws://username@domain.com'));
+    // Empty values should be rejected.
+    throws(() => new WebSocket(''), {
+      name: 'SyntaxError',
+      message: /invalid/,
+    });
+  },
+};

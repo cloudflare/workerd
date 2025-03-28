@@ -1841,25 +1841,6 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
-// URI-encode control characters and spaces.
-kj::String uriEncodeControlChars(kj::ArrayPtr<const byte> bytes) {
-  // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
-  const char HEX_DIGITS_URI[] = "0123456789ABCDEF";
-
-  kj::Vector<char> result(bytes.size() + 1);
-  for (byte b: bytes) {
-    if (b > 0x20) {
-      result.add(b);
-    } else {
-      result.add('%');
-      result.add(HEX_DIGITS_URI[b / 16]);
-      result.add(HEX_DIGITS_URI[b % 16]);
-    }
-  }
-  result.add('\0');
-  return kj::String(result.releaseAsArray());
-}
-
 jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,

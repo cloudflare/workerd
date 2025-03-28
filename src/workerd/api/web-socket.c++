@@ -5,6 +5,7 @@
 #include "web-socket.h"
 
 #include "events.h"
+#include "util.h"
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -184,9 +185,14 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
   auto& context = IoContext::current();
 
   // Check if we have a valid URL
+  constexpr auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
-  kj::Url urlRecord =
-      JSG_REQUIRE_NONNULL(kj::Url::tryParse(url), DOMSyntaxError, wsErr, "The url is invalid.");
+
+  // To be compatible with fetch() implementation:
+  // - First parse the URL with REMOTE_HREF which requires hostname.
+  // - Then stringify the URL with HTTP_PROXY_REQUEST which omits the userinfo.
+  kj::Url urlRecord = JSG_REQUIRE_NONNULL(kj::Url::tryParse(url, kj::Url::REMOTE_HREF, urlOptions),
+      DOMSyntaxError, wsErr, "The url is invalid.");
 
   JSG_REQUIRE(urlRecord.scheme == "ws" || urlRecord.scheme == "wss", DOMSyntaxError, wsErr,
       "The url scheme must be ws or wss.");
@@ -237,7 +243,10 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     headers.set(protoHeaderId, kj::mv(protoString));
   }
 
-  auto connUrl = urlRecord.toString();
+  // Any userinfo, username and/or password, should be removed.
+  // Users should use Authorization header for this purpose.
+  kj::String connUrl =
+      uriEncodeControlChars(urlRecord.toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
   auto ws = jsg::alloc<WebSocket>(kj::mv(url));
 
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
