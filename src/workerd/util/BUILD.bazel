@@ -3,6 +3,36 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 wd_cc_library(
+    name = "abortable",
+    hdrs = [
+        "abortable.h",
+        "canceler.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":canceler",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_cc_library(
+    name = "batch-queue",
+    hdrs = ["batch-queue.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "canceler",
+    hdrs = ["canceler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
     name = "perfetto",
     srcs = ["perfetto-tracing.c++"],
     hdrs = [
@@ -39,32 +69,21 @@ wd_cc_library(
 
 wd_cc_library(
     name = "util",
-    srcs = [
-        "stream-utils.c++",
-        "wait-list.c++",
-    ],
-    # This is verbose, but allows us to be intentional about what we include here and e.g. avoid
-    # accidentally including test headers or having targets depend on more than they need to.
-    # TODO (cleanup): Break this up entirely.
-    hdrs = [
-        "abortable.h",
-        "batch-queue.h",
-        "canceler.h",
-        "color-util.h",
-        "http-util.h",
-        "stream-utils.h",
-        "uncaught-exception-source.h",
-        "wait-list.h",
-        "weak-refs.h",
-        "xthreadnotifier.h",
-    ],
     visibility = ["//visibility:public"],
     deps = [
+        ":abortable",
+        ":batch-queue",
+        ":canceler",
+        ":color-util",
         ":duration-exceeded-logger",
+        ":http-util",
+        ":stream-utils",
+        ":uncaught-exception-source",
+        ":wait-list",
+        ":weak-refs",
+        ":xthreadnotifier",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
-        # TODO(cleanup): Only for abortable.h, factor out
-        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -98,6 +117,13 @@ wd_cc_library(
     hdrs = ["string-buffer.h"],
     visibility = ["//visibility:public"],
     deps = [":strings"],
+)
+
+wd_cc_library(
+    name = "uncaught-exception-source",
+    hdrs = ["uncaught-exception-source.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 wd_cc_library(
@@ -144,6 +170,14 @@ wd_cc_library(
         "//src/workerd/jsg:exception",
         "@capnp-cpp//src/kj:kj-async",
     ],
+)
+
+wd_cc_library(
+    name = "stream-utils",
+    srcs = ["stream-utils.c++"],
+    hdrs = ["stream-utils.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj:kj-async"],
 )
 
 wd_cc_library(
@@ -197,6 +231,13 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "color-util",
+    hdrs = ["color-util.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "duration-exceeded-logger",
     hdrs = ["duration-exceeded-logger.h"],
     visibility = ["//visibility:public"],
@@ -217,21 +258,54 @@ wd_cc_library(
     deps = ["@capnp-cpp//src/kj"],
 )
 
+wd_cc_library(
+    name = "http-util",
+    hdrs = ["http-util.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "wait-list",
+    srcs = ["wait-list.c++"],
+    hdrs = ["wait-list.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
+    name = "weak-refs",
+    hdrs = ["weak-refs.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "xthreadnotifier",
+    hdrs = ["xthreadnotifier.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
 exports_files(["autogate.h"])
 
-[
-    kj_test(
-        src = f,
-        deps = [
-            ":util",
-        ],
-    )
-    for f in [
-        "batch-queue-test.c++",
-        "wait-list-test.c++",
-        "duration-exceeded-logger-test.c++",
-    ]
-]
+kj_test(
+    src = "batch-queue-test.c++",
+    deps = [
+        ":batch-queue",
+    ],
+)
+
+kj_test(
+    src = "duration-exceeded-logger-test.c++",
+    deps = [
+        ":duration-exceeded-logger",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
 
 kj_test(
     src = "string-buffer-test.c++",
@@ -279,5 +353,12 @@ kj_test(
     src = "uuid-test.c++",
     deps = [
         ":uuid",
+    ],
+)
+
+kj_test(
+    src = "wait-list-test.c++",
+    deps = [
+        ":wait-list",
     ],
 )
