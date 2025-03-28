@@ -745,4 +745,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-04-19");
     # when enabled, exports compability flags for FL to Cache API requests.
 
+
+  jsWeakRef @81 :Bool
+      $compatEnableFlag("enable_weak_ref")
+      $compatEnableDate("2025-03-24")
+      $compatDisableFlag("disable_weak_ref");
+  # Enables WeakRefs and FinalizationRegistry API. WebAssembly based projects often rely on this API for wasm memory cleanup
 }
