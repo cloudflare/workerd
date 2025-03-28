@@ -280,7 +280,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
   }
 
   jsg::BufferSource signatureSslToWebCrypto(
-      jsg::Lock& js, kj::Array<kj::byte> signature) const override {
+      jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const override {
     // An EC signature is two big integers "r" and "s". WebCrypto wants us to just concatenate both
     // integers, using a constant size of each that depends on the curve size. OpenSSL wants to
     // encode them in some ASN.1 wrapper with variable-width sizes. Ugh.

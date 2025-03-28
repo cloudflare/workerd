@@ -698,10 +698,10 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
       "btoa() can only operate on characters in the Latin1 (ISO/IEC 8859-1) range.");
   auto strArray = str.toArray<kj::byte>(js);
   auto expected_length = simdutf::base64_length_from_binary(strArray.size());
-  auto result = kj::heapArray<kj::byte>(expected_length);
+  KJ_STACK_ARRAY(kj::byte, result, expected_length, 1024, 1024);
   auto written = simdutf::binary_to_base64(
       strArray.asChars().begin(), strArray.size(), result.asChars().begin());
-  return js.str(result.first(written).attach(kj::mv(result)));
+  return js.str(result.first(written));
 }
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());
