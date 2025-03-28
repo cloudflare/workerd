@@ -106,8 +106,8 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":actor",
         ":actor-id",
+        ":actor-sqlite",
         ":actor-storage_capnp",
         ":cdp_capnp",
         ":container_capnp",
@@ -146,31 +146,51 @@ wd_cc_library(
     }),
 )
 
-# TODO(cleanup): Split this up further.
 wd_cc_library(
-    name = "actor",
-    srcs = [
-        "actor-cache.c++",
-        "actor-sqlite.c++",
-        "actor-storage.c++",
+    name = "actor-cache",
+    srcs = ["actor-cache.c++"],
+    hdrs = ["actor-cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-storage",
+        ":io-gate",
+        "//src/workerd/jsg:exception",
+        "//src/workerd/util:duration-exceeded-logger",
+        "//src/workerd/util:sentry",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async",
     ],
+)
+
+wd_cc_library(
+    name = "actor-sqlite",
+    srcs = ["actor-sqlite.c++"],
     hdrs = [
         "actor-cache.h",
         "actor-sqlite.h",
-        "actor-storage.h",
     ],
     implementation_deps = [
         "@sqlite3",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":actor-storage_capnp",
+        ":actor-cache",
         ":io-gate",
         "//src/workerd/jsg:exception",
-        "//src/workerd/util:duration-exceeded-logger",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
+    name = "actor-storage",
+    srcs = ["actor-storage.c++"],
+    hdrs = ["actor-storage.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-storage_capnp",
+        "//src/workerd/jsg:exception",
+        "@capnp-cpp//src/kj",
     ],
 )
 
@@ -338,7 +358,7 @@ kj_test(
 kj_test(
     src = "actor-cache-test.c++",
     deps = [
-        ":actor",
+        ":actor-cache",
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
@@ -348,7 +368,7 @@ kj_test(
 kj_test(
     src = "actor-sqlite-test.c++",
     deps = [
-        ":actor",
+        ":actor-sqlite",
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
