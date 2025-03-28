@@ -693,13 +693,14 @@ class CRC32DigestContext final: public DigestContext {
     value = crc32(value, buffer.begin(), buffer.size());
   }
 
-  kj::Array<kj::byte> close() override {
+  jsg::BufferSource close(jsg::Lock& js) override {
     auto beValue = htobe32(value);
     static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
-    auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
-    KJ_DASSERT(digest.size() == sizeof(beValue));
-    memcpy(digest.begin(), &beValue, sizeof(beValue));
-    return digest;
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sizeof(beValue));
+    jsg::BufferSource source(js, kj::mv(backing));
+    kj::ArrayPtr<kj::byte> be(reinterpret_cast<kj::byte*>(&beValue), sizeof(beValue));
+    source.asArrayPtr().copyFrom(be);
+    return kj::mv(source);
   }
 
  private:
@@ -715,13 +716,14 @@ class CRC32CDigestContext final: public DigestContext {
     value = crc32c(value, buffer.begin(), buffer.size());
   }
 
-  kj::Array<kj::byte> close() override {
+  jsg::BufferSource close(jsg::Lock& js) override {
     auto beValue = htobe32(value);
     static_assert(sizeof(value) == sizeof(beValue), "CRC32 digest is not 32 bits?");
-    auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
-    KJ_DASSERT(digest.size() == sizeof(beValue));
-    memcpy(digest.begin(), &beValue, sizeof(beValue));
-    return digest;
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sizeof(beValue));
+    jsg::BufferSource source(js, kj::mv(backing));
+    kj::ArrayPtr<kj::byte> be(reinterpret_cast<kj::byte*>(&beValue), sizeof(beValue));
+    source.asArrayPtr().copyFrom(be);
+    return kj::mv(source);
   }
 
  private:
@@ -737,13 +739,14 @@ class CRC64NVMEDigestContext final: public DigestContext {
     value = crc64nvme(value, buffer.begin(), buffer.size());
   }
 
-  kj::Array<kj::byte> close() override {
+  jsg::BufferSource close(jsg::Lock& js) override {
     auto beValue = htobe64(value);
     static_assert(sizeof(value) == sizeof(beValue), "CRC64 digest is not 64 bits?");
-    auto digest = kj::heapArray<kj::byte>(sizeof(beValue));
-    KJ_DASSERT(digest.size() == sizeof(beValue));
-    memcpy(digest.begin(), &beValue, sizeof(beValue));
-    return digest;
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sizeof(beValue));
+    jsg::BufferSource source(js, kj::mv(backing));
+    kj::ArrayPtr<kj::byte> be(reinterpret_cast<kj::byte*>(&beValue), sizeof(beValue));
+    source.asArrayPtr().copyFrom(be);
+    return kj::mv(source);
   }
 
  private:
@@ -767,13 +770,14 @@ class OpenSSLDigestContext final: public DigestContext {
     OSSLCALL(EVP_DigestUpdate(context.get(), buffer.begin(), buffer.size()));
   }
 
-  kj::Array<kj::byte> close() override {
+  jsg::BufferSource close(jsg::Lock& js) override {
     auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
     uint size = 0;
-    auto digest = kj::heapArray<kj::byte>(EVP_MD_CTX_size(context.get()));
-    OSSLCALL(EVP_DigestFinal_ex(context.get(), digest.begin(), &size));
-    KJ_ASSERT(size, digest.size());
-    return kj::mv(digest);
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, EVP_MD_CTX_size(context.get()));
+    jsg::BufferSource source(js, kj::mv(backing));
+    OSSLCALL(EVP_DigestFinal_ex(context.get(), source.asArrayPtr().begin(), &size));
+    KJ_ASSERT(size, source.size());
+    return kj::mv(source);
   }
 
  private:
@@ -795,8 +799,8 @@ DigestStream::DigestContextPtr DigestStream::initContext(SubtleCrypto::HashAlgor
 
 DigestStream::DigestStream(kj::Own<WritableStreamController> controller,
     SubtleCrypto::HashAlgorithm algorithm,
-    jsg::Promise<kj::Array<kj::byte>>::Resolver resolver,
-    jsg::Promise<kj::Array<kj::byte>> promise)
+    jsg::Promise<jsg::BufferSource>::Resolver resolver,
+    jsg::Promise<jsg::BufferSource> promise)
     : WritableStream(kj::mv(controller)),
       promise(kj::mv(promise)),
       state(Ready(kj::mv(algorithm), kj::mv(resolver))) {}
@@ -850,7 +854,7 @@ kj::Maybe<StreamStates::Errored> DigestStream::close(jsg::Lock& js) {
       return errored.addRef(js);
     }
     KJ_CASE_ONEOF(ready, Ready) {
-      ready.resolver.resolve(js, ready.context->close());
+      ready.resolver.resolve(js, ready.context->close(js));
       state.init<StreamStates::Closed>();
       return kj::none;
     }
@@ -867,7 +871,7 @@ void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
 }
 
 jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
-  auto paf = js.newPromiseAndResolver<kj::Array<kj::byte>>();
+  auto paf = js.newPromiseAndResolver<jsg::BufferSource>();
 
   auto stream = jsg::alloc<DigestStream>(newWritableStreamJsController(),
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));

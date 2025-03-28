@@ -657,7 +657,7 @@ class DigestContext {
  public:
   virtual ~DigestContext() noexcept = default;
   virtual void write(kj::ArrayPtr<kj::byte> buffer) = 0;
-  virtual kj::Array<kj::byte> close() = 0;
+  virtual jsg::BufferSource close(jsg::Lock& js) = 0;
 };
 
 class DigestStream: public WritableStream {
@@ -667,12 +667,12 @@ class DigestStream: public WritableStream {
 
   explicit DigestStream(kj::Own<WritableStreamController> controller,
       SubtleCrypto::HashAlgorithm algorithm,
-      jsg::Promise<kj::Array<kj::byte>>::Resolver resolver,
-      jsg::Promise<kj::Array<kj::byte>> promise);
+      jsg::Promise<jsg::BufferSource>::Resolver resolver,
+      jsg::Promise<jsg::BufferSource> promise);
 
   static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
-  jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>>& getDigest() {
+  jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>>& getDigest() {
     return promise;
   }
   void dispose(jsg::Lock& js);
@@ -700,15 +700,14 @@ class DigestStream: public WritableStream {
 
   struct Ready {
     SubtleCrypto::HashAlgorithm algorithm;
-    jsg::Promise<kj::Array<kj::byte>>::Resolver resolver;
+    jsg::Promise<jsg::BufferSource>::Resolver resolver;
     DigestContextPtr context;
-    Ready(
-        SubtleCrypto::HashAlgorithm algorithm, jsg::Promise<kj::Array<kj::byte>>::Resolver resolver)
+    Ready(SubtleCrypto::HashAlgorithm algorithm, jsg::Promise<jsg::BufferSource>::Resolver resolver)
         : algorithm(kj::mv(algorithm)),
           resolver(kj::mv(resolver)),
           context(initContext(this->algorithm)) {}
   };
-  jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>> promise;
+  jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>> promise;
   kj::OneOf<Ready, StreamStates::Closed, StreamStates::Errored> state;
   uint64_t bytesWritten = 0;
 
