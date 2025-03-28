@@ -26,7 +26,7 @@ just compile-commands
 
 workerd code is automatically formatted by clang-format. Run `python ./tools/cross/format.py` to reformat the code
 or use the appropriate IDE extension.
-While building workerd currently requires LLVM 16 or above, formatting requires clang-format 18.1.8 as different
+While building workerd currently requires LLVM 18 or above, formatting requires clang-format 18.1.8 as different
 versions result in different format suggestions. This is automatically fetched using Bazel and does not need to be
 installed manually.
 
