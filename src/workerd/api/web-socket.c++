@@ -538,7 +538,6 @@ void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::Critic
       } else {
         native.closedIncoming = true;
         reportError(js, kj::cp(e));
-        kj::throwFatalException(kj::mv(e));
       }
     }
   })));
