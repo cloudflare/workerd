@@ -7,6 +7,7 @@
 #include "basics.h"
 #include "hibernation-event-params.h"
 #include "http.h"
+#include "messagechannel.h"
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
@@ -663,6 +664,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
     JSG_NESTED_TYPE(CountQueuingStrategy);
     JSG_NESTED_TYPE(ErrorEvent);
+    JSG_NESTED_TYPE(MessageChannel);
+    JSG_NESTED_TYPE(MessagePort);
 
     JSG_NESTED_TYPE(EventSource);
 
