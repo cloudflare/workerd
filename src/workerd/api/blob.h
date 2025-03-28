@@ -15,7 +15,6 @@ class ReadableStream;
 class Blob: public jsg::Object {
  public:
   Blob(jsg::Lock& js, jsg::BufferSource data, kj::String type);
-  Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type);
   Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
   kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND;
@@ -121,7 +120,8 @@ class File: public Blob {
   // lock. This is currently only the case when parsing FormData outside of running
   // JavaScript (such as in the internal fiddle service).
   File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
-  File(jsg::Lock& js, kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
+  File(
+      jsg::Lock& js, jsg::BufferSource data, kj::String name, kj::String type, double lastModified);
   File(jsg::Ref<Blob> parent,
       kj::ArrayPtr<const byte> data,
       kj::String name,

@@ -169,8 +169,10 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
     if (filename == kj::none || convertFilesToStrings) {
       data.add(FormData::Entry{kj::mv(name), kj::str(message)});
     } else {
-      auto bytes = kj::heapArray(message.asBytes());
       KJ_IF_SOME(lock, js) {
+        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(lock, message.size());
+        jsg::BufferSource bytes(lock, kj::mv(backing));
+        bytes.asArrayPtr().copyFrom(message.asBytes());
         data.add(FormData::Entry{kj::mv(name),
           jsg::alloc<File>(lock, kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
               kj::str(type.orDefault(nullptr)), dateNow())});
@@ -178,6 +180,7 @@ void parseFormData(kj::Maybe<jsg::Lock&> js,
         // This variation is used when we do not have an isolate lock. In this
         // case, the external memory held by the File is not tracked towards
         // the isolate's external memory.
+        auto bytes = kj::heapArray<kj::byte>(message.asBytes());
         data.add(FormData::Entry{kj::mv(name),
           jsg::alloc<File>(kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
               kj::str(type.orDefault(nullptr)), dateNow())});

@@ -14,7 +14,7 @@ namespace workerd::api {
 
 namespace {
 // Concatenate an array of segments (parameter to Blob constructor).
-kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
+jsg::BufferSource concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
   // TODO(perf): Make it so that a Blob can keep references to the input data rather than copy it.
   //   Note that we can't keep references to ArrayBuffers since they are mutable, but we can
   //   reference other Blobs in the input.
@@ -57,10 +57,12 @@ kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
     size += partSize;
   }
 
-  if (size == 0) return nullptr;
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, size);
+  auto result = jsg::BufferSource(js, kj::mv(backing));
 
-  auto result = kj::heapArray<byte>(size);
-  auto view = result.asPtr();
+  if (size == 0) return kj::mv(result);
+
+  auto view = result.asArrayPtr();
 
   for (auto& part: bits) {
     KJ_SWITCH_ONEOF(part) {
@@ -89,7 +91,7 @@ kj::Array<byte> concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
 
   KJ_ASSERT(view == nullptr);
 
-  return result;
+  return kj::mv(result);
 }
 
 kj::String normalizeType(kj::String type) {
@@ -113,22 +115,6 @@ kj::String normalizeType(kj::String type) {
   return kj::mv(type);
 }
 
-jsg::BufferSource wrap(jsg::Lock& js, kj::Array<byte> data) {
-  auto buf = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, data.size()), Error,
-      "Unable to allocate space for Blob data");
-  buf.asArrayPtr().copyFrom(data);
-  return kj::mv(buf);
-
-  // TODO(perf): Ideally we could just wrap the data like this, in which
-  // the underlying v8::BackingStore is supposed to free the buffer when
-  // it is done with it. Unfortunately ASAN complains about a leak that
-  // will require more investigation.
-  // return jsg::BufferSource(js, jsg::BackingStore::from(kj::mv(data)));
-}
-
-kj::ArrayPtr<const kj::byte> getPtr(jsg::BufferSource& source) {
-  return source.asArrayPtr();
-}
 }  // namespace
 
 Blob::Blob(kj::Array<byte> data, kj::String type)
@@ -138,12 +124,7 @@ Blob::Blob(kj::Array<byte> data, kj::String type)
 
 Blob::Blob(jsg::Lock& js, jsg::BufferSource data, kj::String type)
     : ownData(kj::mv(data)),
-      data(getPtr(ownData.get<jsg::BufferSource>())),
-      type(kj::mv(type)) {}
-
-Blob::Blob(jsg::Lock& js, kj::Array<byte> data, kj::String type)
-    : ownData(wrap(js, kj::mv(data))),
-      data(getPtr(ownData.get<jsg::BufferSource>())),
+      data(ownData.get<jsg::BufferSource>().asArrayPtr()),
       type(kj::mv(type)) {}
 
 Blob::Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
@@ -289,7 +270,7 @@ File::File(kj::Array<byte> data, kj::String name, kj::String type, double lastMo
       lastModified(lastModified) {}
 
 File::File(
-    jsg::Lock& js, kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
+    jsg::Lock& js, jsg::BufferSource data, kj::String name, kj::String type, double lastModified)
     : Blob(js, kj::mv(data), kj::mv(type)),
       name(kj::mv(name)),
       lastModified(lastModified) {}
