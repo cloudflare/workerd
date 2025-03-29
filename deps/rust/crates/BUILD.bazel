@@ -104,20 +104,32 @@ alias(
 )
 
 alias(
-    name = "cxx-1.0.138",
-    actual = "@crates_vendor__cxx-1.0.138//:cxx",
+    name = "cxx-1.0.151",
+    actual = "@crates_vendor__cxx-1.0.151//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.138//:cxx",
+    actual = "@crates_vendor__cxx-1.0.151//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.138//:cxx_cc",
+    actual = "@crates_vendor__cxx-1.0.151//:cxx_cc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxxbridge-cmd-1.0.151",
+    actual = "@crates_vendor__cxxbridge-cmd-1.0.151//:cxxbridge_cmd",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxxbridge-cmd",
+    actual = "@crates_vendor__cxxbridge-cmd-1.0.151//:cxxbridge_cmd",
     tags = ["manual"],
 )
 
@@ -311,6 +323,12 @@ alias(
 alias(
     name = "clap__stdio-fixture",
     actual = "@crates_vendor__clap-4.5.28//:stdio-fixture__bin",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cxxbridge-cmd__cxxbridge",
+    actual = "@crates_vendor__cxxbridge-cmd-1.0.151//:cxxbridge__bin",
     tags = ["manual"],
 )
 
