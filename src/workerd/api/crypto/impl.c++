@@ -364,16 +364,14 @@ kj::Maybe<kj::Array<kj::byte>> simdutfBase64UrlDecode(kj::StringPtr input) {
 
 kj::Maybe<jsg::BufferSource> simdutfBase64UrlDecode(jsg::Lock& js, kj::StringPtr input) {
   auto size = simdutf::maximal_binary_length_from_base64(input.begin(), input.size());
-  ;
-  auto buf = kj::heapArray<kj::byte>(size);
+  KJ_STACK_ARRAY(kj::byte, buf, size, 1024, 4096);
   auto result = simdutf::base64_to_binary(
       input.begin(), input.size(), buf.asChars().begin(), simdutf::base64_url);
   if (result.error != simdutf::SUCCESS) return kj::none;
   KJ_ASSERT(result.count <= size);
 
   auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, result.count);
-  auto src = kj::arrayPtr(buf.begin(), result.count);
-  backing.asArrayPtr().copyFrom(src);
+  backing.asArrayPtr().copyFrom(buf.first(result.count));
   return jsg::BufferSource(js, kj::mv(backing));
 }
 
