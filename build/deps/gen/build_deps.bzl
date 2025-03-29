@@ -16,6 +16,7 @@ load("@//build/deps:gen/dep_clang_format_linux_amd64.bzl", "dep_clang_format_lin
 load("@//build/deps:gen/dep_clang_format_linux_arm64.bzl", "dep_clang_format_linux_arm64")
 load("@//build/deps:gen/dep_com_google_benchmark.bzl", "dep_com_google_benchmark")
 load("@//build/deps:gen/dep_cxxbridge_cmd.bzl", "dep_cxxbridge_cmd")
+load("@//build/deps:gen/dep_platforms.bzl", "dep_platforms")
 load("@//build/deps:gen/dep_rules_cc.bzl", "dep_rules_cc")
 load("@//build/deps:gen/dep_rules_nodejs.bzl", "dep_rules_nodejs")
 load("@//build/deps:gen/dep_rules_python.bzl", "dep_rules_python")
@@ -24,6 +25,7 @@ load("@//build/deps:gen/dep_rules_shell.bzl", "dep_rules_shell")
 
 def deps_gen():
     dep_bazel_skylib()
+    dep_platforms()
     dep_rules_python()
     dep_build_bazel_apple_support()
     dep_rules_rust()

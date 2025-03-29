@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "lol_html",
@@ -30,6 +36,9 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -42,7 +51,7 @@ rust_library(
     ],
     version = "2.2.0",
     deps = [
-        "@crates_vendor__bitflags-2.8.0//:bitflags",
+        "@crates_vendor__bitflags-2.9.0//:bitflags",
         "@crates_vendor__cfg-if-1.0.0//:cfg_if",
         "@crates_vendor__cssparser-0.29.6//:cssparser",
         "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
@@ -50,6 +59,6 @@ rust_library(
         "@crates_vendor__memchr-2.7.4//:memchr",
         "@crates_vendor__mime-0.3.17//:mime",
         "@crates_vendor__selectors-0.24.0//:selectors",
-        "@crates_vendor__thiserror-2.0.11//:thiserror",
+        "@crates_vendor__thiserror-2.0.12//:thiserror",
     ],
 )

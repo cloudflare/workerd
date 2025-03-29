@@ -6,10 +6,19 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load(
+    "@rules_rust//cargo:defs.bzl",
+    "cargo_build_script",
+    "cargo_toml_env_vars",
+)
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "getrandom",
@@ -34,6 +43,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -50,16 +62,16 @@ rust_library(
         "@crates_vendor__getrandom-0.1.16//:build_script_build",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.169//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.171//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.169//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.171//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.169//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.171//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.169//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.171//:libc",  # cfg(unix)
         ],
         "//conditions:default": [],
     }),

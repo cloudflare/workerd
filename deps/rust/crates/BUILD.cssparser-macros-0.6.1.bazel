@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_proc_macro(
     name = "cssparser_macros",
@@ -30,6 +36,9 @@ rust_proc_macro(
     ),
     crate_root = "lib.rs",
     edition = "2018",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -42,7 +51,7 @@ rust_proc_macro(
     ],
     version = "0.6.1",
     deps = [
-        "@crates_vendor__quote-1.0.38//:quote",
-        "@crates_vendor__syn-2.0.98//:syn",
+        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__syn-2.0.100//:syn",
     ],
 )

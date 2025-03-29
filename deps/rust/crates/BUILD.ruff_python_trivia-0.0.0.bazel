@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "ruff_python_trivia",
@@ -30,6 +36,9 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -45,6 +54,6 @@ rust_library(
         "@crates_vendor__itertools-0.13.0//:itertools",
         "@crates_vendor__ruff_source_file-0.0.0//:ruff_source_file",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
-        "@crates_vendor__unicode-ident-1.0.16//:unicode_ident",
+        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
     ],
 )

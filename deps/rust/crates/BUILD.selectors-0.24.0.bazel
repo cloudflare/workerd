@@ -6,10 +6,19 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load(
+    "@rules_rust//cargo:defs.bzl",
+    "cargo_build_script",
+    "cargo_toml_env_vars",
+)
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "selectors",
@@ -34,6 +43,9 @@ rust_library(
     proc_macro_deps = [
         "@crates_vendor__derive_more-0.99.19//:derive_more",
     ],
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -49,12 +61,12 @@ rust_library(
         "@crates_vendor__bitflags-1.3.2//:bitflags",
         "@crates_vendor__cssparser-0.29.6//:cssparser",
         "@crates_vendor__fxhash-0.2.1//:fxhash",
-        "@crates_vendor__log-0.4.25//:log",
+        "@crates_vendor__log-0.4.27//:log",
         "@crates_vendor__phf-0.8.0//:phf",
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
         "@crates_vendor__selectors-0.24.0//:build_script_build",
         "@crates_vendor__servo_arc-0.2.0//:servo_arc",
-        "@crates_vendor__smallvec-1.13.2//:smallvec",
+        "@crates_vendor__smallvec-1.14.0//:smallvec",
     ],
 )
 
