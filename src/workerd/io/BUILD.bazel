@@ -15,25 +15,40 @@ config_setting(
     flag_values = {"enable_experimental_webgpu": "True"},
 )
 
-# TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
-# not encumbered with many dependencies.
 wd_cc_library(
-    name = "io-helpers",
+    name = "io-thread-context",
     srcs = [
         "io-thread-context.c++",
-        "io-timers.c++",
-        "request-tracker.c++",
     ],
     hdrs = [
         "io-thread-context.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/capnp/compat:http-over-capnp"],
+)
+
+wd_cc_library(
+    name = "io-timers",
+    srcs = [
+        "io-timers.c++",
+    ],
+    hdrs = [
         "io-timers.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//src/workerd/jsg"],
+)
+
+wd_cc_library(
+    name = "request-tracker",
+    srcs = [
+        "request-tracker.c++",
+    ],
+    hdrs = [
         "request-tracker.h",
     ],
     visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/jsg",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
-    ],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 wd_cc_library(
@@ -113,9 +128,11 @@ wd_cc_library(
         ":container_capnp",
         ":frankenvalue",
         ":io-gate",
-        ":io-helpers",
+        ":io-thread-context",
+        ":io-timers",
         ":limit-enforcer",
         ":observer",
+        ":request-tracker",
         ":supported-compatibility-date_capnp",
         ":trace",
         ":worker-interface",
