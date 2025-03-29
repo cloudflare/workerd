@@ -25,7 +25,15 @@ interface VectorizeError {
  *
  * This list is expected to grow as support for more operations are released.
  */
-type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
+type VectorizeVectorMetadataFilterOp =
+  | '$eq'
+  | '$ne'
+  | '$in'
+  | '$nin'
+  | '$lt'
+  | '$lte'
+  | '$gt'
+  | '$gte';
 
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
