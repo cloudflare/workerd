@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { Buffer } from 'node-internal:internal_buffer';
+import type { PeerCertificate } from 'node:tls';
 
 // random
 export function checkPrimeSync(
@@ -54,7 +55,7 @@ export class X509Certificate {
   public checkIssued(cert: X509Certificate): boolean;
   public checkPrivateKey(key: CryptoKey): boolean;
   public verify(key: CryptoKey): boolean;
-  public toLegacyObject(): object;
+  public toLegacyObject(): PeerCertificate & { subjectAltName?: string };
 }
 
 // Hash and Hmac
