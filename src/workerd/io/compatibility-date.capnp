@@ -745,10 +745,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-04-19");
     # when enabled, exports compability flags for FL to Cache API requests.
 
-
   pythonWorkersDurableObjects @81 :Bool
       $compatEnableFlag("python_workers_durable_objects")
       $experimental;
     # when enabled, enables Durable Object support for Python Workers.
 
+  # Experimental support for streaming tail worker.
+  streamingTailWorker @82 :Bool
+      $compatEnableFlag("streaming_tail_worker")
+      $experimental;
 }
