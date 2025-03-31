@@ -6,12 +6,18 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
+
 rust_library(
-    name = "cxxbridge_flags",
+    name = "codespan_reporting",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,18 +36,27 @@ rust_library(
     ),
     crate_features = [
         "default",
+        "std",
+        "termcolor",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cxxbridge-flags",
+        "crate-name=codespan-reporting",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.138",
+    version = "0.12.0",
+    deps = [
+        "@crates_vendor__termcolor-1.4.1//:termcolor",
+        "@crates_vendor__unicode-width-0.1.14//:unicode_width",
+    ],
 )
