@@ -6,10 +6,6 @@ on:
     - main
   workflow_dispatch:
     inputs:
-      patch:
-        description: 'Patch Version'
-        required: true
-        default: '0'
       prerelease:
         description: 'Is Prerelease'
         type: boolean
@@ -26,11 +22,39 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: determine-patch
+        name: Determine next patch version
+        run: |
+          DATE_PART=$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-')
+          VERSION_PREFIX="${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$DATE_PART"
+          TYPES_PREFIX="${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$DATE_PART"
+          
+          # Find all existing tags with current date part
+          EXISTING_TAGS=$(git tag -l "v$VERSION_PREFIX.*" | sort -V)
+          
+          # Default patch is 0
+          PATCH="0"
+          
+          # Find highest patch number for current date
+          if [ ! -z "$EXISTING_TAGS" ]; then
+            LATEST_TAG=$(echo "$EXISTING_TAGS" | tail -n 1)
+            CURRENT_PATCH=$(echo "$LATEST_TAG" | awk -F. '{print $3}')
+            PATCH=$((CURRENT_PATCH + 1))
+          fi
+          
+          # Store for next step
+          echo "patch=$PATCH" >> $GITHUB_OUTPUT
+          echo "calculated_patch=$PATCH" >> $GITHUB_OUTPUT
+      
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
-          echo "version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
-          echo "types_version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ github.event_name == 'push' && '0' || inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '1'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${PATCH}" >> $GITHUB_OUTPUT;
+          echo "types_version=${{ (github.event_name != 'push' && inputs.prerelease == true) && '0' || '4'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${PATCH}" >> $GITHUB_OUTPUT;
+        env:
+          PATCH: ${{ steps.determine-patch.outputs.patch }}
   check-tag:
     name: Check tag is new
     outputs:
