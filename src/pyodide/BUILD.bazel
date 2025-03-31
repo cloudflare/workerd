@@ -4,8 +4,6 @@ load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
 load(":helpers.bzl", "copy_and_capnp_embed", "copy_to_generated", "python_bundle")
 
-copy_and_capnp_embed("@pyodide_packages//:pyodide_packages.tar")
-
 copy_and_capnp_embed("python-entrypoint.js")
 
 copy_to_generated(
@@ -42,7 +40,6 @@ cc_capnp_library(
     visibility = ["//visibility:public"],
     deps = [
         ":pyodide_extra_file_embed",
-        ":pyodide_packages.tar@capnp",
         ":python-entrypoint.js@capnp",
     ] + [
         ":pyodide-lock_" + package_date + ".json@capnp"
