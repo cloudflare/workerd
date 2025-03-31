@@ -1,5 +1,3 @@
-# TODO(later): llvm-toolchain-16 has been backported to Bullseye with the 11.9 point release –
-# switch to using the regular packages instead of LLVM's APT repo here.
 FROM node:bullseye AS builder
 
 WORKDIR /workerd
@@ -12,12 +10,12 @@ RUN wget https://apt.llvm.org/llvm.sh
 # Drop the install step here so we can install just the packages we need.
 RUN sed -i '/apt-get install/d' llvm.sh
 RUN chmod +x llvm.sh
-RUN ./llvm.sh 16
-RUN apt-get install -y --no-install-recommends clang-16 lld-16 libunwind-16 libc++abi1-16 libc++1-16 libc++-16-dev libclang-rt-16-dev
+RUN ./llvm.sh 18
+RUN apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev libclang-rt-18-dev
 COPY . .
 
-RUN echo "build:linux --action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
-RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-16/bin/clang" >> .bazelrc
+RUN echo "build:linux --action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
+RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-18/bin/clang" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
 # pnpm version will be different depending on the value of `packageManager` field in package.json
 RUN npm install -g pnpm@latest

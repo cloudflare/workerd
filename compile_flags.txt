@@ -18,8 +18,8 @@
 -Iexternal/ncrypto/include
 -isystembazel-bin/external/sqlite3
 -Isrc
--isystem/usr/lib/llvm-16/include/c++/v1
--isystem/usr/lib/llvm-16/lib/clang/16/include
+-isystem/usr/lib/llvm-18/include/c++/v1
+-isystem/usr/lib/llvm-18/lib/clang/18/include
 -isystem/usr/include/x86_64-linux-gnu
 -isystem/usr/include/aarch64-linux-gnu
 -isystem/usr/include
