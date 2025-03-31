@@ -6029,19 +6029,7 @@ declare namespace Rpc {
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
     // Structured cloneables
-    | void
-    | undefined
-    | null
-    | boolean
-    | number
-    | bigint
-    | string
-    | TypedArray
-    | ArrayBuffer
-    | DataView
-    | Date
-    | Error
-    | RegExp
+    | BaseType
     // Structured cloneable composites
     | Map<
         T extends Map<infer U, unknown> ? Serializable<U> : never,
@@ -6053,11 +6041,6 @@ declare namespace Rpc {
         [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
       }
     // Special types
-    | ReadableStream<Uint8Array>
-    | WritableStream<Uint8Array>
-    | Request
-    | Response
-    | Headers
     | Stub<Stubable>
     // Serialized as stubs, see `Stubify`
     | Stubable;
@@ -6068,6 +6051,7 @@ declare namespace Rpc {
     dup(): this;
   }
   export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+  // This represents all the types that can be sent as-is over an RPC boundary
   type BaseType =
     | void
     | undefined
