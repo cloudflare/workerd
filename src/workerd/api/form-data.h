@@ -39,9 +39,26 @@ private:
   };
 
 public:
-  // Given a delimiter string `boundary`, serialize all fields in this form data to an array of
-  // bytes suitable for use as an HTTP message body.
-  kj::Array<kj::byte> serialize(kj::ArrayPtr<const char> boundary);
+
+  using ParseCallback = kj::FunctionParam<void(kj::StringPtr name,
+                                               kj::Maybe<kj::StringPtr> filename,
+                                               kj::Maybe<kj::StringPtr> type,
+                                               kj::ArrayPtr<const kj::byte> data)>;
+
+  static void parseFormDataImpl(kj::ArrayPtr<const char> rawText,
+                                kj::StringPtr boundary,
+                                ParseCallback callback);
+  struct EntryWithoutLock {
+    kj::String name;
+    kj::Maybe<kj::String> filename;
+    kj::Maybe<kj::String> type;
+    kj::OneOf<kj::Array<kj::byte>, kj::String> value;
+  };
+
+  // Provided for cases where parsing FormData outside of any direct JS
+  // API usage (such as in fiddle internally).
+  static kj::Array<EntryWithoutLock> parseWithoutLock(kj::ArrayPtr<const char> rawText,
+                                                      kj::StringPtr contentType);
 
   // Parse `rawText`, storing the results in this FormData object. `contentType` must be either
   // multipart/form-data or application/x-www-form-urlencoded.
@@ -53,8 +70,14 @@ public:
   // Parsing may or may not pass a jsg::Lock. If a lock is passed, any File objects created will
   // track their internal allocated memory in the associated isolate. If a lock is not passed,
   // the internal allocated memory will not be tracked.
-  void parse(kj::Maybe<jsg::Lock&> js, kj::ArrayPtr<const char> rawText,
-             kj::StringPtr contentType, bool convertFilesToStrings);
+  void parse(jsg::Lock& js,
+             kj::ArrayPtr<const char> rawText,
+             kj::StringPtr contentType,
+             bool convertFilesToStrings);
+
+  // Given a delimiter string `boundary`, serialize all fields in this form data to an array of
+  // bytes suitable for use as an HTTP message body.
+  kj::Array<kj::byte> serialize(kj::ArrayPtr<const char> boundary);
 
   struct Entry {
     kj::String name;

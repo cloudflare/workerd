@@ -66,129 +66,6 @@ constexpr auto contentDispositionParam = p::sequence(p::exactChar<';'>(),
 constexpr auto contentDisposition = p::sequence(
     p::discardWhitespace, httpIdentifier, p::discardWhitespace, p::many(contentDispositionParam));
 
-void parseFormData(kj::Maybe<jsg::Lock&> js,
-    kj::Vector<FormData::Entry>& data,
-    kj::StringPtr boundary,
-    kj::ArrayPtr<const char> body,
-    bool convertFilesToStrings) {
-  // multipart/form-data messages are delimited by <CRLF>--<boundary>. We want to be able to handle
-  // omitted carriage returns, though, so our delimiter only matches against a preceding line feed.
-  const auto delimiter = kj::str("\n--", boundary);
-
-  // We want to slice off the delimiter's preceding newline for the initial search, because the very
-  // first instance does not require one. In every subsequent multipart message, the preceding
-  // newline is required.
-  auto message = splitAtSubString(body, delimiter.slice(1));
-
-  JSG_REQUIRE(
-      body.size() > 0, TypeError, "No initial boundary string (or you have a truncated message).");
-
-  const auto done = [](kj::ArrayPtr<const char>& body) {
-    // Consume any (CR)LF characters that trailed the boundary and indicate continuation, or consume
-    // the terminal "--" characters and indicate termination, or throw an error.
-    if (body.startsWith("\n"_kj)) {
-      body = body.slice(1, body.size());
-    } else if (body.startsWith("\r\n"_kj)) {
-      body = body.slice(2, body.size());
-    } else if (body.startsWith("--"_kj)) {
-      // We're done!
-      return true;
-    } else {
-      JSG_FAIL_REQUIRE(TypeError, "Boundary string was not succeeded by CRLF, LF, or '--'.");
-    }
-    return false;
-  };
-
-  constexpr auto staticRegexFlags =
-      std::regex_constants::ECMAScript | std::regex_constants::optimize;
-
-  static const auto headerTerminationRegex = std::regex("\r?\n\r?\n", staticRegexFlags);
-
-  std::cmatch match;
-
-  auto& formDataHeaderTable = getFormDataHeaderTable();
-
-  while (!done(body)) {
-    JSG_REQUIRE(std::regex_search(body.begin(), body.end(), match, headerTerminationRegex),
-        TypeError, "No multipart message header termination found.");
-
-    // TODO(cleanup): Use kj-http to parse multipart headers. Right now that API isn't public, so
-    //   I'm just using a regex. For reference, multipart/form-data supports the following three
-    //   headers (https://tools.ietf.org/html/rfc7578#section-4.8):
-    //
-    //   Content-Disposition        (required)
-    //   Content-Type               (optional, recommended for files)
-    //   Content-Transfer-Encoding  (for 7-bit encoding, deprecated in HTTP contexts)
-    //
-    // TODO(soon): Read the Content-Type to support files.
-
-    auto headersText = kj::str(body.first(match[0].second - body.begin()));
-    body = body.slice(match[0].second - body.begin(), body.size());
-
-    kj::HttpHeaders headers(*formDataHeaderTable.table);
-    JSG_REQUIRE(headers.tryParse(headersText), TypeError, "FormData part had invalid headers.");
-
-    kj::StringPtr disposition =
-        JSG_REQUIRE_NONNULL(headers.get(formDataHeaderTable.contentDispositionId), TypeError,
-            "No valid Content-Disposition header found in FormData part.");
-
-    kj::Maybe<kj::String> maybeName;
-    kj::Maybe<kj::String> filename;
-    {
-      p::IteratorInput<char, const char*> input(disposition.begin(), disposition.end());
-      auto result = JSG_REQUIRE_NONNULL(contentDisposition(input), TypeError,
-          "Invalid Content-Disposition header found in FormData part.");
-      JSG_REQUIRE(kj::get<0>(result) == "form-data"_kj.asArray(), TypeError,
-          "Content-Disposition header for FormData part must have the value \"form-data\", "
-          "possibly followed by parameters. Got: \"",
-          kj::get<0>(result), "\"");
-
-      for (auto& param: kj::get<1>(result)) {
-        if (kj::get<0>(param) == "name"_kj.asArray()) {
-          maybeName = kj::str(kj::get<1>(param));
-        } else if (kj::get<0>(param) == "filename"_kj.asArray()) {
-          filename = kj::str(kj::get<1>(param));
-        }
-      }
-    }
-
-    kj::String name = JSG_REQUIRE_NONNULL(kj::mv(maybeName), TypeError,
-        "Content-Disposition header in FormData part is missing a name.");
-
-    kj::Maybe<kj::StringPtr> type = headers.get(kj::HttpHeaderId::CONTENT_TYPE);
-
-    message = splitAtSubString(body, delimiter);
-    JSG_REQUIRE(
-        body.size() > 0, TypeError, "No subsequent boundary string after multipart message.");
-
-    if (message.size() > 0) {
-      // If we skipped a CR, we must avoid including it in the message data.
-      message = message.first(message.size() - uint(message.back() == '\r'));
-    }
-
-    if (filename == kj::none || convertFilesToStrings) {
-      data.add(FormData::Entry{kj::mv(name), kj::str(message)});
-    } else {
-      KJ_IF_SOME(lock, js) {
-        auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(lock, message.size());
-        jsg::BufferSource bytes(lock, kj::mv(backing));
-        bytes.asArrayPtr().copyFrom(message.asBytes());
-        data.add(FormData::Entry{kj::mv(name),
-          jsg::alloc<File>(lock, kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
-              kj::str(type.orDefault(nullptr)), dateNow())});
-      } else {
-        // This variation is used when we do not have an isolate lock. In this
-        // case, the external memory held by the File is not tracked towards
-        // the isolate's external memory.
-        auto bytes = kj::heapArray<kj::byte>(message.asBytes());
-        data.add(FormData::Entry{kj::mv(name),
-          jsg::alloc<File>(kj::mv(bytes), KJ_ASSERT_NONNULL(kj::mv(filename)),
-              kj::str(type.orDefault(nullptr)), dateNow())});
-      }
-    }
-  }
-}
-
 kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
     kj::StringPtr name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
@@ -255,10 +132,234 @@ void addEscapingQuotes(kj::Vector<char>& builder, kj::StringPtr value) {
   }
 }
 
+void assertUtf8(const auto& params) {
+  KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
+    auto charset = kj::str(charsetParam);
+    JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
+            strcasecmp(charset.cStr(), "utf8") == 0 ||
+            strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
+        TypeError, "Non-utf-8 application/x-www-form-urlencoded body.");
+  }
+}
+
 }  // namespace
 
 // =======================================================================================
 // FormData implementation
+
+void FormData::parseFormDataImpl(
+    kj::ArrayPtr<const char> rawText, kj::StringPtr boundary, ParseCallback callback) {
+  // multipart/form-data messages are delimited by <CRLF>--<boundary>. We want to be able to handle
+  // omitted carriage returns, though, so our delimiter only matches against a preceding line feed.
+  const auto delimiter = kj::str("\n--", boundary);
+
+  // We want to slice off the delimiter's preceding newline for the initial search, because the very
+  // first instance does not require one. In every subsequent multipart message, the preceding
+  // newline is required.
+  auto message = splitAtSubString(rawText, delimiter.slice(1));
+
+  JSG_REQUIRE(rawText.size() > 0, TypeError,
+      "No initial boundary string (or you have a truncated message).");
+
+  static const auto done = [](kj::ArrayPtr<const char>& body) {
+    // Consume any (CR)LF characters that trailed the boundary and indicate continuation, or consume
+    // the terminal "--" characters and indicate termination, or throw an error.
+    if (body.startsWith("\n"_kj)) {
+      body = body.slice(1, body.size());
+    } else if (body.startsWith("\r\n"_kj)) {
+      body = body.slice(2, body.size());
+    } else if (body.startsWith("--"_kj)) {
+      // We're done!
+      return true;
+    } else {
+      JSG_FAIL_REQUIRE(TypeError, "Boundary string was not succeeded by CRLF, LF, or '--'.");
+    }
+    return false;
+  };
+
+  constexpr auto staticRegexFlags =
+      std::regex_constants::ECMAScript | std::regex_constants::optimize;
+
+  static const auto headerTerminationRegex = std::regex("\r?\n\r?\n", staticRegexFlags);
+
+  std::cmatch match;
+
+  auto& formDataHeaderTable = getFormDataHeaderTable();
+
+  while (!done(rawText)) {
+    JSG_REQUIRE(std::regex_search(rawText.begin(), rawText.end(), match, headerTerminationRegex),
+        TypeError, "No multipart message header termination found.");
+
+    // TODO(cleanup): Use kj-http to parse multipart headers. Right now that API isn't public, so
+    //   I'm just using a regex. For reference, multipart/form-data supports the following three
+    //   headers (https://tools.ietf.org/html/rfc7578#section-4.8):
+    //
+    //   Content-Disposition        (required)
+    //   Content-Type               (optional, recommended for files)
+    //   Content-Transfer-Encoding  (for 7-bit encoding, deprecated in HTTP contexts)
+    //
+    // TODO(soon): Read the Content-Type to support files.
+
+    auto headersText = kj::str(rawText.first(match[0].second - rawText.begin()));
+    rawText = rawText.slice(match[0].second - rawText.begin(), rawText.size());
+
+    kj::HttpHeaders headers(*formDataHeaderTable.table);
+    JSG_REQUIRE(headers.tryParse(headersText), TypeError, "FormData part had invalid headers.");
+
+    kj::StringPtr disposition =
+        JSG_REQUIRE_NONNULL(headers.get(formDataHeaderTable.contentDispositionId), TypeError,
+            "No valid Content-Disposition header found in FormData part.");
+
+    kj::Maybe<kj::String> maybeName;
+    kj::Maybe<kj::String> filename;
+    {
+      p::IteratorInput<char, const char*> input(disposition.begin(), disposition.end());
+      auto result = JSG_REQUIRE_NONNULL(contentDisposition(input), TypeError,
+          "Invalid Content-Disposition header found in FormData part.");
+      JSG_REQUIRE(kj::get<0>(result) == "form-data"_kj.asArray(), TypeError,
+          "Content-Disposition header for FormData part must have the value \"form-data\", "
+          "possibly followed by parameters. Got: \"",
+          kj::get<0>(result), "\"");
+
+      for (auto& param: kj::get<1>(result)) {
+        if (kj::get<0>(param) == "name"_kj.asArray()) {
+          maybeName = kj::str(kj::get<1>(param));
+        } else if (kj::get<0>(param) == "filename"_kj.asArray()) {
+          filename = kj::str(kj::get<1>(param));
+        }
+      }
+    }
+
+    kj::String name = JSG_REQUIRE_NONNULL(kj::mv(maybeName), TypeError,
+        "Content-Disposition header in FormData part is missing a name.");
+
+    kj::Maybe<kj::StringPtr> type = headers.get(kj::HttpHeaderId::CONTENT_TYPE);
+
+    message = splitAtSubString(rawText, delimiter);
+    JSG_REQUIRE(
+        rawText.size() > 0, TypeError, "No subsequent boundary string after multipart message.");
+
+    if (message.size() > 0) {
+      // If we skipped a CR, we must avoid including it in the message data.
+      message = message.first(message.size() - uint(message.back() == '\r'));
+    }
+
+    callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
+  }
+}
+
+kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
+    kj::ArrayPtr<const char> rawText, kj::StringPtr contentType) {
+  kj::Vector<FormData::EntryWithoutLock> data;
+
+  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
+    auto& params = parsed.params();
+    if (MimeType::FORM_DATA == parsed) {
+      auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
+          "No boundary string in Content-Type header. The multipart/form-data MIME "
+          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
+          "boundary=\"abcd\"'. See RFC 7578, section 4.");
+
+      parseFormDataImpl(rawText, boundary,
+          [&](kj::StringPtr name, kj::Maybe<kj::StringPtr> maybeFilename,
+              kj::Maybe<kj::StringPtr> maybeType, kj::ArrayPtr<const kj::byte> message) mutable {
+        KJ_IF_SOME(filename, maybeFilename) {
+          data.add(FormData::EntryWithoutLock{
+            .name = kj::str(name),
+            .filename = kj::str(filename),
+            .type = maybeType.map([](kj::StringPtr str) { return kj::str(str); }),
+            .value = kj::heapArray<kj::byte>(message),
+          });
+        } else {
+          data.add(FormData::EntryWithoutLock{
+            .name = kj::str(name),
+            .value = kj::str(message),
+          });
+        }
+      });
+      return data.releaseAsArray();
+    } else if (MimeType::FORM_URLENCODED == parsed) {
+      // Let's read the charset so we can barf if the body isn't UTF-8.
+      //
+      // TODO(conform): Transcode to UTF-8, like the spec tells us to.
+      assertUtf8(params);
+      kj::Vector<kj::Url::QueryParam> query;
+      parseQueryString(query, kj::mv(rawText));
+      data.reserve(query.size());
+      for (auto& param: query) {
+        data.add(EntryWithoutLock{
+          .name = kj::mv(param.name),
+          .value = kj::mv(param.value),
+        });
+      }
+      return data.releaseAsArray();
+    }
+  }
+  JSG_FAIL_REQUIRE(TypeError,
+      "Unrecognized Content-Type header value. FormData can only "
+      "parse the following MIME types: ",
+      MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString());
+}
+
+void FormData::parse(jsg::Lock& js,
+    kj::ArrayPtr<const char> rawText,
+    kj::StringPtr contentType,
+    bool convertFilesToStrings) {
+  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
+    auto& params = parsed.params();
+    if (MimeType::FORM_DATA == parsed) {
+      auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
+          "No boundary string in Content-Type header. The multipart/form-data MIME "
+          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
+          "boundary=\"abcd\"'. See RFC 7578, section 4.");
+
+      parseFormDataImpl(rawText, boundary,
+          [&](kj::StringPtr name, kj::Maybe<kj::StringPtr> maybeFilename,
+              kj::Maybe<kj::StringPtr> maybeType, kj::ArrayPtr<const kj::byte> message) {
+        KJ_IF_SOME(filename, maybeFilename) {
+          if (convertFilesToStrings) {
+            data.add(FormData::Entry{
+              .name = kj::str(name),
+              .value = kj::str(message.asChars()),
+            });
+          } else {
+            auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, message.size());
+            jsg::BufferSource bytes(js, kj::mv(backing));
+            bytes.asArrayPtr().copyFrom(message);
+            data.add(FormData::Entry{.name = kj::str(name),
+              .value = jsg::alloc<File>(js, kj::mv(bytes), kj::str(filename),
+                  kj::str(maybeType.orDefault(nullptr)), dateNow())});
+          }
+        } else {
+          data.add(FormData::Entry{
+            .name = kj::str(name),
+            .value = kj::str(message.asChars()),
+          });
+        }
+      });
+      return;
+    } else if (MimeType::FORM_URLENCODED == parsed) {
+      // Let's read the charset so we can barf if the body isn't UTF-8.
+      //
+      // TODO(conform): Transcode to UTF-8, like the spec tells us to.
+      assertUtf8(params);
+      kj::Vector<kj::Url::QueryParam> query;
+      parseQueryString(query, kj::mv(rawText));
+      data.reserve(query.size());
+      for (auto& param: query) {
+        data.add(Entry{
+          .name = kj::mv(param.name),
+          .value = kj::mv(param.value),
+        });
+      }
+      return;
+    }
+  }
+  JSG_FAIL_REQUIRE(TypeError,
+      "Unrecognized Content-Type header value. FormData can only "
+      "parse the following MIME types: ",
+      MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString());
+}
 
 kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
   // Boundary string requirement per RFC7578
@@ -313,45 +414,6 @@ FormData::EntryType FormData::clone(FormData::EntryType& value) {
     }
   }
   KJ_UNREACHABLE;
-}
-
-void FormData::parse(kj::Maybe<jsg::Lock&> js,
-    kj::ArrayPtr<const char> rawText,
-    kj::StringPtr contentType,
-    bool convertFilesToStrings) {
-  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
-    auto& params = parsed.params();
-    if (MimeType::FORM_DATA == parsed) {
-      auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
-          "No boundary string in Content-Type header. The multipart/form-data MIME "
-          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
-          "boundary=\"abcd\"'. See RFC 7578, section 4.");
-      parseFormData(js, data, boundary, rawText, convertFilesToStrings);
-      return;
-    } else if (MimeType::FORM_URLENCODED == parsed) {
-      // Let's read the charset so we can barf if the body isn't UTF-8.
-      //
-      // TODO(conform): Transcode to UTF-8, like the spec tells us to.
-      KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
-        auto charset = kj::str(charsetParam);
-        JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
-                strcasecmp(charset.cStr(), "utf8") == 0 ||
-                strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
-            TypeError, "Non-utf-8 application/x-www-form-urlencoded body.");
-      }
-      kj::Vector<kj::Url::QueryParam> query;
-      parseQueryString(query, kj::mv(rawText));
-      data.reserve(query.size());
-      for (auto& param: query) {
-        data.add(Entry{kj::mv(param.name), kj::mv(param.value)});
-      }
-      return;
-    }
-  }
-  JSG_FAIL_REQUIRE(TypeError,
-      kj::str("Unrecognized Content-Type header value. FormData can only "
-              "parse the following MIME types: ",
-          MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString()));
 }
 
 jsg::Ref<FormData> FormData::constructor() {
