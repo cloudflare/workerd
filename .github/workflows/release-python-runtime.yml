@@ -39,7 +39,7 @@ jobs:
       - name: Bazel build
         run: |
           bazel build //src/pyodide:pyodide.capnp.bin@rule --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux
-          cp bazel-bin/src/pyodide/pyodide.capnp.bin .
+          cp bazel-bin/src/pyodide/${{ inputs.pyodide }}/generated/pyodide.capnp.bin .
       - name: Upload Pyodide capnproto bundle
         env:
           R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
