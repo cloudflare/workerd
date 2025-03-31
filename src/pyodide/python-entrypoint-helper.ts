@@ -219,6 +219,19 @@ function makeDurableObjectClass(className: string, classKind: AnyClass) {
   return DurableObjectWrapper;
 }
 
+async function getIntrospectionMod(pyodide: Pyodide) {
+  // @ts-ignore TS isn't aware of this module's existence, but it does exist.
+  const introspectionSource = await import('pyodide-internal:introspection.py');
+  const introspectionMod = pyodide.runPython(
+    "from types import ModuleType; ModuleType('introspection')"
+  );
+  const decoder = new TextDecoder();
+  pyodide.runPython(decoder.decode(introspectionSource.default), {
+    globals: introspectionMod.__dict__,
+  });
+  return introspectionMod;
+}
+
 const SUPPORTED_HANDLER_NAMES = [
   'fetch',
   'alarm',
@@ -237,6 +250,11 @@ try {
   // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
   // needs to be called inside an IO context.
   if (IS_WORKERD || IS_TRACING) {
+    // Currently when we're running via workerd or when tracing we cannot perform IO in the
+    // top-level. So we have some custom logic for handlers here in that case.
+    //
+    // TODO: rewrite package download logic in workerd to fetch the packages in the same way as in
+    // edgeworker.
     pythonDurableObjectClasses.push(...(DURABLE_OBJECT_CLASSES ?? []));
 
     for (const handlerName of SUPPORTED_HANDLER_NAMES) {
@@ -246,7 +264,6 @@ try {
 
     handlers.test = makeHandler('test');
   } else {
-    // TODO: introspection to fill pythonDurableObjectClasses.
     const mainModule = await getMainModule();
     for (const handlerName of SUPPORTED_HANDLER_NAMES) {
       const pyHandlerName = 'on_' + handlerName;
@@ -254,6 +271,14 @@ try {
         handlers[handlerName] = makeHandler(pyHandlerName);
       }
     }
+
+    // In order to get the durable object classes exported by the worker, we use a Python module
+    // to introspect the user's main module. So we are effectively using Python to analyse the
+    // classes exported by the user worker here. The class names are then exported and used to
+    // create the equivalent JS classes via makeDurableObjectClass.
+    const pyodide = await getPyodide();
+    const introspectionMod = await getIntrospectionMod(pyodide);
+    pythonDurableObjectClasses = introspectionMod.collect_classes(mainModule);
   }
 } catch (e) {
   console.warn('Error in top level in python-entrypoint-helper.js');

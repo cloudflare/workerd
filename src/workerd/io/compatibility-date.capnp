@@ -430,7 +430,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers @43 :Bool
       $compatEnableFlag("python_workers")
       $pythonSnapshotRelease(pyodide = "0.26.0a2", pyodideRevision = "2024-03-01",
-          packages = "20240829.4", backport = 27,
+          packages = "20240829.4", backport = 28,
           baselineSnapshotHash = "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5")
       $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
@@ -679,7 +679,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("python_workers_20250116")
       $experimental
       $pythonSnapshotRelease(pyodide = "0.27.1", pyodideRevision = "2025-01-16",
-          packages = "20250324.1", backport = 15,
+          packages = "20250324.1", backport = 16,
           baselineSnapshotHash = "TODO");
 
   requestCfOverridesCacheRules @72 :Bool

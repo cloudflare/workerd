@@ -13,7 +13,7 @@ interface PyModule {
 
 interface Pyodide {
   _module: Module;
-  runPython: (code: string) => void;
+  runPython: (code: string, opts?: { globals?: any }) => any;
   registerJsModule: (handle: string, mod: object) => void;
   pyimport: (moduleName: string) => PyModule;
   FS: FS;
