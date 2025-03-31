@@ -9,6 +9,13 @@
       "file_regex": "^bazel-skylib-[0-9\\.]+\\.tar\\.gz$"
     },
     {
+      "name": "platforms",
+      "type": "github_release",
+      "owner": "bazelbuild",
+      "repo": "platforms",
+      "file_regex": "^platforms-[0-9\\.]+\\.tar\\.gz$"
+    },
+    {
       "name": "rules_python",
       "type": "github_release",
       "owner": "bazelbuild",
@@ -75,10 +82,7 @@
     {
       "name": "cxxbridge-cmd",
       "type": "crate",
-      "build_file": "//deps/rust:BUILD.cxxbridge-cmd",
-      // TODO(soon): Frozen until we upgrade to LLVM 17
-      // <https://github.com/dtolnay/cxx/issues/1436>
-      "freeze_version": "1.0.138"
+      "build_file": "//deps/rust:BUILD.cxxbridge-cmd"
     },
     {
       "name": "rules_cc",

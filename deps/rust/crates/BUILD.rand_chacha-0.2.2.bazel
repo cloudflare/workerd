@@ -6,9 +6,15 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "rand_chacha",
@@ -33,6 +39,9 @@ rust_library(
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -45,7 +54,7 @@ rust_library(
     ],
     version = "0.2.2",
     deps = [
-        "@crates_vendor__ppv-lite86-0.2.20//:ppv_lite86",
+        "@crates_vendor__ppv-lite86-0.2.21//:ppv_lite86",
         "@crates_vendor__rand_core-0.5.1//:rand_core",
     ],
 )
