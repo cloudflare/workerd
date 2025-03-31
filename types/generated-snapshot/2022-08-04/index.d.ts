@@ -6064,6 +6064,25 @@ declare namespace Rpc {
     dup(): this;
   }
   export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+  type BaseType =
+    | void
+    | undefined
+    | null
+    | boolean
+    | number
+    | bigint
+    | string
+    | TypedArray
+    | ArrayBuffer
+    | DataView
+    | Date
+    | Error
+    | RegExp
+    | ReadableStream<Uint8Array>
+    | WritableStream<Uint8Array>
+    | Request
+    | Response
+    | Headers;
   // Recursively rewrite all `Stubable` types with `Stub`s
   type Stubify<T> = T extends Stubable
     ? Stub<T>
@@ -6075,13 +6094,15 @@ declare namespace Rpc {
           ? Array<Stubify<V>>
           : T extends ReadonlyArray<infer V>
             ? ReadonlyArray<Stubify<V>>
-            : T extends {
-                  [key: string | number]: any;
-                }
-              ? {
-                  [K in keyof T]: Stubify<T[K]>;
-                }
-              : T;
+            : T extends BaseType
+              ? T
+              : T extends {
+                    [key: string | number]: any;
+                  }
+                ? {
+                    [K in keyof T]: Stubify<T[K]>;
+                  }
+                : T;
   // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
   // Note we use `StubBase` instead of `Stub` here to avoid circular dependencies:
   // `Stub` depends on `Provider`, which depends on `Unstubify`, which would depend on `Stub`.
@@ -6096,13 +6117,15 @@ declare namespace Rpc {
             ? Array<Unstubify<V>>
             : T extends ReadonlyArray<infer V>
               ? ReadonlyArray<Unstubify<V>>
-              : T extends {
-                    [key: string | number]: unknown;
-                  }
-                ? {
-                    [K in keyof T]: Unstubify<T[K]>;
-                  }
-                : T;
+              : T extends BaseType
+                ? T
+                : T extends {
+                      [key: string | number]: unknown;
+                    }
+                  ? {
+                      [K in keyof T]: Unstubify<T[K]>;
+                    }
+                  : T;
   type UnstubifyAll<A extends any[]> = {
     [I in keyof A]: Unstubify<A[I]>;
   };
