@@ -6,11 +6,11 @@ declare namespace Rpc {
   // TypeScript uses *structural* typing meaning anything with the same shape as type `T` is a `T`.
   // For the classes exported by `cloudflare:workers` we want *nominal* typing (i.e. we only want to
   // accept `WorkerEntrypoint` from `cloudflare:workers`, not any other class with the same shape)
-  export const __RPC_STUB_BRAND: "__RPC_STUB_BRAND";
-  export const __RPC_TARGET_BRAND: "__RPC_TARGET_BRAND";
-  export const __WORKER_ENTRYPOINT_BRAND: "__WORKER_ENTRYPOINT_BRAND";
-  export const __DURABLE_OBJECT_BRAND: "__DURABLE_OBJECT_BRAND";
-  export const __WORKFLOW_ENTRYPOINT_BRAND: "__WORKFLOW_ENTRYPOINT_BRAND";
+  export const __RPC_STUB_BRAND: '__RPC_STUB_BRAND';
+  export const __RPC_TARGET_BRAND: '__RPC_TARGET_BRAND';
+  export const __WORKER_ENTRYPOINT_BRAND: '__WORKER_ENTRYPOINT_BRAND';
+  export const __DURABLE_OBJECT_BRAND: '__DURABLE_OBJECT_BRAND';
+  export const __WORKFLOW_ENTRYPOINT_BRAND: '__WORKFLOW_ENTRYPOINT_BRAND';
   export interface RpcTargetBranded {
     [__RPC_TARGET_BRAND]: never;
   }
@@ -37,6 +37,32 @@ declare namespace Rpc {
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
     // Structured cloneables
+    | BaseType
+    // Structured cloneable composites
+    | Map<
+        T extends Map<infer U, unknown> ? Serializable<U> : never,
+        T extends Map<unknown, infer U> ? Serializable<U> : never
+      >
+    | Set<T extends Set<infer U> ? Serializable<U> : never>
+    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
+    | {
+        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+      }
+    // Special types
+    | Stub<Stubable>
+    // Serialized as stubs, see `Stubify`
+    | Stubable;
+
+  // Base type for all RPC stubs, including common memory management methods.
+  // `T` is used as a marker type for unwrapping `Stub`s later.
+  interface StubBase<T extends Stubable> extends Disposable {
+    [__RPC_STUB_BRAND]: T;
+    dup(): this;
+  }
+  export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+
+  // This represents all the types that can be sent as-is over an RPC boundary
+  type BaseType =
     | void
     | undefined
     | null
@@ -50,53 +76,11 @@ declare namespace Rpc {
     | Date
     | Error
     | RegExp
-    // Structured cloneable composites
-    | Map<
-        T extends Map<infer U, unknown> ? Serializable<U> : never,
-        T extends Map<unknown, infer U> ? Serializable<U> : never
-      >
-    | Set<T extends Set<infer U> ? Serializable<U> : never>
-    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
-    | {
-        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
-      }
-    // Special types
     | ReadableStream<Uint8Array>
     | WritableStream<Uint8Array>
     | Request
     | Response
-    | Headers
-    | Stub<Stubable>
-    // Serialized as stubs, see `Stubify`
-    | Stubable;
-
-  // Base type for all RPC stubs, including common memory management methods.
-  // `T` is used as a marker type for unwrapping `Stub`s later.
-  interface StubBase<T extends Stubable> extends Disposable {
-    [__RPC_STUB_BRAND]: T;
-    dup(): this;
-  }
-  export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
-
-  type BaseType =
-		| void
-		| undefined
-		| null
-		| boolean
-		| number
-		| bigint
-		| string
-		| TypedArray
-		| ArrayBuffer
-		| DataView
-		| Date
-		| Error
-		| RegExp
-		| ReadableStream<Uint8Array>
-		| WritableStream<Uint8Array>
-		| Request
-		| Response
-		| Headers;
+    | Headers;
   // Recursively rewrite all `Stubable` types with `Stub`s
   // prettier-ignore
   type Stubify<T> =
@@ -173,10 +157,10 @@ declare namespace Rpc {
 }
 
 declare namespace Cloudflare {
-	interface Env {}
+  interface Env {}
 }
 
-declare module "cloudflare:workers" {
+declare module 'cloudflare:workers' {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -230,23 +214,23 @@ declare module "cloudflare:workers" {
   }
 
   export type WorkflowDurationLabel =
-    | "second"
-    | "minute"
-    | "hour"
-    | "day"
-    | "week"
-    | "month"
-    | "year";
+    | 'second'
+    | 'minute'
+    | 'hour'
+    | 'day'
+    | 'week'
+    | 'month'
+    | 'year';
 
   export type WorkflowSleepDuration =
-    | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+    | `${number} ${WorkflowDurationLabel}${'s' | ''}`
     | number;
 
   export type WorkflowDelayDuration = WorkflowSleepDuration;
 
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
 
-  export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowBackoff = 'constant' | 'linear' | 'exponential';
 
   export type WorkflowStepConfig = {
     retries?: {
@@ -264,8 +248,15 @@ declare module "cloudflare:workers" {
   };
 
   export abstract class WorkflowStep {
-    do<T extends Rpc.Serializable<T>>(name: string, callback: () => Promise<T>): Promise<T>;
-    do<T extends Rpc.Serializable<T>>(name: string, config: WorkflowStepConfig, callback: () => Promise<T>): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      callback: () => Promise<T>
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: () => Promise<T>
+    ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
   }
@@ -282,7 +273,10 @@ declare module "cloudflare:workers" {
 
     constructor(ctx: ExecutionContext, env: Env);
 
-    run(event: Readonly<WorkflowEvent<T>>, step: WorkflowStep): Promise<unknown>;
+    run(
+      event: Readonly<WorkflowEvent<T>>,
+      step: WorkflowStep
+    ): Promise<unknown>;
   }
 
   export const env: Cloudflare.Env;
