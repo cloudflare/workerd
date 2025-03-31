@@ -7,8 +7,8 @@ import {
   RpcStub,
   RpcTarget,
   WorkerEntrypoint,
-} from "cloudflare:workers";
-import { expectTypeOf } from "expect-type";
+} from 'cloudflare:workers';
+import { expectTypeOf } from 'expect-type';
 
 type TestType = {
   fieldString: string;
@@ -63,7 +63,7 @@ class TestCounter extends RpcTarget {
   }
 
   [Symbol.dispose]() {
-    console.log("Disposing");
+    console.log('Disposing');
   }
 
   // Check can't use custom `dup()` method
@@ -72,7 +72,7 @@ class TestCounter extends RpcTarget {
   }
 }
 
-const symbolMethod = Symbol("symbolMethod");
+const symbolMethod = Symbol('symbolMethod');
 
 class TestEntrypoint extends WorkerEntrypoint<Env> {
   constructor(ctx: ExecutionContext, env: Env) {
@@ -96,7 +96,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
     return 1;
   }
 
-  instanceProperty = "2";
+  instanceProperty = '2';
   get property(): number {
     return 3;
   }
@@ -131,7 +131,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
 
   functionWithExtrasMethod() {
     const fn = (x: number) => x;
-    fn.y = "z";
+    fn.y = 'z';
     return fn;
   }
 
@@ -172,7 +172,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
       boolean: false,
       number: 42,
       bigint: 1_000_000n,
-      string: "hello",
+      string: 'hello',
       Int8Array: new Int8Array(),
       Uint8Array: new Uint8Array(),
       Uint8ClampedArray: new Uint8ClampedArray(),
@@ -195,14 +195,14 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
       TypeError: new TypeError(),
       URIError: new URIError(),
       RegExp: /abc/,
-      Map: new Map([["a", 1]]),
-      Set: new Set(["a"]),
+      Map: new Map([['a', 1]]),
+      Set: new Set(['a']),
       Array: [1, 2, 3],
       ReadonlyArray: [4, 5, 6] as const,
       Object: { a: { b: 1 } },
       ReadableStream: new ReadableStream<Uint8Array>(),
       WritableStream: new WritableStream<Uint8Array>(),
-      Request: new Request("https://example.com"),
+      Request: new Request('https://example.com'),
       Response: new Response(),
       Headers: new Headers(),
       Stub: new RpcStub(() => {}),
@@ -220,46 +220,46 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
 
   methodReturnsTypeObject(): TestType {
     return {
-      fieldString: "a",
+      fieldString: 'a',
       fieldCallback: (p: string) => 1,
-      fieldBasicMap: new Map([["b", 2]]),
+      fieldBasicMap: new Map([['b', 2]]),
       fieldComplexMap: new Map([
         [
-          "c",
+          'c',
           {
-            fieldString: "d",
+            fieldString: 'd',
             fieldCallback: (p: string) => 3,
           },
         ],
       ]),
-      fieldSet: new Set(["e"]),
+      fieldSet: new Set(['e']),
       fieldSubLevel: {
-        fieldString: "f",
+        fieldString: 'f',
         fieldCallback: (p: string) => 4,
       },
     };
   }
   methodReturnsInterfaceObject(): TestInterface {
     return {
-      fieldString: "a",
+      fieldString: 'a',
       fieldCallback: (p: string) => 1,
-      fieldBasicMap: new Map([["b", 2]]),
+      fieldBasicMap: new Map([['b', 2]]),
       fieldComplexMap: new Map([
         [
-          "c",
+          'c',
           {
-            fieldString: "d",
+            fieldString: 'd',
             fieldCallback: (p: string) => 3,
           },
         ],
       ]),
-      fieldSet: new Set(["e"]),
+      fieldSet: new Set(['e']),
       fieldSubLevelInline: {
-        fieldString: "f",
+        fieldString: 'f',
         fieldCallback: (p: string) => 4,
       },
       fieldSubLevelInterface: {
-        fieldString: "e",
+        fieldString: 'e',
         fieldCallback: (p: string) => 5,
       },
     };
@@ -276,7 +276,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
   }
 
   [Symbol.dispose]() {
-    console.log("Disposing");
+    console.log('Disposing');
   }
 }
 
@@ -285,6 +285,48 @@ class TestObject extends DurableObject {
     return new Response(request.url);
   }
   async alarm() {}
+
+  complexTypes() {
+    return {
+      undefined: undefined,
+      void: void 0,
+      null: null,
+      boolean: true,
+      number: 1,
+      bigint: BigInt(4),
+      string: 'string',
+      ArrayBuffer: new ArrayBuffer(0),
+      DataView: new DataView(new ArrayBuffer(0)),
+      Date: new Date(),
+      Error: new Error(),
+      RegExp: new RegExp(''),
+      ReadableStream: new ReadableStream(),
+      WritableStream: new WritableStream(),
+      Request: new Request('https://example.com'),
+      Response: new Response(),
+      Headers: new Headers(),
+      nested: {
+        undefined: undefined,
+        void: void 0,
+        null: null,
+        boolean: true,
+        number: 1,
+        bigint: BigInt(4),
+        string: 'string',
+        ArrayBuffer: new ArrayBuffer(0),
+        DataView: new DataView(new ArrayBuffer(0)),
+        Date: new Date(),
+        Error: new Error(),
+        RegExp: new RegExp(''),
+        ReadableStream: new ReadableStream(),
+        WritableStream: new WritableStream(),
+        Request: new Request('https://example.com'),
+        Response: new Response(),
+        Headers: new Headers(),
+      },
+    };
+  }
+
   webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {}
   async webSocketClose(
     _ws: WebSocket,
@@ -302,7 +344,7 @@ class TestObject extends DurableObject {
   }
 
   [Symbol.dispose]() {
-    console.log("Disposing");
+    console.log('Disposing');
   }
 }
 
@@ -331,10 +373,10 @@ class TestNaughtyEntrypoint extends WorkerEntrypoint {
   // Check incorrectly typed methods
   // @ts-expect-error
   fetch(_request: Request) {
-    return "body";
+    return 'body';
   }
   // @ts-expect-error
-  async tail(_animal: "🐶") {}
+  async tail(_animal: '🐶') {}
   // @ts-expect-error
   trace(_draw: boolean) {}
   // @ts-expect-error
@@ -384,8 +426,8 @@ export default <ExportedHandler<Env>>{
   async fetch(_request, env, _ctx) {
     // Check non-RPC services and namespaces work as usual
     {
-      const response = await env.REGULAR_SERVICE.fetch("https://example.com", {
-        method: "POST",
+      const response = await env.REGULAR_SERVICE.fetch('https://example.com', {
+        method: 'POST',
       });
       expectTypeOf(response).toEqualTypeOf<Response>();
 
@@ -397,8 +439,8 @@ export default <ExportedHandler<Env>>{
       expectTypeOf(stringId).toEqualTypeOf<DurableObjectId>();
 
       const stub = env.REGULAR_OBJECT.get(uniqueId);
-      const objectResponse = await stub.fetch("https://example.com", {
-        method: "POST",
+      const objectResponse = await stub.fetch('https://example.com', {
+        method: 'POST',
       });
       expectTypeOf(objectResponse).toEqualTypeOf<Response>();
       expectTypeOf(stub.id).toEqualTypeOf<DurableObjectId>();
@@ -618,7 +660,7 @@ export default <ExportedHandler<Env>>{
       >;
       // TODO(now): these next two don't actually work, should they?
       expectTypeOf(s.everySerializable.Array[0]).toEqualTypeOf<Promise<number>>;
-      expectTypeOf(await s.everySerializable.Map.get("a")).toEqualTypeOf<
+      expectTypeOf(await s.everySerializable.Map.get('a')).toEqualTypeOf<
         number | undefined
       >;
 
@@ -689,6 +731,53 @@ export default <ExportedHandler<Env>>{
     {
       const stub = new RpcStub(new TestCounter(42));
       expectTypeOf(stub.dup).toEqualTypeOf<() => RpcStub<TestCounter>>();
+    }
+
+    // Check methods returning base types are not stubified
+    {
+      const s = env.RPC_OBJECT.get(env.RPC_OBJECT.newUniqueId());
+
+      expectTypeOf(s.fetch(_request)).toMatchTypeOf<Promise<Response>>();
+      expectTypeOf(s.complexTypes()).toMatchTypeOf<
+        Promise<{
+          undefined: undefined;
+          void: void;
+          null: null;
+          boolean: boolean;
+          number: number;
+          bigint: BigInt;
+          string: string;
+          ArrayBuffer: ArrayBuffer;
+          DataView: DataView;
+          Date: Date;
+          Error: Error;
+          RegExp: RegExp;
+          ReadableStream: ReadableStream;
+          WritableStream: WritableStream;
+          Request: Request;
+          Response: Response;
+          Headers: Headers;
+          nested: {
+            undefined: undefined;
+            void: void;
+            null: null;
+            boolean: boolean;
+            number: number;
+            bigint: BigInt;
+            string: string;
+            ArrayBuffer: ArrayBuffer;
+            DataView: DataView;
+            Date: Date;
+            Error: Error;
+            RegExp: RegExp;
+            ReadableStream: ReadableStream;
+            WritableStream: WritableStream;
+            Request: Request;
+            Response: Response;
+            Headers: Headers;
+          };
+        }>
+      >;
     }
 
     return new Response();
