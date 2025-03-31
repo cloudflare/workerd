@@ -408,7 +408,8 @@ class AesCbcKey final: public AesKeyBase {
     int plainSize = 0;
     auto blockSize = EVP_CIPHER_CTX_block_size(cipherCtx.get());
 
-    auto plainText = kj::heapArray<kj::byte>(cipherText.size() + ((blockSize > 1) ? blockSize : 0));
+    KJ_STACK_ARRAY(
+        kj::byte, plainText, cipherText.size() + ((blockSize > 1) ? blockSize : 0), 1024, 4096);
 
     // Perform the actual decryption.
     OSSLCALL(EVP_DecryptUpdate(
@@ -419,7 +420,8 @@ class AesCbcKey final: public AesKeyBase {
         cipherCtx.get(), plainText.begin() + plainSize);
     KJ_ASSERT(plainSize <= plainText.size());
 
-    // TODO(perf): Avoid this copy, see comment in the encrypt implementation functions.
+    // Copy is necessary to support v8:Sandbox where all ArrayBuffers have to be
+    // allocated from within the sandbox.
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, plainSize);
     backing.asArrayPtr().copyFrom(plainText.first(plainSize));
     return jsg::BufferSource(js, kj::mv(backing));

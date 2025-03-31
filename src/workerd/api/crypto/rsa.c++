@@ -145,15 +145,14 @@ jsg::BufferSource Rsa::sign(jsg::Lock& js, const kj::ArrayPtr<const kj::byte> da
         "modulus, consider using a larger key size.");
   }
 
-  auto signature = kj::heapArray<kj::byte>(size);
+  KJ_STACK_ARRAY(kj::byte, signature, size, 256, 256);
   size_t signatureSize = 0;
   OSSLCALL(RSA_decrypt(rsa, &signatureSize, signature.begin(), signature.size(), data.begin(),
       data.size(), RSA_NO_PADDING));
   KJ_ASSERT(signatureSize <= signature.size());
 
   auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signatureSize);
-  auto src = kj::arrayPtr(signature.begin(), signatureSize);
-  backing.asArrayPtr().copyFrom(src);
+  backing.asArrayPtr().copyFrom(signature.first(signatureSize));
   return jsg::BufferSource(js, kj::mv(backing));
 }
 
