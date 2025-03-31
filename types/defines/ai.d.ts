@@ -30,6 +30,28 @@ export declare abstract class BaseAiImageToText {
   inputs: AiImageToTextInput;
   postProcessedOutputs: AiImageToTextOutput;
 }
+export type AiImageTextToTextInput = {
+  image: string;
+  prompt?: string;
+  max_tokens?: number;
+  temperature?: number;
+  ignore_eos?: boolean;
+  top_p?: number;
+  top_k?: number;
+  seed?: number;
+  repetition_penalty?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  raw?: boolean;
+  messages?: RoleScopedChatInput[];
+};
+export type AiImageTextToTextOutput = {
+  description: string;
+};
+export declare abstract class BaseAiImageTextToText {
+  inputs: AiImageTextToTextInput;
+  postProcessedOutputs: AiImageTextToTextOutput;
+}
 export type AiObjectDetectionInput = {
   image: number[];
 };
@@ -100,12 +122,7 @@ export declare abstract class BaseAiTextEmbeddings {
   postProcessedOutputs: AiTextEmbeddingsOutput;
 }
 export type RoleScopedChatInput = {
-  role:
-    | "user"
-    | "assistant"
-    | "system"
-    | "tool"
-    | (string & NonNullable<unknown>);
+  role: "user" | "assistant" | "system" | "tool" | (string & NonNullable<unknown>);
   content: string;
   name?: string;
 };
@@ -162,10 +179,7 @@ export type AiTextGenerationInput = {
   presence_penalty?: number;
   messages?: RoleScopedChatInput[];
   response_format?: AiTextGenerationResponseFormat;
-  tools?:
-    | AiTextGenerationToolInput[]
-    | AiTextGenerationToolLegacyInput[]
-    | (object & NonNullable<unknown>);
+  tools?: AiTextGenerationToolInput[] | AiTextGenerationToolLegacyInput[] | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
 export type AiTextGenerationOutput =
@@ -439,6 +453,69 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
 export declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
+}
+export type Ai_Cf_Baai_Bge_M3_Input = BGEM3InputQueryAndContexts | BGEM3InputEmbedding;
+export interface BGEM3InputQueryAndContexts {
+  /**
+   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
+   */
+  query?: string;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+export interface BGEM3InputEmbedding {
+  text: string | string[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+export type Ai_Cf_Baai_Bge_M3_Output = BGEM3OuputQuery | BGEM3OutputEmbeddingForContexts | BGEM3OuputEmbedding;
+export interface BGEM3OuputQuery {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+export interface BGEM3OutputEmbeddingForContexts {
+  response?: number[][];
+  shape?: number[];
+  /**
+   * The pooling method used in the embedding process.
+   */
+  pooling?: "mean" | "cls";
+}
+export interface BGEM3OuputEmbedding {
+  shape?: number[];
+  /**
+   * Embeddings of the requested text values
+   */
+  data?: number[][];
+  /**
+   * The pooling method used in the embedding process.
+   */
+  pooling?: "mean" | "cls";
+}
+export declare abstract class Base_Ai_Cf_Baai_Bge_M3 {
+  inputs: Ai_Cf_Baai_Bge_M3_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_M3_Output;
 }
 export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
   /**
@@ -750,6 +827,40 @@ export declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
   inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
 }
+export interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
+  /**
+   * A query you wish to perform against the provided contexts.
+   */
+  /**
+   * Number of returned results starting with the best score.
+   */
+  top_k?: number;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+}
+export interface Ai_Cf_Baai_Bge_Reranker_Base_Output {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+export declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
+  inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -757,6 +868,7 @@ export interface AiModels {
   "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
+  "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
   "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
@@ -810,9 +922,11 @@ export interface AiModels {
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
+  "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
+  "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
 }
 export type AiOptions = {
   gateway?: GatewayOptions;
@@ -855,16 +969,14 @@ export type AiModelsSearchObject = {
 export interface InferenceUpstreamError extends Error {}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
-export declare abstract class Ai<
-  AiModelList extends AiModelListType = AiModels,
-> {
+export declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
   autorag(autoragId: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
-    options?: Options
+    options?: Options,
   ): Promise<
     Options extends {
       returnRawResponse: true;
@@ -872,16 +984,25 @@ export declare abstract class Ai<
       ? Response
       : AiModelList[Name]["postProcessedOutputs"]
   >;
-  public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
-  public toMarkdown(
-    files: { name: string; blob: Blob }[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+  models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(
+    files: {
+      name: string;
+      blob: Blob;
+    }[],
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
   ): Promise<ConversionResponse[]>;
-  public toMarkdown(
+  toMarkdown(
     files: {
       name: string;
       blob: Blob;
     },
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
   ): Promise<ConversionResponse>;
 }
