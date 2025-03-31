@@ -3,9 +3,10 @@ load("//:build/pyodide_bucket.bzl", "PYODIDE_ALL_WHEELS_ZIP_SHA256", "PYODIDE_GI
 load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
 
 def dep_pyodide():
+    # Use @workerd prefix on build_file so we can use this from edgeworker too
     http_archive(
         name = "pyodide",
-        build_file = "//:build/BUILD.pyodide",
+        build_file = "@workerd//:build/BUILD.pyodide",
         sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
         urls = ["https://github.com/pyodide/pyodide/releases/download/0.26.0a2/pyodide-core-0.26.0a2.tar.bz2"],
     )
@@ -19,7 +20,7 @@ def dep_pyodide():
 
     http_archive(
         name = "all_pyodide_wheels",
-        build_file = "//:build/BUILD.all_pyodide_wheels",
+        build_file = "@workerd//:build/BUILD.all_pyodide_wheels",
         sha256 = PYODIDE_ALL_WHEELS_ZIP_SHA256,
         urls = [PYODIDE_GITHUB_RELEASE_URL + "all_wheels.zip"],
     )
