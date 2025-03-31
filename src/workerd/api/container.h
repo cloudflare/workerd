@@ -39,7 +39,7 @@ class Container: public jsg::Object {
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
-  jsg::Promise<void> monitor(jsg::Lock& js);
+  jsg::Promise<int> monitor(jsg::Lock& js);
   jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);

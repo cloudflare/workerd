@@ -52,22 +52,27 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   running = true;
 }
 
-jsg::Promise<void> Container::monitor(jsg::Lock& js) {
+jsg::Promise<int> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
   return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send().ignoreResult())
-      .then(js, [this](jsg::Lock& js) {
+      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
+      .then(js,
+          [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) -> int {
     running = false;
+    auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
       destroyReason = kj::none;
       js.throwException(kj::mv(error));
     }
+
+    return exitCode;
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
+    return -1;
   });
 }
 
@@ -144,6 +149,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // ... and then adapt that to an HttpService ...
     auto service = kj::newHttpService(*client);
 
+    KJ_LOG(ERROR, "TEST: The request body", requestBody.tryGetLength().orDefault(0));
     // ... and now we can just forward our call to that.
     co_await connectionPromise.exclusiveJoin(
         service->request(method, noHostUrl, newHeaders, requestBody, response));
