@@ -85,13 +85,6 @@ http_archive(
     urls = ["https://github.com/pyodide/pyodide/releases/download/0.26.0a2/pyodide-core-0.26.0a2.tar.bz2"],
 )
 
-http_archive(
-    name = "pyodide_packages",
-    build_file = "//:build/BUILD.pyodide_packages",
-    sha256 = "c4a4e0c1cb658a39abc0435cc07df902e5a2ecffc091e0528b96b0c295e309ea",
-    urls = ["https://github.com/dom96/pyodide_packages/releases/download/just-stdlib/pyodide_packages.tar.zip"],
-)
-
 load("//:build/pyodide_bucket.bzl", "PYODIDE_ALL_WHEELS_ZIP_SHA256", "PYODIDE_GITHUB_RELEASE_URL")
 load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
 
