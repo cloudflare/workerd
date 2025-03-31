@@ -3547,6 +3547,28 @@ declare abstract class BaseAiImageToText {
   inputs: AiImageToTextInput;
   postProcessedOutputs: AiImageToTextOutput;
 }
+type AiImageTextToTextInput = {
+  image: string;
+  prompt?: string;
+  max_tokens?: number;
+  temperature?: number;
+  ignore_eos?: boolean;
+  top_p?: number;
+  top_k?: number;
+  seed?: number;
+  repetition_penalty?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  raw?: boolean;
+  messages?: RoleScopedChatInput[];
+};
+type AiImageTextToTextOutput = {
+  description: string;
+};
+declare abstract class BaseAiImageTextToText {
+  inputs: AiImageTextToTextInput;
+  postProcessedOutputs: AiImageTextToTextOutput;
+}
 type AiObjectDetectionInput = {
   image: number[];
 };
@@ -3957,6 +3979,72 @@ declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
 }
+type Ai_Cf_Baai_Bge_M3_Input = BGEM3InputQueryAndContexts | BGEM3InputEmbedding;
+interface BGEM3InputQueryAndContexts {
+  /**
+   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
+   */
+  query?: string;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+interface BGEM3InputEmbedding {
+  text: string | string[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+type Ai_Cf_Baai_Bge_M3_Output =
+  | BGEM3OuputQuery
+  | BGEM3OutputEmbeddingForContexts
+  | BGEM3OuputEmbedding;
+interface BGEM3OuputQuery {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+interface BGEM3OutputEmbeddingForContexts {
+  response?: number[][];
+  shape?: number[];
+  /**
+   * The pooling method used in the embedding process.
+   */
+  pooling?: "mean" | "cls";
+}
+interface BGEM3OuputEmbedding {
+  shape?: number[];
+  /**
+   * Embeddings of the requested text values
+   */
+  data?: number[][];
+  /**
+   * The pooling method used in the embedding process.
+   */
+  pooling?: "mean" | "cls";
+}
+declare abstract class Base_Ai_Cf_Baai_Bge_M3 {
+  inputs: Ai_Cf_Baai_Bge_M3_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_M3_Output;
+}
 interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
   /**
    * A text description of the image you want to generate.
@@ -4267,6 +4355,40 @@ declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
   inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
 }
+interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
+  /**
+   * A query you wish to perform against the provided contexts.
+   */
+  /**
+   * Number of returned results starting with the best score.
+   */
+  top_k?: number;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+}
+interface Ai_Cf_Baai_Bge_Reranker_Base_Output {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
+  inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
+}
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -4274,6 +4396,7 @@ interface AiModels {
   "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
+  "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
   "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
@@ -4327,9 +4450,11 @@ interface AiModels {
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
+  "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
+  "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
 }
 type AiOptions = {
   gateway?: GatewayOptions;
@@ -4387,8 +4512,8 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
       ? Response
       : AiModelList[Name]["postProcessedOutputs"]
   >;
-  public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
-  public toMarkdown(
+  models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(
     files: {
       name: string;
       blob: Blob;
@@ -4398,7 +4523,7 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
       extraHeaders?: object;
     },
   ): Promise<ConversionResponse[]>;
-  public toMarkdown(
+  toMarkdown(
     files: {
       name: string;
       blob: Blob;
