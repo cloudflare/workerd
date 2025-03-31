@@ -16,10 +16,7 @@ export default {
   'urlpattern-hasregexpgroups.any.js': {},
   'urlpattern.any.js': {
     comment: 'Invalid tests',
-    expectedFailures: [
-      'Pattern: ["https://{sub.}?example{.com/}foo"] Inputs: ["https://example.com/foo"]',
-      'Pattern: [{"pathname":"\\ud83d \\udeb2"}] Inputs: []',
-    ],
+    expectedFailures: ['Pattern: [{"pathname":"\\ud83d \\udeb2"}] Inputs: []'],
   },
   'urlpattern.https.any.js': {
     comment: 'Test cases are identical to urlpattern.any.js.',
