@@ -1426,7 +1426,11 @@ void MemoryTracker::trackField(
 }
 
 template <typename T, typename... Params>
-[[deprecated("Use js.alloc<T>(...) instead")]] Ref<T> alloc(Params&&... params) {
+// TODO(js.alloc): When most of the jsg::alloc users are updated we can uncomment
+// the deprecation here. When all uses are updated to use js.alloc, we can remove
+// this method entirely.
+//[[deprecated("Use js.alloc<T>(...) instead")]]
+Ref<T> alloc(Params&&... params) {
   return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
 }
 

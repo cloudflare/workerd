@@ -141,7 +141,7 @@ jsg::Ref<Blob> Blob::constructor(
     }
   }
 
-  return jsg::alloc<Blob>(js, concat(js, kj::mv(bits)), kj::mv(type));
+  return js.alloc<Blob>(js, concat(js, kj::mv(bits)), kj::mv(type));
 }
 
 kj::ArrayPtr<const byte> Blob::getData() const {
@@ -302,7 +302,7 @@ jsg::Ref<File> File::constructor(
     lastModified = dateNow();
   }
 
-  return jsg::alloc<File>(js, concat(js, kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
+  return js.alloc<File>(js, concat(js, kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
 }
 
 }  // namespace workerd::api

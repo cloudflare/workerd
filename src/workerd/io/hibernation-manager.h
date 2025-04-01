@@ -37,7 +37,8 @@ class HibernationManagerImpl final: public Worker::Actor::HibernationManager {
 
   void setWebSocketAutoResponse(
       kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
+      jsg::Lock& js) override;
   void setTimerChannel(TimerChannel& timerChannel) override;
 
   kj::Own<HibernationManager> addRef() override;

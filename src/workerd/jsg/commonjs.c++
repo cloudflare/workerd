@@ -7,7 +7,7 @@
 namespace workerd::jsg {
 
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
-    : module(jsg::alloc<CommonJsModuleObject>(js, path.toString(true))),
+    : module(js.alloc<CommonJsModuleObject>(js, path.toString(true))),
       path(kj::mv(path)),
       exports(js.v8Isolate, module->getExports(js)) {}
 

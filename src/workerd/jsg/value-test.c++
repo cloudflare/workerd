@@ -53,29 +53,29 @@ struct OptionalContext: public ContextGlobalObject {
     JSG_STRUCT(optString, optDouble);
   };
 
-  double takeOptional(Optional<Ref<NumberBox>> num) {
-    return kj::mv(num).orDefault(jsg::alloc<NumberBox>(321))->value;
+  double takeOptional(jsg::Lock& js, Optional<Ref<NumberBox>> num) {
+    return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
-  double takeMaybe(kj::Maybe<Ref<NumberBox>> num) {
-    return kj::mv(num).orDefault(jsg::alloc<NumberBox>(321))->value;
+  double takeMaybe(jsg::Lock& js, kj::Maybe<Ref<NumberBox>> num) {
+    return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
-  double takeLenientOptional(LenientOptional<Ref<NumberBox>> num) {
-    return kj::mv(num).orDefault(jsg::alloc<NumberBox>(321))->value;
+  double takeLenientOptional(jsg::Lock& js, LenientOptional<Ref<NumberBox>> num) {
+    return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
   kj::String takeOptionalMaybe(Optional<kj::Maybe<kj::String>> arg) {
     return kj::mv(arg).orDefault(kj::str("(absent)")).orDefault(kj::str("(null)"));
   }
-  Optional<Ref<NumberBox>> returnOptional(double value) {
+  Optional<Ref<NumberBox>> returnOptional(jsg::Lock& js, double value) {
     if (value == 321)
       return kj::none;
     else
-      return jsg::alloc<NumberBox>(value);
+      return js.alloc<NumberBox>(value);
   }
-  kj::Maybe<Ref<NumberBox>> returnMaybe(double value) {
+  kj::Maybe<Ref<NumberBox>> returnMaybe(jsg::Lock& js, double value) {
     if (value == 321)
       return kj::none;
     else
-      return jsg::alloc<NumberBox>(value);
+      return js.alloc<NumberBox>(value);
   }
 
   kj::String readTestOptionalFields(TestOptionalFields s) {
@@ -354,11 +354,11 @@ struct DictContext: public ContextGlobalObject {
     return kj::strArray(
         KJ_MAP(f, dict.fields) { return kj::str(f.name, ": ", f.value(js)); }, ", ");
   }
-  Dict<Ref<NumberBox>> returnDict() {
+  Dict<Ref<NumberBox>> returnDict(jsg::Lock& js) {
     auto builder = kj::heapArrayBuilder<Dict<Ref<NumberBox>>::Field>(3);
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), jsg::alloc<NumberBox>(123)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), jsg::alloc<NumberBox>(456)});
-    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), jsg::alloc<NumberBox>(789)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("foo"), js.alloc<NumberBox>(123)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("bar"), js.alloc<NumberBox>(456)});
+    builder.add(Dict<Ref<NumberBox>>::Field{kj::str("baz"), js.alloc<NumberBox>(789)});
     return {builder.finish()};
   }
 

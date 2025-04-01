@@ -53,34 +53,34 @@ kj::String MIMEParams::toString() {
   return kj::String();
 }
 
-jsg::Ref<MIMEParams::EntryIterator> MIMEParams::entries(jsg::Lock&) {
+jsg::Ref<MIMEParams::EntryIterator> MIMEParams::entries(jsg::Lock& js) {
   kj::Vector<kj::Array<kj::String>> vec;
   KJ_IF_SOME(inner, mimeType) {
     for (const auto& entry: inner.params()) {
       vec.add(kj::arr(kj::str(entry.key), kj::str(entry.value)));
     }
   }
-  return jsg::alloc<EntryIterator>(IteratorState<kj::Array<kj::String>>{vec.releaseAsArray()});
+  return js.alloc<EntryIterator>(IteratorState<kj::Array<kj::String>>{vec.releaseAsArray()});
 }
 
-jsg::Ref<MIMEParams::KeyIterator> MIMEParams::keys(jsg::Lock&) {
+jsg::Ref<MIMEParams::KeyIterator> MIMEParams::keys(jsg::Lock& js) {
   kj::Vector<kj::String> vec;
   KJ_IF_SOME(inner, mimeType) {
     for (const auto& entry: inner.params()) {
       vec.add(kj::str(entry.key));
     }
   }
-  return jsg::alloc<KeyIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
+  return js.alloc<KeyIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
 }
 
-jsg::Ref<MIMEParams::ValueIterator> MIMEParams::values(jsg::Lock&) {
+jsg::Ref<MIMEParams::ValueIterator> MIMEParams::values(jsg::Lock& js) {
   kj::Vector<kj::String> vec;
   KJ_IF_SOME(inner, mimeType) {
     for (const auto& entry: inner.params()) {
       vec.add(kj::str(entry.value));
     }
   }
-  return jsg::alloc<ValueIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
+  return js.alloc<ValueIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
 }
 
 MIMEType::MIMEType(MimeType inner)

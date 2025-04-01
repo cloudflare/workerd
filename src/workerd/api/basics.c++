@@ -543,9 +543,9 @@ kj::Exception AbortSignal::abortException(
 jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   auto exception = abortException(js, maybeReason);
   KJ_IF_SOME(reason, maybeReason) {
-    return jsg::alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
+    return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
   }
-  return jsg::alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
+  return js.alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
@@ -559,7 +559,7 @@ void AbortSignal::throwIfAborted(jsg::Lock& js) {
 }
 
 jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
-  auto signal = jsg::alloc<AbortSignal>();
+  auto signal = js.alloc<AbortSignal>();
 
   auto context = js.v8Context();
 
@@ -584,7 +584,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
-    return jsg::alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
+    return js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   }
 
   // Let's check to see if any of the signals are already aborted. If it is, we can
@@ -597,7 +597,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
 
   // Otherwise we need to create a new signal and register event handlers on all
   // of the signals that were passed in.
-  auto signal = jsg::alloc<AbortSignal>();
+  auto signal = js.alloc<AbortSignal>();
   for (auto& sig: signals) {
     // This is a bit of a hack. We want to call addEventListener, but that requires a
     // jsg::Identified<EventTarget::Handler>, which we can't create directly yet.
@@ -663,7 +663,7 @@ void AbortSignal::triggerAbort(
   // of the spec here should be just fine.
   KJ_DEFER(removeAllHandlers());
 
-  dispatchEventImpl(js, jsg::alloc<Event>(kj::str("abort")));
+  dispatchEventImpl(js, js.alloc<Event>(kj::str("abort")));
 }
 
 void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
@@ -758,7 +758,7 @@ CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
 
 jsg::Ref<CustomEvent> CustomEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<CustomEventInit> init) {
-  return jsg::alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  return js.alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
 }
 
 jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {

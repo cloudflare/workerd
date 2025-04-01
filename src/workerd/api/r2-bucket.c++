@@ -417,7 +417,7 @@ R2Bucket::get(jsg::Lock& js,
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&context, &errorType](jsg::Lock&,
+        [&context, &errorType](jsg::Lock& js,
             R2Result r2Result) -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 
@@ -427,7 +427,7 @@ R2Bucket::get(jsg::Lock& js,
         jsg::Ref<ReadableStream> body = nullptr;
 
         KJ_IF_SOME(s, r2Result.stream) {
-          body = jsg::alloc<ReadableStream>(context, kj::mv(s));
+          body = js.alloc<ReadableStream>(context, kj::mv(s));
           r2Result.stream = kj::none;
         }
         result = parseObjectMetadata<GetResult>("get", r2Result, errorType, kj::mv(body));
@@ -733,7 +733,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
 
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::String uploadId = kj::str(responseBuilder.getUploadId());
-      return jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
+      return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
     });
   });
 }
@@ -742,7 +742,7 @@ jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUpload(jsg::Lock& js,
     kj::String key,
     kj::String uploadId,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
+  return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
 }
 
 jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
@@ -1177,7 +1177,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
                                  .contentType.map([](const auto& str) {
       return kj::str(str);
     }).orDefault(nullptr);
-    return jsg::alloc<Blob>(js, kj::mv(buffer), kj::mv(contentType));
+    return js.alloc<Blob>(js, kj::mv(buffer), kj::mv(contentType));
   });
 }
 

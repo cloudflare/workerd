@@ -2352,7 +2352,7 @@ class Server::WorkerService final: public Service,
           auto makeStorage =
               [enableSql = enableSql](jsg::Lock& js, const Worker::Api& api,
                   ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
-            return jsg::alloc<api::DurableObjectStorage>(
+            return js.alloc<api::DurableObjectStorage>(
                 IoContext::current().addObject(actorCache), enableSql);
           };
 

@@ -562,20 +562,20 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // Implemented in global-scope.c++ to avoid including crypto.h
   jsg::Ref<Crypto> getCrypto();
 
-  jsg::Ref<Scheduler> getScheduler() {
-    return jsg::alloc<Scheduler>();
+  jsg::Ref<Scheduler> getScheduler(jsg::Lock& js) {
+    return js.alloc<Scheduler>();
   }
 
-  jsg::Ref<Navigator> getNavigator() {
-    return jsg::alloc<Navigator>();
+  jsg::Ref<Navigator> getNavigator(jsg::Lock& js) {
+    return js.alloc<Navigator>();
   }
 
-  jsg::Ref<Performance> getPerformance() {
-    return jsg::alloc<Performance>();
+  jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
+    return js.alloc<Performance>();
   }
 
-  jsg::Ref<Cloudflare> getCloudflare() {
-    return jsg::alloc<Cloudflare>();
+  jsg::Ref<Cloudflare> getCloudflare(jsg::Lock& js) {
+    return js.alloc<Cloudflare>();
   }
 
   // The origin is unknown, return "null" as described in

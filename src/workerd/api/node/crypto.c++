@@ -126,10 +126,10 @@ jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
     jsg::Lock& js, kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      return jsg::alloc<HmacHandle>(HmacContext(js, algorithm, key_data.asPtr()));
+      return js.alloc<HmacHandle>(HmacContext(js, algorithm, key_data.asPtr()));
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
-      return jsg::alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
+      return js.alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
     }
   }
   KJ_UNREACHABLE;
@@ -186,7 +186,7 @@ jsg::BufferSource CryptoImpl::HashHandle::digest(jsg::Lock& js) {
 
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(
     jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
-  return jsg::alloc<HashHandle>(ctx.clone(js, kj::mv(xofLen)));
+  return js.alloc<HashHandle>(ctx.clone(js, kj::mv(xofLen)));
 }
 
 void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -212,7 +212,7 @@ jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::const
     jsg::Lock& js,
     kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
     kj::OneOf<kj::Array<kj::byte>, int> generator) {
-  return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
+  return js.alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
 }
 
 CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh): dh(kj::mv(dh)) {
@@ -735,7 +735,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::constructor(jsg::Lo
   JSG_REQUIRE(ctx.init(ncrypto::Cipher(), encrypt, keyData.begin(), iv.asArrayPtr().begin()), Error,
       "Failed to initialize cipher/cipher context");
 
-  return jsg::alloc<CipherHandle>(mode == "cipher" ? Mode::CIPHER : Mode::DECIPHER, kj::mv(ctx),
+  return js.alloc<CipherHandle>(mode == "cipher" ? Mode::CIPHER : Mode::DECIPHER, kj::mv(ctx),
       kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
 }
 
@@ -1206,7 +1206,7 @@ jsg::Ref<CryptoImpl::ECDHHandle> CryptoImpl::ECDHHandle::constructor(
   auto key = ncrypto::ECKeyPointer::NewByCurveName(nid);
   JSG_REQUIRE(key, Error, "Failed to create key using named curve");
 
-  return jsg::alloc<CryptoImpl::ECDHHandle>(kj::mv(key));
+  return js.alloc<CryptoImpl::ECDHHandle>(kj::mv(key));
 }
 
 jsg::BufferSource CryptoImpl::ECDHHandle::computeSecret(

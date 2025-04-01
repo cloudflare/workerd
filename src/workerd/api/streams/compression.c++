@@ -522,9 +522,8 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<DecompressionStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide),
+  return js.alloc<DecompressionStream>(js.alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
+      js.alloc<WritableStream>(ioContext, kj::mv(writableSide),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 

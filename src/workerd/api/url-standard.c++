@@ -290,18 +290,18 @@ void URLSearchParams::sort() {
   update();
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
-  return jsg::alloc<URLSearchParams::EntryIterator>(
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock& js) {
+  return js.alloc<URLSearchParams::EntryIterator>(
       IteratorState<jsg::UrlSearchParams::EntryIterator>(JSG_THIS, inner.getEntries()));
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
-  return jsg::alloc<URLSearchParams::KeyIterator>(
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock& js) {
+  return js.alloc<URLSearchParams::KeyIterator>(
       IteratorState<jsg::UrlSearchParams::KeyIterator>(JSG_THIS, inner.getKeys()));
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
-  return jsg::alloc<URLSearchParams::ValueIterator>(
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock& js) {
+  return alloc<URLSearchParams::ValueIterator>(
       IteratorState<jsg::UrlSearchParams::ValueIterator>(JSG_THIS, inner.getValues()));
 }
 

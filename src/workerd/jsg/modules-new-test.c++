@@ -934,7 +934,7 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
       // The compileEvalFunction is used in CommonJs/Node.js compat modules to
       // evaluate the module as a function rather than as an ESM. This test just
       // verifies that compileEvalFunction works as expected.
-      auto ext = alloc<TestType>(js, specifier);
+      auto ext = js.alloc<TestType>(js, specifier);
       auto& wrapper = TestIsolate_TypeWrapper::from(js.v8Isolate);
       auto fn = Module::compileEvalFunction(js, "bar(123);"_kj, "foo"_kj,
           JsObject(wrapper.wrap(js.v8Context(), kj::none, ext.addRef())), observer);

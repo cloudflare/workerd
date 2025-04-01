@@ -28,7 +28,7 @@ jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor d
   desc.size = descriptor.size;
   desc.usage = static_cast<wgpu::BufferUsage>(descriptor.usage);
   auto buffer = device_.CreateBuffer(&desc);
-  return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
+  return js.alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
 }
 
 jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescriptor descriptor) {
@@ -84,7 +84,7 @@ jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescripto
   }
 
   auto texture = device_.CreateTexture(&desc);
-  return jsg::alloc<GPUTexture>(kj::mv(texture));
+  return js.alloc<GPUTexture>(kj::mv(texture));
 }
 
 wgpu::CompareFunction parseCompareFunction(kj::StringPtr compare) {

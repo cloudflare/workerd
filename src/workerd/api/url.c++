@@ -629,16 +629,16 @@ void URLSearchParams::forEach(jsg::Lock& js,
   }
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock& js) {
+  return js.alloc<EntryIterator>(IteratorState{JSG_THIS});
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock& js) {
+  return js.alloc<KeyIterator>(IteratorState{JSG_THIS});
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock& js) {
+  return js.alloc<ValueIterator>(IteratorState{JSG_THIS});
 }
 
 kj::String URLSearchParams::toString() {

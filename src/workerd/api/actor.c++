@@ -177,7 +177,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
-  return jsg::alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);
+  return js.alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);
 }
 
 jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(kj::String jurisdiction) {

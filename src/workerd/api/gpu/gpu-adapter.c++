@@ -63,7 +63,7 @@ jsg::Promise<jsg::Ref<GPUAdapterInfo>> GPUAdapter::requestAdapterInfo(
 
   wgpu::AdapterInfo info = {};
   adapter_.GetInfo(&info);
-  auto gpuInfo = jsg::alloc<GPUAdapterInfo>(kj::mv(info));
+  auto gpuInfo = js.alloc<GPUAdapterInfo>(kj::mv(info));
   return js.resolvedPromise(kj::mv(gpuInfo));
 }
 
@@ -171,7 +171,7 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
 
   KJ_ASSERT(userData.requestEnded);
 
-  jsg::Ref<GPUDevice> gpuDevice = jsg::alloc<GPUDevice>(
+  jsg::Ref<GPUDevice> gpuDevice = js.alloc<GPUDevice>(
       js, kj::mv(userData.device), kj::addRef(*async_), kj::mv(deviceLostCtx), kj::mv(uErrorCtx));
   return js.resolvedPromise(kj::mv(gpuDevice));
 }

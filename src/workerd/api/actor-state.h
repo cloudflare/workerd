@@ -441,8 +441,8 @@ class WebSocketRequestResponsePair: public jsg::Object {
         response(kj::mv(response)) {};
 
   static jsg::Ref<WebSocketRequestResponsePair> constructor(
-      kj::String request, kj::String response) {
-    return jsg::alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
+      jsg::Lock& js, kj::String request, kj::String response) {
+    return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
   };
 
   kj::StringPtr getRequest() {
@@ -536,7 +536,7 @@ class DurableObjectState: public jsg::Object {
       jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
 
   // Gets the currently set object-wide websocket auto response.
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(jsg::Lock& js);
 
   // Get the last auto response timestamp or null
   kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);

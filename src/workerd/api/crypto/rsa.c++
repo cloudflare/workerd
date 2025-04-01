@@ -713,23 +713,23 @@ CryptoKeyPair generateRsaPair(jsg::Lock& js,
     .usages = usages & CryptoKeyUsageSet::privateKeyMask(),
   };
 
-  static constexpr auto createPair = [](kj::Own<CryptoKey::Impl> publicKey,
+  static constexpr auto createPair = [](jsg::Lock& js, kj::Own<CryptoKey::Impl> publicKey,
                                          kj::Own<CryptoKey::Impl> privateKey) {
-    return CryptoKeyPair{.publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey))};
+    return CryptoKeyPair{.publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+      .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey))};
   };
 
   if (normalizedName == "RSASSA-PKCS1-v1_5") {
-    return createPair(
+    return createPair(js,
         kj::heap<RsassaPkcs1V15Key>(kj::mv(publicKeyData), kj::mv(keyAlgorithm), true),
         kj::heap<RsassaPkcs1V15Key>(
             kj::mv(privateKeyData), kj::mv(privateKeyAlgorithm), privateKeyExtractable));
   } else if (normalizedName == "RSA-PSS") {
-    return createPair(kj::heap<RsaPssKey>(kj::mv(publicKeyData), kj::mv(keyAlgorithm), true),
+    return createPair(js, kj::heap<RsaPssKey>(kj::mv(publicKeyData), kj::mv(keyAlgorithm), true),
         kj::heap<RsaPssKey>(
             kj::mv(privateKeyData), kj::mv(privateKeyAlgorithm), privateKeyExtractable));
   } else if (normalizedName == "RSA-OAEP") {
-    return createPair(kj::heap<RsaOaepKey>(kj::mv(publicKeyData), kj::mv(keyAlgorithm), true),
+    return createPair(js, kj::heap<RsaOaepKey>(kj::mv(publicKeyData), kj::mv(keyAlgorithm), true),
         kj::heap<RsaOaepKey>(
             kj::mv(privateKeyData), kj::mv(privateKeyAlgorithm), privateKeyExtractable));
   }

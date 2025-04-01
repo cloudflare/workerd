@@ -620,7 +620,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
     //
     // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
     // as the method merely allocates an object and returns it with no side effects.
-    auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
+    auto txn = js.alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
 
     return js.resolvedPromise(txn.addRef())
         .then(js, kj::mv(callback))
@@ -741,7 +741,7 @@ SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
-  return jsg::alloc<SqlStorage>(JSG_THIS);
+  return js.alloc<SqlStorage>(JSG_THIS);
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
@@ -973,12 +973,12 @@ void DurableObjectState::setWebSocketAutoResponse(
       reqResp->getRequest(), reqResp->getResponse());
 }
 
-kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::
-    getWebSocketAutoResponse() {
+kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWebSocketAutoResponse(
+    jsg::Lock& js) {
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
   KJ_IF_SOME(manager, a.getHibernationManager()) {
     // If there's no hibernation manager created yet, there's nothing to do here.
-    return manager.getWebSocketAutoResponse();
+    return manager.getWebSocketAutoResponse(js);
   }
   return kj::none;
 }

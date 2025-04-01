@@ -659,7 +659,7 @@ kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey(jsg::Lock& js) {
   auto ptr = X509_get_pubkey(cert_.get());
   if (ptr == nullptr) return kj::none;
   auto pkey = kj::disposeWith<EVP_PKEY_free>(ptr);
-  return jsg::alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
+  return js.alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
 }
 
 kj::Maybe<kj::String> X509Certificate::getPem() {

@@ -11,14 +11,6 @@
 
 namespace workerd::api {
 
-namespace {
-class TextEncoderStreamController: public kj::Refcounted {
- public:
- private:
-  jsg::Ref<TextEncoder> encoder = jsg::alloc<TextEncoder>();
-};
-}  // namespace
-
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   auto transformer = TransformStream::constructor(js,
       Transformer{.transform = jsg::Function<Transformer::TransformAlgorithm>(
@@ -38,7 +30,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   })},
       StreamQueuingStrategy{}, StreamQueuingStrategy{});
 
-  return jsg::alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
+  return js.alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
 }
 
 TextDecoderStream::TextDecoderStream(jsg::Ref<TextDecoder> decoder,
@@ -79,7 +71,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                 }))},
       StreamQueuingStrategy{}, StreamQueuingStrategy{});
 
-  return jsg::alloc<TextDecoderStream>(
+  return js.alloc<TextDecoderStream>(
       kj::mv(decoder), transformer->getReadable(), transformer->getWritable());
 }
 

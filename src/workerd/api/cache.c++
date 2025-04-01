@@ -586,7 +586,7 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
     }
   }
 
-  return js.resolvedPromise(jsg::alloc<Cache>(kj::mv(cacheName)));
+  return js.resolvedPromise(js.alloc<Cache>(kj::mv(cacheName)));
 }
 
 }  // namespace workerd::api
