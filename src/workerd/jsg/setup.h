@@ -466,7 +466,7 @@ class Isolate: public IsolateBase {
   explicit Isolate(const V8System& system,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
-      : Isolate(system, nullptr, nullptr, kj::mv(observer), kj::mv(createParams)) {}
+      : Isolate(system, kj::none, nullptr, kj::mv(observer), kj::mv(createParams)) {}
 
   template <typename MetaConfiguration>
   void instantiateDefaultWrapper(MetaConfiguration&& configuration) {

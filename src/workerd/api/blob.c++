@@ -115,22 +115,6 @@ kj::String normalizeType(kj::String type) {
   return kj::mv(type);
 }
 
-jsg::BufferSource wrap(jsg::Lock& js, kj::Array<byte> data) {
-  auto buf = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, data.size()), Error,
-      "Unable to allocate space for Blob data");
-  buf.asArrayPtr().copyFrom(data);
-  return kj::mv(buf);
-
-  // TODO(perf): Ideally we could just wrap the data like this, in which
-  // the underlying v8::BackingStore is supposed to free the buffer when
-  // it is done with it. Unfortunately ASAN complains about a leak that
-  // will require more investigation.
-  // return jsg::BufferSource(js, jsg::BackingStore::from(js, kj::mv(data)));
-}
-
-kj::ArrayPtr<const kj::byte> getPtr(jsg::BufferSource& source) {
-  return source.asArrayPtr();
-}
 }  // namespace
 
 Blob::Blob(kj::Array<byte> data, kj::String type)
