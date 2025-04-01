@@ -180,7 +180,7 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
     url.path.add(kj::str("bulk"));
     url.path.add(kj::str("get"));
 
-    kj::String body = formBulkBodyString(name, withMetadata, options);
+    kj::String body = formBulkBodyString(js, name, withMetadata, options);
     kj::Maybe<uint64_t> expectedBodySize = uint64_t(body.size());
     auto headers = kj::HttpHeaders(context.getHeaderTable());
 
@@ -227,10 +227,10 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
   });
 }
 
-kj::String KvNamespace::formBulkBodyString(kj::Array<kj::String>& names,
+kj::String KvNamespace::formBulkBodyString(jsg::Lock& js,
+    kj::Array<kj::String>& names,
     bool withMetadata,
     jsg::Optional<kj::OneOf<kj::String, GetOptions>>& options) {
-  kj::Vector<kj::String> stringVector;
 
   kj::String type = kj::str("");
   kj::String cacheTtlStr = kj::str("");
@@ -249,26 +249,24 @@ kj::String KvNamespace::formBulkBodyString(kj::Array<kj::String>& names,
       }
     }
   }
-  for (auto& str: names) {
-    stringVector.add(kj::str("\"", str, "\""));  // Wrap each string in quotes for JSON
-  }
+  auto object = js.obj();
 
-  // Join array elements into a JSON array format
-  kj::String jsonArray = kj::str("[", kj::strArray(stringVector, ", "), "]");
-  kj::String s = kj::str("{'key': 'value'}");
-  kj::String keys = kj::str("\"keys\": ", jsonArray);
-  kj::String typeStr = kj::str("");
-  kj::String metadataStr = kj::str("");
+  auto keysArray = kj::heapArrayBuilder<jsg::JsValue>(names.size());
+  for (auto& n: names) {
+    keysArray.add(js.str(n));
+  }
+  object.set(js, "keys", js.arr(keysArray));
+
   if (type != kj::str("")) {
-    typeStr = kj::str(",\"type\": \"", type, "\"");
+    object.set(js, "type", js.str(type));
   }
   if (withMetadata) {
-    metadataStr = kj::str(",\"withMetadata\": true");
+    object.set(js, "withMetadata", js.boolean(true));
   }
   if (cacheTtlStr != kj::str("")) {
-    cacheTtlStr = kj::str(",\"cacheTtl\": \"", cacheTtlStr, "\"");
+    object.set(js, "cacheTtl", js.str(cacheTtlStr));
   }
-  return kj::str("{", keys, typeStr, metadataStr, cacheTtlStr, "}");
+  return jsg::JsValue(object).toJson(js);
 }
 
 kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>> KvNamespace::
