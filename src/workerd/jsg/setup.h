@@ -329,7 +329,7 @@ class IsolateBase {
   explicit IsolateBase(const V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
-      const v8::IsolateGroup* group);
+      kj::Maybe<v8::IsolateGroup> group);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
@@ -450,7 +450,7 @@ class Isolate: public IsolateBase {
   // a jsg::Lock of this Isolate.
   template <typename MetaConfiguration>
   explicit Isolate(const V8System& system,
-      const v8::IsolateGroup* group,
+      kj::Maybe<v8::IsolateGroup> group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
