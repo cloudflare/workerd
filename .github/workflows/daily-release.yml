@@ -17,7 +17,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_ACCESS_TOKEN }}
+          token: ${{ secrets.DEVPROD_PAT }}
           ref: main
           
       - name: Get current date
