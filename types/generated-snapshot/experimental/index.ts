@@ -1226,26 +1226,26 @@ export interface RsaOtherPrimesInfo {
 }
 export interface SubtleCryptoDeriveKeyAlgorithm {
   name: string;
-  salt?: ArrayBuffer;
+  salt?: ArrayBuffer | ArrayBufferView;
   iterations?: number;
   hash?: string | SubtleCryptoHashAlgorithm;
   $public?: CryptoKey;
-  info?: ArrayBuffer;
+  info?: ArrayBuffer | ArrayBufferView;
 }
 export interface SubtleCryptoEncryptAlgorithm {
   name: string;
-  iv?: ArrayBuffer;
-  additionalData?: ArrayBuffer;
+  iv?: ArrayBuffer | ArrayBufferView;
+  additionalData?: ArrayBuffer | ArrayBufferView;
   tagLength?: number;
-  counter?: ArrayBuffer;
+  counter?: ArrayBuffer | ArrayBufferView;
   length?: number;
-  label?: ArrayBuffer;
+  label?: ArrayBuffer | ArrayBufferView;
 }
 export interface SubtleCryptoGenerateKeyAlgorithm {
   name: string;
   hash?: string | SubtleCryptoHashAlgorithm;
   modulusLength?: number;
-  publicExponent?: ArrayBuffer;
+  publicExponent?: ArrayBuffer | ArrayBufferView;
   length?: number;
   namedCurve?: string;
 }
@@ -1280,7 +1280,7 @@ export interface CryptoKeyHmacKeyAlgorithm {
 export interface CryptoKeyRsaKeyAlgorithm {
   name: string;
   modulusLength: number;
-  publicExponent: ArrayBuffer | (ArrayBuffer | ArrayBufferView);
+  publicExponent: ArrayBuffer | ArrayBufferView;
   hash?: CryptoKeyKeyAlgorithm;
 }
 export interface CryptoKeyEllipticKeyAlgorithm {
@@ -1297,7 +1297,7 @@ export declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
   constructor(algorithm: string | SubtleCryptoHashAlgorithm);
-  get digest(): Promise<ArrayBuffer>;
+  get digest(): Promise<ArrayBuffer | ArrayBufferView>;
   get bytesWritten(): number | bigint;
 }
 /**

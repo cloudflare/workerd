@@ -70,12 +70,12 @@ jsg::BufferSource Rsa::getPublicExponent(jsg::Lock& js) {
   return KJ_REQUIRE_NONNULL(bignumToArray(js, *e));
 }
 
-CryptoKey::AsymmetricKeyDetails Rsa::getAsymmetricKeyDetail() const {
+CryptoKey::AsymmetricKeyDetails Rsa::getAsymmetricKeyDetail(jsg::Lock& js) const {
   CryptoKey::AsymmetricKeyDetails details;
 
   details.modulusLength = BN_num_bits(n);
   details.publicExponent =
-      JSG_REQUIRE_NONNULL(bignumToArrayPadded(*e), Error, "Failed to extract public exponent");
+      JSG_REQUIRE_NONNULL(bignumToArrayPadded(js, *e), Error, "Failed to extract public exponent");
 
   // TODO(soon): Does BoringSSL not support retrieving RSA_PSS params?
   // if (type == EVP_PKEY_RSA_PSS) {
@@ -182,7 +182,8 @@ jsg::BufferSource Rsa::cipher(jsg::Lock& js,
 
     JSG_REQUIRE(labelCopy != nullptr, DOMOperationError,
         "Failed to allocate space for RSA-OAEP label copy", tryDescribeOpensslErrors());
-    std::copy(l.begin(), l.end(), labelCopy);
+    auto ptr = l.asArrayPtr();
+    std::copy(ptr.begin(), ptr.end(), labelCopy);
 
     // EVP_PKEY_CTX_set0_rsa_oaep_label below takes ownership of the buffer passed in (must have
     // been OPENSSL_malloc-allocated).
@@ -506,8 +507,8 @@ class RsaBase: public AsymmetricKeyCryptoKeyImpl {
         DOMInvalidAccessError, "Cannot export \"", getAlgorithmName(), "\" in \"raw\" format.");
   }
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
-    return KJ_ASSERT_NONNULL(Rsa::tryGetRsa(getEvpPkey())).getAsymmetricKeyDetail();
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const override {
+    return KJ_ASSERT_NONNULL(Rsa::tryGetRsa(getEvpPkey())).getAsymmetricKeyDetail(js);
   }
 
   virtual kj::String jwkHashAlgorithmName() const = 0;
@@ -826,7 +827,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
   auto usages = CryptoKeyUsageSet::validate(
       normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages, validUsages);
 
-  Rsa::validateRsaParams(js, modulusLength, publicExponent.asPtr());
+  Rsa::validateRsaParams(js, modulusLength, publicExponent.asArrayPtr());
   // BoringSSL silently uses (modulusLength & ~127) for the key size, i.e. it rounds down to the
   // closest multiple of 128 bits. This can easily cause confusion when non-standard key sizes are
   // requested.
@@ -836,8 +837,8 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(jsg::
   JSG_REQUIRE(!(FeatureFlags::get(js).getStrictCrypto() && (modulusLength & 127)),
       DOMOperationError, "Can't generate key: RSA key size is required to be a multiple of 128");
 
-  auto bnExponent = JSG_REQUIRE_NONNULL(
-      toBignum(publicExponent), InternalDOMOperationError, "Error setting up RSA keygen.");
+  auto bnExponent = JSG_REQUIRE_NONNULL(toBignum(publicExponent.asArrayPtr()),
+      InternalDOMOperationError, "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
   OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
@@ -1008,7 +1009,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(jsg::Lock& js,
       "Input was not an RSA key", tryDescribeOpensslErrors());
 
   size_t modulusLength = rsa.getModulusBits();
-  auto publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(*rsa.getE()));
+  auto publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(js, *rsa.getE()));
 
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
   Rsa::validateRsaParams(js, modulusLength, publicExponent, true);
@@ -1020,12 +1021,19 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(jsg::Lock& js,
   return kj::heap<RsaRawKey>(kj::mv(importedKey), kj::mv(keyAlgorithm), extractable);
 }
 
-kj::Own<CryptoKey::Impl> fromRsaKey(kj::Own<EVP_PKEY> key) {
+kj::Own<CryptoKey::Impl> fromRsaKey(jsg::Lock& js, kj::Own<EVP_PKEY> key) {
+  auto rsa =
+      JSG_REQUIRE_NONNULL(Rsa::tryGetRsa(key.get()), DOMDataError, "Input was not an RSA key");
+
   return kj::heap<RsassaPkcs1V15Key>(AsymmetricKeyData{.evpPkey = kj::mv(key),
                                        .keyType = KeyType::PUBLIC,
                                        .usages = CryptoKeyUsageSet::decrypt() |
                                            CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify()},
-      CryptoKey::RsaKeyAlgorithm{.name = "RSA"_kj}, true);
+      CryptoKey::RsaKeyAlgorithm{
+        .name = "RSA"_kj,
+        .publicExponent = KJ_REQUIRE_NONNULL(bignumToArray(js, *rsa.getE())),
+      },
+      true);
 }
 
 }  // namespace workerd::api

@@ -187,8 +187,6 @@ class CryptoKey: public jsg::Object {
     JSG_MEMORY_INFO(HmacKeyAlgorithm) {}
   };
 
-  using BigInteger = kj::Array<kj::byte>;
-
   struct RsaKeyAlgorithm {
     // "RSASSA-PKCS1-v1_5", "RSA-PSS", "RSA-OAEP"
     kj::StringPtr name;
@@ -197,41 +195,25 @@ class CryptoKey: public jsg::Object {
     uint16_t modulusLength;
 
     // The RSA public exponent (in unsigned big-endian form)
-    kj::OneOf<BigInteger, jsg::BufferSource> publicExponent;
+    jsg::BufferSource publicExponent;
 
     // The hash algorithm that is used with this key.
     jsg::Optional<KeyAlgorithm> hash;
 
     RsaKeyAlgorithm clone(jsg::Lock& js) const {
       auto fixPublicExp = FeatureFlags::get(js).getCryptoPreservePublicExponent();
-      KJ_SWITCH_ONEOF(publicExponent) {
-        KJ_CASE_ONEOF(array, BigInteger) {
-          if (fixPublicExp) {
-            // alloc will, by default create a Uint8Array
-            auto expBack = jsg::BackingStore::alloc(js, array.size());
-            expBack.asArrayPtr().copyFrom(array);
-            return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
-          } else {
-            auto expBack = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, array.size());
-            expBack.asArrayPtr().copyFrom(array);
-            return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
-          }
-        }
-        KJ_CASE_ONEOF(source, jsg::BufferSource) {
-          // Should only happen if the flag is enabled and an algorithm field is cloned twice.
-          if (fixPublicExp) {
-            // alloc will, by default create a Uint8Array
-            auto expBack = jsg::BackingStore::alloc(js, source.size());
-            expBack.asArrayPtr().copyFrom(source);
-            return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
-          } else {
-            auto expBack = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, source.size());
-            expBack.asArrayPtr().copyFrom(source);
-            return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
-          }
-        }
+
+      // Should only happen if the flag is enabled and an algorithm field is cloned twice.
+      if (fixPublicExp) {
+        // alloc will, by default create a Uint8Array.
+        auto expBack = jsg::BackingStore::alloc(js, publicExponent.size());
+        expBack.asArrayPtr().copyFrom(publicExponent.asArrayPtr());
+        return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
+      } else {
+        auto expBack = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, publicExponent.size());
+        expBack.asArrayPtr().copyFrom(publicExponent.asArrayPtr());
+        return {name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash};
       }
-      KJ_UNREACHABLE;
     }
 
     JSG_STRUCT(name, modulusLength, publicExponent, hash);
@@ -270,7 +252,7 @@ class CryptoKey: public jsg::Object {
   // by CryptoKey::Impl to provide the actual implementation.
   struct AsymmetricKeyDetails {
     jsg::Optional<uint32_t> modulusLength;
-    jsg::Optional<kj::Array<kj::byte>> publicExponent;
+    jsg::Optional<jsg::BufferSource> publicExponent;
     // TODO(later): BoringSSL does not currently support getting the RSA-PSS
     // details for an RSA key. Once it does, we can update our impl and add
     // these fields.
@@ -287,7 +269,7 @@ class CryptoKey: public jsg::Object {
         divisorLength,
         namedCurve);
   };
-  AsymmetricKeyDetails getAsymmetricKeyDetails() const;
+  AsymmetricKeyDetails getAsymmetricKeyDetails(jsg::Lock& js) const;
 
   ~CryptoKey() noexcept(false);
 
@@ -377,10 +359,10 @@ class SubtleCrypto: public jsg::Object {
     kj::String name;
 
     // For AES: The initialization vector use. May be up to 2^64-1 bytes long.
-    jsg::Optional<kj::Array<kj::byte>> iv;
+    jsg::Optional<jsg::BufferSource> iv;
 
     // The additional authentication data to include.
-    jsg::Optional<kj::Array<kj::byte>> additionalData;
+    jsg::Optional<jsg::BufferSource> additionalData;
 
     // The desired length of the authentication tag. May be 0 - 128.
     // Note: the spec specifies this as a Web IDL byte (== signed char in C++), not an int, but JS
@@ -389,7 +371,7 @@ class SubtleCrypto: public jsg::Object {
 
     // The initial value of the counter block for AES-CTR.
     // https://www.w3.org/TR/WebCryptoAPI/#aes-ctr-params
-    jsg::Optional<kj::Array<kj::byte>> counter;
+    jsg::Optional<jsg::BufferSource> counter;
 
     // The length, in bits, of the rightmost part of the counter block that is incremented.
     // See above why we use int instead of int8_t.
@@ -397,7 +379,7 @@ class SubtleCrypto: public jsg::Object {
     jsg::Optional<int> length;
 
     // The optional label/application data to associate with the message (for RSA-OAEP)
-    jsg::Optional<kj::Array<kj::byte>> label;
+    jsg::Optional<jsg::BufferSource> label;
 
     JSG_STRUCT(name, iv, additionalData, tagLength, counter, length, label);
   };
@@ -435,7 +417,7 @@ class SubtleCrypto: public jsg::Object {
     jsg::Optional<int> modulusLength;
 
     // For RSA algorithms
-    jsg::Optional<kj::Array<kj::byte>> publicExponent;
+    jsg::Optional<jsg::BufferSource> publicExponent;
 
     // For AES algorithms or when name == "HMAC": The length in bits of the key.
     jsg::Optional<int> length;
@@ -477,7 +459,7 @@ class SubtleCrypto: public jsg::Object {
     kj::String name;
 
     // PBKDF2 parameters
-    jsg::Optional<kj::Array<kj::byte>> salt;
+    jsg::Optional<jsg::BufferSource> salt;
     jsg::Optional<int> iterations;
     jsg::Optional<kj::OneOf<kj::String, HashAlgorithm>> hash;
 
@@ -488,7 +470,7 @@ class SubtleCrypto: public jsg::Object {
 
     // Bit string that corresponds to the context and application specific context for the derived
     // keying material
-    jsg::Optional<kj::Array<kj::byte>> info;
+    jsg::Optional<jsg::BufferSource> info;
 
     JSG_STRUCT(name, salt, iterations, hash, $public, info);
   };
@@ -620,7 +602,7 @@ class SubtleCrypto: public jsg::Object {
       const jsg::TypeHandler<JsonWebKey>& jwkHandler);
 
   // This is a non-standard extension based off Node.js' implementation of crypto.timingSafeEqual.
-  bool timingSafeEqual(kj::Array<kj::byte> a, kj::Array<kj::byte> b);
+  bool timingSafeEqual(jsg::BufferSource a, jsg::BufferSource b);
 
   JSG_RESOURCE_TYPE(SubtleCrypto) {
     JSG_METHOD(encrypt);
@@ -675,7 +657,7 @@ class DigestContext {
  public:
   virtual ~DigestContext() noexcept = default;
   virtual void write(kj::ArrayPtr<kj::byte> buffer) = 0;
-  virtual kj::Array<kj::byte> close() = 0;
+  virtual jsg::BufferSource close(jsg::Lock& js) = 0;
 };
 
 class DigestStream: public WritableStream {
@@ -685,12 +667,12 @@ class DigestStream: public WritableStream {
 
   explicit DigestStream(kj::Own<WritableStreamController> controller,
       SubtleCrypto::HashAlgorithm algorithm,
-      jsg::Promise<kj::Array<kj::byte>>::Resolver resolver,
-      jsg::Promise<kj::Array<kj::byte>> promise);
+      jsg::Promise<jsg::BufferSource>::Resolver resolver,
+      jsg::Promise<jsg::BufferSource> promise);
 
   static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
-  jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>>& getDigest() {
+  jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>>& getDigest() {
     return promise;
   }
   void dispose(jsg::Lock& js);
@@ -718,15 +700,14 @@ class DigestStream: public WritableStream {
 
   struct Ready {
     SubtleCrypto::HashAlgorithm algorithm;
-    jsg::Promise<kj::Array<kj::byte>>::Resolver resolver;
+    jsg::Promise<jsg::BufferSource>::Resolver resolver;
     DigestContextPtr context;
-    Ready(
-        SubtleCrypto::HashAlgorithm algorithm, jsg::Promise<kj::Array<kj::byte>>::Resolver resolver)
+    Ready(SubtleCrypto::HashAlgorithm algorithm, jsg::Promise<jsg::BufferSource>::Resolver resolver)
         : algorithm(kj::mv(algorithm)),
           resolver(kj::mv(resolver)),
           context(initContext(this->algorithm)) {}
   };
-  jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>> promise;
+  jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>> promise;
   kj::OneOf<Ready, StreamStates::Closed, StreamStates::Errored> state;
   uint64_t bytesWritten = 0;
 

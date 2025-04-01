@@ -216,7 +216,14 @@ class AesGcmKey final: public AesKeyBase {
         JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".");
     JSG_REQUIRE(iv.size() != 0, DOMOperationError, "AES-GCM IV must not be empty.");
 
-    auto additionalData = algorithm.additionalData.orDefault(kj::Array<kj::byte>()).asPtr();
+    kj::ArrayPtr<kj::byte> empty = nullptr;
+    auto additionalData = ([&] {
+      KJ_IF_SOME(source, algorithm.additionalData) {
+        return source.asArrayPtr();
+      } else {
+        return empty;
+      }
+    })();
 
     // The magic number below came from here:
     // https://w3c.github.io/webcrypto/Overview.html#aes-gcm-operations
@@ -291,7 +298,13 @@ class AesGcmKey final: public AesKeyBase {
         "the size of the AES-GCM tag length of ",
         tagLength, " bits.");
 
-    auto additionalData = algorithm.additionalData.orDefault(kj::Array<kj::byte>()).asPtr();
+    kj::ArrayPtr<kj::byte> empty = nullptr;
+    auto additionalData = ([&] {
+      KJ_IF_SOME(source, algorithm.additionalData) {
+        return source.asArrayPtr();
+      }
+      return empty;
+    })();
 
     auto cipherCtx = kj::disposeWith<EVP_CIPHER_CTX_free>(EVP_CIPHER_CTX_new());
     KJ_ASSERT(cipherCtx.get() != nullptr);
@@ -499,7 +512,7 @@ class AesCtrKey final: public AesKeyBase {
         InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt",
         internalDescribeOpensslErrors());
 
-    auto currentCounter = getCounter(counter.asPtr(), counterBitLength);
+    auto currentCounter = getCounter(counter.asArrayPtr(), counterBitLength);
 
     // Now figure out how many AES blocks we'll process/how many times to increment the counter.
     auto numOutputBlocks = newBignum();
@@ -534,7 +547,7 @@ class AesCtrKey final: public AesKeyBase {
     process(&cipher, data.first(inputSizePart1), counter, result.asArrayPtr());
 
     // Zero the counter bits of the block in a copy of the input counter.
-    kj::Array<kj::byte> zeroed_counter = kj::heapArray(counter.asPtr());
+    kj::Array<kj::byte> zeroed_counter = kj::heapArray(counter.asArrayPtr());
     {
       KJ_DASSERT(counterBitLength / 8 <= expectedCounterByteSize);
 

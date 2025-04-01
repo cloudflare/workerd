@@ -107,7 +107,7 @@ class SecretKey final: public CryptoKey::Impl {
   jsg::BufferSource keyData;
 };
 
-CryptoKey::AsymmetricKeyDetails getRsaKeyDetails(const ncrypto::EVPKeyPointer& key) {
+CryptoKey::AsymmetricKeyDetails getRsaKeyDetails(jsg::Lock& js, const ncrypto::EVPKeyPointer& key) {
   ncrypto::Rsa rsa = key;
 
   // BoringSSL does not currently support the id-RSASSA-PSS key encoding and
@@ -120,7 +120,7 @@ CryptoKey::AsymmetricKeyDetails getRsaKeyDetails(const ncrypto::EVPKeyPointer& k
   return CryptoKey::AsymmetricKeyDetails{
     .modulusLength = key.bits(),
     .publicExponent = JSG_REQUIRE_NONNULL(
-        bignumToArrayPadded(*rsa.getPublicKey().e), Error, "Failed to extract public exponent"),
+        bignumToArrayPadded(js, *rsa.getPublicKey().e), Error, "Failed to extract public exponent"),
   };
 }
 
@@ -243,12 +243,12 @@ class AsymmetricKey final: public CryptoKey::Impl {
     return alg;
   }
 
-  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js) const override {
     if (!key) [[unlikely]]
       return {};
 
     if (key.isRsaVariant()) {
-      return getRsaKeyDetails(key);
+      return getRsaKeyDetails(js, key);
     }
 
     if (key.id() == EVP_PKEY_DSA) {
@@ -394,7 +394,7 @@ bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoK
 CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
     jsg::Lock& js, jsg::Ref<CryptoKey> key) {
   JSG_REQUIRE(key->getType() != "secret"_kj, Error, "Secret keys do not have asymmetric details");
-  return key->getAsymmetricKeyDetails();
+  return key->getAsymmetricKeyDetails(js);
 }
 
 kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
