@@ -11,7 +11,7 @@ namespace {
 // Approximately how much external data we allow in a trace before we start ignoring requests.  We
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request.
-static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
+static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 // Limit spans to at most 512, it could be difficult to fit e.g. 1024 spans within MAX_TRACE_BYTES
 // unless most of the included spans do not include tags. If use cases arise where this amount is
 // insufficient, merge smaller spans together or drop smaller spans.
@@ -104,7 +104,7 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
       self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
 
 constexpr kj::LiteralStringConst logSizeExceeded =
-    "[\"Log size limit exceeded: More than 128KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
+    "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
 
 void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
