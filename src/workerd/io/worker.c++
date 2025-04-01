@@ -3506,7 +3506,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
       auto handler = info.cls(lock,
-          js.alloc<api::DurableObjectState>(cloneId(),
+          js.alloc<api::DurableObjectState>(js, cloneId(),
               jsg::JsRef<jsg::JsValue>(
                   js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
               kj::mv(storage), kj::mv(impl->container), containerRunning),

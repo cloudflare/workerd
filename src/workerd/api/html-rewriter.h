@@ -44,7 +44,7 @@ class HTMLRewriter: public jsg::Object {
   ~HTMLRewriter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(HTMLRewriter);
 
-  static jsg::Ref<HTMLRewriter> constructor();
+  static jsg::Ref<HTMLRewriter> constructor(jsg::Lock& js);
 
   using ElementCallback = kj::Promise<void>(jsg::Ref<jsg::Object> element);
   using ElementCallbackFunction = jsg::Function<ElementCallback>;
@@ -184,7 +184,7 @@ class Element final: public HTMLRewriter::Token {
   void setTagName(kj::String tagName);
 
   class AttributesIterator;
-  jsg::Ref<AttributesIterator> getAttributes();
+  jsg::Ref<AttributesIterator> getAttributes(jsg::Lock& js);
 
   bool getRemoved();
 

@@ -562,7 +562,9 @@ class R2Bucket: public jsg::Object {
 
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
 // by making use of dynamic dispatch.
-kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
-    kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,
+    kj::StringPtr action,
+    R2Result& r2Result,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
 }  // namespace workerd::api::public_beta

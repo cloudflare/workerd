@@ -29,7 +29,7 @@ class ColoLocalActorNamespace: public jsg::Object {
  public:
   ColoLocalActorNamespace(uint channel): channel(channel) {}
 
-  jsg::Ref<Fetcher> get(kj::String actorId);
+  jsg::Ref<Fetcher> get(jsg::Lock& js, kj::String actorId);
 
   JSG_RESOURCE_TYPE(ColoLocalActorNamespace) {
     JSG_METHOD(get);
@@ -175,18 +175,18 @@ class DurableObjectNamespace: public jsg::Object {
   };
 
   // Create a new unique ID for a durable object that will be allocated nearby the calling colo.
-  jsg::Ref<DurableObjectId> newUniqueId(jsg::Optional<NewUniqueIdOptions> options);
+  jsg::Ref<DurableObjectId> newUniqueId(jsg::Lock& js, jsg::Optional<NewUniqueIdOptions> options);
 
   // Create a name-derived ID. Passing in the same `name` (to the same class) will always
   // produce the same ID.
-  jsg::Ref<DurableObjectId> idFromName(kj::String name);
+  jsg::Ref<DurableObjectId> idFromName(jsg::Lock& js, kj::String name);
 
   // Create a DurableObjectId from the stringified form of the ID (as produced by calling
   // `toString()` on a durable object ID). Throws if the ID is not a 64-digit hex number, or if the
   // ID was not originally created for this class.
   //
   // The ID may be one that was originally created using either `newUniqueId()` or `idFromName()`.
-  jsg::Ref<DurableObjectId> idFromString(kj::String id);
+  jsg::Ref<DurableObjectId> idFromString(jsg::Lock& js, kj::String id);
 
   struct GetDurableObjectOptions {
     jsg::Optional<kj::String> locationHint;
@@ -210,7 +210,7 @@ class DurableObjectNamespace: public jsg::Object {
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Creates a subnamespace with the jurisdiction hardcoded.
-  jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
+  jsg::Ref<DurableObjectNamespace> jurisdiction(jsg::Lock& js, kj::String jurisdiction);
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);

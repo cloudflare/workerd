@@ -825,12 +825,12 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(jsg::Lock& js,
   return timeoutId.toNumber();
 }
 
-jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto() {
-  return jsg::alloc<Crypto>();
+jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto(jsg::Lock& js) {
+  return js.alloc<Crypto>(js);
 }
 
-jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches() {
-  return jsg::alloc<CacheStorage>();
+jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches(jsg::Lock& js) {
+  return js.alloc<CacheStorage>(js);
 }
 
 jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(jsg::Lock& js,
@@ -904,7 +904,8 @@ double Performance::now() {
 }
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(CompatibilityFlags::Reader flags) {
+jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(
+    jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // is this a durable object?
   KJ_IF_SOME(actor, IoContext::current().getActor()) {
     if (actor.getPersistent() == kj::none) {
@@ -918,7 +919,7 @@ jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(CompatibilityFlags::Rea
     return kj::none;
   }
 
-  return jsg::alloc<api::gpu::GPU>();
+  return js.alloc<api::gpu::GPU>();
 }
 #endif
 

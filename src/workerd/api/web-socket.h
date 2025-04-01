@@ -180,7 +180,7 @@ class WebSocketPair: public jsg::Object {
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
       : sockets{kj::mv(first), kj::mv(second)} {}
 
-  static jsg::Ref<WebSocketPair> constructor();
+  static jsg::Ref<WebSocketPair> constructor(jsg::Lock& js);
 
   jsg::Ref<WebSocket> getFirst() {
     return sockets[0].addRef();
@@ -666,7 +666,7 @@ class WebSocket: public EventTarget {
 
   void setPeer(kj::Own<WeakRef<WebSocket>> peer);
 
-  friend jsg::Ref<WebSocketPair> WebSocketPair::constructor();
+  friend jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock&);
 
   void dispatchOpen(jsg::Lock& js);
 

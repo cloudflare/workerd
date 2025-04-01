@@ -230,7 +230,8 @@ kj::Maybe<kj::String> getCurrentActorId() {
 
 }  // namespace
 
-DurableObjectStorage::DurableObjectStorage(IoPtr<ActorCacheInterface> cache,
+DurableObjectStorage::DurableObjectStorage(jsg::Lock& js,
+    IoPtr<ActorCacheInterface> cache,
     bool enableSql,
     kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
     kj::Own<ActorIdFactory::ActorId> primaryActorId)
@@ -246,8 +247,8 @@ DurableObjectStorage::DurableObjectStorage(IoPtr<ActorCacheInterface> cache,
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
 
-  this->maybePrimary = jsg::alloc<DurableObject>(
-      jsg::alloc<DurableObjectId>(kj::mv(primaryActorId)), kj::mv(outgoingFactory), requiresHost);
+  this->maybePrimary = js.alloc<DurableObject>(
+      js.alloc<DurableObjectId>(kj::mv(primaryActorId)), kj::mv(outgoingFactory), requiresHost);
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(jsg::Lock& js,
@@ -824,19 +825,20 @@ ActorState::ActorState(Worker::Actor::Id actorId,
       transient(kj::mv(transient)),
       persistent(kj::mv(persistent)) {}
 
-kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId() {
+kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return coloLocalId.asPtr();
     }
     KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
-      return jsg::alloc<DurableObjectId>(globalId->clone());
+      return js.alloc<DurableObjectId>(globalId->clone());
     }
   }
   KJ_UNREACHABLE;
 }
 
-DurableObjectState::DurableObjectState(Worker::Actor::Id actorId,
+DurableObjectState::DurableObjectState(jsg::Lock& js,
+    Worker::Actor::Id actorId,
     jsg::JsRef<jsg::JsValue> exports,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
@@ -845,20 +847,20 @@ DurableObjectState::DurableObjectState(Worker::Actor::Id actorId,
       exports(kj::mv(exports)),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
-        return jsg::alloc<Container>(kj::mv(cap), containerRunning);
+        return js.alloc<Container>(kj::mv(cap), containerRunning);
       })) {}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId() {
+kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return coloLocalId.asPtr();
     }
     KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
-      return jsg::alloc<DurableObjectId>(globalId->clone());
+      return js.alloc<DurableObjectId>(globalId->clone());
     }
   }
   KJ_UNREACHABLE;

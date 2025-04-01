@@ -42,7 +42,7 @@ TextDecoderStream::TextDecoderStream(jsg::Ref<TextDecoder> decoder,
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<TextDecoderStreamInit> options) {
 
-  auto decoder = TextDecoder::constructor(kj::mv(label), options.map([](auto& opts) {
+  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([](auto& opts) {
     return TextDecoder::ConstructorOptions{
       .fatal = opts.fatal.orDefault(true),
       .ignoreBOM = opts.ignoreBOM.orDefault(false),

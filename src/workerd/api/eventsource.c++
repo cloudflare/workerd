@@ -267,12 +267,12 @@ EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit>
         .url = kj::mv(url),
         .options = kj::mv(init).orDefault({}),
       }),
-      abortController(js.alloc<AbortController>()),
+      abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
 EventSource::EventSource(jsg::Lock& js)
     : context(IoContext::current()),
-      abortController(js.alloc<AbortController>()),
+      abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
 void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool reconnecting) {
@@ -320,7 +320,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
 void EventSource::reconnect(jsg::Lock& js) {
   KJ_ASSERT(impl != kj::none);
   readyState = State::CONNECTING;
-  abortController = js.alloc<AbortController>();
+  abortController = js.alloc<AbortController>(js);
   auto signal = abortController->getSignal();
   context.awaitIo(js, signal->wrap(context.afterLimitTimeout(reconnectionTime)))
       .then(js,

@@ -167,8 +167,8 @@ Headers::Headers(const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) 
   this->guard = guard;
 }
 
-jsg::Ref<Headers> Headers::clone() const {
-  auto result = jsg::alloc<Headers>(*this);
+jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
+  auto result = js.alloc<Headers>(*this);
   result->guard = guard;
   return kj::mv(result);
 }
@@ -1128,7 +1128,7 @@ jsg::Ref<Request> Request::constructor(
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
-  auto headersClone = headers->clone();
+  auto headersClone = headers->clone(js);
 
   auto cfClone = cf.deepClone(js);
   auto bodyClone = Body::clone(js);
@@ -1594,7 +1594,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   JSG_REQUIRE(
       webSocket == kj::none, TypeError, "Cannot clone a response to a WebSocket handshake.");
 
-  auto headersClone = headers->clone();
+  auto headersClone = headers->clone(js);
   auto cfClone = cf.deepClone(js);
 
   auto bodyClone = Body::clone(js);

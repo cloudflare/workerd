@@ -825,12 +825,12 @@ kj::StringPtr Element::getNamespaceURI() {
   return lol_html_element_namespace_uri_get(&checkToken(impl).element);
 }
 
-jsg::Ref<Element::AttributesIterator> Element::getAttributes() {
+jsg::Ref<Element::AttributesIterator> Element::getAttributes(jsg::Lock& js) {
   auto& implRef = checkToken(impl);
 
   auto iter = LOL_HTML_OWN(attributes_iterator, lol_html_attributes_iterator_get(&implRef.element));
 
-  auto jsIter = jsg::alloc<Element::AttributesIterator>(kj::mv(iter));
+  auto jsIter = js.alloc<Element::AttributesIterator>(kj::mv(iter));
   implRef.attributesIterators.add(jsIter.addRef());
   return kj::mv(jsIter);
 }
@@ -1201,8 +1201,8 @@ void HTMLRewriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("impl", impl);
 }
 
-jsg::Ref<HTMLRewriter> HTMLRewriter::constructor() {
-  return jsg::alloc<HTMLRewriter>();
+jsg::Ref<HTMLRewriter> HTMLRewriter::constructor(jsg::Lock& js) {
+  return js.alloc<HTMLRewriter>();
 }
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::on(

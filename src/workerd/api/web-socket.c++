@@ -1029,10 +1029,10 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop(
   }
 }
 
-jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
+jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
   auto pipe = kj::newWebSocketPipe();
-  auto pair = jsg::alloc<WebSocketPair>(
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0])), jsg::alloc<WebSocket>(kj::mv(pipe.ends[1])));
+  auto pair = js.alloc<WebSocketPair>(
+      js.alloc<WebSocket>(kj::mv(pipe.ends[0])), js.alloc<WebSocket>(kj::mv(pipe.ends[1])));
   auto first = pair->getFirst();
   auto second = pair->getSecond();
 

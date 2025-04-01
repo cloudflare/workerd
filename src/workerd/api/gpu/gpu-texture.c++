@@ -12,7 +12,7 @@
 namespace workerd::api::gpu {
 
 jsg::Ref<GPUTextureView> GPUTexture::createView(
-    jsg::Optional<GPUTextureViewDescriptor> descriptor) {
+    jsg::Lock& js, jsg::Optional<GPUTextureViewDescriptor> descriptor) {
   wgpu::TextureViewDescriptor desc{};
   KJ_IF_SOME(d, descriptor) {
     desc.label = d.label.cStr();
@@ -26,7 +26,7 @@ jsg::Ref<GPUTextureView> GPUTexture::createView(
   }
 
   auto textureView = texture_.CreateView(&desc);
-  return jsg::alloc<GPUTextureView>(kj::mv(textureView));
+  return js.alloc<GPUTextureView>(kj::mv(textureView));
 }
 
 }  // namespace workerd::api::gpu

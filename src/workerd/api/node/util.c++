@@ -16,8 +16,8 @@ MIMEParams::MIMEParams(kj::Maybe<MimeType&> mimeType): mimeType(mimeType) {}
 
 // Oddly, Node.js allows creating MIMEParams directly but it's not actually
 // functional. But, to match, we'll go ahead and allow it.
-jsg::Ref<MIMEParams> MIMEParams::constructor() {
-  return jsg::alloc<MIMEParams>(kj::none);
+jsg::Ref<MIMEParams> MIMEParams::constructor(jsg::Lock& js) {
+  return js.alloc<MIMEParams>(kj::none);
 }
 
 void MIMEParams::delete_(kj::String name) {
@@ -83,19 +83,19 @@ jsg::Ref<MIMEParams::ValueIterator> MIMEParams::values(jsg::Lock& js) {
   return js.alloc<ValueIterator>(IteratorState<kj::String>{vec.releaseAsArray()});
 }
 
-MIMEType::MIMEType(MimeType inner)
+MIMEType::MIMEType(jsg::Lock& js, MimeType inner)
     : inner(kj::mv(inner)),
-      params(jsg::alloc<MIMEParams>(this->inner)) {}
+      params(js.alloc<MIMEParams>(this->inner)) {}
 
 MIMEType::~MIMEType() noexcept(false) {
   // Break the connection with the MIMEParams
   params->mimeType = kj::none;
 }
 
-jsg::Ref<MIMEType> MIMEType::constructor(kj::String input) {
+jsg::Ref<MIMEType> MIMEType::constructor(jsg::Lock& js, kj::String input) {
   auto parsed =
       JSG_REQUIRE_NONNULL(MimeType::tryParse(input), TypeError, "Not a valid MIME type: ", input);
-  return jsg::alloc<MIMEType>(kj::mv(parsed));
+  return js.alloc<MIMEType>(js, kj::mv(parsed));
 }
 
 kj::StringPtr MIMEType::getType() {

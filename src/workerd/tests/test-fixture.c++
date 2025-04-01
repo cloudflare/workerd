@@ -366,7 +366,7 @@ TestFixture::TestFixture(SetupParams&& params)
           [](jsg::Lock& js, const Worker::Api& api,
               ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
         return js.alloc<api::DurableObjectStorage>(
-            IoContext::current().addObject(actorCache), /*enableSql=*/false);
+            js, IoContext::current().addObject(actorCache), /*enableSql=*/false);
       };
       actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
           /*hasTransient=*/false, makeActorCache,

@@ -36,7 +36,7 @@ class MIMEParams final: public jsg::Object {
  public:
   MIMEParams(kj::Maybe<MimeType&> mimeType = kj::none);
 
-  static jsg::Ref<MIMEParams> constructor();
+  static jsg::Ref<MIMEParams> constructor(jsg::Lock& js);
 
   void delete_(kj::String name);
   kj::Maybe<kj::StringPtr> get(kj::String name);
@@ -88,9 +88,9 @@ class MIMEParams final: public jsg::Object {
 
 class MIMEType final: public jsg::Object {
  public:
-  explicit MIMEType(MimeType inner);
+  explicit MIMEType(jsg::Lock& js, MimeType inner);
   ~MIMEType() noexcept(false);
-  static jsg::Ref<MIMEType> constructor(kj::String input);
+  static jsg::Ref<MIMEType> constructor(jsg::Lock& js, kj::String input);
 
   kj::StringPtr getType();
   void setType(kj::String type);

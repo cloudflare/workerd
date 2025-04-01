@@ -155,9 +155,9 @@ uint EventTarget::EventHandlerHashCallbacks::hashCode(const EventHandler::Handle
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<Event> Event::constructor(kj::String type, jsg::Optional<Init> init) {
+jsg::Ref<Event> Event::constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init) {
   static const Init defaultInit;
-  return jsg::alloc<Event>(kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
+  return js.alloc<Event>(kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
 }
 
 kj::StringPtr Event::getType() {
@@ -187,8 +187,8 @@ void Event::beginDispatch(jsg::Ref<EventTarget> target) {
   this->target = kj::mv(target);
 }
 
-jsg::Ref<EventTarget> EventTarget::constructor() {
-  return jsg::alloc<EventTarget>();
+jsg::Ref<EventTarget> EventTarget::constructor(jsg::Lock& js) {
+  return js.alloc<EventTarget>();
 }
 
 EventTarget::~EventTarget() noexcept(false) {
@@ -742,13 +742,12 @@ void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState() {
+jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
   IoContext& context = IoContext::current();
   return context.getActor().map([&](Worker::Actor& actor) {
     auto& lock = context.getCurrentLock();
     auto persistent = actor.makeStorageForSwSyntax(lock);
-    return jsg::alloc<api::ActorState>(
-        actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
+    return js.alloc<api::ActorState>(actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
   });
 }
 

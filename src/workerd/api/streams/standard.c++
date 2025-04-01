@@ -1136,9 +1136,9 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(WritableStream& owner)
+WritableImpl<Self>::WritableImpl(jsg::Lock& js, WritableStream& owner)
     : owner(owner.addWeakRef()),
-      signal(jsg::alloc<AbortSignal>()) {}
+      signal(js.alloc<AbortSignal>()) {}
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(
@@ -3171,9 +3171,10 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 
 // ======================================================================================
 
-WritableStreamDefaultController::WritableStreamDefaultController(WritableStream& owner)
+WritableStreamDefaultController::WritableStreamDefaultController(
+    jsg::Lock& js, WritableStream& owner)
     : ioContext(tryGetIoContext()),
-      impl(owner) {}
+      impl(js, owner) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
     jsg::Lock& js, v8::Local<v8::Value> reason) {
@@ -3403,7 +3404,7 @@ void WritableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = js.alloc<WritableStreamDefaultController>(KJ_ASSERT_NONNULL(owner));
+  state = js.alloc<WritableStreamDefaultController>(js, KJ_ASSERT_NONNULL(owner));
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

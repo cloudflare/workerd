@@ -561,7 +561,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   KJ_UNREACHABLE;
 }
 
-CryptoKeyPair CryptoImpl::generateRsaKeyPair(RsaKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(
@@ -621,12 +621,12 @@ CryptoKeyPair CryptoImpl::generateRsaKeyPair(RsaKeyPairOptions options) {
   JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   };
 }
 
-CryptoKeyPair CryptoImpl::generateDsaKeyPair(DsaKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateDsaKeyPair(jsg::Lock& js, DsaKeyPairOptions options) {
   // TODO(later): BoringSSL does not implement DSA key generation using
   // EVP_PKEY_keygen. We would need to implement this using the DSA-specific
   // APIs which get a bit complicated when it comes to using a user-provided
@@ -657,14 +657,14 @@ CryptoKeyPair CryptoImpl::generateDsaKeyPair(DsaKeyPairOptions options) {
   // JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   // return CryptoKeyPair {
-  //   .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-  //   .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+  //   .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+  //   .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   // };
 
   JSG_FAIL_REQUIRE(Error, "Not yet implemented");
 }
 
-CryptoKeyPair CryptoImpl::generateEcKeyPair(EcKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateEcKeyPair(jsg::Lock& js, EcKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto nid = getCurveFromName(options.namedCurve);
@@ -698,12 +698,12 @@ CryptoKeyPair CryptoImpl::generateEcKeyPair(EcKeyPairOptions options) {
   JSG_REQUIRE(pvtKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(pubKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(pvtKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(pubKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(pvtKey)),
   };
 }
 
-CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateEdKeyPair(jsg::Lock& js, EdKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto nid = ([&] {
@@ -733,12 +733,12 @@ CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
   JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   };
 }
 
-CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions options) {
 
   // TODO(soon): Older versions of boringssl+fips do not support EVP with
   // DH key pairs that are required to make the following work. A compile
@@ -806,8 +806,8 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
   JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   };
 }
 

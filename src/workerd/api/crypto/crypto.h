@@ -725,6 +725,8 @@ class DigestStream: public WritableStream {
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
 class Crypto: public jsg::Object {
  public:
+  Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
   jsg::BufferSource getRandomValues(jsg::BufferSource buffer);
 
   kj::String randomUUID();
@@ -768,7 +770,7 @@ class Crypto: public jsg::Object {
   }
 
  private:
-  jsg::Ref<SubtleCrypto> subtle = jsg::alloc<SubtleCrypto>();
+  jsg::Ref<SubtleCrypto> subtle;
 };
 
 #define EW_CRYPTO_ISOLATE_TYPES                                                                    \

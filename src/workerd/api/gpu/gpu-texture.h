@@ -35,7 +35,8 @@ class GPUTexture: public jsg::Object {
  private:
   wgpu::Texture texture_;
 
-  jsg::Ref<GPUTextureView> createView(jsg::Optional<GPUTextureViewDescriptor> descriptor);
+  jsg::Ref<GPUTextureView> createView(
+      jsg::Lock& js, jsg::Optional<GPUTextureViewDescriptor> descriptor);
 
   GPUIntegerCoordinateOut getWidth() {
     return texture_.GetWidth();
