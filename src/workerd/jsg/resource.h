@@ -21,6 +21,7 @@
 #include <v8-template.h>
 
 #include <kj/debug.h>
+#include <kj/filesystem.h>
 #include <kj/map.h>
 #include <kj/tuple.h>
 

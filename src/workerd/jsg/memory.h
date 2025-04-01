@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <v8-local-handle.h>
 #include <v8-profiler.h>
 
 #include <kj/common.h>

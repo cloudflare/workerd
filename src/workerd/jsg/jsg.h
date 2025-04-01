@@ -14,12 +14,13 @@
 #include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
 
-#include <v8-external-memory-accounter.h>
-#include <v8-forward.h>
+#include <v8-function-callback.h>
 #include <v8-locker.h>
-#include <v8-profiler.h>
+#include <v8-promise.h>
 #include <v8-regexp.h>
-
+namespace v8 {
+class ExternalMemoryAccounter;
+}
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>

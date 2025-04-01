@@ -5,7 +5,9 @@
 
 #include "jsg.h"
 
-#include <v8.h>
+#include <v8-function.h>      // for Function
+#include <v8-local-handle.h>  // for Local
+#include <v8-object.h>        // for Object
 
 namespace workerd::jsg {
 

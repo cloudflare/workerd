@@ -9,6 +9,7 @@
 // including garbage-collecting those objects.
 
 #include <v8-context.h>
+#include <v8-embedder-heap.h>
 #include <v8-object.h>
 
 #include <kj/common.h>

@@ -15,6 +15,7 @@
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
+#include <v8-unwinder.h>
 
 #if !_WIN32
 #include <cxxabi.h>

@@ -8,6 +8,7 @@
 #include "util.h"
 #include "wrappable.h"
 
+#include <v8-function.h>
 #include <v8-promise.h>
 
 #include <kj/async.h>

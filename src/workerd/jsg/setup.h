@@ -12,13 +12,17 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/util/batch-queue.h>
 
-#include <v8-profiler.h>
+#include <v8-external-memory-accounter.h>
 
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
 #include <typeindex>
+
+namespace v8 {
+class EmbedderGraph;
+}
 
 namespace workerd::jsg {
 

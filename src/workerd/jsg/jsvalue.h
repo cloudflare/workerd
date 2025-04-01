@@ -3,7 +3,9 @@
 #include "jsg.h"
 
 #include <v8-container.h>
+#include <v8-date.h>
 #include <v8-external.h>
+#include <v8-proxy.h>
 
 namespace workerd::jsg {
 

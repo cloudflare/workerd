@@ -7,10 +7,31 @@
 //
 // This file contains misc utility functions used elsewhere.
 
-#include <v8-array-buffer.h>
-#include <v8-exception.h>
-#include <v8-primitive.h>
-#include <v8-promise.h>
+#include <v8-exception.h>     // for TryCatch
+#include <v8-local-handle.h>  // for Local, HandleScope, MaybeLocal
+#include <v8-maybe.h>         // for Maybe
+#include <v8-primitive.h>     // for String, NewStringType
+
+namespace v8 {
+class ArrayBuffer;
+}
+namespace v8 {
+class ArrayBufferView;
+}
+namespace v8 {
+class Context;
+}
+namespace v8 {
+class Promise;
+}
+namespace v8 {
+template <class F>
+class FunctionCallbackInfo;
+}
+namespace v8 {
+template <typename T>
+class PropertyCallbackInfo;
+}
 
 #include <kj/debug.h>
 #include <kj/exception.h>
@@ -436,8 +457,6 @@ inline bool isFinite(double value) {
 }
 
 // ======================================================================================
-
-class Lock;
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite

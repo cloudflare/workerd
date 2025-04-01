@@ -13,6 +13,7 @@
 #include <workerd/util/thread-scopes.h>
 
 #include <v8-json.h>
+#include <v8-wasm.h>
 
 #include <kj/filesystem.h>
 #include <kj/map.h>

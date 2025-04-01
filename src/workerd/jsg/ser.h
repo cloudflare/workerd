@@ -7,6 +7,9 @@
 #include <workerd/jsg/jsg.h>
 
 #include <v8-value-serializer.h>
+namespace v8 {
+class Proxy;
+}
 
 #include <kj/vector.h>
 
