@@ -13,6 +13,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/promise-wrapper.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/inspector.h>

@@ -5,6 +5,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/vector.h>

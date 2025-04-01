@@ -6,6 +6,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/features.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 
 #include <capnp/membrane.h>

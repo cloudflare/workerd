@@ -8,6 +8,7 @@
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/mimetype.h>
