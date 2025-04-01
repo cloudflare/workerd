@@ -349,10 +349,14 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
 
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
   KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
-  KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(KJ_ASSERT_NONNULL(topLevelInvocationSpanContext),
-        tracing::Return(tracing::Return::Info(info.clone())));
-  }
+  // TODO(streaming-tail): The fetch response info is currently being reported when terminating the
+  // request observer. This results in it being reported after the outcome event, which we need to
+  // avoid.
+  // KJ_IF_SOME(writer, maybeTailStreamWriter) {
+  //   KJ_LOG(WARNING, "setFetchResponseInfo");
+  //   writer->report(KJ_ASSERT_NONNULL(topLevelInvocationSpanContext),
+  //       tracing::Return(tracing::Return::Info(info.clone())));
+  // }
   trace->fetchResponseInfo = kj::mv(info);
 }
 
