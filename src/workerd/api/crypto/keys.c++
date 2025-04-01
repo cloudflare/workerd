@@ -31,7 +31,7 @@ AsymmetricKeyCryptoKeyImpl::AsymmetricKeyCryptoKeyImpl(AsymmetricKeyData&& key, 
 }
 
 jsg::BufferSource AsymmetricKeyCryptoKeyImpl::signatureSslToWebCrypto(
-    jsg::Lock& js, kj::Array<kj::byte> signature) const {
+    jsg::Lock& js, kj::ArrayPtr<kj::byte> signature) const {
   auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, signature.size());
   backing.asArrayPtr().copyFrom(signature);
   return jsg::BufferSource(js, kj::mv(backing));
@@ -261,15 +261,15 @@ jsg::BufferSource AsymmetricKeyCryptoKeyImpl::sign(jsg::Lock& js,
   size_t signatureSize = 0;
   OSSLCALL(EVP_DigestSignFinal(digestCtx.get(), nullptr, &signatureSize));
 
-  auto signature = kj::heapArray<kj::byte>(signatureSize);
+  KJ_STACK_ARRAY(kj::byte, signature, signatureSize, 256, 256);
   OSSLCALL(EVP_DigestSignFinal(digestCtx.get(), signature.begin(), &signatureSize));
 
   KJ_ASSERT(signatureSize <= signature.size());
   if (signatureSize < signature.size()) {
-    signature = kj::heapArray<kj::byte>(signature.first(signatureSize));
+    return signatureSslToWebCrypto(js, signature.first(signatureSize));
   }
 
-  return signatureSslToWebCrypto(js, kj::mv(signature));
+  return signatureSslToWebCrypto(js, signature);
 }
 
 bool AsymmetricKeyCryptoKeyImpl::verify(jsg::Lock& js,

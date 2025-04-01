@@ -440,7 +440,7 @@ jsg::JsString toStringImpl(
     }
     case Encoding::BASE64: {
       size_t length = simdutf::base64_length_from_binary(slice.size());
-      auto out = kj::heapArray<kj::byte>(length);
+      KJ_STACK_ARRAY(kj::byte, out, length, 1024, 4096);
       simdutf::binary_to_base64(reinterpret_cast<const char*>(slice.begin()), slice.size(),
           reinterpret_cast<char*>(out.begin()));
       return js.str(out);
@@ -448,7 +448,7 @@ jsg::JsString toStringImpl(
     case Encoding::BASE64URL: {
       auto options = simdutf::base64_url;
       size_t length = simdutf::base64_length_from_binary(slice.size(), options);
-      auto out = kj::heapArray<kj::byte>(length);
+      KJ_STACK_ARRAY(kj::byte, out, length, 1024, 4096);
       simdutf::binary_to_base64(reinterpret_cast<const char*>(slice.begin()), slice.size(),
           reinterpret_cast<char*>(out.begin()), options);
       return js.str(out);

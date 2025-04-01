@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:dev-bookworm
 
 # Install dependencies, including clang via through LLVM APT repository. Note that this
 # will also install lldb and clangd alongside dependencies.
-ARG LLVM_VERSION=16
+ARG LLVM_VERSION=18
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get -y install software-properties-common python3 python3-distutils tclsh nodejs npm \
     && curl -fSsL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh && chmod +x /tmp/llvm.sh && bash /tmp/llvm.sh ${LLVM_VERSION} \

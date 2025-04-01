@@ -12,7 +12,26 @@ type ImageInfoResponse =
     };
 
 type ImageTransform = {
+  width?: number;
+  height?: number;
+  background?: string;
+  blur?: number;
+  border?:
+    | {
+        color?: string;
+        width?: number;
+      }
+    | {
+        top?: number;
+        bottom?: number;
+        left?: number;
+        right?: number;
+      };
+  brightness?: number;
+  contrast?: number;
   fit?: 'scale-down' | 'contain' | 'pad' | 'squeeze' | 'cover' | 'crop';
+  flip?: 'h' | 'v' | 'hv';
+  gamma?: number;
   gravity?:
     | 'left'
     | 'right'
@@ -21,13 +40,15 @@ type ImageTransform = {
     | 'center'
     | 'auto'
     | 'entropy'
-    | 'face'
     | {
         x?: number;
         y?: number;
         mode: 'remainder' | 'box-center';
       };
-  trim?: {
+  rotate?: 0 | 90 | 180 | 270;
+  saturation?: number;
+  sharpen?: number;
+  trim?: "border" | {
     top?: number;
     bottom?: number;
     left?: number;
@@ -42,24 +63,6 @@ type ImageTransform = {
           keep?: number;
         };
   };
-  width?: number;
-  height?: number;
-  background?: string;
-  rotate?: number;
-  sharpen?: number;
-  blur?: number;
-  contrast?: number;
-  brightness?: number;
-  gamma?: number;
-  border?: {
-    color?: string;
-    width?: number;
-    top?: number;
-    bottom?: number;
-    left?: number;
-    right?: number;
-  };
-  zoom?: number;
 };
 
 type ImageDrawOptions = {

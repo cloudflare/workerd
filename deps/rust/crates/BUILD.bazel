@@ -32,26 +32,26 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "anyhow-1.0.95",
-    actual = "@crates_vendor__anyhow-1.0.95//:anyhow",
+    name = "anyhow-1.0.97",
+    actual = "@crates_vendor__anyhow-1.0.97//:anyhow",
     tags = ["manual"],
 )
 
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.95//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.97//:anyhow",
     tags = ["manual"],
 )
 
 alias(
-    name = "capnp-0.20.3",
-    actual = "@crates_vendor__capnp-0.20.3//:capnp",
+    name = "capnp-0.20.6",
+    actual = "@crates_vendor__capnp-0.20.6//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.20.3//:capnp",
+    actual = "@crates_vendor__capnp-0.20.6//:capnp",
     tags = ["manual"],
 )
 
@@ -68,68 +68,68 @@ alias(
 )
 
 alias(
-    name = "clang-ast-0.1.29",
-    actual = "@crates_vendor__clang-ast-0.1.29//:clang_ast",
+    name = "clang-ast-0.1.31",
+    actual = "@crates_vendor__clang-ast-0.1.31//:clang_ast",
     tags = ["manual"],
 )
 
 alias(
     name = "clang-ast",
-    actual = "@crates_vendor__clang-ast-0.1.29//:clang_ast",
+    actual = "@crates_vendor__clang-ast-0.1.31//:clang_ast",
     tags = ["manual"],
 )
 
 alias(
-    name = "clap-4.5.28",
-    actual = "@crates_vendor__clap-4.5.28//:clap",
+    name = "clap-4.5.34",
+    actual = "@crates_vendor__clap-4.5.34//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.28//:clap",
+    actual = "@crates_vendor__clap-4.5.34//:clap",
     tags = ["manual"],
 )
 
 alias(
-    name = "codespan-reporting-0.11.1",
-    actual = "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
+    name = "codespan-reporting-0.12.0",
+    actual = "@crates_vendor__codespan-reporting-0.12.0//:codespan_reporting",
     tags = ["manual"],
 )
 
 alias(
     name = "codespan-reporting",
-    actual = "@crates_vendor__codespan-reporting-0.11.1//:codespan_reporting",
+    actual = "@crates_vendor__codespan-reporting-0.12.0//:codespan_reporting",
     tags = ["manual"],
 )
 
 alias(
-    name = "cxx-1.0.138",
-    actual = "@crates_vendor__cxx-1.0.138//:cxx",
+    name = "cxx-1.0.153",
+    actual = "@crates_vendor__cxx-1.0.153//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.138//:cxx",
+    actual = "@crates_vendor__cxx-1.0.153//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.138//:cxx_cc",
+    actual = "@crates_vendor__cxx-1.0.153//:cxx_cc",
     tags = ["manual"],
 )
 
 alias(
-    name = "flate2-1.0.35",
-    actual = "@crates_vendor__flate2-1.0.35//:flate2",
+    name = "flate2-1.1.0",
+    actual = "@crates_vendor__flate2-1.1.0//:flate2",
     tags = ["manual"],
 )
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.0.35//:flate2",
+    actual = "@crates_vendor__flate2-1.1.0//:flate2",
     tags = ["manual"],
 )
 
@@ -170,26 +170,26 @@ alias(
 )
 
 alias(
-    name = "proc-macro2-1.0.93",
-    actual = "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
+    name = "proc-macro2-1.0.94",
+    actual = "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.93//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
-    name = "quote-1.0.38",
-    actual = "@crates_vendor__quote-1.0.38//:quote",
+    name = "quote-1.0.40",
+    actual = "@crates_vendor__quote-1.0.40//:quote",
     tags = ["manual"],
 )
 
 alias(
     name = "quote",
-    actual = "@crates_vendor__quote-1.0.38//:quote",
+    actual = "@crates_vendor__quote-1.0.40//:quote",
     tags = ["manual"],
 )
 
@@ -218,62 +218,62 @@ alias(
 )
 
 alias(
-    name = "serde-1.0.217",
-    actual = "@crates_vendor__serde-1.0.217//:serde",
+    name = "serde-1.0.219",
+    actual = "@crates_vendor__serde-1.0.219//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.217//:serde",
+    actual = "@crates_vendor__serde-1.0.219//:serde",
     tags = ["manual"],
 )
 
 alias(
-    name = "serde_json-1.0.138",
-    actual = "@crates_vendor__serde_json-1.0.138//:serde_json",
+    name = "serde_json-1.0.140",
+    actual = "@crates_vendor__serde_json-1.0.140//:serde_json",
     tags = ["manual"],
 )
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.138//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.140//:serde_json",
     tags = ["manual"],
 )
 
 alias(
-    name = "syn-2.0.98",
-    actual = "@crates_vendor__syn-2.0.98//:syn",
+    name = "syn-2.0.100",
+    actual = "@crates_vendor__syn-2.0.100//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.98//:syn",
+    actual = "@crates_vendor__syn-2.0.100//:syn",
     tags = ["manual"],
 )
 
 alias(
-    name = "thiserror-2.0.11",
-    actual = "@crates_vendor__thiserror-2.0.11//:thiserror",
+    name = "thiserror-2.0.12",
+    actual = "@crates_vendor__thiserror-2.0.12//:thiserror",
     tags = ["manual"],
 )
 
 alias(
     name = "thiserror",
-    actual = "@crates_vendor__thiserror-2.0.11//:thiserror",
+    actual = "@crates_vendor__thiserror-2.0.12//:thiserror",
     tags = ["manual"],
 )
 
 alias(
-    name = "tokio-1.43.0",
-    actual = "@crates_vendor__tokio-1.43.0//:tokio",
+    name = "tokio-1.44.1",
+    actual = "@crates_vendor__tokio-1.44.1//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.43.0//:tokio",
+    actual = "@crates_vendor__tokio-1.44.1//:tokio",
     tags = ["manual"],
 )
 
@@ -310,7 +310,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.28//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.34//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

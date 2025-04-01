@@ -54,8 +54,8 @@ build:ci-linux-common --copt='-Werror'
 build:ci-linux-common --copt='-Wno-error=#warnings'
 build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
 # keep in sync with .github/workflows/test.yml
-build:ci-linux-common --action_env=CC=/usr/lib/llvm-16/bin/clang
-build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-16/bin/clang
+build:ci-linux-common --action_env=CC=/usr/lib/llvm-18/bin/clang
+build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-18/bin/clang
 
 build:ci-linux --config=ci-linux-common
 build:ci-linux-arm --config=ci-linux --remote_download_regex=".*src/workerd/server/workerd.*"
