@@ -523,7 +523,10 @@ class AbortSignal final: public EventTarget {
   static jsg::Ref<AbortSignal> constructor() = delete;
 
   bool getAborted() {
-    return getCanceler().isCanceled();
+    KJ_IF_SOME(c, canceler) {
+      return c->isCanceled();
+    }
+    return pendingException != kj::none;
   }
 
   jsg::JsValue getReason(jsg::Lock& js);
@@ -577,8 +580,7 @@ class AbortSignal final: public EventTarget {
   // Allows this AbortSignal to also serve as a kj::Canceler
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> promise) {
-    JSG_REQUIRE(
-        !getCanceler().isCanceled(), TypeError, "The AbortSignal has already been triggered");
+    JSG_REQUIRE(!getAborted(), TypeError, "The AbortSignal has already been triggered");
     return getCanceler().wrap(kj::mv(promise));
   }
 

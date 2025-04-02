@@ -548,7 +548,7 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
-  if (getCanceler().isCanceled()) {
+  if (getAborted()) {
     KJ_IF_SOME(r, reason) {
       js.throwException(r.getHandle(js));
     } else {
@@ -645,10 +645,12 @@ RefcountedCanceler& AbortSignal::getCanceler() {
 void AbortSignal::triggerAbort(
     jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
   KJ_ASSERT(flag != Flag::NEVER_ABORTS);
-  if (getCanceler().isCanceled()) {
+  if (getAborted()) {
     return;
   }
   auto exception = AbortSignal::abortException(js, maybeReason);
+  pendingException = kj::cp(exception);
+
   KJ_IF_SOME(r, maybeReason) {
     KJ_SWITCH_ONEOF(r) {
       KJ_CASE_ONEOF(value, jsg::JsValue) {
@@ -661,7 +663,11 @@ void AbortSignal::triggerAbort(
   } else {
     reason = js.exceptionToJsValue(kj::mv(exception));
   }
-  getCanceler().cancel(kj::cp(exception));
+
+  // If we already have a canceler, cancel it
+  KJ_IF_SOME(c, canceler) {
+    c->cancel(kj::cp(exception));
+  }
 
   // This is questionable only because it goes against the spec but it does help prevent
   // memory leaks. Once the abort signal has been triggered, there's really nothing else
