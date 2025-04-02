@@ -2,6 +2,7 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api::node {

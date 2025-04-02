@@ -8,6 +8,7 @@
 #include <workerd/api/http.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>

@@ -12,6 +12,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/server/server.h>

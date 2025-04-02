@@ -608,7 +608,7 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
         KJ_CASE_ONEOF(_, tracing::Link) {
           return LINK_STR;
         }
-        KJ_CASE_ONEOF(_, kj::Array<Attribute>) {
+        KJ_CASE_ONEOF(_, tracing::CustomInfo) {
           return ATTRIBUTE_STR;
         }
       }
@@ -925,14 +925,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
+  // TODO(streaming-tail): Support instrementation for streaming tail workers themselves – need to
+  // be careful to avoid infinite recursion in case pipeline stages tail themselves in the
+  // downstream implementation.
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
         TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
   }
-
-  // TODO(streaming-tail): Support instrementation for streaming tail workers themselves – need to
-  // be careful to avoid infinite recursion in case pipeline stages tail themselves in the
-  // downstream implementation.
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(
