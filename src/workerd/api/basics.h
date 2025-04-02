@@ -523,7 +523,7 @@ class AbortSignal final: public EventTarget {
   static jsg::Ref<AbortSignal> constructor() = delete;
 
   bool getAborted() {
-    return canceler->isCanceled();
+    return getCanceler().isCanceled();
   }
 
   jsg::JsValue getReason(jsg::Lock& js);
@@ -577,8 +577,9 @@ class AbortSignal final: public EventTarget {
   // Allows this AbortSignal to also serve as a kj::Canceler
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> promise) {
-    JSG_REQUIRE(!canceler->isCanceled(), TypeError, "The AbortSignal has already been triggered");
-    return canceler->wrap(kj::mv(promise));
+    JSG_REQUIRE(
+        !getCanceler().isCanceled(), TypeError, "The AbortSignal has already been triggered");
+    return getCanceler().wrap(kj::mv(promise));
   }
 
   template <typename T>
@@ -598,13 +599,16 @@ class AbortSignal final: public EventTarget {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     EventTarget::visitForMemoryInfo(tracker);
-    tracker.trackInlineFieldWithSize(
-        "IoOwn<RefcountedCanceler>", sizeof(IoOwn<RefcountedCanceler>));
+    if (canceler != kj::none) {
+      tracker.trackInlineFieldWithSize(
+          "IoOwn<RefcountedCanceler>", sizeof(IoOwn<RefcountedCanceler>));
+    }
     tracker.trackField("reason", reason);
   }
 
  private:
-  IoOwn<RefcountedCanceler> canceler;
+  kj::Maybe<IoOwn<RefcountedCanceler>> canceler;
+  kj::Maybe<kj::Exception> pendingException;
   Flag flag;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;

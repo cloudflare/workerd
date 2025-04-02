@@ -495,8 +495,7 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
 AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
     jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
     Flag flag)
-    : canceler(
-          IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
+    : pendingException(kj::mv(exception)),
       flag(flag),
       reason(kj::mv(maybeReason)) {}
 
@@ -549,7 +548,7 @@ jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsVal
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
-  if (canceler->isCanceled()) {
+  if (getCanceler().isCanceled()) {
     KJ_IF_SOME(r, reason) {
       js.throwException(r.getHandle(js));
     } else {
@@ -631,13 +630,22 @@ void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 RefcountedCanceler& AbortSignal::getCanceler() {
-  return *canceler;
+  KJ_IF_SOME(c, canceler) {
+    return *c;
+  } else {
+    // Lazily initialize the canceler when it's first needed. This allows
+    // AbortController/AbortSignal to be constructed in global scope.
+    auto& ioContext = IoContext::current();
+    auto newCanceler = kj::refcounted<RefcountedCanceler>(kj::mv(pendingException));
+    canceler = ioContext.addObject(kj::mv(newCanceler));
+    return *KJ_ASSERT_NONNULL(canceler);
+  }
 }
 
 void AbortSignal::triggerAbort(
     jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason) {
   KJ_ASSERT(flag != Flag::NEVER_ABORTS);
-  if (canceler->isCanceled()) {
+  if (getCanceler().isCanceled()) {
     return;
   }
   auto exception = AbortSignal::abortException(js, maybeReason);
@@ -653,7 +661,7 @@ void AbortSignal::triggerAbort(
   } else {
     reason = js.exceptionToJsValue(kj::mv(exception));
   }
-  canceler->cancel(kj::cp(exception));
+  getCanceler().cancel(kj::cp(exception));
 
   // This is questionable only because it goes against the spec but it does help prevent
   // memory leaks. Once the abort signal has been triggered, there's really nothing else

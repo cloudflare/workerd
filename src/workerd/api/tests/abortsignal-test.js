@@ -188,3 +188,30 @@ export const onabortPrototypeProperty = {
     strictEqual(ac.signal.onabort, handler);
   },
 };
+
+// Create a global AbortController instance at module scope to verify
+// that it's possible to create AbortControllers in the global scope
+// This test validates that the fix for https://github.com/cloudflare/workerd/issues/3657 works properly
+const globalAbortController = new AbortController();
+
+export const abortControllerInGlobalScope = {
+  test() {
+    // Simply verify that the globally created AbortController exists and has the expected properties
+    ok(globalAbortController instanceof AbortController);
+    ok(globalAbortController.signal instanceof AbortSignal);
+    strictEqual(globalAbortController.signal.aborted, false);
+
+    // Now test that the controller actually works by aborting it
+    let eventFired = false;
+    globalAbortController.signal.addEventListener('abort', () => {
+      eventFired = true;
+    });
+
+    globalAbortController.abort('global abort reason');
+
+    // Verify it was properly aborted
+    ok(eventFired);
+    strictEqual(globalAbortController.signal.aborted, true);
+    strictEqual(globalAbortController.signal.reason, 'global abort reason');
+  },
+};
