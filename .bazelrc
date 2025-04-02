@@ -58,17 +58,16 @@ build --@dawn//src/tint:tint_build_wgsl_writer=True
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
 # have that option, so disable -Wunknown-warning-option there too.
 build --per_file_copt='external@-Wno-error'
-build --per_file_copt='external/v8@-Wno-deprecated-declarations'
-build --per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
-build --host_per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
+build --per_file_copt='external/v8@-Wno-unused-function'
 build --per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration,-Wno-deprecated-this-capture'
 build --host_per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration,-Wno-deprecated-this-capture'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
-# for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public one
+# for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public
+# one – this is not needed with tagged absl LTS versions, but we want to use a specific absl commit
 build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
-build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma,-Wno-deprecated-this-capture
-build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-declarations,-Wno-deprecated-pragma,-Wno-deprecated-this-capture
+build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-capture
+build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-capture
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
 # GitHub Actions. This is an optional performance hack intended for CI, although it might also be
@@ -291,7 +290,8 @@ build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
 # We don't expect to distribute host tools, no need to statically link libgcc.
 # TODO(cleanup): Ideally we'd also use shared libc++ here, we'd just need to install the
-# libunwind-15-dev and libc++abi-15-dev packages on CI to have all of shared libc++ available.
+# libunwind-<version>-dev and libc++abi-<version>-dev packages on CI to have all of shared libc++
+# available.
 build:linux --host_linkopt='-l:libc++.a' --host_linkopt='-lm'
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
