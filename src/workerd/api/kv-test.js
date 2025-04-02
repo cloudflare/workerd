@@ -99,10 +99,10 @@ export default {
     assert.strictEqual(new TextDecoder().decode(response), 'value-success');
 
     // // Testing .get bulk
-    response = await env.KV.get(['key1', 'key2']);
+    response = await env.KV.get(['key1', 'key"2']);
     let expected = new Map([
       ['key1', '{\"example\":\"values-key1\"}'],
-      ['key2', '{\"example\":\"values-key2\"}'],
+      ['key"2', '{\"example\":\"values-key\\"2\"}'],
     ]);
     assert.deepStrictEqual(response, expected);
 
