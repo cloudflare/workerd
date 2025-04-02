@@ -6,10 +6,10 @@ Subject: Modify where to look for fast_float and simdutf.
 Similar to fp16, these dependencies now needs to be downloaded by bazel.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8cd55daf968fabf72345edad61e9a303335b6a8e..5a00e6b29abfefaac6a9ec73cfbe47c63a69c616 100644
+index d17a4d15241b5b7a45e0cdad569efbc99152c758..a02e9ca4e9122d487deeae91d4ffe2cef44f9db0 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4343,12 +4343,6 @@ cc_library(
+@@ -4339,12 +4339,6 @@ cc_library(
      ],
  )
  
@@ -22,7 +22,7 @@ index 8cd55daf968fabf72345edad61e9a303335b6a8e..5a00e6b29abfefaac6a9ec73cfbe47c6
  v8_library(
      name = "v8_libshared",
      srcs = [
-@@ -4377,9 +4371,9 @@ v8_library(
+@@ -4373,9 +4367,9 @@ v8_library(
          ":noicu/generated_torque_definitions",
      ],
      deps = [
