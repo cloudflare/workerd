@@ -658,6 +658,7 @@ export interface DurableObjectStorage {
   waitForBookmark(bookmark: string): Promise<void>;
   readonly primary?: DurableObjectStub;
   ensureReplicas(): void;
+  disableReplicas(): void;
 }
 export interface DurableObjectListOptions {
   start?: string;
