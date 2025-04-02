@@ -1286,7 +1286,7 @@ declare class DigestStream extends WritableStream<
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder)
  */
 declare class TextDecoder {
-  constructor(decoder?: string, options?: TextDecoderConstructorOptions);
+  constructor(label?: string, options?: TextDecoderConstructorOptions);
   /**
    * Returns the result of running encoding's decoder. The method can be invoked zero or more times with options's stream set to true, and then once without options's stream (or set to false), to process a fragmented input. If the invocation without options's stream (or set to false) has no input, it's clearest to omit both arguments.
    *
@@ -3120,7 +3120,7 @@ interface GPUCommandEncoder {
     destinationOffset: number | bigint,
     size: number | bigint,
   ): void;
-  finish(param0?: GPUCommandBufferDescriptor): GPUCommandBuffer;
+  finish(param1?: GPUCommandBufferDescriptor): GPUCommandBuffer;
   copyTextureToBuffer(
     source: GPUImageCopyTexture,
     destination: GPUImageCopyBuffer,
