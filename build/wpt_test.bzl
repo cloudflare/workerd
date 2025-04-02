@@ -52,6 +52,7 @@ def wpt_test(name, wpt_directory, config, autogates = [], start_server = False, 
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
+        sidecar_port_bindings = ["HTTP_PORT", "HTTPS_PORT"] if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
         data = [
             test_config_as_js,  # e.g. "url-test.js"
@@ -246,6 +247,8 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "wpt", service = "wpt"),
           (name = "unsafe", unsafeEval = void),
+          (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
+          (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
           {bindings}
         ],
         compatibilityDate = embed "{compat_date}",
@@ -309,11 +312,20 @@ def generate_external_bindings(wd_test_file, base, files):
 ### (Create a single no-args script that starts the WPT server)
 
 WPT_ENTRYPOINT_SCRIPT_TEMPLATE = """
-# Make /usr/sbin/sysctl visibile (Python needs to call it on macOS)
+# Make /usr/sbin/sysctl visible (Python needs to call it on macOS)
 export PATH="$PATH:/usr/sbin"
 
 cd $(dirname $0)
-{python} wpt.py serve --config {config_json}
+{python} wpt.py serve --no-h2 --config /dev/stdin <<EOF
+{{
+  "server_host": "localhost",
+  "check_subdomains": false,
+  "ports": {{
+    "http": [$HTTP_PORT, "auto"],
+    "https": [$HTTPS_PORT, "auto"]
+  }}
+}}
+EOF
 """
 
 def _wpt_server_entrypoint_impl(ctx):
@@ -330,14 +342,13 @@ def _wpt_server_entrypoint_impl(ctx):
         is_executable = True,
         content = WPT_ENTRYPOINT_SCRIPT_TEMPLATE.format(
             python = ctx.file.python.short_path,
-            config_json = ctx.file.config_json.basename,
         ),
     )
 
     return DefaultInfo(
         runfiles = ctx.runfiles(
             files = [start_src],
-            transitive_files = depset(ctx.files.srcs + [ctx.file.python, ctx.file.config_json]),
+            transitive_files = depset(ctx.files.srcs + [ctx.file.python]),
         ),
         executable = start_src,
     )
@@ -349,8 +360,6 @@ wpt_server_entrypoint = rule(
         "python": attr.label(allow_single_file = True),
         # All the Python code that should be visible
         "srcs": attr.label_list(allow_files = True),
-        # Config file to pass to wpt serve
-        "config_json": attr.label(allow_single_file = True),
     },
 )
 

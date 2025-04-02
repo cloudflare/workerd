@@ -1,5 +1,4 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
-load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 load("//:build/eslint_test.bzl", "eslint_test")
 load("//:build/wpt_test.bzl", "wpt_test")
 
@@ -34,11 +33,10 @@ wpt_test(
     name = "fetch/api",
     size = "large",
     config = "fetch/api-test.ts",
-    # TODO(soon): Only a single test can have start_server=True
-    # Solution: Upgrade sidecar to allow dynamic port assignment
     start_server = True,
     target_compatible_with = select({
-        # TODO(soon): Improve sidecar compatibility with Windows
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
