@@ -761,10 +761,16 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
 }
 
 void DurableObjectStorage::ensureReplicas() {
+  if (maybePrimary != kj::none) {
+    KJ_FAIL_ASSERT("replica Durable Objects cannot call ensureReplicas().");
+  }
   return cache->ensureReplicas();
 }
 
 void DurableObjectStorage::disableReplicas() {
+  if (maybePrimary != kj::none) {
+    KJ_FAIL_ASSERT("replica Durable Objects cannot call disableReplicas().");
+  }
   return cache->disableReplicas();
 }
 
