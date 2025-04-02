@@ -183,6 +183,7 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
     kj::String body = formBulkBodyString(js, name, withMetadata, options);
     kj::Maybe<uint64_t> expectedBodySize = uint64_t(body.size());
     auto headers = kj::HttpHeaders(context.getHeaderTable());
+    headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
