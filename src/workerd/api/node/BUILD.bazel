@@ -383,3 +383,9 @@ wd_test(
         "//conditions:default": [],
     }),
 )
+
+js_binary(
+    name = "sidecar-supervisor",
+    entry_point = "tests/sidecar-supervisor.mjs",
+    visibility = ["//visibility:public"],
+)
