@@ -17,6 +17,9 @@ class DurableObjectExample(DurableObject):
     async def no_args_method(self):
         return "value from python"
 
+    async def args_method(self, arg):
+        return "value from python " + arg
+
 
 async def test(ctrl, env, ctx):
     id = env.ns.idFromName("A")
@@ -30,7 +33,8 @@ async def test(ctrl, env, ctx):
     second_resp_data = await second_resp.text()
     assert second_resp_data == "hello from python 2"
 
-    # TODO: Python effectively calls this via `obj.no_args_method.apply(obj, [])` which causes
-    # a DataCloneError to occur. This may be a JS RPC bug that we will need to fix.
-    # custom_resp = await obj.no_args_method()
-    # assert custom_resp == "value from python: 42"
+    no_arg_resp = await obj.no_args_method()
+    assert no_arg_resp == "value from python"
+
+    arg_resp = await obj.args_method("test")
+    assert arg_resp == "value from python test"

@@ -93,6 +93,10 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
             console.error("Failed to read ", libName, e);
         }
     }
+
+    function patchedApplyFunc(func, this_, args) {
+        return Function.prototype.apply.apply(func, [this_, args]);
+    }
     """
 
     REPLACEMENTS = [
@@ -151,6 +155,11 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
         [
             "getMemory(",
             "Module.getMemoryPatched(Module, libName, ",
+        ],
+        # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+        [
+            "nullToUndefined(func.apply(",
+            "nullToUndefined(patchedApplyFunc(func, ",
         ],
     ]
 
