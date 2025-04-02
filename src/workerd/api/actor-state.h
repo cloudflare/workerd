@@ -251,8 +251,14 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // Arrange to create replicas for this Durable Object.
   //
   // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
-  // thus it is idempotent.
+  // making it idempotent, unless `disableReplicas` has been called between `ensureReplicas` calls.
   void ensureReplicas();
+
+  // Arrange to disable replicas for this Durable Object.
+  //
+  // If replicas have never been created, this is a no-op. Similar to `ensureReplicas`, repeated
+  // calls are no-ops unless `ensureReplicas` re-enabled the replicas.
+  void disableReplicas();
 
   jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
 
@@ -282,6 +288,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getReplicaRouting()) {
       JSG_METHOD(ensureReplicas);
+      JSG_METHOD(disableReplicas);
     }
 
     JSG_TS_OVERRIDE({
