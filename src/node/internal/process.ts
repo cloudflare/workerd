@@ -43,10 +43,18 @@ function isJsonSerializable(
       }
       seen.add(value);
 
-      if (typeof value.toJSON === 'function') {
-        // This type is explicitly designed to be JSON-serialized so we'll accept it.
-        return true;
-      }
+      // TODO(revisit): While any object that implements the toJSON function is
+      // generally expected to be JSON serializable, when working with jsrpc
+      // targets, the `toJSON` property ends up being Proxied and appears to be
+      // a legit property on some object types when it really shouldn't be, causing
+      // issues with certain types of bindings. Fun!
+      // Commenting this out instead of removing it because it would be great if
+      // we could find a way to support this reliably.
+      //
+      // if (typeof value.toJSON === 'function') {
+      //   // This type is explicitly designed to be JSON-serialized so we'll accept it.
+      //   return true;
+      // }
 
       // We only consider objects to be serializable if they are plain objects or plain arrays.
       // Technically, JSON can serialize any subclass of Object (as well as objects with null
