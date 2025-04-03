@@ -224,6 +224,16 @@ jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::
     return kj::str(objectNamespace.getClassName());
   };
 
+  // To get the entrypoint classes, we iterate through bindings looking for services with
+  // entrypoint field set. This doesn't allow us to discern between worker entrypoints and workflow
+  // entrypoints, but is the best we can do until we rewrite how workerd loads packages.
+  auto entrypointClasses = kj::Vector<kj::String>();
+  for (auto binding: conf.getBindings()) {
+    if (binding.isService() && binding.getService().hasEntrypoint()) {
+      entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
+    }
+  }
+
   // clang-format off
   return jsg::alloc<api::pyodide::PyodideMetadataReader>(
     kj::mv(mainModule),
@@ -239,7 +249,8 @@ jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::
     pythonConfig.createBaselineSnapshot,
     false,    /* usePackagesInArtifactBundler */
     kj::mv(memorySnapshot),
-    kj::mv(durableObjectClasses)
+    kj::mv(durableObjectClasses),
+    entrypointClasses.releaseAsArray()
   );
   // clang-format on
 }
@@ -450,7 +461,7 @@ NamedExport WorkerdApi::unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> expor
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<NamedExport>(
       lock.v8Context(), exportVal);
 }
-WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
+EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
 
   return {
