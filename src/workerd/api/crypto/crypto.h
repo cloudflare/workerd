@@ -692,7 +692,7 @@ class DigestStream: public WritableStream {
     JSG_DISPOSE(dispose);
 
     JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView> {
-      public digest: Promise<ArrayBuffer>;
+      readonly digest: Promise<ArrayBuffer>;
     });
   }
 

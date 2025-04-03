@@ -1287,7 +1287,7 @@ export declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
   constructor(algorithm: string | SubtleCryptoHashAlgorithm);
-  get digest(): Promise<ArrayBuffer | ArrayBufferView>;
+  readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
 }
 /**
