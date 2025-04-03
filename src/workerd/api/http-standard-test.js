@@ -63,3 +63,17 @@ export const error = {
     strictEqual(errorRespRpc.ok, false);
   },
 };
+
+// Test that DNS-JSON content type does not trigger a warning when using text() method
+// Reference: https://github.com/cloudflare/workerd/issues/3326
+export const dnsJsonContentType = {
+  async test() {
+    // Create a minimal response with application/dns-json mimetype
+    const dnsJsonResponse = new Response('{"Status":0}', {
+      headers: { 'Content-Type': 'application/dns-json' },
+    });
+
+    const text = await dnsJsonResponse.text();
+    strictEqual(typeof text, 'string', 'Response text should be a string');
+  },
+};
