@@ -4504,6 +4504,11 @@ declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
     },
   ): Promise<ConversionResponse>;
 }
+type GatewayReties = {
+  maxAttempts?: 1 | 2 | 3 | 4 | 5;
+  retryDelayMs?: number;
+  backoff?: "constant" | "linear" | "exponential";
+};
 type GatewayOptions = {
   id: string;
   cacheKey?: string;
@@ -4511,6 +4516,9 @@ type GatewayOptions = {
   skipCache?: boolean;
   metadata?: Record<string, number | string | boolean | null | bigint>;
   collectLog?: boolean;
+  eventId?: string;
+  requestTimeoutMs?: number;
+  retries?: GatewayReties;
 };
 type AiGatewayPatchLog = {
   score?: number | null;
