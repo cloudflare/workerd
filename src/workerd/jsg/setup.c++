@@ -355,6 +355,9 @@ IsolateBase::IsolateBase(const V8System& system,
 
     ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
 
+    // Configure Date API to always use UTC timezone
+    ptr->DateTimeConfigurationChangeNotification(v8::Isolate::TimeZoneDetection::kSkip);
+
     // V8 10.5 introduced this API which is used to resolve the promise returned by
     // WebAssembly.compile(). For some reason, the default implementation of the callback does not
     // work -- the promise is never resolved. The only thing the default version does differently

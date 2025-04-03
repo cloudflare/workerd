@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const worker :Workerd.Worker = (
+  compatibilityDate = "2023-05-15",
+  modules = [
+    (name = "worker", esModule = embed "date-timezone-test.js")
+  ]
+);
+
+const server :Workerd.Config = (
+  services = [
+    (name = "main", worker = .worker)
+  ]
+);

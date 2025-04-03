@@ -368,6 +368,7 @@ struct WorkerdApi::Impl final {
     if (maybeOwnedModuleRegistry != kj::none) {
       jsgIsolate.setUsingNewModuleRegistry();
     }
+
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
       if (features->getPythonWorkers()) {
         auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
