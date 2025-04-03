@@ -15,6 +15,7 @@ import {
   WORKERD_INDEX_URL,
   USING_OLDEST_PYODIDE_VERSION,
   DURABLE_OBJECT_CLASSES,
+  WORKER_ENTRYPOINT_CLASSES,
 } from 'pyodide-internal:metadata';
 import { reportError } from 'pyodide-internal:util';
 import { default as Limiter } from 'pyodide-internal:limiter';
@@ -166,8 +167,8 @@ function makeHandler(pyHandlerName: string): Handler {
   };
 }
 
-function makeDurableObjectClass(className: string, classKind: AnyClass) {
-  class DurableObjectWrapper extends classKind {
+function makeEntrypointClass(className: string, classKind: AnyClass) {
+  class EntrypointWrapper extends classKind {
     pyInstance: Promise<PyModule>;
 
     constructor(...args: any[]) {
@@ -216,7 +217,7 @@ function makeDurableObjectClass(className: string, classKind: AnyClass) {
     }
   }
 
-  return DurableObjectWrapper;
+  return EntrypointWrapper;
 }
 
 async function getIntrospectionMod(pyodide: Pyodide) {
@@ -244,7 +245,11 @@ const handlers: {
   [handlerName: string]: Handler;
 } = {};
 
-let pythonDurableObjectClasses: string[] = [];
+let pythonEntrypointClasses: {
+  durableObjects: string[];
+  workerEntrypoints: string[];
+  workflowEntrypoints: string[];
+} = { durableObjects: [], workerEntrypoints: [], workflowEntrypoints: [] };
 
 try {
   // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
@@ -255,7 +260,8 @@ try {
     //
     // TODO: rewrite package download logic in workerd to fetch the packages in the same way as in
     // edgeworker.
-    pythonDurableObjectClasses.push(...(DURABLE_OBJECT_CLASSES ?? []));
+    pythonEntrypointClasses.durableObjects = DURABLE_OBJECT_CLASSES ?? [];
+    pythonEntrypointClasses.workerEntrypoints = WORKER_ENTRYPOINT_CLASSES ?? [];
 
     for (const handlerName of SUPPORTED_HANDLER_NAMES) {
       const pyHandlerName = 'on_' + handlerName;
@@ -275,15 +281,20 @@ try {
     // In order to get the durable object classes exported by the worker, we use a Python module
     // to introspect the user's main module. So we are effectively using Python to analyse the
     // classes exported by the user worker here. The class names are then exported and used to
-    // create the equivalent JS classes via makeDurableObjectClass.
+    // create the equivalent JS classes via makeEntrypointClass.
     const pyodide = await getPyodide();
     const introspectionMod = await getIntrospectionMod(pyodide);
-    pythonDurableObjectClasses = introspectionMod.collect_classes(mainModule);
+    pythonEntrypointClasses.durableObjects =
+      introspectionMod.collect_durable_object_classes(mainModule);
+    pythonEntrypointClasses.workerEntrypoints =
+      introspectionMod.collect_worker_entrypoint_classes(mainModule);
+    pythonEntrypointClasses.workflowEntrypoints =
+      introspectionMod.collect_workflow_entrypoint_classes(mainModule);
   }
 } catch (e) {
   console.warn('Error in top level in python-entrypoint-helper.js');
   reportError(e);
 }
 
-export { pythonDurableObjectClasses, makeDurableObjectClass };
+export { pythonEntrypointClasses, makeEntrypointClass };
 export default handlers;

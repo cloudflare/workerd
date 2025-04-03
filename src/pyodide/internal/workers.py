@@ -634,3 +634,19 @@ class DurableObject:
     """
 
     pass
+
+
+class WorkerEntrypoint:
+    """
+    Base class used to define a Worker Entrypoint.
+    """
+
+    pass
+
+
+class WorkflowEntrypoint:
+    """
+    Base class used to define a Workflow Entrypoint.
+    """
+
+    pass

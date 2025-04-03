@@ -1655,11 +1655,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
                         obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
-                        // Python Workers append all durable objects classes in the
-                        // pythonDurableObjects named export.
+                        // Python Workers append all durable objects, worker entrypoint and workflow
+                        // entrypoint classes in the pythonEntrypoints named export.
                         bool isPythonWorker = FeatureFlags::get(js).getPythonWorkers();
                         bool hasDoSupport = FeatureFlags::get(js).getPythonWorkersDurableObjects();
-                        if (handler.name == "pythonDurableObjects" && isPythonWorker) {
+                        if (handler.name == "pythonEntrypoints" && isPythonWorker) {
                           auto handle = obj.self.getHandle(js);
                           auto dict = js.toDict(handle);
                           for (auto& field: dict.fields) {
@@ -1667,7 +1667,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                             KJ_SWITCH_ONEOF(unwrapped) {
                               KJ_CASE_ONEOF(cls, EntrypointClass) {
                                 JSG_REQUIRE(hasDoSupport, Error,
-                                    "The python_workers_durable_objects compat flag needs to be enabled for durable object support.");
+                                    "The python_workers_durable_objects compat flag needs to be enabled for custom entrypoint support.");
                                 impl->actorClasses.insert(kj::mv(field.name),
                                     ActorClassInfo{
                                       .cls = kj::mv(cls),

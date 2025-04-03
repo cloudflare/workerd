@@ -232,6 +232,15 @@ jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::
     return kj::str(objectNamespace.getClassName());
   };
 
+  // To get the entrypoint classes, we iterate through bindings looking for services with
+  // entrypoint field set.
+  auto entrypointClasses = kj::Vector<kj::String>();
+  for (auto binding: conf.getBindings()) {
+    if (binding.isService() && binding.getService().hasEntrypoint()) {
+      entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
+    }
+  }
+
   // clang-format off
   return jsg::alloc<api::pyodide::PyodideMetadataReader>(
     kj::mv(mainModule),
@@ -247,7 +256,8 @@ jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::
     pythonConfig.createBaselineSnapshot,
     false,    /* usePackagesInArtifactBundler */
     kj::mv(memorySnapshot),
-    kj::mv(durableObjectClasses)
+    kj::mv(durableObjectClasses),
+    entrypointClasses.releaseAsArray()
   );
   // clang-format on
 }
