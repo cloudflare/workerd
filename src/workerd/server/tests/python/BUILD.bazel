@@ -31,10 +31,6 @@ py_wd_test("subdirectory")
 
 py_wd_test(
     "sdk",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
 )
 
 py_wd_test("seek-metadatafs")
@@ -70,10 +66,6 @@ py_wd_test("seek-metadatafs")
 
 py_wd_test(
     "undefined-handler",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
 )
 
 py_wd_test("vendor_dir")
