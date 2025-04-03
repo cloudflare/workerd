@@ -6130,6 +6130,30 @@ export declare namespace Rpc {
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
     // Structured cloneables
+    | BaseType
+    // Structured cloneable composites
+    | Map<
+        T extends Map<infer U, unknown> ? Serializable<U> : never,
+        T extends Map<unknown, infer U> ? Serializable<U> : never
+      >
+    | Set<T extends Set<infer U> ? Serializable<U> : never>
+    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
+    | {
+        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+      }
+    // Special types
+    | Stub<Stubable>
+    // Serialized as stubs, see `Stubify`
+    | Stubable;
+  // Base type for all RPC stubs, including common memory management methods.
+  // `T` is used as a marker type for unwrapping `Stub`s later.
+  interface StubBase<T extends Stubable> extends Disposable {
+    [__RPC_STUB_BRAND]: T;
+    dup(): this;
+  }
+  export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+  // This represents all the types that can be sent as-is over an RPC boundary
+  type BaseType =
     | void
     | undefined
     | null
@@ -6143,32 +6167,11 @@ export declare namespace Rpc {
     | Date
     | Error
     | RegExp
-    // Structured cloneable composites
-    | Map<
-        T extends Map<infer U, unknown> ? Serializable<U> : never,
-        T extends Map<unknown, infer U> ? Serializable<U> : never
-      >
-    | Set<T extends Set<infer U> ? Serializable<U> : never>
-    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
-    | {
-        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
-      }
-    // Special types
     | ReadableStream<Uint8Array>
     | WritableStream<Uint8Array>
     | Request
     | Response
-    | Headers
-    | Stub<Stubable>
-    // Serialized as stubs, see `Stubify`
-    | Stubable;
-  // Base type for all RPC stubs, including common memory management methods.
-  // `T` is used as a marker type for unwrapping `Stub`s later.
-  interface StubBase<T extends Stubable> extends Disposable {
-    [__RPC_STUB_BRAND]: T;
-    dup(): this;
-  }
-  export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+    | Headers;
   // Recursively rewrite all `Stubable` types with `Stub`s
   type Stubify<T> = T extends Stubable
     ? Stub<T>
@@ -6180,13 +6183,15 @@ export declare namespace Rpc {
           ? Array<Stubify<V>>
           : T extends ReadonlyArray<infer V>
             ? ReadonlyArray<Stubify<V>>
-            : T extends {
-                  [key: string | number]: any;
-                }
-              ? {
-                  [K in keyof T]: Stubify<T[K]>;
-                }
-              : T;
+            : T extends BaseType
+              ? T
+              : T extends {
+                    [key: string | number]: any;
+                  }
+                ? {
+                    [K in keyof T]: Stubify<T[K]>;
+                  }
+                : T;
   // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
   // Note we use `StubBase` instead of `Stub` here to avoid circular dependencies:
   // `Stub` depends on `Provider`, which depends on `Unstubify`, which would depend on `Stub`.
@@ -6201,13 +6206,15 @@ export declare namespace Rpc {
             ? Array<Unstubify<V>>
             : T extends ReadonlyArray<infer V>
               ? ReadonlyArray<Unstubify<V>>
-              : T extends {
-                    [key: string | number]: unknown;
-                  }
-                ? {
-                    [K in keyof T]: Unstubify<T[K]>;
-                  }
-                : T;
+              : T extends BaseType
+                ? T
+                : T extends {
+                      [key: string | number]: unknown;
+                    }
+                  ? {
+                      [K in keyof T]: Unstubify<T[K]>;
+                    }
+                  : T;
   type UnstubifyAll<A extends any[]> = {
     [I in keyof A]: Unstubify<A[I]>;
   };
