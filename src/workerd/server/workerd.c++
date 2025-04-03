@@ -78,6 +78,22 @@ static kj::StringPtr getVersionString() {
 
 // =======================================================================================
 
+// For ASan's leak sanitizer, suppress warnings about leaks with stacks that include "unknown
+// modules". This suppression is adopted from the GN build and applies to addresses that LSan can't
+// symbolize or even map to a binary – perhaps JIT or snapshot-generated code in V8's case?
+// TODO(someday): Suppression is needed to get several python tests to pass under LSan. Investigate
+// if this is an actual leak (perhaps a bug in V8 itself since it is suppressed there?) at a later
+// time.
+#if __has_feature(address_sanitizer)
+extern "C" __attribute__((no_sanitize("address"))) __attribute__((visibility("default")))
+__attribute__((used)) const char*
+__lsan_default_suppressions() {
+  return "leak:<unknown module>\n";
+}
+#endif
+
+// =======================================================================================
+
 class EntropySourceImpl: public kj::EntropySource {
  public:
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
