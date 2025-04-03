@@ -672,6 +672,7 @@ class DigestStream: public WritableStream {
 
   static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
+  // The BufferSource returned will always be an ArrayBuffer here.
   jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>>& getDigest() {
     return promise;
   }
@@ -690,7 +691,9 @@ class DigestStream: public WritableStream {
     JSG_READONLY_PROTOTYPE_PROPERTY(bytesWritten, getBytesWritten);
     JSG_DISPOSE(dispose);
 
-    JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView>);
+    JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView> {
+      readonly digest: Promise<ArrayBuffer>;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
