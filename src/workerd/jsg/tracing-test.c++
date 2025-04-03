@@ -20,8 +20,8 @@ class NumberBoxHolder: public Object {
 
   Ref<NumberBox> inner;
 
-  static Ref<NumberBoxHolder> constructor(Ref<NumberBox> inner) {
-    return jsg::alloc<NumberBoxHolder>(kj::mv(inner));
+  static Ref<NumberBoxHolder> constructor(jsg::Lock& js, Ref<NumberBox> inner) {
+    return js.alloc<NumberBoxHolder>(kj::mv(inner));
   }
 
   Ref<NumberBox> getInner() {
@@ -69,7 +69,8 @@ class GcDetectorBox: public jsg::Object {
   // Contains a GcDetector. Useful for testing tracing scenarios.
 
  public:
-  jsg::Ref<GcDetector> inner = jsg::alloc<GcDetector>();
+  GcDetectorBox(jsg::Lock& js): inner(js.alloc<GcDetector>()) {}
+  jsg::Ref<GcDetector> inner;
 
   jsg::Ref<GcDetector> getInner() {
     return inner.addRef();
@@ -91,8 +92,8 @@ class ValueBox: public jsg::Object {
  public:
   ValueBox(jsg::Value inner): inner(kj::mv(inner)) {}
 
-  static jsg::Ref<ValueBox> constructor(jsg::Value inner) {
-    return jsg::alloc<ValueBox>(kj::mv(inner));
+  static jsg::Ref<ValueBox> constructor(jsg::Lock& js, jsg::Value inner) {
+    return js.alloc<ValueBox>(kj::mv(inner));
   }
 
   jsg::Value inner;
@@ -123,17 +124,17 @@ struct TraceTestContext: public Object, public ContextGlobal {
     strongRef = kj::mv(ref);
   }
 
-  kj::Array<jsg::Ref<GcDetector>> makeGcDetectorPair() {
-    auto obj1 = jsg::alloc<GcDetector>();
-    auto obj2 = jsg::alloc<GcDetector>();
+  kj::Array<jsg::Ref<GcDetector>> makeGcDetectorPair(jsg::Lock& js) {
+    auto obj1 = js.alloc<GcDetector>();
+    auto obj2 = js.alloc<GcDetector>();
     obj1->sibling = *obj2;
     obj2->sibling = *obj1;
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
   }
 
-  kj::Array<jsg::Ref<GcDetectorBox>> makeGcDetectorBoxPair() {
-    auto obj1 = jsg::alloc<GcDetectorBox>();
-    auto obj2 = jsg::alloc<GcDetectorBox>();
+  kj::Array<jsg::Ref<GcDetectorBox>> makeGcDetectorBoxPair(jsg::Lock& js) {
+    auto obj1 = js.alloc<GcDetectorBox>(js);
+    auto obj2 = js.alloc<GcDetectorBox>(js);
     obj1->inner->sibling = *obj2->inner;
     obj2->inner->sibling = *obj1->inner;
     return kj::arr(kj::mv(obj1), kj::mv(obj2));

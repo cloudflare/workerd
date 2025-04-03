@@ -76,25 +76,29 @@ class GPUDevice: public EventTarget {
   bool destroyed_ = false;
   jsg::Ref<GPUBuffer> createBuffer(jsg::Lock&, GPUBufferDescriptor);
   jsg::Ref<GPUTexture> createTexture(jsg::Lock&, GPUTextureDescriptor);
-  jsg::Ref<GPUBindGroupLayout> createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
-  jsg::Ref<GPUBindGroup> createBindGroup(GPUBindGroupDescriptor descriptor);
-  jsg::Ref<GPUSampler> createSampler(GPUSamplerDescriptor descriptor);
-  jsg::Ref<GPUShaderModule> createShaderModule(GPUShaderModuleDescriptor descriptor);
-  jsg::Ref<GPUPipelineLayout> createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
-  jsg::Ref<GPUComputePipeline> createComputePipeline(GPUComputePipelineDescriptor descriptor);
-  jsg::Ref<GPURenderPipeline> createRenderPipeline(GPURenderPipelineDescriptor descriptor);
+  jsg::Ref<GPUBindGroupLayout> createBindGroupLayout(
+      jsg::Lock& js, GPUBindGroupLayoutDescriptor descriptor);
+  jsg::Ref<GPUBindGroup> createBindGroup(jsg::Lock& js, GPUBindGroupDescriptor descriptor);
+  jsg::Ref<GPUSampler> createSampler(jsg::Lock& js, GPUSamplerDescriptor descriptor);
+  jsg::Ref<GPUShaderModule> createShaderModule(jsg::Lock& js, GPUShaderModuleDescriptor descriptor);
+  jsg::Ref<GPUPipelineLayout> createPipelineLayout(
+      jsg::Lock& js, GPUPipelineLayoutDescriptor descriptor);
+  jsg::Ref<GPUComputePipeline> createComputePipeline(
+      jsg::Lock& js, GPUComputePipelineDescriptor descriptor);
+  jsg::Ref<GPURenderPipeline> createRenderPipeline(
+      jsg::Lock& js, GPURenderPipelineDescriptor descriptor);
   jsg::Promise<jsg::Ref<GPUComputePipeline>> createComputePipelineAsync(
       jsg::Lock& js, GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPUCommandEncoder> createCommandEncoder(
-      jsg::Optional<GPUCommandEncoderDescriptor> descriptor);
-  jsg::Ref<GPUQueue> getQueue();
-  void destroy();
-  jsg::Ref<GPUQuerySet> createQuerySet(GPUQuerySetDescriptor descriptor);
+      jsg::Lock& js, jsg::Optional<GPUCommandEncoderDescriptor> descriptor);
+  jsg::Ref<GPUQueue> getQueue(jsg::Lock& js);
+  void destroy(jsg::Lock& js);
+  jsg::Ref<GPUQuerySet> createQuerySet(jsg::Lock& js, GPUQuerySetDescriptor descriptor);
   void pushErrorScope(GPUErrorFilter filter);
   jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> popErrorScope(jsg::Lock& js);
   jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& getLost();
-  jsg::Ref<GPUSupportedFeatures> getFeatures();
-  jsg::Ref<GPUSupportedLimits> getLimits();
+  jsg::Ref<GPUSupportedFeatures> getFeatures(jsg::Lock& js);
+  jsg::Ref<GPUSupportedLimits> getLimits(jsg::Lock& js);
 };
 
 struct GPUQueueDescriptor {

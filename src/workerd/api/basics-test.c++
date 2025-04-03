@@ -24,7 +24,7 @@ struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
 
   bool test(jsg::Lock& js) {
 
-    auto target = jsg::alloc<api::EventTarget>();
+    auto target = js.alloc<api::EventTarget>();
 
     int called = 0;
     bool onceCalled = false;
@@ -40,11 +40,11 @@ struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
       onceCalled = true;
       // Recursively dispatching the event here should not cause this handler to
       // be invoked again.
-      target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo")));
+      target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo")));
     }, true);
 
-    KJ_ASSERT(target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo"))));
-    KJ_ASSERT(target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo"))));
+    KJ_ASSERT(target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo"))));
+    KJ_ASSERT(target->dispatchEventImpl(js, js.alloc<api::Event>(kj::str("foo"))));
     KJ_ASSERT(onceCalled);
     return called == 3;
   }

@@ -23,9 +23,11 @@ jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo(j
     kj::Vector<jsg::Ref<GPUCompilationMessage>> messages(compilationInfo->messageCount);
     for (uint32_t i = 0; i < compilationInfo->messageCount; i++) {
       auto& msg = compilationInfo->messages[i];
+      // TODO(js.alloc): Currently being allocated outside of the isolate lock?
       messages.add(jsg::alloc<GPUCompilationMessage>(msg));
     }
 
+    // TODO(js.alloc): Currently being allocated outside of the isolate lock?
     ctx->fulfiller_->fulfill(jsg::alloc<GPUCompilationInfo>(kj::mv(messages)));
   });
 

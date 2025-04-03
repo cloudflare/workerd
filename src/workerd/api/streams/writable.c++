@@ -22,7 +22,7 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
     jsg::Lock& js, jsg::Ref<WritableStream> stream) {
   JSG_REQUIRE(
       !stream->isLocked(), TypeError, "This WritableStream is currently locked to a writer.");
-  auto writer = jsg::alloc<WritableStreamDefaultWriter>();
+  auto writer = js.alloc<WritableStreamDefaultWriter>();
   writer->lockToStream(js, *stream);
   return kj::mv(writer);
 }
@@ -292,7 +292,7 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
       "To use the new WritableStream() constructor, enable the "
       "streams_enable_constructors compatibility flag. "
       "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
-  auto stream = jsg::alloc<WritableStream>(newWritableStreamJsController());
+  auto stream = js.alloc<WritableStream>(newWritableStreamJsController());
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
@@ -615,7 +615,7 @@ jsg::Ref<WritableStream> WritableStream::deserialize(
   auto stream = ioctx.getByteStreamFactory().capnpToKjExplicitEnd(ws.getByteStream());
   auto sink = newSystemStream(kj::mv(stream), encoding, ioctx);
 
-  return jsg::alloc<WritableStream>(
+  return js.alloc<WritableStream>(
       ioctx, kj::mv(sink), ioctx.getMetrics().tryCreateWritableByteStreamObserver());
 }
 

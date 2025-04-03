@@ -8,7 +8,7 @@ ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
 
 jsg::Ref<ErrorEvent> ErrorEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init) {
-  return jsg::alloc<ErrorEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+  return js.alloc<ErrorEvent>(kj::mv(type), kj::mv(init).orDefault({}));
 }
 
 kj::StringPtr ErrorEvent::getFilename() {

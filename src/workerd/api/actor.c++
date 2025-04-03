@@ -113,7 +113,7 @@ kj::Own<WorkerInterface> ReplicaActorOutgoingFactory::newSingleUseClient(
         .operationName = kj::ConstString("durable_object_subrequest"_kjc)}));
 }
 
-jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
+jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId) {
   JSG_REQUIRE(actorId.size() > 0 && actorId.size() <= 2048, TypeError,
       "Actor ID length must be in the range [1, 2048].");
 
@@ -124,7 +124,7 @@ jsg::Ref<Fetcher> ColoLocalActorNamespace::get(kj::String actorId) {
   auto outgoingFactory = context.addObject(kj::mv(factory));
 
   bool isInHouse = true;
-  return jsg::alloc<Fetcher>(
+  return js.alloc<Fetcher>(
       kj::mv(outgoingFactory), Fetcher::RequiresHostAndProtocol::YES, isInHouse);
 }
 
@@ -135,16 +135,16 @@ kj::String DurableObjectId::toString() {
 }
 
 jsg::Ref<DurableObjectId> DurableObjectNamespace::newUniqueId(
-    jsg::Optional<NewUniqueIdOptions> options) {
-  return jsg::alloc<DurableObjectId>(idFactory->newUniqueId(options.orDefault({}).jurisdiction));
+    jsg::Lock& js, jsg::Optional<NewUniqueIdOptions> options) {
+  return js.alloc<DurableObjectId>(idFactory->newUniqueId(options.orDefault({}).jurisdiction));
 }
 
-jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromName(kj::String name) {
-  return jsg::alloc<DurableObjectId>(idFactory->idFromName(kj::mv(name)));
+jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromName(jsg::Lock& js, kj::String name) {
+  return js.alloc<DurableObjectId>(idFactory->idFromName(kj::mv(name)));
 }
 
-jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(kj::String id) {
-  return jsg::alloc<DurableObjectId>(idFactory->idFromString(kj::mv(id)));
+jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(jsg::Lock& js, kj::String id) {
+  return js.alloc<DurableObjectId>(idFactory->idFromString(kj::mv(id)));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::get(
@@ -177,11 +177,12 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
-  return jsg::alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);
+  return js.alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);
 }
 
-jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(kj::String jurisdiction) {
-  return jsg::alloc<api::DurableObjectNamespace>(
+jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
+    jsg::Lock& js, kj::String jurisdiction) {
+  return js.alloc<api::DurableObjectNamespace>(
       channel, idFactory->cloneWithJurisdiction(jurisdiction));
 }
 

@@ -470,7 +470,7 @@ struct JsRpcPromiseAndPipeline {
   rpc::JsRpcTarget::CallResults::Pipeline pipeline;
 
   jsg::Ref<JsRpcPromise> asJsRpcPromise(jsg::Lock& js) && {
-    return jsg::alloc<JsRpcPromise>(jsg::JsRef<jsg::JsPromise>(js, promise), kj::mv(weakRef),
+    return js.alloc<JsRpcPromise>(jsg::JsRef<jsg::JsPromise>(js, promise), kj::mv(weakRef),
         IoContext::current().addObject(kj::heap(kj::mv(pipeline))));
   }
 };
@@ -725,11 +725,11 @@ jsg::JsValue JsRpcPromise::finally(jsg::Lock& js, v8::Local<v8::Function> onFina
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcProperty::getProperty(jsg::Lock& js, kj::String name) {
-  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
+  return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
 kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcPromise::getProperty(jsg::Lock& js, kj::String name) {
-  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
+  return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
 JsRpcStub::JsRpcStub(
@@ -829,8 +829,8 @@ rpc::JsRpcTarget::Client JsRpcStub::getClientForOneCall(
   return getClient();
 }
 
-jsg::Ref<JsRpcStub> JsRpcStub::dup() {
-  return jsg::alloc<JsRpcStub>(IoContext::current().addObject(kj::heap(getClient())));
+jsg::Ref<JsRpcStub> JsRpcStub::dup(jsg::Lock& js) {
+  return js.alloc<JsRpcStub>(IoContext::current().addObject(kj::heap(getClient())));
 }
 
 void JsRpcStub::dispose() {
@@ -864,7 +864,7 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(jsg::Lock& js, kj::St
   // with it, which is not what you want!
   if (name == "then"_kj) return kj::none;
 
-  return jsg::alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
+  return js.alloc<JsRpcProperty>(JSG_THIS, kj::mv(name));
 }
 
 void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -915,7 +915,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
   KJ_REQUIRE(reader.isRpcTarget(), "external table slot type doesn't match serialization tag");
 
   auto& ioctx = IoContext::current();
-  return jsg::alloc<JsRpcStub>(
+  return js.alloc<JsRpcStub>(
       ioctx.addObject(kj::heap(reader.getRpcTarget())), externalHandler->getDisposalGroup());
 }
 
@@ -1661,7 +1661,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> 
 
   rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, ioctx, handle);
 
-  return jsg::alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
+  return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
 }
 
 void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
@@ -1974,7 +1974,7 @@ jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
   jsg::JsObject self(args.This());
   self.set(js, "ctx", jsg::JsValue(args[0]));
   self.set(js, "env", jsg::JsValue(args[1]));
-  return jsg::alloc<WorkerEntrypoint>();
+  return js.alloc<WorkerEntrypoint>();
 }
 
 jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
@@ -1989,7 +1989,7 @@ jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
   jsg::JsObject self(args.This());
   self.set(js, "ctx", jsg::JsValue(args[0]));
   self.set(js, "env", jsg::JsValue(args[1]));
-  return jsg::alloc<DurableObjectBase>();
+  return js.alloc<DurableObjectBase>();
 }
 
 jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
@@ -2004,7 +2004,7 @@ jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
   jsg::JsObject self(args.This());
   self.set(js, "ctx", jsg::JsValue(args[0]));
   self.set(js, "env", jsg::JsValue(args[1]));
-  return jsg::alloc<WorkflowEntrypoint>();
+  return js.alloc<WorkflowEntrypoint>();
 }
 
 };  // namespace workerd::api

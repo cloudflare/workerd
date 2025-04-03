@@ -129,7 +129,7 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
                               jsg::Value value) {
         // If async context tracking is enabled, then we need to ensure that we enter the frame
         // associated with the promise before we invoke the unhandled rejection callback handling.
-        auto ev = jsg::alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
+        auto ev = js.alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
         dispatchEventImpl(js, kj::mv(ev));
       }) {}
 
@@ -165,11 +165,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   CfProperty cf(cfBlobJson);
 
-  auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
+  auto jsHeaders = js.alloc<Headers>(headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
   auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
-  auto jsStream = jsg::alloc<ReadableStream>(ioContext, kj::mv(b));
+  auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
   // thing as the request having a body that happens to be empty. Unfortunately, KJ HTTP gives us
@@ -214,14 +214,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
   }
 
-  auto jsRequest = jsg::alloc<Request>(method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
-      jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
+  auto jsRequest = js.alloc<Request>(method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+      js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
       kj::none /** AbortSignal **/, kj::mv(cf), kj::mv(body));
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
-  auto event = jsg::alloc<FetchEvent>(kj::mv(jsRequest));
+  auto event = js.alloc<FetchEvent>(kj::mv(jsRequest));
 
   uint tasksBefore = ioContext.taskCount();
 
@@ -342,14 +342,15 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   auto isolate = lock.getIsolate();
+  jsg::Lock& js = lock;
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.tail) {
-      auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
+      auto tailEvent = js.alloc<TailEvent>(lock, "tail"_kj, traces);
       auto promise = f(lock, tailEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_SOME(f, h.trace) {
-      auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
+      auto traceEvent = js.alloc<TailEvent>(lock, "trace"_kj, traces);
       auto promise = f(lock, traceEvent->getEvents(), h.env.addRef(isolate), h.getCtx());
       traceEvent->waitUntil(kj::mv(promise));
     } else {
@@ -360,8 +361,8 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
   } else {
     // Fire off the handlers.
     // We only create both events here.
-    auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
-    auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
+    auto tailEvent = js.alloc<TailEvent>(lock, "tail"_kj, traces);
+    auto traceEvent = js.alloc<TailEvent>(lock, "trace"_kj, traces);
     dispatchEventImpl(lock, tailEvent.addRef());
     dispatchEventImpl(lock, traceEvent.addRef());
 
@@ -374,17 +375,18 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   auto& context = IoContext::current();
+  jsg::Lock& js = lock;
 
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
-  auto event = jsg::alloc<ScheduledEvent>(eventTime, cron);
+  auto event = js.alloc<ScheduledEvent>(eventTime, cron);
 
   auto isolate = lock.getIsolate();
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.scheduled) {
-      auto promise = f(
-          lock, jsg::alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx());
+      auto promise =
+          f(lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx());
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -435,8 +437,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
                    Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         // We want to limit alarm handler walltime to 15 minutes at most. If the timeout promise
-        // completes we want to cancel the alarm handler. If the alarm handler promise completes first
-        // timeout will be canceled.
+        // completes we want to cancel the alarm handler. If the alarm handler promise completes
+        // first timeout will be canceled.
+        jsg::Lock& js = lock;
         auto timeoutPromise = context.afterLimitTimeout(timeout).then(
             [&context]() -> kj::Promise<WorkerInterface::AlarmResult> {
           // We don't want to delete the alarm since we have not successfully completed the alarm
@@ -461,7 +464,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
             .retry = true, .retryCountsAgainstLimit = true, .outcome = EventOutcome::EXCEEDED_CPU};
         });
 
-        return alarm(lock, jsg::alloc<AlarmInvocationInfo>(retryCount))
+        return alarm(lock, js.alloc<AlarmInvocationInfo>(retryCount))
             .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
@@ -573,7 +576,8 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   auto& testHandler =
       JSG_REQUIRE_NONNULL(eh.test, Error, "Entrypoint does not export a test() function.");
 
-  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
+  jsg::Lock& js = lock;
+  return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
 // This promise is used to set the timeout for hibernatable websocket events. It's expected to be
@@ -605,7 +609,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
     kj::String websocketId,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
-  auto event = jsg::alloc<HibernatableWebSocketEvent>();
+  jsg::Lock& js = lock;
+  auto event = js.alloc<HibernatableWebSocketEvent>();
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   auto websocket = event->claimWebSocket(lock, websocketId);
 
@@ -623,7 +628,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(HibernatableSocket
     kj::String websocketId,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
-  auto event = jsg::alloc<HibernatableWebSocketEvent>();
+  jsg::Lock& js = lock;
+  auto event = js.alloc<HibernatableWebSocketEvent>();
 
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   //
@@ -648,7 +654,8 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(kj::Exception e,
     kj::String websocketId,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
-  auto event = jsg::alloc<HibernatableWebSocketEvent>();
+  jsg::Lock& js = lock;
+  auto event = js.alloc<HibernatableWebSocketEvent>();
 
   // Even if no handler is exported, we need to claim the websocket so it's removed from the map.
   //
@@ -658,7 +665,6 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(kj::Exception e,
   auto& websocket = releasePackage.webSocketRef;
   websocket->initiateHibernatableRelease(lock, kj::mv(releasePackage.ownedWebSocket),
       kj::mv(releasePackage.tags), WebSocket::HibernatableReleaseState::ERROR);
-  jsg::Lock& js(lock);
 
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(handler, h.webSocketError) {
@@ -819,12 +825,12 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(jsg::Lock& js,
   return timeoutId.toNumber();
 }
 
-jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto() {
-  return jsg::alloc<Crypto>();
+jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto(jsg::Lock& js) {
+  return js.alloc<Crypto>(js);
 }
 
-jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches() {
-  return jsg::alloc<CacheStorage>();
+jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches(jsg::Lock& js) {
+  return js.alloc<CacheStorage>(js);
 }
 
 jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(jsg::Lock& js,
@@ -838,7 +844,7 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   // If that event is not prevented, we will log the error to the console. Note
   // that we do not throw the error at all.
   auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
-  auto event = jsg::alloc<ErrorEvent>(kj::str("error"),
+  auto event = js.alloc<ErrorEvent>(kj::str("error"),
       ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
         .filename = kj::str(message->GetScriptResourceName()),
         .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
@@ -898,7 +904,8 @@ double Performance::now() {
 }
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(CompatibilityFlags::Reader flags) {
+jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(
+    jsg::Lock& js, CompatibilityFlags::Reader flags) {
   // is this a durable object?
   KJ_IF_SOME(actor, IoContext::current().getActor()) {
     if (actor.getPersistent() == kj::none) {
@@ -912,7 +919,7 @@ jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(CompatibilityFlags::Rea
     return kj::none;
   }
 
-  return jsg::alloc<api::gpu::GPU>();
+  return js.alloc<api::gpu::GPU>();
 }
 #endif
 
@@ -970,7 +977,7 @@ jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(jsg::Lock& js,
   };
   auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
       /* repeats = */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0);
-  return jsg::alloc<Immediate>(context, timeoutId);
+  return js.alloc<Immediate>(context, timeoutId);
 }
 
 void ServiceWorkerGlobalScope::clearImmediate(kj::Maybe<jsg::Ref<Immediate>> maybeImmediate) {

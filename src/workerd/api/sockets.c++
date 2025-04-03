@@ -151,7 +151,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
   // Initialize the readable/writable streams with the readable/writable sides of an AsyncIoStream.
   auto sysStreams = newSystemMultiStream(refcountedConnection->addWrappedRef(), ioContext);
-  auto readable = jsg::alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
+  auto readable = js.alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   auto allowHalfOpen = getAllowHalfOpen(options);
   kj::Maybe<jsg::Promise<void>> eofPromise;
   if (!allowHalfOpen) {
@@ -159,14 +159,14 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   }
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
-  auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
+  auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
       getWritableHighWaterMark(options), openedPrPair.promise.whenResolved(js));
 
-  auto result = jsg::alloc<Socket>(js, ioContext, kj::mv(refcountedConnection),
-      kj::mv(remoteAddress), kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair),
-      kj::mv(watchForDisconnectTask), kj::mv(options), kj::mv(tlsStarter), isSecureSocket,
-      kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
+  auto result = js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::mv(remoteAddress),
+      kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair), kj::mv(watchForDisconnectTask),
+      kj::mv(options), kj::mv(tlsStarter), isSecureSocket, kj::mv(domain), isDefaultFetchPort,
+      kj::mv(openedPrPair));
 
   KJ_IF_SOME(p, eofPromise) {
     result->handleReadableEof(js, kj::mv(p));
@@ -231,7 +231,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
       return fn(js);
     }
     actualFetcher =
-        jsg::alloc<Fetcher>(IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
+        js.alloc<Fetcher>(IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
   }
 
   CfProperty cf;

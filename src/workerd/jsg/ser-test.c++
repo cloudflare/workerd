@@ -25,8 +25,8 @@ struct SerTestContext: public ContextGlobalObject {
     uint i;
     Foo(uint i): i(i) {}
 
-    static jsg::Ref<Foo> constructor(uint i) {
-      return jsg::alloc<Foo>(i);
+    static jsg::Ref<Foo> constructor(jsg::Lock& js, uint i) {
+      return js.alloc<Foo>(i);
     }
 
     int getI() {
@@ -44,7 +44,7 @@ struct SerTestContext: public ContextGlobalObject {
       KJ_ASSERT(tag == SerializationTag::FOO);
 
       // Intentionally deserialize differently so we can detect it.
-      return jsg::alloc<Foo>(deserializer.readRawUint32() + 2);
+      return js.alloc<Foo>(deserializer.readRawUint32() + 2);
     }
     JSG_SERIALIZABLE(SerializationTag::FOO);
   };
@@ -53,8 +53,8 @@ struct SerTestContext: public ContextGlobalObject {
     kj::String text;
     Bar(kj::String text): text(kj::mv(text)) {}
 
-    static jsg::Ref<Bar> constructor(kj::String text) {
-      return jsg::alloc<Bar>(kj::mv(text));
+    static jsg::Ref<Bar> constructor(jsg::Lock& js, kj::String text) {
+      return js.alloc<Bar>(kj::mv(text));
     }
 
     kj::String getText() {
@@ -75,7 +75,7 @@ struct SerTestContext: public ContextGlobalObject {
       size_t size = deserializer.readRawUint64();
       auto bytes = deserializer.readRawBytes(size);
       // Intentionally deserialize differently so we can detect it.
-      return jsg::alloc<Bar>(kj::str(bytes.asChars(), '!'));
+      return js.alloc<Bar>(kj::str(bytes.asChars(), '!'));
     }
     JSG_SERIALIZABLE(SerializationTag::BAR);
   };
@@ -83,8 +83,8 @@ struct SerTestContext: public ContextGlobalObject {
   struct Baz: public jsg::Object {
     bool serializeThrows;
     Baz(bool serializeThrows): serializeThrows(serializeThrows) {}
-    static jsg::Ref<Baz> constructor(bool serializeThrows) {
-      return jsg::alloc<Baz>(serializeThrows);
+    static jsg::Ref<Baz> constructor(jsg::Lock& js, bool serializeThrows) {
+      return js.alloc<Baz>(serializeThrows);
     }
 
     JSG_RESOURCE_TYPE(Baz) {}
@@ -103,8 +103,8 @@ struct SerTestContext: public ContextGlobalObject {
     kj::String text;
     Qux(kj::String text): text(kj::mv(text)) {}
 
-    static jsg::Ref<Qux> constructor(kj::String text) {
-      return jsg::alloc<Qux>(kj::mv(text));
+    static jsg::Ref<Qux> constructor(jsg::Lock& js, kj::String text) {
+      return js.alloc<Qux>(kj::mv(text));
     }
 
     kj::String getText() {
@@ -126,7 +126,7 @@ struct SerTestContext: public ContextGlobalObject {
         const TypeHandler<kj::String>& stringHandler) {
       KJ_ASSERT(tag == SerializationTag::QUX);
 
-      return jsg::alloc<Qux>(
+      return js.alloc<Qux>(
           KJ_ASSERT_NONNULL(stringHandler.tryUnwrap(js, deserializer.readValue(js))));
     }
     JSG_SERIALIZABLE(SerializationTag::QUX);
@@ -174,8 +174,8 @@ struct SerTestContextV2: public ContextGlobalObject {
     JsRef<JsValue> val;
     Bar(JsRef<JsValue> val): val(kj::mv(val)) {}
 
-    static jsg::Ref<Bar> constructor(JsRef<JsValue> val) {
-      return jsg::alloc<Bar>(kj::mv(val));
+    static jsg::Ref<Bar> constructor(jsg::Lock& js, JsRef<JsValue> val) {
+      return js.alloc<Bar>(kj::mv(val));
     }
 
     JsRef<JsValue> getVal(Lock& js) {
@@ -196,11 +196,11 @@ struct SerTestContextV2: public ContextGlobalObject {
         size_t size = deserializer.readRawUint64();
         auto bytes = deserializer.readRawBytes(size);
 
-        return jsg::alloc<Bar>(JsRef<JsValue>(js, js.str(kj::str("old:", bytes.asChars()))));
+        return js.alloc<Bar>(JsRef<JsValue>(js, js.str(kj::str("old:", bytes.asChars()))));
       } else {
         KJ_ASSERT(tag == SerializationTag::BAR_V2);
 
-        return jsg::alloc<Bar>(JsRef<JsValue>(js, deserializer.readValue(js)));
+        return js.alloc<Bar>(JsRef<JsValue>(js, deserializer.readValue(js)));
       }
     }
     JSG_SERIALIZABLE(SerializationTag::BAR_V2, SerializationTag::BAR_OLD);

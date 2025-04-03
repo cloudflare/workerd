@@ -403,8 +403,9 @@ Decoder& TextDecoder::getImpl() {
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<TextDecoder> TextDecoder::constructor(
-    jsg::Optional<kj::String> maybeLabel, jsg::Optional<ConstructorOptions> maybeOptions) {
+jsg::Ref<TextDecoder> TextDecoder::constructor(jsg::Lock& js,
+    jsg::Optional<kj::String> maybeLabel,
+    jsg::Optional<ConstructorOptions> maybeOptions) {
   static constexpr ConstructorOptions DEFAULT_OPTIONS;
   auto options = maybeOptions.orDefault(DEFAULT_OPTIONS);
   auto encoding = Encoding::Utf8;
@@ -421,10 +422,10 @@ jsg::Ref<TextDecoder> TextDecoder::constructor(
   }
 
   if (encoding == Encoding::Windows_1252) {
-    return jsg::alloc<TextDecoder>(AsciiDecoder(), options);
+    return js.alloc<TextDecoder>(AsciiDecoder(), options);
   }
 
-  return jsg::alloc<TextDecoder>(
+  return js.alloc<TextDecoder>(
       JSG_REQUIRE_NONNULL(IcuDecoder::create(encoding, options.fatal, options.ignoreBOM),
           RangeError, errorMessage(getEncodingId(encoding))),
       options);
@@ -459,8 +460,8 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 // =======================================================================================
 // TextEncoder implementation
 
-jsg::Ref<TextEncoder> TextEncoder::constructor() {
-  return jsg::alloc<TextEncoder>();
+jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
+  return js.alloc<TextEncoder>();
 }
 
 namespace {

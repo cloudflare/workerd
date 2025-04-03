@@ -10,7 +10,7 @@
 namespace workerd::api::gpu {
 
 jsg::Ref<GPUCommandBuffer> GPUCommandEncoder::finish(
-    jsg::Optional<GPUCommandBufferDescriptor> descriptor) {
+    jsg::Lock& js, jsg::Optional<GPUCommandBufferDescriptor> descriptor) {
   wgpu::CommandBufferDescriptor desc{};
 
   KJ_IF_SOME(d, descriptor) {
@@ -20,7 +20,7 @@ jsg::Ref<GPUCommandBuffer> GPUCommandEncoder::finish(
   }
 
   auto buffer = encoder_.Finish(&desc);
-  return jsg::alloc<GPUCommandBuffer>(kj::mv(buffer));
+  return js.alloc<GPUCommandBuffer>(kj::mv(buffer));
 };
 
 wgpu::ImageCopyTexture parseGPUImageCopyTexture(GPUImageCopyTexture source) {
@@ -156,7 +156,7 @@ void GPUCommandEncoder::clearBuffer(
 }
 
 jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
-    GPURenderPassDescriptor descriptor) {
+    jsg::Lock& js, GPURenderPassDescriptor descriptor) {
 
   wgpu::RenderPassDescriptor desc{};
 
@@ -248,11 +248,11 @@ jsg::Ref<GPURenderPassEncoder> GPUCommandEncoder::beginRenderPass(
   // TODO: maxDrawCount is not supported by dawn yet
 
   auto renderPassEncoder = encoder_.BeginRenderPass(&desc);
-  return jsg::alloc<GPURenderPassEncoder>(kj::mv(renderPassEncoder));
+  return js.alloc<GPURenderPassEncoder>(kj::mv(renderPassEncoder));
 }
 
 jsg::Ref<GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
-    jsg::Optional<GPUComputePassDescriptor> descriptor) {
+    jsg::Lock& js, jsg::Optional<GPUComputePassDescriptor> descriptor) {
 
   wgpu::ComputePassDescriptor desc{};
 
@@ -276,7 +276,7 @@ jsg::Ref<GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
   }
 
   auto computePassEncoder = encoder_.BeginComputePass(&desc);
-  return jsg::alloc<GPUComputePassEncoder>(kj::mv(computePassEncoder));
+  return js.alloc<GPUComputePassEncoder>(kj::mv(computePassEncoder));
 }
 
 }  // namespace workerd::api::gpu

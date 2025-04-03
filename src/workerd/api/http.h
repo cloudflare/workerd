@@ -55,7 +55,7 @@ public:
 
   // Make a copy of this Headers object, and preserve the guard. The normal copy constructor sets
   // the copy's guard to NONE.
-  jsg::Ref<Headers> clone() const;
+  jsg::Ref<Headers> clone(jsg::Lock& js) const;
 
   // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
   // reference, so the output must be consumed immediately.
