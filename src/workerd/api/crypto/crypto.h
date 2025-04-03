@@ -672,6 +672,7 @@ class DigestStream: public WritableStream {
 
   static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
+  // The BufferSource returned will always be an ArrayBuffer here.
   jsg::MemoizedIdentity<jsg::Promise<jsg::BufferSource>>& getDigest() {
     return promise;
   }
@@ -690,7 +691,9 @@ class DigestStream: public WritableStream {
     JSG_READONLY_PROTOTYPE_PROPERTY(bytesWritten, getBytesWritten);
     JSG_DISPOSE(dispose);
 
-    JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView>);
+    JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView> {
+      readonly digest: Promise<ArrayBuffer>;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -725,6 +728,8 @@ class DigestStream: public WritableStream {
 // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
 class Crypto: public jsg::Object {
  public:
+  Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
   jsg::BufferSource getRandomValues(jsg::BufferSource buffer);
 
   kj::String randomUUID();
@@ -768,7 +773,7 @@ class Crypto: public jsg::Object {
   }
 
  private:
-  jsg::Ref<SubtleCrypto> subtle = jsg::alloc<SubtleCrypto>();
+  jsg::Ref<SubtleCrypto> subtle;
 };
 
 #define EW_CRYPTO_ISOLATE_TYPES                                                                    \

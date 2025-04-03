@@ -275,7 +275,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
   kj::StringPtr getMethod();
   kj::String getUrl();
 
-  jsg::Ref<Request> getUnredacted();
+  jsg::Ref<Request> getUnredacted(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Request) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(cf, getCf);
@@ -418,7 +418,8 @@ class TraceItem::TailEventInfo final: public jsg::Object {
  public:
   class TailItem;
 
-  explicit TailEventInfo(const Trace& trace, const tracing::TraceEventInfo& eventInfo);
+  explicit TailEventInfo(
+      jsg::Lock& js, const Trace& trace, const tracing::TraceEventInfo& eventInfo);
 
   kj::Array<jsg::Ref<TailItem>> getConsumedEvents();
 
@@ -456,12 +457,15 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
   class Close;
   class Error;
 
-  explicit HibernatableWebSocketEventInfo(
-      const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Message eventInfo);
-  explicit HibernatableWebSocketEventInfo(
-      const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Close eventInfo);
-  explicit HibernatableWebSocketEventInfo(
-      const Trace& trace, const tracing::HibernatableWebSocketEventInfo::Error eventInfo);
+  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
+      const Trace& trace,
+      const tracing::HibernatableWebSocketEventInfo::Message eventInfo);
+  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
+      const Trace& trace,
+      const tracing::HibernatableWebSocketEventInfo::Close eventInfo);
+  explicit HibernatableWebSocketEventInfo(jsg::Lock& js,
+      const Trace& trace,
+      const tracing::HibernatableWebSocketEventInfo::Error eventInfo);
 
   using Type = kj::OneOf<jsg::Ref<Message>, jsg::Ref<Close>, jsg::Ref<Error>>;
 
@@ -651,7 +655,7 @@ class TraceMetrics final: public jsg::Object {
 
 class UnsafeTraceMetrics final: public jsg::Object {
  public:
-  jsg::Ref<TraceMetrics> fromTrace(jsg::Ref<TraceItem> item);
+  jsg::Ref<TraceMetrics> fromTrace(jsg::Lock& js, jsg::Ref<TraceItem> item);
 
   JSG_RESOURCE_TYPE(UnsafeTraceMetrics) {
     JSG_METHOD(fromTrace);

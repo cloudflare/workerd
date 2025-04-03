@@ -41,13 +41,15 @@ class Blob: public jsg::Object {
     return type;
   }
 
-  jsg::Ref<Blob> slice(
-      jsg::Optional<int> start, jsg::Optional<int> end, jsg::Optional<kj::String> type);
+  jsg::Ref<Blob> slice(jsg::Lock& js,
+      jsg::Optional<int> start,
+      jsg::Optional<int> end,
+      jsg::Optional<kj::String> type);
 
   jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
-  jsg::Ref<ReadableStream> stream();
+  jsg::Ref<ReadableStream> stream(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Blob, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {

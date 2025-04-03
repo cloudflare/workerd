@@ -16,10 +16,10 @@
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
   KJ_IF_SOME(j, jwt) {
-    return jsg::alloc<R2Bucket>(
+    return js.alloc<R2Bucket>(
         featureFlags, subrequestChannel, kj::mv(bucketName), kj::str(j), R2Bucket::friend_tag_t{});
   }
-  return jsg::alloc<R2Bucket>(
+  return js.alloc<R2Bucket>(
       featureFlags, subrequestChannel, kj::mv(bucketName), R2Bucket::friend_tag_t{});
 }
 
@@ -45,9 +45,9 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
 
   return context.awaitIo(js, kj::mv(promise),
       [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType](
-          jsg::Lock&, R2Result r2Result) mutable {
+          jsg::Lock& js, R2Result r2Result) mutable {
     r2Result.throwIfError("createBucket", errorType);
-    return jsg::alloc<R2Bucket>(
+    return js.alloc<R2Bucket>(
         featureFlags, subrequestChannel, kj::mv(name), R2Bucket::friend_tag_t{});
   });
 }
@@ -94,9 +94,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
 
     auto buckets = js.map();
     for (auto b: responseBuilder.getBuckets()) {
-      auto bucket =
-          jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel, kj::str(b.getName()),
-              kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
+      auto bucket = js.alloc<RetrievedBucket>(featureFlags, subrequestChannel, kj::str(b.getName()),
+          kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
       buckets.set(js, b.getName(), jsg::JsValue(retrievedBucketType.wrap(js, kj::mv(bucket))));
     }
 

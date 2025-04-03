@@ -658,6 +658,7 @@ export interface DurableObjectStorage {
   waitForBookmark(bookmark: string): Promise<void>;
   readonly primary?: DurableObjectStub;
   ensureReplicas(): void;
+  disableReplicas(): void;
 }
 export interface DurableObjectListOptions {
   start?: string;
@@ -1297,7 +1298,7 @@ export declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
   constructor(algorithm: string | SubtleCryptoHashAlgorithm);
-  get digest(): Promise<ArrayBuffer | ArrayBufferView>;
+  readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
 }
 /**
@@ -1306,7 +1307,7 @@ export declare class DigestStream extends WritableStream<
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder)
  */
 export declare class TextDecoder {
-  constructor(decoder?: string, options?: TextDecoderConstructorOptions);
+  constructor(label?: string, options?: TextDecoderConstructorOptions);
   /**
    * Returns the result of running encoding's decoder. The method can be invoked zero or more times with options's stream set to true, and then once without options's stream (or set to false), to process a fragmented input. If the invocation without options's stream (or set to false) has no input, it's clearest to omit both arguments.
    *
@@ -3224,7 +3225,7 @@ export interface GPUCommandEncoder {
     destinationOffset: number | bigint,
     size: number | bigint,
   ): void;
-  finish(param0?: GPUCommandBufferDescriptor): GPUCommandBuffer;
+  finish(param1?: GPUCommandBufferDescriptor): GPUCommandBuffer;
   copyTextureToBuffer(
     source: GPUImageCopyTexture,
     destination: GPUImageCopyBuffer,
@@ -3647,6 +3648,28 @@ export declare abstract class BaseAiImageToText {
   inputs: AiImageToTextInput;
   postProcessedOutputs: AiImageToTextOutput;
 }
+export type AiImageTextToTextInput = {
+  image: string;
+  prompt?: string;
+  max_tokens?: number;
+  temperature?: number;
+  ignore_eos?: boolean;
+  top_p?: number;
+  top_k?: number;
+  seed?: number;
+  repetition_penalty?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  raw?: boolean;
+  messages?: RoleScopedChatInput[];
+};
+export type AiImageTextToTextOutput = {
+  description: string;
+};
+export declare abstract class BaseAiImageTextToText {
+  inputs: AiImageTextToTextInput;
+  postProcessedOutputs: AiImageTextToTextOutput;
+}
 export type AiObjectDetectionInput = {
   image: number[];
 };
@@ -4057,6 +4080,74 @@ export declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
 }
+export type Ai_Cf_Baai_Bge_M3_Input =
+  | BGEM3InputQueryAndContexts
+  | BGEM3InputEmbedding;
+export interface BGEM3InputQueryAndContexts {
+  /**
+   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
+   */
+  query?: string;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+export interface BGEM3InputEmbedding {
+  text: string | string[];
+  /**
+   * When provided with too long context should the model error out or truncate the context to fit?
+   */
+  truncate_inputs?: boolean;
+}
+export type Ai_Cf_Baai_Bge_M3_Output =
+  | BGEM3OuputQuery
+  | BGEM3OutputEmbeddingForContexts
+  | BGEM3OuputEmbedding;
+export interface BGEM3OuputQuery {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+export interface BGEM3OutputEmbeddingForContexts {
+  response?: number[][];
+  shape?: number[];
+  /**
+   * The pooling method used in the embedding process.
+   */
+  pooling?: "mean" | "cls";
+}
+export interface BGEM3OuputEmbedding {
+  shape?: number[];
+  /**
+   * Embeddings of the requested text values
+   */
+  data?: number[][];
+  /**
+   * The pooling method used in the embedding process.
+   */
+  pooling?: "mean" | "cls";
+}
+export declare abstract class Base_Ai_Cf_Baai_Bge_M3 {
+  inputs: Ai_Cf_Baai_Bge_M3_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_M3_Output;
+}
 export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
   /**
    * A text description of the image you want to generate.
@@ -4367,6 +4458,40 @@ export declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
   inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
 }
+export interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
+  /**
+   * A query you wish to perform against the provided contexts.
+   */
+  /**
+   * Number of returned results starting with the best score.
+   */
+  top_k?: number;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+}
+export interface Ai_Cf_Baai_Bge_Reranker_Base_Output {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+export declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
+  inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -4374,6 +4499,7 @@ export interface AiModels {
   "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
+  "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
   "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
   "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
@@ -4427,9 +4553,11 @@ export interface AiModels {
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
+  "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
+  "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
 }
 export type AiOptions = {
   gateway?: GatewayOptions;
@@ -4489,8 +4617,8 @@ export declare abstract class Ai<
       ? Response
       : AiModelList[Name]["postProcessedOutputs"]
   >;
-  public models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
-  public toMarkdown(
+  models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(
     files: {
       name: string;
       blob: Blob;
@@ -4500,7 +4628,7 @@ export declare abstract class Ai<
       extraHeaders?: object;
     },
   ): Promise<ConversionResponse[]>;
-  public toMarkdown(
+  toMarkdown(
     files: {
       name: string;
       blob: Blob;
@@ -6164,6 +6292,30 @@ export declare namespace Rpc {
   //   serializable check as well. Otherwise, only types defined with the "type" keyword would pass.
   type Serializable<T> =
     // Structured cloneables
+    | BaseType
+    // Structured cloneable composites
+    | Map<
+        T extends Map<infer U, unknown> ? Serializable<U> : never,
+        T extends Map<unknown, infer U> ? Serializable<U> : never
+      >
+    | Set<T extends Set<infer U> ? Serializable<U> : never>
+    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
+    | {
+        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
+      }
+    // Special types
+    | Stub<Stubable>
+    // Serialized as stubs, see `Stubify`
+    | Stubable;
+  // Base type for all RPC stubs, including common memory management methods.
+  // `T` is used as a marker type for unwrapping `Stub`s later.
+  interface StubBase<T extends Stubable> extends Disposable {
+    [__RPC_STUB_BRAND]: T;
+    dup(): this;
+  }
+  export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+  // This represents all the types that can be sent as-is over an RPC boundary
+  type BaseType =
     | void
     | undefined
     | null
@@ -6177,32 +6329,11 @@ export declare namespace Rpc {
     | Date
     | Error
     | RegExp
-    // Structured cloneable composites
-    | Map<
-        T extends Map<infer U, unknown> ? Serializable<U> : never,
-        T extends Map<unknown, infer U> ? Serializable<U> : never
-      >
-    | Set<T extends Set<infer U> ? Serializable<U> : never>
-    | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
-    | {
-        [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
-      }
-    // Special types
     | ReadableStream<Uint8Array>
     | WritableStream<Uint8Array>
     | Request
     | Response
-    | Headers
-    | Stub<Stubable>
-    // Serialized as stubs, see `Stubify`
-    | Stubable;
-  // Base type for all RPC stubs, including common memory management methods.
-  // `T` is used as a marker type for unwrapping `Stub`s later.
-  interface StubBase<T extends Stubable> extends Disposable {
-    [__RPC_STUB_BRAND]: T;
-    dup(): this;
-  }
-  export type Stub<T extends Stubable> = Provider<T> & StubBase<T>;
+    | Headers;
   // Recursively rewrite all `Stubable` types with `Stub`s
   type Stubify<T> = T extends Stubable
     ? Stub<T>
@@ -6214,13 +6345,15 @@ export declare namespace Rpc {
           ? Array<Stubify<V>>
           : T extends ReadonlyArray<infer V>
             ? ReadonlyArray<Stubify<V>>
-            : T extends {
-                  [key: string | number]: any;
-                }
-              ? {
-                  [K in keyof T]: Stubify<T[K]>;
-                }
-              : T;
+            : T extends BaseType
+              ? T
+              : T extends {
+                    [key: string | number]: any;
+                  }
+                ? {
+                    [K in keyof T]: Stubify<T[K]>;
+                  }
+                : T;
   // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
   // Note we use `StubBase` instead of `Stub` here to avoid circular dependencies:
   // `Stub` depends on `Provider`, which depends on `Unstubify`, which would depend on `Stub`.
@@ -6235,13 +6368,15 @@ export declare namespace Rpc {
             ? Array<Unstubify<V>>
             : T extends ReadonlyArray<infer V>
               ? ReadonlyArray<Unstubify<V>>
-              : T extends {
-                    [key: string | number]: unknown;
-                  }
-                ? {
-                    [K in keyof T]: Unstubify<T[K]>;
-                  }
-                : T;
+              : T extends BaseType
+                ? T
+                : T extends {
+                      [key: string | number]: unknown;
+                    }
+                  ? {
+                      [K in keyof T]: Unstubify<T[K]>;
+                    }
+                  : T;
   type UnstubifyAll<A extends any[]> = {
     [I in keyof A]: Unstubify<A[I]>;
   };

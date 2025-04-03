@@ -14,7 +14,6 @@
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/io/trace.h>
-#include <workerd/io/tracer.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/exception.h>
@@ -27,7 +26,9 @@
 #include <kj/function.h>
 #include <kj/mutex.h>
 
-#include <initializer_list>
+namespace workerd {
+class WorkerTracer;
+}
 
 namespace workerd {
 class LimitEnforcer;

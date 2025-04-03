@@ -13,6 +13,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/promise-wrapper.h>
+#include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/inspector.h>
@@ -1652,7 +1653,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Historically, non-class-based handlers reused the same ctx object for all requests.
                         // This was an accident, but some Workers depend on it.
                         // Newer worker with the unique_ctx_per_invocation will allocate a new ctx for every request.
-                        obj.ctx = jsg::alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
+                        obj.ctx = js.alloc<api::ExecutionContext>(lock, jsg::JsValue(ctxExports));
 
                         // Python Workers append all durable objects classes in the
                         // pythonDurableObjects named export.
@@ -1982,7 +1983,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
       api::ExportedHandler constructedHandler = h.clone(js);
 
-      constructedHandler.ctx = jsg::alloc<api::ExecutionContext>(js,
+      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
           jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
       return kj::heap(kj::mv(constructedHandler));
     }
@@ -1990,7 +1991,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
-        jsg::alloc<api::ExecutionContext>(js,
+        js.alloc<api::ExecutionContext>(js,
             jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js)),
         KJ_ASSERT_NONNULL(worker.impl->env).addRef(js)));
 
@@ -3505,7 +3506,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
       auto handler = info.cls(lock,
-          jsg::alloc<api::DurableObjectState>(cloneId(),
+          js.alloc<api::DurableObjectState>(js, cloneId(),
               jsg::JsRef<jsg::JsValue>(
                   js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
               kj::mv(storage), kj::mv(impl->container), containerRunning),

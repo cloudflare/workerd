@@ -132,7 +132,8 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
 
     return context.awaitIo(
         js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) mutable {
-      auto parsedObject = parseHeadResultWrapper("completeMultipartUpload", r2Result, errorType);
+      auto parsedObject =
+          parseHeadResultWrapper(js, "completeMultipartUpload", r2Result, errorType);
       KJ_IF_SOME(obj, parsedObject) {
         return obj.addRef();
       } else {

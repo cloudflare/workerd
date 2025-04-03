@@ -1510,7 +1510,7 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
         KJ_CASE_ONEOF(link, Link) {
           link.copyTo(eventBuilder.initLink());
         }
-        KJ_CASE_ONEOF(attrs, kj::Array<Attribute>) {
+        KJ_CASE_ONEOF(attrs, CustomInfo) {
           // Mark is a collection of attributes.
           auto attrBuilder = eventBuilder.initAttribute(attrs.size());
           for (size_t n = 0; n < attrs.size(); n++) {

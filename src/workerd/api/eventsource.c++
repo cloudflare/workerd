@@ -242,7 +242,7 @@ jsg::Ref<EventSource> EventSource::constructor(
     }
   }
 
-  auto eventsource = jsg::alloc<EventSource>(js,
+  auto eventsource = js.alloc<EventSource>(js,
       JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url.asPtr()), DOMSyntaxError,
           kj::str("Cannot open an EventSource to '", url, "'. The URL is invalid.")),
       kj::mv(init));
@@ -256,7 +256,7 @@ jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, jsg::Ref<ReadableStream> 
   JSG_REQUIRE(!readable->isLocked(), TypeError, "This ReadableStream is locked.");
   JSG_REQUIRE(
       !readable->isDisturbed(), TypeError, "This ReadableStream has already been read from.");
-  auto eventsource = jsg::alloc<EventSource>(js);
+  auto eventsource = js.alloc<EventSource>(js);
   eventsource->run(js, kj::mv(readable), false /* No reconnection attempts */);
   return kj::mv(eventsource);
 }
@@ -267,12 +267,12 @@ EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit>
         .url = kj::mv(url),
         .options = kj::mv(init).orDefault({}),
       }),
-      abortController(jsg::alloc<AbortController>()),
+      abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
 EventSource::EventSource(jsg::Lock& js)
     : context(IoContext::current()),
-      abortController(jsg::alloc<AbortController>()),
+      abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
 void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool reconnecting) {
@@ -288,7 +288,7 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
     readyState = State::CONNECTING;
 
   // Dispatch the error event.
-  dispatchEventImpl(js, jsg::alloc<ErrorEvent>(js, error));
+  dispatchEventImpl(js, js.alloc<ErrorEvent>(js, error));
 
   // Log the error as an uncaught exception for debugging purposes.
   IoContext::current().logUncaughtException(UncaughtExceptionSource::ASYNC_TASK, error);
@@ -297,7 +297,7 @@ void EventSource::notifyError(jsg::Lock& js, const jsg::JsValue& error, bool rec
 void EventSource::notifyOpen(jsg::Lock& js) {
   if (readyState == State::CLOSED) return;
   readyState = State::OPEN;
-  dispatchEventImpl(js, jsg::alloc<OpenEvent>());
+  dispatchEventImpl(js, js.alloc<OpenEvent>());
 }
 
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
@@ -307,7 +307,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
       dispatchEventImpl(js,
-          jsg::alloc<MessageEvent>(kj::mv(message.event), kj::mv(data), kj::mv(message.id),
+          js.alloc<MessageEvent>(kj::mv(message.event), kj::mv(data), kj::mv(message.id),
               impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
     }
   }, [&](jsg::Value exception) {
@@ -320,7 +320,7 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
 void EventSource::reconnect(jsg::Lock& js) {
   KJ_ASSERT(impl != kj::none);
   readyState = State::CONNECTING;
-  abortController = jsg::alloc<AbortController>();
+  abortController = js.alloc<AbortController>(js);
   auto signal = abortController->getSignal();
   context.awaitIo(js, signal->wrap(context.afterLimitTimeout(reconnectionTime)))
       .then(js,
@@ -418,7 +418,7 @@ void EventSource::start(jsg::Lock& js) {
         return js.resolvedPromise();
       });
 
-  auto headers = jsg::alloc<Headers>();
+  auto headers = js.alloc<Headers>();
   headers->set(
       jsg::ByteString(kj::str("accept")), jsg::ByteString(MimeType::EVENT_STREAM.essence()));
   headers->set(jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str("no-cache")));

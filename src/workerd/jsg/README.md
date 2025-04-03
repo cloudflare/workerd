@@ -550,8 +550,8 @@ object. This wrapper is created lazily when the `jsg::Ref<T>` instance is first 
 out to JavaScript via JSG mechanisms.
 
 ```cpp
-// We'll discuss jsg::alloc a bit later as part of the introduction to Resource Types.
-jsg::Ref<Foo> foo = jsg::alloc<Foo>();
+// We'll discuss js.alloc a bit later as part of the introduction to Resource Types.
+jsg::Ref<Foo> foo = js.alloc<Foo>();
 
 jsg::Ref<Foo> foo2 = foo.addRef();
 
@@ -796,7 +796,7 @@ public:
   Foo(int value): value(value) {}
 
   static jsg::Ref<Foo> constructor(jsg::Lock& js, int value) {
-    return jsg::alloc<Foo>(value);
+    return js.alloc<Foo>(value);
   }
 
   JSG_RESOURCE_TYPE(Foo) {}

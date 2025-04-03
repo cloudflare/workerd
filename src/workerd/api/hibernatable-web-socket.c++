@@ -6,6 +6,7 @@
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {

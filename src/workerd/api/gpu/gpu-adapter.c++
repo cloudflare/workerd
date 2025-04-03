@@ -63,7 +63,7 @@ jsg::Promise<jsg::Ref<GPUAdapterInfo>> GPUAdapter::requestAdapterInfo(
 
   wgpu::AdapterInfo info = {};
   adapter_.GetInfo(&info);
-  auto gpuInfo = jsg::alloc<GPUAdapterInfo>(kj::mv(info));
+  auto gpuInfo = js.alloc<GPUAdapterInfo>(kj::mv(info));
   return js.resolvedPromise(kj::mv(gpuInfo));
 }
 
@@ -112,9 +112,10 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
   desc.SetDeviceLostCallback(wgpu::CallbackMode::AllowSpontaneous,
       [ctx = kj::addRef(*deviceLostCtx)](
           const wgpu::Device&, wgpu::DeviceLostReason reason, const char* message) mutable {
+    jsg::Lock& js = IoContext::current().getCurrentLock();
     auto r = parseDeviceLostReason(reason);
     if (ctx->fulfiller_->isWaiting()) {
-      auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
+      auto lostInfo = js.alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
       ctx->fulfiller_->fulfill(kj::mv(lostInfo));
     }
   });
@@ -122,6 +123,7 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
   auto uErrorCtx = kj::heap<UncapturedErrorContext>();
   desc.SetUncapturedErrorCallback(
       [](const wgpu::Device&, wgpu::ErrorType type, const char* message, void* userdata) {
+    jsg::Lock& js = IoContext::current().getCurrentLock();
     auto maybeTarget = static_cast<kj::Maybe<EventTarget*>*>(userdata);
 
     KJ_IF_SOME(target, *maybeTarget) {
@@ -129,23 +131,23 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
         jsg::Ref<GPUError> error = nullptr;
         switch (type) {
           case wgpu::ErrorType::Validation:
-            error = jsg::alloc<GPUValidationError>(kj::str(message));
+            error = js.alloc<GPUValidationError>(kj::str(message));
             break;
           case wgpu::ErrorType::NoError:
             KJ_UNREACHABLE;
           case wgpu::ErrorType::OutOfMemory:
-            error = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
+            error = js.alloc<GPUOutOfMemoryError>(kj::str(message));
             break;
           case wgpu::ErrorType::Internal:
           case wgpu::ErrorType::DeviceLost:
           case wgpu::ErrorType::Unknown:
-            error = jsg::alloc<GPUInternalError>(kj::str(message));
+            error = js.alloc<GPUInternalError>(kj::str(message));
             break;
         }
 
         auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
-        auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
-        target->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
+        auto ev = js.alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
+        target->dispatchEventImpl(js, kj::mv(ev));
         return;
       }
     }
@@ -171,22 +173,22 @@ jsg::Promise<jsg::Ref<GPUDevice>> GPUAdapter::requestDevice(
 
   KJ_ASSERT(userData.requestEnded);
 
-  jsg::Ref<GPUDevice> gpuDevice = jsg::alloc<GPUDevice>(
+  jsg::Ref<GPUDevice> gpuDevice = js.alloc<GPUDevice>(
       js, kj::mv(userData.device), kj::addRef(*async_), kj::mv(deviceLostCtx), kj::mv(uErrorCtx));
   return js.resolvedPromise(kj::mv(gpuDevice));
 }
 
-jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures() {
+jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures(jsg::Lock& js) {
   wgpu::Adapter adapter(adapter_.Get());
   size_t count = adapter.EnumerateFeatures(nullptr);
   kj::Array<wgpu::FeatureName> features = kj::heapArray<wgpu::FeatureName>(count);
   if (count > 0) {
     adapter.EnumerateFeatures(&features[0]);
   }
-  return jsg::alloc<GPUSupportedFeatures>(kj::mv(features));
+  return js.alloc<GPUSupportedFeatures>(kj::mv(features));
 }
 
-jsg::Ref<GPUSupportedLimits> GPUAdapter::getLimits() {
+jsg::Ref<GPUSupportedLimits> GPUAdapter::getLimits(jsg::Lock& js) {
   WGPUSupportedLimits limits{};
   JSG_REQUIRE(adapter_.GetLimits(&limits), TypeError, "failed to get adapter limits");
 
@@ -197,7 +199,7 @@ jsg::Ref<GPUSupportedLimits> GPUAdapter::getLimits() {
   WGPU_FOR_EACH_LIMIT(COPY_LIMIT)
 #undef COPY_LIMIT
 
-  return jsg::alloc<GPUSupportedLimits>(kj::mv(wgpuLimits));
+  return js.alloc<GPUSupportedLimits>(kj::mv(wgpuLimits));
 }
 
 }  // namespace workerd::api::gpu

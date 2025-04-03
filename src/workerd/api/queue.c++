@@ -8,6 +8,7 @@
 
 #include <workerd/api/global-scope.h>
 #include <workerd/io/features.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/util/mimetype.h>
@@ -418,7 +419,7 @@ QueueEvent::QueueEvent(
   auto incoming = params.getMessages();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(incoming.size());
   for (auto i: kj::indices(incoming)) {
-    messagesBuilder.add(jsg::alloc<QueueMessage>(js, incoming[i], result));
+    messagesBuilder.add(js.alloc<QueueMessage>(js, incoming[i], result));
   }
   messages = messagesBuilder.finish();
 }
@@ -429,7 +430,7 @@ QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> res
       result(result) {
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
-    messagesBuilder.add(jsg::alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
+    messagesBuilder.add(js.alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
   }
   messages = messagesBuilder.finish();
 }
@@ -479,10 +480,10 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
   jsg::Ref<QueueEvent> event(nullptr);
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
-      event = jsg::alloc<QueueEvent>(js, p, result);
+      event = js.alloc<QueueEvent>(js, p, result);
     }
     KJ_CASE_ONEOF(p, QueueEvent::Params) {
-      event = jsg::alloc<QueueEvent>(js, kj::mv(p), result);
+      event = js.alloc<QueueEvent>(js, kj::mv(p), result);
     }
   }
 
@@ -492,7 +493,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(lock, h.self.getHandle(lock)));
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise =
-          f(lock, jsg::alloc<QueueController>(event.addRef()),
+          f(lock, js.alloc<QueueController>(event.addRef()),
               jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
               .then(
                   [outcomeObserver = outcomeObserver.addRef(), event = event.addRef()]() mutable {

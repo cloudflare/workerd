@@ -12,6 +12,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/server/server.h>
@@ -364,8 +365,8 @@ TestFixture::TestFixture(SetupParams&& params)
       auto makeStorage =
           [](jsg::Lock& js, const Worker::Api& api,
               ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
-        return jsg::alloc<api::DurableObjectStorage>(
-            IoContext::current().addObject(actorCache), /*enableSql=*/false);
+        return js.alloc<api::DurableObjectStorage>(
+            js, IoContext::current().addObject(actorCache), /*enableSql=*/false);
       };
       actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
           /*hasTransient=*/false, makeActorCache,

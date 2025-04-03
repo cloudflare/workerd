@@ -26,7 +26,7 @@ class GPUComputePipeline: public jsg::Object {
 
  private:
   wgpu::ComputePipeline pipeline_;
-  jsg::Ref<GPUBindGroupLayout> getBindGroupLayout(uint32_t index);
+  jsg::Ref<GPUBindGroupLayout> getBindGroupLayout(jsg::Lock& js, uint32_t index);
 };
 
 struct GPUComputePipelineDescriptor {

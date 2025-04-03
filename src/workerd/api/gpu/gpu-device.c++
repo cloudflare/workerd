@@ -28,7 +28,7 @@ jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor d
   desc.size = descriptor.size;
   desc.usage = static_cast<wgpu::BufferUsage>(descriptor.usage);
   auto buffer = device_.CreateBuffer(&desc);
-  return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
+  return js.alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
 }
 
 jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescriptor descriptor) {
@@ -84,7 +84,7 @@ jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescripto
   }
 
   auto texture = device_.CreateTexture(&desc);
-  return jsg::alloc<GPUTexture>(kj::mv(texture));
+  return js.alloc<GPUTexture>(kj::mv(texture));
 }
 
 wgpu::CompareFunction parseCompareFunction(kj::StringPtr compare) {
@@ -166,7 +166,7 @@ wgpu::MipmapFilterMode parseMipmapFilterMode(kj::StringPtr mode) {
   JSG_FAIL_REQUIRE(TypeError, "unknown mipmap filter mode", mode);
 }
 
-jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
+jsg::Ref<GPUSampler> GPUDevice::createSampler(jsg::Lock& js, GPUSamplerDescriptor descriptor) {
   wgpu::SamplerDescriptor desc{};
 
   KJ_IF_SOME(addressModeU, descriptor.addressModeU) {
@@ -203,11 +203,11 @@ jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
   }
 
   auto sampler = device_.CreateSampler(&desc);
-  return jsg::alloc<GPUSampler>(kj::mv(sampler));
+  return js.alloc<GPUSampler>(kj::mv(sampler));
 }
 
 jsg::Ref<GPUBindGroupLayout> GPUDevice::createBindGroupLayout(
-    GPUBindGroupLayoutDescriptor descriptor) {
+    jsg::Lock& js, GPUBindGroupLayoutDescriptor descriptor) {
   wgpu::BindGroupLayoutDescriptor desc{};
 
   KJ_IF_SOME(label, descriptor.label) {
@@ -222,10 +222,11 @@ jsg::Ref<GPUBindGroupLayout> GPUDevice::createBindGroupLayout(
   desc.entryCount = layoutEntries.size();
 
   auto bindGroupLayout = device_.CreateBindGroupLayout(&desc);
-  return jsg::alloc<GPUBindGroupLayout>(kj::mv(bindGroupLayout));
+  return js.alloc<GPUBindGroupLayout>(kj::mv(bindGroupLayout));
 }
 
-jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
+jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(
+    jsg::Lock& js, GPUBindGroupDescriptor descriptor) {
   wgpu::BindGroupDescriptor desc{};
 
   KJ_IF_SOME(label, descriptor.label) {
@@ -243,10 +244,11 @@ jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descrip
   desc.entryCount = bindGroupEntries.size();
 
   auto bindGroup = device_.CreateBindGroup(&desc);
-  return jsg::alloc<GPUBindGroup>(kj::mv(bindGroup));
+  return js.alloc<GPUBindGroup>(kj::mv(bindGroup));
 }
 
-jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescriptor descriptor) {
+jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(
+    jsg::Lock& js, GPUShaderModuleDescriptor descriptor) {
   wgpu::ShaderModuleDescriptor desc{};
   wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
   desc.nextInChain = &wgsl_desc;
@@ -258,7 +260,7 @@ jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescripto
   wgsl_desc.code = descriptor.code.cStr();
 
   auto shader = device_.CreateShaderModule(&desc);
-  return jsg::alloc<GPUShaderModule>(kj::mv(shader), kj::addRef(*async_));
+  return js.alloc<GPUShaderModule>(kj::mv(shader), kj::addRef(*async_));
 }
 
 void parseStencilFaceState(wgpu::StencilFaceState& out, jsg::Optional<GPUStencilFaceState>& in) {
@@ -489,14 +491,14 @@ ParsedRenderPipelineDescriptor parseRenderPipelineDescriptor(
 }
 
 jsg::Ref<GPURenderPipeline> GPUDevice::createRenderPipeline(
-    GPURenderPipelineDescriptor descriptor) {
+    jsg::Lock& js, GPURenderPipelineDescriptor descriptor) {
   auto parsedDesc = parseRenderPipelineDescriptor(descriptor);
   auto pipeline = device_.CreateRenderPipeline(&parsedDesc.desc);
-  return jsg::alloc<GPURenderPipeline>(kj::mv(pipeline));
+  return js.alloc<GPURenderPipeline>(kj::mv(pipeline));
 }
 
 jsg::Ref<GPUPipelineLayout> GPUDevice::createPipelineLayout(
-    GPUPipelineLayoutDescriptor descriptor) {
+    jsg::Lock& js, GPUPipelineLayoutDescriptor descriptor) {
   wgpu::PipelineLayoutDescriptor desc{};
 
   KJ_IF_SOME(label, descriptor.label) {
@@ -512,11 +514,11 @@ jsg::Ref<GPUPipelineLayout> GPUDevice::createPipelineLayout(
   desc.bindGroupLayoutCount = bindGroupLayouts.size();
 
   auto layout = device_.CreatePipelineLayout(&desc);
-  return jsg::alloc<GPUPipelineLayout>(kj::mv(layout));
+  return js.alloc<GPUPipelineLayout>(kj::mv(layout));
 }
 
 jsg::Ref<GPUCommandEncoder> GPUDevice::createCommandEncoder(
-    jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
+    jsg::Lock& js, jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
   wgpu::CommandEncoderDescriptor desc{};
 
   kj::String label = kj::str("");
@@ -528,7 +530,7 @@ jsg::Ref<GPUCommandEncoder> GPUDevice::createCommandEncoder(
   }
 
   auto encoder = device_.CreateCommandEncoder(&desc);
-  return jsg::alloc<GPUCommandEncoder>(kj::mv(encoder), kj::mv(label));
+  return js.alloc<GPUCommandEncoder>(kj::mv(encoder), kj::mv(label));
 }
 
 // TODO(soon): checks the allocations that are done during this method for dangling refs.
@@ -574,10 +576,10 @@ wgpu::ComputePipelineDescriptor parseComputePipelineDescriptor(
 }
 
 jsg::Ref<GPUComputePipeline> GPUDevice::createComputePipeline(
-    GPUComputePipelineDescriptor descriptor) {
+    jsg::Lock& js, GPUComputePipelineDescriptor descriptor) {
   wgpu::ComputePipelineDescriptor desc = parseComputePipelineDescriptor(descriptor);
   auto pipeline = device_.CreateComputePipeline(&desc);
-  return jsg::alloc<GPUComputePipeline>(kj::mv(pipeline));
+  return js.alloc<GPUComputePipeline>(kj::mv(pipeline));
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope(jsg::Lock& js) {
@@ -597,11 +599,13 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope(jsg::Lock& 
         ctx->fulfiller_->fulfill(kj::none);
         break;
       case wgpu::ErrorType::OutOfMemory: {
+        // TODO(js.alloc): Currently being allocated outside of the isolate lock?
         jsg::Ref<GPUError> err = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
         ctx->fulfiller_->fulfill(kj::mv(err));
         break;
       }
       case wgpu::ErrorType::Validation: {
+        // TODO(js.alloc): Currently being allocated outside of the isolate lock?
         jsg::Ref<GPUError> err = jsg::alloc<GPUValidationError>(kj::str(message));
         ctx->fulfiller_->fulfill(kj::mv(err));
         break;
@@ -637,6 +641,7 @@ jsg::Promise<jsg::Ref<GPUComputePipeline>> GPUDevice::createComputePipelineAsync
 
     switch (status) {
       case wgpu::CreatePipelineAsyncStatus::Success:
+        // TODO(js.alloc): Currently being allocated outside of the isolate lock?
         ctx->fulfiller_->fulfill(jsg::alloc<GPUComputePipeline>(kj::mv(pipeline)));
         break;
       default:
@@ -648,9 +653,9 @@ jsg::Promise<jsg::Ref<GPUComputePipeline>> GPUDevice::createComputePipelineAsync
   return promise;
 }
 
-jsg::Ref<GPUQueue> GPUDevice::getQueue() {
+jsg::Ref<GPUQueue> GPUDevice::getQueue(jsg::Lock& js) {
   auto queue = device_.GetQueue();
-  return jsg::alloc<GPUQueue>(kj::mv(queue));
+  return js.alloc<GPUQueue>(kj::mv(queue));
 }
 
 GPUDevice::~GPUDevice() {
@@ -660,10 +665,10 @@ GPUDevice::~GPUDevice() {
   }
 }
 
-void GPUDevice::destroy() {
+void GPUDevice::destroy(jsg::Lock& js) {
   if (dlc_->fulfiller_->isWaiting()) {
     auto lostInfo =
-        jsg::alloc<GPUDeviceLostInfo>(kj::str("destroyed"), kj::str("device was destroyed"));
+        js.alloc<GPUDeviceLostInfo>(kj::str("destroyed"), kj::str("device was destroyed"));
     dlc_->fulfiller_->fulfill(kj::mv(lostInfo));
   }
 
@@ -691,7 +696,7 @@ GPUDevice::GPUDevice(jsg::Lock& js,
   }, this);
 };
 
-jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor) {
+jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(jsg::Lock& js, GPUQuerySetDescriptor descriptor) {
   wgpu::QuerySetDescriptor desc{};
 
   KJ_IF_SOME(label, descriptor.label) {
@@ -702,7 +707,7 @@ jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor
   desc.type = parseQueryType(descriptor.type);
 
   auto querySet = device_.CreateQuerySet(&desc);
-  return jsg::alloc<GPUQuerySet>(kj::mv(querySet));
+  return js.alloc<GPUQuerySet>(kj::mv(querySet));
 }
 
 wgpu::ErrorFilter parseErrorFilter(GPUErrorFilter& filter) {
@@ -727,20 +732,20 @@ void GPUDevice::pushErrorScope(GPUErrorFilter filter) {
   device_.PushErrorScope(f);
 }
 
-jsg::Ref<GPUSupportedFeatures> GPUDevice::getFeatures() {
+jsg::Ref<GPUSupportedFeatures> GPUDevice::getFeatures(jsg::Lock& js) {
   wgpu::Device device(device_.Get());
   size_t count = device.EnumerateFeatures(nullptr);
   kj::Array<wgpu::FeatureName> features = kj::heapArray<wgpu::FeatureName>(count);
   if (count > 0) {
     device.EnumerateFeatures(&features[0]);
   }
-  return jsg::alloc<GPUSupportedFeatures>(kj::mv(features));
+  return js.alloc<GPUSupportedFeatures>(kj::mv(features));
 }
 
-jsg::Ref<GPUSupportedLimits> GPUDevice::getLimits() {
+jsg::Ref<GPUSupportedLimits> GPUDevice::getLimits(jsg::Lock& js) {
   wgpu::SupportedLimits limits{};
   JSG_REQUIRE(device_.GetLimits(&limits), TypeError, "failed to get device limits");
-  return jsg::alloc<GPUSupportedLimits>(kj::mv(limits));
+  return js.alloc<GPUSupportedLimits>(kj::mv(limits));
 }
 
 }  // namespace workerd::api::gpu

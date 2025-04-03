@@ -510,7 +510,8 @@ struct StackOfXASN1Disposer: public kj::Disposer {
 constexpr StackOfXASN1Disposer stackOfXASN1Disposer;
 }  // namespace
 
-kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(kj::Array<const kj::byte> raw) {
+kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(
+    jsg::Lock& js, kj::Array<const kj::byte> raw) {
   ClearErrorOnReturn ClearErrorOnReturn;
   KJ_IF_SOME(bio, loadBio(raw)) {
     auto ptr = PEM_read_bio_X509_AUX(bio.get(), nullptr, NoPasswordCallback, nullptr);
@@ -522,7 +523,7 @@ kj::Maybe<jsg::Ref<X509Certificate>> X509Certificate::parse(kj::Array<const kj::
         throwOpensslError(__FILE__, __LINE__, "X509Certificate::parse()");
       }
     }
-    return jsg::alloc<X509Certificate>(ptr);
+    return js.alloc<X509Certificate>(ptr);
   }
   return kj::none;
 }
@@ -659,7 +660,7 @@ kj::Maybe<jsg::Ref<CryptoKey>> X509Certificate::getPublicKey(jsg::Lock& js) {
   auto ptr = X509_get_pubkey(cert_.get());
   if (ptr == nullptr) return kj::none;
   auto pkey = kj::disposeWith<EVP_PKEY_free>(ptr);
-  return jsg::alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
+  return js.alloc<CryptoKey>(CryptoKey::Impl::from(js, kj::mv(pkey)));
 }
 
 kj::Maybe<kj::String> X509Certificate::getPem() {

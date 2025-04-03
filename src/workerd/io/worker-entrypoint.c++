@@ -7,6 +7,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
@@ -365,7 +366,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
   }))
       .then([this, metrics = kj::mv(metricsForProxyTask),
-                outcomeObserver = kj::mv(outcomeObserver)]() mutable -> kj::Promise<void> {
+                outcomeObserver = outcomeObserver.addRef()]() mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() finish proxying",
         PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
@@ -384,7 +385,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     proxyTask = kj::none;
   }))
       .catch_([this, wrappedResponse = kj::mv(wrappedResponse), isActor, method, url, &headers,
-                  &requestBody, metrics = kj::mv(metricsForCatch)](
+                  &requestBody, metrics = kj::mv(metricsForCatch),
+                  outcomeObserver = kj::mv(outcomeObserver)](
                   kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() exception",

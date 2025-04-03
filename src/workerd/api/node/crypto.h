@@ -51,7 +51,7 @@ class CryptoImpl final: public jsg::Object {
     int verifyError;
   };
 
-  jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
+  jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(jsg::Lock& js, kj::String name);
 
   jsg::BufferSource statelessDH(
       jsg::Lock& js, jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey);
@@ -69,7 +69,8 @@ class CryptoImpl final: public jsg::Object {
    public:
     HashHandle(HashContext ctx): ctx(kj::mv(ctx)) {}
 
-    static jsg::Ref<HashHandle> constructor(kj::String algorithm, kj::Maybe<uint32_t> xofLen);
+    static jsg::Ref<HashHandle> constructor(
+        jsg::Lock& js, kj::String algorithm, kj::Maybe<uint32_t> xofLen);
     static jsg::BufferSource oneshot(
         jsg::Lock&, kj::String algorithm, kj::Array<kj::byte> data, kj::Maybe<uint32_t> xofLen);
 
@@ -246,17 +247,17 @@ class CryptoImpl final: public jsg::Object {
     JSG_STRUCT(primeOrGroup, generator);
   };
 
-  CryptoKeyPair generateRsaKeyPair(RsaKeyPairOptions options);
-  CryptoKeyPair generateDsaKeyPair(DsaKeyPairOptions options);
-  CryptoKeyPair generateEcKeyPair(EcKeyPairOptions options);
-  CryptoKeyPair generateEdKeyPair(EdKeyPairOptions options);
-  CryptoKeyPair generateDhKeyPair(DhKeyPairOptions options);
+  CryptoKeyPair generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options);
+  CryptoKeyPair generateDsaKeyPair(jsg::Lock& js, DsaKeyPairOptions options);
+  CryptoKeyPair generateEcKeyPair(jsg::Lock& js, EcKeyPairOptions options);
+  CryptoKeyPair generateEdKeyPair(jsg::Lock& js, EdKeyPairOptions options);
+  CryptoKeyPair generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions options);
 
   // Sign/Verify
   class SignHandle final: public jsg::Object {
    public:
     SignHandle(ncrypto::EVPMDCtxPointer ctx);
-    static jsg::Ref<SignHandle> constructor(kj::String algorithm);
+    static jsg::Ref<SignHandle> constructor(jsg::Lock& js, kj::String algorithm);
 
     void update(jsg::Lock& js, jsg::BufferSource data);
     jsg::BufferSource sign(jsg::Lock& js,
@@ -276,7 +277,7 @@ class CryptoImpl final: public jsg::Object {
   class VerifyHandle final: public jsg::Object {
    public:
     VerifyHandle(ncrypto::EVPMDCtxPointer ctx);
-    static jsg::Ref<VerifyHandle> constructor(kj::String algorithm);
+    static jsg::Ref<VerifyHandle> constructor(jsg::Lock& js, kj::String algorithm);
 
     void update(jsg::Lock& js, jsg::BufferSource data);
     bool verify(jsg::Lock& js,

@@ -2,6 +2,7 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api::node {
@@ -132,7 +133,7 @@ jsg::Ref<Channel> DiagnosticsChannelModule::channel(jsg::Lock& js, jsg::Name cha
       .findOrCreate(name,
           [&, channel = kj::mv(channel)]() mutable
           -> kj::HashMap<kj::String, jsg::Ref<Channel>>::Entry {
-    return {kj::mv(name), jsg::alloc<Channel>(kj::mv(channel))};
+    return {kj::mv(name), js.alloc<Channel>(kj::mv(channel))};
   }).addRef();
 }
 

@@ -576,7 +576,7 @@ class Isolate: public IsolateBase {
           jsg::check(obj->DefineProperty(v8Context(), stackName, prop));
         }
 
-        auto de = jsg::alloc<DOMException>(kj::mv(message), kj::mv(name));
+        auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
         de.attachWrapper(v8Isolate, obj);
 
         return kj::mv(de);

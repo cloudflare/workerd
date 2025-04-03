@@ -495,7 +495,7 @@ class CompressionStreamImpl: public kj::Refcounted,
 };
 }  // namespace
 
-jsg::Ref<CompressionStream> CompressionStream::constructor(kj::String format) {
+jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
@@ -505,8 +505,8 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(kj::String format) {
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<CompressionStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide),
+  return js.alloc<CompressionStream>(js.alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
+      js.alloc<WritableStream>(ioContext, kj::mv(writableSide),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 
@@ -522,9 +522,8 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<DecompressionStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide),
+  return js.alloc<DecompressionStream>(js.alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
+      js.alloc<WritableStream>(ioContext, kj::mv(writableSide),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver()));
 }
 

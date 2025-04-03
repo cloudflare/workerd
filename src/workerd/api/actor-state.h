@@ -176,7 +176,7 @@ class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
  public:
-  DurableObjectStorage(IoPtr<ActorCacheInterface> cache, bool enableSql)
+  DurableObjectStorage(jsg::Lock&, IoPtr<ActorCacheInterface> cache, bool enableSql)
       : cache(kj::mv(cache)),
         enableSql(enableSql) {}
 
@@ -185,7 +185,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // forward write requests, and since we already have a reference to the primary prior to
   // constructing the `DurableObjectStorage`, we can just pass in the information we need to build
   // a stub. The stub is then stored in `maybePrimary`.
-  DurableObjectStorage(IoPtr<ActorCacheInterface> cache,
+  DurableObjectStorage(jsg::Lock& js,
+      IoPtr<ActorCacheInterface> cache,
       bool enableSql,
       kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
       kj::Own<ActorIdFactory::ActorId> primaryActorId);
@@ -251,8 +252,14 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // Arrange to create replicas for this Durable Object.
   //
   // Once a Durable Object instance calls `ensureReplicas`, all subsequent calls will be no-ops,
-  // thus it is idempotent.
+  // making it idempotent, unless `disableReplicas` has been called between `ensureReplicas` calls.
   void ensureReplicas();
+
+  // Arrange to disable replicas for this Durable Object.
+  //
+  // If replicas have never been created, this is a no-op. Similar to `ensureReplicas`, repeated
+  // calls are no-ops unless `ensureReplicas` re-enabled the replicas.
+  void disableReplicas();
 
   jsg::Optional<jsg::Ref<DurableObject>> getPrimary(jsg::Lock& js);
 
@@ -282,6 +289,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getReplicaRouting()) {
       JSG_METHOD(ensureReplicas);
+      JSG_METHOD(disableReplicas);
     }
 
     JSG_TS_OVERRIDE({
@@ -388,7 +396,7 @@ class ActorState: public jsg::Object {
       kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
 
-  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
+  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::JsValue> getTransient(jsg::Lock& js) {
     return transient.map([&](jsg::JsRef<jsg::JsValue>& v) { return v.getHandle(js); });
@@ -434,8 +442,8 @@ class WebSocketRequestResponsePair: public jsg::Object {
         response(kj::mv(response)) {};
 
   static jsg::Ref<WebSocketRequestResponsePair> constructor(
-      kj::String request, kj::String response) {
-    return jsg::alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
+      jsg::Lock& js, kj::String request, kj::String response) {
+    return js.alloc<WebSocketRequestResponsePair>(kj::mv(request), kj::mv(response));
   };
 
   kj::StringPtr getRequest() {
@@ -463,7 +471,8 @@ class WebSocketRequestResponsePair: public jsg::Object {
 // The type passed as the first parameter to durable object class's constructor.
 class DurableObjectState: public jsg::Object {
  public:
-  DurableObjectState(Worker::Actor::Id actorId,
+  DurableObjectState(jsg::Lock& js,
+      Worker::Actor::Id actorId,
       jsg::JsRef<jsg::JsValue> exports,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
@@ -475,7 +484,7 @@ class DurableObjectState: public jsg::Object {
     return exports.getHandle(js);
   }
 
-  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
+  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getStorage() {
     return storage.map([&](jsg::Ref<DurableObjectStorage>& p) { return p.addRef(); });
@@ -529,7 +538,7 @@ class DurableObjectState: public jsg::Object {
       jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
 
   // Gets the currently set object-wide websocket auto response.
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(jsg::Lock& js);
 
   // Get the last auto response timestamp or null
   kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);

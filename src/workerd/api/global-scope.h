@@ -79,7 +79,7 @@ class Navigator: public jsg::Object {
     return "Cloudflare-Workers"_kj;
   }
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  jsg::Optional<jsg::Ref<api::gpu::GPU>> getGPU(CompatibilityFlags::Reader flags);
+  jsg::Optional<jsg::Ref<api::gpu::GPU>> getGPU(jsg::Lock& js, CompatibilityFlags::Reader flags);
 #endif
 
   bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
@@ -560,22 +560,22 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   }
 
   // Implemented in global-scope.c++ to avoid including crypto.h
-  jsg::Ref<Crypto> getCrypto();
+  jsg::Ref<Crypto> getCrypto(jsg::Lock& js);
 
-  jsg::Ref<Scheduler> getScheduler() {
-    return jsg::alloc<Scheduler>();
+  jsg::Ref<Scheduler> getScheduler(jsg::Lock& js) {
+    return js.alloc<Scheduler>();
   }
 
-  jsg::Ref<Navigator> getNavigator() {
-    return jsg::alloc<Navigator>();
+  jsg::Ref<Navigator> getNavigator(jsg::Lock& js) {
+    return js.alloc<Navigator>();
   }
 
-  jsg::Ref<Performance> getPerformance() {
-    return jsg::alloc<Performance>();
+  jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
+    return js.alloc<Performance>();
   }
 
-  jsg::Ref<Cloudflare> getCloudflare() {
-    return jsg::alloc<Cloudflare>();
+  jsg::Ref<Cloudflare> getCloudflare(jsg::Lock& js) {
+    return js.alloc<Cloudflare>();
   }
 
   // The origin is unknown, return "null" as described in
@@ -584,7 +584,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     return "null";
   }
 
-  jsg::Ref<CacheStorage> getCaches();
+  jsg::Ref<CacheStorage> getCaches(jsg::Lock& js);
 
   void reportError(jsg::Lock& js, jsg::JsValue error);
 

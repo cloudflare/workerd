@@ -148,8 +148,8 @@ class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHan
 // makes RPCs back to the original object.
 class JsRpcTarget: public jsg::Object {
  public:
-  static jsg::Ref<JsRpcTarget> constructor() {
-    return jsg::alloc<JsRpcTarget>();
+  static jsg::Ref<JsRpcTarget> constructor(jsg::Lock& js) {
+    return js.alloc<JsRpcTarget>();
   }
 
   JSG_RESOURCE_TYPE(JsRpcTarget) {}
@@ -358,7 +358,7 @@ class JsRpcStub: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClientForOneCall(
       jsg::Lock& js, kj::Vector<kj::StringPtr>& path) override;
 
-  jsg::Ref<JsRpcStub> dup();
+  jsg::Ref<JsRpcStub> dup(jsg::Lock& js);
   void dispose();
 
   // Given a JsRpcTarget, make an RPC stub from it.

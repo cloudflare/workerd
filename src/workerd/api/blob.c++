@@ -141,7 +141,7 @@ jsg::Ref<Blob> Blob::constructor(
     }
   }
 
-  return jsg::alloc<Blob>(js, concat(js, kj::mv(bits)), kj::mv(type));
+  return js.alloc<Blob>(js, concat(js, kj::mv(bits)), kj::mv(type));
 }
 
 kj::ArrayPtr<const byte> Blob::getData() const {
@@ -149,8 +149,10 @@ kj::ArrayPtr<const byte> Blob::getData() const {
   return data;
 }
 
-jsg::Ref<Blob> Blob::slice(
-    jsg::Optional<int> maybeStart, jsg::Optional<int> maybeEnd, jsg::Optional<kj::String> type) {
+jsg::Ref<Blob> Blob::slice(jsg::Lock& js,
+    jsg::Optional<int> maybeStart,
+    jsg::Optional<int> maybeEnd,
+    jsg::Optional<kj::String> type) {
   int start = maybeStart.orDefault(0);
   int end = maybeEnd.orDefault(data.size());
 
@@ -176,7 +178,7 @@ jsg::Ref<Blob> Blob::slice(
     end = data.size();
   }
 
-  return jsg::alloc<Blob>(
+  return js.alloc<Blob>(
       JSG_THIS, data.slice(start, end), normalizeType(kj::mv(type).orDefault(nullptr)));
 }
 
@@ -257,9 +259,9 @@ class Blob::BlobInputStream final: public ReadableStreamSource {
   jsg::Ref<Blob> blob;
 };
 
-jsg::Ref<ReadableStream> Blob::stream() {
+jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return jsg::alloc<ReadableStream>(IoContext::current(), kj::heap<BlobInputStream>(JSG_THIS));
+  return js.alloc<ReadableStream>(IoContext::current(), kj::heap<BlobInputStream>(JSG_THIS));
 }
 
 // =======================================================================================
@@ -302,7 +304,7 @@ jsg::Ref<File> File::constructor(
     lastModified = dateNow();
   }
 
-  return jsg::alloc<File>(js, concat(js, kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
+  return js.alloc<File>(js, concat(js, kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
 }
 
 }  // namespace workerd::api

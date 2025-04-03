@@ -68,9 +68,9 @@ class GPUCommandEncoder: public jsg::Object {
   }
 
   jsg::Ref<GPUComputePassEncoder> beginComputePass(
-      jsg::Optional<GPUComputePassDescriptor> descriptor);
-  jsg::Ref<GPURenderPassEncoder> beginRenderPass(GPURenderPassDescriptor descriptor);
-  jsg::Ref<GPUCommandBuffer> finish(jsg::Optional<GPUCommandBufferDescriptor>);
+      jsg::Lock& js, jsg::Optional<GPUComputePassDescriptor> descriptor);
+  jsg::Ref<GPURenderPassEncoder> beginRenderPass(jsg::Lock& js, GPURenderPassDescriptor descriptor);
+  jsg::Ref<GPUCommandBuffer> finish(jsg::Lock& js, jsg::Optional<GPUCommandBufferDescriptor>);
   void copyBufferToBuffer(jsg::Ref<GPUBuffer> source,
       GPUSize64 sourceOffset,
       jsg::Ref<GPUBuffer> destination,
