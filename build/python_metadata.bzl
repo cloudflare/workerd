@@ -1,6 +1,17 @@
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
 load("//:build/python/packages_20250324_1.bzl", "PACKAGES_20250324_1")
 
+PYODIDE_VERSIONS = [
+    {
+        "version": "0.26.0a2",
+        "sha256": "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
+    },
+    {
+        "version": "0.27.1",
+        "sha256": "6e45f93c71ed21bff4a06d6d9d8e27e815269dabf8ab34dc400939fd45edc665",
+    },
+]
+
 # This is the list of all the package metadata that we use.
 #
 # IMPORTANT: packages that are present here should never be removed after the package version is
@@ -36,12 +47,15 @@ def verify_no_packages_were_removed():
 
 verify_no_packages_were_removed()
 
+def _bundle_id(*, pyodide_version, pyodide_date, backport, **_kwds):
+    return "%s_%s_%s" % (pyodide_version, pyodide_date, backport)
+
 def make_bundle_version_info(versions):
     result = {}
     for entry in versions:
         name = entry["name"]
         if entry["name"] != "development":
-            entry["id"] = entry["pyodide_version"] + "_" + entry["pyodide_date"] + "_" + entry["backport"]
+            entry["id"] = _bundle_id(**entry)
         result[name] = entry
     return result
 
@@ -53,7 +67,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": "20240829.4",
-        "backport": "28",
+        "backport": 28,
         "integrity": "sha256-a2F/YpfjuGsVIsx5Z/WSbAaWSHL9vO13puPxX+wKwNI=",
         "feature_flags": [],
         "emscripten_version": "3.1.52",
@@ -65,7 +79,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_version": "0.27.1",
         "pyodide_date": "2025-01-16",
         "packages": "20250324.1",
-        "backport": "16",
+        "backport": 16,
         "integrity": "sha256-znvAe5OAidJcQyeWeMFClJ5LPgP0QPztxZW/sogb1wI=",
         "feature_flags": ["pythonWorkers20250116"],
         "emscripten_version": "3.1.58",

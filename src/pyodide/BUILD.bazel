@@ -1,8 +1,9 @@
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
-load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
-load(":helpers.bzl", "copy_and_capnp_embed", "copy_to_generated", "python_bundle")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYTHON_LOCKFILES")
+load(":helpers.bzl", "copy_and_capnp_embed", "copy_to_generated", "python_bundles")
 
 copy_and_capnp_embed("python-entrypoint.js")
 
@@ -47,7 +48,7 @@ cc_capnp_library(
     ],
 )
 
-python_bundle("0.26.0a2")
+python_bundles()
 
 alias(
     name = "pyodide.capnp.bin",
@@ -65,4 +66,10 @@ alias(
     name = "pyodide",
     actual = "pyodide@0.26.0a2",
     visibility = ["//visibility:public"],
+)
+
+write_file(
+    name = "bundle_version_info",
+    out = "bundle_version_info.json",
+    content = [json.encode(BUNDLE_VERSION_INFO)],
 )
