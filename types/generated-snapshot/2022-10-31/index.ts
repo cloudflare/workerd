@@ -6898,4 +6898,14 @@ export declare abstract class WorkflowInstance {
    * Returns the current status of the instance.
    */
   public status(): Promise<InstanceStatus>;
+  /**
+   * Send an event to this instance.
+   */
+  public sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void>;
 }
