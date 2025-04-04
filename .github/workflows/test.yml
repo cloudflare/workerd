@@ -111,10 +111,13 @@ jobs:
       - name: Make workerd binary executable
         run: chmod +x /tmp/workerd
 
-      - name: Build Wrangler + Miniflare & dependencies
-        run: pnpm build --filter miniflare --filter wrangler
+      - name: Add built types
+        run: pnpm add /tmp/workers-types
 
-      - name: Run Miniflare tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler
+      - name: Build Wrangler, Miniflare, Vitest, Vite & dependencies
+        run: pnpm build --filter miniflare --filter wrangler --filter @cloudflare/vitest-pool-workers --filter @cloudflare/vite-plugin
+
+      - name: Run Wrangler, Miniflare, Vitest, Vite tests
+        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter="./packages/vite-plugin-cloudflare/playground" --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
