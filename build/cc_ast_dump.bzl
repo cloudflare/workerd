@@ -26,7 +26,7 @@ def _cc_ast_dump_impl(ctx):
         feature_configuration = feature_configuration,
         source_file = ctx.file.src.path,
         output_file = None,
-        user_compile_flags = ["-Xclang", "-ast-dump=json", "-fsyntax-only"] + ctx.fragments.cpp.copts + ctx.fragments.cpp.cxxopts,
+        user_compile_flags = ["-Xclang", "-ast-dump=json", "-fsyntax-only"] + ctx.fragments.cpp.copts + ctx.fragments.cpp.cxxopts + ["-Wno-unused-command-line-argument"],
         include_directories = cc_info.compilation_context.includes,
         quote_include_directories = cc_info.compilation_context.quote_includes,
         system_include_directories = cc_info.compilation_context.system_includes,

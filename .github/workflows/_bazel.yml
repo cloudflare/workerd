@@ -57,10 +57,10 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           sed -i '/apt-get install/d' llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 18
+          sudo ./llvm.sh 20
           # keep in sync with build/ci.bazelrc
-          sudo apt-get install -y --no-install-recommends clang-18 lld-18 libunwind-18 libc++abi1-18 libc++1-18 libc++-18-dev libclang-rt-18-dev llvm-18
-          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-18/bin/llvm-symbolizer%" .bazelrc
+          sudo apt-get install -y --no-install-recommends clang-20 lld-20 libunwind-20 libc++abi1-20 libc++1-20 libc++-20-dev libclang-rt-20-dev llvm-20
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-20/bin/llvm-symbolizer%" .bazelrc
       - name: Setup Windows
         if: inputs.os_name == 'windows'
         # Set a custom output root directory to avoid long file name issues.
@@ -69,6 +69,8 @@ jobs:
           git config --show-scope --show-origin core.symlinks
           git config --system core.longpaths true
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
+          # TODO: Test that the build is still compatible with the latest LLVM release
+          choco upgrade llvm --version=20.1.0
       - name: Configure download mirrors
         shell: bash
         run: |
