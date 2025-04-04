@@ -72,7 +72,7 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
 }
 
 Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageEntry) {
-  return alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
+  return js.alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
 }
 
 v8::Local<v8::Function> AsyncContextFrame::wrap(

@@ -175,7 +175,7 @@ jsg::Ref<ReadableStreamDefaultReader> ReadableStreamDefaultReader::constructor(
     jsg::Lock& js, jsg::Ref<ReadableStream> stream) {
   JSG_REQUIRE(
       !stream->isLocked(), TypeError, "This ReadableStream is currently locked to a reader.");
-  auto reader = jsg::alloc<ReadableStreamDefaultReader>();
+  auto reader = js.alloc<ReadableStreamDefaultReader>();
   reader->lockToStream(js, *stream);
   return kj::mv(reader);
 }
@@ -228,7 +228,7 @@ jsg::Ref<ReadableStreamBYOBReader> ReadableStreamBYOBReader::constructor(
         "This ReadableStream does not support BYOB reads.");
   }
 
-  auto reader = jsg::alloc<ReadableStreamBYOBReader>();
+  auto reader = js.alloc<ReadableStreamBYOBReader>();
   reader->lockToStream(js, *stream);
   return kj::mv(reader);
 }
@@ -369,7 +369,7 @@ ReadableStream::Reader ReadableStream::getReader(
 jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js, jsg::Optional<ValuesOptions> options) {
   static const auto defaultOptions = ValuesOptions{};
-  return jsg::alloc<ReadableStreamAsyncIterator>(AsyncIteratorState{.ioContext = ioContext,
+  return js.alloc<ReadableStreamAsyncIterator>(AsyncIteratorState{.ioContext = ioContext,
     .reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
     .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)});
 }
@@ -471,7 +471,7 @@ jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDistur
   JSG_REQUIRE(
       !isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
-  return jsg::alloc<ReadableStream>(getController().detach(js, ignoreDisturbed));
+  return js.alloc<ReadableStream>(getController().detach(js, ignoreDisturbed));
 }
 
 kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {
@@ -494,7 +494,7 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
       "To use the new ReadableStream() constructor, enable the "
       "streams_enable_constructors compatibility flag. "
       "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
-  auto stream = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+  auto stream = js.alloc<ReadableStream>(newReadableStreamJsController());
   stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
@@ -730,7 +730,7 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
 
   externalHandler->setLastStream(ioctx.getByteStreamFactory().kjToCapnp(kj::mv(out)));
 
-  return jsg::alloc<ReadableStream>(ioctx,
+  return js.alloc<ReadableStream>(ioctx,
       kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx));
 }
 

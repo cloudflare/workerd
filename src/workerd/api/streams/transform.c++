@@ -42,7 +42,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     // the readable and writable sides. The actual TransformStream object can be dropped
     // and allowed to be garbage collected.
 
-    auto controller = jsg::alloc<TransformStreamDefaultController>(js);
+    auto controller = js.alloc<TransformStreamDefaultController>(js);
     auto transformer = kj::mv(maybeTransformer).orDefault({});
 
     // By default, let's signal backpressure on the readable side by setting the highWaterMark
@@ -96,7 +96,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
     // streams underlying controllers.
     controller->init(js, readable, writable, kj::mv(transformer));
 
-    return jsg::alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
+    return js.alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
   }
 
   // The old implementation just defers to IdentityTransformStream. If any of the arguments
@@ -123,8 +123,8 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
   KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
     maybeHighWaterMark = queuingStrategy.highWaterMark;
   }
-  return jsg::alloc<IdentityTransformStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out),
+  return js.alloc<IdentityTransformStream>(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
+      js.alloc<WritableStream>(ioContext, kj::mv(pipe.out),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
 }
 
@@ -146,8 +146,8 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
         [&](uint64_t highWaterMark) { return kj::min(expectedLength, highWaterMark); });
   }
 
-  return jsg::alloc<FixedLengthStream>(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(pipe.out),
+  return js.alloc<FixedLengthStream>(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
+      js.alloc<WritableStream>(ioContext, kj::mv(pipe.out),
           ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
 }
 

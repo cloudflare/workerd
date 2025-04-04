@@ -36,7 +36,7 @@ jsg::Ref<URLPattern> create(jsg::Lock& js, jsg::UrlPattern pattern) {
 #undef V
 
 #define V(_, var) , kj::mv(var)
-  return jsg::alloc<URLPattern>(kj::mv(pattern) URL_PATTERN_COMPONENTS(V));
+  return js.alloc<URLPattern>(kj::mv(pattern) URL_PATTERN_COMPONENTS(V));
 #undef V
 }
 

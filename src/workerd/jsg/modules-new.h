@@ -349,7 +349,7 @@ class Module {
           return true;
         }
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
-        auto ext = alloc<T>(js, specifier);
+        auto ext = js.alloc<T>(js, specifier);
         ns.setDefault(js, ext->getExports(js));
         auto fn = Module::compileEvalFunction(js, source, name,
             JsObject(wrapper.wrap(js.v8Context(), kj::none, ext.addRef())), observer);
@@ -479,7 +479,7 @@ class ModuleBundle {
             [](Lock& js, const Url& specifier, const Module::ModuleNamespace& ns,
                 const CompilationObserver&) {
           auto value = TypeWrapper::from(js.v8Isolate)
-                           .wrap(js.v8Context(), kj::none, alloc<T>(js, specifier));
+                           .wrap(js.v8Context(), kj::none, js.alloc<T>(js, specifier));
           ns.setDefault(js, JsValue(value));
           return true;
         });

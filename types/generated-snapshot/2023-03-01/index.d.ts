@@ -1282,7 +1282,7 @@ declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
   constructor(algorithm: string | SubtleCryptoHashAlgorithm);
-  get digest(): Promise<ArrayBuffer | ArrayBufferView>;
+  readonly digest: Promise<ArrayBuffer>;
   get bytesWritten(): number | bigint;
 }
 /**
@@ -1291,7 +1291,7 @@ declare class DigestStream extends WritableStream<
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder)
  */
 declare class TextDecoder {
-  constructor(decoder?: string, options?: TextDecoderConstructorOptions);
+  constructor(label?: string, options?: TextDecoderConstructorOptions);
   /**
    * Returns the result of running encoding's decoder. The method can be invoked zero or more times with options's stream set to true, and then once without options's stream (or set to false), to process a fragmented input. If the invocation without options's stream (or set to false) has no input, it's clearest to omit both arguments.
    *
@@ -3131,7 +3131,7 @@ interface GPUCommandEncoder {
     destinationOffset: number | bigint,
     size: number | bigint,
   ): void;
-  finish(param0?: GPUCommandBufferDescriptor): GPUCommandBuffer;
+  finish(param1?: GPUCommandBufferDescriptor): GPUCommandBuffer;
   copyTextureToBuffer(
     source: GPUImageCopyTexture,
     destination: GPUImageCopyBuffer,
@@ -6414,6 +6414,11 @@ declare module "cloudflare:workers" {
     timestamp: Date;
     instanceId: string;
   };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
@@ -6426,6 +6431,13 @@ declare module "cloudflare:workers" {
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
   }
   export abstract class WorkflowEntrypoint<
     Env = unknown,

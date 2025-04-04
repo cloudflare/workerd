@@ -247,7 +247,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(jsg:
   auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{
     normalizedName, {normalizedHashName}, static_cast<uint16_t>(length)};
 
-  return jsg::alloc<CryptoKey>(
+  return js.alloc<CryptoKey>(
       kj::heap<HmacKey>(kj::mv(keyDataArray), kj::mv(keyAlgorithm), extractable, usages));
 }
 

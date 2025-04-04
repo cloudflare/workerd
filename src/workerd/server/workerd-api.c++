@@ -645,7 +645,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           "The python_workers compatibility flag is required to use Python.");
       // Inject SetupEmscripten module
       modules->addBuiltinModule("internal:setup-emscripten",
-          jsg::alloc<SetupEmscripten>(KJ_ASSERT_NONNULL(impl->maybeEmscriptenRuntime)),
+          lockParam.alloc<SetupEmscripten>(KJ_ASSERT_NONNULL(impl->maybeEmscriptenRuntime)),
           workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
@@ -685,7 +685,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
       // Inject disk cache module
       modules->addBuiltinModule("pyodide-internal:disk_cache",
-          jsg::alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot),
+          lockParam.alloc<DiskCache>(impl->pythonConfig.packageDiskCacheRoot),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject a (disabled) SimplePythonLimiter
@@ -745,7 +745,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
       value = lock.wrap(context,
-          jsg::alloc<api::Fetcher>(pipeline.channel,
+          lock.alloc<api::Fetcher>(pipeline.channel,
               pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
                                     : api::Fetcher::RequiresHostAndProtocol::NO,
               pipeline.isInHouse));
@@ -753,22 +753,22 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {
       value = lock.wrap(context,
-          jsg::alloc<api::KvNamespace>(
+          lock.alloc<api::KvNamespace>(
               kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2, Global::R2Bucket) {
       value = lock.wrap(
-          context, jsg::alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
+          context, lock.alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2a, Global::R2Admin) {
       value = lock.wrap(
-          context, jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
+          context, lock.alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(ns, Global::QueueBinding) {
-      value = lock.wrap(context, jsg::alloc<api::WorkerQueue>(ns.subrequestChannel));
+      value = lock.wrap(context, lock.alloc<api::WorkerQueue>(ns.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(key, Global::CryptoKey) {
@@ -798,7 +798,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(cache, Global::MemoryCache) {
       value = lock.wrap(context,
-          jsg::alloc<api::MemoryCache>(
+          lock.alloc<api::MemoryCache>(
               api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
                   {
                     .maxKeys = cache.maxKeys,
@@ -808,19 +808,19 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
-      value = lock.wrap(context, jsg::alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
+      value = lock.wrap(context, lock.alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
     }
 
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
       value = lock.wrap(context,
-          jsg::alloc<api::DurableObjectNamespace>(
+          lock.alloc<api::DurableObjectNamespace>(
               ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
       // Use subrequestChannel as logfwdrChannel
       value = lock.wrap(context,
-          jsg::alloc<api::AnalyticsEngine>(
+          lock.alloc<api::AnalyticsEngine>(
               ae.subrequestChannel, kj::str(ae.dataset), ae.version, ownerId));
     }
 
@@ -866,11 +866,11 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
       value = lock.wrap(context,
-          jsg::alloc<api::Hyperdrive>(hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
+          lock.alloc<api::Hyperdrive>(hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
               kj::str(hyperdrive.user), kj::str(hyperdrive.password), kj::str(hyperdrive.scheme)));
     }
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
-      value = lock.wrap(context, jsg::alloc<api::UnsafeEval>());
+      value = lock.wrap(context, lock.alloc<api::UnsafeEval>());
     }
   }
 

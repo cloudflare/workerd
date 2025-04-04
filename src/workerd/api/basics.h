@@ -59,7 +59,7 @@ class Event: public jsg::Object {
     return stopped;
   }
 
-  static jsg::Ref<Event> constructor(kj::String type, jsg::Optional<Init> init);
+  static jsg::Ref<Event> constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init);
   kj::StringPtr getType();
 
   inline void stopImmediatePropagation() {
@@ -222,7 +222,7 @@ class ExtendableEvent: public Event {
 
   void waitUntil(kj::Promise<void> promise);
 
-  jsg::Optional<jsg::Ref<ActorState>> getActorState();
+  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ExtendableEvent) {
     JSG_INHERIT(Event);
@@ -355,7 +355,7 @@ class EventTarget: public jsg::Object {
   }
   JSG_REFLECTION(onEvents);
 
-  static jsg::Ref<EventTarget> constructor();
+  static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
   // Registers a lambda that will be called when the given event type is emitted.
   // The handler will be registered for as long as the returned kj::Own<void>
@@ -617,10 +617,10 @@ class AbortSignal final: public EventTarget {
 // An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
  public:
-  explicit AbortController(): signal(jsg::alloc<AbortSignal>()) {}
+  explicit AbortController(jsg::Lock& js): signal(js.alloc<AbortSignal>()) {}
 
-  static jsg::Ref<AbortController> constructor() {
-    return jsg::alloc<AbortController>();
+  static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
+    return js.alloc<AbortController>(js);
   }
 
   jsg::Ref<AbortSignal> getSignal() {

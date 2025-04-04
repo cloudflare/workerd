@@ -126,10 +126,10 @@ jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
     jsg::Lock& js, kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key) {
   KJ_SWITCH_ONEOF(key) {
     KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
-      return jsg::alloc<HmacHandle>(HmacContext(js, algorithm, key_data.asPtr()));
+      return js.alloc<HmacHandle>(HmacContext(js, algorithm, key_data.asPtr()));
     }
     KJ_CASE_ONEOF(key, jsg::Ref<CryptoKey>) {
-      return jsg::alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
+      return js.alloc<HmacHandle>(HmacContext(js, algorithm, key->impl.get()));
     }
   }
   KJ_UNREACHABLE;
@@ -171,8 +171,8 @@ void CryptoImpl::HmacHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) con
 // ======================================================================================
 #pragma region Hash
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
-    kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
-  return jsg::alloc<HashHandle>(HashContext(algorithm, xofLen));
+    jsg::Lock& js, kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
+  return js.alloc<HashHandle>(HashContext(algorithm, xofLen));
 }
 
 int CryptoImpl::HashHandle::update(kj::Array<kj::byte> data) {
@@ -186,7 +186,7 @@ jsg::BufferSource CryptoImpl::HashHandle::digest(jsg::Lock& js) {
 
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(
     jsg::Lock& js, kj::Maybe<uint32_t> xofLen) {
-  return jsg::alloc<HashHandle>(ctx.clone(js, kj::mv(xofLen)));
+  return js.alloc<HashHandle>(ctx.clone(js, kj::mv(xofLen)));
 }
 
 void CryptoImpl::HashHandle::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -204,15 +204,16 @@ jsg::BufferSource CryptoImpl::HashHandle::oneshot(
 // ======================================================================================
 #pragma region DiffieHellman
 
-jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
-  return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(name));
+jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(
+    jsg::Lock& js, kj::String name) {
+  return js.alloc<DiffieHellmanHandle>(DiffieHellman(name));
 }
 
 jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::constructor(
     jsg::Lock& js,
     kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
     kj::OneOf<kj::Array<kj::byte>, int> generator) {
-  return jsg::alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
+  return js.alloc<DiffieHellmanHandle>(DiffieHellman(sizeOrKey, generator));
 }
 
 CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(DiffieHellman dh): dh(kj::mv(dh)) {
@@ -403,7 +404,8 @@ const EVP_MD* maybeGetDigest(jsg::Optional<kj::String>& maybeAlgorithm) {
 CryptoImpl::SignHandle::SignHandle(ncrypto::EVPMDCtxPointer ctx)
     : ctx(ncrypto::EVPMDCtxPointer(ctx.release())) {}
 
-jsg::Ref<CryptoImpl::SignHandle> CryptoImpl::SignHandle::constructor(kj::String algorithm) {
+jsg::Ref<CryptoImpl::SignHandle> CryptoImpl::SignHandle::constructor(
+    jsg::Lock& js, kj::String algorithm) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
   auto md = ncrypto::getDigestByName(std::string_view(algorithm.begin(), algorithm.size()));
   JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", algorithm));
@@ -411,7 +413,7 @@ jsg::Ref<CryptoImpl::SignHandle> CryptoImpl::SignHandle::constructor(kj::String 
   auto mdctx = ncrypto::EVPMDCtxPointer::New();
   JSG_REQUIRE(mdctx, Error, "Failed to create signing context");
   JSG_REQUIRE(mdctx.digestInit(md), Error, "Failed to initialize signing context");
-  return jsg::alloc<SignHandle>(kj::mv(mdctx));
+  return js.alloc<SignHandle>(kj::mv(mdctx));
 }
 
 void CryptoImpl::SignHandle::update(jsg::Lock& js, jsg::BufferSource data) {
@@ -455,7 +457,8 @@ jsg::BufferSource CryptoImpl::SignHandle::sign(jsg::Lock& js,
 CryptoImpl::VerifyHandle::VerifyHandle(ncrypto::EVPMDCtxPointer ctx)
     : ctx(ncrypto::EVPMDCtxPointer(ctx.release())) {}
 
-jsg::Ref<CryptoImpl::VerifyHandle> CryptoImpl::VerifyHandle::constructor(kj::String algorithm) {
+jsg::Ref<CryptoImpl::VerifyHandle> CryptoImpl::VerifyHandle::constructor(
+    jsg::Lock& js, kj::String algorithm) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
   auto md = ncrypto::getDigestByName(std::string_view(algorithm.begin(), algorithm.size()));
   JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", algorithm));
@@ -464,7 +467,7 @@ jsg::Ref<CryptoImpl::VerifyHandle> CryptoImpl::VerifyHandle::constructor(kj::Str
   JSG_REQUIRE(mdctx, Error, "Failed to create verification context");
   JSG_REQUIRE(mdctx.digestInit(md), Error, "Failed to initialize verification context");
 
-  return jsg::alloc<VerifyHandle>(kj::mv(mdctx));
+  return js.alloc<VerifyHandle>(kj::mv(mdctx));
 }
 
 void CryptoImpl::VerifyHandle::update(jsg::Lock& js, jsg::BufferSource data) {
@@ -735,7 +738,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::constructor(jsg::Lo
   JSG_REQUIRE(ctx.init(ncrypto::Cipher(), encrypt, keyData.begin(), iv.asArrayPtr().begin()), Error,
       "Failed to initialize cipher/cipher context");
 
-  return jsg::alloc<CipherHandle>(mode == "cipher" ? Mode::CIPHER : Mode::DECIPHER, kj::mv(ctx),
+  return js.alloc<CipherHandle>(mode == "cipher" ? Mode::CIPHER : Mode::DECIPHER, kj::mv(ctx),
       kj::mv(key), kj::mv(iv), kj::mv(maybeAuthInfo));
 }
 
@@ -1206,7 +1209,7 @@ jsg::Ref<CryptoImpl::ECDHHandle> CryptoImpl::ECDHHandle::constructor(
   auto key = ncrypto::ECKeyPointer::NewByCurveName(nid);
   JSG_REQUIRE(key, Error, "Failed to create key using named curve");
 
-  return jsg::alloc<CryptoImpl::ECDHHandle>(kj::mv(key));
+  return js.alloc<CryptoImpl::ECDHHandle>(kj::mv(key));
 }
 
 jsg::BufferSource CryptoImpl::ECDHHandle::computeSecret(

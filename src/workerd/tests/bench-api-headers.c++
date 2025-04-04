@@ -51,7 +51,7 @@ struct ApiHeaders: public benchmark::Fixture {
 BENCHMARK_F(ApiHeaders, constructor)(benchmark::State& state) {
   fixture->runInIoContext([&](const TestFixture::Environment& env) {
     for (auto _: state) {
-      auto jsHeaders = jsg::alloc<api::Headers>(*kjHeaders, api::Headers::Guard::REQUEST);
+      auto jsHeaders = env.js.alloc<api::Headers>(*kjHeaders, api::Headers::Guard::REQUEST);
     }
   });
 }

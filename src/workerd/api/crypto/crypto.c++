@@ -626,7 +626,7 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(jsg::Lock& js,
   //   implementation functions don't necessarily know the name of the algorithm whose key they're
   //   importing (importKeyAesImpl handles AES-CTR, -CBC, and -GCM, for instance), so they should
   //   rely on this value to set the imported CryptoKey's name.
-  auto cryptoKey = jsg::alloc<CryptoKey>(algoImpl.importFunc(
+  auto cryptoKey = js.alloc<CryptoKey>(algoImpl.importFunc(
       js, algoImpl.name, format, kj::mv(keyData), kj::mv(algorithm), extractable, keyUsages));
 
   if (cryptoKey->getUsageSet().size() == 0) {
@@ -873,7 +873,7 @@ void DigestStream::abort(jsg::Lock& js, jsg::JsValue reason) {
 jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
   auto paf = js.newPromiseAndResolver<jsg::BufferSource>();
 
-  auto stream = jsg::alloc<DigestStream>(newWritableStreamJsController(),
+  auto stream = js.alloc<DigestStream>(newWritableStreamJsController(),
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));
 
   stream->getController().setup(js,

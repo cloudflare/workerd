@@ -61,14 +61,14 @@ KJ_TEST("context type is exposed in the global scope") {
 
 struct InheritContext: public ContextGlobalObject {
   struct Other: public Object {
-    static jsg::Ref<Other> constructor() {
-      return jsg::alloc<Other>();
+    static jsg::Ref<Other> constructor(jsg::Lock& js) {
+      return js.alloc<Other>();
     }
     JSG_RESOURCE_TYPE(Other) {}
   };
 
-  Ref<NumberBox> newExtendedAsBase(double value, kj::String text) {
-    return ExtendedNumberBox::constructor(value, kj::mv(text));
+  Ref<NumberBox> newExtendedAsBase(jsg::Lock& js, double value, kj::String text) {
+    return ExtendedNumberBox::constructor(js, value, kj::mv(text));
   }
 
   JSG_RESOURCE_TYPE(InheritContext) {
@@ -150,8 +150,8 @@ KJ_TEST("utf-8 scripts") {
 // ========================================================================================
 
 struct RefContext: public ContextGlobalObject {
-  Ref<NumberBox> addAndReturnCopy(NumberBox& box, double value) {
-    auto copy = jsg::alloc<NumberBox>(box.value);
+  Ref<NumberBox> addAndReturnCopy(jsg::Lock& js, NumberBox& box, double value) {
+    auto copy = js.alloc<NumberBox>(box.value);
     copy->value += value;
     return copy;
   }
@@ -322,8 +322,8 @@ KJ_TEST("jsg::Lock logWarning") {
 struct CallableContext: public ContextGlobalObject {
   struct MyCallable: public Object {
    public:
-    static Ref<MyCallable> constructor() {
-      return alloc<MyCallable>();
+    static Ref<MyCallable> constructor(jsg::Lock& js) {
+      return js.alloc<MyCallable>();
     }
 
     bool foo() {
@@ -336,8 +336,8 @@ struct CallableContext: public ContextGlobalObject {
     }
   };
 
-  Ref<MyCallable> getCallable() {
-    return alloc<MyCallable>();
+  Ref<MyCallable> getCallable(jsg::Lock& js) {
+    return js.alloc<MyCallable>();
   }
 
   JSG_RESOURCE_TYPE(CallableContext) {
@@ -362,8 +362,8 @@ KJ_TEST("Test JSG_CALLABLE") {
 // ========================================================================================
 struct InterceptContext: public ContextGlobalObject {
   struct ProxyImpl: public jsg::Object {
-    static jsg::Ref<ProxyImpl> constructor() {
-      return jsg::alloc<ProxyImpl>();
+    static jsg::Ref<ProxyImpl> constructor(jsg::Lock& js) {
+      return js.alloc<ProxyImpl>();
     }
 
     int getBar() {

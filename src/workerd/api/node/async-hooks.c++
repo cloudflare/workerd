@@ -6,7 +6,7 @@
 namespace workerd::api::node {
 
 jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(jsg::Lock& js) {
-  return jsg::alloc<AsyncLocalStorage>();
+  return js.alloc<AsyncLocalStorage>();
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::run(jsg::Lock& js,
@@ -69,7 +69,7 @@ jsg::Ref<AsyncResource> AsyncResource::constructor(
   // The type and options are required as part of the Node.js API compatibility
   // but our implementation does not currently make use of them at all. It is OK
   // for us to silently ignore both here.
-  return jsg::alloc<AsyncResource>(js);
+  return js.alloc<AsyncResource>(js);
 }
 
 v8::Local<v8::Function> AsyncResource::staticBind(jsg::Lock& js,

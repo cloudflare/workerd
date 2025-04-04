@@ -297,7 +297,7 @@ class ZlibUtil final: public jsg::Object {
     ~CompressionStream();
     KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
 
-    static jsg::Ref<CompressionStream> constructor(ZlibModeValue mode);
+    static jsg::Ref<CompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     void close();
     bool checkError(jsg::Lock& js);
@@ -359,7 +359,7 @@ class ZlibUtil final: public jsg::Object {
    public:
     explicit ZlibStream(ZlibMode mode): CompressionStream(mode) {}
     KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
-    static jsg::Ref<ZlibStream> constructor(ZlibModeValue mode);
+    static jsg::Ref<ZlibStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     // Instance methods
     void initialize(int windowBits,
@@ -385,7 +385,7 @@ class ZlibUtil final: public jsg::Object {
     explicit BrotliCompressionStream(ZlibMode _mode)
         : CompressionStream<CompressionContext>(_mode) {}
     KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);
-    static jsg::Ref<BrotliCompressionStream> constructor(ZlibModeValue mode);
+    static jsg::Ref<BrotliCompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
     bool initialize(jsg::Lock& js,
         jsg::BufferSource params,

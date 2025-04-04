@@ -72,7 +72,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>> GPU::requestAdapter(
   }
 
   KJ_IF_SOME(a, adapter) {
-    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(a, kj::addRef(*async_));
+    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = js.alloc<GPUAdapter>(a, kj::addRef(*async_));
     return js.resolvedPromise(kj::mv(gpuAdapter));
   }
 

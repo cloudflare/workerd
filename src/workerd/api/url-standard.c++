@@ -37,8 +37,9 @@ jsg::Url parseImpl(kj::StringPtr url, kj::Maybe<kj::StringPtr> maybeBase) {
 }
 }  // namespace
 
-jsg::Ref<URL> URL::constructor(jsg::USVString url, jsg::Optional<jsg::USVString> base) {
-  return jsg::alloc<URL>(kj::mv(url), base.map([](jsg::USVString& base) { return base.asPtr(); }));
+jsg::Ref<URL> URL::constructor(
+    jsg::Lock& js, jsg::USVString url, jsg::Optional<jsg::USVString> base) {
+  return js.alloc<URL>(kj::mv(url), base.map([](jsg::USVString& base) { return base.asPtr(); }));
 }
 
 URL::URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base): inner(parseImpl(url, base)) {}
@@ -64,11 +65,11 @@ void URL::revokeObjectURL(jsg::Lock& js, jsg::USVString object_url) {
   JSG_FAIL_REQUIRE(Error, "URL.revokeObjectURL() is not implemented"_kj);
 }
 
-jsg::Ref<URLSearchParams> URL::getSearchParams() {
+jsg::Ref<URLSearchParams> URL::getSearchParams(jsg::Lock& js) {
   KJ_IF_SOME(searchParams, maybeSearchParams) {
     return searchParams.addRef();
   }
-  return maybeSearchParams.emplace(jsg::alloc<URLSearchParams>(inner.getSearch(), *this)).addRef();
+  return maybeSearchParams.emplace(js.alloc<URLSearchParams>(inner.getSearch(), *this)).addRef();
 }
 
 kj::Array<const char> URL::getOrigin() {
@@ -210,8 +211,9 @@ jsg::UrlSearchParams initFromSearch(kj::Maybe<kj::ArrayPtr<const char>>& maybeQu
 }
 }  // namespace
 
-jsg::Ref<URLSearchParams> URLSearchParams::constructor(jsg::Optional<Initializer> init) {
-  return jsg::alloc<URLSearchParams>(kj::mv(init).orDefault(jsg::USVString()));
+jsg::Ref<URLSearchParams> URLSearchParams::constructor(
+    jsg::Lock& js, jsg::Optional<Initializer> init) {
+  return js.alloc<URLSearchParams>(kj::mv(init).orDefault(jsg::USVString()));
 }
 
 URLSearchParams::URLSearchParams(Initializer initializer): inner(initSearchParams(initializer)) {}
@@ -290,18 +292,18 @@ void URLSearchParams::sort() {
   update();
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
-  return jsg::alloc<URLSearchParams::EntryIterator>(
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock& js) {
+  return js.alloc<URLSearchParams::EntryIterator>(
       IteratorState<jsg::UrlSearchParams::EntryIterator>(JSG_THIS, inner.getEntries()));
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
-  return jsg::alloc<URLSearchParams::KeyIterator>(
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock& js) {
+  return js.alloc<URLSearchParams::KeyIterator>(
       IteratorState<jsg::UrlSearchParams::KeyIterator>(JSG_THIS, inner.getKeys()));
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
-  return jsg::alloc<URLSearchParams::ValueIterator>(
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock& js) {
+  return alloc<URLSearchParams::ValueIterator>(
       IteratorState<jsg::UrlSearchParams::ValueIterator>(JSG_THIS, inner.getValues()));
 }
 

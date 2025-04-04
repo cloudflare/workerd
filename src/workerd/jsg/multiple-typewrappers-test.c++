@@ -19,8 +19,8 @@ struct TestApi1: public jsg::Object {
   int test2(jsg::Lock& js) {
     return 2;
   }
-  static jsg::Ref<TestApi1> constructor() {
-    return jsg::alloc<TestApi1>();
+  static jsg::Ref<TestApi1> constructor(jsg::Lock& js) {
+    return js.alloc<TestApi1>();
   }
 
   JSG_RESOURCE_TYPE(TestApi1, workerd::CompatibilityFlags::Reader flags) {
@@ -41,8 +41,8 @@ struct TestApi2: public jsg::Object {
   int test2(jsg::Lock& js) {
     return 2;
   }
-  static jsg::Ref<TestApi2> constructor() {
-    return jsg::alloc<TestApi2>();
+  static jsg::Ref<TestApi2> constructor(jsg::Lock& js) {
+    return js.alloc<TestApi2>();
   }
 
   JSG_RESOURCE_TYPE(TestApi2, workerd::CompatibilityFlags::Reader flags) {

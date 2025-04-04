@@ -756,7 +756,8 @@ class Worker::Actor final: public kj::Refcounted {
     virtual void hibernateWebSockets(Worker::Lock& lock) = 0;
     virtual void setWebSocketAutoResponse(
         kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) = 0;
-    virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() = 0;
+    virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse(
+        jsg::Lock& js) = 0;
     virtual void setTimerChannel(TimerChannel& timerChannel) = 0;
     virtual kj::Own<HibernationManager> addRef() = 0;
     virtual void setEventTimeout(kj::Maybe<uint32_t> timeoutMs) = 0;

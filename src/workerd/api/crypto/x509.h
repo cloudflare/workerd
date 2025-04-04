@@ -12,7 +12,7 @@ class X509Certificate: public jsg::Object {
  public:
   X509Certificate(X509* cert): cert_(kj::disposeWith<X509_free>(cert)) {}
 
-  static kj::Maybe<jsg::Ref<X509Certificate>> parse(kj::Array<const kj::byte> raw);
+  static kj::Maybe<jsg::Ref<X509Certificate>> parse(jsg::Lock& js, kj::Array<const kj::byte> raw);
 
   kj::Maybe<kj::String> getSubject();
   kj::Maybe<kj::String> getSubjectAltName();

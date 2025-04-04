@@ -261,7 +261,7 @@ jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
       kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
           ioctx.getHeaderTable(), req.send().getPort());
 
-  return jsg::alloc<Fetcher>(
+  return js.alloc<Fetcher>(
       ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
 }
 

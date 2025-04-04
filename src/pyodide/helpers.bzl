@@ -4,6 +4,7 @@ load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
+load("//:build/python_metadata.bzl", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 def _out_name(src):
@@ -43,15 +44,28 @@ def copy_and_capnp_embed(src, version = None, out_name = None):
         deps = [out_name + "@copy"],
     )
 
-def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+def python_bundles(overrides = {}):
+    srcs = [_python_bundle_helper(info, overrides) for info in PYODIDE_VERSIONS]
+    native.filegroup(
+        name = "python_bundles",
+        srcs = srcs + [":bundle_version_info"],
+    )
+
+def _python_bundle_helper(info, overrides):
+    version = info["version"]
+    override = overrides.get(version, {})
+    return _python_bundle(version, **override)
+
+def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+    pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
-        pyodide_asm_wasm = "@pyodide//:pyodide/pyodide.asm.wasm"
+        pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
 
     if not pyodide_asm_js:
-        pyodide_asm_js = "@pyodide//:pyodide/pyodide.asm.js"
+        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
 
     if not python_stdlib_zip:
-        python_stdlib_zip = "@pyodide//:pyodide/python_stdlib.zip"
+        python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
 
     copy_and_capnp_embed("python-entrypoint.js", version = version)
 
@@ -243,8 +257,9 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
         out_dir = _out_path("", version),
     )
 
+    pyodide_cappn_bin_rule = "pyodide.capnp.bin@rule@" + version
     native.genrule(
-        name = "pyodide.capnp.bin@rule@" + version,
+        name = pyodide_cappn_bin_rule,
         srcs = [
             ":pyodide@%s.capnp" % version,
             "//src/workerd/jsg:modules.capnp",
@@ -287,3 +302,4 @@ def python_bundle(version, pyodide_asm_wasm = None, pyodide_asm_js = None, pytho
         tools = ["@capnp-cpp//src/capnp:capnp_tool"],
         visibility = ["//visibility:public"],
     )
+    return pyodide_cappn_bin_rule

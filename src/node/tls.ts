@@ -29,7 +29,13 @@ import {
   SecureContext,
 } from 'node-internal:internal_tls_common';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
-export { TLSSocket, connect, createSecureContext, checkServerIdentity };
+export {
+  TLSSocket,
+  connect,
+  createSecureContext,
+  checkServerIdentity,
+  SecureContext,
+};
 export default {
   SecureContext,
   TLSSocket,

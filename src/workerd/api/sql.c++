@@ -54,10 +54,10 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
     SqliteDatabase::Regulator& regulator = *this;
-    return jsg::alloc<Cursor>(js, db, regulator, js.toString(querySql), kj::mv(bindings));
+    return js.alloc<Cursor>(js, db, regulator, js.toString(querySql), kj::mv(bindings));
   }
 
-  auto result = jsg::alloc<Cursor>(js, slot.addRef(), kj::mv(bindings));
+  auto result = js.alloc<Cursor>(js, slot.addRef(), kj::mv(bindings));
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -79,7 +79,7 @@ SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) 
 }
 
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString query) {
-  return jsg::alloc<Statement>(js, JSG_THIS, query);
+  return js.alloc<Statement>(js, JSG_THIS, query);
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
@@ -240,7 +240,7 @@ jsg::JsValue SqlStorage::Cursor::one(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
-  return jsg::alloc<RowIterator>(JSG_THIS);
+  return js.alloc<RowIterator>(JSG_THIS);
 }
 
 kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj) {
@@ -257,8 +257,8 @@ kj::Maybe<jsg::JsObject> SqlStorage::Cursor::rowIteratorNext(jsg::Lock& js, jsg:
   }
 }
 
-jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
-  return jsg::alloc<RawIterator>(JSG_THIS);
+jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock& js) {
+  return js.alloc<RawIterator>(JSG_THIS);
 }
 
 // Returns the set of column names for the current Cursor. An exception will be thrown if the

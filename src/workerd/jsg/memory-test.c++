@@ -59,7 +59,7 @@ KJ_TEST("MemoryTracker test") {
     IsolateBase& base = IsolateBase::from(js.v8Isolate);
     base.getUuid();
 
-    auto foo = fooHandler.wrap(js, alloc<Foo>());
+    auto foo = fooHandler.wrap(js, js.alloc<Foo>());
     KJ_ASSERT(foo->IsObject());
 
     auto profiler = js.v8Isolate->GetHeapProfiler();

@@ -380,7 +380,9 @@ const MimeType MimeType::WILDCARD = MimeType("*"_kj, "*"_kj);
 
 bool MimeType::isText(const MimeType& mimeType) {
   auto type = mimeType.type();
-  return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType);
+  auto subtype = mimeType.subtype();
+  return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType) ||
+      (type == "application" && subtype == "dns-json");
 }
 
 bool MimeType::isXml(const MimeType& mimeType) {

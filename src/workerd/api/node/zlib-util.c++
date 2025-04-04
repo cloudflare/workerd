@@ -443,8 +443,8 @@ void ZlibContext::setOutputBuffer(kj::ArrayPtr<kj::byte> output) {
 
 template <typename CompressionContext>
 jsg::Ref<ZlibUtil::CompressionStream<CompressionContext>> ZlibUtil::CompressionStream<
-    CompressionContext>::constructor(ZlibModeValue mode) {
-  return jsg::alloc<CompressionStream>(static_cast<ZlibMode>(mode));
+    CompressionContext>::constructor(jsg::Lock& js, ZlibModeValue mode) {
+  return js.alloc<CompressionStream>(static_cast<ZlibMode>(mode));
 }
 
 template <typename CompressionContext>
@@ -583,8 +583,9 @@ void ZlibUtil::CompressionStream<CompressionContext>::reset(jsg::Lock& js) {
   }
 }
 
-jsg::Ref<ZlibUtil::ZlibStream> ZlibUtil::ZlibStream::constructor(ZlibModeValue mode) {
-  return jsg::alloc<ZlibStream>(static_cast<ZlibMode>(mode));
+jsg::Ref<ZlibUtil::ZlibStream> ZlibUtil::ZlibStream::constructor(
+    jsg::Lock& js, ZlibModeValue mode) {
+  return js.alloc<ZlibStream>(static_cast<ZlibMode>(mode));
 }
 
 void ZlibUtil::ZlibStream::initialize(int windowBits,
@@ -751,8 +752,8 @@ kj::Maybe<CompressionError> BrotliDecoderContext::getError() const {
 
 template <typename CompressionContext>
 jsg::Ref<ZlibUtil::BrotliCompressionStream<CompressionContext>> ZlibUtil::BrotliCompressionStream<
-    CompressionContext>::constructor(ZlibModeValue mode) {
-  return jsg::alloc<BrotliCompressionStream>(static_cast<ZlibMode>(mode));
+    CompressionContext>::constructor(jsg::Lock& js, ZlibModeValue mode) {
+  return js.alloc<BrotliCompressionStream>(static_cast<ZlibMode>(mode));
 }
 
 template <typename CompressionContext>
@@ -932,16 +933,16 @@ void ZlibUtil::brotliWithCallback(
       jsg::Optional<kj::Array<kj::byte>> input, int inputOffset, int inputLength,                  \
       kj::Array<kj::byte> output, int outputOffset, int outputLength);                             \
   template jsg::Ref<ZlibUtil::CompressionStream<T>> ZlibUtil::CompressionStream<T>::constructor(   \
-      ZlibModeValue mode);
+      jsg::Lock& js, ZlibModeValue mode);
 
 CREATE_TEMPLATE(ZlibContext)
 CREATE_TEMPLATE(BrotliEncoderContext)
 CREATE_TEMPLATE(BrotliDecoderContext)
 
 template jsg::Ref<ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>> ZlibUtil::
-    BrotliCompressionStream<BrotliEncoderContext>::constructor(ZlibModeValue mode);
+    BrotliCompressionStream<BrotliEncoderContext>::constructor(jsg::Lock& js, ZlibModeValue mode);
 template jsg::Ref<ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>> ZlibUtil::
-    BrotliCompressionStream<BrotliDecoderContext>::constructor(ZlibModeValue mode);
+    BrotliCompressionStream<BrotliDecoderContext>::constructor(jsg::Lock& js, ZlibModeValue mode);
 template bool ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>::initialize(
     jsg::Lock&, jsg::BufferSource, jsg::BufferSource, jsg::Function<void()>);
 template bool ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>::initialize(
