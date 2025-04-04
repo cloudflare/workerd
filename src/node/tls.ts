@@ -23,7 +23,10 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { checkServerIdentity } from 'node-internal:internal_tls';
+import {
+  checkServerIdentity,
+  convertALPNProtocols,
+} from 'node-internal:internal_tls';
 import {
   createSecureContext,
   SecureContext,
@@ -35,6 +38,7 @@ export {
   createSecureContext,
   checkServerIdentity,
   SecureContext,
+  convertALPNProtocols,
 };
 export default {
   SecureContext,
@@ -42,4 +46,5 @@ export default {
   connect,
   createSecureContext,
   checkServerIdentity,
+  convertALPNProtocols,
 };
