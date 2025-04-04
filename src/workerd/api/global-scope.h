@@ -11,9 +11,6 @@
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#endif
 
 namespace workerd::jsg {
 class DOMException;
@@ -78,9 +75,6 @@ class Navigator: public jsg::Object {
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  jsg::Optional<jsg::Ref<api::gpu::GPU>> getGPU(jsg::Lock& js, CompatibilityFlags::Reader flags);
-#endif
 
   bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
 
@@ -94,9 +88,6 @@ class Navigator: public jsg::Object {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
     JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
-#endif
   }
 };
 
@@ -743,20 +734,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    // WebGPU
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUAdapter, GPUAdapter);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUOutOfMemoryError, GPUOutOfMemoryError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUValidationError, GPUValidationError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUInternalError, GPUInternalError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUDeviceLostInfo, GPUDeviceLostInfo);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUMapMode, GPUMapMode);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUTextureUsage, GPUTextureUsage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUColorWrite, GPUColorWrite);
-#endif
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(

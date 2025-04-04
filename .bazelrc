@@ -31,9 +31,6 @@ import %workspace%/build/ci.bazelrc
 
 import %workspace%/build/lint.bazelrc
 
-# Enable webgpu
-build --//src/workerd/io:enable_experimental_webgpu=True
-
 # Avoid generating duplicate runfile trees. This will become the default in a future bazel version.
 build --nolegacy_external_runfiles
 
@@ -43,24 +40,11 @@ build --incompatible_disallow_empty_glob
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
 
-# Dawn tint build flags
-build --@dawn//src/tint:tint_build_glsl_writer=False
-build --@dawn//src/tint:tint_build_glsl_validator=False
-build --@dawn//src/tint:tint_build_hlsl_writer=True
-build --@dawn//src/tint:tint_build_ir=False
-build --@dawn//src/tint:tint_build_msl_writer=True
-build --@dawn//src/tint:tint_build_spv_reader=False
-build --@dawn//src/tint:tint_build_spv_writer=True
-build --@dawn//src/tint:tint_build_wgsl_reader=True
-build --@dawn//src/tint:tint_build_wgsl_writer=True
-
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
 # have that option, so disable -Wunknown-warning-option there too.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external/v8@-Wno-unused-function'
-build --per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration,-Wno-deprecated-this-capture'
-build --host_per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration,-Wno-deprecated-this-capture'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
 # for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public
@@ -136,9 +120,6 @@ build:unix --cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL --host_cxxopt=-D_LIBCPP_HAS
 # TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
 build:windows --copt='-Wno-macro-redefined'
 build:windows --host_copt='-Wno-macro-redefined'
-# Dawn/Tint adds compiler flags that are ignored on Windows
-build:windows --per_file_copt='external/dawn@-Wno-unknown-argument'
-build:windows --host_per_file_copt='external/dawn@-Wno-unknown-argument'
 
 # typescript configuration
 # do more correct type checking

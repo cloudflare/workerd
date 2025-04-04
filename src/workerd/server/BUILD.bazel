@@ -104,10 +104,6 @@ wd_cc_library(
         "server.h",
         "workerd-api.h",
     ],
-    defines = select({
-        "//src/workerd/io:set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",

@@ -29,10 +29,6 @@
 #include <kj/main.h>
 #include <kj/map.h>
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#endif
-
 #if _WIN32
 #include <windows.h>
 #include <winsock2.h>
@@ -1647,10 +1643,6 @@ int main(int argc, char* argv[]) {
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  workerd::api::gpu::initialize();
-#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }
