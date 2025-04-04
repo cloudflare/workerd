@@ -6402,6 +6402,11 @@ declare module "cloudflare:workers" {
     timestamp: Date;
     instanceId: string;
   };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
@@ -6414,6 +6419,13 @@ declare module "cloudflare:workers" {
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
   }
   export abstract class WorkflowEntrypoint<
     Env = unknown,
