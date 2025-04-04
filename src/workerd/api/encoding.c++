@@ -4,8 +4,6 @@
 
 #include "encoding.h"
 
-#include "util.h"
-
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/strings.h>
 

@@ -15,25 +15,40 @@ config_setting(
     flag_values = {"enable_experimental_webgpu": "True"},
 )
 
-# TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
-# not encumbered with many dependencies.
 wd_cc_library(
-    name = "io-helpers",
+    name = "io-thread-context",
     srcs = [
         "io-thread-context.c++",
-        "io-timers.c++",
-        "request-tracker.c++",
     ],
     hdrs = [
         "io-thread-context.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/capnp/compat:http-over-capnp"],
+)
+
+wd_cc_library(
+    name = "io-timers",
+    srcs = [
+        "io-timers.c++",
+    ],
+    hdrs = [
         "io-timers.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["//src/workerd/jsg"],
+)
+
+wd_cc_library(
+    name = "request-tracker",
+    srcs = [
+        "request-tracker.c++",
+    ],
+    hdrs = [
         "request-tracker.h",
     ],
     visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/jsg",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
-    ],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 wd_cc_library(
@@ -106,16 +121,18 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":actor",
         ":actor-id",
+        ":actor-sqlite",
         ":actor-storage_capnp",
         ":cdp_capnp",
         ":container_capnp",
         ":frankenvalue",
         ":io-gate",
-        ":io-helpers",
+        ":io-thread-context",
+        ":io-timers",
         ":limit-enforcer",
         ":observer",
+        ":request-tracker",
         ":supported-compatibility-date_capnp",
         ":trace",
         ":worker-interface",
@@ -146,31 +163,51 @@ wd_cc_library(
     }),
 )
 
-# TODO(cleanup): Split this up further.
 wd_cc_library(
-    name = "actor",
-    srcs = [
-        "actor-cache.c++",
-        "actor-sqlite.c++",
-        "actor-storage.c++",
+    name = "actor-cache",
+    srcs = ["actor-cache.c++"],
+    hdrs = ["actor-cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-storage",
+        ":io-gate",
+        "//src/workerd/jsg:exception",
+        "//src/workerd/util:duration-exceeded-logger",
+        "//src/workerd/util:sentry",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async",
     ],
+)
+
+wd_cc_library(
+    name = "actor-sqlite",
+    srcs = ["actor-sqlite.c++"],
     hdrs = [
         "actor-cache.h",
         "actor-sqlite.h",
-        "actor-storage.h",
     ],
     implementation_deps = [
         "@sqlite3",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":actor-storage_capnp",
+        ":actor-cache",
         ":io-gate",
         "//src/workerd/jsg:exception",
-        "//src/workerd/util:duration-exceeded-logger",
+        "//src/workerd/util:sentry",
         "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
+    name = "actor-storage",
+    srcs = ["actor-storage.c++"],
+    hdrs = ["actor-storage.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-storage_capnp",
+        "//src/workerd/jsg:exception",
+        "@capnp-cpp//src/kj",
     ],
 )
 
@@ -198,7 +235,6 @@ wd_cc_library(
         ":trace_capnp",
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
-        "//src/workerd/util",
         "//src/workerd/util:own-util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
@@ -339,7 +375,7 @@ kj_test(
 kj_test(
     src = "actor-cache-test.c++",
     deps = [
-        ":actor",
+        ":actor-cache",
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
@@ -349,7 +385,7 @@ kj_test(
 kj_test(
     src = "actor-sqlite-test.c++",
     deps = [
-        ":actor",
+        ":actor-sqlite",
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
