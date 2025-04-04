@@ -84,12 +84,21 @@ class Navigator: public jsg::Object {
 
   bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
 
+  kj::uint getHardwareConcurrency() {
+    // Workers does not expose hardware concurrency to users.
+    // From the user code perspective there's only one core.
+    return 1;
+  }
+
   JSG_RESOURCE_TYPE(Navigator) {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
+    JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
 #endif
+
+    JSG_TS_OVERRIDE({ readonly hardwareConcurrency: number; });
   }
 };
 
