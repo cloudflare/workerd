@@ -231,7 +231,7 @@ KJ_TEST("WritableStreamInternalController queue size assertion") {
 
     jsg::Ref<ReadableStream> source = ReadableStream::constructor(env.js, kj::none, kj::none);
     jsg::Ref<WritableStream> sink =
-        jsg::alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
+        env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::none);
 
     auto pipeTo = source->pipeTo(env.js, sink.addRef(), PipeToOptions{.preventClose = true});
 
@@ -323,7 +323,7 @@ KJ_TEST("WritableStreamInternalController observability") {
   auto& observer = *myObserver;
   kj::Maybe<jsg::Ref<WritableStream>> stream;
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    stream = jsg::alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::mv(myObserver));
+    stream = env.js.alloc<WritableStream>(env.context, kj::heap<MySink>(), kj::mv(myObserver));
 
     auto write = [&](size_t size) {
       auto buffersource = env.js.bytes(kj::heapArray<kj::byte>(size));

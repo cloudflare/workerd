@@ -180,7 +180,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(jsg::Lock& js,
   ada::url_pattern_options* options_opt = options ? &options.value() : nullptr;
   auto result = ada::parse_url_pattern<URLPatternRegexEngine>(kj::mv(input), base_opt, options_opt);
   JSG_REQUIRE(result.has_value(), TypeError, "Failed to construct URLPattern"_kj);
-  return jsg::alloc<URLPattern>(std::move(*result));
+  return js.alloc<URLPattern>(std::move(*result));
 }
 
 bool URLPattern::test(jsg::Optional<kj::OneOf<jsg::DOMString, URLPatternInit>> maybeInput,

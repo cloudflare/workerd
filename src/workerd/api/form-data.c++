@@ -79,7 +79,7 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
     }
     // The file is created with the same data as the blob (essentially as just
     // a view of the same blob) to avoid copying the data.
-    return jsg::alloc<File>(
+    return js.alloc<File>(
         blob.addRef(), blob->getData(), kj::mv(fn), kj::str(blob->getType()), dateNow());
   };
 
@@ -327,7 +327,7 @@ void FormData::parse(jsg::Lock& js,
             jsg::BufferSource bytes(js, kj::mv(backing));
             bytes.asArrayPtr().copyFrom(message);
             data.add(FormData::Entry{.name = kj::str(name),
-              .value = jsg::alloc<File>(js, kj::mv(bytes), kj::str(filename),
+              .value = js.alloc<File>(js, kj::mv(bytes), kj::str(filename),
                   kj::str(maybeType.orDefault(nullptr)), dateNow())});
           }
         } else {
@@ -416,8 +416,8 @@ FormData::EntryType FormData::clone(FormData::EntryType& value) {
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<FormData> FormData::constructor() {
-  return jsg::alloc<FormData>();
+jsg::Ref<FormData> FormData::constructor(jsg::Lock& js) {
+  return js.alloc<FormData>();
 }
 
 void FormData::append(jsg::Lock& js,
@@ -478,16 +478,16 @@ void FormData::set(jsg::Lock& js,
   }
 }
 
-jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState{JSG_THIS});
+jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock& js) {
+  return js.alloc<EntryIterator>(IteratorState{JSG_THIS});
 }
 
-jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState{JSG_THIS});
+jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock& js) {
+  return js.alloc<KeyIterator>(IteratorState{JSG_THIS});
 }
 
-jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState{JSG_THIS});
+jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock& js) {
+  return js.alloc<ValueIterator>(IteratorState{JSG_THIS});
 }
 
 void FormData::forEach(jsg::Lock& js,

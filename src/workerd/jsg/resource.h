@@ -1420,7 +1420,7 @@ class ResourceWrapper {
     v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
     auto global = context->Global();
 
-    auto ptr = jsg::alloc<T>(kj::fwd<Args>(args)...);
+    auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);
     if constexpr (T::jsgHasReflection) {
       ptr->jsgInitReflection(static_cast<TypeWrapper&>(*this));
     }

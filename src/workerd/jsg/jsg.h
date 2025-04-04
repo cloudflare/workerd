@@ -1409,6 +1409,7 @@ class Ref {
   friend class Ref;
   template <typename U, typename... Params>
   friend Ref<U> alloc(Params&&... params);
+  friend class Lock;
   template <typename U>
   friend Ref<U> _jsgThis(U* obj);
   template <typename, typename>
@@ -1425,6 +1426,10 @@ void MemoryTracker::trackField(
 }
 
 template <typename T, typename... Params>
+// TODO(js.alloc): When most of the jsg::alloc users are updated we can uncomment
+// the deprecation here. When all uses are updated to use js.alloc, we can remove
+// this method entirely.
+//[[deprecated("Use js.alloc<T>(...) instead")]]
 Ref<T> alloc(Params&&... params) {
   return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
 }
@@ -2307,6 +2312,15 @@ class Lock {
   // The underlying V8 isolate, useful for directly calling V8 APIs. Hopefully, this is rarely
   // needed outside JSG itself.
   v8::Isolate* const v8Isolate;
+
+  template <typename T, typename... Params>
+  Ref<T> alloc(Params&&... params) {
+    // TODO(soon): While it is possible to create jsg::Object instances outside of the
+    // isolate lock, we intend to change that in order to improve memory accounting and
+    // tracking of objects created while under lock. As such, all instances of jsg::alloc<T>(...)
+    // are to be replaced by js.alloc<T>(...). For now, these are functionally equivalent.
+    return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
+  }
 
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();

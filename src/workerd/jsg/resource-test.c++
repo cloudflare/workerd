@@ -92,8 +92,8 @@ struct InheritsMixin: public Object, public Mixin {
   }
 };
 struct InheritsMixinContext: public ContextGlobalObject {
-  Ref<InheritsMixin> makeInheritsMixin(int i) {
-    return jsg::alloc<InheritsMixin>(i);
+  Ref<InheritsMixin> makeInheritsMixin(jsg::Lock& js, int i) {
+    return js.alloc<InheritsMixin>(i);
   }
 
   JSG_RESOURCE_TYPE(InheritsMixinContext) {
@@ -114,8 +114,8 @@ struct PrototypePropertyObject: public Object {
 
   PrototypePropertyObject(double value): value(value) {}
 
-  static Ref<PrototypePropertyObject> constructor(double value) {
-    return alloc<PrototypePropertyObject>(value);
+  static Ref<PrototypePropertyObject> constructor(jsg::Lock& js, double value) {
+    return js.alloc<PrototypePropertyObject>(value);
   }
 
   double getValue() {
@@ -211,8 +211,8 @@ struct NonConstructibleContext: public ContextGlobalObject {
     }
   };
 
-  Ref<NonConstructible> getNonConstructible(double x) {
-    return jsg::alloc<NonConstructible>(x);
+  Ref<NonConstructible> getNonConstructible(jsg::Lock& js, double x) {
+    return js.alloc<NonConstructible>(x);
   }
 
   JSG_RESOURCE_TYPE(NonConstructibleContext) {
@@ -237,8 +237,8 @@ KJ_TEST("non-constructible types can't be constructed") {
 struct IterableContext: public ContextGlobalObject {
   class Iterable: public Object {
    public:
-    static Ref<Iterable> constructor() {
-      return jsg::alloc<Iterable>();
+    static Ref<Iterable> constructor(jsg::Lock& js) {
+      return js.alloc<Iterable>();
     }
 
     class Iterator: public Object {
@@ -278,7 +278,8 @@ struct IterableContext: public ContextGlobalObject {
     };
 
     Ref<Iterator> entries(const v8::FunctionCallbackInfo<v8::Value>& info) {
-      return jsg::alloc<Iterator>(JSG_THIS);
+      auto& js = jsg::Lock::from(info.GetIsolate());
+      return js.alloc<Iterator>(JSG_THIS);
     }
 
     JSG_RESOURCE_TYPE(Iterable) {
@@ -327,8 +328,8 @@ KJ_TEST("Iterables can be iterated") {
 
 struct StaticContext: public ContextGlobalObject {
   struct StaticConstants: public Object {
-    static Ref<StaticConstants> constructor() {
-      return jsg::alloc<StaticConstants>();
+    static Ref<StaticConstants> constructor(jsg::Lock& js) {
+      return js.alloc<StaticConstants>();
     }
 
     static constexpr double DOUBLE = 1.5;
@@ -345,8 +346,8 @@ struct StaticContext: public ContextGlobalObject {
   };
 
   struct StaticMethods: public Object {
-    static Ref<StaticMethods> constructor() {
-      return jsg::alloc<StaticMethods>();
+    static Ref<StaticMethods> constructor(jsg::Lock& js) {
+      return js.alloc<StaticMethods>();
     }
 
     static v8::Local<v8::Value> passThrough(v8::Local<v8::Value> arg) {
@@ -474,12 +475,12 @@ struct ReflectionContext: public ContextGlobalObject {
   };
 
   struct Reflector: public Super {
-    static jsg::Ref<Reflector> constructor(v8::Isolate* isolate) {
-      auto result = jsg::alloc<Reflector>();
+    static jsg::Ref<Reflector> constructor(jsg::Lock& js) {
+      auto result = js.alloc<Reflector>();
 
       // Check reflection returns null when wrapper isn't allocated.
-      KJ_EXPECT(result->intReflector.get(isolate, "foo") == kj::none);
-      KJ_EXPECT(result->stringReflector.get(isolate, "foo") == kj::none);
+      KJ_EXPECT(result->intReflector.get(js.v8Isolate, "foo") == kj::none);
+      KJ_EXPECT(result->stringReflector.get(js.v8Isolate, "foo") == kj::none);
 
       return result;
     }
@@ -502,12 +503,12 @@ struct ReflectionContext: public ContextGlobalObject {
     JSG_REFLECTION(intReflector, stringReflector);
   };
 
-  jsg::Ref<Reflector> makeReflector() {
-    return jsg::alloc<Reflector>();
+  jsg::Ref<Reflector> makeReflector(jsg::Lock& js) {
+    return js.alloc<Reflector>();
   }
 
-  jsg::Ref<Super> makeSuper() {
-    return jsg::alloc<Reflector>();
+  jsg::Ref<Super> makeSuper(jsg::Lock& js) {
+    return js.alloc<Reflector>();
   }
 
   JSG_RESOURCE_TYPE(ReflectionContext) {
@@ -539,7 +540,7 @@ struct InjectLockContext: public ContextGlobalObject {
 
     static Ref<Thingy> constructor(Lock& js, int val, v8::Isolate* v8Isolate) {
       KJ_ASSERT(js.v8Isolate == v8Isolate);
-      return alloc<Thingy>(val, v8Isolate);
+      return js.alloc<Thingy>(val, v8Isolate);
     }
 
     int frob(Lock& js, int val2) {

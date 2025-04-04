@@ -1039,7 +1039,7 @@ class AsyncIteratorBase: public Object {
 //   }
 //
 //   jsg::Ref<MyApiTypeIterator> entries(jsg::Lock& js) {
-//     return jsg::alloc<MyApiTypeIterator>(IteratorState { /* any necessary state init */ });
+//     return js.alloc<MyApiTypeIterator>(IteratorState { /* any necessary state init */ });
 //   }
 // };
 //
@@ -1129,7 +1129,7 @@ class AsyncIteratorBase: public Object {
 //   }
 //
 //   jsg::Ref<MyApiTypeIterator> entries(jsg::Lock& js) {
-//     return jsg::alloc<MyApiTypeIterator>(IteratorState { /* any necessary state init */ });
+//     return js.alloc<MyApiTypeIterator>(IteratorState { /* any necessary state init */ });
 //   }
 // };
 //

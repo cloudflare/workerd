@@ -1,14 +1,6 @@
 name: Build Python Runtime
 
-on:
-  workflow_dispatch:
-    inputs:
-      pyodide:
-        description: The Pyodide version
-      pyodideRevision:
-        description: The Pyodide revision date
-      backport:
-        description: The Pyodide release backport number
+on: workflow_dispatch
 
 jobs:
   build:
@@ -36,17 +28,14 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
           fi
-      - name: Bazel build
-        run: |
-          bazel build //src/pyodide:pyodide.capnp.bin@rule --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux
-          cp bazel-bin/src/pyodide/${{ inputs.pyodide }}/generated/pyodide.capnp.bin .
-      - name: Upload Pyodide capnproto bundle
+      - name: Build and upload Pyodide capnproto bundle
         env:
           R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
         run: |
+          bazel build @workerd//src/pyodide:python_bundles @workerd//src/pyodide:bundle_version_info --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
           # boto3 v1.36.0 fails with:
           # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
           pip install 'boto3<1.36.0'
-          python3 src/pyodide/upload_bundle.py pyodide.capnp.bin pyodide_${{ inputs.pyodide }}_${{ inputs.pyodideRevision }}_${{ inputs.backport }}.capnp.bin
+          python3 src/pyodide/upload_bundles.py

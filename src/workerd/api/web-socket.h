@@ -49,7 +49,7 @@ class MessageEvent: public Event {
   };
   static jsg::Ref<MessageEvent> constructor(
       jsg::Lock& js, kj::String type, Initializer initializer) {
-    return jsg::alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
+    return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
   }
 
   jsg::JsValue getData(jsg::Lock& js) {
@@ -119,9 +119,10 @@ class CloseEvent: public Event {
     JSG_STRUCT(code, reason, wasClean);
     JSG_STRUCT_TS_OVERRIDE(CloseEventInit);
   };
-  static jsg::Ref<CloseEvent> constructor(kj::String type, jsg::Optional<Initializer> initializer) {
+  static jsg::Ref<CloseEvent> constructor(
+      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
     Initializer init = kj::mv(initializer).orDefault({});
-    return jsg::alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
+    return js.alloc<CloseEvent>(kj::mv(type), init.code.orDefault(0),
         kj::mv(init.reason).orDefault(nullptr), init.wasClean.orDefault(false));
   }
 
@@ -179,7 +180,7 @@ class WebSocketPair: public jsg::Object {
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
       : sockets{kj::mv(first), kj::mv(second)} {}
 
-  static jsg::Ref<WebSocketPair> constructor();
+  static jsg::Ref<WebSocketPair> constructor(jsg::Lock& js);
 
   jsg::Ref<WebSocket> getFirst() {
     return sockets[0].addRef();
@@ -665,7 +666,7 @@ class WebSocket: public EventTarget {
 
   void setPeer(kj::Own<WeakRef<WebSocket>> peer);
 
-  friend jsg::Ref<WebSocketPair> WebSocketPair::constructor();
+  friend jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock&);
 
   void dispatchOpen(jsg::Lock& js);
 

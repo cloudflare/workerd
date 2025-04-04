@@ -43,7 +43,7 @@ jsg::BufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
 KJ_TEST("ReadableStream read all text (value readable)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
@@ -100,7 +100,7 @@ KJ_TEST("ReadableStream read all text (value readable)") {
 KJ_TEST("ReadableStream read all text, rs ref held (value readable)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
@@ -153,7 +153,7 @@ KJ_TEST("ReadableStream read all text, rs ref held (value readable)") {
 KJ_TEST("ReadableStream read all text (byte readable)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .type = kj::str("bytes"),
@@ -211,7 +211,7 @@ KJ_TEST("ReadableStream read all text (byte readable)") {
 KJ_TEST("ReadableStream read all bytes (value readable)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
@@ -268,7 +268,7 @@ KJ_TEST("ReadableStream read all bytes (value readable)") {
 KJ_TEST("ReadableStream read all bytes (byte readable)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .type = kj::str("bytes"),
@@ -327,7 +327,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, more reads)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
     uint counter = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     auto chunks = kj::arr<kj::String>(kj::str("H"), kj::str("e"), kj::str("l"), kj::str("l"),
         kj::str("o"), kj::str(","), kj::str(" "), kj::str("w"), kj::str("o"), kj::str("r"),
         kj::str("l"), kj::str("d"), kj::str("!"));
@@ -390,7 +390,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, more reads)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
     uint counter = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     auto chunks = kj::arr<kj::String>(kj::str("H"), kj::str("e"), kj::str("l"), kj::str("l"),
         kj::str("o"), kj::str(","), kj::str(" "), kj::str("w"), kj::str("o"), kj::str("r"),
         kj::str("l"), kj::str("d"), kj::str("!"));
@@ -454,7 +454,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
     uint counter = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     static constexpr uint BASE = 4097;
     auto chunks = kj::arr<kj::Array<kj::byte>>(kj::heapArray<kj::byte>(BASE),
         kj::heapArray<kj::byte>(BASE * 2), kj::heapArray<kj::byte>(BASE * 4));
@@ -529,7 +529,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, large data)") {
 KJ_TEST("ReadableStream read all bytes (value readable, wrong type)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
@@ -590,7 +590,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, wrong type)") {
 KJ_TEST("ReadableStream read all bytes (value readable, to many bytes)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
@@ -645,7 +645,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, to many bytes)") {
 KJ_TEST("ReadableStream read all bytes (byte readable, to many bytes)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .type = kj::str("bytes"),
@@ -701,7 +701,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, to many bytes)") {
 KJ_TEST("ReadableStream read all bytes (byte readable, failed read)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .type = kj::str("bytes"),
@@ -744,7 +744,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed read)") {
 KJ_TEST("ReadableStream read all bytes (value readable, failed read)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
@@ -786,7 +786,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, failed read)") {
 KJ_TEST("ReadableStream read all bytes (byte readable, failed start)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .type = kj::str("bytes"),
@@ -829,7 +829,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start)") {
 KJ_TEST("ReadableStream read all bytes (byte readable, failed start 2)") {
   preamble([](jsg::Lock& js) {
     uint checked = 0;
-    auto rs = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
     rs->getController().setup(js,
         UnderlyingSource{
           .type = kj::str("bytes"),

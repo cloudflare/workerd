@@ -35,8 +35,8 @@ class GPUAdapter: public jsg::Object {
   kj::Own<AsyncRunner> async_;
   jsg::Promise<jsg::Ref<GPUAdapterInfo>> requestAdapterInfo(
       jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints);
-  jsg::Ref<GPUSupportedFeatures> getFeatures();
-  jsg::Ref<GPUSupportedLimits> getLimits();
+  jsg::Ref<GPUSupportedFeatures> getFeatures(jsg::Lock& js);
+  jsg::Ref<GPUSupportedLimits> getLimits(jsg::Lock& js);
 };
 
 }  // namespace workerd::api::gpu

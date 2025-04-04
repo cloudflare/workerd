@@ -36,7 +36,7 @@ class CompressionStream: public TransformStream {
  public:
   using TransformStream::TransformStream;
 
-  static jsg::Ref<CompressionStream> constructor(kj::String format);
+  static jsg::Ref<CompressionStream> constructor(jsg::Lock& js, kj::String format);
 
   JSG_RESOURCE_TYPE(CompressionStream) {
     JSG_INHERIT(TransformStream);

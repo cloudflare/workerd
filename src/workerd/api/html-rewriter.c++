@@ -592,10 +592,11 @@ kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& regi
     // (when transform() was called). If someone wants, instead, to use the context
     // that was current when on(...) is called, the ElementHandler can use AsyncResource
     // (or eventually the standard AsyncContext once that lands).
-    jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
-    auto jsContent = jsg::alloc<T>(*content, *this);
+    jsg::Lock& js = lock;
+    jsg::AsyncContextFrame::Scope asyncContextScope(js, maybeAsyncContext);
+    auto jsContent = js.alloc<T>(*content, *this);
     auto scope = HTMLRewriter::TokenScope(jsContent);
-    auto value = registeredHandler.callback(lock, kj::mv(jsContent));
+    auto value = registeredHandler.callback(js, kj::mv(jsContent));
 
     if constexpr (kj::isSameType<T, EndTag>()) {
       // TODO(someday): We can't unconditionally pop the top of `registeredEndTagHandlers`,
@@ -824,12 +825,12 @@ kj::StringPtr Element::getNamespaceURI() {
   return lol_html_element_namespace_uri_get(&checkToken(impl).element);
 }
 
-jsg::Ref<Element::AttributesIterator> Element::getAttributes() {
+jsg::Ref<Element::AttributesIterator> Element::getAttributes(jsg::Lock& js) {
   auto& implRef = checkToken(impl);
 
   auto iter = LOL_HTML_OWN(attributes_iterator, lol_html_attributes_iterator_get(&implRef.element));
 
-  auto jsIter = jsg::alloc<Element::AttributesIterator>(kj::mv(iter));
+  auto jsIter = js.alloc<Element::AttributesIterator>(kj::mv(iter));
   implRef.attributesIterators.add(jsIter.addRef());
   return kj::mv(jsIter);
 }
@@ -1200,8 +1201,8 @@ void HTMLRewriter::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("impl", impl);
 }
 
-jsg::Ref<HTMLRewriter> HTMLRewriter::constructor() {
-  return jsg::alloc<HTMLRewriter>();
+jsg::Ref<HTMLRewriter> HTMLRewriter::constructor(jsg::Lock& js) {
+  return js.alloc<HTMLRewriter>();
 }
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::on(
@@ -1238,7 +1239,7 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
 
   auto pipe = newIdentityPipe();
   response = Response::constructor(
-      js, kj::Maybe(jsg::alloc<ReadableStream>(ioContext, kj::mv(pipe.in))), kj::mv(response));
+      js, kj::Maybe(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in))), kj::mv(response));
 
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");

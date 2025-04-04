@@ -193,12 +193,12 @@ void HibernationManagerImpl::setWebSocketAutoResponse(
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::
-    getWebSocketAutoResponse() {
+    getWebSocketAutoResponse(jsg::Lock& js) {
   KJ_IF_SOME(req, autoResponsePair->request) {
     // When getting the currently set auto-response pair, if we have a request we must have a response
     // set. If not, we'll throw.
     return api::WebSocketRequestResponsePair::constructor(
-        kj::str(req), kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response)));
+        js, kj::str(req), kj::str(KJ_REQUIRE_NONNULL(autoResponsePair->response)));
   }
   return kj::none;
 }

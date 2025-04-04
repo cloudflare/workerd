@@ -420,7 +420,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::BufferSource
   // It will have been copied on the JS side before being passed to this function.
   // We do not detach the key data, however, because we want to ensure that it
   // remains associated with the isolate for memory accounting purposes.
-  return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::mv(keyData)));
+  return js.alloc<CryptoKey>(kj::heap<SecretKey>(kj::mv(keyData)));
 }
 
 namespace {
@@ -471,7 +471,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
           "Invalid format for private key creation");
 
       if (auto maybePrivate = tryParsingPrivate(options, buffer)) {
-        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(maybePrivate.value())));
+        return js.alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(maybePrivate.value())));
       }
 
       JSG_FAIL_REQUIRE(Error, "Failed to parse private key");
@@ -480,7 +480,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
       JSG_REQUIRE(options.format == "jwk"_kj, TypeError, "Invalid format for JWK key creation");
 
       if (auto key = fromJwk(jwk, KeyType::PRIVATE)) {
-        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(key)));
+        return js.alloc<CryptoKey>(AsymmetricKey::NewPrivate(kj::mv(key)));
       }
 
       JSG_FAIL_REQUIRE(Error, "JWK private key import is not implemented for this key type");
@@ -524,13 +524,13 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
             config, ToNcryptoBuffer(buffer.asArrayPtr().asConst()));
 
         if (result.has_value) {
-          return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(result.value)));
+          return js.alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(result.value)));
         }
       }
 
       // Otherwise, let's try parsing as a private key...
       if (auto maybePrivate = tryParsingPrivate(options, buffer)) {
-        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(maybePrivate.value())));
+        return js.alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(maybePrivate.value())));
       }
 
       JSG_FAIL_REQUIRE(Error, "Failed to parse public key");
@@ -539,7 +539,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
       JSG_REQUIRE(options.format == "jwk"_kj, TypeError, "Invalid format for JWK key creation");
 
       if (auto key = fromJwk(jwk, KeyType::PUBLIC)) {
-        return jsg::alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(key)));
+        return js.alloc<CryptoKey>(AsymmetricKey::NewPublic(kj::mv(key)));
       }
 
       JSG_FAIL_REQUIRE(Error, "JWK public key import is not implemented for this key type");
@@ -551,7 +551,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
       // TODO(later): For now, this only works with crypto keys that are created using
       // AsymmetricKey above. Web crypto private keys won't work here.
       KJ_IF_SOME(impl, kj::dynamicDowncastIfAvailable<AsymmetricKey>(*key->impl.get())) {
-        return jsg::alloc<CryptoKey>(impl.cloneAsPublicKey());
+        return js.alloc<CryptoKey>(impl.cloneAsPublicKey());
       }
 
       JSG_FAIL_REQUIRE(Error, "Failed to derive public key from private key");
@@ -561,7 +561,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   KJ_UNREACHABLE;
 }
 
-CryptoKeyPair CryptoImpl::generateRsaKeyPair(RsaKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(
@@ -621,12 +621,12 @@ CryptoKeyPair CryptoImpl::generateRsaKeyPair(RsaKeyPairOptions options) {
   JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   };
 }
 
-CryptoKeyPair CryptoImpl::generateDsaKeyPair(DsaKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateDsaKeyPair(jsg::Lock& js, DsaKeyPairOptions options) {
   // TODO(later): BoringSSL does not implement DSA key generation using
   // EVP_PKEY_keygen. We would need to implement this using the DSA-specific
   // APIs which get a bit complicated when it comes to using a user-provided
@@ -657,14 +657,14 @@ CryptoKeyPair CryptoImpl::generateDsaKeyPair(DsaKeyPairOptions options) {
   // JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   // return CryptoKeyPair {
-  //   .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-  //   .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+  //   .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+  //   .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   // };
 
   JSG_FAIL_REQUIRE(Error, "Not yet implemented");
 }
 
-CryptoKeyPair CryptoImpl::generateEcKeyPair(EcKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateEcKeyPair(jsg::Lock& js, EcKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto nid = getCurveFromName(options.namedCurve);
@@ -698,12 +698,12 @@ CryptoKeyPair CryptoImpl::generateEcKeyPair(EcKeyPairOptions options) {
   JSG_REQUIRE(pvtKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(pubKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(pvtKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(pubKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(pvtKey)),
   };
 }
 
-CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateEdKeyPair(jsg::Lock& js, EdKeyPairOptions options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto nid = ([&] {
@@ -733,12 +733,12 @@ CryptoKeyPair CryptoImpl::generateEdKeyPair(EdKeyPairOptions options) {
   JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   };
 }
 
-CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions options) {
 
   // TODO(soon): Older versions of boringssl+fips do not support EVP with
   // DH key pairs that are required to make the following work. A compile
@@ -806,8 +806,8 @@ CryptoKeyPair CryptoImpl::generateDhKeyPair(DhKeyPairOptions options) {
   JSG_REQUIRE(privateKey, Error, "Failed to create private key");
 
   return CryptoKeyPair{
-    .publicKey = jsg::alloc<CryptoKey>(kj::mv(publicKey)),
-    .privateKey = jsg::alloc<CryptoKey>(kj::mv(privateKey)),
+    .publicKey = js.alloc<CryptoKey>(kj::mv(publicKey)),
+    .privateKey = js.alloc<CryptoKey>(kj::mv(privateKey)),
   };
 }
 

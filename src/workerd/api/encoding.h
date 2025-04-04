@@ -148,7 +148,7 @@ class TextDecoder final: public jsg::Object {
   };
 
   static jsg::Ref<TextDecoder> constructor(
-      jsg::Optional<kj::String> label, jsg::Optional<ConstructorOptions> options);
+      jsg::Lock& js, jsg::Optional<kj::String> label, jsg::Optional<ConstructorOptions> options);
 
   jsg::JsString decode(jsg::Lock& js,
       jsg::Optional<kj::Array<const kj::byte>> input,
@@ -174,6 +174,12 @@ class TextDecoder final: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(fatal, getFatal);
       JSG_READONLY_INSTANCE_PROPERTY(ignoreBOM, getIgnoreBom);
     }
+    // TODO(soon): Defining the constructor override here *should not* be
+    // necessary but for some reason the type generation is creating an
+    // invalid result without it.
+    JSG_TS_OVERRIDE({
+      constructor(label?: string, options?: TextDecoderConstructorOptions);
+    });
   }
 
   explicit TextDecoder(DecoderImpl decoder): decoder(kj::mv(decoder)) {}
@@ -208,7 +214,7 @@ class TextEncoder final: public jsg::Object {
     JSG_STRUCT(read, written);
   };
 
-  static jsg::Ref<TextEncoder> constructor();
+  static jsg::Ref<TextEncoder> constructor(jsg::Lock& js);
 
   jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
 

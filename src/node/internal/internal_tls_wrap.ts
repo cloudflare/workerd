@@ -190,9 +190,8 @@ export function TLSSocket(
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.requestCert');
   }
 
-  if (tlsOptions.rejectUnauthorized) {
-    // Used by servers to reject unauthorized connections.
-    // Does not apply to Cloudflare Workers.
+  if (tlsOptions.rejectUnauthorized === false) {
+    // TODO(soon): We don't support rejectUnauthorized=false
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.rejectUnauthorized');
   }
 
@@ -598,8 +597,8 @@ export function connect(...args: unknown[]): TLSSocket {
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.minDHSize');
   }
 
-  if (options.rejectUnauthorized) {
-    // Not supported.
+  if (options.rejectUnauthorized === false) {
+    // TODO(soon): We don't support rejectUnauthorized=false
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.rejectUnauthorized');
   }
 
@@ -629,6 +628,10 @@ export function connect(...args: unknown[]): TLSSocket {
     onread: options.onread,
     signal: options.signal,
     lookup: options.lookup,
+    rejectUnauthorized:
+      options.rejectUnauthorized !== undefined
+        ? Boolean(options.rejectUnauthorized)
+        : true,
   });
 
   tlssock[kConnectOptions] = options;

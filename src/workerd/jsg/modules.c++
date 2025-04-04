@@ -401,7 +401,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
 
 Ref<CommonJsModuleContext> ModuleRegistry::CommonJsModuleInfo::initModuleContext(
     jsg::Lock& js, kj::StringPtr name) {
-  return jsg::alloc<jsg::CommonJsModuleContext>(js, kj::Path::parse(name));
+  return js.alloc<jsg::CommonJsModuleContext>(js, kj::Path::parse(name));
 }
 
 ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(

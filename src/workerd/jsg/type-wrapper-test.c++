@@ -70,7 +70,7 @@ KJ_TEST("extensions") {
 struct TypeHandlerContext: public ContextGlobalObject {
   v8::Local<v8::Value> newNumberBox(
       jsg::Lock& js, double value, const TypeHandler<Ref<NumberBox>>& handler) {
-    return handler.wrap(js, alloc<NumberBox>(value));
+    return handler.wrap(js, js.alloc<NumberBox>(value));
   }
   double openNumberBox(
       jsg::Lock& js, v8::Local<v8::Value> handle, const TypeHandler<Ref<NumberBox>>& handler) {
@@ -213,8 +213,8 @@ struct UnimplementedContext: public ContextGlobalObject {
   class UnimplementedConstructorParam: public Object {
    public:
     UnimplementedConstructorParam(int i): i(i) {}
-    static Ref<UnimplementedConstructorParam> constructor(int i, Unimplemented) {
-      return jsg::alloc<UnimplementedConstructorParam>(i);
+    static Ref<UnimplementedConstructorParam> constructor(jsg::Lock& js, int i, Unimplemented) {
+      return js.alloc<UnimplementedConstructorParam>(i);
     }
     int getI() {
       return i;
@@ -248,8 +248,8 @@ struct UnimplementedContext: public ContextGlobalObject {
 
   class UnimplementedProperties: public Object {
    public:
-    static Ref<UnimplementedProperties> constructor() {
-      return jsg::alloc<UnimplementedProperties>();
+    static Ref<UnimplementedProperties> constructor(jsg::Lock& js) {
+      return js.alloc<UnimplementedProperties>();
     }
 
     int getNumber() {
