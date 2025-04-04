@@ -49,7 +49,7 @@ jobs:
           bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
       - name: Check snapshot diff
         run: |
-          diff -r bazel-bin/types/definitions/ types/generated-snapshot > types.diff
+          diff -r types/generated-snapshot bazel-bin/types/definitions/ > types.diff
       - name: 'Put diff on the environment'
         if: failure()
         id: types_diff
