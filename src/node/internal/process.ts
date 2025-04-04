@@ -191,10 +191,27 @@ export function exit(code: number) {
 
 export const platform = utilImpl.processPlatform;
 
+// The following features does not include deprecated or experimental flags mentioned in
+// https://nodejs.org/docs/latest/api/process.html
+export const features = Object.freeze({
+  // A boolean value that is true if the current Node.js build is caching builtin modules.
+  cached_builtins: true,
+  // A boolean value that is true if the current Node.js build is a debug build.
+  debug: false,
+  // A boolean value that is true if the current Node.js build includes the inspector.
+  inspector: false,
+  // A boolean value that is true if the current Node.js build supports loading ECMAScript modules using require().
+  // TODO(soon): Update this when we support ESM modules through require().
+  require_module: false,
+  // A boolean value that is true if the current Node.js build includes support for TLS.
+  tls: true,
+});
+
 export default {
   nextTick,
   env,
   exit,
   getBuiltinModule,
   platform,
+  features,
 };
