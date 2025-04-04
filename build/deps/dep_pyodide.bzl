@@ -1,15 +1,18 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 load("//:build/pyodide_bucket.bzl", "PYODIDE_ALL_WHEELS_ZIP_SHA256", "PYODIDE_GITHUB_RELEASE_URL")
-load("//:build/python_metadata.bzl", "PYTHON_LOCKFILES")
+load("//:build/python_metadata.bzl", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
 
 def dep_pyodide():
     # Use @workerd prefix on build_file so we can use this from edgeworker too
-    http_archive(
-        name = "pyodide",
-        build_file = "@workerd//:build/BUILD.pyodide",
-        sha256 = "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
-        urls = ["https://github.com/pyodide/pyodide/releases/download/0.26.0a2/pyodide-core-0.26.0a2.tar.bz2"],
-    )
+    for info in PYODIDE_VERSIONS:
+        version = info["version"]
+        sha256 = info["sha256"]
+        http_archive(
+            name = "pyodide-%s" % version,
+            build_file = "@workerd//:build/BUILD.pyodide",
+            sha256 = sha256,
+            urls = ["https://github.com/pyodide/pyodide/releases/download/%s/pyodide-core-%s.tar.bz2" % (version, version)],
+        )
 
     for package_date, package_lock_sha in PYTHON_LOCKFILES.items():
         http_file(
