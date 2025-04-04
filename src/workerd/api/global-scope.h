@@ -97,8 +97,6 @@ class Navigator: public jsg::Object {
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
 #endif
-
-    JSG_TS_OVERRIDE({ readonly hardwareConcurrency: number; });
   }
 };
 
@@ -530,7 +528,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // ---------------------------------------------------------------------------
   // JS API
 
-  jsg::JsString btoa(jsg::Lock& js, jsg::JsValue data);
+  jsg::JsString btoa(jsg::Lock& js, jsg::JsString data);
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
@@ -879,8 +877,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
 
     JSG_TS_OVERRIDE({
-      btoa(data: string): string;
-
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
       setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
