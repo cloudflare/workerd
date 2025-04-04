@@ -383,3 +383,9 @@ wd_test(
         "//conditions:default": [],
     }),
 )
+
+wd_test(
+    src = "tests/http-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/http-nodejs-test.js"],
+)

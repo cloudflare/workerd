@@ -778,3 +778,31 @@ export function aggregateTwoErrors(innerError: any, outerError: any) {
   }
   return innerError || outerError;
 }
+
+export class ERR_INVALID_HTTP_TOKEN extends NodeTypeError {
+  constructor(label: string, name: string | undefined) {
+    super(
+      'ERR_INVALID_HTTP_TOKEN',
+      `${label} must be a valid HTTP token ["${name}"]`
+    );
+  }
+}
+
+export class ERR_HTTP_INVALID_HEADER_VALUE extends NodeTypeError {
+  constructor(value: string | undefined, header: string | undefined) {
+    super(
+      'ERR_HTTP_INVALID_HEADER_VALUE',
+      `Invalid value "${value}" for header "${header}"`
+    );
+  }
+}
+
+export class ERR_INVALID_CHAR extends NodeTypeError {
+  constructor(name: string, field?: string) {
+    let msg = `Invalid character in ${name}`;
+    if (field !== undefined) {
+      msg += ` ["${field}"]`;
+    }
+    super('ERR_INVALID_CHAR', msg);
+  }
+}
