@@ -1,4 +1,4 @@
-declare module "cloudflare:workflows" {
+declare module 'cloudflare:workflows' {
   /**
    * NonRetryableError allows for a user to throw a fatal error
    * that makes a Workflow instance fail immediately without triggering a retry
@@ -49,15 +49,15 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
 
 type InstanceStatus = {
   status:
-    | "queued" // means that instance is waiting to be started (see concurrency limits)
-    | "running"
-    | "paused"
-    | "errored"
-    | "terminated" // user terminated the instance while it was running
-    | "complete"
-    | "waiting" // instance is hibernating and waiting for sleep or event to finish
-    | "waitingForPause" // instance is finishing the current work to pause
-    | "unknown";
+    | 'queued' // means that instance is waiting to be started (see concurrency limits)
+    | 'running'
+    | 'paused'
+    | 'errored'
+    | 'terminated' // user terminated the instance while it was running
+    | 'complete'
+    | 'waiting' // instance is hibernating and waiting for sleep or event to finish
+    | 'waitingForPause' // instance is finishing the current work to pause
+    | 'unknown';
   error?: string;
   output?: object;
 };
@@ -98,11 +98,11 @@ declare abstract class WorkflowInstance {
   /**
    * Send an event to this instance.
    */
-  public sendEvent<T = unknown>({
+  public sendEvent({
     type,
     payload,
   }: {
     type: string;
-    payload: T;
+    payload: unknown;
   }): Promise<void>;
 }
