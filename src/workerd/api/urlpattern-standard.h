@@ -127,10 +127,6 @@ class URLPattern final: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(hasRegExpGroups, getHasRegExpGroups);
     JSG_METHOD(test);
     JSG_METHOD(exec);
-
-    JSG_TS_OVERRIDE({
-                  get hasRegExpGroups(): boolean;
-                });
   }
 
  private:
