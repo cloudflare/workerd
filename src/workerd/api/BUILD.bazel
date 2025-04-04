@@ -586,6 +586,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/navigator-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/navigator-test.js"],
+)
+
+wd_test(
     src = "tests/reporterror-test.wd-test",
     args = ["--experimental"],
     data = ["tests/reporterror-test.js"],

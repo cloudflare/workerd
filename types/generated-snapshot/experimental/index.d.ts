@@ -476,6 +476,7 @@ declare abstract class Navigator {
       | URLSearchParams,
   ): boolean;
   readonly userAgent: string;
+  readonly hardwareConcurrency: number;
   readonly gpu?: GPU;
 }
 /**
