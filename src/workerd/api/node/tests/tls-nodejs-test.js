@@ -713,3 +713,29 @@ export const testTlsTranslatePeerCertificate = {
     });
   },
 };
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/b1402835a512f14fa9f8dd23d3e0cee8cfe888a2/test/parallel/test-tls-basic-validations.js
+export const testConvertALPNProtocols = {
+  async test() {
+    {
+      const buffer = Buffer.from('abcd');
+      const out = {};
+      tls.convertALPNProtocols(buffer, out);
+      out.ALPNProtocols.write('efgh');
+      ok(buffer.equals(Buffer.from('abcd')));
+      ok(out.ALPNProtocols.equals(Buffer.from('efgh')));
+    }
+
+    {
+      const protocols = [new String('a').repeat(500)];
+      const out = {};
+      throws(() => tls.convertALPNProtocols(protocols, out), {
+        code: 'ERR_OUT_OF_RANGE',
+        message:
+          'The byte length of the protocol at index 0 exceeds the ' +
+          'maximum length. It must be <= 255. Received 500',
+      });
+    }
+  },
+};
