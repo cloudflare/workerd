@@ -269,9 +269,16 @@ void EventTarget::addEventListener(jsg::Lock& js,
 
     auto& set = getOrCreate(type);
 
+    KJ_DEFER({
+      KJ_IF_SOME(listener, maybeListenerCallback) {
+        listener(js, type, getHandlerCount(type));
+      } else {
+      }
+    });
+
     auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
       auto func =
-          JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js)),
+          JSG_VISITABLE_LAMBDA((this, type = kj::str(type), handler = handler.identity.addRef(js)),
               (handler), (jsg::Lock& js, jsg::Ref<Event>) {
                 removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
               });
@@ -306,6 +313,13 @@ void EventTarget::removeEventListener(jsg::Lock& js,
       }
     }
   }
+
+  KJ_DEFER({
+    KJ_IF_SOME(listener, maybeListenerCallback) {
+      listener(js, type, getHandlerCount(type));
+    } else {
+    }
+  });
 
   js.withinHandleScope([&] {
     KJ_IF_SOME(handlerSet, typeMap.find(type)) {

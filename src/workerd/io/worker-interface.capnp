@@ -397,6 +397,8 @@ enum SerializationTag {
   # Keep this value in sync with the DOMException::SERIALIZATION_TAG in
   # /src/workerd/jsg/dom-exception (but we can't actually change this value
   # without breaking things).
+
+  messagePort @9;
 }
 
 enum StreamEncoding {
@@ -458,6 +460,10 @@ struct JsValue {
         }
       }
 
+      messagePort :group {
+        out @7 :JsMessagePort;
+      }
+
       # TODO(soon): WebSocket, Request, Response
     }
   }
@@ -478,6 +484,16 @@ struct JsValue {
     # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
     # `ByteStream`.
   }
+}
+
+interface JsMessagePort $Cxx.allowCancellation {
+  struct Params {
+    data @0 :JsValue;
+  }
+
+  struct Results {}
+
+  call @0 Params -> Results;
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {
