@@ -40,12 +40,6 @@
 
 #include <kj/vector.h>
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#else
-#define EW_WEBGPU_ISOLATE_TYPES
-#endif
-
 #define EW_TYPE_GROUP_FOR_EACH(F)                                                                  \
   F("dom-exception", jsg::DOMException)                                                            \
   F("global-scope", EW_GLOBAL_SCOPE_ISOLATE_TYPES)                                                 \
@@ -82,7 +76,6 @@
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                                           \
   F("node", EW_NODE_ISOLATE_TYPES)                                                                 \
   F("rtti", EW_RTTI_ISOLATE_TYPES)                                                                 \
-  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)                                                             \
   F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)                                                   \
   F("container", EW_CONTAINER_ISOLATE_TYPES)
 

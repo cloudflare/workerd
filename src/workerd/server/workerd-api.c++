@@ -53,11 +53,6 @@
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#else
-#define EW_WEBGPU_ISOLATE_TYPES_LIST
-#endif
 
 namespace workerd::server {
 
@@ -115,9 +110,6 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    EW_WEBGPU_ISOLATE_TYPES,
-#endif
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,

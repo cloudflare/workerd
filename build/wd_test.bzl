@@ -13,8 +13,7 @@ def wd_test(
     Args:
      src: A .capnp config file defining the test. (`name` will be derived from this if not
         specified.) The extension `.wd-test` is also permitted instead of `.capnp`, in order to
-        avoid confusing other build systems that may assume a `.capnp` file should be compiled. As
-        an extension, `.gpu-wd-test` is supported to enable special handling for GPU tests.
+        avoid confusing other build systems that may assume a `.capnp` file should be compiled.
      data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
      their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
@@ -27,7 +26,7 @@ def wd_test(
 
     # Default name based on src.
     if name == None:
-        name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".gpu-wd-test").removesuffix(".ts-wd-test")
+        name = src.removesuffix(".capnp").removesuffix(".wd-test").removesuffix(".ts-wd-test")
 
     if len(ts_srcs) != 0:
         # Generated declarations are currently not being used, but required based on https://github.com/aspect-build/rules_ts/issues/719

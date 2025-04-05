@@ -103,16 +103,16 @@ export function isUnsatisfiable(typeNode: ts.TypeNode): boolean {
 }
 
 // Strings to replace in fully-qualified structure names with nothing
-// `workerd` references APIs by fully qualified names such as `workerd::api::gpu::GPUFragmentState`
+// `workerd` references APIs by fully qualified names such as `workerd::api::Whatever`
 // This wouldn't be all that user-friendly as a type, and so this regex captures all the
 // parts of an API name that should be removed when turning an API into a TS type
-// For instance, this turns `workerd::api::gpu::GPUFragmentState` into `GPUFragmentState`
+// For instance, this turns `workerd::api::Whatever` into `Whatever`
 // If any new namespaced APIs are added, they should be added to this regex.
 // If they're _not_ added to this regex, a sane-ish fallback will be used.
 // For instance, a new hypothetical API called `workerd::api::magic::MakeASpell` would be
 // `magicMakeASpell`.
 const replaceEmpty =
-  /^workerd::api::public_beta::|^workerd::api::node::|^workerd::api::gpu::|^workerd::api::|^workerd::jsg::|::|[ >]/g;
+  /^workerd::api::public_beta::|^workerd::api::node::|^workerd::api::|^workerd::jsg::|::|[ >]/g;
 // Strings to replace in fully-qualified structure names with an underscore
 const replaceUnderscore = /[<,]/g;
 export function getTypeName(

@@ -901,26 +901,6 @@ double Performance::now() {
   return dateNow();
 }
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(
-    jsg::Lock& js, CompatibilityFlags::Reader flags) {
-  // is this a durable object?
-  KJ_IF_SOME(actor, IoContext::current().getActor()) {
-    if (actor.getPersistent() == kj::none) {
-      return kj::none;
-    }
-  } else {
-    return kj::none;
-  };
-
-  if (!flags.getWebgpu()) {
-    return kj::none;
-  }
-
-  return js.alloc<api::gpu::GPU>();
-}
-#endif
-
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   if (IoContext::hasCurrent()) {
     auto v8Context = js.v8Context();

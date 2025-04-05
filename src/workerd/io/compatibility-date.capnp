@@ -371,9 +371,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables the `workerd:rtti` module for querying runtime-type-information from JavaScript.
 
-  webgpu @35 :Bool
+  obsolete35 @35 :Bool
       $compatEnableFlag("webgpu")
       $experimental;
+  # The experimental webgpu API was removed.
 
   cryptoPreservePublicExponent @36 :Bool
       $compatEnableFlag("crypto_preserve_public_exponent")

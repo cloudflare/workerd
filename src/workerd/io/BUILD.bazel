@@ -4,17 +4,6 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
-# Flag to enable WebGPU support via the Dawn library
-bool_flag(
-    name = "enable_experimental_webgpu",
-    build_setting_default = False,
-)
-
-config_setting(
-    name = "set_enable_experimental_webgpu",
-    flag_values = {"enable_experimental_webgpu": "True"},
-)
-
 # TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
 # not encumbered with many dependencies.
 wd_cc_library(
@@ -63,10 +52,7 @@ wd_cc_library(
         "io-util.c++",
         "tracer.c++",
         "worker.c++",
-    ] + ["//src/workerd/api:srcs"] + select({
-        ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:srcs"],
-        "//conditions:default": [],
-    }),
+    ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "compatibility-date.h",
         "features.h",
@@ -78,10 +64,7 @@ wd_cc_library(
         "promise-wrapper.h",
         "tracer.h",
         "worker.h",
-    ] + ["//src/workerd/api:hdrs"] + select({
-        ":set_enable_experimental_webgpu": ["//src/workerd/api/gpu:hdrs"],
-        "//conditions:default": [],
-    }),
+    ] + ["//src/workerd/api:hdrs"],
     # global CPU-specific options are inconvenient to specify with bazel – just set the options we
     # need for CRC32C in this target for now.
     copts = select({
@@ -91,10 +74,6 @@ wd_cc_library(
         "@platforms//cpu:x86_64": [
             "-msse4.2",
         ],
-    }),
-    defines = select({
-        ":set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
-        "//conditions:default": [],
     }),
     implementation_deps = [
         "//src/workerd/util:perfetto",
@@ -140,10 +119,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@ncrypto",
         "@ssl",
-    ] + select({
-        ":set_enable_experimental_webgpu": ["@dawn"],
-        "//conditions:default": [],
-    }),
+    ],
 )
 
 # TODO(cleanup): Split this up further.
