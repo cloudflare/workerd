@@ -7,7 +7,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
-#include <workerd/io/supported-compatibility-date.capnp.h>
+#include <workerd/io/supported-compatibility-date.embed.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
 #include <workerd/server/json-logger.h>
