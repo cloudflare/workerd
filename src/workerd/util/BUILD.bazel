@@ -136,12 +136,12 @@ wd_cc_library(
         "sqlite-metadata.h",
     ],
     implementation_deps = [
+        "//src/workerd/jsg:exception",
         "@sqlite3",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":sentry",
-        "//src/workerd/jsg:exception",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )

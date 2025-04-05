@@ -11,7 +11,7 @@
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/url.h>
 #include <workerd/api/node/util.h>
-#include <workerd/io/compatibility-date.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>

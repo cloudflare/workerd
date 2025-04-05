@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "module.h"
 
-#include <workerd/io/features.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api::node {

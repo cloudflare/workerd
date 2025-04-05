@@ -241,14 +241,6 @@ build:macos --macos_minimum_os=13.5
 # information on the flag.
 build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 
-# Bazel doesn't allow setting flags only for a specific build mode like fastbuild, but somehow has
-# a flag that does this for ObjC to set "-O0 -DDEBUG=1". Worse yet, options set by this flag cannot
-# be overwritten on the command line, which confusingly makes enabling optimization there not have
-# an effect. On macOS we build some ObjC as part of Dawn, set this flag to an empty string so we
-# can set the right configuration flags.
-# TODO(soon): File a bazel issue for the flag so we can drop this.
-build:macos --experimental_objc_fastbuild_options=""
-
 # Cross-Compilation
 # Only cross-compiling on macOS from Apple Silicon to x86_64 is supported – using apple_support
 # makes this much easier than on other platforms. We could define a configuration for cross-
