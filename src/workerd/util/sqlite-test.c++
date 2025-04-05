@@ -2,9 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/mutex.h"
 #include "sqlite.h"
+#include "workerd/io/io-gate.h"
 
 #include <fcntl.h>
+#include <sqlite3.h>
 
 #include <kj/refcount.h>
 #include <kj/test.h>
@@ -14,6 +17,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <thread>
 
 #if _WIN32
 #include <io.h>
@@ -1476,10 +1480,22 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   }
 };
 
-KJ_TEST("I/O exceptions pass through SQLite") {
+KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Create a tracker to verify our callback is called
+  bool criticalErrorCallbackCalled = false;
+  kj::Maybe<kj::Exception> capturedException;
+  // Register a critical error callback
+  db.onCriticalError([&](kj::Exception exception) {
+    criticalErrorCallbackCalled = true;
+    capturedException = exception;
+  });
+
+  // Use a small cache size to force flushing to disk on even a small write
+  db.run(SqliteDatabase::TRUSTED, "PRAGMA cache_size = 1");  // 1 page cache
 
   db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1489,13 +1505,103 @@ KJ_TEST("I/O exceptions pass through SQLite") {
     INSERT INTO things(value) VALUES (123);
   )"));
 
+  db.run("BEGIN TRANSACTION");
+
   // Now arrange for an error on write().
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
-  // It should pass through.
-  KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+  KJ_EXPECT_THROW_MESSAGE("disk I/O error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
   )")));
+
+  KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_ASSERT(capturedException != kj::none);
+  KJ_IF_SOME(exception, capturedException) {
+    KJ_EXPECT(exception.getDescription().startsWith("test-vfs-error"));
+  }
+}
+
+void testCriticalError(const char* expectedErrorMessage,
+    kj::Function<void(SqliteDatabase&, SqliteDatabase::Vfs& vfs)> triggerErrorFn) {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Create a tracker to verify our callback is called
+  bool criticalErrorCallbackCalled = false;
+  kj::Maybe<kj::Exception> capturedException = kj::none;
+
+  // Register a critical error callback
+  db.onCriticalError([&](kj::Maybe<kj::Exception> exception) {
+    criticalErrorCallbackCalled = true;
+    capturedException = exception;
+  });
+
+  KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
+
+  KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_ASSERT(capturedException != kj::none);
+  KJ_IF_SOME(exception, capturedException) {
+    KJ_EXPECT(exception.getDescription().startsWith(expectedErrorMessage));
+  }
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
+  testCriticalError("database is locked", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    // Create a second database connection to hold an exclusive lock
+    SqliteDatabase lockDb(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+
+    db.run("CREATE TABLE IF NOT EXISTS lock_test (id INTEGER PRIMARY KEY)");
+    db.run("INSERT INTO lock_test VALUES (1) ON CONFLICT DO NOTHING");
+
+    // Start an exclusive transaction in the locking database
+    lockDb.run("BEGIN EXCLUSIVE TRANSACTION");
+    lockDb.run("UPDATE lock_test SET id = 2 WHERE id = 1");
+
+    db.run("BEGIN TRANSACTION");
+
+    // Attempt to start another exclusive transaction in the main database
+    // This should trigger SQLITE_BUSY
+    // TODO: This should ideally trigger an auto-rollback, but it doesn't, need to figure out why
+    // It does trigger the auto-rollback if not executed inside a transaction
+    db.run("BEGIN EXCLUSIVE TRANSACTION");
+  });
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
+  testCriticalError("database or disk is full", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    // Set up a database with limited size
+    db.run("PRAGMA max_page_count = 10");
+    db.run("CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)");
+
+    db.run("BEGIN TRANSACTION");
+
+    // Create a large blob to quickly fill the database
+    auto largeData = kj::heapArray<byte>(100000, 'X');  // 100KB
+
+    // This should eventually trigger SQLITE_FULL
+    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_full VALUES (?, ?)", 1, largeData.asPtr());
+  });
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
+  testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
+
+    db.run("BEGIN TRANSACTION");
+
+    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
+    db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
+
+    // Create data that will exceed the memory limit
+    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
+
+    // This operation should trigger SQLITE_NOMEM when SQLite tries to allocate
+    // memory for the large parameter
+    // TODO: This should ideally trigger an auto-rollback, but it doesn't, need to figure out why
+    // It does trigger the auto-rollback if not executed inside a transaction
+    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_nomem VALUES (?, ?)", 1, largeData.asPtr());
+  });
 }
 
 }  // namespace
