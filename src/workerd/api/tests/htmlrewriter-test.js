@@ -968,12 +968,7 @@ export const svgNamespace = {
   },
 };
 
-// This test is commented out because it will cause a stack overflow in workerd if enabled.
-// It is included for reference.
-
-/*
-export const stackOverflow1 = {
-  // One big handler
+export const handlerPerformingManySmallWrites = {
   async test() {
     const promiseDepth = 128 * 100;
     const numReads = 2;
@@ -995,9 +990,9 @@ export const stackOverflow1 = {
       await reader.read();
     }
   },
-};*/
+};
 
-export const stackOverflow2 = {
+export const hugeNumberOfHandlersForAnElement = {
   // Many small handlers
   async test() {
     const promiseDepth = 128 * 100;
