@@ -52,6 +52,7 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/python_entrypoint_js.embed.h>
 
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
@@ -752,8 +753,9 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       modules->addBuiltinBundle(bundle, kj::none);
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
-        Worker::Script::Module module{
-          .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
+        Worker::Script::Module module{.name = source.mainModule,
+          .content =
+              Worker::Script::EsModule{EMBED_pyodide_python_entrypoint_js.asChars().begin()}};
 
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
         auto path = kj::Path::parse(source.mainModule);
@@ -1184,7 +1186,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
               "The python_workers compatibility flag is required to use Python.");
           firstEsm = false;
           hasPythonModules = true;
-          kj::StringPtr entry = PYTHON_ENTRYPOINT;
+          kj::Array<const char> entry =
+              kj::Array<const char>(EMBED_pyodide_python_entrypoint_js.asChars().begin(),
+                  EMBED_pyodide_python_entrypoint_js_size, kj::NullArrayDisposer::instance);
           bundleBuilder.addEsmModule(def.name, entry);
           break;
         }
