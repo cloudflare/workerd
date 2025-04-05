@@ -18,6 +18,7 @@ namespace workerd::api {
 // isolate pointer and use that to get the external memory adjustment.
 class CompressionAllocator final {
  public:
+  CompressionAllocator(jsg::ExternalMemoryTarget&& externalMemoryTarget);
   void configure(z_stream* stream);
 
   static void* AllocForZlib(void* data, uInt items, uInt size);
@@ -29,6 +30,8 @@ class CompressionAllocator final {
     kj::Array<kj::byte> data;
     kj::Maybe<jsg::ExternalMemoryAdjustment> memoryAdjustment = kj::none;
   };
+
+  jsg::ExternalMemoryTarget externalMemoryTarget;
   kj::HashMap<void*, Allocation> allocations;
 };
 
