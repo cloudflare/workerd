@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import type tls from 'node:tls';
+import type { X509Certificate } from 'node-internal:crypto_x509';
 import { ERR_OPTION_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { validateInteger } from 'node-internal:validators';
 
@@ -91,15 +92,13 @@ export function createSecureContext(
 // javascript object representations before passing them back to the user.  Can
 // be used on any cert object, but changing the name would be semver-major.
 export function translatePeerCertificate(
-  c?: tls.DetailedPeerCertificate
-): null | tls.DetailedPeerCertificate {
+  c?: tls.DetailedPeerCertificate | X509Certificate
+): null | tls.DetailedPeerCertificate | X509Certificate {
   if (!c) return null;
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (c.issuerCertificate != null && c.issuerCertificate !== c) {
-    c.issuerCertificate = translatePeerCertificate(
-      c.issuerCertificate
-    ) as tls.DetailedPeerCertificate;
+    // @ts-expect-error TS2540 Read-only property.
+    c.issuerCertificate = translatePeerCertificate(c.issuerCertificate);
   }
   if (c.infoAccess != null) {
     // Type is ignored due to @types/node inconsistency
@@ -108,10 +107,11 @@ export function translatePeerCertificate(
     c.infoAccess = { __proto__: null };
 
     // XXX: More key validation?
-    info.replace(
-      /([^\n:]*):([^\n]*)(?:\n|$)/g,
-      // @ts-expect-error TS2349 @types/node inconsistency
-      (_all: string, key: string, val: string): void => {
+    const regex = /([^\n:]*):([^\n]*)(?:\n|$)/g;
+    regex[Symbol.replace](
+      info,
+      // @ts-expect-error TS2769 Fix this on Node.js core as well.
+      (_: unknown, key: string, val: string): void => {
         if (val.charCodeAt(0) === 0x22) {
           // The translatePeerCertificate function is only
           // used on internally created legacy certificate
@@ -120,9 +120,12 @@ export function translatePeerCertificate(
           // so this should never throw.
           val = JSON.parse(val) as string;
         }
-        if (c.infoAccess != null) {
-          c.infoAccess[key] ??= [];
-          c.infoAccess[key].push(val);
+        if (c.infoAccess != null && typeof c.infoAccess !== 'string') {
+          if (key in c.infoAccess) {
+            c.infoAccess[key]?.push(val);
+          } else {
+            c.infoAccess[key] = [val];
+          }
         }
       }
     );
