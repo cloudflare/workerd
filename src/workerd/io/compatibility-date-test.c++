@@ -4,6 +4,8 @@
 
 #include "compatibility-date.h"
 
+#include <workerd/io/supported-compatibility-date.embed.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
 #include <kj/debug.h>

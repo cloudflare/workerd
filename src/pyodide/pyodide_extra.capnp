@@ -2,7 +2,6 @@
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd");
 
-const pythonEntrypoint :Text = embed "python-entrypoint.js";
 struct PackageLock {
   packageDate @0 :Text;
   lock @1 :Text;

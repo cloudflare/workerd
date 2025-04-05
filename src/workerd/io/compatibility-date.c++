@@ -6,6 +6,8 @@
 
 #include "time.h"
 
+#include <workerd/io/supported-compatibility-date.embed.h>
+
 #include <capnp/dynamic.h>
 #include <capnp/schema.h>
 #include <kj/debug.h>
