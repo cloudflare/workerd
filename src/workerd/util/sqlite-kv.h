@@ -6,8 +6,6 @@
 
 #include "sqlite.h"
 
-#include <workerd/jsg/exception.h>
-
 namespace workerd {
 
 // Small class which is used to customize certain aspects of the underlying sql operations

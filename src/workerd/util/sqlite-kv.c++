@@ -4,6 +4,8 @@
 
 #include "sqlite-kv.h"
 
+#include <workerd/jsg/exception.h>
+
 #include <sqlite3.h>
 
 namespace workerd {

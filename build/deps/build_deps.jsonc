@@ -23,7 +23,9 @@
       "file_regex": "^rules_python-.*\\.tar\\.gz$"
     },
     {
-      // Needed for objc_library starting with bazel 7, used to build dawn on macOS
+      // Previously used to allow building dawn on macOS – while the build should succeed with the
+      // default Linux toolchain configuration from rules_cc apple_support is still more tailored to
+      // macOS.
       "name": "build_bazel_apple_support",
       "type": "github_release",
       "owner": "bazelbuild",
