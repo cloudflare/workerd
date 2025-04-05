@@ -15,7 +15,7 @@ const customTransform = class MyEntrypoint extends PipelineTransformationEntrypo
   async run(records, _) {
     for (const record of records) {
       record.dispatcher = 'was here!';
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 1));
       record.wait = 'happened!';
     }
 
@@ -23,11 +23,14 @@ const customTransform = class MyEntrypoint extends PipelineTransformationEntrypo
   }
 };
 
-const lines = [
-  `${JSON.stringify({ name: 'jimmy', age: '42' })}\n`,
-  `${JSON.stringify({ name: 'jonny', age: '9' })}\n`,
-  `${JSON.stringify({ name: 'joey', age: '108' })}\n`,
-];
+const lines = [];
+const jimmy = `${JSON.stringify({ name: 'jimmy', age: '42', bio: 'hello\nworld\n\n' })}\n`;
+const jonny = `${JSON.stringify({ name: 'jonny', age: '9' })}\n`;
+const joey = `${JSON.stringify({ name: 'joey', age: '108' })}\n\n`;
+
+for (let i = 0; i < 1000; i++) {
+  lines.push(jimmy, jonny, joey);
+}
 
 function newBatch() {
   return {
@@ -92,16 +95,19 @@ export const tests = {
           data += value;
         }
       }
+      reader.releaseLock();
 
       assert.notEqual(data.length, 0);
 
       const objects = [];
       const resultLines = data.split('\n');
-      resultLines.pop();
       for (const line of resultLines) {
-        objects.push(JSON.parse(line));
+        if (line.trim().length > 0) {
+          // Guard against empty lines
+          objects.push(JSON.parse(line));
+        }
       }
-      assert.equal(objects.length, 3);
+      assert.equal(objects.length, 3000);
 
       let index = 0;
       for (const obj of objects) {
@@ -110,7 +116,7 @@ export const tests = {
         assert.equal(obj.wait, 'happened!');
         delete obj.wait;
 
-        assert.equal(`${JSON.stringify(obj)}\n`, lines[index]);
+        assert.equal(`${JSON.stringify(obj)}`, lines[index].trim());
         index++;
       }
     }
