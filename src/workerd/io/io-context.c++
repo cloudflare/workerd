@@ -431,6 +431,35 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   waitUntilTasks.add(kj::mv(promise));
 }
 
+kj::Promise<void> IoContext::drainPendingEvents() {
+  // Shamelessly copied from TaskSet::onEmpty
+  KJ_IF_SOME(fulfiller, finishedPendingEventsFulfiller) {
+    if (fulfiller->isWaiting()) {
+      KJ_FAIL_REQUIRE("onEmpty() can only be called once at a time");
+    }
+  }
+
+  if (pendingEvent == kj::none) {
+    return kj::READY_NOW;
+  } else {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    finishedPendingEventsFulfiller = kj::mv(paf.fulfiller);
+    return kj::mv(paf.promise);
+  }
+}
+
+kj::Promise<void> IoContext::drainEventsAndTasks() {
+  if (pendingEvent != kj::none) {
+    return drainPendingEvents().then([this]() { return drainEventsAndTasks(); });
+  }
+
+  if (!waitUntilTasks.isEmpty()) {
+    return waitUntilTasks.onEmpty().then([this]() { return drainEventsAndTasks(); });
+  }
+
+  return kj::READY_NOW;
+}
+
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 kj::Promise<void> IoContext::IncomingRequest::drain() {
   waitedForWaitUntil = true;
@@ -456,8 +485,17 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
     timeoutPromise = context->limitEnforcer->limitDrain();
   }
-  return context->waitUntilTasks.onEmpty()
-      .exclusiveJoin(kj::mv(timeoutPromise))
+
+  kj::Promise<void> drainTask = nullptr;
+  if (context->actor != kj::none) {
+    // Actors use pending events to track when it's gone idle. Once no more events or tasks are
+    // scheduled, it's considered drained.
+    drainTask = context->drainEventsAndTasks();
+  } else {
+    drainTask = context->waitUntilTasks.onEmpty();
+  }
+
+  return drainTask.exclusiveJoin(kj::mv(timeoutPromise))
       .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&&) {}));
 }
 
@@ -513,36 +551,43 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
 
   context.pendingEvent = kj::none;
 
-  // We can't execute finalizers just yet. We need to run the event loop to see if any queued
+  // We can't say we're done just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
-  context.runFinalizersTask = Worker::AsyncLock::whenThreadIdle()
-                                  .then([&context = context]() noexcept {
-    // We have nothing left to do and no PendingEvent has been registered. Run finalizers now.
+  context.finalizePendingEventsTask =
+      Worker::AsyncLock::whenThreadIdle()
+          .then([&context = context]() noexcept -> kj::Promise<void> {
+    // We have nothing left to do and no PendingEvent has been registered.
+    KJ_IF_SOME(f, kj::mv(context.finishedPendingEventsFulfiller)) {
+      f->fulfill();
+    }
+
+    if (context.actor != kj::none) {
+      // Actors don't get finalized.
+      return kj::READY_NOW;
+    }
+
     return context.worker->takeAsyncLock(context.getMetrics())
         .then([&context](Worker::AsyncLock asyncLock) { context.runFinalizers(asyncLock); });
   }).eagerlyEvaluate(nullptr);
 }
 
 kj::Own<void> IoContext::registerPendingEvent() {
-  if (actor != kj::none) {
-    // Actors don't use the pending event system, because different requests to the same Actor are
-    // explicitly allowed to resolve each other's promises.
-    return {};
-  }
-
   KJ_IF_SOME(pe, pendingEvent) {
     return kj::addRef(pe);
-  } else {
-    KJ_REQUIRE(!isFinalized(), "request has already been finalized");
-
-    // Cancel any already-scheduled finalization.
-    runFinalizersTask = kj::none;
-
-    auto result = kj::refcounted<PendingEvent>(*this);
-    pendingEvent = *result;
-    return result;
   }
+
+  // Cancel any already-scheduled finalization.
+  finalizePendingEventsTask = kj::none;
+
+  if (actor == kj::none) {
+    // Stateless requests need to make sure they haven't been finalized already.
+    KJ_REQUIRE(!isFinalized(), "request has already been finalized");
+  }
+
+  auto result = kj::refcounted<PendingEvent>(*this);
+  pendingEvent = *result;
+  return result;
 }
 
 IoContext::TimeoutManagerImpl::TimeoutState::TimeoutState(

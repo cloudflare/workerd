@@ -4319,6 +4319,9 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       ++failCount;
     }
     KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name));
+
+    // Wait until everything on this thread is wrapped up.
+    co_await kj::yieldUntilWouldSleep();
   };
 
   for (auto& service: services) {

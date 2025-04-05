@@ -341,9 +341,11 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(
     return false;
   };
   KJ_IF_SOME(p, tryGetPeer()) {
-    // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
-    // messages from the client to this worker) counts as something the request is waiting for.
-    upstream = upstream.attach(context.registerPendingEvent());
+    if (!isHibernatable(p)) {
+      // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
+      // messages from the client to this worker) counts as something the request is waiting for.
+      upstream = upstream.attach(context.registerPendingEvent());
+    }
 
     // We can observe websocket traffic in both directions by attaching an observer to the peer
     // websocket which terminates in the worker.

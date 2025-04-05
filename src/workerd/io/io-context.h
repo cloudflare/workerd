@@ -865,7 +865,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   class PendingEvent;
 
   kj::Maybe<PendingEvent&> pendingEvent;
-  kj::Maybe<kj::Promise<void>> runFinalizersTask;
+  kj::Maybe<kj::Promise<void>> finalizePendingEventsTask;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> finishedPendingEventsFulfiller;
+
+  // Returns a promise that fulfills the next time all pending events are finished.
+  // Only one such promise can exist at a time.
+  kj::Promise<void> drainPendingEvents();
+
+  // Drain both events and waitUntilTasks until both run out.
+  kj::Promise<void> drainEventsAndTasks();
 
   WarningAggregator::Map warningAggregatorMap;
 
