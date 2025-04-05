@@ -36,14 +36,21 @@ import { inspect } from 'node:util';
 import net from 'node:net';
 import { translatePeerCertificate } from '_tls_common';
 
+export const checkPortsSetCorrectly = {
+  test(ctrl, env, ctx) {
+    ok(env.ECHO_SERVER_PORT);
+    ok(env.HELLO_SERVER_PORT);
+  },
+};
+
 // Tests are taken from
 // https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/parallel/test-tls-connect-abort-controller.js
 export const tlsConnectAbortController = {
-  async test() {
+  async test(ctrl, env, ctx) {
     // Our tests differ from Node.js
     // We don't check for abortSignal listener count because it's not supported.
     const connectOptions = (signal) => ({
-      port: 8888,
+      port: env.ECHO_SERVER_PORT,
       host: 'localhost',
       signal,
     });
@@ -118,7 +125,7 @@ export const tlsConnectAbortController = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/parallel/test-tls-connect-allow-half-open-option.js
 export const connectAllowHalfOpenOption = {
-  async test() {
+  async test(ctrl, env, ctx) {
     {
       const socket = tls.connect({ port: 42, lookup() {} });
       strictEqual(socket.allowHalfOpen, false);
@@ -137,7 +144,7 @@ export const connectAllowHalfOpenOption = {
       const { promise, resolve } = Promise.withResolvers();
       const socket = tls.connect(
         {
-          port: 8888,
+          port: env.ECHO_SERVER_PORT,
           allowHalfOpen: true,
         },
         () => {
@@ -167,10 +174,10 @@ export const connectAllowHalfOpenOption = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-simple.js
 export const tlsConnectSimple = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const promise1 = Promise.withResolvers();
     const promise2 = Promise.withResolvers();
-    const options = { port: 8888 };
+    const options = { port: env.ECHO_SERVER_PORT };
     const client1 = tls.connect(options, function () {
       client1.end();
       promise1.resolve();
@@ -187,9 +194,9 @@ export const tlsConnectSimple = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-timeout-option.js
 export const tlsConnectTimeoutOption = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const socket = tls.connect({
-      port: 8888,
+      port: env.ECHO_SERVER_PORT,
       lookup: () => {},
       timeout: 1000,
     });
@@ -201,11 +208,11 @@ export const tlsConnectTimeoutOption = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-no-host.js
 export const tlsConnectNoHost = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const { promise, resolve } = Promise.withResolvers();
     const socket = tls.connect(
       {
-        port: 8888,
+        port: env.ECHO_SERVER_PORT,
         // No host set here. 'localhost' is the default,
         // but tls.checkServerIdentity() breaks before the fix with:
         // Error: Hostname/IP doesn't match certificate's altnames:
@@ -223,7 +230,7 @@ export const tlsConnectNoHost = {
 // Tests are taken from
 // https://github.com/nodejs/node/blob/755e4603fd1679de72d250514ea5096b272ae8d6/test/parallel/test-tls-connect-given-socket.js
 export const tlsConnectGivenSocket = {
-  async test() {
+  async test(ctrl, env, ctx) {
     const promises = [];
     let waiting = 2;
     function establish(socket, shouldNotCallCallback = false) {
@@ -259,7 +266,7 @@ export const tlsConnectGivenSocket = {
       return client;
     }
 
-    const port = 8887;
+    const port = env.HELLO_SERVER_PORT;
     // Immediate death socket
     const immediateDeath = net.connect(port);
     establish(immediateDeath, true).destroy();

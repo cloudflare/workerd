@@ -318,11 +318,11 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/net-nodejs-test.js"],
     sidecar = "net-nodejs-tcp-server",
-    target_compatible_with = select({
-        # TODO(soon): Investigate why this test timeout on Windows.
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
+    sidecar_port_bindings = [
+        "SERVER_PORT",
+        "ECHO_SERVER_PORT",
+        "TIMEOUT_SERVER_PORT",
+    ],
 )
 
 wd_test(
@@ -377,9 +377,14 @@ wd_test(
         "tests/tls-nodejs-test.js",
     ],
     sidecar = "tls-nodejs-tcp-server",
-    target_compatible_with = select({
-        # TODO(soon): Investigate why this test timeout on Windows.
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
+    sidecar_port_bindings = [
+        "ECHO_SERVER_PORT",
+        "HELLO_SERVER_PORT",
+    ],
+)
+
+js_binary(
+    name = "sidecar-supervisor",
+    entry_point = "tests/sidecar-supervisor.mjs",
+    visibility = ["//visibility:public"],
 )

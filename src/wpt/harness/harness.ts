@@ -77,6 +77,8 @@ export type TestRunnerConfig = {
 
 type Env = {
   unsafe: { eval: (code: string) => void };
+  HTTP_PORT: string | null;
+  HTTPS_PORT: string | null;
   [key: string]: unknown;
 };
 
@@ -975,7 +977,10 @@ globalThis.get_host_info = (): HostInfo => {
 
   const httpsUrl = new URL(httpUrl);
   httpsUrl.protocol = 'https';
-  httpsUrl.port = '8443';
+
+  // If the environment variable HTTPS_PORT is set, the wpt server is running as a sidecar.
+  // Update the URL's port so we can connect to it
+  httpsUrl.port = globalThis.state.env.HTTPS_PORT ?? '';
 
   return {
     REMOTE_HOST: httpUrl.hostname,
@@ -1227,8 +1232,12 @@ export function createRunner(
 
         const testUrl = new URL(
           path.join(moduleBase, file),
-          'http://localhost:8000'
+          'http://localhost'
         );
+
+        // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
+        // Update the URL's port so we can connect to it
+        testUrl.port = env.HTTP_PORT ?? '';
 
         globalThis.state = new RunnerState(testUrl, file, env, options);
         const meta = parseWptMetadata(String(env[file]));

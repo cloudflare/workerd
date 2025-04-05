@@ -7,13 +7,17 @@
 // We execute this command using Node.js, which makes net.createServer available.
 const net = require('node:net');
 
+function reportPort(server) {
+  console.info(`Listening on port ${server.address().port}`);
+}
+
 const server = net.createServer((s) => {
   s.on('error', () => {
     // Do nothing
   });
   s.end();
 });
-server.listen(9999, () => console.info('Listening on port 9999'));
+server.listen(process.env.SERVER_PORT, () => reportPort(server));
 
 const echoServer = net.createServer((s) => {
   s.setTimeout(100);
@@ -22,7 +26,7 @@ const echoServer = net.createServer((s) => {
   });
   s.pipe(s);
 });
-echoServer.listen(9998, () => console.info('Listening on port 9998'));
+echoServer.listen(process.env.ECHO_SERVER_PORT, () => reportPort(echoServer));
 
 const timeoutServer = net.createServer((s) => {
   s.setTimeout(100);
@@ -39,4 +43,6 @@ const timeoutServer = net.createServer((s) => {
     // Do nothing
   });
 });
-timeoutServer.listen(9997, () => console.info('Listening on port 9997'));
+timeoutServer.listen(process.env.TIMEOUT_SERVER_PORT, () =>
+  reportPort(timeoutServer)
+);

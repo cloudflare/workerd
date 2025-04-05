@@ -5,6 +5,10 @@
 // This file is used as a sidecar for the tls-nodejs-test tests.
 const tls = require('node:tls');
 
+function reportPort(server) {
+  console.info(`Listening on port ${server.address().port}`);
+}
+
 // Taken from https://github.com/nodejs/node/blob/304743655d5236c2edc39094336ee2667600b684/test/fixtures/keys/agent1-key.pem
 const AGENT1_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCn5Ieb/G+/y5iD
@@ -71,10 +75,12 @@ const echoServer = tls.createServer(options, (s) => {
   });
   s.pipe(s);
 });
-echoServer.listen(8888, () => console.info('Listening on port 8888'));
+echoServer.listen(process.env.ECHO_SERVER_PORT, () => reportPort(echoServer));
 
 // Taken from test-tls-connect-given-socket.js
 const helloServer = tls.createServer(options, (socket) => {
   socket.end('Hello');
 });
-helloServer.listen(8887, () => console.info('Listening on port 8887'));
+helloServer.listen(process.env.HELLO_SERVER_PORT, () =>
+  reportPort(helloServer)
+);
