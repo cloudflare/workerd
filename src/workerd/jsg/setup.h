@@ -206,7 +206,7 @@ class IsolateBase {
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
-  v8::ExternalMemoryAccounter& getExternalMemoryAccounter() {
+  jsg::ExternalMemoryAccounter& getExternalMemoryAccounter() {
     return externalMemoryAccounter;
   }
 
@@ -295,7 +295,7 @@ class IsolateBase {
 
   /* *** External Memory accounting *** */
   // Used to report external memory usage to V8
-  v8::ExternalMemoryAccounter externalMemoryAccounter;
+  jsg::ExternalMemoryAccounter externalMemoryAccounter;
 
   // A list of objects currently tracking memory that are referring to this isolate.
   // They must be cleared when the isolate is destroyed.

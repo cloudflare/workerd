@@ -423,6 +423,10 @@ IsolateBase::~IsolateBase() noexcept(false) {
   }
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // V8 doesn't allow destroying a v8::ExternalMemoryAccounter while it is still reporting
+    // non-zero memory usage. Our allocations may outlive the isolate, however, so we bypass this.
+    externalMemoryAccounter.Reset(ptr);
+
     ptr->Dispose();
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();

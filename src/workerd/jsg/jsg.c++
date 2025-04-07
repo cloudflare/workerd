@@ -322,6 +322,17 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
+void ExternalMemoryAccounter::Update(v8::Isolate* isolate, int64_t delta) {
+  KJ_ASSERT(isolate == isolate_ || isolate_ == nullptr);
+  amount_of_external_memory_ += delta;
+  v8::ExternalMemoryAccounter::Update(isolate, delta);
+}
+
+void ExternalMemoryAccounter::Reset(v8::Isolate* isolate) {
+  KJ_ASSERT(isolate == isolate_ || isolate_ == nullptr);
+  v8::ExternalMemoryAccounter::Update(isolate, -amount_of_external_memory_);
+}
+
 void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) {
   KJ_IF_SOME(inner, maybeInner) {
     if (v8::Locker::IsLocked(inner.isolate)) {
