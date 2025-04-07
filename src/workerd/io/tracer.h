@@ -104,7 +104,7 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
 class BaseTracer: public kj::Refcounted {
  public:
   BaseTracer(): self(kj::refcounted<WeakRef<BaseTracer>>(kj::Badge<BaseTracer>{}, *this)) {}
-  ~BaseTracer() {
+  virtual ~BaseTracer() {
     self->invalidate();
   }
 

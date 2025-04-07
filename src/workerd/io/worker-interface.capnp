@@ -202,7 +202,7 @@ struct Trace @0x8e8d911203762d34 {
       empty @1 :Void;
       custom @2 :List(Attribute);
       fetch @3 :FetchEventInfo;
-      jsrpc @4 :JsRpcEventInfo;
+      jsRpc @4 :JsRpcEventInfo;
     }
   }
 
@@ -242,18 +242,20 @@ struct Trace @0x8e8d911203762d34 {
     # Propagation of the trigger context is not required, and in some
     # cases is not desirable.
 
-    info :union {
-      fetch @7 :FetchEventInfo;
-      jsrpc @8 :JsRpcEventInfo;
-      scheduled @9 :ScheduledEventInfo;
-      alarm @10 :AlarmEventInfo;
-      queue @11 :QueueEventInfo;
-      email @12 :EmailEventInfo;
-      trace @13 :TraceEventInfo;
-      hibernatableWebSocket @14 :HibernatableWebSocketEventInfo;
-      resume @15 :Resume;
-      custom @16 :CustomEventInfo;
+    struct Info { union {
+      fetch @0 :FetchEventInfo;
+      jsRpc @1 :JsRpcEventInfo;
+      scheduled @2 :ScheduledEventInfo;
+      alarm @3 :AlarmEventInfo;
+      queue @4 :QueueEventInfo;
+      email @5 :EmailEventInfo;
+      trace @6 :TraceEventInfo;
+      hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
+      resume @8 :Resume;
+      custom @9 :CustomEventInfo;
     }
+    }
+    info @7: Info;
   }
 
   struct Outcome {
