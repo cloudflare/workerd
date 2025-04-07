@@ -1014,8 +1014,8 @@ kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader
     case rpc::Trace::SpanOpen::Info::FETCH: {
       return kj::Maybe(tracing::FetchEventInfo(info.getFetch()));
     }
-    case rpc::Trace::SpanOpen::Info::JSRPC: {
-      return kj::Maybe(tracing::JsRpcEventInfo(info.getJsrpc()));
+    case rpc::Trace::SpanOpen::Info::JS_RPC: {
+      return kj::Maybe(tracing::JsRpcEventInfo(info.getJsRpc()));
     }
     case rpc::Trace::SpanOpen::Info::CUSTOM: {
       auto custom = info.getCustom();
@@ -1045,7 +1045,7 @@ void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) {
         fetch.copyTo(infoBuilder.initFetch());
       }
       KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
-        jsrpc.copyTo(infoBuilder.initJsrpc());
+        jsrpc.copyTo(infoBuilder.initJsRpc());
       }
       KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
         auto customBuilder = infoBuilder.initCustom(custom.size());
@@ -1146,15 +1146,13 @@ tracing::Link tracing::Link::clone() const {
       label.map([](const kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
 }
 
-namespace {
-tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
-  auto info = reader.getInfo();
+tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
   switch (info.which()) {
     case rpc::Trace::Onset::Info::FETCH: {
       return tracing::FetchEventInfo(info.getFetch());
     }
-    case rpc::Trace::Onset::Info::JSRPC: {
-      return tracing::JsRpcEventInfo(info.getJsrpc());
+    case rpc::Trace::Onset::Info::JS_RPC: {
+      return tracing::JsRpcEventInfo(info.getJsRpc());
     }
     case rpc::Trace::Onset::Info::SCHEDULED: {
       return tracing::ScheduledEventInfo(info.getScheduled());
@@ -1184,6 +1182,7 @@ tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) 
   KJ_UNREACHABLE;
 }
 
+namespace {
 kj::Maybe<kj::String> getScriptNameFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasScriptName()) {
     return kj::str(reader.getScriptName());
@@ -1251,7 +1250,7 @@ tracing::Onset::Onset(tracing::Onset::Info&& info,
       trigger(kj::mv(maybeTrigger)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
-    : info(getInfoFromReader(reader)),
+    : info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
       trigger(getTriggerContextFromReader(reader)) {}
 
@@ -1287,7 +1286,7 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) {
       fetch.copyTo(infoBuilder.initFetch());
     }
     KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
-      jsrpc.copyTo(infoBuilder.initJsrpc());
+      jsrpc.copyTo(infoBuilder.initJsRpc());
     }
     KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
       scheduled.copyTo(infoBuilder.initScheduled());

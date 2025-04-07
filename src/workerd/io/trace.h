@@ -719,6 +719,9 @@ struct Onset final {
   Onset clone() const;
 };
 
+// Helper function to copy onset info from rpc reader
+Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info);
+
 struct Outcome final {
   explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
   Outcome(rpc::Trace::Outcome::Reader reader);
