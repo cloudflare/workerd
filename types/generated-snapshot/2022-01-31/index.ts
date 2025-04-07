@@ -3858,6 +3858,282 @@ export declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
   inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
   postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
 }
+export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
+  | Ai_Cf_Meta_Llama_4_Prompt
+  | Ai_Cf_Meta_Llama_4_Messages;
+export interface Ai_Cf_Meta_Llama_4_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Ai_Cf_Meta_Llama_4_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output =
+  | {
+      /**
+       * The generated text response from the model
+       */
+      response: string;
+      /**
+       * Usage statistics for the inference request
+       */
+      usage?: {
+        /**
+         * Total number of tokens in input
+         */
+        prompt_tokens?: number;
+        /**
+         * Total number of tokens in output
+         */
+        completion_tokens?: number;
+        /**
+         * Total number of input and output tokens
+         */
+        total_tokens?: number;
+      };
+      /**
+       * An array of tool calls requests made during the response generation
+       */
+      tool_calls?: {
+        /**
+         * The arguments passed to be passed to the tool call request
+         */
+        arguments?: object;
+        /**
+         * The name of the tool to be called
+         */
+        name?: string;
+      }[];
+    }
+  | string;
+export declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
+  inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -3924,6 +4200,7 @@ export interface AiModels {
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
   "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
+  "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
 }
 export type AiOptions = {
   gateway?: GatewayOptions;
