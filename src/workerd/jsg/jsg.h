@@ -2750,6 +2750,12 @@ class Lock {
 
   JsArray arr(kj::ArrayPtr<JsValue> values) KJ_WARN_UNUSED_RESULT;
 
+  // Create a JavaScript array from the given kj::ArrayPtr, passing each
+  // item through the given transformation function to create the appropriate
+  // JsValue.
+  template <typename T, typename Func>
+  JsArray arr(kj::ArrayPtr<T> values, Func fn) KJ_WARN_UNUSED_RESULT;
+
   template <typename... Args>
     requires(std::assignable_from<JsValue&, Args> && ...)
   JsSet set(const Args&... args) KJ_WARN_UNUSED_RESULT;

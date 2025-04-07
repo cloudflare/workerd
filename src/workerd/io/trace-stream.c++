@@ -148,8 +148,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCach
   if (attribute.value.size() == 1) {
     obj.set(js, VALUE_STR, ToJs(js, attribute.value[0]));
   } else {
-    auto values = KJ_MAP(val, attribute.value) { return ToJs(js, val); };
-    obj.set(js, VALUE_STR, js.arr(values));
+    obj.set(js, VALUE_STR, js.arr(attribute.value.asPtr(), [](jsg::Lock& js, const auto& val) {
+      return ToJs(js, val);
+    }));
   }
 
   return obj;
@@ -157,8 +158,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCach
 
 jsg::JsValue ToJs(
     jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes, StringCache& cache) {
-  auto attrs = KJ_MAP(attr, attributes) { return ToJs(js, attr, cache); };
-  return js.arr(attrs);
+  return js.arr(
+      attributes, [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); });
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info, StringCache& cache) {
@@ -182,8 +183,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
     return obj;
   };
 
-  auto headers = KJ_MAP(header, info.headers) -> jsg::JsValue { return ToJs(js, header, cache); };
-  obj.set(js, HEADERS_STR, js.arr(headers));
+  obj.set(js, HEADERS_STR,
+      js.arr(info.headers.asPtr(),
+          [&cache, &ToJs](jsg::Lock& js, const auto& header) { return ToJs(js, header, cache); }));
+
   return obj;
 }
 
@@ -231,15 +234,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, TRACE_STR));
-
-  auto names = KJ_MAP(trace, info.traces) -> jsg::JsValue {
+  obj.set(js, TRACES_STR,
+      js.arr(info.traces.asPtr(), [](jsg::Lock& js, const auto& trace) -> jsg::JsValue {
     KJ_IF_SOME(name, trace.scriptName) {
       return js.str(name);
     }
     return js.null();
-  };
-  obj.set(js, TRACES_STR, js.arr(names));
-
+  }));
   return obj;
 }
 
@@ -334,8 +335,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     obj.set(js, SCRIPTNAME_STR, js.str(name));
   }
   KJ_IF_SOME(tags, onset.workerInfo.scriptTags) {
-    auto vals = KJ_MAP(tag, tags) -> jsg::JsValue { return js.str(tag); };
-    obj.set(js, SCRIPTTAGS_STR, js.arr(vals));
+    obj.set(js, SCRIPTTAGS_STR,
+        js.arr(tags.asPtr(), [](jsg::Lock& js, const kj::String& tag) { return js.str(tag); }));
   }
   KJ_IF_SOME(version, onset.workerInfo.scriptVersion) {
     auto vobj = js.obj();

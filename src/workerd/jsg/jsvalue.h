@@ -460,6 +460,16 @@ inline JsArray Lock::arr(const Args&... args) {
   return JsArray(v8::Array::New(v8Isolate, &values[0], sizeof...(Args)));
 }
 
+template <typename T, typename Func>
+inline JsArray Lock::arr(kj::ArrayPtr<T> values, Func fn) {
+  v8::LocalVector<v8::Value> vec(v8Isolate);
+  vec.reserve(values.size());
+  for (const T& val: values) {
+    vec.push_back(fn(*this, val));
+  }
+  return JsArray(v8::Array::New(v8Isolate, vec.data(), vec.size()));
+}
+
 template <typename... Args>
   requires(std::assignable_from<JsValue&, Args> && ...)
 inline JsSet Lock::set(const Args&... args) {
