@@ -37,6 +37,7 @@ import {
   ERR_SOCKET_CLOSED,
   ERR_SOCKET_CLOSED_BEFORE_CONNECTION,
   ERR_SOCKET_CONNECTING,
+  ERR_INVALID_IP_ADDRESS,
   EPIPE,
 } from 'node-internal:internal_errors';
 
@@ -47,6 +48,7 @@ import {
   validateNumber,
   validatePort,
   validateObject,
+  validateBoolean,
 } from 'node-internal:validators';
 
 import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
@@ -60,6 +62,7 @@ import type {
   Socket as _Socket,
   OnReadOpts,
 } from 'node:net';
+import type { Writable } from 'node:stream';
 
 const kLastWriteQueueSize = Symbol('kLastWriteQueueSize');
 const kTimeout = Symbol('kTimeout');
@@ -134,6 +137,11 @@ export function Server(): void {
   throw new Error('Server is not implemented');
 }
 
+export type SocketWriteData = Array<{
+  chunk: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  encoding: BufferEncoding;
+}>;
+
 // @ts-expect-error TS2323 Redeclare error.
 export declare class Socket extends _Socket {
   public timeout: number;
@@ -143,13 +151,11 @@ export declare class Socket extends _Socket {
   public _parent: null | Socket;
   public _host: null | string;
   public _peername: null | string;
-  public _getsockname():
-    | {}
-    | {
-        address?: string;
-        port?: number;
-        family?: string;
-      };
+  public _getsockname(): {
+    address?: string;
+    port?: number;
+    family?: string;
+  };
   public [kLastWriteQueueSize]: number | null | undefined;
   public [kTimeout]: Socket | null | undefined;
   public [kBuffer]: null | boolean | Uint8Array;
@@ -188,7 +194,7 @@ export declare class Socket extends _Socket {
   public _unrefTimer(): void;
   public _writeGeneric(
     writev: boolean,
-    data: { chunk: string | ArrayBufferView; encoding: string }[],
+    data: SocketWriteData,
     encoding: string,
     cb: (err?: Error) => void
   ): void;
@@ -197,6 +203,14 @@ export declare class Socket extends _Socket {
   public _reset(): void;
   public _getpeername(): Record<string, unknown>;
   public _writableState: null | unknown[];
+  public _bytesDispatched: number;
+  public _pendingData: SocketWriteData | null;
+  public _pendingEncoding: string;
+  // This should have existed in _Socket type but it's not...
+  public writableBuffer?: Writable & {
+    allBuffers: boolean;
+    length: number;
+  };
 
   // Defined by TLSSocket
   public encrypted?: boolean;
@@ -204,6 +218,7 @@ export declare class Socket extends _Socket {
 
   public constructor(options?: SocketOptions);
   public prototype: Socket;
+  public resetAndClosing?: boolean;
 }
 
 // @ts-expect-error TS2323 Redeclare error.
@@ -273,6 +288,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   options.readable = true;
   options.writable = true;
 
+  this._handle = null;
   this.connecting = false;
   this._hadError = false;
   this._parent = null;
@@ -288,6 +304,8 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this._closeAfterHandlingError = false;
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
+  this._pendingData = null;
+  this._pendingEncoding = '';
 
   Duplex.call(this, options);
 
@@ -327,21 +345,29 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     this[kBufferCb] = undefined;
   }
 
+  this[kBytesRead] = 0;
+  this[kBytesWritten] = 0;
+
+  // TODO(soon): Enable this once blockList is implemented.
+  // if (options.blockList) {
+  //     if (!BlockList.isBlockList(options.blockList)) {
+  //       throw new ERR_INVALID_ARG_TYPE('options.blockList', 'net.BlockList', options.blockList);
+  //     }
+  //     this.blockList = options.blockList;
+  //   }
+
   return this;
 }
 
 Object.setPrototypeOf(Socket.prototype, Duplex.prototype);
 Object.setPrototypeOf(Socket, Duplex);
 
-Socket.prototype._unrefTimer = function _unrefTimer(this: Socket | null): void {
+Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s = this; s != null; s = s._parent) {
+  for (let s: Socket | null = this; s != null; s = s._parent) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = (this as Socket).setTimeout(
-        s.timeout,
-        s._onTimeout.bind(s)
-      );
+      s[kTimeout] = this.setTimeout(s.timeout, s._onTimeout.bind(s));
     }
   }
 };
@@ -415,7 +441,6 @@ Socket.prototype._getsockname = function (this: Socket): AddressInfo | {} {
 };
 
 Socket.prototype.address = function (this: Socket): {} | AddressInfo {
-  if (this.destroyed) return {};
   return this._getsockname();
 };
 
@@ -425,7 +450,7 @@ Socket.prototype.address = function (this: Socket): {} | AddressInfo {
 Socket.prototype._writeGeneric = function (
   this: Socket,
   writev: boolean,
-  data: { chunk: string | ArrayBufferView; encoding: string }[],
+  data: SocketWriteData,
   encoding: string,
   cb: (err?: Error) => void
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
@@ -435,17 +460,21 @@ Socket.prototype._writeGeneric = function (
   // waiting for this one to be done.
   try {
     if (this.connecting) {
+      this._pendingData = data;
+      this._pendingEncoding = encoding;
       function onClose(): void {
         cb(new ERR_SOCKET_CLOSED_BEFORE_CONNECTION());
       }
       this.once('connect', () => {
-        // Note that off is a Node.js equivalent to removeEventListener
         this.off('close', onClose);
         this._writeGeneric(writev, data, encoding, cb);
       });
       this.once('close', onClose);
       return;
     }
+
+    this._pendingData = null;
+    this._pendingEncoding = '';
 
     if (this._handle?.writer === undefined) {
       cb(new ERR_SOCKET_CLOSED());
@@ -538,7 +567,7 @@ Socket.prototype._writeGeneric = function (
 
 Socket.prototype._writev = function (
   this: Socket,
-  chunks: { chunk: string | ArrayBufferView; encoding: string }[],
+  chunks: SocketWriteData,
   cb: () => void
 ): void {
   this._writeGeneric(true, chunks, '', cb);
@@ -546,7 +575,7 @@ Socket.prototype._writev = function (
 
 Socket.prototype._write = function (
   this: Socket,
-  data: { chunk: string | ArrayBufferView; encoding: string }[],
+  data: SocketWriteData,
   encoding: string,
   cb: (err?: Error) => void
 ): void {
@@ -595,16 +624,25 @@ Socket.prototype.end = function (
 // Readable side
 
 Socket.prototype.pause = function (this: Socket): Socket {
-  if (this.destroyed) return this;
-  // If the read loop is already running, setting reading to false
-  // will interrupt it after the current read completes (if any)
-  if (this._handle) this._handle.reading = false;
+  if (this[kBuffer] && !this.connecting && this._handle?.reading) {
+    // If the read loop is already running, setting reading to false
+    // will interrupt it after the current read completes (if any)
+    if (!this.destroyed) {
+      this._handle.reading = false;
+    }
+  }
   return Duplex.prototype.pause.call(this) as unknown as Socket;
 };
 
 Socket.prototype.resume = function (this: Socket): Socket {
-  if (this.destroyed) return this;
-  maybeStartReading(this);
+  if (
+    this[kBuffer] &&
+    !this.connecting &&
+    this._handle &&
+    !this._handle.reading
+  ) {
+    tryReadStart(this);
+  }
   return Duplex.prototype.resume.call(this) as unknown as Socket;
 };
 
@@ -612,8 +650,14 @@ Socket.prototype.read = function (
   this: Socket,
   n: number
 ): ReturnType<typeof Duplex.prototype.read> {
-  if (this.destroyed) return;
-  maybeStartReading(this);
+  if (
+    this[kBuffer] &&
+    !this.connecting &&
+    this._handle &&
+    !this._handle.reading
+  ) {
+    tryReadStart(this);
+  }
 
   return Duplex.prototype.read.call(this, n);
 };
@@ -624,7 +668,7 @@ Socket.prototype._read = function (this: Socket, n: number): void {
       this._read(n);
     });
   } else if (!this._handle.reading) {
-    maybeStartReading(this);
+    tryReadStart(this);
   }
 };
 
@@ -632,6 +676,7 @@ Socket.prototype._read = function (this: Socket, n: number): void {
 // Destroy and reset
 
 Socket.prototype._reset = function (this: Socket): Socket {
+  this.resetAndClosing = true;
   return this.destroy();
 };
 
@@ -645,7 +690,6 @@ Socket.prototype.resetAndDestroy = function (this: Socket): Socket {
   // of ensuring whether or not an RST packet is actually sent so this is largely an
   // alias for the existing destroy. If the socket is still connecting, it will be
   // destroyed immediately after the connection is established.
-  if (this.destroyed) return this;
   if (this._handle) {
     if (this.connecting) {
       this.once('connect', () => {
@@ -661,7 +705,6 @@ Socket.prototype.resetAndDestroy = function (this: Socket): Socket {
 };
 
 Socket.prototype.destroySoon = function (this: Socket): void {
-  if (this.destroyed) return;
   if (this.writable) {
     this.end();
   }
@@ -678,9 +721,11 @@ Socket.prototype._destroy = function (
   exception: Error,
   cb: (err?: Error) => void
 ): void {
-  if (this[kTimeout]) {
-    clearTimeout(this[kTimeout] as unknown as number);
-    this[kTimeout] = undefined;
+  this.connecting = false;
+
+  // eslint-disable-next-line @typescript-eslint/no-this-alias
+  for (let s: Socket | null = this; s !== null; s = s._parent) {
+    clearTimeout(s[kTimeout] as unknown as number);
   }
 
   if (this._handle) {
@@ -726,13 +771,13 @@ Socket.prototype.connect = function (
     }
     return undefined;
   }
-  // TODO(later): In Node.js a Socket instance can be reset so that it can be reused.
-  // We haven't yet implemented that here. We can consider doing so but it's not an
-  // immediate priority. Implementing it correctly requires making sure the internal
-  // state of the socket is correctly reset.
-  if (this.destroyed) {
-    throw new ERR_SOCKET_CLOSED();
-  }
+  // // TODO(later): In Node.js a Socket instance can be reset so that it can be reused.
+  // // We haven't yet implemented that here. We can consider doing so but it's not an
+  // // immediate priority. Implementing it correctly requires making sure the internal
+  // // state of the socket is correctly reset.
+  // if (this.destroyed) {
+  //   throw new ERR_SOCKET_CLOSED();
+  // }
 
   if (cb !== null) {
     this.once('connect', cb);
@@ -752,7 +797,6 @@ Socket.prototype.connect = function (
     this.write = Socket.prototype.write;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (this.destroyed) {
     this._handle = null;
     this._peername = null;
@@ -873,17 +917,64 @@ Object.defineProperties(Socket.prototype, {
       return this._handle ? this._handle.bytesRead : this[kBytesRead];
     },
   },
-  bytesWritten: {
+  _bytesDispatched: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
     configurable: false,
     enumerable: true,
     get(this: Socket): number {
-      const flushed =
-        this._handle != null ? this._handle.bytesWritten : this[kBytesWritten];
-      const pending =
-        this._writableState != null ? this._writableState.length : 0;
-      return flushed + pending;
+      return this._handle ? this._handle.bytesWritten : this[kBytesWritten];
+    },
+  },
+  bytesWritten: {
+    // @ts-expect-error TS2353 Required for __proto__
+    __proto__: null,
+    configurable: false,
+    enumerable: true,
+    get(this: Socket): number | undefined {
+      let bytes = this._bytesDispatched;
+      const data = this._pendingData as unknown as Buffer | string | null;
+      const encoding = this._pendingEncoding;
+      const writableBuffer = this.writableBuffer;
+
+      if (!writableBuffer) return undefined;
+
+      if (Array.isArray(data)) {
+        // Was a writev, iterate over chunks to get total length
+        for (let i = 0; i < data.length; i++) {
+          const chunk = data[i] as Buffer | null;
+
+          if (chunk == null) {
+            continue;
+          }
+
+          // @ts-expect-error TS2339 allBuffers doesn't exist on type.
+          if (chunk instanceof Buffer || data.allBuffers) bytes += chunk.length;
+          else {
+            bytes += Buffer.byteLength(
+              // @ts-expect-error TS2339 TODO(soon): Use correct type here.
+              chunk.chunk as Buffer,
+              // @ts-expect-error TS2339 TODO(soon): Use correct type here.
+              chunk.encoding as string
+            );
+          }
+        }
+      } else if (data) {
+        // Writes are either a string or a Buffer.
+        if (typeof data !== 'string') {
+          bytes += data.length;
+        } else {
+          bytes += Buffer.byteLength(data, encoding);
+        }
+      } else {
+        const flushed =
+          this._handle != null
+            ? this._handle.bytesWritten
+            : this[kBytesWritten];
+        return this.writableLength + flushed;
+      }
+
+      return bytes;
     },
   },
   remoteAddress: {
@@ -918,8 +1009,8 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(): string {
-      return '0.0.0.0';
+    get(this: Socket): string | undefined {
+      return this._getsockname().address;
     },
   },
   localPort: {
@@ -927,8 +1018,8 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: Socket): number {
-      return 0;
+    get(this: Socket): number | undefined {
+      return this._getsockname().port;
     },
   },
   localFamily: {
@@ -936,8 +1027,8 @@ Object.defineProperties(Socket.prototype, {
     __proto__: null,
     configurable: false,
     enumerable: true,
-    get(this: Socket): string {
-      return 'IPv4';
+    get(this: Socket): string | undefined {
+      return this._getsockname().family;
     },
   },
 });
@@ -950,9 +1041,14 @@ function cleanupAfterDestroy(
   cb: (err?: Error) => void,
   error?: Error
 ): void {
+  const isException = error != null;
   if (socket._handle != null) {
     socket[kBytesRead] = socket.bytesRead;
     socket[kBytesWritten] = socket.bytesWritten;
+
+    if (socket.resetAndClosing) {
+      socket.resetAndClosing = false;
+    }
   }
   socket._handle = null;
   socket[kLastWriteQueueSize] = 0;
@@ -961,34 +1057,55 @@ function cleanupAfterDestroy(
   socket[kBufferGen] = null;
   socket[kSocketInfo] = null;
   cb(error);
-  queueMicrotask(() => socket.emit('close', error != null));
+  queueMicrotask(() => socket.emit('close', isException));
 }
 
 export function initializeConnection(
   socket: Socket,
   options: TcpSocketConnectOpts
 ): void {
-  // options.localAddress, options.localPort, and options.family are ignored.
   const {
     host = 'localhost',
     family,
     hints,
     autoSelectFamily,
+    autoSelectFamilyAttemptTimeout,
     lookup,
+    localAddress,
+    localPort,
   } = options;
   let { port = 0 } = options;
+  if (localAddress && !isIP(localAddress)) {
+    throw new ERR_INVALID_IP_ADDRESS(localAddress);
+  }
 
-  if (autoSelectFamily != null) {
-    // We don't support this option.
-    // We shouldn't throw this because services like mongodb depends on it.
-    // TODO(soon): Investigate supporting this.
+  if (localPort) {
+    validateNumber(localPort, 'options.localPort');
   }
 
   if (typeof port !== 'number' && typeof port !== 'string') {
     throw new ERR_INVALID_ARG_TYPE('options.port', ['number', 'string'], port);
   }
+  validatePort(port);
+  port |= 0;
 
-  port = validatePort(+port);
+  if (autoSelectFamily != null) {
+    // We don't support this option.
+    // We shouldn't throw this because services like mongodb depends on it.
+    // TODO(soon): Investigate supporting this.
+    validateBoolean(autoSelectFamily, 'options.autoSelectFamily');
+  }
+
+  if (autoSelectFamilyAttemptTimeout != null) {
+    // We don't support this option.
+    // We shouldn't throw this because services like mongodb depends on it.
+    // TODO(soon): Investigate supporting this.
+    validateInt32(
+      autoSelectFamilyAttemptTimeout,
+      'options.autoSelectFamilyAttemptTimeout',
+      1
+    );
+  }
 
   socket.connecting = true;
 
@@ -1074,11 +1191,7 @@ export function initializeConnection(
             return;
           }
           if (isIP(address) === 0) {
-            throw new ERR_INVALID_ARG_VALUE(
-              'address',
-              address,
-              'must be an IPv4 or IPv6 address'
-            );
+            throw new ERR_INVALID_IP_ADDRESS(address);
           }
           if (
             family !== 4 &&
@@ -1114,7 +1227,7 @@ function onConnectionOpened(this: Socket): void {
       this._finishInit();
     }
     if (!this.isPaused()) {
-      maybeStartReading(this);
+      tryReadStart(this);
     }
   } catch (err) {
     this.destroy(err as Error);
@@ -1214,7 +1327,7 @@ async function startRead(socket: Socket): Promise<void> {
   }
 }
 
-function maybeStartReading(socket: Socket): void {
+function tryReadStart(socket: Socket): void {
   if (
     socket[kBuffer] &&
     !socket.connecting &&
@@ -1229,7 +1342,7 @@ function maybeStartReading(socket: Socket): void {
 function writeAfterFIN(
   this: Socket,
   chunk: Uint8Array | string,
-  encoding?: NodeJS.BufferEncoding,
+  encoding?: NodeJS.BufferEncoding | null,
   cb?: (err?: Error) => void
 ): boolean {
   if (!this.writableEnded) {
@@ -1239,11 +1352,16 @@ function writeAfterFIN(
 
   if (typeof encoding === 'function') {
     cb = encoding;
+    encoding = null;
   }
 
   const er = new EPIPE();
 
-  queueMicrotask(() => cb?.(er));
+  if (cb != null && typeof cb === 'function') {
+    queueMicrotask(() => {
+      cb(er);
+    });
+  }
   this.destroy(er);
 
   return false;

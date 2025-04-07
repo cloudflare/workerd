@@ -46,3 +46,16 @@ const timeoutServer = net.createServer((s) => {
 timeoutServer.listen(process.env.TIMEOUT_SERVER_PORT, () =>
   reportPort(timeoutServer)
 );
+
+const endServer = net.createServer((s) => {
+  s.end();
+});
+endServer.listen(process.env.END_SERVER_PORT, () => reportPort(endServer));
+
+const serverThatDies = net.createServer(function (s) {
+  serverThatDies.close();
+  s.end();
+});
+serverThatDies.listen(process.env.SERVER_THAT_DIES_PORT, () =>
+  reportPort(serverThatDies)
+);
