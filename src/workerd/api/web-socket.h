@@ -14,6 +14,7 @@
 #include <kj/compat/http.h>
 
 #include <cstdlib>
+#include <list>
 
 namespace workerd {
 class ActorObserver;
@@ -629,7 +630,7 @@ class WebSocket: public EventTarget {
   // between regular websocket messages, and auto-responses.
   struct AutoResponse {
     kj::Promise<void> ongoingAutoResponse = kj::READY_NOW;
-    std::deque<kj::String> pendingAutoResponseDeque;
+    std::list<kj::String> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
