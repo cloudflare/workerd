@@ -15,5 +15,5 @@ def dep_ruff_darwin_arm64():
         strip_prefix = STRIP_PREFIX,
         type = TYPE,
         sha256 = SHA256,
-        build_file_content = "filegroup(name='file', srcs=glob(['**']))",
+        build_file_content = "filegroup(name='file', srcs=['ruff'], visibility=['//visibility:public'])",
     )

@@ -17,4 +17,7 @@
         "--compile-commands-dir=${workspaceFolder}/",
         "--query-driver=**"
     ],
+    "clang-format.executable": "${workspaceRoot}/bazel-bin/build/deps/formatters/clang-format",
+    "bazel.buildifierExecutable": "${workspaceRoot}/bazel-bin/build/deps/formatters/buildifier",
+    "ruff.path": ["${workspaceRoot}/bazel-bin/build/deps/formatters/ruff"]
 }
