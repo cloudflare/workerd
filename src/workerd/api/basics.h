@@ -9,6 +9,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>
 
@@ -603,15 +604,30 @@ class AbortSignal final: public EventTarget {
     tracker.trackField("reason", reason);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<AbortSignal> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::ABORT_SIGNAL);
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
+  // The collection of rpc clients associated with this abort signal
+  // Each rpcClient will be informed when this abort signal is triggered.
+  kj::Vector<rpc::AbortSignal::Client> rpcClients;
+
+  // Trigger an abort on all associated clients
+  kj::Promise<void> sendToRpc(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsValue>>& reason);
+  kj::Promise<void> sendToRpc(kj::Own<rpc::JsValue::Reader> reason);
+
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class AbortController;
+  friend class AbortSignalImpl;
 };
 
 // An implementation of the Web Platform Standard AbortController API
