@@ -399,6 +399,8 @@ enum SerializationTag {
   # Keep this value in sync with the DOMException::SERIALIZATION_TAG in
   # /src/workerd/jsg/dom-exception (but we can't actually change this value
   # without breaking things).
+
+  abortSignal @9;
 }
 
 enum StreamEncoding {
@@ -460,6 +462,10 @@ struct JsValue {
         }
       }
 
+      abortSignal :group {
+        signal @7 :AbortSignal;
+      }
+
       # TODO(soon): WebSocket, Request, Response
     }
   }
@@ -480,6 +486,16 @@ struct JsValue {
     # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
     # `ByteStream`.
   }
+}
+
+interface AbortSignal $Cxx.allowCancellation {
+    struct Params {
+      reason @0 :JsValue;
+    }
+
+    struct Results {}
+
+    triggerAbort @0 Params -> Results;
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {
