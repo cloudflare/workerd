@@ -65,53 +65,35 @@ WINDOWS_TEMPLATE = """
 @echo off
 setlocal EnableDelayedExpansion
 
-REM Start sidecar if specified
-if not "%SIDECAR%" == "" (
-    start /b "" "%SIDECAR%" > nul 2>&1
-    set SIDECAR_PID=!ERRORLEVEL!
-    timeout /t 1 > nul
+REM Run supervisor to start sidecar if specified
+if not "{sidecar}" == "" (
+    REM These environment variables are processed by the supervisor executable
+    set PORTS_TO_ASSIGN={port_bindings}
+    set SIDECAR_COMMAND="{sidecar}"
+    powershell -Command \"{supervisor} {runtest}\"
+) else (
+    {runtest}
 )
 
-REM Run the actual test
-$(RUNTEST)
-
-REM Cleanup sidecar if it was started
-if defined SIDECAR_PID (
-    taskkill /F /PID !SIDECAR_PID! > nul 2>&1
-)
-
+set TEST_EXIT=!ERRORLEVEL!
 exit /b !TEST_EXIT!
 """
 
 SH_TEMPLATE = """#!/bin/sh
 set -e
 
-cleanup() {
-    if [ ! -z "$SIDECAR_PID" ]; then
-        kill $SIDECAR_PID 2>/dev/null || true
-    fi
-}
-
-trap cleanup EXIT
-
-# Start sidecar if specified
-if [ ! -z "$(SIDECAR)" ]; then
-    "$(SIDECAR)" & SIDECAR_PID=$!
-    # Wait until the process is ready
-    sleep 3
+# Run supervisor to start sidecar if specified
+if [ ! -z "{sidecar}" ]; then
+    # These environment variables are processed by the supervisor executable
+    PORTS_TO_ASSIGN={port_bindings} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+else
+    {runtest}
 fi
-
-$(RUNTEST)
 """
 
-WINDOWS_RUNTEST_NORMAL = """
-powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
-set TEST_EXIT=!ERRORLEVEL!
-"""
+WINDOWS_RUNTEST_NORMAL = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
 
-SH_RUNTEST_NORMAL = """
-"$@" -dTEST_TMPDIR=$TEST_TMPDIR
-"""
+SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 
 # We need variants of the RUN_TEST command for Python memory snapshot tests. We have to invoke
 # workerd twice, once with --python-save-snapshot to produce the snapshot and once with
@@ -144,20 +126,30 @@ echo Using Python Snapshot
 def _wd_test_impl(ctx):
     is_windows = ctx.target_platform_has_constraint(ctx.attr._platforms_os_windows[platform_common.ConstraintValueInfo])
 
+    if ctx.file.sidecar and ctx.attr.python_snapshot_test:
+        # TODO(later): Implement support for generating a combined script with these two options
+        # if we have a test that requires it. Not doing it for now due to complexity.
+        return print("sidecar and python_snapshot_test currently cannot be used together")
+
     # Bazel insists that the rule must actually create the executable that it intends to run; it
     # can't just specify some other executable with some args. OK, fine, we'll use a script that
     # just execs its args.
     if is_windows:
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
-        content = WINDOWS_TEMPLATE.replace("$(SIDECAR)", ctx.file.sidecar.path if ctx.file.sidecar else "")
+        template = WINDOWS_TEMPLATE
         runtest = WINDOWS_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else WINDOWS_RUNTEST_NORMAL
-        content = content.replace("$(RUNTEST)", runtest)
     else:
         executable = ctx.outputs.executable
-        content = SH_TEMPLATE.replace("$(SIDECAR)", ctx.file.sidecar.short_path if ctx.file.sidecar else "")
+        template = SH_TEMPLATE
         runtest = SH_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else SH_RUNTEST_NORMAL
-        content = content.replace("$(RUNTEST)", runtest)
+
+    content = template.format(
+        sidecar = ctx.file.sidecar.short_path if ctx.file.sidecar else "",
+        runtest = runtest,
+        supervisor = ctx.file.sidecar_supervisor.short_path if ctx.file.sidecar_supervisor else "",
+        port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
+    )
 
     ctx.actions.write(
         output = executable,
@@ -174,6 +166,13 @@ def _wd_test_impl(ctx):
         if default_runfiles:
             runfiles = runfiles.merge(default_runfiles)
 
+        runfiles = runfiles.merge(ctx.runfiles(files = [ctx.file.sidecar_supervisor]))
+
+        # Also merge the supervisor's own runfiles if it has any
+        default_runfiles = ctx.attr.sidecar_supervisor[DefaultInfo].default_runfiles
+        if default_runfiles:
+            runfiles = runfiles.merge(default_runfiles)
+
     return [
         DefaultInfo(
             executable = executable,
@@ -185,20 +184,42 @@ _wd_test = rule(
     implementation = _wd_test_impl,
     test = True,
     attrs = {
+        # The workerd executable is used to run all tests
         "workerd": attr.label(
             allow_single_file = True,
             executable = True,
             cfg = "exec",
             default = "//src/workerd/server:workerd",
         ),
-        "flags": attr.string_list(),
+        # A list of files that this test requires to be present in order to run.
         "data": attr.label_list(allow_files = True),
+        # If set, an executable that is run in parallel with the test, and provides some functionality
+        # needed for the test. This is usually a backend server, with workerd serving as the client.
+        # The sidecar will be killed once the test completes.
         "sidecar": attr.label(
             allow_single_file = True,
             executable = True,
             cfg = "exec",
         ),
+        # A list of binding names which will be filled in with random port numbers that the sidecar
+        # and test can use for communication. The test will only begin once the sidecar is
+        # listening to these ports.
+        #
+        # In the sidecar, access these bindings as environment variables. In the wd-test file, add
+        # fromEnvironment bindings to expose them to the test.
+        #
+        # Reminder: you'll also need to add a network = ( allow = ["private"] ) service as well.
+        "sidecar_port_bindings": attr.string_list(),
+        # An executable that is used to manage port assignments and child process creation when a
+        # sidecar is specified.
+        "sidecar_supervisor": attr.label(
+            allow_single_file = True,
+            executable = True,
+            cfg = "exec",
+            default = "//src/workerd/api/node:sidecar-supervisor",
+        ),
         "python_snapshot_test": attr.bool(),
+        # A reference to the Windows platform label, needed for the implementation of wd_test
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
 )
