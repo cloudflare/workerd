@@ -679,8 +679,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
       $experimental
-      $pythonSnapshotRelease(pyodide = "0.27.1", pyodideRevision = "2025-01-16",
-          packages = "20250324.1", backport = 17,
+      $pythonSnapshotRelease(pyodide = "0.27.5", pyodideRevision = "2025-01-16",
+          packages = "20250324.1", backport = 2,
           baselineSnapshotHash = "TODO");
 
   requestCfOverridesCacheRules @72 :Bool
