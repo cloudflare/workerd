@@ -794,14 +794,18 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(jsg::Lock& js,
     function(js, kj::mv(args));
   };
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /* repeats = */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
+      /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
       msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
 
-void ServiceWorkerGlobalScope::clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId) {
-  KJ_IF_SOME(id, timeoutId) {
-    IoContext::current().clearTimeoutImpl(TimeoutId::fromNumber(id));
+void ServiceWorkerGlobalScope::clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId) {
+  KJ_IF_SOME(rawId, timeoutId) {
+    // Browsers does not throw an error when "unsafe" integers are passed to the clearTimeout method.
+    // Let's make sure we ignore those values, just like browsers and other runtimes.
+    KJ_IF_SOME(id, rawId.toSafeInteger(js)) {
+      IoContext::current().clearTimeoutImpl(TimeoutId::fromNumber(id));
+    }
   }
 }
 
@@ -818,9 +822,13 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(jsg::Lock& js,
     function(js, jsg::Arguments(kj::mv(argv)));
   };
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /* repeats = */ true, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
+      /* repeat */ true, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
       msDelay.orDefault(0));
   return timeoutId.toNumber();
+}
+
+void ServiceWorkerGlobalScope::clearInterval(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId) {
+  clearTimeout(js, kj::mv(timeoutId));
 }
 
 jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto(jsg::Lock& js) {
