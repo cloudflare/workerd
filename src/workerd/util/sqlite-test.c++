@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/common.h"
 #include "sqlite.h"
 
 #include <fcntl.h>
@@ -820,6 +821,48 @@ KJ_TEST("reset database") {
     q2.nextRow();
     KJ_EXPECT(q2.isDone());
   }
+}
+
+KJ_TEST("SQLite observer reportQueryEvent") {
+  class TestSqliteObserver: public SqliteObserver {
+   public:
+    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+        uint64_t queryRowsRead,
+        uint64_t queryRowsWritten,
+        kj::Duration queryLatency,
+        uint64_t dbWalBytesWritten,
+        int queryError,
+        bool isInternalQuery,
+        kj::Maybe<kj::String> queryErrorDescription) {
+      KJ_IF_SOME(err, queryErrorDescription) {
+        KJ_ASSERT(err.contains("query canceled because reset()"));
+      }
+    }
+  };
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  TestSqliteObserver sqliteObserver = TestSqliteObserver();
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+  db.run("PRAGMA journal_mode=WAL;");
+
+  db.run("CREATE TABLE things (id INTEGER PRIMARY KEY)");
+
+  db.run("INSERT INTO things VALUES (123)");
+  db.run("INSERT INTO things VALUES (321)");
+
+  auto stmt = db.prepare("SELECT * FROM things");
+
+  auto query = stmt.run();
+  KJ_ASSERT(!query.isDone());
+  KJ_EXPECT(query.getInt(0) == 123);
+
+  db.reset();
+  db.run("PRAGMA journal_mode=WAL;");
+
+  // The query was canceled.
+  KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.nextRow());
+  KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.getInt(0));
 }
 
 KJ_TEST("SQLite observer addQueryStats") {
