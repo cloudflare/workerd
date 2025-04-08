@@ -252,11 +252,9 @@ kj::String KvNamespace::formBulkBodyString(jsg::Lock& js,
   }
   auto object = js.obj();
 
-  auto keysArray = kj::heapArrayBuilder<jsg::JsValue>(names.size());
-  for (auto& n: names) {
-    keysArray.add(js.str(n));
-  }
-  object.set(js, "keys", js.arr(keysArray));
+  auto keysArray =
+      js.arr(names.asPtr(), [](jsg::Lock& js, const kj::String& val) { return js.str(val); });
+  object.set(js, "keys", keysArray);
 
   if (type != kj::str("")) {
     object.set(js, "type", js.str(type));

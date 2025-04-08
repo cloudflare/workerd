@@ -838,8 +838,8 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
     obj.set(js, "fingerprint512", js.str(fingerprint512));
   }
   KJ_IF_SOME(keyUsage, getKeyUsage()) {
-    auto values = KJ_MAP(str, keyUsage) { return jsg::JsValue(js.str(str)); };
-    obj.set(js, "ext_key_usage", js.arr(values));
+    obj.set(js, "ext_key_usage",
+        js.arr(keyUsage.asPtr(), [](jsg::Lock& js, const kj::String& val) { return js.str(val); }));
   }
   KJ_IF_SOME(serialNumber, getSerialNumber()) {
     obj.set(js, "serialNumber", js.str(serialNumber));
