@@ -274,8 +274,10 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
   }
 
   {
-    KJ_LOG(INFO, "Loading Pyodide bundle from internet...");
     kj::Thread([&]() {
+      kj::String url =
+          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
+      KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
       kj::AsyncIoContext io = kj::setupAsyncIo();
       kj::HttpHeaderTable table;
 
@@ -290,9 +292,6 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
       auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
 
       kj::HttpHeaders headers(table);
-
-      kj::String url =
-          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 

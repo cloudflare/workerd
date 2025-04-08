@@ -7,8 +7,8 @@ PYODIDE_VERSIONS = [
         "sha256": "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
     },
     {
-        "version": "0.27.1",
-        "sha256": "6e45f93c71ed21bff4a06d6d9d8e27e815269dabf8ab34dc400939fd45edc665",
+        "version": "0.27.5",
+        "sha256": "2e16b053eaa0b1f5761e027e6fc54003567a34e8327bba9a918407accaa4d7c8",
     },
 ]
 
@@ -73,18 +73,20 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
+        "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
     },
     {
-        "name": "0.27.1",
-        "pyodide_version": "0.27.1",
+        "name": "0.27.5",
+        "pyodide_version": "0.27.5",
         "pyodide_date": "2025-01-16",
         "packages": "20250324.1",
-        "backport": "17",
-        "integrity": "sha256-jV3zgLs1uevw2s9woVGdcRTjkqTWEOg5ToMAWS1mo8w=",
+        "backport": "2",
+        "integrity": "sha256-0hfQm9GU3UzoxrrdU1KtLvr+nCfydELnaKnnvEbnEaM=",
         "feature_flags": ["pythonWorkers20250116"],
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",
-        "baseline_snapshot": "baseline-700487b8d.bin",
+        "baseline_snapshot": "baseline-cb0651452.bin",
+        "baseline_snapshot_integrity": "sha256-fckrUGeHN443uCivfJC11F924K8g9HAy8RtyaGHmzW8=",
     },
     {
         "name": "development",
@@ -94,5 +96,6 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "python_version": "3.12.1",
         "packages": "20240829.4",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
+        "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
     },
 ])

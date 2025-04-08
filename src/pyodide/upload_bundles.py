@@ -40,7 +40,7 @@ def bundle_version_info():
 
 
 def get_pyodide_bin_path(ver):
-    return cquery(f"@workerd//src/pyodide:pyodide@{ver}.capnp")
+    return cquery(f"@workerd//src/pyodide:pyodide.capnp.bin@rule@{ver}")
 
 
 def bundle_key(*, pyodide_version, pyodide_date, backport, **_kwds):
