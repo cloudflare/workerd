@@ -23,12 +23,13 @@
 
 namespace workerd::api {
 
-// For the same reason we limit the size of WebSocket messages to 1MB, we limit RPC payloads.
-// Very large messages would both cause problems for the underlying Cap'n Proto transport,
-// as well as put too much memory pressure on the isolate. Applications which need to move
-// large amounts of data should split the data into several smaller chunks transmitted through
-// separate calls.
-constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 20;
+// The 32MB limit is based on the fact that Cap'n Proto's default total message size limit is 64MB,
+// and we want to stay clear of that.
+// Additionally, considering total memory of the isolate is limited to 128MB a significantly larger
+// memory might cause unwarrented condemnations and terminations.
+// Applications which need to move large amounts of data should split the data into several smaller
+// chunks transmitted through separate calls.
+constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 25;
 
 // ExternalHandler used when serializing RPC messages. Serialization functions with which to
 // handle RPC specially should use this.

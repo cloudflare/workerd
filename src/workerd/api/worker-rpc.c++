@@ -176,7 +176,7 @@ kj::Vector<kj::Own<void>> serializeJsValue(jsg::Lock& js,
   serializer.write(js, value);
   kj::Array<const byte> data = serializer.release().data;
   JSG_ASSERT(data.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
-      "Serialized RPC arguments or return values are limited to 1MiB, but the size of this value "
+      "Serialized RPC arguments or return values are limited to 32MiB, but the size of this value "
       "was: ",
       data.size(), " bytes.");
 
