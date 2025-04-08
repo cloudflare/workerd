@@ -322,6 +322,8 @@ wd_test(
         "SERVER_PORT",
         "ECHO_SERVER_PORT",
         "TIMEOUT_SERVER_PORT",
+        "END_SERVER_PORT",
+        "SERVER_THAT_DIES_PORT",
     ],
 )
 
@@ -387,4 +389,10 @@ js_binary(
     name = "sidecar-supervisor",
     entry_point = "tests/sidecar-supervisor.mjs",
     visibility = ["//visibility:public"],
+)
+
+wd_test(
+    src = "tests/streams-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/streams-nodejs-test.js"],
 )

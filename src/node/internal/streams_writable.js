@@ -343,7 +343,7 @@ function writeOrBuffer(stream, state, chunk, encoding, callback) {
   state.length += len;
 
   // stream._write resets state.length
-  const ret = state.length < state.highWaterMark;
+  const ret = state.length < state.highWaterMark || state.length === 0;
   // We must ensure that previous needDrain will not be reset to false.
   if (!ret) state.needDrain = true;
   if (state.writing || state.corked || state.errored || !state.constructed) {

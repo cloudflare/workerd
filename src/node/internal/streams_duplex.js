@@ -92,6 +92,9 @@ export function Duplex(options) {
     this.allowHalfOpen = true;
   }
 }
+
+Duplex.prototype.destroy = Writable.prototype.destroy;
+
 Object.defineProperties(Duplex.prototype, {
   writable: {
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writable'),
