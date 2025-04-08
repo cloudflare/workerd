@@ -1453,88 +1453,87 @@ export const testNetSocketResetSend = {
 };
 
 // test/parallel/test-net-socket-timeout.js
-// TODO(soon): Follow up on this test once setTimeout coercion error is fixed.
-// export const testNetSocketTimeout = {
-//   async test(ctrl, env) {
-//     // Verify that invalid delays throw
-//     const s = new net.Socket();
-//     const nonNumericDelays = [
-//       '100',
-//       true,
-//       false,
-//       undefined,
-//       null,
-//       '',
-//       {},
-//       () => {},
-//       [],
-//     ];
-//     const badRangeDelays = [-0.001, -1, -Infinity, Infinity, NaN];
-//     const validDelays = [0, 0.001, 1, 1e6];
-//     const invalidCallbacks = [
-//       1,
-//       '100',
-//       true,
-//       false,
-//       null,
-//       {},
-//       [],
-//       Symbol('test'),
-//     ];
+export const testNetSocketTimeout = {
+  async test(ctrl, env) {
+    // Verify that invalid delays throw
+    const s = new net.Socket();
+    const nonNumericDelays = [
+      '100',
+      true,
+      false,
+      undefined,
+      null,
+      '',
+      {},
+      () => {},
+      [],
+    ];
+    const badRangeDelays = [-0.001, -1, -Infinity, Infinity, NaN];
+    const validDelays = [0, 0.001, 1, 1e6];
+    const invalidCallbacks = [
+      1,
+      '100',
+      true,
+      false,
+      null,
+      {},
+      [],
+      Symbol('test'),
+    ];
 
-//     for (let i = 0; i < nonNumericDelays.length; i++) {
-//       throws(
-//         () => {
-//           s.setTimeout(nonNumericDelays[i], () => {});
-//         },
-//         { code: 'ERR_INVALID_ARG_TYPE' },
-//         nonNumericDelays[i]
-//       );
-//     }
+    for (let i = 0; i < nonNumericDelays.length; i++) {
+      throws(
+        () => {
+          s.setTimeout(nonNumericDelays[i], () => {});
+        },
+        { code: 'ERR_INVALID_ARG_TYPE' },
+        nonNumericDelays[i]
+      );
+    }
 
-//     for (let i = 0; i < badRangeDelays.length; i++) {
-//       throws(
-//         () => {
-//           s.setTimeout(badRangeDelays[i], () => {});
-//         },
-//         { code: 'ERR_OUT_OF_RANGE' },
-//         badRangeDelays[i]
-//       );
-//     }
+    for (let i = 0; i < badRangeDelays.length; i++) {
+      throws(
+        () => {
+          s.setTimeout(badRangeDelays[i], () => {});
+        },
+        { code: 'ERR_OUT_OF_RANGE' },
+        badRangeDelays[i]
+      );
+    }
 
-//     for (let i = 0; i < validDelays.length; i++) {
-//       s.setTimeout(validDelays[i], () => {});
-//     }
+    for (let i = 0; i < validDelays.length; i++) {
+      s.setTimeout(validDelays[i], () => {});
+    }
 
-//     for (let i = 0; i < invalidCallbacks.length; i++) {
-//       [0, 1].forEach((msec) =>
-//         throws(() => s.setTimeout(msec, invalidCallbacks[i]), {
-//           code: 'ERR_INVALID_ARG_TYPE',
-//           name: 'TypeError',
-//         })
-//       );
-//     }
+    for (let i = 0; i < invalidCallbacks.length; i++) {
+      [0, 1].forEach((msec) =>
+        throws(() => s.setTimeout(msec, invalidCallbacks[i]), {
+          code: 'ERR_INVALID_ARG_TYPE',
+          name: 'TypeError',
+        })
+      );
+    }
 
-//     {
-//       const { promise, resolve, reject } = Promise.withResolvers();
-//       const socket = net.createConnection(env.SERVER_PORT);
-//       strictEqual(
-//         socket.setTimeout(1, () => {
-//           socket.destroy();
-//           strictEqual(
-//             socket.setTimeout(1, () =>
-//               reject(new Error('Should not have called setTimeout callback'))
-//             ),
-//             socket
-//           );
-//           resolve();
-//         }),
-//         socket
-//       );
-//       await promise;
-//     }
-//   },
-// };
+    {
+      const { promise, resolve, reject } = Promise.withResolvers();
+      const socket = net.createConnection(env.SERVER_PORT);
+      strictEqual(
+        socket.setTimeout(1, () => {
+          socket.destroy();
+          strictEqual(
+            socket.setTimeout(1, () =>
+              reject(new Error('Should not have called setTimeout callback'))
+            ),
+            socket
+          );
+          resolve();
+        }),
+        socket
+      );
+      await promise;
+    }
+  },
+};
 
 // test/parallel/test-net-socket-write-after-close.js
 export const testNetSocketWriteAfterClose = {

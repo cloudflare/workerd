@@ -325,12 +325,20 @@ class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
 
 V(Symbol)
 V(BigInt)
-V(Number)
 V(Int32)
 V(Uint32)
 V(Set)
 
 #undef V
+
+class JsNumber final: public JsBase<v8::Number, JsNumber> {
+ public:
+  kj::Maybe<double> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  bool isSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<double> toSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Number, JsNumber>::JsBase;
+};
 
 class JsObject final: public JsBase<v8::Object, JsObject> {
  public:
@@ -604,6 +612,8 @@ struct JsValueWrapper {
       return T(check(handle->ToString(context)));
     } else if constexpr (kj::isSameType<T, JsBoolean>()) {
       return T(handle->ToBoolean(context->GetIsolate()));
+    } else if constexpr (kj::isSameType<T, JsNumber>()) {
+      return T(check(handle->ToNumber(context)));
     } else {
       JsValue value(handle);
       KJ_IF_SOME(t, value.tryCast<T>()) {

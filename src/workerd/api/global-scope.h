@@ -537,7 +537,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Optional<double> msDelay,
       jsg::Arguments<jsg::Value> args);
-  void clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId);
+  void clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
   TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
 
@@ -545,9 +545,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Optional<double> msDelay,
       jsg::Arguments<jsg::Value> args);
-  void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) {
-    clearTimeout(timeoutId);
-  }
+  void clearInterval(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
   jsg::Promise<jsg::Ref<Response>> fetch(jsg::Lock& js,
       kj::OneOf<jsg::Ref<Request>, kj::String> request,
