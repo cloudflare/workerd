@@ -13,6 +13,9 @@
 #include <vector>
 
 namespace workerd::api {
+CompressionAllocator::CompressionAllocator(
+    kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+    : externalMemoryTarget(kj::mv(externalMemoryTarget)) {}
 
 void CompressionAllocator::configure(z_stream* stream) {
   stream->zalloc = AllocForZlib;
@@ -30,28 +33,10 @@ void* CompressionAllocator::AllocForBrotli(void* opaque, size_t size) {
   auto* allocator = static_cast<CompressionAllocator*>(opaque);
   auto data = kj::heapArray<kj::byte>(size);
   auto begin = data.begin();
-  auto isolate = v8::Isolate::TryGetCurrent();
-  kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
-  // TODO(soon): Improve this. We want to track external memory allocations
-  // with the v8 isolate so we can account for these as part of the isolate
-  // heap memory limits. However, we don't always have an isolate lock or
-  // current isolate when this is called so we can't just blindly try
-  // grabbing the isolate. For now we'll only be able to account for the
-  // allocations when we actually have an isolate. It's a bit tricky but
-  // we could possibly try implementing a deferred accounting adjustment?
-  // Basically, defer incrementing the memory allocation reported to the
-  // isolate until we have the isolate lock again? But that's a bit tricky
-  // if the adjustment is dropped before that happens. Will have to think
-  // through how best to approach that.
-  if (isolate != nullptr) {
-    auto& js = jsg::Lock::from(isolate);
-    maybeMemoryAdjustment = js.getExternalMemoryAdjustment(size);
-  }
+
   allocator->allocations.insert(begin,
-      {
-        .data = kj::mv(data),
-        .memoryAdjustment = kj::mv(maybeMemoryAdjustment),
-      });
+      {.data = kj::mv(data),
+        .memoryAdjustment = allocator->externalMemoryTarget->getAdjustment(size)});
   return begin;
 }
 
@@ -83,9 +68,15 @@ class Context {
     kj::ArrayPtr<const byte> buffer;
   };
 
-  explicit Context(Mode mode, kj::StringPtr format, ContextFlags flags)
-      : mode(mode),
-        strictCompression(flags) {
+  explicit Context(Mode mode,
+      kj::StringPtr format,
+      ContextFlags flags,
+      kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+      : allocator(kj::mv(externalMemoryTarget)),
+        mode(mode),
+        strictCompression(flags)
+
+  {
     // Configure allocator before any stream operations.
     allocator.configure(&ctx);
     int result = Z_OK;
@@ -251,8 +242,10 @@ class CompressionStreamImpl: public kj::Refcounted,
                              public ReadableStreamSource,
                              public WritableStreamSink {
  public:
-  explicit CompressionStreamImpl(kj::String format, Context::ContextFlags flags)
-      : context(mode, format, flags) {}
+  explicit CompressionStreamImpl(kj::String format,
+      Context::ContextFlags flags,
+      kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+      : context(mode, format, flags, kj::mv(externalMemoryTarget)) {}
 
   // WritableStreamSink implementation ---------------------------------------------------
 
@@ -500,7 +493,7 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::St
       "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide = kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(
-      kj::mv(format), Context::ContextFlags::NONE);
+      kj::mv(format), Context::ContextFlags::NONE, js.getExternalMemoryTarget());
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
@@ -517,7 +510,8 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
   auto readableSide =
       kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(kj::mv(format),
           FeatureFlags::get(js).getStrictCompression() ? Context::ContextFlags::STRICT
-                                                       : Context::ContextFlags::NONE);
+                                                       : Context::ContextFlags::NONE,
+          js.getExternalMemoryTarget());
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();

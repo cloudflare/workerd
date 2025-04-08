@@ -206,9 +206,12 @@ class IsolateBase {
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
-  v8::ExternalMemoryAccounter& getExternalMemoryAccounter() {
+  jsg::ExternalMemoryAccounter& getExternalMemoryAccounter() {
     return externalMemoryAccounter;
   }
+
+  // Get an object referencing this isolate that can be used to adjust external memory usage later
+  kj::Own<ExternalMemoryTarget> getExternalMemoryTarget();
 
   AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
     return *envAsyncContextKey;
@@ -290,8 +293,32 @@ class IsolateBase {
   // Polyfilled Symbol.asyncDispose.
   v8::Global<v8::Symbol> symbolAsyncDispose;
 
-  // Used to account for external memory
-  v8::ExternalMemoryAccounter externalMemoryAccounter;
+  /* *** External Memory accounting *** */
+  // Used to report external memory usage to V8
+  jsg::ExternalMemoryAccounter externalMemoryAccounter;
+
+  // A list of objects currently tracking memory that are referring to this isolate.
+  // They must be cleared when the isolate is destroyed.
+  kj::MutexGuarded<kj::HashSet<ExternalMemoryTarget*>> externalMemoryTargets;
+
+  // Remove an ExternalMemoryTarget from the list of pointers we are tracking.
+  // In doing so, its reference back to the Isolate is also cleared, allowing us to dispose the
+  // isolate.
+  void removeExternalMemoryTarget(ExternalMemoryTarget* target);
+
+  // Current value of memory adjustments that have been requested, but have not yet been reported
+  // to V8.
+  std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
+
+  // Adjust the pending external memory update value
+  void deferExternalMemoryUpdate(int64_t size);
+
+  // Get current value of external memory update (for tests)
+  int64_t getPendingExternalMemoryUpdate();
+
+  // Called when isolate lock is acquired. Report pending memory update to V8 and set its value
+  // back to zero.
+  void clearPendingExternalMemoryUpdate();
 
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
@@ -308,7 +335,6 @@ class IsolateBase {
   // operation) outside of the queue lock.
   const kj::MutexGuarded<BatchQueue<Item>> queue{
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
-  std::atomic<int64_t> pendingExternalMemoryDecrement = {0};
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -344,11 +370,9 @@ class IsolateBase {
 
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
   void deferDestruction(Item item);
-  void deferExternalMemoryDecrement(int64_t size);
 
   // Destroy everything in the deferred destruction queue. Must be called under the isolate lock.
   void clearDestructionQueue();
-  void clearPendingExternalMemoryDecrement();
 
   static void fatalError(const char* location, const char* message);
   static void oomError(const char* location, const v8::OOMDetails& details);
@@ -369,7 +393,7 @@ class IsolateBase {
   friend class Data;
   friend class Wrappable;
   friend class HeapTracer;
-  friend class ExternalMemoryAdjustment;
+  friend class ExternalMemoryTarget;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);
@@ -522,7 +546,7 @@ class Isolate: public IsolateBase {
         : jsg::Lock(isolate.ptr),
           jsgIsolate(const_cast<Isolate&>(isolate)) {
       jsgIsolate.clearDestructionQueue();
-      jsgIsolate.clearPendingExternalMemoryDecrement();
+      jsgIsolate.clearPendingExternalMemoryUpdate();
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
     KJ_DISALLOW_AS_COROUTINE_PARAM;

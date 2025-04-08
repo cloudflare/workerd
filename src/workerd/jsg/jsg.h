@@ -2246,42 +2246,85 @@ JS_TYPE_CLASSES(V)
 #undef V
 
 class DOMException;
+class ExternalMemoryAdjustment;
+
+// Wrapper of v8::ExternalMemoryAccounter that allows us to reset its memory usage back to zero
+// TODO(soon): Upstream a change to V8 to allow accessing this info without a second copy of it
+class ExternalMemoryAccounter: private v8::ExternalMemoryAccounter {
+ public:
+  using v8::ExternalMemoryAccounter::ExternalMemoryAccounter;
+
+  void Update(v8::Isolate* isolate, int64_t delta);
+  void Reset(v8::Isolate* isolate);
+
+ private:
+  size_t amount_of_external_memory_ = 0;
+  v8::Isolate* isolate_ = nullptr;
+};
+
+// Used to save a reference to an isolate that is responsible for external memory usage.
+// getAdjustment() can be invoked at any time to create a new RAII adjustment object
+// pointing to this isolate
+class ExternalMemoryTarget: public kj::Refcounted {
+  struct Impl;
+
+ public:
+  ExternalMemoryTarget(): maybeInner(kj::none) {}
+
+  ExternalMemoryTarget(v8::Isolate* isolate, jsg::ExternalMemoryAccounter* accounter) {
+    maybeInner.emplace(isolate, accounter);
+  }
+
+  bool isIsolateAlive();
+  int64_t getPendingMemoryUpdate();
+  ExternalMemoryAdjustment getAdjustment(size_t amount);
+  ~ExternalMemoryTarget();
+
+ private:
+  kj::Own<ExternalMemoryTarget> addRef();
+  void reset();
+  void maybeDeferAdjustment(ssize_t amount);
+  struct Impl {
+    v8::Isolate* isolate;
+    jsg::ExternalMemoryAccounter* externalMemoryAccounter;
+  };
+
+  kj::Maybe<Impl> maybeInner;
+
+  friend class ExternalMemoryAdjustment;
+  friend class IsolateBase;
+};
 
 // RAII class to adjust the amount of external memory attributed to an isolate.
 // The adjustment will be automatically decremented when the object is destroyed.
 // The allocation amount can be adjusted up or down during the lifetime of an object.
 class ExternalMemoryAdjustment final {
  public:
-  ExternalMemoryAdjustment(
-      v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount);
-  ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount);
+  ExternalMemoryAdjustment(kj::Own<ExternalMemoryTarget> externalMemory, size_t amount);
   ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
   ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
   KJ_DISALLOW_COPY(ExternalMemoryAdjustment);
   ~ExternalMemoryAdjustment() noexcept(false);
 
   // Adjust the amount of external memory report up or down.
-  void adjust(Lock&, ssize_t amount);
+  void adjust(ssize_t amount);
 
   // Set a specific amount of external memory to be attributed, overriding
   // the previous amount.
-  void set(Lock&, size_t amount);
-
-  inline v8::Isolate* getIsolate() const {
-    return isolate;
-  }
+  void set(size_t amount);
 
   inline size_t getAmount() const {
     return amount;
   }
 
  private:
-  v8::ExternalMemoryAccounter& externalMemoryAccounter;
-  v8::Isolate* isolate = nullptr;
+  kj::Own<ExternalMemoryTarget> externalMemory;
   size_t amount = 0;
 
-  static void maybeDeferAdjustment(
-      v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount);
+  // If the isolate is locked, adjust the v8::ExternalMemoryAccounter immediately.
+  // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
+  // time that we do.
+  void maybeDeferAdjustment(ssize_t amount);
 };
 
 // Represents an isolate lock, which allows the current thread to execute JavaScript code within
@@ -2343,7 +2386,12 @@ class Lock {
   // until the next time the lock is held. The ExternalMemoryAdjustment itself can be
   // moved and can be used to increment or decrement the amount of external memory
   // held.
-  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount);
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount = 0);
+
+  // Used to save a reference to an isolate that is responsible for external memory usage.
+  // getAdjustment() can be invoked at any time to create a new RAII adjustment object
+  // pointing to this isolate
+  kj::Own<ExternalMemoryTarget> getExternalMemoryTarget();
 
   Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);

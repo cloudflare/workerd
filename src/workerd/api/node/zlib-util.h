@@ -292,7 +292,10 @@ class ZlibUtil final: public jsg::Object {
   template <class CompressionContext>
   class CompressionStream: public jsg::Object {
    public:
-    explicit CompressionStream(ZlibMode _mode): context_(_mode) {}
+    explicit CompressionStream(
+        ZlibMode _mode, kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : allocator(kj::mv(externalMemoryTarget)),
+          context_(_mode) {}
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
     ~CompressionStream();
     KJ_DISALLOW_COPY_AND_MOVE(CompressionStream);
@@ -357,7 +360,8 @@ class ZlibUtil final: public jsg::Object {
 
   class ZlibStream final: public CompressionStream<ZlibContext> {
    public:
-    explicit ZlibStream(ZlibMode mode): CompressionStream(mode) {}
+    explicit ZlibStream(ZlibMode mode, kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : CompressionStream(mode, kj::mv(externalMemoryTarget)) {}
     KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
     static jsg::Ref<ZlibStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
@@ -382,8 +386,9 @@ class ZlibUtil final: public jsg::Object {
   template <typename CompressionContext>
   class BrotliCompressionStream: public CompressionStream<CompressionContext> {
    public:
-    explicit BrotliCompressionStream(ZlibMode _mode)
-        : CompressionStream<CompressionContext>(_mode) {}
+    explicit BrotliCompressionStream(
+        ZlibMode _mode, kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        : CompressionStream<CompressionContext>(_mode, kj::mv(externalMemoryTarget)) {}
     KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);
     static jsg::Ref<BrotliCompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
 
@@ -421,10 +426,11 @@ class ZlibUtil final: public jsg::Object {
       ZlibContext::Options options,
       ZlibModeValue mode,
       CompressCallback cb);
-  kj::Array<kj::byte> zlibSync(InputSource data, ZlibContext::Options options, ZlibModeValue mode);
+  kj::Array<kj::byte> zlibSync(
+      jsg::Lock& js, InputSource data, ZlibContext::Options options, ZlibModeValue mode);
 
   template <typename Context>
-  kj::Array<kj::byte> brotliSync(InputSource data, BrotliContext::Options options);
+  kj::Array<kj::byte> brotliSync(jsg::Lock& js, InputSource data, BrotliContext::Options options);
   template <typename Context>
   void brotliWithCallback(
       jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
