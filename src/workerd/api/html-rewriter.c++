@@ -325,9 +325,17 @@ class Rewriter final: public WritableStreamSink {
   // this (buildRewriter()) modifies that vector.
   kj::Own<lol_html_HtmlRewriter> rewriter;
 
-  kj::Own<WritableStreamSink> inner;
+  // Stores data written by lol-html, which will be periodically flushed to inner.
+  kj::Vector<kj::byte> outputBuffer;
 
-  kj::Maybe<kj::Promise<void>> writePromise;
+  // Used to ensure memory usage is reported to V8 and cannot grow arbritrarily
+  jsg::ExternalMemoryAdjustment externalMemoryAdjustment;
+
+  // True if we are currently flushing from outputBuffer to inner (in flushWrite)
+  bool flushing = false;
+
+  // The destination for the output from lol-html
+  kj::Own<WritableStreamSink> inner;
 
   kj::Maybe<kj::Exception> maybeException;
 
@@ -422,6 +430,7 @@ Rewriter::Rewriter(jsg::Lock& js,
     kj::ArrayPtr<const char> encoding,
     kj::Own<WritableStreamSink> inner)
     : rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this)),
+      externalMemoryAdjustment(js.getExternalMemoryAdjustment()),
       inner(kj::mv(inner)),
       ioContext(IoContext::current()),
       maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
@@ -505,25 +514,24 @@ kj::Promise<void> Rewriter::finishWrite() {
 }
 
 kj::Promise<void> Rewriter::flushWrite() {
-  auto checkException = [this]() -> kj::Promise<void> {
-    KJ_ASSERT(writePromise == kj::none);
+  KJ_ASSERT(!flushing);
 
-    KJ_IF_SOME(exception, maybeException) {
-      inner->abort(kj::cp(exception));
-      return kj::cp(exception);
-    }
+  if (!outputBuffer.empty()) {
+    KJ_DEFER({
+      externalMemoryAdjustment.set(0);
+      outputBuffer.clear();
+      flushing = false;
+    });
 
-    return kj::READY_NOW;
-  };
-
-  KJ_IF_SOME(wp, writePromise) {
-    KJ_DEFER(writePromise = kj::none);
-    return wp.then([checkException]() { return checkException(); });
+    flushing = true;
+    co_await inner->write(outputBuffer);
   }
 
-  return checkException();
+  KJ_IF_SOME(exception, maybeException) {
+    inner->abort(kj::cp(exception));
+    kj::throwFatalException(kj::cp(exception));
+  }
 }
-
 template <typename T, typename CType>
 lol_html_rewriter_directive_t Rewriter::thunk(CType* content, void* userdata) {
   auto& registration = *reinterpret_cast<RegisteredHandler*>(userdata);
@@ -755,15 +763,9 @@ void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {
     return;
   }
 
-  auto bufferCopy = kj::heapArray(buffer);
-
-  KJ_IF_SOME(wp, writePromise) {
-    writePromise = wp.then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
-      return inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-    });
-  } else {
-    writePromise = inner->write(bufferCopy.asPtr()).attach(kj::mv(bufferCopy));
-  }
+  KJ_ASSERT(!flushing);
+  externalMemoryAdjustment.adjust(buffer.size());
+  outputBuffer.addAll(buffer);
 }
 
 // =======================================================================================
