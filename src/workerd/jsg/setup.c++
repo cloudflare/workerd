@@ -150,8 +150,12 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 #endif
 
   v8::V8::InitializePlatform(&platformWrapper);
-  v8::V8::Initialize();
+
+  // A recent change in v8 initializes cppgc in V8::Initialize if it's not already initialized
+  // Hence the ordering here is important
   cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
+
+  v8::V8::Initialize();
   v8Initialized = true;
 }
 
