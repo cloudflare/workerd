@@ -199,6 +199,8 @@ build:asan --config=sanitizer-common
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
+# Enable ASan, LSan support in V8
+build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
 #
 # Linux and macOS
