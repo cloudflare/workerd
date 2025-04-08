@@ -1482,14 +1482,15 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   TransientJsRpcTarget(
       jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object, bool allowInstanceProperties = false)
       : JsRpcTargetBase(ioCtx),
-        handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object, kj::none))),
+        handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         allowInstanceProperties(allowInstanceProperties),
         pendingEvent(ioCtx.registerPendingEvent()) {
     // Check for the existence of a dispose function now so that the destructor doesn't have to
     // take an isolate lock if there isn't one.
     auto getResult = object.get(js, js.symbolDispose());
     if (getResult.isFunction()) {
-      handles->dispose.emplace(js.v8Isolate, v8::Local<v8::Value>(getResult).As<v8::Function>());
+      disposeFulfiller =
+          addDisposeTask(js, ioCtx, object, v8::Local<v8::Value>(getResult).As<v8::Function>());
     }
   }
 
@@ -1500,32 +1501,17 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<v8::Local<v8::Function>> dispose,
       bool allowInstanceProperties = false)
       : JsRpcTargetBase(ioCtx),
-        handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object, dispose))),
+        handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         allowInstanceProperties(allowInstanceProperties),
-        pendingEvent(ioCtx.registerPendingEvent()) {}
+        pendingEvent(ioCtx.registerPendingEvent()) {
+    KJ_IF_SOME(d, dispose) {
+      disposeFulfiller = addDisposeTask(js, ioCtx, object, d);
+    }
+  }
 
   ~TransientJsRpcTarget() noexcept(false) {
-    // If we have a disposer, and the I/O context is not already destroyed, arrange to call the
-    // disposer.
-    KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
-      auto& h = *handles;
-      if (h.dispose != kj::none || !h.stubDisposers.empty()) {
-        ctx.addTask(ctx.run([h = kj::mv(h)](Worker::Lock& lock) mutable {
-          jsg::Lock& js = lock;
-
-          // It's best if `handles` is destroyed under lock, as this avoids the need to queue
-          // destroyed handles to the cross-thread disposal queue. So, move it to the local stack.
-          auto handles = kj::mv(h);
-
-          // Call the disposer for the top-level object, if there was one.
-          KJ_IF_SOME(d, handles.dispose) {
-            jsg::check(
-                d.getHandle(js)->Call(js.v8Context(), handles.object.getHandle(js), 0, nullptr));
-          }
-
-          // Dropping `handles` will also call disposers for any stubs that were in the object.
-        }));
-      }
+    KJ_IF_SOME(f, kj::mv(disposeFulfiller)) {
+      f->fulfill();
     }
   }
 
@@ -1544,17 +1530,12 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
  private:
   struct Handles {
     jsg::JsRef<jsg::JsObject> object;
-    kj::Maybe<jsg::V8Ref<v8::Function>> dispose;
 
     // Discposers for stubs or other things inside `object` which need to be dropped as soon as
     // the pipeline is dropped.
     kj::Vector<kj::Own<void>> stubDisposers;
 
-    Handles(jsg::Lock& js, jsg::JsObject object, kj::Maybe<v8::Local<v8::Function>> dispose)
-        : object(js, object),
-          dispose(dispose.map([&](v8::Local<v8::Function> func) {
-            return jsg::V8Ref<v8::Function>(js.v8Isolate, func);
-          })) {}
+    Handles(jsg::Lock& js, jsg::JsObject object): object(js, object) {}
   };
 
   // This object could outlive the IoContext (that's why `JsRpcTargetBase` holds a `WeakRef` to the
@@ -1562,6 +1543,22 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   // place these handles in a `ReverseIoOwn` so that if the `IoContext` dies before we do, they are
   // dropped at that point.
   ReverseIoOwn<Handles> handles;
+
+  // When fulfilled, calls the original object's dispose function.
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> disposeFulfiller;
+
+  static kj::Own<kj::PromiseFulfiller<void>> addDisposeTask(
+      jsg::Lock& js, IoContext& ctx, jsg::JsObject object, v8::Local<v8::Function> dispose) {
+    auto obj = jsg::JsRef<jsg::JsObject>(js, object);
+    auto d = jsg::V8Ref<v8::Function>(js.v8Isolate, dispose);
+    auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
+    auto jsPromise =
+        ctx.awaitIo(js, kj::mv(promise), [obj = kj::mv(obj), d = kj::mv(d)](jsg::Lock& js) {
+      jsg::check(d.getHandle(js)->Call(js.v8Context(), obj.getHandle(js), 0, nullptr));
+    });
+    ctx.addTask(ctx.awaitJs(js, kj::mv(jsPromise)));
+    return kj::mv(fulfiller);
+  }
 
   bool allowInstanceProperties;
 
