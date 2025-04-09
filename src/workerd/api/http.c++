@@ -90,7 +90,7 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   if (slice.size() == value.size()) {
     return kj::mv(value);
   }
-  return js.accountedByteString(slice);
+  return js.accountedByteString(kj::str(slice));
 }
 
 void requireValidHeaderName(const jsg::ByteString& name) {
