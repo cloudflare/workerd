@@ -255,9 +255,9 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
         "Cannot cache response to a range request (206 Partial Content).");
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
-    auto cacheControl = responseHeadersRef->get(jsg::ByteString(kj::str("Cache-Control")));
+    auto cacheControl = responseHeadersRef->getNoChecks(js, "cache-control"_kj);
 
-    KJ_IF_SOME(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
+    KJ_IF_SOME(vary, responseHeadersRef->getNoChecks(js, "vary"_kj)) {
       JSG_REQUIRE(vary.findFirst('*') == kj::none, TypeError,
           "Cannot cache response with 'Vary: *' header.");
     }

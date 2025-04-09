@@ -370,7 +370,7 @@ bool JsRegExp::match(Lock& js, kj::StringPtr input) {
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
-  return jsg::ByteString(str.toString(js));
+  return js.accountedByteString(str.toString(js));
 }
 
 JsDate::operator kj::Date() const {

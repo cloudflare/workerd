@@ -1245,8 +1245,7 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
 
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");
-  auto contentTypeKey = jsg::ByteString(kj::str("content-type"));
-  KJ_IF_SOME(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
+  KJ_IF_SOME(contentType, response->getHeaders(js)->getNoChecks(js, "content-type"_kj)) {
     // TODO(cleanup): readContentTypeParameter can be replaced with using
     // workerd/util/mimetype.h directly.
     KJ_IF_SOME(charset, readContentTypeParameter(contentType, "charset")) {

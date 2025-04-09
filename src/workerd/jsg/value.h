@@ -492,10 +492,13 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       ByteString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
     v8::Local<v8::String> str = check(handle->ToString(context));
-    auto result = ByteString(KJ_ASSERT_NONNULL(
-        tryUnwrap(context, str, static_cast<kj::String*>(nullptr), parentObject)));
+
+    auto& js = Lock::from(context->GetIsolate());
+    auto inner =
+        KJ_ASSERT_NONNULL(tryUnwrap(context, str, static_cast<kj::String*>(nullptr), parentObject));
+
+    auto result = js.accountedByteString(kj::mv(inner));
 
     if (!simdutf::validate_ascii(result.begin(), result.size())) {
       // If storage is one-byte or the string contains only one-byte
@@ -520,10 +523,11 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     v8::Local<v8::String> str = check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
+    auto& js = Lock::from(isolate);
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
     str->WriteUtf8V2(isolate, buf.begin(), buf.size(),
         v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
-    return USVString(kj::mv(buf));
+    return js.accountedUSVString(kj::mv(buf));
   }
 
   kj::Maybe<DOMString> tryUnwrap(v8::Local<v8::Context> context,
@@ -532,9 +536,10 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     v8::Local<v8::String> str = check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
+    auto& js = Lock::from(isolate);
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
     str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-    return DOMString(kj::mv(buf));
+    return js.accountedDOMString(kj::mv(buf));
   }
 };
 

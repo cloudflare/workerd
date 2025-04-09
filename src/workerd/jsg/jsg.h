@@ -2365,6 +2365,21 @@ class Lock {
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
   }
 
+  // Returns a ByteString with an external memory adjustment attached.
+  ByteString accountedByteString(kj::Array<char>&& str);
+  ByteString accountedByteString(kj::String&& str) {
+    return accountedByteString(str.releaseArray());
+  }
+  ByteString accountedByteString(kj::StringPtr str) {
+    return accountedByteString(kj::str(str));
+  }
+
+  // Returns a DOMString with an external memory adjustment attached.
+  DOMString accountedDOMString(kj::Array<char>&& str);
+
+  // Returns a USVString with an external memory adjustment attached.
+  USVString accountedUSVString(kj::Array<char>&& str);
+
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");

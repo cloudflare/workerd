@@ -165,7 +165,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   CfProperty cf(cfBlobJson);
 
-  auto jsHeaders = js.alloc<Headers>(headers, Headers::Guard::REQUEST);
+  auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
   auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
@@ -207,14 +207,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
       jsHeaders->setUnguarded(
-          jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
+          js, js.accountedByteString("Content-Length"_kj), js.accountedByteString(kj::str(l)));
     } else {
       jsHeaders->setUnguarded(
-          jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
+          js, js.accountedByteString("Transfer-Encoding"_kj), js.accountedByteString("chunked"_kj));
     }
   }
 
-  auto jsRequest = js.alloc<Request>(method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+  auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
       js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
       kj::none /** AbortSignal **/, kj::mv(cf), kj::mv(body));
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
