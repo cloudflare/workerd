@@ -83,6 +83,8 @@ kj::String namedErrorCode(int errorCode) {
 #undef LITERAL
 }
 
+constexpr size_t RA_MAX_METRICS_QUERY_SIZE = 1024;
+
 kj::String dbErrorMessage(int errorCode, sqlite3* db) {
   kj::StringTree msg = kj::strTree(sqlite3_errmsg(db));
   if (int offset = sqlite3_error_offset(db); offset != -1) {
@@ -720,7 +722,33 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
 
           // This isn't the last statement in the code. Execute it immediately.
           SQLITE_CALL_SCOPE {
+            auto start = sqliteObserver.now();
+            auto dbWalSizeBefore = sqliteObserver.getDbWalSize();
+
             int err = sqlite3_step(result);
+
+            kj::Duration queryLatency = sqliteObserver.now() - start;
+            auto dbWalBytesWritten = sqliteObserver.getDbWalSize() - dbWalSizeBefore;
+            auto rowsRead = sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_READ, 0);
+            auto rowsWritten = sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 0);
+
+            kj::Maybe<kj::String> queryStatement;
+            kj::Maybe<kj::String> queryErrorDescription;
+            try {
+              kj::StringPtr statement = sqlite3_sql(result);
+              queryStatement = kj::heapString(
+                  statement.slice(0, kj::min(statement.size(), RA_MAX_METRICS_QUERY_SIZE)));
+            } catch (kj::Exception& e) {
+              kj::StringPtr errorDescription = e.getDescription();
+              queryErrorDescription = kj::heapString(errorDescription.slice(
+                  0, kj::min(RA_MAX_METRICS_QUERY_SIZE, errorDescription.size())));
+            }
+
+            // Report queryEvent for this statement
+            sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
+                queryLatency, dbWalBytesWritten, err, regulator.shouldAddQueryStats(),
+                kj::mv(queryErrorDescription));
+
             if (err == SQLITE_DONE) {
               // good
             } else if (err == SQLITE_ROW) {
@@ -1267,7 +1295,8 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(regulator),
-      maybeStatement(statement.prepareForExecution()) {
+      maybeStatement(statement.prepareForExecution()),
+      queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1280,7 +1309,8 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     : ResetListener(db),
       regulator(regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-      maybeStatement(ownStatement) {
+      maybeStatement(ownStatement),
+      queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1294,6 +1324,18 @@ void SqliteDatabase::Query::destroy() {
   if (regulator.shouldAddQueryStats()) {
     //Update the db stats that we have collected for the query
     db.sqliteObserver.addQueryStats(rowsRead, rowsWritten);
+  }
+
+  queryEvent.setQueryEventStats(rowsRead, rowsWritten, !(regulator.shouldAddQueryStats()));
+
+  try {
+    kj::StringPtr statement = sqlite3_sql(getStatementAndEffect().statement);
+    queryEvent.setQueryStatement(
+        kj::heapString(statement.slice(0, kj::min(statement.size(), RA_MAX_METRICS_QUERY_SIZE))));
+  } catch (kj::Exception& e) {
+    kj::StringPtr errorDescription = e.getDescription();
+    queryEvent.setQueryErrorDescription(kj::heapString(
+        errorDescription.slice(0, kj::min(RA_MAX_METRICS_QUERY_SIZE, errorDescription.size()))));
   }
 
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
@@ -1413,6 +1455,7 @@ void SqliteDatabase::Query::nextRow(bool first) {
 
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
+    queryEvent.setQueryResult(err);
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets
