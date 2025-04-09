@@ -334,7 +334,7 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
       }
 
       KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-        KJ_IF_SOME(e, h->get(jsg::ByteString(kj::str("range")))) {
+        KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
           builder.setRangeHeader(kj::str(e));
         }
       }
@@ -1036,17 +1036,17 @@ kj::Array<R2Bucket::Etag> buildSingleEtagArray(kj::StringPtr etagValue) {
 
 R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
-  KJ_IF_SOME(e, h.get(jsg::ByteString(kj::str("if-match")))) {
+  KJ_IF_SOME(e, h.getNoChecks(js, "if-match"_kj)) {
     etagMatches = parseConditionalEtagHeader(kj::str(e));
   }
-  KJ_IF_SOME(e, h.get(jsg::ByteString(kj::str("if-none-match")))) {
+  KJ_IF_SOME(e, h.getNoChecks(js, "if-none-match"_kj)) {
     etagDoesNotMatch = parseConditionalEtagHeader(kj::str(e));
   }
-  KJ_IF_SOME(d, h.get(jsg::ByteString(kj::str("if-modified-since")))) {
+  KJ_IF_SOME(d, h.getNoChecks(js, "if-modified-since"_kj)) {
     auto date = parseDate(js, d);
     uploadedAfter = date;
   }
-  KJ_IF_SOME(d, h.get(jsg::ByteString(kj::str("if-unmodified-since")))) {
+  KJ_IF_SOME(d, h.getNoChecks(js, "if-unmodified-since"_kj)) {
     auto date = parseDate(js, d);
     uploadedBefore = date;
   }
@@ -1074,22 +1074,22 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(const Conditional& c)
 
 R2Bucket::HttpMetadata R2Bucket::HttpMetadata::fromRequestHeaders(jsg::Lock& js, Headers& h) {
   HttpMetadata result;
-  KJ_IF_SOME(ct, h.get(jsg::ByteString(kj::str("content-type")))) {
+  KJ_IF_SOME(ct, h.getNoChecks(js, "content-type")) {
     result.contentType = kj::mv(ct);
   }
-  KJ_IF_SOME(ce, h.get(jsg::ByteString(kj::str("content-encoding")))) {
+  KJ_IF_SOME(ce, h.getNoChecks(js, "content-encoding"_kj)) {
     result.contentEncoding = kj::mv(ce);
   }
-  KJ_IF_SOME(cd, h.get(jsg::ByteString(kj::str("content-disposition")))) {
+  KJ_IF_SOME(cd, h.getNoChecks(js, "content-disposition"_kj)) {
     result.contentDisposition = kj::mv(cd);
   }
-  KJ_IF_SOME(cl, h.get(jsg::ByteString(kj::str("content-language")))) {
+  KJ_IF_SOME(cl, h.getNoChecks(js, "content-language"_kj)) {
     result.contentLanguage = kj::mv(cl);
   }
-  KJ_IF_SOME(cc, h.get(jsg::ByteString(kj::str("cache-control")))) {
+  KJ_IF_SOME(cc, h.getNoChecks(js, "cache-control"_kj)) {
     result.cacheControl = kj::mv(cc);
   }
-  KJ_IF_SOME(ceStr, h.get(jsg::ByteString(kj::str("expires")))) {
+  KJ_IF_SOME(ceStr, h.getNoChecks(js, "expires"_kj)) {
     result.cacheExpiry = parseDate(js, ceStr);
   }
 
@@ -1114,22 +1114,22 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   const auto& m = KJ_REQUIRE_NONNULL(httpMetadata);
 
   KJ_IF_SOME(ct, m.contentType) {
-    headers.set(jsg::ByteString(kj::str("content-type")), jsg::ByteString(kj::str(ct)));
+    headers.set(js, js.accountedByteString("content-type"_kj), js.accountedByteString(ct));
   }
   KJ_IF_SOME(cl, m.contentLanguage) {
-    headers.set(jsg::ByteString(kj::str("content-language")), jsg::ByteString(kj::str(cl)));
+    headers.set(js, js.accountedByteString("content-language"_kj), js.accountedByteString(cl));
   }
   KJ_IF_SOME(cd, m.contentDisposition) {
-    headers.set(jsg::ByteString(kj::str("content-disposition")), jsg::ByteString(kj::str(cd)));
+    headers.set(js, js.accountedByteString("content-disposition"_kj), js.accountedByteString(cd));
   }
   KJ_IF_SOME(ce, m.contentEncoding) {
-    headers.set(jsg::ByteString(kj::str("content-encoding")), jsg::ByteString(kj::str(ce)));
+    headers.set(js, js.accountedByteString("content-encoding"_kj), js.accountedByteString(ce));
   }
   KJ_IF_SOME(cc, m.cacheControl) {
-    headers.set(jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str(cc)));
+    headers.set(js, js.accountedByteString("cache-control"_kj), js.accountedByteString(cc));
   }
   KJ_IF_SOME(ce, m.cacheExpiry) {
-    headers.set(jsg::ByteString(kj::str("expires")), toUTCString(js, ce));
+    headers.set(js, js.accountedByteString("expires"_kj), toUTCString(js, ce));
   }
 }
 

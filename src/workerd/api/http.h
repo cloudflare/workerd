@@ -46,9 +46,9 @@ public:
   };
 
   Headers(): guard(Guard::NONE) {}
-  explicit Headers(jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
-  explicit Headers(const Headers& other);
-  explicit Headers(const kj::HttpHeaders& other, Guard guard);
+  explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
+  explicit Headers(jsg::Lock& js, const Headers& other);
+  explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
 
   Headers(Headers&&) = delete;
   Headers& operator=(Headers&&) = delete;
@@ -86,7 +86,9 @@ public:
                                 jsg::Dict<jsg::ByteString, jsg::ByteString>>;
 
   static jsg::Ref<Headers> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
-  kj::Maybe<jsg::ByteString> get(jsg::ByteString name);
+  kj::Maybe<jsg::ByteString> get(jsg::Lock& js, jsg::ByteString name);
+
+  kj::Maybe<jsg::ByteString> getNoChecks(jsg::Lock& js, kj::StringPtr name);
 
   // getAll is a legacy non-standard extension API that we introduced before
   // getSetCookie() was defined. We continue to support it for backwards
@@ -99,13 +101,13 @@ public:
 
   bool has(jsg::ByteString name);
 
-  void set(jsg::ByteString name, jsg::ByteString value);
+  void set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
 
   // Like set(), but ignores the header guard if set. This can only be called from C++, and may be
   // used to mutate headers before dispatching a request.
-  void setUnguarded(jsg::ByteString name, jsg::ByteString value);
+  void setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
 
-  void append(jsg::ByteString name, jsg::ByteString value);
+  void append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
 
   void delete_(jsg::ByteString name);
 
@@ -337,7 +339,7 @@ public:
   // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
   static ExtractedBody extractBody(jsg::Lock& js, Initializer init);
 
-  explicit Body(kj::Maybe<ExtractedBody> init, Headers& headers);
+  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
 
   kj::Maybe<Buffer> getBodyBuffer(jsg::Lock& js);
 
@@ -788,13 +790,13 @@ public:
     NOCACHE,
   };
 
-  Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
+  Request(jsg::Lock& js, kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
           kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
           kj::Maybe<Body::ExtractedBody> body,
           CacheMode cacheMode = CacheMode::NONE,
           Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
-    : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
+    : Body(js, kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
       cacheMode(cacheMode), cf(kj::mv(cf)), responseBodyEncoding(responseBodyEncoding) {
     KJ_IF_SOME(s, signal) {

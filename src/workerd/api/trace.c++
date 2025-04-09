@@ -349,7 +349,8 @@ jsg::Optional<jsg::V8Ref<v8::Object>> TraceItem::FetchEventInfo::Request::getCf(
   return detail->cf.map([&](jsg::V8Ref<v8::Object>& obj) { return obj.addRef(js); });
 }
 
-jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::getHeaders() {
+jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::getHeaders(
+    jsg::Lock& js) {
   auto shouldRedact = [](kj::StringPtr name) {
     return (
         //(name == "authorization"_kj) || // covered below
@@ -362,8 +363,7 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
   auto builder = kj::heapArrayBuilder<HeaderDict::Field>(detail->headers.size());
   for (const auto& header: detail->headers) {
     auto v = (redacted && shouldRedact(header.name)) ? "REDACTED"_kj : header.value;
-    builder.add(
-        HeaderDict::Field{jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v))});
+    builder.add(HeaderDict::Field{js.accountedByteString(header.name), js.accountedByteString(v)});
   }
 
   // TODO(conform): Better to return a frozen JS Object?

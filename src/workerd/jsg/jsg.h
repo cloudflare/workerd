@@ -2367,6 +2367,12 @@ class Lock {
 
   // Returns a ByteString with an external memory adjustment attached.
   ByteString accountedByteString(kj::Array<char>&& str);
+  ByteString accountedByteString(kj::String&& str) {
+    return accountedByteString(str.releaseArray());
+  }
+  ByteString accountedByteString(kj::StringPtr str) {
+    return accountedByteString(kj::str(str));
+  }
 
   // Returns a DOMString with an external memory adjustment attached.
   DOMString accountedDOMString(kj::Array<char>&& str);

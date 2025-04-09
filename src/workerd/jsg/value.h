@@ -498,7 +498,7 @@ class StringWrapper {
     auto inner =
         KJ_ASSERT_NONNULL(tryUnwrap(context, str, static_cast<kj::String*>(nullptr), parentObject));
 
-    auto result = js.accountedByteString(inner.releaseArray());
+    auto result = js.accountedByteString(kj::mv(inner));
 
     if (!simdutf::validate_ascii(result.begin(), result.size())) {
       // If storage is one-byte or the string contains only one-byte
