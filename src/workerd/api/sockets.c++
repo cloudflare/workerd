@@ -361,7 +361,12 @@ void Socket::handleProxyStatus(
     jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status) {
   auto& context = IoContext::current();
   auto result = context.awaitIo(js, status.catch_([](kj::Exception&& e) {
-    LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    // Let's not log errors when we have a disconnected exception.
+    // If we don't filter this out, whenever connect() fails, we'll
+    // have noisy errors even though the user catches the error on JS side.
+    if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+      LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
+    }
     return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
   }),
       [this, self = JSG_THIS](

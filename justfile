@@ -30,12 +30,12 @@ test-asan *args="//...":
   just test {{args}} --config=asan
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
-stream-test args:
+stream-test *args:
   bazel test {{args}} --test_output=streamed
 
 # e.g. just node-test zlib
-node-test test_name:
-  just stream-test //src/workerd/api/node:tests/{{test_name}}-nodejs-test
+node-test test_name *args:
+  just stream-test //src/workerd/api/node:tests/{{test_name}}-nodejs-test {{args}}
 
 # e.g. just wpt-test urlpattern
 wpt-test test_name:

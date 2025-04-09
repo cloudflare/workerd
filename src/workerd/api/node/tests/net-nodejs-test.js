@@ -33,11 +33,17 @@ const enc = new TextEncoder();
 
 export const checkPortsSetCorrectly = {
   test(ctrl, env, ctx) {
-    strictEqual(typeof env.SERVER_PORT, 'string');
-    strictEqual(typeof env.ECHO_SERVER_PORT, 'string');
-    strictEqual(typeof env.TIMEOUT_SERVER_PORT, 'string');
-    strictEqual(typeof env.END_SERVER_PORT, 'string');
-    strictEqual(typeof env.SERVER_THAT_DIES_PORT, 'string');
+    const keys = [
+      'SERVER_PORT',
+      'ECHO_SERVER_PORT',
+      'TIMEOUT_SERVER_PORT',
+      'END_SERVER_PORT',
+      'SERVER_THAT_DIES_PORT',
+    ];
+    for (const key of keys) {
+      strictEqual(typeof env[key], 'string');
+      ok(env[key].length > 0);
+    }
   },
 };
 
@@ -95,9 +101,7 @@ export const testNetAllowHalfOpen = {
     const finishFn = mock.fn(() => {
       ok(!c.destroyed);
     });
-    const closeFn = mock.fn(() => {
-      resolve();
-    });
+    const closeFn = mock.fn(resolve);
     c.on('end', endFn);
 
     // Even tho we're not writing anything, since the socket receives a
@@ -707,7 +711,6 @@ export const testNetEndDestroyed = {
       resolve();
     });
     c.on('end', endFn);
-    c.end();
     await promise;
   },
 };
@@ -1623,20 +1626,19 @@ export const testNetTimeoutNoHandle = {
   },
 };
 
-// TODO(soon): Fix end event not being emitted.
 // test/parallel/test-net-writable.js
-// export const testNetWritable = {
-//   async test(ctrl, env) {
-//     const { promise, resolve } = Promise.withResolvers();
-//     const socket = net.connect(env.SERVER_THAT_DIES_PORT);
-//     socket.on('end', () => {
-//       strictEqual(socket.writable, true);
-//       socket.write('hello world');
-//       resolve();
-//     });
-//     await promise;
-//   }
-// }
+export const testNetWritable = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect(env.SERVER_THAT_DIES_PORT);
+    socket.on('end', () => {
+      strictEqual(socket.writable, true);
+      socket.write('hello world');
+      resolve();
+    });
+    await promise;
+  },
+};
 
 // test/parallel/test-net-write-arguments.js
 export const testNetWriteArguments = {
