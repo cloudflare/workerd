@@ -276,7 +276,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
-    t.setEventInfo(context.getInvocationSpanContext(), timestamp,
+    t.setEventInfo(context.getInvocationSpanContext(), context.getWaitUntilTasks(), timestamp,
         tracing::FetchEventInfo(method, kj::str(url), kj::str(cfJson), kj::mv(traceHeadersArray)));
   }
 
@@ -537,7 +537,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
+    t.setEventInfo(context.getInvocationSpanContext(), context.getWaitUntilTasks(), context.now(),
         tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
@@ -602,7 +602,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(
-        context.getInvocationSpanContext(), context.now(), tracing::AlarmEventInfo(scheduledTime));
+        context.getInvocationSpanContext(), context.getWaitUntilTasks(), context.now(), tracing::AlarmEventInfo(scheduledTime));
   }
 
   // TODO(streaming-tail): Ensure that lifetime of outcomeObserver is handled correctly.

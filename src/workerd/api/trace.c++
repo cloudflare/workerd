@@ -660,7 +660,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(
-        context.getInvocationSpanContext(), context.now(), tracing::TraceEventInfo(traces));
+        context.getInvocationSpanContext(), context.getWaitUntilTasks(), context.now(), tracing::TraceEventInfo(traces));
   }
 
   auto outcomeObserver = kj::rc<OutcomeObserver>(

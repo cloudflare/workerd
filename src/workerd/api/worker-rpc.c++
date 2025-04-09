@@ -1834,7 +1834,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 
   void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
     KJ_IF_SOME(t, tracer) {
-      t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.now(),
+      t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.getWaitUntilTasks(), ioctx.now(),
           tracing::JsRpcEventInfo(kj::str(methodName)));
     }
   }

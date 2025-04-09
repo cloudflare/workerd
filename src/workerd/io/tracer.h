@@ -129,7 +129,7 @@ class BaseTracer: public kj::Refcounted {
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
   virtual void setEventInfo(
-      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&&) = 0;
+      const tracing::InvocationSpanContext& context, kj::TaskSet& ioContextTasks, kj::Date timestamp, tracing::EventInfo&&) = 0;
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
@@ -176,7 +176,7 @@ class WorkerTracer: public BaseTracer {
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) override;
-  void setEventInfo(const tracing::InvocationSpanContext& context,
+  void setEventInfo(const tracing::InvocationSpanContext& context, kj::TaskSet& ioContextTasks,
       kj::Date timestamp,
       tracing::EventInfo&&) override;
   void setFetchResponseInfo(tracing::FetchResponseInfo&&) override;

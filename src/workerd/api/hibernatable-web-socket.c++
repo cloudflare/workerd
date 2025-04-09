@@ -97,7 +97,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   // TODO(streaming-tail-workers): Support Hibernate and Resume events properly.
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(incomingRequest->getContext().getInvocationSpanContext(), context.now(),
+    t.setEventInfo(incomingRequest->getContext().getInvocationSpanContext(), context.getWaitUntilTasks(), context.now(),
         tracing::HibernatableWebSocketEventInfo(getType()));
   }
 

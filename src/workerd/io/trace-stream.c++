@@ -929,7 +929,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   // be careful to avoid infinite recursion in case pipeline stages tail themselves in the
   // downstream implementation.
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
+    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.getWaitUntilTasks(), ioContext.now(),
         TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
   }
 

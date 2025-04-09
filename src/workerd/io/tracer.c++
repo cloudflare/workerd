@@ -277,7 +277,7 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
 }
 
 void WorkerTracer::setEventInfo(
-    const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
+    const tracing::InvocationSpanContext& context, kj::TaskSet& ioContextTasks, kj::Date timestamp, tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything

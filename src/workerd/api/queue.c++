@@ -557,7 +557,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   }
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
+    t.setEventInfo(context.getInvocationSpanContext(), context.getWaitUntilTasks(), context.now(),
         tracing::QueueEventInfo(kj::str(queueName), batchSize));
   }
 
