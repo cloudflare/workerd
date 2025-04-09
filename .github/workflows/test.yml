@@ -151,7 +151,7 @@ jobs:
   workers-sdk-test:
     needs: [test, check-snapshot]
     name: Run workers-sdk tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-arm
     steps:
       - name: Checkout workers-sdk
         uses: actions/checkout@v4
@@ -195,10 +195,7 @@ jobs:
           EOF
           pnpm add /tmp/test-types -w
 
-      - name: Build Wrangler, Miniflare, Vitest, Vite & dependencies
-        run: pnpm build --filter miniflare --filter wrangler --filter @cloudflare/vitest-pool-workers --filter @cloudflare/vite-plugin
-
       - name: Run Wrangler, Miniflare, Vitest, Vite tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter= @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
+        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
