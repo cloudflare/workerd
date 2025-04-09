@@ -389,6 +389,11 @@ kj::Own<ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
 }
 
+kj::String Lock::accountedKjString(kj::Array<char>&& str) {
+  size_t size = str.size();
+  return kj::String(str.attach(getExternalMemoryAdjustment(size)));
+}
+
 ByteString Lock::accountedByteString(kj::Array<char>&& str) {
   size_t size = str.size();
   return ByteString(str.attach(getExternalMemoryAdjustment(size)));

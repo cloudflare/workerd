@@ -485,7 +485,8 @@ class StringWrapper {
     v8::Isolate* isolate = context->GetIsolate();
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
     str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-    return kj::String(kj::mv(buf));
+    auto& js = Lock::from(isolate);
+    return js.accountedKjString(kj::mv(buf));
   }
 
   kj::Maybe<ByteString> tryUnwrap(v8::Local<v8::Context> context,

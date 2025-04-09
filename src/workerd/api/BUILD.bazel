@@ -276,6 +276,7 @@ wd_cc_library(
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
         "headers-test.c++",
+        "form-data-memory-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
         "util-test.c++",
