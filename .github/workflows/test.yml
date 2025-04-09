@@ -199,6 +199,6 @@ jobs:
         run: pnpm build --filter miniflare --filter wrangler --filter @cloudflare/vitest-pool-workers --filter @cloudflare/vite-plugin
 
       - name: Run Wrangler, Miniflare, Vitest, Vite tests
-        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter="./packages/vite-plugin-cloudflare/playground" --filter="./fixtures/vitest-pool-workers-examples"
+        run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter= @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
