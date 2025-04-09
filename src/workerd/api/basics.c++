@@ -371,8 +371,7 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
       }
     }
 
-    auto maybeHandlerSet = typeMap.find(event->getType());
-    KJ_IF_SOME(handlerSet, maybeHandlerSet) {
+    KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
       for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
         KJ_SWITCH_ONEOF(handler->handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
@@ -401,14 +400,18 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
       // into the Callbacks vector, which means we need to look up the actual handler
       // again to see if it still exists in the list. The entire way the storage of the
       // handlers is done here can be improved to make this more efficient.
-      auto& handlerSet = KJ_ASSERT_NONNULL(maybeHandlerSet);
-      KJ_SWITCH_ONEOF(handler) {
-        KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-          return handlerSet.handlers.find(js.identity) == kj::none;
+
+      KJ_IF_SOME(handlerSet, typeMap.find(event->getType())) {
+        KJ_SWITCH_ONEOF(handler) {
+          KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
+            return handlerSet.handlers.find(js.identity) == kj::none;
+          }
+          KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
+            return handlerSet.handlers.find(native.handler) == kj::none;
+          }
         }
-        KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          return handlerSet.handlers.find(native.handler) == kj::none;
-        }
+      } else {
+        return true;
       }
       KJ_UNREACHABLE;
     };
