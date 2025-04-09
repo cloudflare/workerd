@@ -389,6 +389,21 @@ kj::Own<ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
 }
 
+ByteString Lock::accountedByteString(kj::Array<char>&& str) {
+  size_t size = str.size();
+  return ByteString(str.attach(getExternalMemoryAdjustment(size)));
+}
+
+DOMString Lock::accountedDOMString(kj::Array<char>&& str) {
+  size_t size = str.size();
+  return DOMString(str.attach(getExternalMemoryAdjustment(size)));
+}
+
+USVString Lock::accountedUSVString(kj::Array<char>&& str) {
+  size_t size = str.size();
+  return USVString(str.attach(getExternalMemoryAdjustment(size)));
+}
+
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
