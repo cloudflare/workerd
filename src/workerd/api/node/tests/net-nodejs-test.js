@@ -1269,18 +1269,18 @@ export const testNetSocketBytesWritten = {
     // one = 3 bytes, twø = 4 bytes
     strictEqual(socket.bytesWritten, 3 + 4);
 
-    socket.on('connect', function () {
+    const connectFn = mock.fn(() => {
+      strictEqual(socket.bytesWritten, 3 + 4);
+    });
+    socket.on('connect', connectFn);
+
+    socket.on('end', function () {
       strictEqual(socket.bytesWritten, 3 + 4);
       resolve();
     });
 
-    // TODO(soon): Investigate why end() is not called.
-    // socket.on('end', function () {
-    //   strictEqual(socket.bytesWritten, 3 + 4);
-    //   resolve();
-    // });
-
     await promise;
+    strictEqual(connectFn.mock.callCount(), 1);
   },
 };
 
