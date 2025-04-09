@@ -30,6 +30,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
+#include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/compatibility-date.h>
