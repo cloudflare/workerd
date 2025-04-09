@@ -1507,15 +1507,6 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     outcome = newOutcome;
   }
 
-  void reportOutcome(const tracing::InvocationSpanContext& context) override {
-    KJ_IF_SOME(t, tracer) {
-      KJ_IF_SOME(writer, t->getTailStreamWriter()) {
-        writer->report(
-            context, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
-      }
-    }
-  }
-
   // WorkerInterface
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,

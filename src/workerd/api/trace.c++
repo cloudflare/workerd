@@ -663,9 +663,6 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
         context.getInvocationSpanContext(), context.now(), tracing::TraceEventInfo(traces));
   }
 
-  auto outcomeObserver = kj::rc<OutcomeObserver>(
-      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
-
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
     if (trace->eventInfo != kj::none) {
@@ -701,7 +698,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
   };
 
-  co_await incomingRequest->drain().attach(kj::mv(outcomeObserver));
+  co_await incomingRequest->drain();
 }
 }  // namespace
 

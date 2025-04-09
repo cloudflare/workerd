@@ -280,33 +280,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         tracing::FetchEventInfo(method, kj::str(url), kj::str(cfJson), kj::mv(traceHeadersArray)));
   }
 
-  // At the conclusion of an invocation we need to dispatch the outcome
-  // event to the streaming tail worker (if any). We essentially have a race
-  // between the completion of waitUntil tasks and the completion of the
-  // deferred proxy (if any). The request is done whenever both of these are
-  // finished. However, those end up being two separate (and unrelated) branches
-  // of the promise tree set up by an invocation.
-  //
-  // So to handle this case, we will create a refcounted object that will
-  // trigger the emission of the outcome event when it is destroyed. Each
-  // of our promise branches will hold a reference. Whichever branch finishes
-  // last will be the one to trigger the outcome event.
-  //
-  // Critically, the RequestObserver (e.g. incomingRequest->getMetrics()) must
-  // be kept alive until the outcome event is emitted. This is because it is
-  // the RequestObserver that actually receives and processes that event. This
-  // should be fine as strong references to the RequestObserver are held by
-  // the final then/catch steps in the promise chain below, both of which
-  // ought to outlive the actual outcome event emission.
-  //
-  // The outcome observer arranges to send the streaming tail session outcome event.
-  // References to this will be added to each of the promise completion branches
-  // set up below to ensure that the outcome is correctly reported for both waitUntil
-  // and deferred proxy cases (the outcome should be sent after either waitUntil tasks
-  // complete or the deferred proxy completes, whichever occurs *last*).
-  auto outcomeObserver = kj::rc<OutcomeObserver>(
-      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
-
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
 
@@ -338,11 +311,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::cp(exception));
 
-    // TODO(streaming-tail): This is needed to report the outcome correctly when there is an
-    // exception, but breaks some downstream tests. Fix and re-enable.
-    // At this point we know that the request has failed.
-    // context.getMetrics().reportFailure(exception);
-
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
     return context.waitForOutputLocks().then(
@@ -352,8 +320,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return kj::mv(exception);
     });
   })
-      .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest), &context,
-                            outcomeObserver = outcomeObserver.addRef()]() mutable {
+      .attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest), &context]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
     if (context.isFailOpen()) {
       // Fail-open behavior has been chosen, we'd better save an interface that we can use for
@@ -361,12 +328,10 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       failOpenService = context.getSubrequestChannelNoChecks(
           IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
     }
-    auto promise =
-        incomingRequest->drain().attach(kj::mv(incomingRequest).attach(kj::mv(outcomeObserver)));
+    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
   }))
-      .then([this, metrics = kj::mv(metricsForProxyTask),
-                outcomeObserver = outcomeObserver.addRef()]() mutable -> kj::Promise<void> {
+      .then([this, metrics = kj::mv(metricsForProxyTask)]() mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() finish proxying",
         PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
@@ -385,8 +350,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     proxyTask = kj::none;
   }))
       .catch_([this, wrappedResponse = kj::mv(wrappedResponse), isActor, method, url, &headers,
-                  &requestBody, metrics = kj::mv(metricsForCatch),
-                  outcomeObserver = kj::mv(outcomeObserver)](
+                  &requestBody, metrics = kj::mv(metricsForCatch)](
                   kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() exception",
@@ -541,9 +505,6 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
         tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
-  auto outcomeObserver = kj::rc<OutcomeObserver>(
-      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
-
   // Scheduled handlers run entirely in waitUntil() tasks.
   context.addWaitUntil(context.run(
       [scheduledTime, cron, entrypointName = entrypointName, props = kj::mv(props), &context,
@@ -565,7 +526,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
   };
 
-  auto promise = waitForFinished(context, kj::mv(incomingRequest)).attach(kj::mv(outcomeObserver));
+  auto promise = waitForFinished(context, kj::mv(incomingRequest));
 
   return maybeAddGcPassForTest(context, kj::mv(promise));
 }
@@ -605,10 +566,6 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         context.getInvocationSpanContext(), context.now(), tracing::AlarmEventInfo(scheduledTime));
   }
 
-  // TODO(streaming-tail): Ensure that lifetime of outcomeObserver is handled correctly.
-  auto outcomeObserver = kj::rc<OutcomeObserver>(
-      kj::addRef(incomingRequest->getMetrics()), context.getInvocationSpanContext());
-
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {
     KJ_CASE_ONEOF(af, WorkerInterface::AlarmFulfiller) {
@@ -643,7 +600,6 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
         // run again.
-        outcomeObserver = nullptr;
         if (result.outcome == EventOutcome::OK) {
           // When an alarm handler completes its execution, the alarm is marked ready for deletion in
           // actor-cache. This alarm change will only be reflected in the alarmsXX table, once cache
@@ -661,9 +617,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         cancellationGuard.cancel();
         co_return result;
       } catch (const kj::Exception& e) {
-        // We failed, clear the outcome observer and inform any other entrypoints that may be
-        // waiting upon us.
-        outcomeObserver = nullptr;
+        // We failed, inform any other entrypoints that may be waiting upon us.
         af.reject(e);
         cancellationGuard.cancel();
         throw;
@@ -671,7 +625,6 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     }
     KJ_CASE_ONEOF(result, WorkerInterface::AlarmResult) {
       // The alarm was cancelled while we were waiting to run, go ahead and return the result.
-      outcomeObserver = nullptr;
       co_return result;
     }
   }

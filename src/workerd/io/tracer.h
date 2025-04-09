@@ -95,8 +95,8 @@ class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis
   kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 };
 
-// An abstract class that defines shares functionality for tracers
-// that have different characteristics.
+// An abstract class that defines shares functionality for tracers that have different
+// characteristics. This interface is used to submit both legacy and streaming tail events.
 // TODO(streaming-tail): When further consolidating the tail worker implementations, the interface
 // of the add* methods below should make more sense: The invocation span context below is currently
 // only being used in the streaming model, when we have switched the legacy model to streaming
@@ -135,6 +135,8 @@ class BaseTracer: public kj::Refcounted {
   // after passing a FetchEventInfo to setEventInfo().
   virtual void setFetchResponseInfo(tracing::FetchResponseInfo&&) = 0;
 
+  // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
+  // final event, causing the stream to terminate.
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
 
   kj::Own<WeakRef<BaseTracer>> addWeakRef() {
