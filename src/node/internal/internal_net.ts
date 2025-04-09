@@ -25,7 +25,7 @@
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
-import inner from 'cloudflare-internal:sockets';
+import inner, { type Writer, type Reader } from 'cloudflare-internal:sockets';
 
 import {
   AbortError,
@@ -180,14 +180,8 @@ export declare class Socket extends _Socket {
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
-    reader: {
-      close(): Promise<void>;
-      read(value: unknown): Promise<{ value: Buffer; done: boolean }>;
-    };
-    writer: {
-      close(): Promise<void>;
-      write(data: string | ArrayBufferView): Promise<void>;
-    };
+    reader: Reader;
+    writer: Writer;
   };
   public _sockname?: null | AddressInfo;
   public _onTimeout(): void;
@@ -554,7 +548,25 @@ Socket.prototype._writeGeneric = function (
         (err: unknown): void => {
           this[kLastWriteQueueSize] = 0;
           this._unrefTimer();
-          cb(err as Error);
+
+          // Think of the following code:
+          //
+          // const socket = net.connect(env.SERVER_THAT_DIES_PORT);
+          // socket.on('end', () => {
+          //   strictEqual(socket.writable, true);
+          //   socket.write('hello world');
+          //   resolve();
+          // });
+          //
+          // If we don't omit the error message for CLOSED, socket.write()
+          // will throw an error. This is not compliant with Node.js behavior.
+          if (
+            (err as Error).message !== 'This WritableStream has been closed.'
+          ) {
+            cb(err as Error);
+          } else {
+            cb();
+          }
         }
       );
       lastWriteSize = (data as unknown as Buffer).byteLength;
@@ -1057,7 +1069,9 @@ function cleanupAfterDestroy(
   socket[kBufferGen] = null;
   socket[kSocketInfo] = null;
   cb(error);
-  queueMicrotask(() => socket.emit('close', isException));
+  queueMicrotask(() => {
+    socket.emit('close', isException);
+  });
 }
 
 export function initializeConnection(
@@ -1235,8 +1249,15 @@ function onConnectionOpened(this: Socket): void {
 }
 
 function onConnectionClosed(this: Socket): void {
-  if (this[kTimeout] != null) clearTimeout(this[kTimeout] as unknown as number);
-  // TODO(later): What else should we do here? Anything?
+  if (this[kTimeout] != null) {
+    clearTimeout(this[kTimeout] as unknown as number);
+  }
+
+  if (!this.destroyed) {
+    // We have to manually trigger an 'end' event because we are using
+    // BYOB buffers with Socket class.
+    this.emit('end');
+  }
 }
 
 async function startRead(socket: Socket): Promise<void> {

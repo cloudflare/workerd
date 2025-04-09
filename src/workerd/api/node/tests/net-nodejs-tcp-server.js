@@ -52,8 +52,13 @@ const endServer = net.createServer((s) => {
 });
 endServer.listen(process.env.END_SERVER_PORT, () => reportPort(endServer));
 
+let count = 0;
 const serverThatDies = net.createServer(function (s) {
-  serverThatDies.close();
+  // We ignore the first event because wd_test checks for the connected state
+  // while preparing the sidecar test suite.
+  if (count++ > 0) {
+    serverThatDies.close();
+  }
   s.end();
 });
 serverThatDies.listen(process.env.SERVER_THAT_DIES_PORT, () =>
