@@ -73,6 +73,7 @@ const kBytesRead = Symbol('kBytesRead');
 const kBytesWritten = Symbol('kBytesWritten');
 const kUpdateTimer = Symbol('kUpdateTimer');
 const normalizedArgsSymbol = Symbol('normalizedArgs');
+export const kReinitializeHandle = Symbol('kReinitializeHandle');
 
 // Once the socket has been opened, the socket info provided by the
 // socket.opened promise will be stored here.
@@ -172,6 +173,7 @@ export declare class Socket extends _Socket {
   };
   public [kBytesRead]: number;
   public [kBytesWritten]: number;
+  public [kReinitializeHandle](handle: Socket['_handle']): void;
   public _closeAfterHandlingError: boolean;
   public _handle: null | {
     writeQueueSize?: number;
@@ -200,6 +202,7 @@ export declare class Socket extends _Socket {
   public _bytesDispatched: number;
   public _pendingData: SocketWriteData | null;
   public _pendingEncoding: string;
+  public _undestroy(): void;
   // This should have existed in _Socket type but it's not...
   public writableBuffer?: Writable & {
     allBuffers: boolean;
@@ -298,9 +301,15 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this._closeAfterHandlingError = false;
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
+
+  initSocketHandle(this);
+
   this._pendingData = null;
   this._pendingEncoding = '';
 
+  // Call Duplex constructor before setting up the abort signal
+  // This ensures the stream methods are properly set up before
+  // any abort handling that might call destroy()
   Duplex.call(this, options);
 
   if (options.handle) {
@@ -309,10 +318,6 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   }
 
   this.once('end', onReadableStreamEnd);
-
-  if (options.signal) {
-    addClientAbortSignalOption(this, options.signal);
-  }
 
   const onread = options.onread;
   if (
@@ -337,6 +342,11 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     this[kBuffer] = true;
     this[kBufferGen] = (): Uint8Array => new Uint8Array(4096);
     this[kBufferCb] = undefined;
+  }
+
+  // Now set up abort signal handling after the Duplex constructor
+  if (options.signal) {
+    addClientAbortSignalOption(this, options.signal);
   }
 
   this[kBytesRead] = 0;
@@ -783,19 +793,12 @@ Socket.prototype.connect = function (
     }
     return undefined;
   }
-  // // TODO(later): In Node.js a Socket instance can be reset so that it can be reused.
-  // // We haven't yet implemented that here. We can consider doing so but it's not an
-  // // immediate priority. Implementing it correctly requires making sure the internal
-  // // state of the socket is correctly reset.
-  // if (this.destroyed) {
-  //   throw new ERR_SOCKET_CLOSED();
-  // }
 
   if (cb !== null) {
     this.once('connect', cb);
   }
 
-  if (this._parent && this._parent.connecting) {
+  if (this._parent?.connecting) {
     return this;
   }
 
@@ -823,9 +826,30 @@ Socket.prototype.connect = function (
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
 
+  if (this._handle != null) {
+    initSocketHandle(this);
+  }
+
   initializeConnection(this, options);
 
   return this;
+};
+
+Socket.prototype[kReinitializeHandle] = function reinitializeHandle(
+  handle: Socket['_handle']
+): void {
+  this._handle?.socket.close().then(
+    () => {
+      cleanupAfterDestroy(this);
+    },
+    (err: unknown) => {
+      cleanupAfterDestroy(this, null, err as Error);
+    }
+  );
+
+  this._handle = handle;
+
+  initSocketHandle(this);
 };
 
 // ======================================================================================
@@ -1050,17 +1074,14 @@ Object.defineProperties(Socket.prototype, {
 
 function cleanupAfterDestroy(
   socket: Socket,
-  cb: (err?: Error) => void,
+  cb?: ((err?: Error) => void) | null,
   error?: Error
 ): void {
   const isException = error != null;
   if (socket._handle != null) {
     socket[kBytesRead] = socket.bytesRead;
     socket[kBytesWritten] = socket.bytesWritten;
-
-    if (socket.resetAndClosing) {
-      socket.resetAndClosing = false;
-    }
+    socket.resetAndClosing = false;
   }
   socket._handle = null;
   socket[kLastWriteQueueSize] = 0;
@@ -1068,13 +1089,19 @@ function cleanupAfterDestroy(
   socket[kBufferCb] = null;
   socket[kBufferGen] = null;
   socket[kSocketInfo] = null;
-  cb(error);
+
   queueMicrotask(() => {
+    // If there's an error, emit it before the close event
+    if (error != null) {
+      socket.emit('error', error);
+    }
+
+    cb?.(error);
     socket.emit('close', isException);
   });
 }
 
-export function initializeConnection(
+function initializeConnection(
   socket: Socket,
   options: TcpSocketConnectOpts
 ): void {
@@ -1121,6 +1148,7 @@ export function initializeConnection(
     );
   }
 
+  socket._unrefTimer();
   socket.connecting = true;
 
   const continueConnection = (
@@ -1128,7 +1156,6 @@ export function initializeConnection(
     port: number,
     family: number | string
   ): void => {
-    socket._unrefTimer();
     socket[kSocketInfo] = {
       remoteAddress: {
         address: host,
@@ -1183,46 +1210,47 @@ export function initializeConnection(
     }
   };
 
-  const addressType = isIP(host);
-
-  if (addressType === 0) {
-    // The host is not an IP address. That's allowed in our implementation, but let's
-    // see if the user provided a lookup function. If not, we'll skip.
-    if (typeof lookup !== 'undefined') {
-      validateFunction(lookup, 'options.lookup');
-      // Looks like we have a lookup function! Let's call it. The expectation is that
-      // the lookup function will produce a good IP address from the non-IP address
-      // that is given. How that is done is left entirely up to the application code.
-      // The connection attempt will continue once the lookup function invokes the
-      // given callback.
-      lookup(
-        host,
-        { family: family || addressType, hints },
-        (err: Error | null, address: string, family: number | string): void => {
-          socket.emit('lookup', err, address, family, host);
-          if (err) {
-            socket.destroy(err);
-            return;
-          }
-          if (isIP(address) === 0) {
-            throw new ERR_INVALID_IP_ADDRESS(address);
-          }
-          if (
-            family !== 4 &&
-            family !== 6 &&
-            family !== 'IPv4' &&
-            family !== 'IPv6'
-          ) {
-            throw new ERR_INVALID_ARG_VALUE('family', family, 'must be 4 or 6');
-          }
-          continueConnection(address, port, family);
-        }
-      );
-      return;
-    }
+  if (lookup != null) {
+    validateFunction(lookup, 'options.lookup');
   }
 
-  continueConnection(host, port, addressType);
+  const addressType = isIP(host);
+
+  // The host is not an IP address. That's allowed in our implementation, but let's
+  // see if the user provided a lookup function. If not, we'll skip.
+  if (addressType === 0 && lookup != null) {
+    // Looks like we have a lookup function! Let's call it. The expectation is that
+    // the lookup function will produce a good IP address from the non-IP address
+    // that is given. How that is done is left entirely up to the application code.
+    // The connection attempt will continue once the lookup function invokes the
+    // given callback.
+    const lookupOptions = { family: family || addressType, hints };
+    lookup(
+      host,
+      lookupOptions,
+      (err: Error | null, address: string, family: number | string): void => {
+        socket.emit('lookup', err, address, family, host);
+        if (err) {
+          socket.destroy(err);
+          return;
+        }
+        if (isIP(address) === 0) {
+          throw new ERR_INVALID_IP_ADDRESS(address);
+        }
+        if (
+          family !== 4 &&
+          family !== 6 &&
+          family !== 'IPv4' &&
+          family !== 'IPv6'
+        ) {
+          throw new ERR_INVALID_ARG_VALUE('family', family, 'must be 4 or 6');
+        }
+        continueConnection(address, port, family);
+      }
+    );
+  } else {
+    continueConnection(host, port, addressType);
+  }
 }
 
 function onConnectionOpened(this: Socket): void {
@@ -1231,6 +1259,8 @@ function onConnectionOpened(this: Socket): void {
     // address in the form of a string like `${host}:{port}`. We can choose
     // to pull that out here but it's not critical at this point.
     this.connecting = false;
+    this._sockname = null;
+
     this._unrefTimer();
 
     this.emit('connect');
@@ -1249,8 +1279,9 @@ function onConnectionOpened(this: Socket): void {
 }
 
 function onConnectionClosed(this: Socket): void {
-  if (this[kTimeout] != null) {
-    clearTimeout(this[kTimeout] as unknown as number);
+  // eslint-disable-next-line @typescript-eslint/no-this-alias
+  for (let s: Socket | null = this; s !== null; s = s._parent) {
+    clearTimeout(s[kTimeout] as unknown as number);
   }
 
   if (!this.destroyed) {
@@ -1348,16 +1379,17 @@ async function startRead(socket: Socket): Promise<void> {
   }
 }
 
+// Called when creating new Socket, or when re-using a closed Socket
+function initSocketHandle(socket: Socket): void {
+  socket._undestroy();
+  socket._sockname = null;
+}
+
 function tryReadStart(socket: Socket): void {
-  if (
-    socket[kBuffer] &&
-    !socket.connecting &&
-    socket._handle &&
-    !socket._handle.reading
-  ) {
+  if (socket._handle != null) {
     socket._handle.reading = true;
-    startRead(socket).catch((err: unknown) => socket.destroy(err as Error));
   }
+  startRead(socket).catch((err: unknown) => socket.destroy(err as Error));
 }
 
 function writeAfterFIN(
@@ -1464,11 +1496,12 @@ function addClientAbortSignalOption(self: Socket, signal: AbortSignal): void {
   function onAbort(): void {
     disposable?.[Symbol.dispose]();
     self._aborted = true;
-    // TODO(now): What else should be do here? Anything?
   }
 
   if (signal.aborted) {
-    onAbort();
+    queueMicrotask(() => {
+      onAbort();
+    });
   } else {
     queueMicrotask(() => {
       disposable = addAbortListener(signal, onAbort);

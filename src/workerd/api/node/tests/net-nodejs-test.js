@@ -39,6 +39,7 @@ export const checkPortsSetCorrectly = {
       'TIMEOUT_SERVER_PORT',
       'END_SERVER_PORT',
       'SERVER_THAT_DIES_PORT',
+      'RECONNECT_SERVER_PORT',
     ];
     for (const key of keys) {
       strictEqual(typeof env[key], 'string');
@@ -279,7 +280,7 @@ async function assertAbort(socket, testName) {
     await once(socket, 'close');
     fail(`close ${testName} should have thrown`);
   } catch (err) {
-    strictEqual(err.name, 'AbortError');
+    strictEqual(err.name, 'AbortError', err.message);
   }
 }
 
@@ -1190,49 +1191,50 @@ export const testNetOnReadStaticBuffer = {
 };
 
 // export const testNetReconnect = {
-//   async test() {
+//   async test(ctrl, env) {
 //     const { promise, resolve } = Promise.withResolvers();
 //     const N = 50;
-//     let client_recv_count = 0;
-//     let client_end_count = 0;
 //     let disconnect_count = 0;
 
-//     console.log('SERVER listening');
-//     const client = net.connect({ port: 9999 });
+//     const client = net.connect(env.RECONNECT_SERVER_PORT);
 
 //     client.setEncoding('UTF8');
 
 //     client.on('connect', () => {
-//       console.error('CLIENT connected', client._writableState);
+//       console.error('CLIENT connected');
 //     });
 
-//     client.on('data', function (chunk) {
-//       client_recv_count += 1;
-//       console.log(`client_recv_count ${client_recv_count}`);
+//     client.on('error', (err) => {
+//       console.error('CLIENT error', err);
+//     });
+
+//     const onDataFn = mock.fn((chunk) => {
+//       console.log(`got data`);
 //       strictEqual(chunk, 'hello\r\n');
-//       console.error('CLIENT: calling end', client._writableState);
+//       console.error('CLIENT: calling end');
 //       client.end();
 //     });
+//     client.on('data', onDataFn);
 
-//     client.on('end', () => {
-//       console.error('CLIENT end');
-//       client_end_count++;
+//     const endFn = mock.fn(() => {
+//       console.log('CLIENT end');
 //     });
+//     client.on('end', endFn);
 
 //     client.on('close', (had_error) => {
 //       console.log('CLIENT disconnect');
 //       strictEqual(had_error, false);
-//       if (disconnect_count++ < N)
-//         client.connect(9999); // reconnect
-//       else {
+//       if (disconnect_count++ < N) {
+//         client.connect(env.RECONNECT_SERVER_PORT); // reconnect
+//       } else {
 //         resolve();
 //       }
 //     });
 
 //     await promise;
 //     strictEqual(disconnect_count, N + 1);
-//     strictEqual(client_recv_count, N + 1);
-//     strictEqual(client_end_count, N + 1);
+//     strictEqual(onDataFn.mock.callCount(), N + 1);
+//     strictEqual(endFn.mock.callCount(), N + 1);
 //   },
 // };
 

@@ -44,6 +44,7 @@ import {
   destroy,
   undestroy,
   errorOrDestroy,
+  kOnConstructed,
 } from 'node-internal:streams_util';
 
 import {
@@ -204,6 +205,16 @@ Object.defineProperty(WritableState.prototype, 'bufferedRequestCount', {
     return this.buffered.length - this.bufferedIndex;
   },
 });
+
+WritableState.prototype[kOnConstructed] = function onConstructed(stream) {
+  if (!this.writing) {
+    clearBuffer(stream, this);
+  }
+
+  if (!this.ending) {
+    finishMaybe(stream, this);
+  }
+};
 
 // ======================================================================================
 // Writable

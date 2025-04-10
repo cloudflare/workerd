@@ -35,6 +35,7 @@ export const kOnFinished = Symbol('kOnFinished');
 export const kDestroy = Symbol('kDestroy');
 export const kConstruct = Symbol('kConstruct');
 
+import { addAbortListener } from 'node-internal:events';
 import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
@@ -53,6 +54,10 @@ import {
   validateFunction,
   validateObject,
 } from 'node-internal:validators';
+
+export const kIsDestroyed = Symbol.for('nodejs.stream.destroyed');
+export const kIsWritable = Symbol.for('nodejs.stream.writable');
+export const kOnConstructed = Symbol('kOnConstructed');
 
 export function isReadableNodeStream(obj, strict = false) {
   let _obj$_readableState;
@@ -478,8 +483,8 @@ export function addAbortSignal(signal, stream) {
   if (signal.aborted) {
     onAbort();
   } else {
-    signal.addEventListener('abort', onAbort);
-    eos(stream, () => signal.removeEventListener('abort', onAbort));
+    const disposable = addAbortListener(signal, onAbort);
+    eos(stream, disposable[Symbol.dispose]);
   }
   return stream;
 }

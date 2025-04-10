@@ -6,6 +6,7 @@
 // It creates 2 TCP servers to act as a source of truth for the node:net tests.
 // We execute this command using Node.js, which makes net.createServer available.
 const net = require('node:net');
+const assert = require('node:assert/strict');
 
 function reportPort(server) {
   console.info(`Listening on port ${server.address().port}`);
@@ -63,4 +64,29 @@ const serverThatDies = net.createServer(function (s) {
 });
 serverThatDies.listen(process.env.SERVER_THAT_DIES_PORT, () =>
   reportPort(serverThatDies)
+);
+
+const reconnectServer = net.createServer((s) => {
+  console.info('SERVER: got s connection');
+  s.resume();
+
+  s.on('error', () => {
+    // Do nothing
+  });
+
+  console.info('SERVER connect, writing');
+  s.write('hello\r\n');
+
+  s.on('end', () => {
+    console.info('SERVER s end, calling end()');
+    s.end();
+  });
+
+  s.on('close', (had_error) => {
+    console.info(`SERVER had_error: ${JSON.stringify(had_error)}`);
+    assert.strictEqual(had_error, false);
+  });
+});
+reconnectServer.listen(process.env.RECONNECT_SERVER_PORT, () =>
+  reportPort(reconnectServer)
 );

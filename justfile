@@ -31,7 +31,7 @@ test-asan *args="//...":
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
-  bazel test {{args}} --test_output=streamed
+  bazel test {{args}} --test_output=streamed --cache_test_results=no
 
 # e.g. just node-test zlib
 node-test test_name *args:
