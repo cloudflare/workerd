@@ -14,6 +14,10 @@ export class OtherServer extends WorkerEntrypoint {
     await scheduler.wait(300);
     return new Response('completed');
   }
+
+  async rpcEcho(req) {
+    return req;
+  }
 }
 
 export class Server extends WorkerEntrypoint {
@@ -82,6 +86,10 @@ export class Server extends WorkerEntrypoint {
     if (text == 'completed') {
       await abortTracker.setAborted(key, false);
     }
+  }
+
+  async cloneIncomingRequest(req) {
+    return new Response(await this.env.OtherServer.echo(new Request(req)));
   }
 }
 
@@ -183,5 +191,12 @@ export const abortedRequestDoesNotAbortSubrequest = {
     // Then make sure that the subrequest wasn't also aborted
     await scheduler.wait(500);
     assert.strictEqual(await abortTracker.getAborted('subrequest'), false);
+  },
+};
+
+export const incomingRequestSignalCanBeCloned = {
+  async test(ctrl, env, ctx) {
+    const req = env.Server.fetch('http://example.com/cloneIncomingRequest');
+    const res = await req;
   },
 };
