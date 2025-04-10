@@ -166,12 +166,16 @@ kj::Vector<kj::Own<void>> serializeJsValue(jsg::Lock& js,
     RpcSerializerExternalHander::GetStreamSinkFunc getStreamSinkFunc) {
   RpcSerializerExternalHander externalHandler(kj::mv(getStreamSinkFunc));
 
+  auto& isolate = Worker::Isolate::from(js);
+  auto pythonWorkersEnabled = isolate.getApi().getFeatureFlags().getPythonWorkers();
+
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
         .version = 15,
         .omitHeader = false,
         .treatClassInstancesAsPlainObjects = false,
         .externalHandler = externalHandler,
+        .supportPythonWorkerFields = pythonWorkersEnabled,
       });
   serializer.write(js, value);
   kj::Array<const byte> data = serializer.release().data;

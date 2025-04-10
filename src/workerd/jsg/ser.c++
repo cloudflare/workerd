@@ -24,6 +24,7 @@ void Serializer::ExternalHandler::serializeProxy(
 Serializer::Serializer(Lock& js, Options options)
     : externalHandler(options.externalHandler),
       treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
+      supportPythonWorkerFields(options.supportPythonWorkerFields),
       ser(js.v8Isolate, this) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
@@ -110,6 +111,19 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
 v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   try {
     jsg::Lock& js = jsg::Lock::from(isolate);
+
+    // For Python Workers, check if `object` defines a `js_object` field and serialise that instead
+    // if so.
+    if (supportPythonWorkerFields) {
+      auto jsObjectStr = jsg::v8StrIntern(js.v8Isolate, "js_object");
+      auto jsObjectProperty = object->Get(js.v8Context(), jsObjectStr);
+      if (!jsObjectProperty.IsEmpty()) {
+        auto obj = jsg::check(jsObjectProperty);
+        if (obj->IsObject()) {
+          return WriteHostObject(isolate, obj.As<v8::Object>());
+        }
+      }
+    }
 
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
         !Wrappable::isWorkerdApiObject(object)) {
