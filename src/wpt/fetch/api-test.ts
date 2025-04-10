@@ -14,11 +14,11 @@ export default {
   },
   'abort/general.any.js': {
     comment: 'These tests will be enabled in a later PR',
-    skipAllTests: true,
+    //skipAllTests: true,
   },
   'abort/request.any.js': {
     comment: 'These tests will be enabled in a later PR',
-    skipAllTests: true,
+    //skipAllTests: true,
   },
 
   'basic/accept-header.any.js': {
