@@ -197,7 +197,7 @@ void IsolateBase::deferDestruction(Item item) {
 }
 
 kj::Own<ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
-  auto target = kj::refcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter);
+  auto target = kj::atomicRefcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter);
   externalMemoryTargets.lockExclusive()->insert(target.get());
   return target;
 }

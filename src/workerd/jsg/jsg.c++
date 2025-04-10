@@ -352,7 +352,7 @@ void ExternalMemoryTarget::reset() {
 }
 
 kj::Own<ExternalMemoryTarget> ExternalMemoryTarget::addRef() {
-  return kj::addRef(*this);
+  return kj::atomicAddRef(*this);
 }
 
 ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) {

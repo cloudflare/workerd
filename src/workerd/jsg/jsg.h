@@ -2265,7 +2265,7 @@ class ExternalMemoryAccounter: private v8::ExternalMemoryAccounter {
 // Used to save a reference to an isolate that is responsible for external memory usage.
 // getAdjustment() can be invoked at any time to create a new RAII adjustment object
 // pointing to this isolate
-class ExternalMemoryTarget: public kj::Refcounted {
+class ExternalMemoryTarget: public kj::AtomicRefcounted {
   struct Impl;
 
  public:
