@@ -59,6 +59,17 @@ typedef jsg::Constructor<api::ExportedHandler(ExecutionContextOrState ctx, jsg::
 // The type of a top-level export -- either a simple handler or a class.
 typedef kj::OneOf<EntrypointClass, api::ExportedHandler> NamedExport;
 
+struct EntrypointClasses {
+  // Class constructor for WorkerEntrypoint.
+  jsg::JsObject workerEntrypoint;
+
+  // Class constructor for DurableObject (aka api::DurableObjectBase).
+  jsg::JsObject durableObject;
+
+  // Class constructor for WorkflowEntrypoint
+  jsg::JsObject workflowEntrypoint;
+};
+
 // An instance of a Worker.
 //
 // Typically each worker script is loaded into a single Worker instance which is reused by
@@ -193,6 +204,11 @@ class Worker: public kj::AtomicRefcounted {
       LogLevel level,
       const v8::Global<v8::Function>& original,
       const v8::FunctionCallbackInfo<v8::Value>& info);
+
+  void processEntrypointClass(jsg::Lock& js,
+      EntrypointClass cls,
+      EntrypointClasses entrypointClasses,
+      kj::String handlerName);
 };
 
 // A compiled script within an Isolate, but which hasn't been instantiated into a particular
@@ -511,17 +527,6 @@ class Worker::Api {
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
 
   virtual NamedExport unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const = 0;
-
-  struct EntrypointClasses {
-    // Class constructor for WorkerEntrypoint.
-    jsg::JsObject workerEntrypoint;
-
-    // Class constructor for DurableObject (aka api::DurableObjectBase).
-    jsg::JsObject durableObject;
-
-    // Class constructor for WorkflowEntrypoint
-    jsg::JsObject workflowEntrypoint;
-  };
 
   // Get the constructors for classes from which entrypoint classes may inherit.
   //
