@@ -913,6 +913,77 @@ KJ_TEST("SQLite observer addQueryStats") {
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 1);
 }
 
+KJ_TEST("SQLite observer reportQueryEvent") {
+  class TestSqliteObserver: public SqliteObserver {
+   public:
+    int capturedEvents = 0;
+
+    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+        uint64_t queryRowsRead,
+        uint64_t queryRowsWritten,
+        kj::Duration,
+        uint64_t dbWalBytesWritten,
+        int queryError,
+        bool isInternalQuery,
+        kj::Maybe<kj::String> queryErrorDescription) override {
+      KJ_IF_SOME(err, queryErrorDescription) {
+        KJ_ASSERT(err.contains("query canceled because reset()"));
+      }
+      capturedEvents++;
+    }
+  };
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  TestSqliteObserver sqliteObserver;
+  SqliteDatabase db(
+      vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY, sqliteObserver);
+
+  db.run("PRAGMA journal_mode=WAL;");
+
+  db.run(R"(
+      CREATE TABLE people (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE
+      );
+
+      INSERT INTO people (id, name, email)
+      VALUES (?, ?, ?),
+             (?, ?, ?);
+    )",
+      123, "Bob"_kj, "bob@example.com"_kj, 321, "Alice"_kj, "alice@example.com"_kj);
+
+  {
+    auto stmt = db.prepare("SELECT * FROM people");
+    auto query = stmt.run();
+  }
+  {
+    // Expect 4 events so far: PRAGMA, CREATE, INSERT, SELECT.
+    KJ_ASSERT(sqliteObserver.capturedEvents == 4);
+
+    // SELECT #2 (canceled due to reset later)
+    auto stmt = db.prepare("SELECT * FROM people");
+    auto query = stmt.run();
+
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 123);
+
+    db.reset();
+
+    db.run("PRAGMA journal_mode=WAL;");
+
+    KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.nextRow());
+    KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.getInt(0));
+
+    // 1 more event: PRAGMA
+    KJ_ASSERT(sqliteObserver.capturedEvents == 5);
+  }
+
+  // Cancelled SELECT #2 emiited with an errorDesc after query goes out of scope
+  KJ_ASSERT(sqliteObserver.capturedEvents == 6);
+}
+
 KJ_TEST("SQLite failed statement reset") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
