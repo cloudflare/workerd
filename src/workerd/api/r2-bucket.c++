@@ -1193,6 +1193,34 @@ R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
   };
 }
 
+namespace {
+jsg::Optional<jsg::BufferSource> copyHash(
+    jsg::Lock& js, const jsg::Optional<kj::Array<kj::byte>>& maybeHash) {
+  KJ_IF_SOME(hash, maybeHash) {
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, hash.size());
+    backing.asArrayPtr().copyFrom(hash);
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
+  return kj::none;
+}
+}  // namespace
+
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getMd5(jsg::Lock& js) {
+  return copyHash(js, md5);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha1(jsg::Lock& js) {
+  return copyHash(js, sha1);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha256(jsg::Lock& js) {
+  return copyHash(js, sha256);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha384(jsg::Lock& js) {
+  return copyHash(js, sha384);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha512(jsg::Lock& js) {
+  return copyHash(js, sha512);
+}
+
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr) {
   return kj::heapArray(arr.asPtr());
 }

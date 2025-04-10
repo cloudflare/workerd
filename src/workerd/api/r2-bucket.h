@@ -126,21 +126,11 @@ class R2Bucket: public jsg::Object {
           sha384(kj::mv(sha384)),
           sha512(kj::mv(sha512)) {}
 
-    jsg::Optional<kj::Array<kj::byte>> getMd5() const {
-      return md5.map(cloneByteArray);
-    }
-    jsg::Optional<kj::Array<kj::byte>> getSha1() const {
-      return sha1.map(cloneByteArray);
-    }
-    jsg::Optional<kj::Array<kj::byte>> getSha256() const {
-      return sha256.map(cloneByteArray);
-    }
-    jsg::Optional<kj::Array<kj::byte>> getSha384() const {
-      return sha384.map(cloneByteArray);
-    }
-    jsg::Optional<kj::Array<kj::byte>> getSha512() const {
-      return sha512.map(cloneByteArray);
-    }
+    jsg::Optional<jsg::BufferSource> getMd5(jsg::Lock& js);
+    jsg::Optional<jsg::BufferSource> getSha1(jsg::Lock& js);
+    jsg::Optional<jsg::BufferSource> getSha256(jsg::Lock& js);
+    jsg::Optional<jsg::BufferSource> getSha384(jsg::Lock& js);
+    jsg::Optional<jsg::BufferSource> getSha512(jsg::Lock& js);
 
     StringChecksums toJSON();
 
@@ -151,7 +141,13 @@ class R2Bucket: public jsg::Object {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha384, getSha384);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha512, getSha512);
       JSG_METHOD(toJSON);
-      JSG_TS_OVERRIDE(R2Checksums);
+      JSG_TS_OVERRIDE(R2Checksums {
+        readonly md5?: ArrayBuffer;
+        readonly sha1?: ArrayBuffer;
+        readonly sha256?: ArrayBuffer;
+        readonly sha384?: ArrayBuffer;
+        readonly sha512?: ArrayBuffer;
+      });
     }
 
     jsg::Optional<kj::Array<kj::byte>> md5;
