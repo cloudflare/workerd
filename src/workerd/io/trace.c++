@@ -278,7 +278,7 @@ tracing::FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reade
   headers = v.releaseAsArray();
 }
 
-void tracing::FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) {
+void tracing::FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
   builder.setMethod(static_cast<capnp::HttpMethod>(method));
   builder.setUrl(url);
   builder.setCfJson(cfJson);
@@ -302,7 +302,8 @@ tracing::FetchEventInfo::Header::Header(rpc::Trace::FetchEventInfo::Header::Read
     : name(kj::str(reader.getName())),
       value(kj::str(reader.getValue())) {}
 
-void tracing::FetchEventInfo::Header::copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) {
+void tracing::FetchEventInfo::Header::copyTo(
+    rpc::Trace::FetchEventInfo::Header::Builder builder) const {
   builder.setName(name);
   builder.setValue(value);
 }
@@ -316,7 +317,7 @@ tracing::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::m
 tracing::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
     : methodName(kj::str(reader.getMethodName())) {}
 
-void tracing::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) {
+void tracing::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) const {
   builder.setMethodName(methodName);
 }
 
@@ -332,7 +333,7 @@ tracing::ScheduledEventInfo::ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::
     : scheduledTime(reader.getScheduledTime()),
       cron(kj::str(reader.getCron())) {}
 
-void tracing::ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) {
+void tracing::ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const {
   builder.setScheduledTime(scheduledTime);
   builder.setCron(cron);
 }
@@ -346,7 +347,7 @@ tracing::AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(s
 tracing::AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
     : scheduledTime(reader.getScheduledTimeMs() * kj::MILLISECONDS + kj::UNIX_EPOCH) {}
 
-void tracing::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) {
+void tracing::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const {
   builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
 }
 
@@ -362,7 +363,7 @@ tracing::QueueEventInfo::QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reade
     : queueName(kj::heapString(reader.getQueueName())),
       batchSize(reader.getBatchSize()) {}
 
-void tracing::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) {
+void tracing::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) const {
   builder.setQueueName(queueName);
   builder.setBatchSize(batchSize);
 }
@@ -381,7 +382,7 @@ tracing::EmailEventInfo::EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reade
       rcptTo(kj::heapString(reader.getRcptTo())),
       rawSize(reader.getRawSize()) {}
 
-void tracing::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) {
+void tracing::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) const {
   builder.setMailFrom(mailFrom);
   builder.setRcptTo(rcptTo);
   builder.setRawSize(rawSize);
@@ -412,7 +413,7 @@ kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromReader(
 tracing::TraceEventInfo::TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader)
     : traces(getTraceItemsFromReader(reader)) {}
 
-void tracing::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) {
+void tracing::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) const {
   auto list = builder.initTraces(traces.size());
   for (auto i: kj::indices(traces)) {
     traces[i].copyTo(list[i]);
@@ -430,7 +431,7 @@ tracing::TraceEventInfo::TraceItem::TraceItem(rpc::Trace::TraceEventInfo::TraceI
     : scriptName(kj::str(reader.getScriptName())) {}
 
 void tracing::TraceEventInfo::TraceItem::copyTo(
-    rpc::Trace::TraceEventInfo::TraceItem::Builder builder) {
+    rpc::Trace::TraceEventInfo::TraceItem::Builder builder) const {
   KJ_IF_SOME(name, scriptName) {
     builder.setScriptName(name);
   }
@@ -452,7 +453,8 @@ tracing::DiagnosticChannelEvent::DiagnosticChannelEvent(
       channel(kj::heapString(reader.getChannel())),
       message(kj::heapArray<kj::byte>(reader.getMessage())) {}
 
-void tracing::DiagnosticChannelEvent::copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder) {
+void tracing::DiagnosticChannelEvent::copyTo(
+    rpc::Trace::DiagnosticChannelEvent::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setChannel(channel);
   builder.setMessage(message);
@@ -469,7 +471,7 @@ tracing::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
     : type(readFrom(reader)) {}
 
 void tracing::HibernatableWebSocketEventInfo::copyTo(
-    rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) {
+    rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) const {
   auto typeBuilder = builder.initType();
   KJ_SWITCH_ONEOF(type) {
     KJ_CASE_ONEOF(_, Message) {
@@ -529,7 +531,7 @@ tracing::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(s
 tracing::FetchResponseInfo::FetchResponseInfo(rpc::Trace::FetchResponseInfo::Reader reader)
     : statusCode(reader.getStatusCode()) {}
 
-void tracing::FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) {
+void tracing::FetchResponseInfo::copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const {
   builder.setStatusCode(statusCode);
 }
 
@@ -571,7 +573,7 @@ Trace::Trace(rpc::Trace::Reader reader) {
 
 Trace::~Trace() noexcept(false) {}
 
-void Trace::copyTo(rpc::Trace::Builder builder) {
+void Trace::copyTo(rpc::Trace::Builder builder) const {
   {
     auto list = builder.initLogs(logs.size());
     for (auto i: kj::indices(logs)) {
@@ -685,7 +687,7 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   }
 }
 
-void tracing::Log::copyTo(rpc::Trace::Log::Builder builder) {
+void tracing::Log::copyTo(rpc::Trace::Log::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setLogLevel(logLevel);
   builder.setMessage(message);
@@ -695,7 +697,7 @@ tracing::Log tracing::Log::clone() const {
   return Log(timestamp, logLevel, kj::str(message));
 }
 
-void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) {
+void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setName(name);
   builder.setMessage(message);
@@ -827,7 +829,7 @@ tracing::Resume::Resume(kj::Maybe<kj::Array<kj::byte>> attachment)
 tracing::Resume::Resume(rpc::Trace::Resume::Reader reader)
     : attachment(readResumeAttachment(reader)) {}
 
-void tracing::Resume::copyTo(rpc::Trace::Resume::Builder builder) {
+void tracing::Resume::copyTo(rpc::Trace::Resume::Builder builder) const {
   KJ_IF_SOME(attach, attachment) {
     builder.setAttachment(attach);
   }
@@ -841,7 +843,7 @@ tracing::Hibernate::Hibernate() {}
 
 tracing::Hibernate::Hibernate(rpc::Trace::Hibernate::Reader reader) {}
 
-void tracing::Hibernate::copyTo(rpc::Trace::Hibernate::Builder builder) {}
+void tracing::Hibernate::copyTo(rpc::Trace::Hibernate::Builder builder) const {}
 
 tracing::Hibernate tracing::Hibernate::clone() const {
   return Hibernate();
@@ -892,7 +894,7 @@ tracing::Attribute::Attribute(rpc::Trace::Attribute::Reader reader)
     : name(kj::str(reader.getName())),
       value(readValues(reader)) {}
 
-void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) {
+void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) const {
   static auto writeValue = [](auto builder, const auto& value) mutable {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(str, kj::String) {
@@ -964,7 +966,7 @@ kj::Maybe<tracing::Return::Info> readReturnInfo(const rpc::Trace::Return::Reader
 
 tracing::Return::Return(rpc::Trace::Return::Reader reader): info(readReturnInfo(reader)) {}
 
-void tracing::Return::copyTo(rpc::Trace::Return::Builder builder) {
+void tracing::Return::copyTo(rpc::Trace::Return::Builder builder) const {
   KJ_IF_SOME(i, info) {
     auto infoBuilder = builder.initInfo();
     KJ_SWITCH_ONEOF(i) {
@@ -1014,8 +1016,8 @@ kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader
     case rpc::Trace::SpanOpen::Info::FETCH: {
       return kj::Maybe(tracing::FetchEventInfo(info.getFetch()));
     }
-    case rpc::Trace::SpanOpen::Info::JSRPC: {
-      return kj::Maybe(tracing::JsRpcEventInfo(info.getJsrpc()));
+    case rpc::Trace::SpanOpen::Info::JS_RPC: {
+      return kj::Maybe(tracing::JsRpcEventInfo(info.getJsRpc()));
     }
     case rpc::Trace::SpanOpen::Info::CUSTOM: {
       auto custom = info.getCustom();
@@ -1034,7 +1036,7 @@ tracing::SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
     : operationName(readSpanOpenOperationName(reader)),
       info(readSpanOpenInfo(reader)) {}
 
-void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) {
+void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
   KJ_IF_SOME(name, operationName) {
     builder.setOperationName(name.asPtr());
   }
@@ -1045,7 +1047,7 @@ void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) {
         fetch.copyTo(infoBuilder.initFetch());
       }
       KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
-        jsrpc.copyTo(infoBuilder.initJsrpc());
+        jsrpc.copyTo(infoBuilder.initJsRpc());
       }
       KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
         auto customBuilder = infoBuilder.initCustom(custom.size());
@@ -1085,7 +1087,7 @@ tracing::SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
 
 tracing::SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {}
 
-void tracing::SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) {
+void tracing::SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) const {
   builder.setOutcome(outcome);
 }
 
@@ -1131,7 +1133,7 @@ tracing::Link::Link(rpc::Trace::Link::Reader reader)
       invocationId(readInvocationIdFromReader(reader)),
       spanId(readSpanIdFromReader(reader)) {}
 
-void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) {
+void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) const {
   KJ_IF_SOME(l, label) {
     builder.setLabel(l);
   }
@@ -1146,15 +1148,13 @@ tracing::Link tracing::Link::clone() const {
       label.map([](const kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
 }
 
-namespace {
-tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
-  auto info = reader.getInfo();
+tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
   switch (info.which()) {
     case rpc::Trace::Onset::Info::FETCH: {
       return tracing::FetchEventInfo(info.getFetch());
     }
-    case rpc::Trace::Onset::Info::JSRPC: {
-      return tracing::JsRpcEventInfo(info.getJsrpc());
+    case rpc::Trace::Onset::Info::JS_RPC: {
+      return tracing::JsRpcEventInfo(info.getJsRpc());
     }
     case rpc::Trace::Onset::Info::SCHEDULED: {
       return tracing::ScheduledEventInfo(info.getScheduled());
@@ -1184,6 +1184,43 @@ tracing::Onset::Info getInfoFromReader(const rpc::Trace::Onset::Reader& reader) 
   KJ_UNREACHABLE;
 }
 
+void tracing::writeOnsetInfo(
+    const tracing::Onset::Info& info, rpc::Trace::Onset::Info::Builder& infoBuilder) {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
+      fetch.copyTo(infoBuilder.initFetch());
+    }
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
+      jsrpc.copyTo(infoBuilder.initJsRpc());
+    }
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
+      scheduled.copyTo(infoBuilder.initScheduled());
+    }
+    KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
+      alarm.copyTo(infoBuilder.initAlarm());
+    }
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
+      queue.copyTo(infoBuilder.initQueue());
+    }
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
+      email.copyTo(infoBuilder.initEmail());
+    }
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
+      trace.copyTo(infoBuilder.initTrace());
+    }
+    KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
+      hws.copyTo(infoBuilder.initHibernatableWebSocket());
+    }
+    KJ_CASE_ONEOF(resume, Resume) {
+      resume.copyTo(infoBuilder.initResume());
+    }
+    KJ_CASE_ONEOF(custom, CustomEventInfo) {
+      infoBuilder.initCustom();
+    }
+  }
+}
+
+namespace {
 kj::Maybe<kj::String> getScriptNameFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasScriptName()) {
     return kj::str(reader.getScriptName());
@@ -1251,11 +1288,11 @@ tracing::Onset::Onset(tracing::Onset::Info&& info,
       trigger(kj::mv(maybeTrigger)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
-    : info(getInfoFromReader(reader)),
+    : info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
       trigger(getTriggerContextFromReader(reader)) {}
 
-void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) {
+void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   builder.setExecutionModel(workerInfo.executionModel);
   KJ_IF_SOME(name, workerInfo.scriptName) {
     builder.setScriptName(name);
@@ -1282,38 +1319,7 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) {
     ctx.setSpanId(t.spanId.getId());
   }
   auto infoBuilder = builder.initInfo();
-  KJ_SWITCH_ONEOF(info) {
-    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
-      fetch.copyTo(infoBuilder.initFetch());
-    }
-    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
-      jsrpc.copyTo(infoBuilder.initJsrpc());
-    }
-    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
-      scheduled.copyTo(infoBuilder.initScheduled());
-    }
-    KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
-      alarm.copyTo(infoBuilder.initAlarm());
-    }
-    KJ_CASE_ONEOF(queue, QueueEventInfo) {
-      queue.copyTo(infoBuilder.initQueue());
-    }
-    KJ_CASE_ONEOF(email, EmailEventInfo) {
-      email.copyTo(infoBuilder.initEmail());
-    }
-    KJ_CASE_ONEOF(trace, TraceEventInfo) {
-      trace.copyTo(infoBuilder.initTrace());
-    }
-    KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
-      hws.copyTo(infoBuilder.initHibernatableWebSocket());
-    }
-    KJ_CASE_ONEOF(resume, Resume) {
-      resume.copyTo(infoBuilder.initResume());
-    }
-    KJ_CASE_ONEOF(custom, CustomEventInfo) {
-      infoBuilder.initCustom();
-    }
-  }
+  writeOnsetInfo(info, infoBuilder);
 }
 
 tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
@@ -1380,7 +1386,7 @@ tracing::Outcome::Outcome(rpc::Trace::Outcome::Reader reader)
       cpuTime(reader.getCpuTime() * kj::MILLISECONDS),
       wallTime(reader.getWallTime() * kj::MILLISECONDS) {}
 
-void tracing::Outcome::copyTo(rpc::Trace::Outcome::Builder builder) {
+void tracing::Outcome::copyTo(rpc::Trace::Outcome::Builder builder) const {
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
@@ -1469,7 +1475,7 @@ tracing::TailEvent::TailEvent(rpc::Trace::TailEvent::Reader reader)
       sequence(reader.getSequence()),
       event(readEventFromTailEvent(reader)) {}
 
-void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) {
+void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
   auto context = builder.initContext();
   traceId.toCapnp(context.initTraceId());
   invocationId.toCapnp(context.initInvocationId());
@@ -1699,7 +1705,7 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
   }
 }
 
-void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) {
+void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
   builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);

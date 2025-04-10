@@ -972,6 +972,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
     rpc::EventDispatcher::Client dispatcher) {
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
 
+  // TODO(streaming-tail): Session is currently being reported as canceled when using
+  // TailStreamCustomEventImpl via RPC, investigate.
   KJ_DEFER({
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
