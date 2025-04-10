@@ -81,6 +81,24 @@ async function loadBundleFromR2(requirement: string): Promise<Reader> {
   }
 }
 
+async function loadBundleFromR2WithRetry(
+  requirement: string,
+  currRetry: number
+): Promise<Reader> {
+  try {
+    return await loadBundleFromR2(requirement);
+  } catch (exc) {
+    if (currRetry < 3) {
+      console.warn(`Error loading '${requirement}' from R2: ${exc}`);
+      console.log('Retrying fetch in 5 seconds...');
+      await new Promise((r) => setTimeout(r, 5000));
+      return loadBundleFromR2WithRetry(requirement, currRetry + 1);
+    }
+
+    throw new Error(`Could not load '${requirement}' from R2: ${exc}`);
+  }
+}
+
 async function loadBundleFromArtifactBundler(
   requirement: string
 ): Promise<Reader> {
@@ -167,7 +185,9 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
     pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
   }
   if (LOAD_WHEELS_FROM_R2) {
-    await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromR2);
+    await loadPackagesImpl(Module, pkgsToLoad, (req) =>
+      loadBundleFromR2WithRetry(req, 0)
+    );
   } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
     await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromArtifactBundler);
   }
