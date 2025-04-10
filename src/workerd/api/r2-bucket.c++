@@ -1221,10 +1221,6 @@ jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha512(jsg::Lock& js) {
   return copyHash(js, sha512);
 }
 
-kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr) {
-  return kj::heapArray(arr.asPtr());
-}
-
 kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,
     kj::StringPtr action,
     R2Result& r2Result,

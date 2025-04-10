@@ -33,7 +33,6 @@ struct R2UserTracing {
 // cleaner than setting span tags directly in each function.
 kj::Own<kj::HttpClient> r2GetClient(IoContext& context, uint subrequestChannel, R2UserTracing user);
 
-kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
 kj::ArrayPtr<kj::StringPtr> fillR2Path(
     kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
 
