@@ -27,8 +27,6 @@ wpt_test(
     wpt_directory = "@wpt//:dom/abort@module",
 )
 
-"""
-# Temporarily disabled because it cannot run concurrently.
 wpt_test(
     name = "fetch/api",
     size = "large",
@@ -42,7 +40,6 @@ wpt_test(
     }),
     wpt_directory = "@wpt//:fetch/api@module",
 )
-"""
 
 srcs = glob(
     [
