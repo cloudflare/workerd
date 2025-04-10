@@ -189,8 +189,7 @@ jobs:
           cp /tmp/test-types/oldest/* /tmp/test-types
           cat > /tmp/test-types/package.json << EOF
           {
-              "name": "@cloudflare/workers-types",
-              "version": "4.20250405.0"
+              "name": "@cloudflare/workers-types"
             }
           EOF
           pnpm add /tmp/test-types -w
