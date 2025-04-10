@@ -222,10 +222,9 @@ export function getFips(): boolean {
   return fips;
 }
 
-export const constants: Record<string, number> = Object.create(null) as Record<
-  string,
-  number
->;
+export const constants: Record<string, number | string> = Object.create(
+  null
+) as Record<string, number | string>;
 Object.defineProperties(constants, {
   DH_CHECK_P_NOT_SAFE_PRIME: {
     value: 2,
@@ -301,6 +300,232 @@ Object.defineProperties(constants, {
     value: 6,
     configurable: false,
     writable: false,
+  },
+
+  // The following constants aren't actually used by anything in workers and
+  // are provided solely for nomimal compatibility with Node.js.
+
+  // This one is particularly silly to define since we don't actually
+  // use openssl but the constant exists in Node.js so we'll define it
+  // also. However, we set the value to 0 instead of an actual openssl
+  // version number to hopefully avoid confusion ... we don't want code
+  // out there inspecting this and assuming openssl is present because
+  // we hard coded it to a real openssl version number.
+  OPENSSL_VERSION_NUMBER: {
+    value: 0,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_ALL: {
+    value: 2147485776,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_ALLOW_NO_DHE_KEX: {
+    value: 1024,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION: {
+    value: 262144,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_CIPHER_SERVER_PREFERENCE: {
+    value: 4194304,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_CISCO_ANYCONNECT: {
+    value: 32768,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_COOKIE_EXCHANGE: {
+    value: 8192,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_CRYPTOPRO_TLSEXT_BUG: {
+    value: 2147483648,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS: {
+    value: 2048,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_LEGACY_SERVER_CONNECT: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_COMPRESSION: {
+    value: 131072,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_ENCRYPT_THEN_MAC: {
+    value: 524288,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_QUERY_MTU: {
+    value: 4096,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_RENEGOTIATION: {
+    value: 1073741824,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION: {
+    value: 65536,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_SSLv2: {
+    value: 0,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_SSLv3: {
+    value: 33554432,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_TICKET: {
+    value: 16384,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_TLSv1: {
+    value: 67108864,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_TLSv1_1: {
+    value: 268435456,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_TLSv1_2: {
+    value: 134217728,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_NO_TLSv1_3: {
+    value: 536870912,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_PRIORITIZE_CHACHA: {
+    value: 2097152,
+    configurable: false,
+    writable: false,
+  },
+  SSL_OP_TLS_ROLLBACK_BUG: {
+    value: 8388608,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_RSA: {
+    value: 1,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_DSA: {
+    value: 2,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_DH: {
+    value: 4,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_RAND: {
+    value: 8,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_EC: {
+    value: 2048,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_CIPHERS: {
+    value: 64,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_DIGESTS: {
+    value: 128,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_PKEY_METHS: {
+    value: 512,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_PKEY_ASN1_METHS: {
+    value: 1024,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_ALL: {
+    value: 65535,
+    configurable: false,
+    writable: false,
+  },
+  ENGINE_METHOD_NONE: {
+    value: 0,
+    configurable: false,
+    writable: false,
+  },
+  // The default coreCipherList in Node.js is configurable at build time.
+  // It is used as a configuration option in TLS client and server connections.
+  // We do not actually use this option in our implementation of TLS, however
+  // since we do not actually handle the TLS protocol directly in the runtime.
+  // There is no need for this value to match the defaultCoreCipherList in the
+  // official Node.js binary.
+  defaultCoreCipherList: {
+    value: '',
+    configurable: false,
+    writable: false,
+  },
+  TLS1_VERSION: {
+    value: 769,
+    configurable: false,
+    writable: false,
+  },
+  TLS1_1_VERSION: {
+    value: 770,
+    configurable: false,
+    writable: false,
+  },
+  TLS1_2_VERSION: {
+    value: 771,
+    configurable: false,
+    writable: false,
+  },
+  TLS1_3_VERSION: {
+    value: 772,
+    configurable: false,
+    writable: false,
+  },
+  // This last one is silly. It's defined on the crypto.constants object
+  // in Node.js but is not actually a constant. We also don't actually
+  // use it anywhere ourselves. Since we don't actually have a default
+  // cipher list in our implementation, we just set it to an empty string
+  // initially.
+  defaultCipherList: {
+    value: '',
+    configurable: true,
+    writable: true,
   },
 });
 
