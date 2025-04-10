@@ -2020,11 +2020,11 @@ export interface R2PutOptions {
   onlyIf?: R2Conditional | Headers;
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
-  md5?: ArrayBuffer | string;
-  sha1?: ArrayBuffer | string;
-  sha256?: ArrayBuffer | string;
-  sha384?: ArrayBuffer | string;
-  sha512?: ArrayBuffer | string;
+  md5?: (ArrayBuffer | ArrayBufferView) | string;
+  sha1?: (ArrayBuffer | ArrayBufferView) | string;
+  sha256?: (ArrayBuffer | ArrayBufferView) | string;
+  sha384?: (ArrayBuffer | ArrayBufferView) | string;
+  sha512?: (ArrayBuffer | ArrayBufferView) | string;
   storageClass?: string;
   ssecKey?: ArrayBuffer | string;
 }
