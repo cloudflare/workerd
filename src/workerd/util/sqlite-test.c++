@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <thread>
 
 #if _WIN32
 #include <io.h>
@@ -1496,6 +1497,125 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
   )")));
+}
+
+void testCriticalError(const char* expectedErrorMessage,
+    kj::Function<void(SqliteDatabase&, SqliteDatabase::Vfs& vfs)> triggerErrorFn) {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Create a tracker to verify our callback is called
+  bool criticalErrorCallbackCalled = false;
+  kj::Maybe<kj::Exception> capturedException = kj::none;
+
+  // Register a critical error callback
+  db.onCriticalError([&](kj::Maybe<kj::Exception> exception) {
+    criticalErrorCallbackCalled = true;
+    capturedException = exception;
+  });
+
+  KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
+
+  KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_ASSERT(capturedException != kj::none);
+  KJ_IF_SOME(exception, capturedException) {
+    KJ_EXPECT(exception.getDescription().startsWith(expectedErrorMessage));
+  }
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // Create a tracker to verify our callback is called
+  bool criticalErrorCallbackCalled = false;
+  kj::Maybe<kj::Exception> capturedException;
+  // Register a critical error callback
+  db.onCriticalError([&](kj::Exception exception) {
+    criticalErrorCallbackCalled = true;
+    capturedException = exception;
+  });
+
+  // Use a small cache size to force flushing to disk on even a small write
+  db.run(SqliteDatabase::TRUSTED, "PRAGMA cache_size = 1");  // 1 page cache
+
+  db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+    CREATE TABLE IF NOT EXISTS things (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      value INTEGER
+    );
+    INSERT INTO things(value) VALUES (123);
+  )"));
+
+  db.run("BEGIN TRANSACTION");
+
+  // Now arrange for an error on write().
+  KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
+
+  KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+    INSERT INTO things(value) VALUES (456);
+  )")));
+
+  KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_ASSERT(capturedException != kj::none);
+  KJ_IF_SOME(exception, capturedException) {
+    KJ_EXPECT(exception.getDescription().startsWith("test-vfs-error"));
+  }
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_BUSY") {
+  /*
+  In order for this test to succeed, we have to create a scenario where we are in an explicit
+  transaction and the sqlite has decided to auto-rollback the statement inside the transaction
+  that caused the error.
+  It is not straightforward to simulate this because Sqlite will only auto-rollback
+  an explicit transaction if it determines it has complex operations preceeding the point at
+  which it encountered a SQLITE_BUSY error.
+  With the current sqlite.c++ code we have, we only conside BEGIN TRANSACTION as a transaction,
+  any other kind of transaction like BEGIN IMMEDICATE TRANSACTION or BEGIN EXCLUSIVE TRANSACTION
+  is not considered a transaction in our code. BEGIN TRANSACTION always takes a database level lock,
+  so there is no way for us to simulate multiple statements in this transaction, last of which will
+  result in a SQLITE_BUSY error.
+  */
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_FULL") {
+  testCriticalError("database or disk is full", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    // Set up a database with limited size
+    db.run("PRAGMA max_page_count = 10");
+    db.run("CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)");
+
+    db.run("BEGIN TRANSACTION");
+
+    // Create a large blob to quickly fill the database
+    auto largeData = kj::heapArray<byte>(100000, 'X');  // 100KB
+
+    // This should eventually trigger SQLITE_FULL
+    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_full VALUES (?, ?)", 1, largeData.asPtr());
+  });
+}
+
+KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
+  testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
+    db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");
+    db.run(
+        "CREATE TABLE test_refs (id INTEGER PRIMARY KEY, ref_id INTEGER, FOREIGN KEY(ref_id) REFERENCES test_nomem(id) ON DELETE CASCADE)");
+
+    db.run("BEGIN TRANSACTION");
+
+    db.run("INSERT INTO test_nomem VALUES (1, 'small data')");
+    db.run("INSERT INTO test_refs VALUES (1, 1)");
+
+    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
+    db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
+
+    // Create data that will exceed the memory limit
+    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
+
+    db.run(SqliteDatabase::TRUSTED, "INSERT INTO test_nomem VALUES (?, ?)", 2, largeData.asPtr());
+  });
 }
 
 }  // namespace
