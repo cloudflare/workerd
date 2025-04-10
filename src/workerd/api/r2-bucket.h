@@ -198,11 +198,11 @@ class R2Bucket: public jsg::Object {
     jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
-    jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> md5;
-    jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha1;
-    jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha256;
-    jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha384;
-    jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha512;
+    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> md5;
+    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha1;
+    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha256;
+    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha384;
+    jsg::Optional<kj::OneOf<jsg::BufferSource, jsg::NonCoercible<kj::String>>> sha512;
     jsg::Optional<kj::String> storageClass;
     jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
