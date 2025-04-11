@@ -107,6 +107,9 @@ cargo_build_script(
     edition = "2021",
     links = "lolhtml",
     pkg_name = "lol_html_c_api",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

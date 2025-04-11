@@ -17,7 +17,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "clap_builder",
+    name = "capnp",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,11 +35,9 @@ rust_library(
         ],
     ),
     crate_features = [
-        "error-context",
-        "help",
+        "alloc",
+        "default",
         "std",
-        "suggestions",
-        "usage",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -51,15 +49,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_builder",
+        "crate-name=capnp",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.34",
-    deps = [
-        "@crates_vendor__anstyle-1.0.10//:anstyle",
-        "@crates_vendor__clap_lex-0.7.4//:clap_lex",
-        "@crates_vendor__strsim-0.11.1//:strsim",
-    ],
+    version = "0.21.0",
 )

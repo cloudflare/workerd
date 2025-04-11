@@ -51,7 +51,7 @@ rust_library(
     ],
     version = "0.0.0",
     deps = [
-        "@crates_vendor__itertools-0.13.0//:itertools",
+        "@crates_vendor__itertools-0.14.0//:itertools",
         "@crates_vendor__ruff_source_file-0.0.0//:ruff_source_file",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
         "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",

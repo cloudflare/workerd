@@ -104,6 +104,9 @@ cargo_build_script(
     ),
     edition = "2021",
     pkg_name = "libc",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
