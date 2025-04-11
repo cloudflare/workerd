@@ -8,7 +8,6 @@ import { scheduler } from 'node:timers/promises';
 
 const ANY_PORT = 0;
 const CONNECT_POLL_INTERVAL_MS = 500;
-const CONNECT_POLL_MAX_ATTEMPTS = 10;
 
 function getListeningServer() {
   const { promise, resolve } = Promise.withResolvers();
@@ -40,10 +39,7 @@ async function reservePorts(envVarNames) {
 
 function waitForListening(port) {
   const { promise, resolve, reject } = Promise.withResolvers();
-  let attempts = 0;
   const interval = setInterval(() => {
-    attempts++;
-
     const conn = net
       .connect(port, () => {
         conn.destroy();
@@ -51,12 +47,6 @@ function waitForListening(port) {
         resolve();
       })
       .once('error', (err) => console.log('waiting for sidecar...', err.code));
-
-    if (attempts > CONNECT_POLL_MAX_ATTEMPTS) {
-      reject(
-        `Sidecar failed to listen to port ${port} after ${attempts} attempts.`
-      );
-    }
   }, CONNECT_POLL_INTERVAL_MS);
   return promise;
 }
