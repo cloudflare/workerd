@@ -223,6 +223,8 @@ wd_cc_capnp_library(
 js_capnp_library(
     name = "rtti_capnp_js",
     srcs = ["rtti.capnp"],
+    outs = ["rtti.ts"],
+    data = ["//:node_modules/capnp-es"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],

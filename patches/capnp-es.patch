@@ -1,0 +1,13 @@
+diff --git a/dist/compiler/main.mjs b/dist/compiler/main.mjs
+index 6999c0e0c50570efd51959661ffc611f561bd31b..c37f97d5d786e4fc316acd4f5780e8e3976b21dd 100755
+--- a/dist/compiler/main.mjs
++++ b/dist/compiler/main.mjs
+@@ -38,7 +38,7 @@ Options:
+ `;
+ const sources = [];
+ const options = [];
+-let outFormats = ["js"];
++let outFormats = ["ts"];
+ let outDir;
+ for (const arg of process.argv.slice(2)) {
+   if (arg === "--help") {
