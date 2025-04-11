@@ -2501,6 +2501,14 @@ class Lock {
     return errorHandler(kj::mv(error));
   }
 
+  // Like tryCatch() but returns a Promise<T> that resolves to the result of func() or
+  // rejects with the result of errorHandler() if an exception is thrown.
+  template <typename T, typename Func>
+  Promise<T> tryOrReject(Func&& func) {
+    return tryCatch([&]() -> Promise<T> { return toPromise(func()); },
+        [&](Value&& error) -> Promise<T> { return rejectedPromise<T>(kj::mv(error)); });
+  }
+
   // ---------------------------------------------------------------------------
   // Promise-related stuff
 

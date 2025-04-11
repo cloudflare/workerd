@@ -98,78 +98,81 @@ class PythonModuleInfo {
 // This is done this way to avoid copying files as much as possible. We set up a Metadata File
 // System which reads the contents as they are needed.
 class PyodideMetadataReader: public jsg::Object {
- private:
-  kj::String mainModule;
-  PythonModuleInfo moduleInfo;
-  kj::Array<kj::String> requirements;
-  kj::String pyodideVersion;
-  kj::String packagesVersion;
-  kj::String packagesLock;
-  bool isWorkerdFlag;
-  bool isTracingFlag;
-  bool snapshotToDisk;
-  bool createBaselineSnapshot;
-  bool usePackagesInArtifactBundler;
-  kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
-  kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
-  kj::Maybe<kj::Array<kj::String>> entrypointClasses;
-
  public:
-  PyodideMetadataReader(kj::String mainModule,
-      kj::Array<kj::String> names,
-      kj::Array<kj::Array<kj::byte>> contents,
-      kj::Array<kj::String> requirements,
-      kj::String pyodideVersion,
-      kj::String packagesVersion,
-      kj::String packagesLock,
-      bool isWorkerd,
-      bool isTracing,
-      bool snapshotToDisk,
-      bool createBaselineSnapshot,
-      bool usePackagesInArtifactBundler,
-      kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
-      kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
-      kj::Maybe<kj::Array<kj::String>> entrypointClasses)
-      : mainModule(kj::mv(mainModule)),
-        moduleInfo(kj::mv(names), kj::mv(contents)),
-        requirements(kj::mv(requirements)),
-        pyodideVersion(kj::mv(pyodideVersion)),
-        packagesVersion(kj::mv(packagesVersion)),
-        packagesLock(kj::mv(packagesLock)),
-        isWorkerdFlag(isWorkerd),
-        isTracingFlag(isTracing),
-        snapshotToDisk(snapshotToDisk),
-        createBaselineSnapshot(createBaselineSnapshot),
-        usePackagesInArtifactBundler(usePackagesInArtifactBundler),
-        memorySnapshot(kj::mv(memorySnapshot)),
-        durableObjectClasses(kj::mv(durableObjectClasses)),
-        entrypointClasses(kj::mv(entrypointClasses)) {}
+  //
+  struct State {
+    kj::String mainModule;
+    PythonModuleInfo moduleInfo;
+    kj::Array<kj::String> requirements;
+    kj::String pyodideVersion;
+    kj::String packagesVersion;
+    kj::String packagesLock;
+    bool isWorkerdFlag;
+    bool isTracingFlag;
+    bool snapshotToDisk;
+    bool createBaselineSnapshot;
+    bool usePackagesInArtifactBundler;
+    kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
+    kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
+    kj::Maybe<kj::Array<kj::String>> entrypointClasses;
+
+    State(kj::String mainModule,
+        kj::Array<kj::String> names,
+        kj::Array<kj::Array<kj::byte>> contents,
+        kj::Array<kj::String> requirements,
+        kj::String pyodideVersion,
+        kj::String packagesVersion,
+        kj::String packagesLock,
+        bool isWorkerd,
+        bool isTracing,
+        bool snapshotToDisk,
+        bool createBaselineSnapshot,
+        bool usePackagesInArtifactBundler,
+        kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
+        kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
+        kj::Maybe<kj::Array<kj::String>> entrypointClasses)
+        : mainModule(kj::mv(mainModule)),
+          moduleInfo(kj::mv(names), kj::mv(contents)),
+          requirements(kj::mv(requirements)),
+          pyodideVersion(kj::mv(pyodideVersion)),
+          packagesVersion(kj::mv(packagesVersion)),
+          packagesLock(kj::mv(packagesLock)),
+          isWorkerdFlag(isWorkerd),
+          isTracingFlag(isTracing),
+          snapshotToDisk(snapshotToDisk),
+          createBaselineSnapshot(createBaselineSnapshot),
+          usePackagesInArtifactBundler(usePackagesInArtifactBundler),
+          memorySnapshot(kj::mv(memorySnapshot)),
+          durableObjectClasses(kj::mv(durableObjectClasses)),
+          entrypointClasses(kj::mv(entrypointClasses)) {}
+  };
+
+  PyodideMetadataReader(kj::Own<State> state): state(kj::mv(state)) {}
 
   bool isWorkerd() {
-    return this->isWorkerdFlag;
+    return state->isWorkerdFlag;
   }
 
   bool isTracing() {
-    return this->isTracingFlag;
+    return state->isTracingFlag;
   }
 
   bool shouldSnapshotToDisk() {
-    return snapshotToDisk;
+    return state->snapshotToDisk;
   }
 
   bool isCreatingBaselineSnapshot() {
-    return createBaselineSnapshot;
+    return state->createBaselineSnapshot;
   }
 
-  kj::String getMainModule() {
-    return kj::str(this->mainModule);
+  kj::StringPtr getMainModule() {
+    return state->mainModule;
   }
 
   // Returns the filenames of the files inside of the WorkerBundle that end with the specified
   // file extension.
   // TODO: Remove this.
-  kj::Array<jsg::JsRef<jsg::JsString>> getNames(
-      jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
+  kj::Array<kj::StringPtr> getNames(jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter);
   kj::Array<int> getSizes(jsg::Lock& js);
 
   // Return the list of names to import into a package snapshot.
@@ -180,47 +183,47 @@ class PyodideMetadataReader: public jsg::Object {
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
   bool hasMemorySnapshot() {
-    return memorySnapshot != kj::none;
+    return state->memorySnapshot != kj::none;
   }
   int getMemorySnapshotSize() {
-    if (memorySnapshot == kj::none) {
+    if (state->memorySnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(memorySnapshot).size();
+    return KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
   }
 
   void disposeMemorySnapshot() {
-    memorySnapshot = kj::none;
+    state->memorySnapshot = kj::none;
   }
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
   bool shouldUsePackagesInArtifactBundler() {
-    return usePackagesInArtifactBundler;
+    return state->usePackagesInArtifactBundler;
   }
 
-  kj::String getPyodideVersion() {
-    return kj::str(pyodideVersion);
+  kj::StringPtr getPyodideVersion() {
+    return state->pyodideVersion;
   }
 
-  kj::String getPackagesVersion() {
-    return kj::str(packagesVersion);
+  kj::StringPtr getPackagesVersion() {
+    return state->packagesVersion;
   }
 
-  kj::String getPackagesLock() {
-    return kj::str(packagesLock);
+  kj::StringPtr getPackagesLock() {
+    return state->packagesLock;
   }
 
   kj::HashSet<kj::String> getTransitiveRequirements();
 
   kj::Maybe<kj::ArrayPtr<kj::String>> getDurableObjectClasses() {
-    KJ_IF_SOME(cls, durableObjectClasses) {
+    KJ_IF_SOME(cls, state->durableObjectClasses) {
       return cls.asPtr();
     }
     return kj::none;
   }
 
   kj::Maybe<kj::ArrayPtr<kj::String>> getEntrypointClasses() {
-    KJ_IF_SOME(cls, entrypointClasses) {
+    KJ_IF_SOME(cls, state->entrypointClasses) {
       return cls.asPtr();
     }
     return kj::none;
@@ -251,17 +254,20 @@ class PyodideMetadataReader: public jsg::Object {
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("mainModule", mainModule);
-    for (const auto& name: this->moduleInfo.names) {
+    tracker.trackField("mainModule", state->mainModule);
+    for (const auto& name: state->moduleInfo.names) {
       tracker.trackField("name", name);
     }
-    for (const auto& content: this->moduleInfo.contents) {
+    for (const auto& content: state->moduleInfo.contents) {
       tracker.trackField("content", content);
     }
-    for (const auto& requirement: requirements) {
+    for (const auto& requirement: state->requirements) {
       tracker.trackField("requirement", requirement);
     }
   }
+
+ private:
+  kj::Own<State> state;
 };
 
 struct MemorySnapshotResult {

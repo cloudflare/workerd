@@ -67,16 +67,16 @@ int ReadOnlyBuffer::read(jsg::Lock& js, int offset, kj::Array<kj::byte> buf) {
   return readToTarget(source, offset, buf);
 }
 
-kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getNames(
+kj::Array<kj::StringPtr> PyodideMetadataReader::getNames(
     jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter) {
-  auto builder = kj::Vector<jsg::JsRef<jsg::JsString>>(this->moduleInfo.names.size());
+  auto builder = kj::Vector<kj::StringPtr>(state->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
     KJ_IF_SOME(ext, maybeExtFilter) {
-      if (!this->moduleInfo.names[i].endsWith(ext)) {
+      if (!state->moduleInfo.names[i].endsWith(ext)) {
         continue;
       }
     }
-    builder.add(js, js.str(this->moduleInfo.names[i]));
+    builder.add(state->moduleInfo.names[i]);
   }
   return builder.releaseAsArray();
 }
@@ -126,45 +126,45 @@ kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports() {
 }
 
 kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports() {
-  return this->moduleInfo.getPackageSnapshotImports();
+  return state->moduleInfo.getPackageSnapshotImports();
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(this->requirements.size());
+  auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(state->requirements.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
-    builder.add(js, js.str(this->requirements[i]));
+    builder.add(js, js.str(state->requirements[i]));
   }
   return builder.finish();
 }
 
 kj::Array<int> PyodideMetadataReader::getSizes(jsg::Lock& js) {
-  auto builder = kj::heapArrayBuilder<int>(this->moduleInfo.names.size());
+  auto builder = kj::heapArrayBuilder<int>(state->moduleInfo.names.size());
   for (auto i: kj::zeroTo(builder.capacity())) {
-    builder.add(this->moduleInfo.contents[i].size());
+    builder.add(state->moduleInfo.contents[i].size());
   }
   return builder.finish();
 }
 
 int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf) {
-  if (index >= this->moduleInfo.contents.size() || index < 0) {
+  if (index >= state->moduleInfo.contents.size() || index < 0) {
     return 0;
   }
-  auto& data = this->moduleInfo.contents[index];
+  auto& data = state->moduleInfo.contents[index];
   return readToTarget(data, offset, buf);
 }
 
 int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
-  if (memorySnapshot == kj::none) {
+  if (state->memorySnapshot == kj::none) {
     return 0;
   }
-  return readToTarget(KJ_REQUIRE_NONNULL(memorySnapshot), offset, buf);
+  return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
 }
 
 kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
-  auto packages = parseLockFile(packagesLock);
+  auto packages = parseLockFile(state->packagesLock);
   auto depMap = getDepMapFromPackagesLock(*packages);
 
-  return getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
+  return getPythonPackageNames(*packages, depMap, state->requirements, state->packagesVersion);
 }
 
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
