@@ -196,8 +196,8 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
-kj::Own<ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
-  return kj::addRef(*externalMemoryTarget);
+kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
+  return externalMemoryTarget->addRef();
 }
 
 void IsolateBase::deferExternalMemoryUpdate(int64_t size) {
@@ -346,7 +346,8 @@ IsolateBase::IsolateBase(const V8System& system,
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
-      externalMemoryTarget(kj::refcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter)),
+      externalMemoryTarget(
+          kj::atomicRefcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {

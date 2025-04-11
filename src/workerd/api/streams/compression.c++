@@ -14,7 +14,7 @@
 
 namespace workerd::api {
 CompressionAllocator::CompressionAllocator(
-    kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+    kj::Own<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
     : externalMemoryTarget(kj::mv(externalMemoryTarget)) {}
 
 void CompressionAllocator::configure(z_stream* stream) {
@@ -71,7 +71,7 @@ class Context {
   explicit Context(Mode mode,
       kj::StringPtr format,
       ContextFlags flags,
-      kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+      kj::Own<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
       : allocator(kj::mv(externalMemoryTarget)),
         mode(mode),
         strictCompression(flags)
@@ -244,7 +244,7 @@ class CompressionStreamImpl: public kj::Refcounted,
  public:
   explicit CompressionStreamImpl(kj::String format,
       Context::ContextFlags flags,
-      kj::Own<jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+      kj::Own<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
       : context(mode, format, flags, kj::mv(externalMemoryTarget)) {}
 
   // WritableStreamSink implementation ---------------------------------------------------

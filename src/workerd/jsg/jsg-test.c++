@@ -466,7 +466,7 @@ KJ_TEST("External memory adjustment") {
 }
 
 KJ_TEST("External memory adjustment - defered") {
-  auto target = kj::refcounted<ExternalMemoryTarget>();
+  kj::Own<const ExternalMemoryTarget> target;
 
   // A memory allocation that will outlive the isolate
   kj::Array<kj::byte> mem;

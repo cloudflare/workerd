@@ -2269,7 +2269,7 @@ class ExternalMemoryAccounter: private v8::ExternalMemoryAccounter {
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
 // point to. The only purpose of this object is to hold a weak reference back to the isolate; the
 // reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::Refcounted {
+class ExternalMemoryTarget: public kj::AtomicRefcounted {
   struct Impl;
 
  public:
@@ -2279,14 +2279,14 @@ class ExternalMemoryTarget: public kj::Refcounted {
     maybeInner.emplace(isolate, accounter);
   }
 
-  bool isIsolateAlive();
-  int64_t getPendingMemoryUpdate();
-  ExternalMemoryAdjustment getAdjustment(size_t amount);
+  bool isIsolateAlive() const;
+  int64_t getPendingMemoryUpdate() const;
+  ExternalMemoryAdjustment getAdjustment(size_t amount) const;
 
  private:
-  kj::Own<ExternalMemoryTarget> addRef();
-  void reset();
-  void maybeDeferAdjustment(ssize_t amount);
+  kj::Own<const ExternalMemoryTarget> addRef() const;
+  void reset() const;
+  void maybeDeferAdjustment(ssize_t amount) const;
   struct Impl {
     v8::Isolate* isolate;
     jsg::ExternalMemoryAccounter* externalMemoryAccounter;
@@ -2303,7 +2303,7 @@ class ExternalMemoryTarget: public kj::Refcounted {
 // The allocation amount can be adjusted up or down during the lifetime of an object.
 class ExternalMemoryAdjustment final {
  public:
-  ExternalMemoryAdjustment(kj::Own<ExternalMemoryTarget> externalMemory, size_t amount);
+  ExternalMemoryAdjustment(kj::Own<const ExternalMemoryTarget> externalMemory, size_t amount);
   ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
   ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
   KJ_DISALLOW_COPY(ExternalMemoryAdjustment);
@@ -2321,7 +2321,7 @@ class ExternalMemoryAdjustment final {
   }
 
  private:
-  kj::Own<ExternalMemoryTarget> externalMemory;
+  kj::Own<const ExternalMemoryTarget> externalMemory;
   size_t amount = 0;
 
   // If the isolate is locked, adjust the v8::ExternalMemoryAccounter immediately.
@@ -2418,7 +2418,7 @@ class Lock {
   // Used to save a reference to an isolate that is responsible for external memory usage.
   // getAdjustment() can be invoked at any time to create a new RAII adjustment object
   // pointing to this isolate
-  kj::Own<ExternalMemoryTarget> getExternalMemoryTarget();
+  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
 
   Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);

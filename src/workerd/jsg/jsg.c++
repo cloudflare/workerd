@@ -333,7 +333,7 @@ void ExternalMemoryAccounter::Reset(v8::Isolate* isolate) {
   v8::ExternalMemoryAccounter::Update(isolate, -amount_of_external_memory_);
 }
 
-void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) {
+void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
   KJ_IF_SOME(inner, maybeInner) {
     if (v8::Locker::IsLocked(inner.isolate)) {
       inner.externalMemoryAccounter->Update(inner.isolate, amount);
@@ -347,23 +347,25 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) {
   }
 }
 
-void ExternalMemoryTarget::reset() {
-  maybeInner = kj::none;
+void ExternalMemoryTarget::reset() const {
+  // TODO(now): This isn't thread-safe! (It wasn't before this commit either, but now that we've
+  //   labeled things const to enforce thread-safety, the problem is revealed.)
+  const_cast<ExternalMemoryTarget*>(this)->maybeInner = kj::none;
 }
 
-kj::Own<ExternalMemoryTarget> ExternalMemoryTarget::addRef() {
-  return kj::addRef(*this);
+kj::Own<const ExternalMemoryTarget> ExternalMemoryTarget::addRef() const {
+  return kj::atomicAddRef(*this);
 }
 
-ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) {
+ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) const {
   return ExternalMemoryAdjustment(addRef(), amount);
 }
 
-bool ExternalMemoryTarget::isIsolateAlive() {
+bool ExternalMemoryTarget::isIsolateAlive() const {
   return maybeInner != kj::none;
 }
 
-int64_t ExternalMemoryTarget::getPendingMemoryUpdate() {
+int64_t ExternalMemoryTarget::getPendingMemoryUpdate() const {
   KJ_IF_SOME(inner, maybeInner) {
     auto& jsgIsolate =
         *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
@@ -377,7 +379,7 @@ ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget()->getAdjustment(amount);
 }
 
-kj::Own<ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
+kj::Own<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
 }
 
@@ -410,7 +412,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
 }
 
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(
-    kj::Own<ExternalMemoryTarget> externalMemory, size_t amount)
+    kj::Own<const ExternalMemoryTarget> externalMemory, size_t amount)
     : externalMemory(kj::mv(externalMemory)) {
   maybeDeferAdjustment(amount);
 }
