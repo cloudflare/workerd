@@ -29,8 +29,6 @@ import { once } from 'node:events';
 import * as net from 'node:net';
 import * as tls from 'node:tls';
 
-const enc = new TextEncoder();
-
 export const checkPortsSetCorrectly = {
   test(ctrl, env, ctx) {
     const keys = [
@@ -1194,8 +1192,6 @@ export const testNetReconnect = {
   async test(ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();
     const N = 50;
-    let disconnect_count = 0;
-
     const client = net.connect(env.RECONNECT_SERVER_PORT);
 
     client.setEncoding('UTF8');
@@ -1209,17 +1205,18 @@ export const testNetReconnect = {
     const endFn = mock.fn(() => {});
     client.on('end', endFn);
 
-    client.on('close', (had_error) => {
+    const closeFn = mock.fn((had_error) => {
       strictEqual(had_error, false);
-      if (disconnect_count++ < N) {
+      if (closeFn.mock.callCount() < N) {
         client.connect(env.RECONNECT_SERVER_PORT); // reconnect
       } else {
         resolve();
       }
     });
+    client.on('close', closeFn);
 
     await promise;
-    strictEqual(disconnect_count, N + 1);
+    strictEqual(closeFn.mock.callCount(), N + 1);
     strictEqual(onDataFn.mock.callCount(), N + 1);
     strictEqual(endFn.mock.callCount(), N + 1);
   },
