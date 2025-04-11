@@ -618,11 +618,11 @@ class AbortSignal final: public EventTarget {
 
   // The collection of rpc clients associated with this abort signal
   // Each rpcClient will be informed when this abort signal is triggered.
-  kj::Vector<rpc::AbortSignal::Client> rpcClients;
+  kj::Vector<IoOwn<rpc::AbortSignal::Client>> rpcClients;
 
   // Trigger an abort on all associated clients
   kj::Promise<void> sendToRpc(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsValue>>& reason);
-  kj::Promise<void> sendToRpc(kj::Own<rpc::JsValue::Reader> reason);
+  kj::Promise<void> sendToRpc(kj::ArrayPtr<kj::byte> reason);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
