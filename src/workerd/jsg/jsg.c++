@@ -374,7 +374,7 @@ int64_t ExternalMemoryTarget::getPendingMemoryUpdateForTest() const {
 }
 
 ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
-  return IsolateBase::from(v8Isolate).getExternalMemoryTarget()->getAdjustment(amount);
+  return IsolateBase::from(v8Isolate).getExternalMemoryAdjustment(amount);
 }
 
 kj::Own<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {

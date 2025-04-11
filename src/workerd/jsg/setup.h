@@ -209,6 +209,12 @@ class IsolateBase {
   // Get an object referencing this isolate that can be used to adjust external memory usage later
   kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
 
+  // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
+  // increment and decrement.
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
+    return externalMemoryTarget->getAdjustment(amount);
+  }
+
   AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
     return *envAsyncContextKey;
   }
