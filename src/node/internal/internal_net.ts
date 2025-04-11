@@ -302,8 +302,8 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   // @ts-expect-error TS2540 Required due to types
   this.autoSelectFamilyAttemptedAddresses = [];
 
-  initSocketHandle(this);
-
+  this._undestroy();
+  this._sockname = null;
   this._pendingData = null;
   this._pendingEncoding = '';
 
@@ -317,7 +317,9 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     this._handle = options.handle;
   }
 
-  this.once('end', onReadableStreamEnd);
+  // We explicitly listen for all 'end' events, not only for once
+  // because Socket class supports reconnection through s.connect();
+  this.on('end', onReadableStreamEnd);
 
   const onread = options.onread;
   if (
@@ -385,8 +387,11 @@ Socket.prototype.setTimeout = function (
 
   this.timeout = msecs;
 
+  // Type checking identical to timers.enroll()
   msecs = getTimerDuration(msecs, 'msecs');
 
+  // Attempt to clear an existing timer in both cases -
+  // even if it will be rescheduled we don't want to leak an existing timer.
   clearTimeout(this[kTimeout] as unknown as number);
 
   if (msecs === 0) {
@@ -424,12 +429,11 @@ Socket.prototype._onTimeout = function (this: Socket): void {
 Socket.prototype._getpeername = function (
   this: Socket
 ): Record<string, unknown> {
-  if (this._handle == null) {
+  if (this._handle == null || this[kSocketInfo] == null) {
     return {};
-  } else {
-    this[kSocketInfo] ??= {};
-    return { ...this[kSocketInfo].remoteAddress };
   }
+
+  return { ...this[kSocketInfo].remoteAddress };
 };
 
 Socket.prototype._getsockname = function (this: Socket): AddressInfo | {} {
@@ -616,7 +620,7 @@ Socket.prototype._final = function (
   }
 
   // If there is no writer, then there's really nothing left to do here.
-  if (this._handle?.writer === undefined) {
+  if (this._handle == null) {
     cb();
     return;
   }
@@ -750,7 +754,7 @@ Socket.prototype._destroy = function (
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
-  if (this._handle) {
+  if (this._handle != null) {
     this._handle.socket.close().then(
       () => {
         cleanupAfterDestroy(this, cb, exception);
@@ -812,12 +816,6 @@ Socket.prototype.connect = function (
     this.write = Socket.prototype.write;
   }
 
-  if (this.destroyed) {
-    this._handle = null;
-    this._peername = null;
-    this._sockname = null;
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (options.path != null) {
     throw new ERR_INVALID_ARG_VALUE('path', options.path, 'is not supported');
@@ -826,11 +824,21 @@ Socket.prototype.connect = function (
   this[kBytesRead] = 0;
   this[kBytesWritten] = 0;
 
-  if (this._handle != null) {
-    initSocketHandle(this);
+  // This is required for "reconnection".
+  // Previous connected handle needs to emit "close" event.
+  // This ensures that the previous handle is closed before initializing a new one.
+  if (this._handle) {
+    this._handle.socket.close().then(
+      () => {
+        initializeConnection(this, options);
+      },
+      () => {
+        initializeConnection(this, options);
+      }
+    );
+  } else {
+    initializeConnection(this, options);
   }
-
-  initializeConnection(this, options);
 
   return this;
 };
@@ -848,8 +856,8 @@ Socket.prototype[kReinitializeHandle] = function reinitializeHandle(
   );
 
   this._handle = handle;
-
-  initSocketHandle(this);
+  this._undestroy();
+  this._sockname = null;
 };
 
 // ======================================================================================
@@ -1083,11 +1091,8 @@ function cleanupAfterDestroy(
     socket[kBytesWritten] = socket.bytesWritten;
     socket.resetAndClosing = false;
   }
-  socket._handle = null;
+  // socket._handle = null;
   socket[kLastWriteQueueSize] = 0;
-  socket[kBuffer] = null;
-  socket[kBufferCb] = null;
-  socket[kBufferGen] = null;
   socket[kSocketInfo] = null;
 
   queueMicrotask(() => {
@@ -1195,6 +1200,10 @@ function initializeConnection(
         bytesRead: 0,
         bytesWritten: 0,
       };
+
+      // We need to undestroy the stream to connect to it.
+      socket._undestroy();
+      socket._sockname = null;
 
       handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
         socket.emit('connectionAttemptFailed', host, port, addressType, err);
@@ -1377,12 +1386,6 @@ async function startRead(socket: Socket): Promise<void> {
       socket._handle.reading = false;
     }
   }
-}
-
-// Called when creating new Socket, or when re-using a closed Socket
-function initSocketHandle(socket: Socket): void {
-  socket._undestroy();
-  socket._sockname = null;
 }
 
 function tryReadStart(socket: Socket): void {

@@ -67,23 +67,19 @@ serverThatDies.listen(process.env.SERVER_THAT_DIES_PORT, () =>
 );
 
 const reconnectServer = net.createServer((s) => {
-  console.info('SERVER: got s connection');
   s.resume();
 
   s.on('error', () => {
     // Do nothing
   });
 
-  console.info('SERVER connect, writing');
   s.write('hello\r\n');
 
   s.on('end', () => {
-    console.info('SERVER s end, calling end()');
     s.end();
   });
 
   s.on('close', (had_error) => {
-    console.info(`SERVER had_error: ${JSON.stringify(had_error)}`);
     assert.strictEqual(had_error, false);
   });
 });

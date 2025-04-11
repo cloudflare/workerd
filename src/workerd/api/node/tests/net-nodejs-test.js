@@ -1190,53 +1190,40 @@ export const testNetOnReadStaticBuffer = {
   },
 };
 
-// export const testNetReconnect = {
-//   async test(ctrl, env) {
-//     const { promise, resolve } = Promise.withResolvers();
-//     const N = 50;
-//     let disconnect_count = 0;
+export const testNetReconnect = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const N = 50;
+    let disconnect_count = 0;
 
-//     const client = net.connect(env.RECONNECT_SERVER_PORT);
+    const client = net.connect(env.RECONNECT_SERVER_PORT);
 
-//     client.setEncoding('UTF8');
+    client.setEncoding('UTF8');
 
-//     client.on('connect', () => {
-//       console.error('CLIENT connected');
-//     });
+    const onDataFn = mock.fn((chunk) => {
+      strictEqual(chunk, 'hello\r\n');
+      client.end();
+    });
+    client.on('data', onDataFn);
 
-//     client.on('error', (err) => {
-//       console.error('CLIENT error', err);
-//     });
+    const endFn = mock.fn(() => {});
+    client.on('end', endFn);
 
-//     const onDataFn = mock.fn((chunk) => {
-//       console.log(`got data`);
-//       strictEqual(chunk, 'hello\r\n');
-//       console.error('CLIENT: calling end');
-//       client.end();
-//     });
-//     client.on('data', onDataFn);
+    client.on('close', (had_error) => {
+      strictEqual(had_error, false);
+      if (disconnect_count++ < N) {
+        client.connect(env.RECONNECT_SERVER_PORT); // reconnect
+      } else {
+        resolve();
+      }
+    });
 
-//     const endFn = mock.fn(() => {
-//       console.log('CLIENT end');
-//     });
-//     client.on('end', endFn);
-
-//     client.on('close', (had_error) => {
-//       console.log('CLIENT disconnect');
-//       strictEqual(had_error, false);
-//       if (disconnect_count++ < N) {
-//         client.connect(env.RECONNECT_SERVER_PORT); // reconnect
-//       } else {
-//         resolve();
-//       }
-//     });
-
-//     await promise;
-//     strictEqual(disconnect_count, N + 1);
-//     strictEqual(onDataFn.mock.callCount(), N + 1);
-//     strictEqual(endFn.mock.callCount(), N + 1);
-//   },
-// };
+    await promise;
+    strictEqual(disconnect_count, N + 1);
+    strictEqual(onDataFn.mock.callCount(), N + 1);
+    strictEqual(endFn.mock.callCount(), N + 1);
+  },
+};
 
 // test/parallel/test-net-remote-address-port.js
 // test/parallel/test-net-remote-address.js
