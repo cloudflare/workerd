@@ -212,13 +212,6 @@ load("@aspect_rules_js//npm:repositories.bzl", "npm_translate_lock")
 npm_translate_lock(
     name = "npm",
     npmrc = "//:.npmrc",
-    patch_args = {
-        "capnp-ts@0.7.0": ["-p1"],
-    },
-    # Patches required for `capnp-ts` to type-check
-    patches = {
-        "capnp-ts@0.7.0": ["//:patches/capnp-ts@0.7.0.patch"],
-    },
     pnpm_lock = "//:pnpm-lock.yaml",
 )
 

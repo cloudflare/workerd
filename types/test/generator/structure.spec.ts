@@ -2,41 +2,41 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
-import { test } from "node:test";
-import { JsgImplType_Type, Structure } from "@workerd/jsg/rtti.capnp.js";
-import { Int64, Message } from "capnp-ts";
-import { createStructureNode } from "../../src/generator/structure";
-import { printNode } from "../../src/print";
+import assert from 'assert';
+import { test } from 'node:test';
+import { JsgImplType_Type, Structure } from '@workerd/jsg/rtti';
+import { Int64, Message } from 'capnp-es';
+import { createStructureNode } from '../../src/generator/structure';
+import { printNode } from '../../src/print';
 
-test("createStructureNode: method members", () => {
+test('createStructureNode: method members', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Methods");
-  structure.setFullyQualifiedName("workerd::api::Methods");
+  structure.setName('Methods');
+  structure.setFullyQualifiedName('workerd::api::Methods');
 
   const members = structure.initMembers(3);
 
   let method = members.get(0).initMethod();
-  method.setName("one");
+  method.setName('one');
   {
     const args = method.initArgs(3);
     args.get(0).setBoolt();
     args.get(1).initPromise().initValue().setVoidt();
     const maybe = args.get(2).initMaybe();
-    maybe.setName("jsg::Optional");
-    maybe.initValue().initNumber().setName("int");
+    maybe.setName('jsg::Optional');
+    maybe.initValue().initNumber().setName('int');
   }
   method.initReturnType().setVoidt();
 
   method = members.get(1).initMethod();
-  method.setName("two");
+  method.setName('two');
   method
     .initReturnType()
     .initJsgImpl()
     .setType(JsgImplType_Type.JSG_UNIMPLEMENTED);
 
   method = members.get(2).initMethod();
-  method.setName("three");
+  method.setName('three');
   {
     const args = method.initArgs(1);
     args.get(0).initJsgImpl().setType(JsgImplType_Type.JSG_VARARGS);
@@ -62,59 +62,59 @@ test("createStructureNode: method members", () => {
   );
 });
 
-test("createStructureNode: property members", () => {
+test('createStructureNode: property members', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Properties");
-  structure.setFullyQualifiedName("workerd::api::Properties");
+  structure.setName('Properties');
+  structure.setFullyQualifiedName('workerd::api::Properties');
 
   const members = structure.initMembers(8);
 
   let prop = members.get(0).initProperty();
-  prop.setName("one");
+  prop.setName('one');
   prop.initType().setBoolt();
 
   prop = members.get(1).initProperty();
-  prop.setName("two");
-  prop.initType().initNumber().setName("int");
+  prop.setName('two');
+  prop.initType().initNumber().setName('int');
   prop.setReadonly(true);
 
   prop = members.get(2).initProperty();
-  prop.setName("three");
+  prop.setName('three');
   {
     const maybe = prop.initType().initMaybe();
-    maybe.setName("jsg::Optional");
+    maybe.setName('jsg::Optional');
     maybe.initValue().setBoolt();
   }
   prop.setReadonly(true);
 
   prop = members.get(3).initProperty();
-  prop.setName("four");
+  prop.setName('four');
   prop.initType().initJsgImpl().setType(JsgImplType_Type.JSG_UNIMPLEMENTED);
   prop.setReadonly(true);
 
   prop = members.get(4).initProperty();
-  prop.setName("five");
+  prop.setName('five');
   prop.initType().setBoolt();
   prop.setPrototype(true);
 
   prop = members.get(5).initProperty();
-  prop.setName("six");
-  prop.initType().initString().setName("kj::String");
+  prop.setName('six');
+  prop.initType().initString().setName('kj::String');
   prop.setReadonly(true);
   prop.setPrototype(true);
 
   prop = members.get(6).initProperty();
-  prop.setName("seven");
+  prop.setName('seven');
   {
     const maybe = prop.initType().initMaybe();
-    maybe.setName("jsg::Optional");
-    maybe.initValue().initNumber().setName("short");
+    maybe.setName('jsg::Optional');
+    maybe.initValue().initNumber().setName('short');
   }
   prop.setReadonly(true);
   prop.setPrototype(true);
 
   prop = members.get(7).initProperty();
-  prop.setName("eight");
+  prop.setName('eight');
   prop.initType().initJsgImpl().setType(JsgImplType_Type.JSG_UNIMPLEMENTED);
   prop.setReadonly(true);
   prop.setPrototype(true);
@@ -146,23 +146,23 @@ test("createStructureNode: property members", () => {
   );
 });
 
-test("createStructureNode: nested type members", () => {
+test('createStructureNode: nested type members', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Nested");
-  structure.setFullyQualifiedName("workerd::api::Nested");
+  structure.setName('Nested');
+  structure.setFullyQualifiedName('workerd::api::Nested');
 
   const members = structure.initMembers(2);
 
   let nested = members.get(0).initNested();
   let nestedStructure = nested.initStructure();
-  nestedStructure.setName("Thing");
-  nestedStructure.setFullyQualifiedName("workerd::api::Thing");
+  nestedStructure.setName('Thing');
+  nestedStructure.setFullyQualifiedName('workerd::api::Thing');
 
   nested = members.get(1).initNested();
   nestedStructure = nested.initStructure();
-  nestedStructure.setName("OtherThing");
-  nestedStructure.setFullyQualifiedName("workerd::api::OtherThing");
-  nested.setName("RenamedThing");
+  nestedStructure.setName('OtherThing');
+  nestedStructure.setFullyQualifiedName('workerd::api::OtherThing');
+  nested.setName('RenamedThing');
 
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: false })),
@@ -180,15 +180,15 @@ test("createStructureNode: nested type members", () => {
   );
 });
 
-test("createStructureNode: constant members", () => {
+test('createStructureNode: constant members', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Constants");
-  structure.setFullyQualifiedName("workerd::api::Constants");
+  structure.setName('Constants');
+  structure.setFullyQualifiedName('workerd::api::Constants');
 
   const members = structure.initMembers(1);
 
   const constant = members.get(0).initConstant();
-  constant.setName("THING");
+  constant.setName('THING');
   constant.setValue(Int64.fromNumber(42));
 
   assert.strictEqual(
@@ -199,38 +199,38 @@ test("createStructureNode: constant members", () => {
   );
 });
 
-test("createStructureNode: iterator members", () => {
+test('createStructureNode: iterator members', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Iterators");
-  structure.setFullyQualifiedName("workerd::api::Iterators");
+  structure.setName('Iterators');
+  structure.setFullyQualifiedName('workerd::api::Iterators');
 
   structure.setIterable(true);
   const iterator = structure.initIterator();
   {
     const args = iterator.initArgs(1);
     const maybe = args.get(0).initMaybe();
-    maybe.setName("jsg::Optional");
+    maybe.setName('jsg::Optional');
     const optionsStructure = maybe.initValue().initStructure();
-    optionsStructure.setName("ThingOptions");
-    optionsStructure.setFullyQualifiedName("workerd::api::ThingOptions");
+    optionsStructure.setName('ThingOptions');
+    optionsStructure.setFullyQualifiedName('workerd::api::ThingOptions');
   }
   let returnStructure = iterator.initReturnType().initStructure();
-  returnStructure.setName("ThingIterator");
-  returnStructure.setFullyQualifiedName("workerd::api::ThingIterator");
+  returnStructure.setName('ThingIterator');
+  returnStructure.setFullyQualifiedName('workerd::api::ThingIterator');
 
   structure.setAsyncIterable(true);
   const asyncIterator = structure.initAsyncIterator();
   {
     const args = asyncIterator.initArgs(1);
     const maybe = args.get(0).initMaybe();
-    maybe.setName("jsg::Optional");
+    maybe.setName('jsg::Optional');
     const optionsStructure = maybe.initValue().initStructure();
-    optionsStructure.setName("AsyncThingOptions");
-    optionsStructure.setFullyQualifiedName("workerd::api::AsyncThingOptions");
+    optionsStructure.setName('AsyncThingOptions');
+    optionsStructure.setFullyQualifiedName('workerd::api::AsyncThingOptions');
   }
   returnStructure = asyncIterator.initReturnType().initStructure();
-  returnStructure.setName("AsyncThingIterator");
-  returnStructure.setFullyQualifiedName("workerd::api::AsyncThingIterator");
+  returnStructure.setName('AsyncThingIterator');
+  returnStructure.setFullyQualifiedName('workerd::api::AsyncThingIterator');
 
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: false })),
@@ -248,10 +248,10 @@ test("createStructureNode: iterator members", () => {
   );
 });
 
-test("createStructureNode: constructors", () => {
+test('createStructureNode: constructors', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Constructor");
-  structure.setFullyQualifiedName("workerd::api::Constructor");
+  structure.setName('Constructor');
+  structure.setFullyQualifiedName('workerd::api::Constructor');
 
   const members = structure.initMembers(1);
 
@@ -259,13 +259,13 @@ test("createStructureNode: constructors", () => {
   {
     const args = constructor.initArgs(4);
     let maybe = args.get(0).initMaybe();
-    maybe.setName("jsg::Optional");
+    maybe.setName('jsg::Optional');
     maybe.initValue().setBoolt();
-    args.get(1).initString().setName("kj::String");
+    args.get(1).initString().setName('kj::String');
     args.get(2).initPromise().initValue().setVoidt();
     maybe = args.get(3).initMaybe();
-    maybe.setName("jsg::Optional");
-    maybe.initValue().initNumber().setName("int");
+    maybe.setName('jsg::Optional');
+    maybe.initValue().initNumber().setName('int');
   }
 
   assert.strictEqual(
@@ -276,14 +276,14 @@ test("createStructureNode: constructors", () => {
   );
 });
 
-test("createStructureNode: extends", () => {
+test('createStructureNode: extends', () => {
   const structure = new Message().initRoot(Structure);
-  structure.setName("Extends");
-  structure.setFullyQualifiedName("workerd::api::Extends");
+  structure.setName('Extends');
+  structure.setFullyQualifiedName('workerd::api::Extends');
 
   const extendsStructure = structure.initExtends().initStructure();
-  extendsStructure.setName("Base");
-  extendsStructure.setFullyQualifiedName("workerd::api::Base");
+  extendsStructure.setName('Base');
+  extendsStructure.setFullyQualifiedName('workerd::api::Base');
 
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: true })),
