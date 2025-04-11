@@ -362,11 +362,11 @@ ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) cons
   return ExternalMemoryAdjustment(addRef(), amount);
 }
 
-bool ExternalMemoryTarget::isIsolateAlive() const {
+bool ExternalMemoryTarget::isIsolateAliveForTest() const {
   return isolate.load(std::memory_order_relaxed) != nullptr;
 }
 
-int64_t ExternalMemoryTarget::getPendingMemoryUpdate() const {
+int64_t ExternalMemoryTarget::getPendingMemoryUpdateForTest() const {
   return pendingExternalMemoryUpdate.load(std::memory_order_relaxed);
 }
 

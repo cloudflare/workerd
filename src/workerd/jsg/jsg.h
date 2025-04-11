@@ -2259,9 +2259,11 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
  public:
   ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
 
-  bool isIsolateAlive() const;
-  int64_t getPendingMemoryUpdate() const;
   ExternalMemoryAdjustment getAdjustment(size_t amount) const;
+
+  // These two methods are for tests only.
+  bool isIsolateAliveForTest() const;
+  int64_t getPendingMemoryUpdateForTest() const;
 
  private:
   kj::Own<const ExternalMemoryTarget> addRef() const;
