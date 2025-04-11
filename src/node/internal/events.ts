@@ -39,6 +39,7 @@ import {
   validateAbortSignal,
   validateBoolean,
   validateFunction,
+  validateObject,
 } from 'node-internal:validators';
 
 import * as process from 'node-internal:process';
@@ -793,10 +794,11 @@ export async function once(
   name: string | symbol,
   options: OnceOptions = {}
 ) {
-  const signal = options?.signal;
+  validateObject(options, 'options');
+  const { signal } = options;
   validateAbortSignal(signal, 'options.signal');
   if (signal?.aborted) {
-    throw new AbortError();
+    throw new AbortError(undefined, { cause: signal.reason });
   }
   return new Promise((resolve, reject) => {
     const errorListener = (err: any) => {
@@ -817,6 +819,8 @@ export async function once(
     };
     eventTargetAgnosticAddListener(emitter, name, resolver, { once: true });
     if (name !== 'error' && typeof emitter.once === 'function') {
+      // EventTarget does not have `error` event semantics like Node
+      // EventEmitters, we listen to `error` events only on EventEmitters.
       emitter.once('error', errorListener);
     }
     function abortListener() {

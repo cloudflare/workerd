@@ -324,6 +324,7 @@ wd_test(
         "TIMEOUT_SERVER_PORT",
         "END_SERVER_PORT",
         "SERVER_THAT_DIES_PORT",
+        "RECONNECT_SERVER_PORT",
     ],
 )
 

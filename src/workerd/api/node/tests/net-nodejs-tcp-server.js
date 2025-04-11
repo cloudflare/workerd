@@ -64,3 +64,17 @@ const serverThatDies = net.createServer(function (s) {
 serverThatDies.listen(process.env.SERVER_THAT_DIES_PORT, () =>
   reportPort(serverThatDies)
 );
+
+const reconnectServer = net.createServer((s) => {
+  s.resume();
+  s.on('error', () => {
+    // Do nothing
+  });
+  s.write('hello\r\n');
+  s.on('end', () => {
+    s.end();
+  });
+});
+reconnectServer.listen(process.env.RECONNECT_SERVER_PORT, () =>
+  reportPort(reconnectServer)
+);

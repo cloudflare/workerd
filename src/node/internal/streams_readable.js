@@ -40,6 +40,7 @@ import {
   undestroy,
   errorOrDestroy,
   finished,
+  kOnConstructed,
 } from 'node-internal:streams_util';
 
 import * as process from 'node-internal:process';
@@ -176,6 +177,12 @@ export function ReadableState(options, stream, isDuplex) {
     this.encoding = options.encoding;
   }
 }
+
+ReadableState.prototype[kOnConstructed] = function onConstructed(stream) {
+  if (this.needReadable) {
+    maybeReadMore(stream, this);
+  }
+};
 
 // ======================================================================================
 // Readable

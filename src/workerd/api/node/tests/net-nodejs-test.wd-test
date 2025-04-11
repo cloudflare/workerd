@@ -15,6 +15,7 @@ const unitTests :Workerd.Config = (
           (name = "TIMEOUT_SERVER_PORT", fromEnvironment = "TIMEOUT_SERVER_PORT"),
           (name = "END_SERVER_PORT", fromEnvironment = "END_SERVER_PORT"),
           (name = "SERVER_THAT_DIES_PORT", fromEnvironment = "SERVER_THAT_DIES_PORT"),
+          (name = "RECONNECT_SERVER_PORT", fromEnvironment = "RECONNECT_SERVER_PORT"),
         ]
       )
     ),

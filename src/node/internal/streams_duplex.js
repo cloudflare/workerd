@@ -29,7 +29,7 @@
 import { Readable } from 'node-internal:streams_readable';
 import { ok as assert } from 'node-internal:internal_assert';
 import { Writable } from 'node-internal:streams_writable';
-
+import { Stream } from 'node-internal:streams_legacy';
 import {
   newStreamDuplexFromReadableWritablePair,
   newReadableWritablePairFromDuplex,
@@ -38,6 +38,7 @@ import {
 import * as process from 'node-internal:process';
 
 import {
+  addAbortSignal,
   destroyer,
   eos,
   isReadable,
@@ -47,6 +48,8 @@ import {
   isReadableNodeStream,
   isWritableNodeStream,
   isDuplexNodeStream,
+  kOnConstructed,
+  construct as destroyConstruct,
 } from 'node-internal:streams_util';
 
 import {
@@ -67,32 +70,80 @@ Object.setPrototypeOf(Duplex, Readable);
   }
 }
 
-export function isDuplexInstance(obj) {
-  return obj instanceof Duplex;
-}
+// Use the `destroy` method of `Writable`.
+Duplex.prototype.destroy = Writable.prototype.destroy;
 
 export function Duplex(options) {
   if (!(this instanceof Duplex)) return new Duplex(options);
-  Readable.call(this, options);
-  Writable.call(this, options);
+
+  this._events ??= {
+    close: undefined,
+    error: undefined,
+    prefinish: undefined,
+    finish: undefined,
+    drain: undefined,
+    data: undefined,
+    end: undefined,
+    readable: undefined,
+    // Skip uncommon events...
+    // pause: undefined,
+    // resume: undefined,
+    // pipe: undefined,
+    // unpipe: undefined,
+    // [destroyImpl.kConstruct]: undefined,
+    // [destroyImpl.kDestroy]: undefined,
+  };
+
+  this._readableState = new Readable.ReadableState(options, this, true);
+  this._writableState = new Writable.WritableState(options, this, true);
+
   if (options) {
     this.allowHalfOpen = options.allowHalfOpen !== false;
+
     if (options.readable === false) {
       this._readableState.readable = false;
       this._readableState.ended = true;
       this._readableState.endEmitted = true;
     }
+
     if (options.writable === false) {
       this._writableState.writable = false;
       this._writableState.ending = true;
       this._writableState.ended = true;
       this._writableState.finished = true;
     }
+
+    if (typeof options.read === 'function') this._read = options.read;
+
+    if (typeof options.write === 'function') this._write = options.write;
+
+    if (typeof options.writev === 'function') this._writev = options.writev;
+
+    if (typeof options.destroy === 'function') this._destroy = options.destroy;
+
+    if (typeof options.final === 'function') this._final = options.final;
+
+    if (typeof options.construct === 'function')
+      this._construct = options.construct;
+
+    if (options.signal) {
+      addAbortSignal(options.signal, this);
+    }
   } else {
     this.allowHalfOpen = true;
   }
+
+  Stream.call(this, options);
+
+  if (this._construct != null) {
+    destroyConstruct(this, () => {
+      this._readableState[kOnConstructed](this);
+      this._writableState[kOnConstructed](this);
+    });
+  }
 }
 
+// Use the `destroy` method of `Writable`.
 Duplex.prototype.destroy = Writable.prototype.destroy;
 
 Object.defineProperties(Duplex.prototype, {
@@ -165,6 +216,10 @@ export function from(body) {
 Duplex.fromWeb = fromWeb;
 Duplex.toWeb = toWeb;
 Duplex.from = from;
+
+export function isDuplexInstance(obj) {
+  return obj instanceof Duplex;
+}
 
 // ======================================================================================
 
