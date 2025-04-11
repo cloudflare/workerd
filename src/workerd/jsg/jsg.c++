@@ -382,31 +382,23 @@ kj::Own<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
 }
 
 kj::String Lock::accountedKjString(kj::Array<char>&& str) {
-  // TODO(soon): Temporarily disable while EMA is being looked at.
-  // size_t size = str.size();
-  // return kj::String(str.attach(getExternalMemoryAdjustment(size)));
-  return kj::String(kj::mv(str));
+  size_t size = str.size();
+  return kj::String(str.attach(getExternalMemoryAdjustment(size)));
 }
 
 ByteString Lock::accountedByteString(kj::Array<char>&& str) {
-  // TODO(soon): Temporarily disable while EMA is being looked at.
-  // size_t size = str.size();
-  // return ByteString(str.attach(getExternalMemoryAdjustment(size)));
-  return ByteString(kj::mv(str));
+  size_t size = str.size();
+  return ByteString(str.attach(getExternalMemoryAdjustment(size)));
 }
 
 DOMString Lock::accountedDOMString(kj::Array<char>&& str) {
-  // TODO(soon): Temporarily disable while EMA is being looked at.
-  // size_t size = str.size();
-  // return DOMString(str.attach(getExternalMemoryAdjustment(size)));
-  return DOMString(kj::mv(str));
+  size_t size = str.size();
+  return DOMString(str.attach(getExternalMemoryAdjustment(size)));
 }
 
 USVString Lock::accountedUSVString(kj::Array<char>&& str) {
-  // TODO(soon): Temporarily disable while EMA is being looked at.
-  // size_t size = str.size();
-  // return USVString(str.attach(getExternalMemoryAdjustment(size)));
-  return USVString(kj::mv(str));
+  size_t size = str.size();
+  return USVString(str.attach(getExternalMemoryAdjustment(size)));
 }
 
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
