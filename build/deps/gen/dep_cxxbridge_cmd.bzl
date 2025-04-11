@@ -2,11 +2,11 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://crates.io/api/v1/crates/cxxbridge-cmd/1.0.153/download"
-STRIP_PREFIX = "cxxbridge-cmd-1.0.153"
-SHA256 = "7cbc41933767955d04c2a90151806029b93df5fd8b682ba22a967433347480a9"
+URL = "https://crates.io/api/v1/crates/cxxbridge-cmd/1.0.156/download"
+STRIP_PREFIX = "cxxbridge-cmd-1.0.156"
+SHA256 = "8e8cefbebcb74ed0b4a08b76139e6c29d8884a0bb94d02c6f35de821a14a6e39"
 TYPE = "tgz"
-VERSION = "1.0.153"
+VERSION = "1.0.156"
 
 def dep_cxxbridge_cmd():
     http_archive(
