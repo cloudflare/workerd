@@ -1022,6 +1022,8 @@ void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
     // Oh! We have no active sessions. Well, never mind then, let's
     // transition to a closed state and drop everything on the floor.
     inner = Closed{};
+
+    closing = true;
     return;
   }
 
