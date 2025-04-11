@@ -1087,23 +1087,20 @@ function cleanupAfterDestroy(
 ): void {
   const isException = error != null;
   if (socket._handle != null) {
-    socket[kBytesRead] = socket.bytesRead;
-    socket[kBytesWritten] = socket.bytesWritten;
+    socket[kBytesRead] = socket._handle.bytesRead;
+    socket[kBytesWritten] = socket._handle.bytesWritten;
     socket.resetAndClosing = false;
   }
-  // socket._handle = null;
   socket[kLastWriteQueueSize] = 0;
   socket[kSocketInfo] = null;
 
-  queueMicrotask(() => {
-    // If there's an error, emit it before the close event
-    if (error != null) {
-      socket.emit('error', error);
-    }
+  // If there's an error, emit it before the close event
+  if (error != null) {
+    socket.emit('error', error);
+  }
 
-    cb?.(error);
-    socket.emit('close', isException);
-  });
+  cb?.(error);
+  socket.emit('close', isException);
 }
 
 function initializeConnection(
