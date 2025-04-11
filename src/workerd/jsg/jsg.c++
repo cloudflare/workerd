@@ -323,26 +323,35 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
 }
 
 void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
-  KJ_IF_SOME(inner, maybeInner) {
-    if (v8::Locker::IsLocked(inner.isolate)) {
-      // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
-      //   explicitly requires that the adjustment returns to zero before it is destroyed. That
-      //   isn't what we want, because we explicitly want external memory to be allowed to live
-      //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
-      //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
-      //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
-      //   uses anyway.
-      inner.isolate->AdjustAmountOfExternalAllocatedMemory(amount);
-    } else {
-      pendingExternalMemoryUpdate.fetch_add(amount, std::memory_order_relaxed);
-    }
+  // Carefully check whether `isolate` is locked by the current thread. Note that there's a
+  // possibility that the isolate is being torn down in a different thread, which means we cannot
+  // safely call `v8::Locekr::IsLocked()` on it.
+  v8::Isolate* current = v8::Isolate::TryGetCurrent();
+  v8::Isolate* target = isolate.load(std::memory_order_relaxed);  // could be null!
+
+  if (current != nullptr && current == target) {
+    // The isolate is currently locked by this thread. Note that it's impossible that `isolate` is
+    // concurrently being torn down because only the thread that holds the isolate lock could be
+    // making such a change, and that's us, and we're not.
+    KJ_ASSERT(v8::Locker::IsLocked(target));
+
+    // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
+    //   explicitly requires that the adjustment returns to zero before it is destroyed. That
+    //   isn't what we want, because we explicitly want external memory to be allowed to live
+    //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
+    //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
+    //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
+    //   uses anyway.
+    target->AdjustAmountOfExternalAllocatedMemory(amount);
+  } else {
+    // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time
+    // the isolate lock is acquired.
+    pendingExternalMemoryUpdate.fetch_add(amount, std::memory_order_relaxed);
   }
 }
 
 void ExternalMemoryTarget::reset() const {
-  // TODO(now): This isn't thread-safe! (It wasn't before this commit either, but now that we've
-  //   labeled things const to enforce thread-safety, the problem is revealed.)
-  const_cast<ExternalMemoryTarget*>(this)->maybeInner = kj::none;
+  isolate.store(nullptr, std::memory_order_relaxed);
 }
 
 kj::Own<const ExternalMemoryTarget> ExternalMemoryTarget::addRef() const {
@@ -354,7 +363,7 @@ ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) cons
 }
 
 bool ExternalMemoryTarget::isIsolateAlive() const {
-  return maybeInner != kj::none;
+  return isolate.load(std::memory_order_relaxed) != nullptr;
 }
 
 int64_t ExternalMemoryTarget::getPendingMemoryUpdate() const {

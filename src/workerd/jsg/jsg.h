@@ -2256,14 +2256,8 @@ class ExternalMemoryAdjustment;
 // point to. The only purpose of this object is to hold a weak reference back to the isolate; the
 // reference is nulled out when the isolate is destroyed.
 class ExternalMemoryTarget: public kj::AtomicRefcounted {
-  struct Impl;
-
  public:
-  ExternalMemoryTarget(): maybeInner(kj::none) {}
-
-  ExternalMemoryTarget(v8::Isolate* isolate) {
-    maybeInner.emplace(isolate);
-  }
+  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
 
   bool isIsolateAlive() const;
   int64_t getPendingMemoryUpdate() const;
@@ -2273,15 +2267,15 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
   kj::Own<const ExternalMemoryTarget> addRef() const;
   void reset() const;
   void maybeDeferAdjustment(ssize_t amount) const;
-  struct Impl {
-    v8::Isolate* isolate;
-  };
 
-  kj::Maybe<Impl> maybeInner;
+  // Mutable so that it can be set null when the isolate is destroyed.
+  mutable std::atomic<v8::Isolate*> isolate;
+  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
 
   // Tracks changes to external memory that were applied from a thread that did not hold the
   // isolate lock. These will be applied the next time the lock is taken.
   mutable std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
+  static_assert(std::atomic<int64_t>::is_always_lock_free);
 
   friend class ExternalMemoryAdjustment;
   friend class IsolateBase;
