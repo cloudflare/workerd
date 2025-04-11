@@ -462,9 +462,9 @@ struct JsValue {
         }
       }
 
-      abortSignal :group {
-        signal @7 :AbortSignal;
-      }
+      # Indicates that an AbortSignal is being passed, see the AbortSignal interface for the
+      # mechanism used to trigger the abort later.
+      abortSignal @7 :Void;
 
       # TODO(soon): WebSocket, Request, Response
     }
@@ -489,13 +489,11 @@ struct JsValue {
 }
 
 interface AbortSignal $Cxx.allowCancellation {
-    struct Params {
-      reason @0 :JsValue;
-    }
-
-    struct Results {}
-
-    triggerAbort @0 Params -> Results;
+  # Allows a cloned abort signal to be triggered over RPC, when the original signal is triggered.
+  # When an AbortSignal is serialized, the original signal is the client, and the deserialized
+  # clone is the server.
+  # reason is an arbitrary JavaScript value which will appear in the resulting AbortErrors.
+  triggerAbort @0 (reason :JsValue) -> ();
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {

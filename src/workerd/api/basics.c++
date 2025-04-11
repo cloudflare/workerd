@@ -520,9 +520,9 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
 
 namespace {
 // The jsrpc handler that receives aborts from the remote and triggers them locally
-class AbortSignalImpl final: public rpc::AbortSignal::Server {
+class AbortSignalRpcImpl final: public rpc::AbortSignal::Server {
  public:
-  AbortSignalImpl(IoContext& ctx, jsg::Ref<AbortSignal> signal)
+  AbortSignalRpcImpl(IoContext& ctx, jsg::Ref<AbortSignal> signal)
       : signal(kj::mv(signal)),
         weakIoContext(ctx.getWeakRef()) {}
 
@@ -750,17 +750,15 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     serializer.write(js, js.undefined());
   }
 
+  auto streamCap = externalHandler
+                       ->writeStream([&](rpc::JsValue::External::Builder builder) mutable {
+    builder.setAbortSignal();
+  }).castAs<rpc::AbortSignal>();
+
   auto& ioContext = IoContext::current();
-
-  auto streamCap =
-      externalHandler->writeStream([&](rpc::JsValue::External::Builder builder) mutable {
-    auto field = builder.initAbortSignal();
-    field.setSignal(kj::heap<AbortSignalImpl>(ioContext, JSG_THIS));
-  });
-
   // Keep track of every AbortSignal cloned from this one.
   // If this->triggerAbort(...) is called, each rpcClient will be informed.
-  rpcClients.add(kj::mv(streamCap).castAs<rpc::AbortSignal>());
+  rpcClients.add(ioContext.addObject(kj::heap(kj::mv(streamCap))));
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(
@@ -791,7 +789,7 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
   auto signal = js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
 
   // The AbortSignalImpl will receive any remote triggerAbort requests and will convert this into a local call to signal->triggerAbort()
-  externalHandler->setLastStream(kj::heap<AbortSignalImpl>(ioContext, signal.addRef()));
+  externalHandler->setLastStream(kj::heap<AbortSignalRpcImpl>(ioContext, signal.addRef()));
   return signal;
 }
 
@@ -803,13 +801,11 @@ kj::Promise<void> AbortSignal::sendToRpc(
   }
 
   auto released = ser.release();
-  capnp::MallocMessageBuilder builder;
-  rpc::JsValue::Builder val = builder.initRoot<rpc::JsValue>();
-  val.setV8Serialized(kj::mv(released.data));
-  return sendToRpc(capnp::clone(val.asReader()));
+
+  return sendToRpc(released.data);
 }
 
-kj::Promise<void> AbortSignal::sendToRpc(kj::Own<rpc::JsValue::Reader> reason) {
+kj::Promise<void> AbortSignal::sendToRpc(kj::ArrayPtr<kj::byte> reason) {
   auto& ioContext = IoContext::current();
 
   KJ_IF_SOME(outputLocks, ioContext.waitForOutputLocksIfNecessary()) {
@@ -817,9 +813,10 @@ kj::Promise<void> AbortSignal::sendToRpc(kj::Own<rpc::JsValue::Reader> reason) {
   }
 
   kj::Vector<kj::Promise<void>> promises;
-  for (rpc::AbortSignal::Client cap: rpcClients) {
-    auto req = cap.triggerAbortRequest();
-    req.setReason(*reason);
+  for (auto& cap: rpcClients) {
+    auto req = cap->triggerAbortRequest();
+    auto field = req.initReason();
+    field.setV8Serialized(reason);
     promises.add(req.send().ignoreResult());
   }
 
