@@ -128,10 +128,6 @@ class RequestObserver: public kj::Refcounted {
     return nullptr;
   }
 
-  // Reports the outcome event to any configured streaming tail workers, signalizing that the
-  // request has completed and will not produce any more events.
-  virtual void reportOutcome(const tracing::InvocationSpanContext& context) {}
-
   virtual void setOutcome(EventOutcome outcome) {}
 
   virtual kj::Own<void> addedContextTask() {
@@ -145,19 +141,6 @@ class RequestObserver: public kj::Refcounted {
 
   virtual uint64_t clockRead() {
     return 0;
-  }
-};
-
-struct OutcomeObserver final: public kj::Refcounted {
-  kj::Own<RequestObserver> metrics;
-  tracing::InvocationSpanContext invocationContext;
-  OutcomeObserver(
-      kj::Own<RequestObserver> metrics, const tracing::InvocationSpanContext& invocationContext)
-      : metrics(kj::mv(metrics)),
-        invocationContext(invocationContext.clone()) {}
-  KJ_DISALLOW_COPY_AND_MOVE(OutcomeObserver);
-  ~OutcomeObserver() noexcept(false) {
-    metrics->reportOutcome(invocationContext);
   }
 };
 
