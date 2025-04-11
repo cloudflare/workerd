@@ -322,21 +322,17 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
-void ExternalMemoryAccounter::Update(v8::Isolate* isolate, int64_t delta) {
-  KJ_ASSERT(isolate == isolate_ || isolate_ == nullptr);
-  amount_of_external_memory_ += delta;
-  v8::ExternalMemoryAccounter::Update(isolate, delta);
-}
-
-void ExternalMemoryAccounter::Reset(v8::Isolate* isolate) {
-  KJ_ASSERT(isolate == isolate_ || isolate_ == nullptr);
-  v8::ExternalMemoryAccounter::Update(isolate, -amount_of_external_memory_);
-}
-
 void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
   KJ_IF_SOME(inner, maybeInner) {
     if (v8::Locker::IsLocked(inner.isolate)) {
-      inner.externalMemoryAccounter->Update(inner.isolate, amount);
+      // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
+      //   explicitly requires that the adjustment returns to zero before it is destroyed. That
+      //   isn't what we want, because we explicitly want external memory to be allowed to live
+      //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
+      //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
+      //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
+      //   uses anyway.
+      inner.isolate->AdjustAmountOfExternalAllocatedMemory(amount);
     } else {
       pendingExternalMemoryUpdate.fetch_add(amount, std::memory_order_relaxed);
     }

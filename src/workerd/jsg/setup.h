@@ -206,10 +206,6 @@ class IsolateBase {
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
-  jsg::ExternalMemoryAccounter& getExternalMemoryAccounter() {
-    return externalMemoryAccounter;
-  }
-
   // Get an object referencing this isolate that can be used to adjust external memory usage later
   kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
 
@@ -294,9 +290,6 @@ class IsolateBase {
   v8::Global<v8::Symbol> symbolAsyncDispose;
 
   /* *** External Memory accounting *** */
-  // Used to report external memory usage to V8
-  jsg::ExternalMemoryAccounter externalMemoryAccounter;
-
   // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments
   // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
   // outlive the isolate.

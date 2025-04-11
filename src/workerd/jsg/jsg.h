@@ -2248,20 +2248,6 @@ JS_TYPE_CLASSES(V)
 class DOMException;
 class ExternalMemoryAdjustment;
 
-// Wrapper of v8::ExternalMemoryAccounter that allows us to reset its memory usage back to zero
-// TODO(soon): Upstream a change to V8 to allow accessing this info without a second copy of it
-class ExternalMemoryAccounter: private v8::ExternalMemoryAccounter {
- public:
-  using v8::ExternalMemoryAccounter::ExternalMemoryAccounter;
-
-  void Update(v8::Isolate* isolate, int64_t delta);
-  void Reset(v8::Isolate* isolate);
-
- private:
-  size_t amount_of_external_memory_ = 0;
-  v8::Isolate* isolate_ = nullptr;
-};
-
 // Used to save a reference to an isolate that is responsible for external memory usage.
 // getAdjustment() can be invoked at any time to create a new RAII adjustment object
 // pointing to this isolate.
@@ -2275,8 +2261,8 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
  public:
   ExternalMemoryTarget(): maybeInner(kj::none) {}
 
-  ExternalMemoryTarget(v8::Isolate* isolate, jsg::ExternalMemoryAccounter* accounter) {
-    maybeInner.emplace(isolate, accounter);
+  ExternalMemoryTarget(v8::Isolate* isolate) {
+    maybeInner.emplace(isolate);
   }
 
   bool isIsolateAlive() const;
@@ -2289,7 +2275,6 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
   void maybeDeferAdjustment(ssize_t amount) const;
   struct Impl {
     v8::Isolate* isolate;
-    jsg::ExternalMemoryAccounter* externalMemoryAccounter;
   };
 
   kj::Maybe<Impl> maybeInner;
@@ -2328,7 +2313,7 @@ class ExternalMemoryAdjustment final {
   kj::Own<const ExternalMemoryTarget> externalMemory;
   size_t amount = 0;
 
-  // If the isolate is locked, adjust the v8::ExternalMemoryAccounter immediately.
+  // If the isolate is locked, adjust the external memory immediately.
   // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
   // time that we do.
   void maybeDeferAdjustment(ssize_t amount);

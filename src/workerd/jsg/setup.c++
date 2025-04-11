@@ -217,7 +217,7 @@ void IsolateBase::applyDeferredActions() {
   int64_t amount =
       externalMemoryTarget->pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
   if (amount != 0) {
-    externalMemoryAccounter.Update(ptr, amount);
+    ptr->AdjustAmountOfExternalAllocatedMemory(amount);
   }
 }
 
@@ -340,8 +340,7 @@ IsolateBase::IsolateBase(const V8System& system,
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
-      externalMemoryTarget(
-          kj::atomicRefcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter)),
+      externalMemoryTarget(kj::atomicRefcounted<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
@@ -412,10 +411,6 @@ IsolateBase::~IsolateBase() noexcept(false) {
   externalMemoryTarget->reset();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    // V8 doesn't allow destroying a v8::ExternalMemoryAccounter while it is still reporting
-    // non-zero memory usage. Our allocations may outlive the isolate, however, so we bypass this.
-    externalMemoryAccounter.Reset(ptr);
-
     ptr->Dispose();
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
