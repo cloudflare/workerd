@@ -36,6 +36,7 @@ import { once } from 'node:events';
 import { inspect } from 'node:util';
 import net from 'node:net';
 import { translatePeerCertificate } from '_tls_common';
+import { mock } from 'node:test';
 
 export const checkPortsSetCorrectly = {
   test(ctrl, env, ctx) {
@@ -234,34 +235,33 @@ export const tlsConnectGivenSocket = {
   async test(ctrl, env, ctx) {
     const promises = [];
     let waiting = 2;
-    function establish(socket, shouldNotCallCallback = false) {
-      const { promise, resolve } = Promise.withResolvers();
+    function establish(socket, calls) {
+      const { promise, resolve, reject } = Promise.withResolvers();
       promises.push(promise);
-      const client = tls.connect(
-        {
-          socket: socket,
-        },
-        () => {
-          if (shouldNotCallCallback) {
-            reject(new Error('should not have called tls.connect() callback'));
-            return;
-          }
-          let data = '';
-          client
-            .on('data', (chunk) => {
-              data += chunk.toString();
-            })
-            .on('end', () => {
-              strictEqual(data, 'Hello');
-              if (--waiting === 0) {
-                resolve();
-              }
-            });
+      const onConnectFn = mock.fn(() => {
+        if (calls === 0) {
+          reject(new Error('Should not have called onConnect callback'));
+          return;
         }
-      );
+        let data = '';
+        let dataFn = mock.fn((chunk) => {
+          data += chunk.toString();
+        });
+        client.on('data', dataFn);
+        client.on('end', () => {
+          strictEqual(data, 'Hello');
+          if (--waiting === 0) {
+            ok(dataFn.mock.callCount());
+            resolve();
+          }
+        });
+      });
+      const client = tls.connect({ socket }, onConnectFn);
+      ok(client.readable);
+      ok(client.writable);
 
-      if (shouldNotCallCallback) {
-        queueMicrotask(() => resolve());
+      if (calls === 0) {
+        queueMicrotask(resolve);
       }
 
       return client;
@@ -270,26 +270,28 @@ export const tlsConnectGivenSocket = {
     const port = env.HELLO_SERVER_PORT;
     // Immediate death socket
     const immediateDeath = net.connect(port);
-    establish(immediateDeath, true).destroy();
+    establish(immediateDeath, 0).destroy();
 
     // Outliving
-    const outlivingTCPPromise = Promise.withResolvers();
-    const outlivingTCP = net.connect(port, () => {
-      outlivingTLS.destroy();
-      next();
-      outlivingTCPPromise.resolve();
-    });
-    promises.push(outlivingTCPPromise.promise);
-    const outlivingTLS = establish(outlivingTCP, true);
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      promises.push(promise);
+      const outlivingTCP = net.connect(port, () => {
+        outlivingTLS.destroy();
+        next();
+        resolve();
+      });
+      const outlivingTLS = establish(outlivingTCP, 0);
+    }
 
     function next() {
       // Already connected socket
       const { promise, resolve } = Promise.withResolvers();
+      promises.push(promise);
       const connected = net.connect(port, () => {
         establish(connected);
         resolve();
       });
-      promises.push(promise);
 
       // Connecting socket
       const connecting = net.connect(port);

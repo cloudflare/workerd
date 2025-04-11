@@ -25,7 +25,7 @@
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
-import inner, { type Writer, type Reader } from 'cloudflare-internal:sockets';
+import inner from 'cloudflare-internal:sockets';
 
 import {
   AbortError,
@@ -178,12 +178,17 @@ export declare class Socket extends _Socket {
   public _handle: null | {
     writeQueueSize?: number;
     lastWriteQueueSize?: number;
-    reading?: boolean | undefined;
+    reading: boolean | undefined;
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
-    reader: Reader;
-    writer: Writer;
+    reader: ReadableStreamBYOBReader;
+    writer: WritableStreamDefaultWriter<unknown>;
+    options: {
+      host: string;
+      port: number;
+      addressType: number;
+    };
   };
   public _sockname?: null | AddressInfo;
   public _onTimeout(): void;
@@ -1196,6 +1201,12 @@ function initializeConnection(
         reader: handle.readable.getReader({ mode: 'byob' }),
         bytesRead: 0,
         bytesWritten: 0,
+        reading: true,
+        options: {
+          host: socket._host,
+          port,
+          addressType,
+        },
       };
 
       // We need to undestroy the stream to connect to it.
@@ -1259,7 +1270,7 @@ function initializeConnection(
   }
 }
 
-function onConnectionOpened(this: Socket): void {
+export function onConnectionOpened(this: Socket): void {
   try {
     // The info.remoteAddress property is going to give the
     // address in the form of a string like `${host}:{port}`. We can choose
@@ -1272,11 +1283,12 @@ function onConnectionOpened(this: Socket): void {
     this.emit('connect');
     this.emit('ready');
 
-    if (this.encrypted) {
-      // This is required for TLSSocket
-      this._finishInit();
-    }
     if (!this.isPaused()) {
+      if (this.encrypted) {
+        // This is required for TLSSocket
+        this._finishInit();
+      }
+
       tryReadStart(this);
     }
   } catch (err) {
@@ -1284,7 +1296,12 @@ function onConnectionOpened(this: Socket): void {
   }
 }
 
-function onConnectionClosed(this: Socket): void {
+export function onConnectionClosed(this: Socket): void {
+  if (this._handle?.socket.upgraded) {
+    // The socket is being upgraded from insecure to TLS.
+    // No need to handle this particular close event.
+    return;
+  }
   // eslint-disable-next-line @typescript-eslint/no-this-alias
   for (let s: Socket | null = this; s !== null; s = s._parent) {
     clearTimeout(s[kTimeout] as unknown as number);
@@ -1385,7 +1402,7 @@ async function startRead(socket: Socket): Promise<void> {
   }
 }
 
-function tryReadStart(socket: Socket): void {
+export function tryReadStart(socket: Socket): void {
   if (socket._handle != null) {
     socket._handle.reading = true;
   }

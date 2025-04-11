@@ -1,20 +1,30 @@
-import type { Buffer } from 'node-internal:internal_buffer';
-
 export interface SocketInfo {
   remoteAddress?: string | null;
   localAddress?: string | null;
 }
 
-export interface Reader {
-  close(): Promise<void>;
-  read(value: unknown): Promise<{ value: Buffer; done: boolean }>;
-}
+export type Reader = ReadableStreamBYOBReader & {
+  getReader(opts: { mode: 'byob' }): ReadableStreamBYOBReader;
+};
 
-export interface Writer {
+export interface Writer extends WritableStream {
   close(): Promise<void>;
   write(data: string | ArrayBufferView): Promise<void>;
   closed: Promise<void>;
   desiredSize: number | null;
+  releaseLock(): void;
+}
+
+export interface Socket {
+  opened: Promise<SocketInfo>;
+  closed: Promise<void>;
+  close(): Promise<void>;
+  readable: Reader;
+  writable: Writer;
+  startTls(): Socket;
+
+  readonly upgraded: boolean;
+  readonly secureTransport: 'on' | 'off' | 'starttls';
 }
 
 declare namespace sockets {
@@ -25,16 +35,6 @@ declare namespace sockets {
       highWatermark?: number | undefined;
       secureTransport: 'on' | 'off' | 'starttls';
     }
-  ): {
-    opened: Promise<SocketInfo>;
-    closed: Promise<void>;
-    close(): Promise<void>;
-    readable: {
-      getReader(options: Record<string, string>): Reader;
-    };
-    writable: {
-      getWriter(): Writer;
-    };
-  };
+  ): Socket;
 }
 export default sockets;
