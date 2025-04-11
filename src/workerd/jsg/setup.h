@@ -302,16 +302,6 @@ class IsolateBase {
   // outlive the isolate.
   kj::Own<const ExternalMemoryTarget> externalMemoryTarget;
 
-  // Current value of memory adjustments that have been requested, but have not yet been reported
-  // to V8.
-  std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
-
-  // Adjust the pending external memory update value
-  void deferExternalMemoryUpdate(int64_t size);
-
-  // Get current value of external memory update (for tests)
-  int64_t getPendingExternalMemoryUpdate();
-
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
 

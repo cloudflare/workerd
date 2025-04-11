@@ -515,7 +515,7 @@ KJ_TEST("External memory adjustment - defered") {
 
   // Making an adjustment anyway won't do anything but also won't crash
   auto adjuster3 = target->getAdjustment(500);
-  KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
+  KJ_ASSERT(target->getPendingMemoryUpdate() == 400);
 }
 
 }  // namespace

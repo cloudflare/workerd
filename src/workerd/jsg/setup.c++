@@ -200,14 +200,6 @@ kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
   return externalMemoryTarget->addRef();
 }
 
-void IsolateBase::deferExternalMemoryUpdate(int64_t size) {
-  pendingExternalMemoryUpdate.fetch_add(size, std::memory_order_relaxed);
-}
-
-int64_t IsolateBase::getPendingExternalMemoryUpdate() {
-  return pendingExternalMemoryUpdate;
-}
-
 void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
@@ -222,7 +214,8 @@ void IsolateBase::applyDeferredActions() {
   }
 
   // Apply deferred external memory updates.
-  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
+  int64_t amount =
+      externalMemoryTarget->pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
   if (amount != 0) {
     externalMemoryAccounter.Update(ptr, amount);
   }

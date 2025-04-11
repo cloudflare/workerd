@@ -2294,6 +2294,10 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
 
   kj::Maybe<Impl> maybeInner;
 
+  // Tracks changes to external memory that were applied from a thread that did not hold the
+  // isolate lock. These will be applied the next time the lock is taken.
+  mutable std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
+
   friend class ExternalMemoryAdjustment;
   friend class IsolateBase;
 };

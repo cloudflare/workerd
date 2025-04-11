@@ -338,11 +338,7 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     if (v8::Locker::IsLocked(inner.isolate)) {
       inner.externalMemoryAccounter->Update(inner.isolate, amount);
     } else {
-      // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
-      // time that we do.
-      auto& jsgIsolate =
-          *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
-      jsgIsolate.deferExternalMemoryUpdate(static_cast<int64_t>(amount));
+      pendingExternalMemoryUpdate.fetch_add(amount, std::memory_order_relaxed);
     }
   }
 }
@@ -366,13 +362,7 @@ bool ExternalMemoryTarget::isIsolateAlive() const {
 }
 
 int64_t ExternalMemoryTarget::getPendingMemoryUpdate() const {
-  KJ_IF_SOME(inner, maybeInner) {
-    auto& jsgIsolate =
-        *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
-    return jsgIsolate.getPendingExternalMemoryUpdate();
-  }
-
-  return 0;
+  return pendingExternalMemoryUpdate.load(std::memory_order_relaxed);
 }
 
 ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
