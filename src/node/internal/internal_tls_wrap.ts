@@ -27,6 +27,7 @@ import {
   Socket,
   SocketOptions,
   _normalizeArgs,
+  startRead,
 } from 'node-internal:internal_net';
 import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
@@ -442,7 +443,35 @@ TLSSocket.prototype._finishInit = function _finishInit(this: TLSSocket): void {
 };
 
 TLSSocket.prototype._start = function _start(this: TLSSocket): void {
-  // Do nothing.
+  if (this.connecting) {
+    this.once('connect', this._start);
+    return;
+  }
+
+  // Socket was destroyed before the connection was established
+  if (this._handle == null) {
+    return;
+  }
+
+  // We first need to release the lock
+  this._handle.writer.releaseLock();
+  this._handle.reader.releaseLock();
+
+  try {
+    const socket = this._handle.socket.startTls();
+
+    this._handle = {
+      socket: socket,
+      writer: socket.writable.getWriter(),
+      reader: socket.readable.getReader({ mode: 'byob' }),
+      bytesRead: 0,
+      bytesWritten: 0,
+    };
+
+    startRead(this);
+  } catch (error) {
+    // Ignore errors.
+  }
 };
 
 TLSSocket.prototype.setServername = function setServername(
@@ -624,6 +653,7 @@ export function connect(...args: unknown[]): TLSSocket {
     highWaterMark: options.highWaterMark,
     secureContext: options.secureContext,
     checkServerIdentity: options.checkServerIdentity ?? checkServerIdentity,
+    socket: options.socket,
     // @ts-expect-error TS2412 Type inconsistencies between types/node
     onread: options.onread,
     signal: options.signal,
