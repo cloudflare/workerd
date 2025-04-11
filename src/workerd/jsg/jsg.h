@@ -2261,13 +2261,18 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
 
   ExternalMemoryAdjustment getAdjustment(size_t amount) const;
 
+  // Apply any deferred external memory updates. Must be called with isolate locked.
+  void applyDeferredMemoryUpdate() const;
+
+  // Disconnects the ExternalMemoryTarget from the isolate (called just before destroying the
+  // isolate).
+  void detach() const;
+
   // These two methods are for tests only.
   bool isIsolateAliveForTest() const;
   int64_t getPendingMemoryUpdateForTest() const;
 
  private:
-  kj::Own<const ExternalMemoryTarget> addRef() const;
-  void reset() const;
   void maybeDeferAdjustment(ssize_t amount) const;
 
   // Mutable so that it can be set null when the isolate is destroyed.
@@ -2280,7 +2285,6 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
   static_assert(std::atomic<int64_t>::is_always_lock_free);
 
   friend class ExternalMemoryAdjustment;
-  friend class IsolateBase;
 };
 
 // RAII class to adjust the amount of external memory attributed to an isolate.

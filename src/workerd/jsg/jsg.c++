@@ -350,16 +350,19 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
   }
 }
 
-void ExternalMemoryTarget::reset() const {
+void ExternalMemoryTarget::detach() const {
   isolate.store(nullptr, std::memory_order_relaxed);
 }
 
-kj::Own<const ExternalMemoryTarget> ExternalMemoryTarget::addRef() const {
-  return kj::atomicAddRef(*this);
+ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) const {
+  return ExternalMemoryAdjustment(kj::atomicAddRef(*this), amount);
 }
 
-ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) const {
-  return ExternalMemoryAdjustment(addRef(), amount);
+void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
+  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
+  if (amount != 0) {
+    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemory(amount);
+  }
 }
 
 bool ExternalMemoryTarget::isIsolateAliveForTest() const {

@@ -197,7 +197,7 @@ void IsolateBase::deferDestruction(Item item) {
 }
 
 kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
-  return externalMemoryTarget->addRef();
+  return kj::atomicAddRef(*externalMemoryTarget);
 }
 
 void IsolateBase::terminateExecution() const {
@@ -213,12 +213,7 @@ void IsolateBase::applyDeferredActions() {
     auto drop = queue.lockExclusive()->pop();
   }
 
-  // Apply deferred external memory updates.
-  int64_t amount =
-      externalMemoryTarget->pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
-  if (amount != 0) {
-    ptr->AdjustAmountOfExternalAllocatedMemory(amount);
-  }
+  externalMemoryTarget->applyDeferredMemoryUpdate();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -408,7 +403,7 @@ IsolateBase::IsolateBase(const V8System& system,
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
-  externalMemoryTarget->reset();
+  externalMemoryTarget->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->Dispose();
