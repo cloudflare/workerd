@@ -721,20 +721,14 @@ jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   return js.str(decoded.asBytes());
 }
 
-void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task) {
-  auto fn = js.wrapReturningFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA((this, fn = js.v8Ref(task)), (fn),
-          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args)->v8::Local<v8::Value> {
-            return js.tryCatch([&]() -> v8::Local<v8::Value> {
-              auto function = fn.getHandle(js);
-
-              v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());
-              for (int n = 0; n < args.Length(); n++) {
-              argv[n] = args[n];
-              }
-
-              return jsg::check(
-                  function->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data()));
+void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
+  auto fn = js.wrapSimpleFunction(js.v8Context(),
+      JSG_VISITABLE_LAMBDA((this, fn = kj::mv(task)), (fn),
+          (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            js.tryCatch([&] {
+              // The function won't be called with any arguments, so we can
+              // safely ignore anything passed in to args.
+              fn(js);
             }, [&](jsg::Value exception) {
               // The reportError call itself can potentially throw errors. Let's catch
               // and report them as well.
@@ -758,7 +752,6 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Funct
                 // Otherwise just log the stringified value generically.
                 js.reportError(val);
               });
-              return js.v8Undefined();
             });
           }));
 

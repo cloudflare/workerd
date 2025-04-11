@@ -521,7 +521,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::JsString btoa(jsg::Lock& js, jsg::JsString data);
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
-  void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
+  void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -857,6 +857,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
       structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+      queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
     });

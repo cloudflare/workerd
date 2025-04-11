@@ -134,7 +134,7 @@ export const queueMicrotask = {
       throws(() => globalThis.queueMicrotask(i), {
         message:
           "Failed to execute 'queueMicrotask' on 'ServiceWorkerGlobalScope': " +
-          "parameter 1 is not of type 'Function'.",
+          "parameter 1 is not of type 'function'.",
       });
     });
     let resolve;
