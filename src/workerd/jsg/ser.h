@@ -120,6 +120,10 @@ class Serializer final: v8::ValueSerializer::Delegate {
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Serializer.
     kj::Maybe<ExternalHandler&> externalHandler;
+
+    // When true, support for Python Worker SDK objects is enabled. This means that any object with
+    // a `js_object` field can be serialised.
+    bool supportPythonWorkerFields;
   };
 
   struct Released {
@@ -203,6 +207,7 @@ class Serializer final: v8::ValueSerializer::Delegate {
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   bool released = false;
   bool treatClassInstancesAsPlainObjects;
+  bool supportPythonWorkerFields = false;
 
   // Initialized to point at the prototype of `Object` if and only if
   // `treatClassInstancesAsPlainObjects` is false (in which case we will need to check against this
