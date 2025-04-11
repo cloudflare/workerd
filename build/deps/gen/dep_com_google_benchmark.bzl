@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v1.9.1"
-URL = "https://api.github.com/repos/google/benchmark/tarball/v1.9.1"
-STRIP_PREFIX = "google-benchmark-96afad5"
-SHA256 = "6e8bd8a610ad0c6814af4b3ae930517dd00fa69caf6f6f4667270fae8d47b53d"
+TAG_NAME = "v1.9.2"
+URL = "https://api.github.com/repos/google/benchmark/tarball/v1.9.2"
+STRIP_PREFIX = "google-benchmark-ce0b57f"
+SHA256 = "f5f18fd6c2a6edebf5c2b916d850448dbb92f3eae016a64e669cae8b5578b001"
 TYPE = "tgz"
 
 def dep_com_google_benchmark():

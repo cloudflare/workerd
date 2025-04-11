@@ -17,7 +17,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "cc",
+    name = "bstr",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -34,8 +34,14 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "std",
+        "unicode",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -44,13 +50,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cc",
+        "crate-name=bstr",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.17",
+    version = "1.12.0",
     deps = [
-        "@crates_vendor__shlex-1.3.0//:shlex",
+        "@crates_vendor__memchr-2.7.4//:memchr",
+        "@crates_vendor__regex-automata-0.4.9//:regex_automata",
     ],
 )

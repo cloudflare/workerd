@@ -66,7 +66,7 @@ rust_library(
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
         "@crates_vendor__selectors-0.24.0//:build_script_build",
         "@crates_vendor__servo_arc-0.2.0//:servo_arc",
-        "@crates_vendor__smallvec-1.14.0//:smallvec",
+        "@crates_vendor__smallvec-1.15.0//:smallvec",
     ],
 )
 
@@ -105,6 +105,9 @@ cargo_build_script(
     ),
     edition = "2015",
     pkg_name = "selectors",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

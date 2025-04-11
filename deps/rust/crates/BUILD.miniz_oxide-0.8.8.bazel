@@ -6,7 +6,6 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
@@ -18,7 +17,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "cxx",
+    name = "miniz_oxide",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -36,15 +35,10 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
-        "default",
-        "std",
+        "with-alloc",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__cxxbridge-macro-1.0.153//:cxxbridge_macro",
-    ],
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -53,27 +47,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cxx",
+        "crate-name=miniz_oxide",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.153",
+    version = "0.8.8",
     deps = [
-        ":cxx_cc",
-        "@crates_vendor__foldhash-0.1.5//:foldhash",
-        "@crates_vendor__link-cplusplus-1.0.10//:link_cplusplus",
+        "@crates_vendor__adler2-2.0.0//:adler2",
     ],
-)
-
-# Additive BUILD file content
-cc_library(
-    name = "cxx_cc",
-    srcs = ["src/cxx.cc"],
-    hdrs = ["include/cxx.h"],
-    include_prefix = "rust",
-    includes = ["include"],
-    linkstatic = True,
-    strip_include_prefix = "include",
-    visibility = ["//visibility:public"],
 )

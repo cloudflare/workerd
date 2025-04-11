@@ -53,6 +53,9 @@ build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALI
 build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-capture
 build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-capture
 
+## simdutf
+build --per_file_copt=external/simdutf@-Wno-unused-const-variable
+
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
 # GitHub Actions. This is an optional performance hack intended for CI, although it might also be
 # useful for local development.

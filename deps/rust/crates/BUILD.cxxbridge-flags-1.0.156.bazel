@@ -52,5 +52,5 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.153",
+    version = "1.0.156",
 )

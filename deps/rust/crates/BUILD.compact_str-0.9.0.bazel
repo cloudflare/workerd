@@ -17,7 +17,7 @@ cargo_toml_env_vars(
 )
 
 rust_library(
-    name = "flate2",
+    name = "compact_str",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,13 +35,14 @@ rust_library(
         ],
     ),
     crate_features = [
-        "any_impl",
         "default",
-        "miniz_oxide",
-        "rust_backend",
+        "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__rustversion-1.0.20//:rustversion",
+    ],
     rustc_env_files = [
         ":cargo_toml_env_vars",
     ],
@@ -50,14 +51,17 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=flate2",
+        "crate-name=compact_str",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.1.0",
+    version = "0.9.0",
     deps = [
-        "@crates_vendor__crc32fast-1.4.2//:crc32fast",
-        "@crates_vendor__miniz_oxide-0.8.5//:miniz_oxide",
+        "@crates_vendor__castaway-0.2.3//:castaway",
+        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+        "@crates_vendor__itoa-1.0.15//:itoa",
+        "@crates_vendor__ryu-1.0.20//:ryu",
+        "@crates_vendor__static_assertions-1.1.0//:static_assertions",
     ],
 )

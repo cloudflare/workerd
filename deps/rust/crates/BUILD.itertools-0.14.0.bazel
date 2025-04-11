@@ -54,7 +54,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.13.0",
+    version = "0.14.0",
     deps = [
         "@crates_vendor__either-1.15.0//:either",
     ],
