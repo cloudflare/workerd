@@ -312,10 +312,6 @@ class IsolateBase {
   // Get current value of external memory update (for tests)
   int64_t getPendingExternalMemoryUpdate();
 
-  // Called when isolate lock is acquired. Report pending memory update to V8 and set its value
-  // back to zero.
-  void clearPendingExternalMemoryUpdate();
-
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
 
@@ -367,8 +363,9 @@ class IsolateBase {
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
   void deferDestruction(Item item);
 
-  // Destroy everything in the deferred destruction queue. Must be called under the isolate lock.
-  void clearDestructionQueue();
+  // Destroy everything in the deferred destruction queue and apply deferred external memory
+  // updates. Called each time a lock is taken. Must be called under the isolate lock.
+  void applyDeferredActions();
 
   static void fatalError(const char* location, const char* message);
   static void oomError(const char* location, const v8::OOMDetails& details);
@@ -541,8 +538,7 @@ class Isolate: public IsolateBase {
     Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr),
           jsgIsolate(const_cast<Isolate&>(isolate)) {
-      jsgIsolate.clearDestructionQueue();
-      jsgIsolate.clearPendingExternalMemoryUpdate();
+      jsgIsolate.applyDeferredActions();
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
     KJ_DISALLOW_AS_COROUTINE_PARAM;

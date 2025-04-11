@@ -203,14 +203,6 @@ kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
 void IsolateBase::deferExternalMemoryUpdate(int64_t size) {
   pendingExternalMemoryUpdate.fetch_add(size, std::memory_order_relaxed);
 }
-void IsolateBase::clearPendingExternalMemoryUpdate() {
-  KJ_ASSERT(v8::Locker::IsLocked(ptr));
-
-  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
-  if (amount != 0) {
-    externalMemoryAccounter.Update(ptr, amount);
-  }
-}
 
 int64_t IsolateBase::getPendingExternalMemoryUpdate() {
   return pendingExternalMemoryUpdate;
@@ -220,11 +212,20 @@ void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
 
-void IsolateBase::clearDestructionQueue() {
-  // Safe to destroy the popped batch outside of the lock because the lock is only actually used to
-  // guard the push buffer.
-  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
-  auto drop = queue.lockExclusive()->pop();
+void IsolateBase::applyDeferredActions() {
+  // Clear the deferred desturction queue.
+  {
+    // Safe to destroy the popped batch outside of the lock because the lock is only actually used
+    // to guard the push buffer.
+    DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+    auto drop = queue.lockExclusive()->pop();
+  }
+
+  // Apply deferred external memory updates.
+  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
+  if (amount != 0) {
+    externalMemoryAccounter.Update(ptr, amount);
+  }
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -440,8 +441,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     v8::Isolate::Scope isolateScope(ptr);
 
     // Make sure everything in the deferred destruction queue is dropped.
-    clearDestructionQueue();
-    clearPendingExternalMemoryUpdate();
+    applyDeferredActions();
 
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.
