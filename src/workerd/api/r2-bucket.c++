@@ -530,9 +530,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(md5, o.md5) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(md5) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 16, TypeError, "MD5 is 16 bytes, not ", bin.size());
-            putBuilder.setMd5(bin);
+            putBuilder.setMd5(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 32, TypeError, "MD5 is 32 hex characters, not ",
@@ -546,9 +546,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha1, o.sha1) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha1) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 20, TypeError, "SHA-1 is 20 bytes, not ", bin.size());
-            putBuilder.setSha1(bin);
+            putBuilder.setSha1(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 40, TypeError, "SHA-1 is 40 hex characters, not ",
@@ -562,9 +562,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha256, o.sha256) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha256) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 32, TypeError, "SHA-256 is 32 bytes, not ", bin.size());
-            putBuilder.setSha256(bin);
+            putBuilder.setSha256(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 64, TypeError, "SHA-256 is 64 hex characters, not ",
@@ -579,9 +579,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha384, o.sha384) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha384) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 48, TypeError, "SHA-384 is 48 bytes, not ", bin.size());
-            putBuilder.setSha384(bin);
+            putBuilder.setSha384(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 96, TypeError, "SHA-384 is 96 hex characters, not ",
@@ -596,9 +596,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha512, o.sha512) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha512) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 64, TypeError, "SHA-512 is 64 bytes, not ", bin.size());
-            putBuilder.setSha512(bin);
+            putBuilder.setSha512(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 128, TypeError, "SHA-512 is 128 hex characters, not ",
@@ -1193,8 +1193,32 @@ R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
   };
 }
 
-kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr) {
-  return kj::heapArray(arr.asPtr());
+namespace {
+jsg::Optional<jsg::BufferSource> copyHash(
+    jsg::Lock& js, const jsg::Optional<kj::Array<kj::byte>>& maybeHash) {
+  KJ_IF_SOME(hash, maybeHash) {
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, hash.size());
+    backing.asArrayPtr().copyFrom(hash);
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
+  return kj::none;
+}
+}  // namespace
+
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getMd5(jsg::Lock& js) {
+  return copyHash(js, md5);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha1(jsg::Lock& js) {
+  return copyHash(js, sha1);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha256(jsg::Lock& js) {
+  return copyHash(js, sha256);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha384(jsg::Lock& js) {
+  return copyHash(js, sha384);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha512(jsg::Lock& js) {
+  return copyHash(js, sha512);
 }
 
 kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,
