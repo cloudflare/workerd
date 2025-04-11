@@ -3,7 +3,7 @@ load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
+load("@npm//:capnp-es/package_json.bzl", capnp_es_binary = "bin")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 
 cc_capnp_library(
@@ -23,8 +23,8 @@ npm_link_package(
     package = "@workerd/jsg",
 )
 
-capnpc_ts_bin.capnpc_ts_binary(
-    name = "capnpc_ts",
+capnp_es_binary.capnp_es_binary(
+    name = "capnpc_es",
     visibility = ["//visibility:public"],
 )
 
