@@ -60,6 +60,7 @@ class URLPattern final: public jsg::Object {
     jsg::Optional<kj::String> baseURL;
 
     JSG_STRUCT(protocol, username, password, hostname, port, pathname, search, hash, baseURL);
+    JSG_STRUCT_TS_OVERRIDE(URLPatternInit);
 
     ada::url_pattern_init toAdaType() const;
   };
@@ -74,7 +75,7 @@ class URLPattern final: public jsg::Object {
     jsg::JsObject groups;
 
     JSG_STRUCT(input, groups);
-    JSG_STRUCT_TS_OVERRIDE({
+    JSG_STRUCT_TS_OVERRIDE(URLPatternComponentResult {
                   input: string;
                   groups: Record<string, string>;
                 });
@@ -90,12 +91,14 @@ class URLPattern final: public jsg::Object {
 #undef V
 
     JSG_STRUCT(inputs, protocol, username, password, hostname, port, pathname, search, hash);
+    JSG_STRUCT_TS_OVERRIDE(URLPatternResult);
   };
 
   struct URLPatternOptions final {
     jsg::Optional<bool> ignoreCase;
 
     JSG_STRUCT(ignoreCase);
+    JSG_STRUCT_TS_OVERRIDE(URLPatternOptions);
 
     ada::url_pattern_options toAdaType() const;
   };

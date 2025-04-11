@@ -743,15 +743,24 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("cache_api_compat_flags")
       $compatDisableFlag("no_cache_api_compat_flags")
       $compatEnableDate("2025-04-19");
-    # when enabled, exports compability flags for FL to Cache API requests.
+  # when enabled, exports compability flags for FL to Cache API requests.
 
   pythonWorkersDurableObjects @81 :Bool
       $compatEnableFlag("python_workers_durable_objects")
       $experimental;
-    # when enabled, enables Durable Object support for Python Workers.
+  # when enabled, enables Durable Object support for Python Workers.
 
-  # Experimental support for streaming tail worker.
   streamingTailWorker @82 :Bool
       $compatEnableFlag("streaming_tail_worker")
       $experimental;
+  # Experimental support for streaming tail worker.
+
+  specCompliantUrlpattern @83 :Bool
+    $compatEnableFlag("urlpattern_standard")
+    $compatEnableDate("2025-05-01")
+    $compatDisableFlag("urlpattern_original");
+  # The original URLPattern implementation is not compliant with the
+  # WHATWG URLPattern Standard, leading to a number of issues reported by users. Unfortunately,
+  # making it spec compliant is a breaking change. This flag controls the availability
+  # of the new spec-compliant URLPattern implementation.
 }

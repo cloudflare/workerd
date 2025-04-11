@@ -10,13 +10,16 @@ wpt_test(
 
 wpt_test(
     name = "urlpattern",
+    # We use a fixed compat date because new URLPattern implementation
+    # will be the default one on a later date.
+    compat_date = "2025-04-09",
     config = "urlpattern-test.ts",
     wpt_directory = "@wpt//:urlpattern@module",
 )
 
 wpt_test(
     name = "urlpattern-standard",
-    autogates = ["workerd-autogate-urlpattern"],
+    compat_flags = ["urlpattern_standard"],
     config = "urlpattern-standard-test.ts",
     wpt_directory = "@wpt//:urlpattern@module",
 )

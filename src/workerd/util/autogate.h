@@ -15,7 +15,6 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   STREAMING_TAIL_WORKERS,
-  URLPATTERN,
   NumOfKeys  // Reserved for iteration.
 };
 

@@ -10,7 +10,6 @@
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 namespace workerd::jsg {
 class DOMException;
@@ -710,8 +709,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(URLSearchParams);
     }
 
-    // We conditionally enable a more spec compliant URLPattern to avoid any breakages.
-    if (util::Autogate::isEnabled(util::AutogateKey::URLPATTERN)) {
+    if (flags.getSpecCompliantUrlpattern()) {
       JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
     } else {
       JSG_NESTED_TYPE(URLPattern);

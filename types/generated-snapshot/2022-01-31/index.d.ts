@@ -2684,9 +2684,9 @@ declare class URLSearchParams {
 }
 declare class URLPattern {
   constructor(
-    input?: string | URLPatternURLPatternInit,
-    baseURL?: string | URLPatternURLPatternOptions,
-    patternOptions?: URLPatternURLPatternOptions,
+    input?: string | URLPatternInit,
+    baseURL?: string | URLPatternOptions,
+    patternOptions?: URLPatternOptions,
   );
   get protocol(): string;
   get username(): string;
@@ -2696,13 +2696,13 @@ declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  test(input?: string | URLPatternURLPatternInit, baseURL?: string): boolean;
+  test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
-    input?: string | URLPatternURLPatternInit,
+    input?: string | URLPatternInit,
     baseURL?: string,
-  ): URLPatternURLPatternResult | null;
+  ): URLPatternResult | null;
 }
-interface URLPatternURLPatternInit {
+interface URLPatternInit {
   protocol?: string;
   username?: string;
   password?: string;
@@ -2713,22 +2713,22 @@ interface URLPatternURLPatternInit {
   hash?: string;
   baseURL?: string;
 }
-interface URLPatternURLPatternComponentResult {
+interface URLPatternComponentResult {
   input: string;
   groups: Record<string, string>;
 }
-interface URLPatternURLPatternResult {
-  inputs: (string | URLPatternURLPatternInit)[];
-  protocol: URLPatternURLPatternComponentResult;
-  username: URLPatternURLPatternComponentResult;
-  password: URLPatternURLPatternComponentResult;
-  hostname: URLPatternURLPatternComponentResult;
-  port: URLPatternURLPatternComponentResult;
-  pathname: URLPatternURLPatternComponentResult;
-  search: URLPatternURLPatternComponentResult;
-  hash: URLPatternURLPatternComponentResult;
+interface URLPatternResult {
+  inputs: (string | URLPatternInit)[];
+  protocol: URLPatternComponentResult;
+  username: URLPatternComponentResult;
+  password: URLPatternComponentResult;
+  hostname: URLPatternComponentResult;
+  port: URLPatternComponentResult;
+  pathname: URLPatternComponentResult;
+  search: URLPatternComponentResult;
+  hash: URLPatternComponentResult;
 }
-interface URLPatternURLPatternOptions {
+interface URLPatternOptions {
   ignoreCase?: boolean;
 }
 /**
