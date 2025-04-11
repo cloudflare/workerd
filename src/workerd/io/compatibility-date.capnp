@@ -583,9 +583,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonWorkersDevPyodide @58 :Bool
     $compatEnableFlag("python_workers_development")
-    $pythonSnapshotRelease(pyodide = "dev", pyodideRevision = "dev",
-          packages = "20240829.4", backport = 0,
-          baselineSnapshotHash = "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae")
     $experimental;
   # Enables Python Workers and uses the bundle from the Pyodide source directory directly. For testing only.
   #

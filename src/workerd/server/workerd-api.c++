@@ -153,9 +153,8 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
   }
 }
 
-jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::Worker::Reader conf,
-    const PythonConfig& pythonConfig,
-    PythonSnapshotRelease::Reader pythonRelease) {
+jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(
+    config::Worker::Reader conf, const PythonConfig& pythonConfig, PythonRelease& pythonRelease) {
   using Worker = config::Worker;
   auto modules = conf.getModules();
   auto mainModule = kj::str(modules.begin()->getName());

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <workerd/api/pyodide/setup-emscripten.h>
-#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 
 #include <capnp/serialize.h>
@@ -461,7 +461,7 @@ class SetupEmscripten: public jsg::Object {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
+kj::Maybe<kj::String> getPyodideLock(PythonRelease& pythonSnapshotRelease);
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \

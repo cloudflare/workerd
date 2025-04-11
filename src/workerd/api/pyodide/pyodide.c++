@@ -4,6 +4,7 @@
 #include "pyodide.h"
 
 #include "requirements.h"
+#include "workerd/io/compatibility-date.h"
 
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/util/strings.h>
@@ -438,7 +439,7 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
   return filteredImportsBuilder.finish();
 }
 
-kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease) {
+kj::Maybe<kj::String> getPyodideLock(PythonRelease& pythonSnapshotRelease) {
   for (auto pkgLock: *PACKAGE_LOCKS) {
     if (pkgLock.getPackageDate() == pythonSnapshotRelease.getPackages()) {
       return kj::str(pkgLock.getLock());
