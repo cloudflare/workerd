@@ -2264,7 +2264,11 @@ class ExternalMemoryAccounter: private v8::ExternalMemoryAccounter {
 
 // Used to save a reference to an isolate that is responsible for external memory usage.
 // getAdjustment() can be invoked at any time to create a new RAII adjustment object
-// pointing to this isolate
+// pointing to this isolate.
+//
+// Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
+// point to. The only purpose of this object is to hold a weak reference back to the isolate; the
+// reference is nulled out when the isolate is destroyed.
 class ExternalMemoryTarget: public kj::Refcounted {
   struct Impl;
 
@@ -2278,7 +2282,6 @@ class ExternalMemoryTarget: public kj::Refcounted {
   bool isIsolateAlive();
   int64_t getPendingMemoryUpdate();
   ExternalMemoryAdjustment getAdjustment(size_t amount);
-  ~ExternalMemoryTarget();
 
  private:
   kj::Own<ExternalMemoryTarget> addRef();

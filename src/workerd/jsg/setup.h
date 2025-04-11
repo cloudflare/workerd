@@ -297,14 +297,10 @@ class IsolateBase {
   // Used to report external memory usage to V8
   jsg::ExternalMemoryAccounter externalMemoryAccounter;
 
-  // A list of objects currently tracking memory that are referring to this isolate.
-  // They must be cleared when the isolate is destroyed.
-  kj::MutexGuarded<kj::HashSet<ExternalMemoryTarget*>> externalMemoryTargets;
-
-  // Remove an ExternalMemoryTarget from the list of pointers we are tracking.
-  // In doing so, its reference back to the Isolate is also cleared, allowing us to dispose the
-  // isolate.
-  void removeExternalMemoryTarget(ExternalMemoryTarget* target);
+  // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments
+  // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
+  // outlive the isolate.
+  kj::Own<ExternalMemoryTarget> externalMemoryTarget;
 
   // Current value of memory adjustments that have been requested, but have not yet been reported
   // to V8.

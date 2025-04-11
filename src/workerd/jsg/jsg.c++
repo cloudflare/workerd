@@ -373,14 +373,6 @@ int64_t ExternalMemoryTarget::getPendingMemoryUpdate() {
   return 0;
 }
 
-ExternalMemoryTarget::~ExternalMemoryTarget() {
-  KJ_IF_SOME(inner, maybeInner) {
-    auto& jsgIsolate =
-        *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
-    jsgIsolate.removeExternalMemoryTarget(this);
-  }
-}
-
 ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget()->getAdjustment(amount);
 }

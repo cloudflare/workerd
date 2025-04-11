@@ -197,13 +197,7 @@ void IsolateBase::deferDestruction(Item item) {
 }
 
 kj::Own<ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
-  auto target = kj::refcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter);
-  externalMemoryTargets.lockExclusive()->insert(target.get());
-  return target;
-}
-
-void IsolateBase::removeExternalMemoryTarget(ExternalMemoryTarget* target) {
-  externalMemoryTargets.lockExclusive()->eraseMatch(target);
+  return kj::addRef(*externalMemoryTarget);
 }
 
 void IsolateBase::deferExternalMemoryUpdate(int64_t size) {
@@ -352,6 +346,7 @@ IsolateBase::IsolateBase(const V8System& system,
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
+      externalMemoryTarget(kj::refcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
@@ -419,9 +414,7 @@ IsolateBase::IsolateBase(const V8System& system,
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
-  for (auto& target: *externalMemoryTargets.lockExclusive()) {
-    target->reset();
-  }
+  externalMemoryTarget->reset();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // V8 doesn't allow destroying a v8::ExternalMemoryAccounter while it is still reporting
