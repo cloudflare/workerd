@@ -25,7 +25,7 @@
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
-import inner, { type Writer, type Reader } from 'cloudflare-internal:sockets';
+import inner from 'cloudflare-internal:sockets';
 
 import {
   AbortError,
@@ -182,8 +182,8 @@ export declare class Socket extends _Socket {
     bytesRead: number;
     bytesWritten: number;
     socket: ReturnType<typeof inner.connect>;
-    reader: Reader;
-    writer: Writer;
+    reader: ReadableStreamBYOBReader;
+    writer: WritableStreamDefaultWriter<any>;
   };
   public _sockname?: null | AddressInfo;
   public _onTimeout(): void;
@@ -1297,7 +1297,7 @@ function onConnectionClosed(this: Socket): void {
   }
 }
 
-async function startRead(socket: Socket): Promise<void> {
+export async function startRead(socket: Socket): Promise<void> {
   if (!socket._handle) return;
   const reader = socket._handle.reader;
   try {
