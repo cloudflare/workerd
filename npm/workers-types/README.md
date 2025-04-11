@@ -1,5 +1,12 @@
 # Cloudflare Workers Types
 
+> **Note**
+>
+> We now recommend using the [Wrangler CLI](https://www.npmjs.com/package/wrangler) and the `wrangler types` command to generate types based on your compatibility date _and_ compatibility flags. You can learn more about this, and how to migrate from @cloudflare/workers-types [here in our docs](https://developers.cloudflare.com/workers/languages/typescript/#generate-types).
+>
+> @cloudflare/workers-types will continue to be published on the same schedule.
+
+
 ## Install
 
 ```bash
@@ -27,7 +34,7 @@ The following is a minimal `tsconfig.json` for use alongside this package:
 
 ### Compatibility dates
 
-![Entrypoints for compatibility dates](./entrypoints.svg)
+![Entrypoints for compatibility dates](./npm/workers-types/entrypoints.svg)
 
 The Cloudflare Workers runtime manages backwards compatibility through the use of [Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates/). Using different compatibility dates affects the runtime types available to your Worker, and so it's important you specify the correct entrypoint to the `workers-types` package to match your compatibility date (which is usually set in your `wrangler.toml` configuration file). `workers-types` currently exposes the following entrypoints to choose from:
 
