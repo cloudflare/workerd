@@ -51,9 +51,33 @@ kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date);
 // Returns the current date as a string formatted by CompatDate.
 kj::String currentDateStr();
 
-kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
-    CompatibilityFlags::Reader featureFlags);
-kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease);
+class PythonRelease {
+ public:
+  PythonSnapshotRelease::Reader capnpRelease;
+  bool isDevelopment;
+  PythonRelease(PythonSnapshotRelease::Reader capnpRelease, bool isDevelopment)
+      : capnpRelease(capnpRelease),
+        isDevelopment(isDevelopment) {}
+
+  kj::StringPtr getPyodide() {
+    return capnpRelease.getPyodide();
+  }
+  kj::StringPtr getPyodideRevision() {
+    return capnpRelease.getPyodideRevision();
+  }
+  kj::StringPtr getPackages() {
+    return capnpRelease.getPackages();
+  }
+  kj::StringPtr getBaselineSnapshotHash() {
+    return capnpRelease.getBaselineSnapshotHash();
+  };
+  int64_t getBackport() {
+    return capnpRelease.getBackport();
+  }
+};
+
+kj::Maybe<PythonRelease> getPythonSnapshotRelease(CompatibilityFlags::Reader featureFlags);
+kj::String getPythonBundleName(PythonRelease& pyodideRelease);
 
 // These values come from src/workerd/io/compatibility-date.capnp
 static constexpr uint64_t COMPAT_ENABLE_FLAG_ANNOTATION_ID = 0xb6dabbc87cd1b03eull;

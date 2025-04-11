@@ -336,8 +336,7 @@ kj::Array<const PythonSnapshotParsedField> makePythonSnapshotFieldTable(
   return table.releaseAsArray();
 }
 
-kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
-    CompatibilityFlags::Reader featureFlags) {
+kj::Maybe<PythonRelease> getPythonSnapshotRelease(CompatibilityFlags::Reader featureFlags) {
   uint latestFieldOrdinal = 0;
   kj::Maybe<PythonSnapshotRelease::Reader> result;
 
@@ -362,12 +361,12 @@ kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
       result = field.pythonSnapshotRelease;
     }
   }
-
-  return result;
+  auto dev = featureFlags.getPythonWorkersDevPyodide();
+  return result.map([dev](auto x) { return PythonRelease(x, dev); });
 }
 
-kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
-  if (pyodideRelease.getPyodide() == "dev") {
+kj::String getPythonBundleName(PythonRelease& pyodideRelease) {
+  if (pyodideRelease.isDevelopment) {
     return kj::str("dev");
   }
   return kj::str(pyodideRelease.getPyodide(), "_", pyodideRelease.getPyodideRevision(), "_",
