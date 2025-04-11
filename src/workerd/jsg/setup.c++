@@ -196,41 +196,24 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
-kj::Own<ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
-  auto target = kj::refcounted<ExternalMemoryTarget>(ptr, &externalMemoryAccounter);
-  externalMemoryTargets.lockExclusive()->insert(target.get());
-  return target;
-}
-
-void IsolateBase::removeExternalMemoryTarget(ExternalMemoryTarget* target) {
-  externalMemoryTargets.lockExclusive()->eraseMatch(target);
-}
-
-void IsolateBase::deferExternalMemoryUpdate(int64_t size) {
-  pendingExternalMemoryUpdate.fetch_add(size, std::memory_order_relaxed);
-}
-void IsolateBase::clearPendingExternalMemoryUpdate() {
-  KJ_ASSERT(v8::Locker::IsLocked(ptr));
-
-  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
-  if (amount != 0) {
-    externalMemoryAccounter.Update(ptr, amount);
-  }
-}
-
-int64_t IsolateBase::getPendingExternalMemoryUpdate() {
-  return pendingExternalMemoryUpdate;
+kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
+  return kj::atomicAddRef(*externalMemoryTarget);
 }
 
 void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
 
-void IsolateBase::clearDestructionQueue() {
-  // Safe to destroy the popped batch outside of the lock because the lock is only actually used to
-  // guard the push buffer.
-  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
-  auto drop = queue.lockExclusive()->pop();
+void IsolateBase::applyDeferredActions() {
+  // Clear the deferred desturction queue.
+  {
+    // Safe to destroy the popped batch outside of the lock because the lock is only actually used
+    // to guard the push buffer.
+    DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+    auto drop = queue.lockExclusive()->pop();
+  }
+
+  externalMemoryTarget->applyDeferredMemoryUpdate();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -352,6 +335,7 @@ IsolateBase::IsolateBase(const V8System& system,
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
+      externalMemoryTarget(kj::atomicRefcounted<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
@@ -419,15 +403,9 @@ IsolateBase::IsolateBase(const V8System& system,
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
-  for (auto& target: *externalMemoryTargets.lockExclusive()) {
-    target->reset();
-  }
+  externalMemoryTarget->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
-    // V8 doesn't allow destroying a v8::ExternalMemoryAccounter while it is still reporting
-    // non-zero memory usage. Our allocations may outlive the isolate, however, so we bypass this.
-    externalMemoryAccounter.Reset(ptr);
-
     ptr->Dispose();
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
@@ -446,8 +424,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     v8::Isolate::Scope isolateScope(ptr);
 
     // Make sure everything in the deferred destruction queue is dropped.
-    clearDestructionQueue();
-    clearPendingExternalMemoryUpdate();
+    applyDeferredActions();
 
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.

@@ -466,7 +466,7 @@ KJ_TEST("External memory adjustment") {
 }
 
 KJ_TEST("External memory adjustment - defered") {
-  auto target = kj::refcounted<ExternalMemoryTarget>();
+  kj::Own<const ExternalMemoryTarget> target;
 
   // A memory allocation that will outlive the isolate
   kj::Array<kj::byte> mem;
@@ -480,27 +480,27 @@ KJ_TEST("External memory adjustment - defered") {
     // Adjustment to memory while not holding lock will be applied later
     auto adjuster1 = target->getAdjustment(1000);
     KJ_ASSERT(adjuster1.getAmount() == 1000);
-    KJ_ASSERT(target->getPendingMemoryUpdate() == 1000);
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 1000);
 
     {
       // This adjustment has no effect because the adjuster is destroyed before we take the lock again
       auto adjuster2 = target->getAdjustment(1000);
       KJ_ASSERT(adjuster2.getAmount() == 1000);
-      KJ_ASSERT(target->getPendingMemoryUpdate() == 2000);
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 2000);
     }
 
-    KJ_ASSERT(target->getPendingMemoryUpdate() == 1000);
-    KJ_ASSERT(target->isIsolateAlive());
+    KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 1000);
+    KJ_ASSERT(target->isIsolateAliveForTest());
 
     isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
       // Once lock is taken, the amount is applied
-      KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
 
       // Adjustment made while holding lock applies immediately
       adjuster1.adjust(-500);
       KJ_ASSERT(adjuster1.getAmount() == 500);
-      KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
-      KJ_ASSERT(target->isIsolateAlive());
+      KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 0);
+      KJ_ASSERT(target->isIsolateAliveForTest());
     });
 
     mem = isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
@@ -508,14 +508,14 @@ KJ_TEST("External memory adjustment - defered") {
     });
   }
 
-  KJ_ASSERT(!target->isIsolateAlive());
+  KJ_ASSERT(!target->isIsolateAliveForTest());
 
   // Delete the long-lived array, which will call the adjustment's destructor, to make sure it's safe.
   mem = nullptr;
 
   // Making an adjustment anyway won't do anything but also won't crash
   auto adjuster3 = target->getAdjustment(500);
-  KJ_ASSERT(target->getPendingMemoryUpdate() == 0);
+  KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 400);
 }
 
 }  // namespace

@@ -322,70 +322,62 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
 }
 
-void ExternalMemoryAccounter::Update(v8::Isolate* isolate, int64_t delta) {
-  KJ_ASSERT(isolate == isolate_ || isolate_ == nullptr);
-  amount_of_external_memory_ += delta;
-  v8::ExternalMemoryAccounter::Update(isolate, delta);
-}
+void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
+  // Carefully check whether `isolate` is locked by the current thread. Note that there's a
+  // possibility that the isolate is being torn down in a different thread, which means we cannot
+  // safely call `v8::Locekr::IsLocked()` on it.
+  v8::Isolate* current = v8::Isolate::TryGetCurrent();
+  v8::Isolate* target = isolate.load(std::memory_order_relaxed);  // could be null!
 
-void ExternalMemoryAccounter::Reset(v8::Isolate* isolate) {
-  KJ_ASSERT(isolate == isolate_ || isolate_ == nullptr);
-  v8::ExternalMemoryAccounter::Update(isolate, -amount_of_external_memory_);
-}
+  if (current != nullptr && current == target) {
+    // The isolate is currently locked by this thread. Note that it's impossible that `isolate` is
+    // concurrently being torn down because only the thread that holds the isolate lock could be
+    // making such a change, and that's us, and we're not.
+    KJ_ASSERT(v8::Locker::IsLocked(target));
 
-void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) {
-  KJ_IF_SOME(inner, maybeInner) {
-    if (v8::Locker::IsLocked(inner.isolate)) {
-      inner.externalMemoryAccounter->Update(inner.isolate, amount);
-    } else {
-      // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
-      // time that we do.
-      auto& jsgIsolate =
-          *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
-      jsgIsolate.deferExternalMemoryUpdate(static_cast<int64_t>(amount));
-    }
+    // TODO(cleanup): This is deprecated, but the replacement, v8::ExternalMemoryAccounter,
+    //   explicitly requires that the adjustment returns to zero before it is destroyed. That
+    //   isn't what we want, because we explicitly want external memory to be allowed to live
+    //   beyond the isolate in some cases. Perhaps we need to patch V8 to un-deprecate
+    //   AdjustAmountOfExternalAllocatedMemory(), or directly expose the underlying
+    //   AdjustAmountOfExternalAllocatedMemoryImpl(), which is what ExternalMemoryAccounter
+    //   uses anyway.
+    target->AdjustAmountOfExternalAllocatedMemory(amount);
+  } else {
+    // We don't hold the isolate lock. Instead, record the adjustment to be applied the next time
+    // the isolate lock is acquired.
+    pendingExternalMemoryUpdate.fetch_add(amount, std::memory_order_relaxed);
   }
 }
 
-void ExternalMemoryTarget::reset() {
-  maybeInner = kj::none;
+void ExternalMemoryTarget::detach() const {
+  isolate.store(nullptr, std::memory_order_relaxed);
 }
 
-kj::Own<ExternalMemoryTarget> ExternalMemoryTarget::addRef() {
-  return kj::addRef(*this);
+ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) const {
+  return ExternalMemoryAdjustment(kj::atomicAddRef(*this), amount);
 }
 
-ExternalMemoryAdjustment ExternalMemoryTarget::getAdjustment(size_t amount) {
-  return ExternalMemoryAdjustment(addRef(), amount);
-}
-
-bool ExternalMemoryTarget::isIsolateAlive() {
-  return maybeInner != kj::none;
-}
-
-int64_t ExternalMemoryTarget::getPendingMemoryUpdate() {
-  KJ_IF_SOME(inner, maybeInner) {
-    auto& jsgIsolate =
-        *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
-    return jsgIsolate.getPendingExternalMemoryUpdate();
+void ExternalMemoryTarget::applyDeferredMemoryUpdate() const {
+  int64_t amount = pendingExternalMemoryUpdate.exchange(0, std::memory_order_relaxed);
+  if (amount != 0) {
+    isolate.load(std::memory_order_relaxed)->AdjustAmountOfExternalAllocatedMemory(amount);
   }
-
-  return 0;
 }
 
-ExternalMemoryTarget::~ExternalMemoryTarget() {
-  KJ_IF_SOME(inner, maybeInner) {
-    auto& jsgIsolate =
-        *reinterpret_cast<IsolateBase*>(inner.isolate->GetData(SET_DATA_ISOLATE_BASE));
-    jsgIsolate.removeExternalMemoryTarget(this);
-  }
+bool ExternalMemoryTarget::isIsolateAliveForTest() const {
+  return isolate.load(std::memory_order_relaxed) != nullptr;
+}
+
+int64_t ExternalMemoryTarget::getPendingMemoryUpdateForTest() const {
+  return pendingExternalMemoryUpdate.load(std::memory_order_relaxed);
 }
 
 ExternalMemoryAdjustment Lock::getExternalMemoryAdjustment(int64_t amount) {
-  return IsolateBase::from(v8Isolate).getExternalMemoryTarget()->getAdjustment(amount);
+  return IsolateBase::from(v8Isolate).getExternalMemoryAdjustment(amount);
 }
 
-kj::Own<ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
+kj::Own<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
 }
 
@@ -426,7 +418,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
 }
 
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(
-    kj::Own<ExternalMemoryTarget> externalMemory, size_t amount)
+    kj::Own<const ExternalMemoryTarget> externalMemory, size_t amount)
     : externalMemory(kj::mv(externalMemory)) {
   maybeDeferAdjustment(amount);
 }
