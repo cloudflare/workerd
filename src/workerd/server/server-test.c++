@@ -202,6 +202,10 @@ class TestStream {
         {});
   }
 
+  kj::AsyncIoStream& getStream() {
+    return *stream;
+  }
+
  private:
   kj::WaitScope& ws;
   kj::Own<kj::AsyncIoStream> stream;
@@ -408,6 +412,10 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
       timer.advanceTo(KJ_ASSERT_NONNULL(timer.nextEvent()));
     }
     delayPromise.wait(ws);
+  }
+
+  kj::WaitScope& getWaitScope() {
+    return ws;
   }
 
   kj::EventLoop loop;
@@ -4107,12 +4115,12 @@ KJ_TEST("Server: encodeResponseBody: manual option") {
                 `    let response = await fetch("http://subhost/foo", {
                 `      encodeResponseBody: "manual"
                 `    });
-                `    
+                `
                 `    // Get the raw bytes, which should not be decompressed
                 `    let rawBytes = await response.arrayBuffer();
                 `    let decoder = new TextDecoder();
                 `    let rawText = decoder.decode(rawBytes);
-                `    
+                `
                 `    return new Response(
                 `      "Content-Encoding: " + response.headers.get("Content-Encoding") + "\n" +
                 `      "Raw content: " + rawText
@@ -4222,6 +4230,126 @@ KJ_TEST("Server: encodeResponseBody: manual pass-through") {
     Content-Encoding: gzip
 
     fake-gzipped-content)"_blockquote);
+}
+
+KJ_TEST("Server: Catch websocket server errors") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+               ` export default {
+               `   async fetch(request) {
+               `     try {
+               `        return await handleRequest(request)
+               `     } catch (e) {
+               `        console.log("eerrrrr", e)
+               `        return new Response("ok")
+               `     }
+               `   }
+               ` }
+               `
+               ` let lastError = "none";
+               `
+               ` async function handleRequest(request) {
+               `   const upgradeHeader = request.headers.get('Upgrade');
+               `   if (!upgradeHeader || upgradeHeader !== 'websocket') {
+               `       return new Response('Expected Upgrade: websocket' , { status: 426 });
+               `   }
+               `
+               `   const webSocketPair = new WebSocketPair();
+               `   const [client, server] = Object.values(webSocketPair);
+               `
+               `   server.accept();
+               `   server.addEventListener('message', event => {
+               `       if (event.data === "getLastError") {
+               `         server.send(lastError)
+               `       } else {
+               `         let msg = event.data
+               `         server.send(msg)
+               `       }
+               `   });
+               `
+               `   server.addEventListener('error', event => {
+               `     lastError = event.message;
+               `   });
+               `
+               `   return new Response(null, {
+               `       status: 101,
+               `       webSocket: client,
+               `   });
+               ` }
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  class NotVeryGoodEntropySource: public kj::EntropySource {
+   public:
+    void generate(kj::ArrayPtr<byte> buffer) {
+      buffer.fill('4');
+    }
+  };
+
+  KJ_EXPECT_LOG(ERROR,
+      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 2097152 > 1048576");
+  test.start();
+  auto& waitScope = test.getWaitScope();
+
+  kj::HttpHeaderTable headerTable;
+  NotVeryGoodEntropySource entropySource;
+  kj::HttpHeaders headers(headerTable);
+  headers.set(kj::HttpHeaderId::HOST, "foo");
+  headers.set(kj::HttpHeaderId::UPGRADE, "websocket");
+  {
+    auto wsConn = test.connect("test-addr");
+    auto client = kj::newHttpClient(
+        headerTable, wsConn.getStream(), kj::HttpClientSettings{.entropySource = entropySource});
+    auto res = client->openWebSocket("/", headers).wait(waitScope);
+    KJ_ASSERT(res.statusCode == 101, res.statusCode, res.statusText);
+    auto ws = kj::mv(res.webSocketOrBody.get<kj::Own<kj::WebSocket>>());
+    const auto smallMessage = kj::str("hello");
+    ws->send(smallMessage).wait(waitScope);
+    auto smallResponse = ws->receive().wait(waitScope);
+    KJ_EXPECT(smallResponse.get<kj::String>() == smallMessage);
+    const auto bigMessage = kj::heapArray<kj::byte>(2 * 1024 * 1024);
+    auto sendProm =
+        kj::evalNow([&]() { return ws->send(bigMessage); }).then([]() {}, [](kj::Exception ex) {});
+    // Message is too big; we should close the connection.
+    auto msg = ws->receive().wait(waitScope);
+    sendProm.wait(waitScope);
+    auto& resp = msg.get<kj::WebSocket::Close>();
+    KJ_EXPECT(resp.code == 1009);  // WebSocket-ese for "message too large"
+  }
+  {
+    auto wsConn = test.connect("test-addr");
+    headers.set(kj::HttpHeaderId::HOST, "foo");
+    headers.set(kj::HttpHeaderId::UPGRADE, "websocket");
+    auto client = kj::newHttpClient(
+        headerTable, wsConn.getStream(), kj::HttpClientSettings{.entropySource = entropySource});
+    auto res = client->openWebSocket("/", headers).wait(waitScope);
+    KJ_ASSERT(res.statusCode == 101, res.statusCode, res.statusText);
+    auto ws = kj::mv(res.webSocketOrBody.get<kj::Own<kj::WebSocket>>());
+    const auto query = kj::str("getLastError");
+    ws->send(query).wait(waitScope);
+    auto response = ws->receive().wait(waitScope);
+
+    kj::StringPtr responseString = response.get<kj::String>();
+    KJ_EXPECT(responseString.find("1009"_kjc) != kj::none, responseString);  // Error code
+    KJ_EXPECT(responseString.find("Message is too large"_kjc) != kj::none, responseString);
+    ws->close(1000, "").wait(waitScope);
+  }
 }
 
 }  // namespace

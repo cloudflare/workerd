@@ -217,6 +217,17 @@ wd_cc_library(
     deps = ["@capnp-cpp//src/kj"],
 )
 
+wd_cc_library(
+    name = "websocket-error-handler",
+    srcs = ["websocket-error-handler.c++"],
+    hdrs = ["websocket-error-handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg:exception",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
 exports_files(["autogate.h"])
 
 [

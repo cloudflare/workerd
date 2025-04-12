@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -633,6 +634,23 @@ wd_test(
     src = "tests/websocket-hibernation.wd-test",
     args = ["--experimental"],
     data = ["tests/websocket-hibernation.js"],
+)
+
+js_binary(
+    name = "websocket-client-error-sidecar",
+    entry_point = "tests/websocket-client-error-sidecar.js",
+)
+
+wd_test(
+    src = "tests/websocket-client-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/websocket-client-error-test.js",
+    ],
+    sidecar = "websocket-client-error-sidecar",
+    sidecar_port_bindings = [
+        "BIG_MESSAGE_SERVER_PORT",
+    ],
 )
 
 wd_test(

@@ -27,6 +27,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
+#include <workerd/util/websocket-error-handler.h>
 
 #include <openssl/bio.h>
 #include <openssl/pem.h>
@@ -605,11 +606,13 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
       capnp::ByteStreamFactory& byteStreamFactory,
       capnp::HttpOverCapnpFactory& httpOverCapnpFactory)
       : addr(kj::mv(addrParam)),
+        webSocketErrorHandler(kj::heap<JsgifyWebSocketErrors>()),
         inner(kj::newHttpClient(timer,
             headerTable,
             *addr,
             {.entropySource = entropySource,
-              .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION})),
+              .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION,
+              .webSocketErrorHandler = *webSocketErrorHandler})),
         serviceAdapter(kj::newHttpService(*inner)),
         rewriter(kj::mv(rewriter)),
         headerTable(headerTable),
@@ -628,6 +631,7 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
  private:
   kj::Own<kj::NetworkAddress> addr;
 
+  kj::Own<JsgifyWebSocketErrors> webSocketErrorHandler;
   kj::Own<kj::HttpClient> inner;
   kj::Own<kj::HttpService> serviceAdapter;
 
@@ -846,12 +850,14 @@ class Server::NetworkService final: public Service, private WorkerInterface {
       kj::Maybe<kj::SecureNetworkWrapper&> tlsContext)
       : network(kj::mv(networkParam)),
         tlsNetwork(kj::mv(tlsNetworkParam)),
+        webSocketErrorHandler(kj::heap<JsgifyWebSocketErrors>()),
         inner(kj::newHttpClient(timer,
             headerTable,
             *network,
             tlsNetwork,
             {.entropySource = entropySource,
               .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION,
+              .webSocketErrorHandler = *webSocketErrorHandler,
               .tlsContext = tlsContext})),
         serviceAdapter(kj::newHttpService(*inner)) {}
 
@@ -866,6 +872,7 @@ class Server::NetworkService final: public Service, private WorkerInterface {
  private:
   kj::Own<kj::Network> network;
   kj::Maybe<kj::Own<kj::Network>> tlsNetwork;
+  kj::Own<JsgifyWebSocketErrors> webSocketErrorHandler;
   kj::Own<kj::HttpClient> inner;
   kj::Own<kj::HttpService> serviceAdapter;
 
@@ -3766,15 +3773,18 @@ class Server::HttpListener final: public kj::Refcounted {
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
         : parent(parent),
           cfBlobJson(kj::mv(cfBlobJson)),
+          webSocketErrorHandler(kj::heap<JsgifyWebSocketErrors>()),
           listedHttp(parent.owner,
               parent.timer,
               parent.headerTable,
               *this,
               kj::HttpServerSettings{.errorHandler = *this,
+                .webSocketErrorHandler = *webSocketErrorHandler,
                 .webSocketCompressionMode = kj::HttpServerSettings::MANUAL_COMPRESSION}) {}
 
     HttpListener& parent;
     kj::Maybe<kj::String> cfBlobJson;
+    kj::Own<JsgifyWebSocketErrors> webSocketErrorHandler;
     ListedHttpServer listedHttp;
 
     class ResponseWrapper final: public kj::HttpService::Response {
