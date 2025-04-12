@@ -1,4 +1,4 @@
-from a import A
+from package.a import A
 
 
 def test():
