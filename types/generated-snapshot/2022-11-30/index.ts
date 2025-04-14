@@ -4420,6 +4420,15 @@ export type AutoRagSearchRequest = {
   };
   rewrite_query?: boolean;
 };
+export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
+  stream?: boolean;
+};
+export type AutoRagAiSearchRequestStreaming = Omit<
+  AutoRagAiSearchRequest,
+  "stream"
+> & {
+  stream: true;
+};
 export type AutoRagSearchResponse = {
   object: "vector_store.search_results.page";
   search_query: string;
@@ -4441,7 +4450,11 @@ export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
 };
 export declare abstract class AutoRAG {
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
-  aiSearch(params: AutoRagSearchRequest): Promise<AutoRagAiSearchResponse>;
+  aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
+  aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
+  aiSearch(
+    params: AutoRagAiSearchRequest,
+  ): Promise<AutoRagAiSearchResponse | Response>;
 }
 export interface BasicImageTransformations {
   /**

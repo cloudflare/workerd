@@ -55,6 +55,16 @@ export type AutoRagSearchRequest = {
   rewrite_query?: boolean;
 };
 
+export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
+  stream?: boolean;
+};
+export type AutoRagAiSearchRequestStreaming = Omit<
+  AutoRagAiSearchRequest,
+  'stream'
+> & {
+  stream: true;
+};
+
 export type AutoRagSearchResponse = {
   object: 'vector_store.search_results.page';
   search_query: string;
@@ -118,8 +128,14 @@ export class AutoRAG {
   }
 
   public async aiSearch(
-    params: AutoRagSearchRequest
-  ): Promise<AutoRagAiSearchResponse> {
+    params: AutoRagAiSearchRequestStreaming
+  ): Promise<Response>;
+  public async aiSearch(
+    params: AutoRagAiSearchRequest
+  ): Promise<AutoRagAiSearchResponse>;
+  public async aiSearch(
+    params: AutoRagAiSearchRequest
+  ): Promise<AutoRagAiSearchResponse | Response> {
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/autorag/rags/${this.#autoragId}/ai-search`,
       {
@@ -142,6 +158,10 @@ export class AutoRAG {
         throw await parseError(res, 'AutoRAG not found', AutoRAGNotFoundError);
       }
       throw await parseError(res);
+    }
+
+    if (params.stream === true) {
+      return res;
     }
 
     const data = (await res.json()) as { result: AutoRagAiSearchResponse };
