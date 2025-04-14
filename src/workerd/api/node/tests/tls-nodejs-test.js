@@ -22,6 +22,7 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
+import { connect } from 'cloudflare:sockets';
 import tls from 'node:tls';
 import {
   strictEqual,
@@ -744,5 +745,27 @@ export const testConvertALPNProtocols = {
           'maximum length. It must be <= 255. Received 500',
       });
     }
+  },
+};
+
+export const testStartTlsBehaviorOnUpgrade = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const socket = connect(`localhost:${env.HELLO_SERVER_PORT}`, {
+      secureTransport: 'starttls',
+    });
+    strictEqual(socket.upgraded, false);
+    await socket.opened;
+    strictEqual(socket.upgraded, false);
+    socket.closed
+      .then(() => {
+        strictEqual(socket.upgraded, true);
+        resolve();
+      })
+      .catch(reject);
+    const secureSocket = socket.startTls();
+    // The newly created socket instance is not upgraded.
+    strictEqual(secureSocket.upgraded, false);
+    await promise;
   },
 };

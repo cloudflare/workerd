@@ -102,6 +102,10 @@ class Socket: public jsg::Object {
     return openedPromise;
   }
 
+  bool getUpgraded() const {
+    return upgraded;
+  }
+
   // Closes the socket connection.
   //
   // The closure is only performed after the socket connection is properly
@@ -134,6 +138,7 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
+    JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
   }
@@ -176,6 +181,8 @@ class Socket: public jsg::Object {
   // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by
   // `startTls`.
   bool isSecureSocket;
+  // Set to true when the socket is upgraded to a secure one.
+  bool upgraded = false;
   // The domain/ip this socket is connected to. Used for startTls.
   kj::String domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
