@@ -6,22 +6,39 @@
 // we delegate the implementation to `python-entrypoint-helper` which is a
 // BUILTIN module that can see our INTERNAL modules.
 
-import { DurableObject } from 'cloudflare:workers';
-
-// The creation of `pythonDurableObjects` has to be done here because python-entrypoint-helper
-// is a BUILTIN and so cannot import `DurableObject` (which is also a builtin). As a workaround
-// we call `makeDurableObjectClass` here and pass it the DurableObject class.
 import {
-  pythonDurableObjectClasses,
-  makeDurableObjectClass,
+  DurableObject,
+  WorkerEntrypoint,
+  WorkflowEntrypoint,
+} from 'cloudflare:workers';
+
+// The creation of `pythonDurableObjects` et al. has to be done here because
+// python-entrypoint-helper is a BUILTIN and so cannot import `DurableObject` et al.
+// (which are also builtins). As a workaround we call `makeEntrypointClass` here and pass it the
+// appropriate class.
+import {
+  pythonEntrypointClasses,
+  makeEntrypointClass,
 } from 'pyodide:python-entrypoint-helper';
 
-const pythonDurableObjects = Object.fromEntries(
-  pythonDurableObjectClasses.map((className) => [
+function makeEntrypointClassFromNames(names, cls) {
+  return names.map((className) => [
     className,
-    makeDurableObjectClass(className, DurableObject),
-  ])
+    makeEntrypointClass(className, cls),
+  ]);
+}
+
+const entrypoints = {
+  durableObjects: DurableObject,
+  workerEntrypoints: WorkerEntrypoint,
+  workflowEntrypoints: WorkflowEntrypoint,
+};
+
+const pythonEntrypoints = Object.fromEntries(
+  Object.entries(entrypoints).flatMap(([key, cls]) =>
+    makeEntrypointClassFromNames(pythonEntrypointClasses[key], cls)
+  )
 );
 
-export { pythonDurableObjects };
+export { pythonEntrypoints };
 export { default } from 'pyodide:python-entrypoint-helper';

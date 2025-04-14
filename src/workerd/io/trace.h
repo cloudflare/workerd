@@ -289,7 +289,7 @@ struct FetchEventInfo final {
     kj::String name;
     kj::String value;
 
-    void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder);
+    void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) const;
     Header clone() const;
 
     JSG_MEMORY_INFO(Header) {
@@ -304,7 +304,7 @@ struct FetchEventInfo final {
   kj::String cfJson;
   kj::Array<Header> headers;
 
-  void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
+  void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
 };
 
@@ -318,7 +318,7 @@ struct JsRpcEventInfo final {
 
   kj::String methodName;
 
-  void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder);
+  void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) const;
   JsRpcEventInfo clone() const;
 };
 
@@ -333,7 +333,7 @@ struct ScheduledEventInfo final {
   double scheduledTime;
   kj::String cron;
 
-  void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder);
+  void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const;
   ScheduledEventInfo clone() const;
 };
 
@@ -347,7 +347,7 @@ struct AlarmEventInfo final {
 
   kj::Date scheduledTime;
 
-  void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
+  void copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const;
   AlarmEventInfo clone() const;
 };
 
@@ -362,7 +362,7 @@ struct QueueEventInfo final {
   kj::String queueName;
   uint32_t batchSize;
 
-  void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
+  void copyTo(rpc::Trace::QueueEventInfo::Builder builder) const;
   QueueEventInfo clone() const;
 };
 
@@ -378,7 +378,7 @@ struct EmailEventInfo final {
   kj::String rcptTo;
   uint32_t rawSize;
 
-  void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
+  void copyTo(rpc::Trace::EmailEventInfo::Builder builder) const;
   EmailEventInfo clone() const;
 };
 
@@ -402,13 +402,13 @@ struct TraceEventInfo final {
 
     kj::Maybe<kj::String> scriptName;
 
-    void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
+    void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder) const;
     TraceItem clone() const;
   };
 
   kj::Vector<TraceItem> traces;
 
-  void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
+  void copyTo(rpc::Trace::TraceEventInfo::Builder builder) const;
   TraceEventInfo clone() const;
 };
 
@@ -431,7 +431,7 @@ struct HibernatableWebSocketEventInfo final {
 
   Type type;
 
-  void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder);
+  void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) const;
   HibernatableWebSocketEventInfo clone() const;
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
 };
@@ -452,7 +452,7 @@ struct FetchResponseInfo final {
 
   uint16_t statusCode;
 
-  void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
+  void copyTo(rpc::Trace::FetchResponseInfo::Builder builder) const;
   FetchResponseInfo clone() const;
 };
 
@@ -468,7 +468,7 @@ struct DiagnosticChannelEvent final {
   kj::String channel;
   kj::Array<kj::byte> message;
 
-  void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
+  void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder) const;
   DiagnosticChannelEvent clone() const;
 };
 
@@ -487,7 +487,7 @@ struct Log final {
   // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
   kj::String message;
 
-  void copyTo(rpc::Trace::Log::Builder builder);
+  void copyTo(rpc::Trace::Log::Builder builder) const;
   Log clone() const;
 };
 
@@ -508,7 +508,7 @@ struct Exception final {
 
   kj::Maybe<kj::String> stack;
 
-  void copyTo(rpc::Trace::Exception::Builder builder);
+  void copyTo(rpc::Trace::Exception::Builder builder) const;
   Exception clone() const;
 };
 
@@ -522,7 +522,7 @@ struct Resume final {
 
   kj::Maybe<kj::Array<kj::byte>> attachment;
 
-  void copyTo(rpc::Trace::Resume::Builder builder);
+  void copyTo(rpc::Trace::Resume::Builder builder) const;
   Resume clone() const;
 };
 
@@ -534,7 +534,7 @@ struct Hibernate final {
   KJ_DISALLOW_COPY(Hibernate);
   ~Hibernate() noexcept(false) = default;
 
-  void copyTo(rpc::Trace::Hibernate::Builder builder);
+  void copyTo(rpc::Trace::Hibernate::Builder builder) const;
   Hibernate clone() const;
 };
 
@@ -587,7 +587,7 @@ struct Attribute final {
   kj::String name;
   Values value;
 
-  void copyTo(rpc::Trace::Attribute::Builder builder);
+  void copyTo(rpc::Trace::Attribute::Builder builder) const;
   Attribute clone() const;
 };
 using CustomInfo = kj::Array<Attribute>;
@@ -609,7 +609,7 @@ struct Return final {
 
   kj::Maybe<Info> info = kj::none;
 
-  void copyTo(rpc::Trace::Return::Builder builder);
+  void copyTo(rpc::Trace::Return::Builder builder) const;
   Return clone() const;
 };
 
@@ -628,7 +628,7 @@ struct Link final {
   TraceId invocationId;
   SpanId spanId;
 
-  void copyTo(rpc::Trace::Link::Builder builder);
+  void copyTo(rpc::Trace::Link::Builder builder) const;
   Link clone() const;
 };
 
@@ -650,7 +650,7 @@ struct SpanOpen final {
   kj::Maybe<kj::String> operationName = kj::none;
   kj::Maybe<Info> info = kj::none;
 
-  void copyTo(rpc::Trace::SpanOpen::Builder builder);
+  void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
 };
 
@@ -666,7 +666,7 @@ struct SpanClose final {
 
   EventOutcome outcome = EventOutcome::OK;
 
-  void copyTo(rpc::Trace::SpanClose::Builder builder);
+  void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
 };
 
@@ -715,9 +715,13 @@ struct Onset final {
   WorkerInfo workerInfo;
   kj::Maybe<TriggerContext> trigger;
 
-  void copyTo(rpc::Trace::Onset::Builder builder);
+  void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
 };
+
+// Helper functions to copy onset info to/from rpc reader
+Onset::Info readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info);
+void writeOnsetInfo(const tracing::Onset::Info& info, rpc::Trace::Onset::Info::Builder& builder);
 
 struct Outcome final {
   explicit Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
@@ -730,7 +734,7 @@ struct Outcome final {
   kj::Duration cpuTime;
   kj::Duration wallTime;
 
-  void copyTo(rpc::Trace::Outcome::Builder builder);
+  void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
 };
 
@@ -766,7 +770,7 @@ struct TailEvent final {
 
   Event event;
 
-  void copyTo(rpc::Trace::TailEvent::Builder builder);
+  void copyTo(rpc::Trace::TailEvent::Builder builder) const;
   TailEvent clone() const;
 };
 }  // namespace tracing
@@ -852,7 +856,7 @@ class Trace final: public kj::Refcounted {
   size_t numSpans = 0;
 
   // Copy content from this trace into `builder`.
-  void copyTo(rpc::Trace::Builder builder);
+  void copyTo(rpc::Trace::Builder builder) const;
 
   // Adds all content from `reader` to this `Trace`. (Typically this trace is empty before the
   // call.)  Also applies filtering to the trace as if it were recorded with the given
@@ -940,7 +944,7 @@ struct CompleteSpan {
   Span::TagMap tags;
 
   CompleteSpan(rpc::UserSpanData::Reader reader);
-  void copyTo(rpc::UserSpanData::Builder builder);
+  void copyTo(rpc::UserSpanData::Builder builder) const;
   explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
       : operationName(kj::mv(operationName)),
         startTime(startTime),

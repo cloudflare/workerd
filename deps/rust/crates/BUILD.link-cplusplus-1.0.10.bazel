@@ -101,6 +101,9 @@ cargo_build_script(
     edition = "2018",
     links = "cplusplus",
     pkg_name = "link-cplusplus",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -114,7 +117,7 @@ cargo_build_script(
     version = "1.0.10",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__cc-1.2.17//:cc",
+        "@crates_vendor__cc-1.2.19//:cc",
     ],
 )
 

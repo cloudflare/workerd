@@ -294,16 +294,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
-  GPUAdapter: typeof GPUAdapter;
-  GPUOutOfMemoryError: typeof GPUOutOfMemoryError;
-  GPUValidationError: typeof GPUValidationError;
-  GPUInternalError: typeof GPUInternalError;
-  GPUDeviceLostInfo: typeof GPUDeviceLostInfo;
-  GPUBufferUsage: typeof GPUBufferUsage;
-  GPUShaderStage: typeof GPUShaderStage;
-  GPUMapMode: typeof GPUMapMode;
-  GPUTextureUsage: typeof GPUTextureUsage;
-  GPUColorWrite: typeof GPUColorWrite;
 }
 declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(
   type: Type,
@@ -474,7 +464,7 @@ declare abstract class Navigator {
       | URLSearchParams,
   ): boolean;
   readonly userAgent: string;
-  readonly gpu?: GPU;
+  readonly hardwareConcurrency: number;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -2047,11 +2037,11 @@ interface R2PutOptions {
   onlyIf?: R2Conditional | Headers;
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
-  md5?: ArrayBuffer | string;
-  sha1?: ArrayBuffer | string;
-  sha256?: ArrayBuffer | string;
-  sha384?: ArrayBuffer | string;
-  sha512?: ArrayBuffer | string;
+  md5?: (ArrayBuffer | ArrayBufferView) | string;
+  sha1?: (ArrayBuffer | ArrayBufferView) | string;
+  sha256?: (ArrayBuffer | ArrayBufferView) | string;
+  sha384?: (ArrayBuffer | ArrayBufferView) | string;
+  sha512?: (ArrayBuffer | ArrayBufferView) | string;
   storageClass?: string;
   ssecKey?: ArrayBuffer | string;
 }
@@ -2724,9 +2714,9 @@ declare class URLSearchParams {
 }
 declare class URLPattern {
   constructor(
-    input?: string | URLPatternURLPatternInit,
-    baseURL?: string | URLPatternURLPatternOptions,
-    patternOptions?: URLPatternURLPatternOptions,
+    input?: string | URLPatternInit,
+    baseURL?: string | URLPatternOptions,
+    patternOptions?: URLPatternOptions,
   );
   get protocol(): string;
   get username(): string;
@@ -2736,13 +2726,13 @@ declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  test(input?: string | URLPatternURLPatternInit, baseURL?: string): boolean;
+  test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
-    input?: string | URLPatternURLPatternInit,
+    input?: string | URLPatternInit,
     baseURL?: string,
-  ): URLPatternURLPatternResult | null;
+  ): URLPatternResult | null;
 }
-interface URLPatternURLPatternInit {
+interface URLPatternInit {
   protocol?: string;
   username?: string;
   password?: string;
@@ -2753,22 +2743,22 @@ interface URLPatternURLPatternInit {
   hash?: string;
   baseURL?: string;
 }
-interface URLPatternURLPatternComponentResult {
+interface URLPatternComponentResult {
   input: string;
   groups: Record<string, string>;
 }
-interface URLPatternURLPatternResult {
-  inputs: (string | URLPatternURLPatternInit)[];
-  protocol: URLPatternURLPatternComponentResult;
-  username: URLPatternURLPatternComponentResult;
-  password: URLPatternURLPatternComponentResult;
-  hostname: URLPatternURLPatternComponentResult;
-  port: URLPatternURLPatternComponentResult;
-  pathname: URLPatternURLPatternComponentResult;
-  search: URLPatternURLPatternComponentResult;
-  hash: URLPatternURLPatternComponentResult;
+interface URLPatternResult {
+  inputs: (string | URLPatternInit)[];
+  protocol: URLPatternComponentResult;
+  username: URLPatternComponentResult;
+  password: URLPatternComponentResult;
+  hostname: URLPatternComponentResult;
+  port: URLPatternComponentResult;
+  pathname: URLPatternComponentResult;
+  search: URLPatternComponentResult;
+  hash: URLPatternComponentResult;
 }
-interface URLPatternURLPatternOptions {
+interface URLPatternOptions {
   ignoreCase?: boolean;
 }
 /**
@@ -2948,518 +2938,6 @@ interface TlsOptions {
 interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
-}
-interface GPU {
-  requestAdapter(param1?: GPURequestAdapterOptions): Promise<GPUAdapter | null>;
-}
-declare abstract class GPUAdapter {
-  requestDevice(param1?: GPUDeviceDescriptor): Promise<GPUDevice>;
-  requestAdapterInfo(unmaskHints?: string[]): Promise<GPUAdapterInfo>;
-  get features(): GPUSupportedFeatures;
-  get limits(): GPUSupportedLimits;
-}
-interface GPUDevice extends EventTarget {
-  createBuffer(param1: GPUBufferDescriptor): GPUBuffer;
-  createBindGroupLayout(
-    descriptor: GPUBindGroupLayoutDescriptor,
-  ): GPUBindGroupLayout;
-  createBindGroup(descriptor: GPUBindGroupDescriptor): GPUBindGroup;
-  createSampler(descriptor: GPUSamplerDescriptor): GPUSampler;
-  createShaderModule(descriptor: GPUShaderModuleDescriptor): GPUShaderModule;
-  createPipelineLayout(
-    descriptor: GPUPipelineLayoutDescriptor,
-  ): GPUPipelineLayout;
-  createComputePipeline(
-    descriptor: GPUComputePipelineDescriptor,
-  ): GPUComputePipeline;
-  createRenderPipeline(
-    descriptor: GPURenderPipelineDescriptor,
-  ): GPURenderPipeline;
-  createCommandEncoder(
-    descriptor?: GPUCommandEncoderDescriptor,
-  ): GPUCommandEncoder;
-  createTexture(param1: GPUTextureDescriptor): GPUTexture;
-  destroy(): void;
-  createQuerySet(descriptor: GPUQuerySetDescriptor): GPUQuerySet;
-  pushErrorScope(filter: string): void;
-  popErrorScope(): Promise<GPUError | null>;
-  get queue(): GPUQueue;
-  get lost(): Promise<GPUDeviceLostInfo>;
-  get features(): GPUSupportedFeatures;
-  get limits(): GPUSupportedLimits;
-}
-interface GPUDeviceDescriptor {
-  label?: string;
-  requiredFeatures?: string[];
-  requiredLimits?: Record<string, number | bigint>;
-  defaultQueue?: GPUQueueDescriptor;
-}
-interface GPUBufferDescriptor {
-  label: string;
-  size: number | bigint;
-  usage: number;
-  mappedAtCreation: boolean;
-}
-interface GPUQueueDescriptor {
-  label?: string;
-}
-declare abstract class GPUBufferUsage {
-  static readonly MAP_READ: number;
-  static readonly MAP_WRITE: number;
-  static readonly COPY_SRC: number;
-  static readonly COPY_DST: number;
-  static readonly INDEX: number;
-  static readonly VERTEX: number;
-  static readonly UNIFORM: number;
-  static readonly STORAGE: number;
-  static readonly INDIRECT: number;
-  static readonly QUERY_RESOLVE: number;
-}
-interface GPUBuffer {
-  getMappedRange(size?: number | bigint, param2?: number | bigint): ArrayBuffer;
-  unmap(): void;
-  destroy(): void;
-  mapAsync(
-    offset: number,
-    size?: number | bigint,
-    param3?: number | bigint,
-  ): Promise<void>;
-  get size(): number | bigint;
-  get usage(): number;
-  get mapState(): string;
-}
-declare abstract class GPUShaderStage {
-  static readonly VERTEX: number;
-  static readonly FRAGMENT: number;
-  static readonly COMPUTE: number;
-}
-interface GPUBindGroupLayoutDescriptor {
-  label?: string;
-  entries: GPUBindGroupLayoutEntry[];
-}
-interface GPUBindGroupLayoutEntry {
-  binding: number;
-  visibility: number;
-  buffer?: GPUBufferBindingLayout;
-  sampler?: GPUSamplerBindingLayout;
-  texture?: GPUTextureBindingLayout;
-  storageTexture?: GPUStorageTextureBindingLayout;
-}
-interface GPUStorageTextureBindingLayout {
-  access?: string;
-  format: string;
-  viewDimension?: string;
-}
-interface GPUTextureBindingLayout {
-  sampleType?: string;
-  viewDimension?: string;
-  multisampled?: boolean;
-}
-interface GPUSamplerBindingLayout {
-  type?: string;
-}
-interface GPUBufferBindingLayout {
-  type?: string;
-  hasDynamicOffset?: boolean;
-  minBindingSize?: number | bigint;
-}
-interface GPUBindGroupLayout {}
-interface GPUBindGroup {}
-interface GPUBindGroupDescriptor {
-  label?: string;
-  layout: GPUBindGroupLayout;
-  entries: GPUBindGroupEntry[];
-}
-interface GPUBindGroupEntry {
-  binding: number;
-  resource: GPUBufferBinding | GPUSampler;
-}
-interface GPUBufferBinding {
-  buffer: GPUBuffer;
-  offset?: number | bigint;
-  size?: number | bigint;
-}
-interface GPUSampler {}
-interface GPUSamplerDescriptor {
-  label?: string;
-  addressModeU?: string;
-  addressModeV?: string;
-  addressModeW?: string;
-  magFilter?: string;
-  minFilter?: string;
-  mipmapFilter?: string;
-  lodMinClamp?: number;
-  lodMaxClamp?: number;
-  compare: string;
-  maxAnisotropy?: number;
-}
-interface GPUShaderModule {
-  getCompilationInfo(): Promise<GPUCompilationInfo>;
-}
-interface GPUShaderModuleDescriptor {
-  label?: string;
-  code: string;
-}
-interface GPUPipelineLayout {}
-interface GPUPipelineLayoutDescriptor {
-  label?: string;
-  bindGroupLayouts: GPUBindGroupLayout[];
-}
-interface GPUComputePipeline {
-  getBindGroupLayout(index: number): GPUBindGroupLayout;
-}
-interface GPUComputePipelineDescriptor {
-  label?: string;
-  compute: GPUProgrammableStage;
-  layout: string | GPUPipelineLayout;
-}
-interface GPUProgrammableStage {
-  module: GPUShaderModule;
-  entryPoint: string;
-  constants?: Record<string, number>;
-}
-interface GPUCommandEncoder {
-  get label(): string;
-  beginComputePass(
-    descriptor?: GPUComputePassDescriptor,
-  ): GPUComputePassEncoder;
-  beginRenderPass(descriptor: GPURenderPassDescriptor): GPURenderPassEncoder;
-  copyBufferToBuffer(
-    source: GPUBuffer,
-    sourceOffset: number | bigint,
-    destination: GPUBuffer,
-    destinationOffset: number | bigint,
-    size: number | bigint,
-  ): void;
-  finish(param1?: GPUCommandBufferDescriptor): GPUCommandBuffer;
-  copyTextureToBuffer(
-    source: GPUImageCopyTexture,
-    destination: GPUImageCopyBuffer,
-    copySize: Iterable<number> | GPUExtent3DDict,
-  ): void;
-  copyBufferToTexture(
-    source: GPUImageCopyBuffer,
-    destination: GPUImageCopyTexture,
-    copySize: Iterable<number> | GPUExtent3DDict,
-  ): void;
-  copyTextureToTexture(
-    source: GPUImageCopyTexture,
-    destination: GPUImageCopyTexture,
-    copySize: Iterable<number> | GPUExtent3DDict,
-  ): void;
-  clearBuffer(
-    buffer: GPUBuffer,
-    offset?: number | bigint,
-    size?: number | bigint,
-  ): void;
-}
-interface GPUCommandEncoderDescriptor {
-  label?: string;
-}
-interface GPUComputePassEncoder {
-  setPipeline(pipeline: GPUComputePipeline): void;
-  setBindGroup(
-    index: number,
-    bindGroup: GPUBindGroup | null,
-    dynamicOffsets?: Iterable<number>,
-  ): void;
-  dispatchWorkgroups(
-    workgroupCountX: number,
-    workgroupCountY?: number,
-    workgroupCountZ?: number,
-  ): void;
-  end(): void;
-}
-interface GPUComputePassDescriptor {
-  label?: string;
-  timestampWrites?: GPUComputePassTimestampWrites;
-}
-interface GPUQuerySet {}
-interface GPUQuerySetDescriptor {
-  label?: string;
-}
-interface GPUComputePassTimestampWrites {
-  querySet: GPUQuerySet;
-  beginningOfPassWriteIndex?: number;
-  endOfPassWriteIndex?: number;
-}
-interface GPUCommandBufferDescriptor {
-  label?: string;
-}
-interface GPUCommandBuffer {}
-interface GPUQueue {
-  submit(commandBuffers: GPUCommandBuffer[]): void;
-  writeBuffer(
-    buffer: GPUBuffer,
-    bufferOffset: number | bigint,
-    data: ArrayBuffer | ArrayBufferView,
-    dataOffset?: number | bigint,
-    size?: number | bigint,
-  ): void;
-}
-declare abstract class GPUMapMode {
-  static readonly READ: number;
-  static readonly WRITE: number;
-}
-interface GPURequestAdapterOptions {
-  powerPreference: string;
-  forceFallbackAdapter?: boolean;
-}
-interface GPUAdapterInfo {
-  get vendor(): string;
-  get architecture(): string;
-  get device(): string;
-  get description(): string;
-}
-interface GPUSupportedFeatures {
-  has(name: string): boolean;
-  keys(): string[];
-}
-interface GPUSupportedLimits {
-  get maxTextureDimension1D(): number;
-  get maxTextureDimension2D(): number;
-  get maxTextureDimension3D(): number;
-  get maxTextureArrayLayers(): number;
-  get maxBindGroups(): number;
-  get maxBindingsPerBindGroup(): number;
-  get maxDynamicUniformBuffersPerPipelineLayout(): number;
-  get maxDynamicStorageBuffersPerPipelineLayout(): number;
-  get maxSampledTexturesPerShaderStage(): number;
-  get maxSamplersPerShaderStage(): number;
-  get maxStorageBuffersPerShaderStage(): number;
-  get maxStorageTexturesPerShaderStage(): number;
-  get maxUniformBuffersPerShaderStage(): number;
-  get maxUniformBufferBindingSize(): number | bigint;
-  get maxStorageBufferBindingSize(): number | bigint;
-  get minUniformBufferOffsetAlignment(): number;
-  get minStorageBufferOffsetAlignment(): number;
-  get maxVertexBuffers(): number;
-  get maxBufferSize(): number | bigint;
-  get maxVertexAttributes(): number;
-  get maxVertexBufferArrayStride(): number;
-  get maxInterStageShaderComponents(): number;
-  get maxInterStageShaderVariables(): number;
-  get maxColorAttachments(): number;
-  get maxColorAttachmentBytesPerSample(): number;
-  get maxComputeWorkgroupStorageSize(): number;
-  get maxComputeInvocationsPerWorkgroup(): number;
-  get maxComputeWorkgroupSizeX(): number;
-  get maxComputeWorkgroupSizeY(): number;
-  get maxComputeWorkgroupSizeZ(): number;
-  get maxComputeWorkgroupsPerDimension(): number;
-}
-declare abstract class GPUError {
-  get message(): string;
-}
-declare abstract class GPUOutOfMemoryError extends GPUError {}
-declare abstract class GPUInternalError extends GPUError {}
-declare abstract class GPUValidationError extends GPUError {}
-declare abstract class GPUDeviceLostInfo {
-  get message(): string;
-  get reason(): string;
-}
-interface GPUCompilationMessage {
-  get message(): string;
-  get type(): string;
-  get lineNum(): number;
-  get linePos(): number;
-  get offset(): number;
-  get length(): number;
-}
-interface GPUCompilationInfo {
-  get messages(): GPUCompilationMessage[];
-}
-declare abstract class GPUTextureUsage {
-  static readonly COPY_SRC: number;
-  static readonly COPY_DST: number;
-  static readonly TEXTURE_BINDING: number;
-  static readonly STORAGE_BINDING: number;
-  static readonly RENDER_ATTACHMENT: number;
-}
-interface GPUTextureDescriptor {
-  label: string;
-  size: number[] | GPUExtent3DDict;
-  mipLevelCount?: number;
-  sampleCount?: number;
-  dimension?: string;
-  format: string;
-  usage: number;
-  viewFormats?: string[];
-}
-interface GPUExtent3DDict {
-  width: number;
-  height?: number;
-  depthOrArrayLayers?: number;
-}
-interface GPUTexture {
-  createView(descriptor?: GPUTextureViewDescriptor): GPUTextureView;
-  destroy(): void;
-  get width(): number;
-  get height(): number;
-  get depthOrArrayLayers(): number;
-  get mipLevelCount(): number;
-  get dimension(): string;
-  get format(): string;
-  get usage(): number;
-}
-interface GPUTextureView {}
-interface GPUTextureViewDescriptor {
-  label: string;
-  format: string;
-  dimension: string;
-  aspect?: string;
-  baseMipLevel?: number;
-  mipLevelCount: number;
-  baseArrayLayer?: number;
-  arrayLayerCount: number;
-}
-declare abstract class GPUColorWrite {
-  static readonly RED: number;
-  static readonly GREEN: number;
-  static readonly BLUE: number;
-  static readonly ALPHA: number;
-  static readonly ALL: number;
-}
-interface GPURenderPipeline {}
-interface GPURenderPipelineDescriptor {
-  label?: string;
-  layout: string | GPUPipelineLayout;
-  vertex: GPUVertexState;
-  primitive?: GPUPrimitiveState;
-  depthStencil?: GPUDepthStencilState;
-  multisample?: GPUMultisampleState;
-  fragment?: GPUFragmentState;
-}
-interface GPUVertexState {
-  module: GPUShaderModule;
-  entryPoint: string;
-  constants?: Record<string, number>;
-  buffers?: GPUVertexBufferLayout[];
-}
-interface GPUVertexBufferLayout {
-  arrayStride: number | bigint;
-  stepMode?: string;
-  attributes: GPUVertexAttribute[];
-}
-interface GPUVertexAttribute {
-  format: string;
-  offset: number | bigint;
-  shaderLocation: number;
-}
-interface GPUPrimitiveState {
-  topology?: string;
-  stripIndexFormat?: string;
-  frontFace?: string;
-  cullMode?: string;
-  unclippedDepth?: boolean;
-}
-interface GPUStencilFaceState {
-  compare?: string;
-  failOp?: string;
-  depthFailOp?: string;
-  passOp?: string;
-}
-interface GPUDepthStencilState {
-  format: string;
-  depthWriteEnabled: boolean;
-  depthCompare: string;
-  stencilFront?: GPUStencilFaceState;
-  stencilBack?: GPUStencilFaceState;
-  stencilReadMask?: number;
-  stencilWriteMask?: number;
-  depthBias?: number;
-  depthBiasSlopeScale?: number;
-  depthBiasClamp?: number;
-}
-interface GPUMultisampleState {
-  count?: number;
-  mask?: number;
-  alphaToCoverageEnabled?: boolean;
-}
-interface GPUFragmentState {
-  module: GPUShaderModule;
-  entryPoint: string;
-  constants?: Record<string, number>;
-  targets: GPUColorTargetState[];
-}
-interface GPUColorTargetState {
-  format: string;
-  blend: GPUBlendState;
-  writeMask?: number;
-}
-interface GPUBlendState {
-  color: GPUBlendComponent;
-  alpha: GPUBlendComponent;
-}
-interface GPUBlendComponent {
-  operation?: string;
-  srcFactor?: string;
-  dstFactor?: string;
-}
-interface GPURenderPassEncoder {
-  setPipeline(pipeline: GPURenderPipeline): void;
-  draw(
-    vertexCount: number,
-    instanceCount?: number,
-    firstVertex?: number,
-    firstInstance?: number,
-  ): void;
-  end(): void;
-}
-interface GPURenderPassDescriptor {
-  label?: string;
-  colorAttachments: GPURenderPassColorAttachment[];
-  depthStencilAttachment?: GPURenderPassDepthStencilAttachment;
-  occlusionQuerySet?: GPUQuerySet;
-  timestampWrites?: GPURenderPassTimestampWrites;
-  maxDrawCount?: number | bigint;
-}
-interface GPURenderPassColorAttachment {
-  view: GPUTextureView;
-  depthSlice?: number;
-  resolveTarget?: GPUTextureView;
-  clearValue?: number[] | GPUColorDict;
-  loadOp: string;
-  storeOp: string;
-}
-interface GPUColorDict {
-  r: number;
-  g: number;
-  b: number;
-  a: number;
-}
-interface GPURenderPassDepthStencilAttachment {
-  view: GPUTextureView;
-  depthClearValue?: number;
-  depthLoadOp?: string;
-  depthStoreOp?: string;
-  depthReadOnly?: boolean;
-  stencilClearValue?: number;
-  stencilLoadOp?: string;
-  stencilStoreOp?: string;
-  stencilReadOnly?: boolean;
-}
-interface GPURenderPassTimestampWrites {
-  querySet: GPUQuerySet;
-  beginningOfPassWriteIndex?: number;
-  endOfPassWriteIndex?: number;
-}
-interface GPUImageCopyTexture {
-  texture: GPUTexture;
-  mipLevel?: number;
-  origin?: number[] | GPUOrigin3DDict;
-  aspect?: string;
-}
-interface GPUImageCopyBuffer {
-  buffer: GPUBuffer;
-  offset?: number | bigint;
-  bytesPerRow?: number;
-  rowsPerImage?: number;
-}
-interface GPUOrigin3DDict {
-  x?: number;
-  y?: number;
-  z?: number;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource) */
 declare class EventSource extends EventTarget {
@@ -4396,6 +3874,282 @@ declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
   inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
   postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
 }
+type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
+  | Ai_Cf_Meta_Llama_4_Prompt
+  | Ai_Cf_Meta_Llama_4_Messages;
+interface Ai_Cf_Meta_Llama_4_Prompt {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+interface Ai_Cf_Meta_Llama_4_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output =
+  | {
+      /**
+       * The generated text response from the model
+       */
+      response: string;
+      /**
+       * Usage statistics for the inference request
+       */
+      usage?: {
+        /**
+         * Total number of tokens in input
+         */
+        prompt_tokens?: number;
+        /**
+         * Total number of tokens in output
+         */
+        completion_tokens?: number;
+        /**
+         * Total number of input and output tokens
+         */
+        total_tokens?: number;
+      };
+      /**
+       * An array of tool calls requests made during the response generation
+       */
+      tool_calls?: {
+        /**
+         * The arguments passed to be passed to the tool call request
+         */
+        arguments?: object;
+        /**
+         * The name of the tool to be called
+         */
+        name?: string;
+      }[];
+    }
+  | string;
+declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
+  inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
+}
 interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -4462,6 +4216,7 @@ interface AiModels {
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
   "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
+  "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
 }
 type AiOptions = {
   gateway?: GatewayOptions;
@@ -6414,6 +6169,11 @@ declare module "cloudflare:workers" {
     timestamp: Date;
     instanceId: string;
   };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
   export abstract class WorkflowStep {
     do<T extends Rpc.Serializable<T>>(
       name: string,
@@ -6426,6 +6186,13 @@ declare module "cloudflare:workers" {
     ): Promise<T>;
     sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
     sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
   }
   export abstract class WorkflowEntrypoint<
     Env = unknown,
@@ -7037,4 +6804,14 @@ declare abstract class WorkflowInstance {
    * Returns the current status of the instance.
    */
   public status(): Promise<InstanceStatus>;
+  /**
+   * Send an event to this instance.
+   */
+  public sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void>;
 }

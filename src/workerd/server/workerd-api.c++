@@ -53,11 +53,6 @@
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#else
-#define EW_WEBGPU_ISOLATE_TYPES_LIST
-#endif
 
 namespace workerd::server {
 
@@ -115,9 +110,6 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    EW_WEBGPU_ISOLATE_TYPES,
-#endif
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -161,7 +153,8 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
   }
 }
 
-jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::Worker::Reader conf,
+kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
+    config::Worker::Reader conf,
     const PythonConfig& pythonConfig,
     PythonSnapshotRelease::Reader pythonRelease) {
   using Worker = config::Worker;
@@ -232,8 +225,18 @@ jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::
     return kj::str(objectNamespace.getClassName());
   };
 
+  // To get the entrypoint classes, we iterate through bindings looking for services with
+  // entrypoint field set. This doesn't allow us to discern between worker entrypoints and workflow
+  // entrypoints, but is the best we can do until we rewrite how workerd loads packages.
+  auto entrypointClasses = kj::Vector<kj::String>();
+  for (auto binding: conf.getBindings()) {
+    if (binding.isService() && binding.getService().hasEntrypoint()) {
+      entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
+    }
+  }
+
   // clang-format off
-  return jsg::alloc<api::pyodide::PyodideMetadataReader>(
+  return kj::heap<api::pyodide::PyodideMetadataReader::State>(
     kj::mv(mainModule),
     names.finish(),
     contents.finish(),
@@ -247,7 +250,8 @@ jsg::Ref<api::pyodide::PyodideMetadataReader> makePyodideMetadataReader(config::
     pythonConfig.createBaselineSnapshot,
     false,    /* usePackagesInArtifactBundler */
     kj::mv(memorySnapshot),
-    kj::mv(durableObjectClasses)
+    kj::mv(durableObjectClasses),
+    entrypointClasses.releaseAsArray()
   );
   // clang-format on
 }
@@ -282,8 +286,10 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
   }
 
   {
-    KJ_LOG(INFO, "Loading Pyodide bundle from internet...");
     kj::Thread([&]() {
+      kj::String url =
+          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
+      KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
       kj::AsyncIoContext io = kj::setupAsyncIo();
       kj::HttpHeaderTable table;
 
@@ -298,9 +304,6 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
       auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
 
       kj::HttpHeaders headers(table);
-
-      kj::String url =
-          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
 
       auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
@@ -362,13 +365,13 @@ struct WorkerdApi::Impl final {
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
-    // maybeOwnedModuleRegistry is only set when using the
-    // new module registry implementation. When that is the
-    // case we also need to tell JSG.
-    if (maybeOwnedModuleRegistry != kj::none) {
-      jsgIsolate.setUsingNewModuleRegistry();
-    }
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
+      // maybeOwnedModuleRegistry is only set when using the
+      // new module registry implementation. When that is the
+      // case we also need to tell JSG.
+      if (maybeOwnedModuleRegistry != kj::none) {
+        jsgIsolate.setUsingNewModuleRegistry();
+      }
       if (features->getPythonWorkers()) {
         auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
         auto version = getPythonBundleName(pythonRelease);
@@ -459,7 +462,7 @@ NamedExport WorkerdApi::unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> expor
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<NamedExport>(
       lock.v8Context(), exportVal);
 }
-WorkerdApi::EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
+EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
 
   return {
@@ -668,7 +671,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
       // Inject metadata that the entrypoint module will read.
       modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
-          makePyodideMetadataReader(conf, impl->pythonConfig, pythonRelease),
+          lockParam.alloc<PyodideMetadataReader>(
+              makePyodideMetadataReader(conf, impl->pythonConfig, pythonRelease)),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
@@ -976,18 +980,18 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const PythonConfig& pythonConfig) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
-  builder.setEvalCallback([](jsg::Lock& js, const auto& module, v8::Local<v8::Module> v8Module,
-                              const auto& observer) -> jsg::Promise<jsg::Value> {
-    // This callback is used when a module is evaluated to arrange evaluating
-    // the module outside of the current IoContext. Creating the
-    // SuppressIoContextScope here ensures that the current
-    // IoContext, if any, is moved out of the way while we are evaluating.
-    SuppressIoContextScope suppressIoContextScope;
-    KJ_ASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
 
-    return js.tryCatch([&]() -> jsg::Promise<jsg::Value> {
-      return js.toPromise(jsg::check(v8Module->Evaluate(js.v8Context())));
-    }, [&](jsg::Value&& exception) { return js.rejectedPromise<jsg::Value>(kj::mv(exception)); });
+  // This callback is used when a module is being loaded to arrange evaluating the
+  // module outside of the current IoContext.
+  builder.setEvalCallback([](jsg::Lock& js, const auto& module, auto v8Module,
+                              const auto& observer) -> jsg::Promise<jsg::Value> {
+    return js.tryOrReject<jsg::Value>([&] {
+      // Creating the SuppressIoContextScope here ensures that the current IoContext,
+      // if any, is moved out of the way while we are evaluating.
+      SuppressIoContextScope suppressIoContextScope;
+      KJ_DASSERT(!IoContext::hasCurrent(), "Module evaluation must not be in an IoContext");
+      return jsg::check(v8Module->Evaluate(js.v8Context()));
+    });
   });
 
   // Add the module bundles that are built into to runtime.
@@ -1071,14 +1075,33 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
     const auto limiterSpecifier = "pyodide-internal:limiter"_url;
 
-    auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     // Inject metadata that the entrypoint module will read.
+    auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    kj::OneOf<kj::Own<PyodideMetadataReader::State>, jsg::Ref<PyodideMetadataReader>>
+        metadataReader = makePyodideMetadataReader(conf, pythonConfig, pythonRelease);
     pyodideBundleBuilder.addSynthetic(metadataSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
             JsgWorkerdIsolate_TypeWrapper>(
-            [metadataReader = makePyodideMetadataReader(conf, pythonConfig, pythonRelease)](
+            [metadataReader = kj::mv(metadataReader)](
                 jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::PyodideMetadataReader> {
-      return metadataReader.addRef();
+      // The metadata reader state is initially created outside of the isolate lock.
+      // Then, once the module is actually evaluated, we'll lazily create the actual
+      // PyodideMetadataReader instance and pass ownership of the state to it.
+      // In practice this is likely only expected to be called once, but with the
+      // new module registry implementation it is at least *possible* for it to
+      // be called multiple times. We don't want to create a new instance each
+      // time so we'll cache the instance and return a ref on each subsequent call.
+      KJ_SWITCH_ONEOF(metadataReader) {
+        KJ_CASE_ONEOF(state, kj::Own<PyodideMetadataReader::State>) {
+          auto ret = js.alloc<PyodideMetadataReader>(kj::mv(state));
+          metadataReader = ret.addRef();
+          return kj::mv(ret);
+        }
+        KJ_CASE_ONEOF(reader, jsg::Ref<PyodideMetadataReader>) {
+          return reader.addRef();
+        }
+      }
+      KJ_UNREACHABLE;
     }));
     // Inject artifact bundler.
     pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
@@ -1096,10 +1119,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     // Inject disk cache module
     pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<DiskCache, JsgWorkerdIsolate_TypeWrapper>(
-            [packageDiskCache = jsg::alloc<DiskCache>(pythonConfig.packageDiskCacheRoot)](
-                jsg::Lock& js) mutable -> jsg::Ref<DiskCache> {
-      return packageDiskCache.addRef();
-    }));
+            [&packageDiskCacheRoot = pythonConfig.packageDiskCacheRoot](jsg::Lock& js) mutable
+            -> jsg::Ref<DiskCache> { return js.alloc<DiskCache>(packageDiskCacheRoot); }));
     // Inject a (disabled) SimplePythonLimiter
     pyodideBundleBuilder.addSynthetic(limiterSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<SimplePythonLimiter,

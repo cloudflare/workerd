@@ -22,7 +22,7 @@ py_wd_test(
     "asgi",
     # TODO: investigate failure!
     make_snapshot = False,
-    skip_python_flags = ["0.27.1"],
+    skip_python_flags = ["0.27.5"],
 )
 
 py_wd_test("random")
@@ -31,10 +31,6 @@ py_wd_test("subdirectory")
 
 py_wd_test(
     "sdk",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
 )
 
 py_wd_test("seek-metadatafs")
@@ -48,10 +44,10 @@ py_wd_test("seek-metadatafs")
         # TODO: The packages below don't currently work in the latest package/python versions. Need
         # to fix them.
         #
-        # TODO: pydantic_core started to fail with "no module named typing_extensions" after 0.27.1
+        # TODO: pydantic_core started to fail with "no module named typing_extensions" after 0.27.5
         # was rebuilt and backport bumped.
         pkg_skip_versions = {
-            "0.27.1": [
+            "0.27.5": [
                 "cryptography",  # top-level entropy
                 "soupsieve",  # Circular dependency with beautifulsoup4
                 "starlette",  # No module named 'starlette.converters'
@@ -70,10 +66,6 @@ py_wd_test("seek-metadatafs")
 
 py_wd_test(
     "undefined-handler",
-    tags = [
-        # TODO(someday): Fix asan failure for this, see https://github.com/cloudflare/workerd/pull/3140#discussion_r1858273318
-        "no-asan",
-    ],
 )
 
 py_wd_test("vendor_dir")
@@ -83,3 +75,5 @@ py_wd_test("dont-snapshot-pyodide")
 py_wd_test("filter-non-py-files")
 
 py_wd_test("durable-object")
+
+py_wd_test("worker-entrypoint")

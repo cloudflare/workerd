@@ -8,6 +8,8 @@
 #include <kj/string-tree.h>
 #include <kj/string.h>
 
+#include <cmath>
+
 namespace workerd::jsg {
 
 JsValue::JsValue(v8::Local<v8::Value> inner): inner(inner) {
@@ -200,6 +202,36 @@ JsValue JsObject::getPrototype(Lock& js) {
   return JsValue(inner->GetPrototypeV2());
 }
 
+kj::Maybe<double> JsNumber::value(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  double value;
+  // The NumberValue(...) operation can fail with a JS exception, in which case
+  // we return kj::none and the error should be allowed to propagate.
+  if (inner->NumberValue(js.v8Context()).To(&value)) {
+    return value;
+  }
+  return kj::none;
+}
+
+// ECMA-262, 15th edition, 21.1.2.5. Number.isSafeInteger
+bool JsNumber::isSafeInteger(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  if (!inner->IsNumber()) return false;
+  KJ_IF_SOME(value, value(js)) {
+    if (std::isnan(value) || std::isinf(value) || std::trunc(value) != value) return false;
+    constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
+    if (std::abs(value) <= static_cast<double>(MAX_SAFE_INTEGER)) return true;
+  }
+  return false;
+}
+
+kj::Maybe<double> JsNumber::toSafeInteger(Lock& js) const {
+  if (isSafeInteger(js)) {
+    return inner.As<v8::Number>()->Value();
+  }
+  return kj::none;
+}
+
 bool JsValue::isTruthy(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return inner->BooleanValue(js.v8Isolate);
@@ -338,7 +370,7 @@ bool JsRegExp::match(Lock& js, kj::StringPtr input) {
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
-  return jsg::ByteString(str.toString(js));
+  return js.accountedByteString(str.toString(js));
 }
 
 JsDate::operator kj::Date() const {
@@ -453,13 +485,19 @@ JsObject Lock::obj() {
 
 JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
   KJ_DASSERT(keys.size() == values.size());
-  auto keys_ = KJ_MAP(k, keys) -> v8::Local<v8::Name> {
-    return v8::String::NewFromUtf8(v8Isolate, k.begin(), v8::NewStringType::kNormal, k.size())
-        .ToLocalChecked();
-  };
-  auto values_ = KJ_MAP(v, values) -> v8::Local<v8::Value> { return v; };
+  v8::LocalVector<v8::Name> keys_(v8Isolate);
+  v8::LocalVector<v8::Value> values_(v8Isolate);
+  keys_.reserve(keys.size());
+  values_.reserve(keys.size());
+  for (auto& k: keys) {
+    v8::Local<v8::String> key = str(k);
+    keys_.push_back(key);
+  }
+  for (auto& v: values) {
+    values_.push_back(v);
+  }
   return JsObject(
-      v8::Object::New(v8Isolate, v8::Null(v8Isolate), keys_.begin(), values_.begin(), keys.size()));
+      v8::Object::New(v8Isolate, v8::Null(v8Isolate), keys_.data(), values_.data(), keys.size()));
 }
 
 JsObject Lock::objNoProto() {

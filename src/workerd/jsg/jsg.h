@@ -2246,42 +2246,77 @@ JS_TYPE_CLASSES(V)
 #undef V
 
 class DOMException;
+class ExternalMemoryAdjustment;
+
+// Used to save a reference to an isolate that is responsible for external memory usage.
+// getAdjustment() can be invoked at any time to create a new RAII adjustment object
+// pointing to this isolate.
+//
+// Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
+// point to. The only purpose of this object is to hold a weak reference back to the isolate; the
+// reference is nulled out when the isolate is destroyed.
+class ExternalMemoryTarget: public kj::AtomicRefcounted {
+ public:
+  ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
+
+  ExternalMemoryAdjustment getAdjustment(size_t amount) const;
+
+  // Apply any deferred external memory updates. Must be called with isolate locked.
+  void applyDeferredMemoryUpdate() const;
+
+  // Disconnects the ExternalMemoryTarget from the isolate (called just before destroying the
+  // isolate).
+  void detach() const;
+
+  // These two methods are for tests only.
+  bool isIsolateAliveForTest() const;
+  int64_t getPendingMemoryUpdateForTest() const;
+
+ private:
+  void maybeDeferAdjustment(ssize_t amount) const;
+
+  // Mutable so that it can be set null when the isolate is destroyed.
+  mutable std::atomic<v8::Isolate*> isolate;
+  static_assert(std::atomic<v8::Isolate*>::is_always_lock_free);
+
+  // Tracks changes to external memory that were applied from a thread that did not hold the
+  // isolate lock. These will be applied the next time the lock is taken.
+  mutable std::atomic<int64_t> pendingExternalMemoryUpdate = {0};
+  static_assert(std::atomic<int64_t>::is_always_lock_free);
+
+  friend class ExternalMemoryAdjustment;
+};
 
 // RAII class to adjust the amount of external memory attributed to an isolate.
 // The adjustment will be automatically decremented when the object is destroyed.
 // The allocation amount can be adjusted up or down during the lifetime of an object.
 class ExternalMemoryAdjustment final {
  public:
-  ExternalMemoryAdjustment(
-      v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount);
-  ExternalMemoryAdjustment(v8::Isolate* isolate, size_t amount);
+  ExternalMemoryAdjustment(kj::Own<const ExternalMemoryTarget> externalMemory, size_t amount);
   ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
   ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
   KJ_DISALLOW_COPY(ExternalMemoryAdjustment);
   ~ExternalMemoryAdjustment() noexcept(false);
 
   // Adjust the amount of external memory report up or down.
-  void adjust(Lock&, ssize_t amount);
+  void adjust(ssize_t amount);
 
   // Set a specific amount of external memory to be attributed, overriding
   // the previous amount.
-  void set(Lock&, size_t amount);
-
-  inline v8::Isolate* getIsolate() const {
-    return isolate;
-  }
+  void set(size_t amount);
 
   inline size_t getAmount() const {
     return amount;
   }
 
  private:
-  v8::ExternalMemoryAccounter& externalMemoryAccounter;
-  v8::Isolate* isolate = nullptr;
+  kj::Own<const ExternalMemoryTarget> externalMemory;
   size_t amount = 0;
 
-  static void maybeDeferAdjustment(
-      v8::ExternalMemoryAccounter& externalMemoryAccounter, v8::Isolate* isolate, size_t amount);
+  // If the isolate is locked, adjust the external memory immediately.
+  // Otherwise, if we don't have the isolate locked, defer the adjustment to the next
+  // time that we do.
+  void maybeDeferAdjustment(ssize_t amount);
 };
 
 // Represents an isolate lock, which allows the current thread to execute JavaScript code within
@@ -2322,6 +2357,30 @@ class Lock {
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
   }
 
+  // Returns a kj::String with an external memory adjustment attached.
+  kj::String accountedKjString(kj::Array<char>&& str);
+  kj::String accountedKjString(kj::String&& str) {
+    return accountedKjString(str.releaseArray());
+  }
+  kj::String accountedKjString(kj::StringPtr str) {
+    return accountedKjString(kj::str(str));
+  }
+
+  // Returns a ByteString with an external memory adjustment attached.
+  ByteString accountedByteString(kj::Array<char>&& str);
+  ByteString accountedByteString(kj::String&& str) {
+    return accountedByteString(str.releaseArray());
+  }
+  ByteString accountedByteString(kj::StringPtr str) {
+    return accountedByteString(kj::str(str));
+  }
+
+  // Returns a DOMString with an external memory adjustment attached.
+  DOMString accountedDOMString(kj::Array<char>&& str);
+
+  // Returns a USVString with an external memory adjustment attached.
+  USVString accountedUSVString(kj::Array<char>&& str);
+
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
@@ -2343,7 +2402,12 @@ class Lock {
   // until the next time the lock is held. The ExternalMemoryAdjustment itself can be
   // moved and can be used to increment or decrement the amount of external memory
   // held.
-  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount);
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount = 0);
+
+  // Used to save a reference to an isolate that is responsible for external memory usage.
+  // getAdjustment() can be invoked at any time to create a new RAII adjustment object
+  // pointing to this isolate
+  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
 
   Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);
@@ -2435,6 +2499,14 @@ class Lock {
     // We have to make sure the `v8::TryCatch` is off the stack before invoking `errorHandler`,
     // otherwise the same `TryCatch` will catch any exceptions the error handler throws, ugh.
     return errorHandler(kj::mv(error));
+  }
+
+  // Like tryCatch() but returns a Promise<T> that resolves to the result of func() or
+  // rejects with the result of errorHandler() if an exception is thrown.
+  template <typename T, typename Func>
+  Promise<T> tryOrReject(Func&& func) {
+    return tryCatch([&]() -> Promise<T> { return toPromise(func()); },
+        [&](Value&& error) -> Promise<T> { return rejectedPromise<T>(kj::mv(error)); });
   }
 
   // ---------------------------------------------------------------------------
@@ -2701,6 +2773,12 @@ class Lock {
   JsArray arr(const Args&... args) KJ_WARN_UNUSED_RESULT;
 
   JsArray arr(kj::ArrayPtr<JsValue> values) KJ_WARN_UNUSED_RESULT;
+
+  // Create a JavaScript array from the given kj::ArrayPtr, passing each
+  // item through the given transformation function to create the appropriate
+  // JsValue.
+  template <typename T, typename Func>
+  JsArray arr(kj::ArrayPtr<T> values, Func fn) KJ_WARN_UNUSED_RESULT;
 
   template <typename... Args>
     requires(std::assignable_from<JsValue&, Args> && ...)

@@ -33,3 +33,4 @@ export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
     ? ArtifactBundler
     : undefined;
 export const DURABLE_OBJECT_CLASSES = MetadataReader.getDurableObjectClasses();
+export const WORKER_ENTRYPOINT_CLASSES = MetadataReader.getEntrypointClasses();

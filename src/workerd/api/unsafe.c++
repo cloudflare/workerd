@@ -1,5 +1,6 @@
 #include "unsafe.h"
 
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/script.h>
 
 namespace workerd::api {
@@ -36,10 +37,14 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(jsg::Lock& js,
   v8::ScriptOrigin origin(nameStr);
   v8::ScriptCompiler::Source source(script, origin);
 
-  auto argNames = KJ_MAP(arg, args) { return v8::Local<v8::String>(arg.getHandle(js)); };
+  v8::LocalVector<v8::String> argNames(js.v8Isolate);
+  argNames.reserve(args.size());
+  for (auto& arg: args) {
+    argNames.push_back(arg.getHandle(js));
+  }
 
   auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-      js.v8Context(), &source, argNames.size(), argNames.begin(), 0, nullptr));
+      js.v8Context(), &source, argNames.size(), argNames.data(), 0, nullptr));
   fn->SetName(nameStr);
 
   return KJ_ASSERT_NONNULL(handler.tryUnwrap(js, fn));

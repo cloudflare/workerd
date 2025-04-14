@@ -31,9 +31,6 @@ import %workspace%/build/ci.bazelrc
 
 import %workspace%/build/lint.bazelrc
 
-# Enable webgpu
-build --//src/workerd/io:enable_experimental_webgpu=True
-
 # Avoid generating duplicate runfile trees. This will become the default in a future bazel version.
 build --nolegacy_external_runfiles
 
@@ -43,24 +40,11 @@ build --incompatible_disallow_empty_glob
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
 
-# Dawn tint build flags
-build --@dawn//src/tint:tint_build_glsl_writer=False
-build --@dawn//src/tint:tint_build_glsl_validator=False
-build --@dawn//src/tint:tint_build_hlsl_writer=True
-build --@dawn//src/tint:tint_build_ir=False
-build --@dawn//src/tint:tint_build_msl_writer=True
-build --@dawn//src/tint:tint_build_spv_reader=False
-build --@dawn//src/tint:tint_build_spv_writer=True
-build --@dawn//src/tint:tint_build_wgsl_reader=True
-build --@dawn//src/tint:tint_build_wgsl_writer=True
-
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
 # have that option, so disable -Wunknown-warning-option there too.
 build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external/v8@-Wno-unused-function'
-build --per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration,-Wno-deprecated-this-capture'
-build --host_per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration,-Wno-deprecated-this-capture'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
 # for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public
@@ -68,6 +52,9 @@ build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprec
 build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
 build --per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-capture
 build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-capture
+
+## simdutf
+build --per_file_copt=external/simdutf@-Wno-unused-const-variable
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
 # GitHub Actions. This is an optional performance hack intended for CI, although it might also be
@@ -136,9 +123,6 @@ build:unix --cxxopt=-D_LIBCPP_HAS_NO_INCOMPLETE_PSTL --host_cxxopt=-D_LIBCPP_HAS
 # TODO(cleanup): Patch upstream V8 to use local_defines for this instead.
 build:windows --copt='-Wno-macro-redefined'
 build:windows --host_copt='-Wno-macro-redefined'
-# Dawn/Tint adds compiler flags that are ignored on Windows
-build:windows --per_file_copt='external/dawn@-Wno-unknown-argument'
-build:windows --host_per_file_copt='external/dawn@-Wno-unknown-argument'
 
 # typescript configuration
 # do more correct type checking
@@ -218,6 +202,8 @@ build:asan --config=sanitizer-common
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
+# Enable ASan, LSan support in V8
+build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
 #
 # Linux and macOS
@@ -259,14 +245,6 @@ build:macos --macos_minimum_os=13.5
 # is easier than adding the flag only on x86. See https://reviews.llvm.org/D122258 for detailed
 # information on the flag.
 build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
-
-# Bazel doesn't allow setting flags only for a specific build mode like fastbuild, but somehow has
-# a flag that does this for ObjC to set "-O0 -DDEBUG=1". Worse yet, options set by this flag cannot
-# be overwritten on the command line, which confusingly makes enabling optimization there not have
-# an effect. On macOS we build some ObjC as part of Dawn, set this flag to an empty string so we
-# can set the right configuration flags.
-# TODO(soon): File a bazel issue for the flag so we can drop this.
-build:macos --experimental_objc_fastbuild_options=""
 
 # Cross-Compilation
 # Only cross-compiling on macOS from Apple Silicon to x86_64 is supported – using apple_support

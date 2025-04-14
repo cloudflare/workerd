@@ -2,9 +2,7 @@
 
 import json
 import logging
-import platform
 import subprocess
-import sys
 from argparse import ArgumentParser, Namespace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -82,49 +80,28 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
-def exec_target() -> str:
-    ALIASES = {"aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64"}
-
-    machine = platform.machine()
-    return f"{sys.platform}-{ALIASES.get(machine, machine)}"
-
-
-def init_external_dir() -> Path:
-    # Create a symlink to the bazel external directory
-    external_dir = Path("external")
-
-    # Fast path to avoid calling into bazel
-    if external_dir.exists():
-        return external_dir
-
-    try:
-        bazel_base = Path(
-            subprocess.run(["bazel", "info", "output_base"], capture_output=True)
-            .stdout.decode()
-            .strip()
-        )
-        external_dir.symlink_to(bazel_base / "external")
-    except FileExistsError:
-        # It's possible the link was created while we were working; this is fine
-        pass
-
-    return external_dir
-
-
 def run_bazel_tool(
     tool_name: str, args: list[str], is_archive: bool = False
 ) -> subprocess.CompletedProcess:
-    tool_target = f"{tool_name}-{exec_target()}"
+    # Use the formatter executable from bazel-bin
+    bazel_bin = Path("bazel-bin")
+    tool_suffix = Path("build") / "deps" / "formatters" / tool_name
+    internal_tool_path = bazel_bin / "external" / "workerd" / tool_suffix
+    workerd_tool_path = bazel_bin / tool_suffix
 
-    if is_archive:
-        tool_path = init_external_dir() / tool_target / tool_name
-    else:
-        tool_path = init_external_dir() / tool_target / "file" / "downloaded"
+    if internal_tool_path.exists():
+        return subprocess.run([internal_tool_path, *args])
+    if workerd_tool_path.exists():
+        return subprocess.run([workerd_tool_path, *args])
 
-    build_target = f"@{tool_target}//:file" if is_archive else f"@{tool_target}//file"
+    # Use the new formatter targets in build/deps/formatters
+    build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
     subprocess.run(["bazel", "build", build_target])
 
-    return subprocess.run([tool_path, *args])
+    if internal_tool_path.exists():
+        return subprocess.run([internal_tool_path, *args])
+    else:
+        return subprocess.run([workerd_tool_path, *args])
 
 
 def clang_format(files: list[Path], check: bool = False) -> bool:
@@ -160,14 +137,14 @@ def ruff(files: list[Path], check: bool = False) -> bool:
     cmd = ["check"]
     if not check:
         cmd.append("--fix")
-    result1 = run_bazel_tool("ruff", cmd + files, is_archive=True)
+    result1 = run_bazel_tool("ruff", cmd + files)
 
     # format
     cmd = ["format"]
     if check:
         cmd.append("--diff")
 
-    result2 = run_bazel_tool("ruff", cmd + files, is_archive=True)
+    result2 = run_bazel_tool("ruff", cmd + files)
     return result1.returncode == 0 and result2.returncode == 0
 
 

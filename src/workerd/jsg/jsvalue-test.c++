@@ -25,6 +25,9 @@ struct JsValueContext: public ContextGlobalObject {
   JsValue takeJsString(Lock& js, Optional<JsString> v) {
     return v.orDefault([&] { return js.str("bar"_kj); });
   }
+  JsValue takeJsNumber(Lock& js, Optional<JsNumber> v) {
+    return v.orDefault([&] { return js.num(42.0); });
+  }
   JsBoolean takeJsBoolean(Lock& js, JsBoolean v, const TypeHandler<bool>& handler) {
     auto ref = v.addRef(js);
 
@@ -87,6 +90,7 @@ struct JsValueContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
+    JSG_METHOD(takeJsNumber);
     JSG_METHOD(takeJsBoolean);
     JSG_METHOD(takeJsObject);
     JSG_METHOD(takeJsArray);
@@ -109,6 +113,13 @@ KJ_TEST("simple") {
   e.expectEval("takeJsValue(false)", "boolean", "false");
   e.expectEval("takeJsString(123)", "string", "123");
   e.expectEval("takeJsString()", "string", "bar");
+  e.expectEval("takeJsNumber(5)", "number", "5");
+  e.expectEval("takeJsNumber()", "number", "42");
+  // Empty string coerces to 0 value in JS. Ex: Number('') === 0
+  e.expectEval("takeJsNumber('')", "number", "0");
+  // NaN is still a JsNumber. To check "safety", call toSafeInteger() method.
+  e.expectEval("takeJsNumber(NaN)", "number", "NaN");
+  e.expectEval("Number({[Symbol.toPrimitive]() { return 1 }})", "number", "1");
   e.expectEval("takeJsBoolean(true)", "boolean", "true");
   e.expectEval("takeJsBoolean('hi')", "boolean", "true");
   e.expectEval("takeJsBoolean('')", "boolean", "false");

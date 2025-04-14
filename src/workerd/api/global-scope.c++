@@ -165,7 +165,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   CfProperty cf(cfBlobJson);
 
-  auto jsHeaders = js.alloc<Headers>(headers, Headers::Guard::REQUEST);
+  auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
   auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
@@ -207,14 +207,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
       jsHeaders->setUnguarded(
-          jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
+          js, js.accountedByteString("Content-Length"_kj), js.accountedByteString(kj::str(l)));
     } else {
       jsHeaders->setUnguarded(
-          jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
+          js, js.accountedByteString("Transfer-Encoding"_kj), js.accountedByteString("chunked"_kj));
     }
   }
 
-  auto jsRequest = js.alloc<Request>(method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+  auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
       js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
       kj::none /** AbortSignal **/, kj::mv(cf), kj::mv(body));
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
@@ -694,9 +694,7 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(jsg::Lock& js,
   }
 }
 
-jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
-  auto str = data.toJsString(js);
-
+jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
   // ContainsOnlyOneByte() function.
@@ -723,20 +721,14 @@ jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   return js.str(decoded.asBytes());
 }
 
-void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task) {
-  auto fn = js.wrapReturningFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA((this, fn = js.v8Ref(task)), (fn),
-          (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args)->v8::Local<v8::Value> {
-            return js.tryCatch([&]() -> v8::Local<v8::Value> {
-              auto function = fn.getHandle(js);
-
-              v8::LocalVector<v8::Value> argv(js.v8Isolate, args.Length());
-              for (int n = 0; n < args.Length(); n++) {
-              argv[n] = args[n];
-              }
-
-              return jsg::check(
-                  function->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data()));
+void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
+  auto fn = js.wrapSimpleFunction(js.v8Context(),
+      JSG_VISITABLE_LAMBDA((this, fn = kj::mv(task)), (fn),
+          (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            js.tryCatch([&] {
+              // The function won't be called with any arguments, so we can
+              // safely ignore anything passed in to args.
+              fn(js);
             }, [&](jsg::Value exception) {
               // The reportError call itself can potentially throw errors. Let's catch
               // and report them as well.
@@ -760,7 +752,6 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, v8::Local<v8::Funct
                 // Otherwise just log the stringified value generically.
                 js.reportError(val);
               });
-              return js.v8Undefined();
             });
           }));
 
@@ -796,14 +787,18 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(jsg::Lock& js,
     function(js, kj::mv(args));
   };
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /* repeats = */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
+      /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
       msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
 
-void ServiceWorkerGlobalScope::clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId) {
-  KJ_IF_SOME(id, timeoutId) {
-    IoContext::current().clearTimeoutImpl(TimeoutId::fromNumber(id));
+void ServiceWorkerGlobalScope::clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId) {
+  KJ_IF_SOME(rawId, timeoutId) {
+    // Browsers does not throw an error when "unsafe" integers are passed to the clearTimeout method.
+    // Let's make sure we ignore those values, just like browsers and other runtimes.
+    KJ_IF_SOME(id, rawId.toSafeInteger(js)) {
+      IoContext::current().clearTimeoutImpl(TimeoutId::fromNumber(id));
+    }
   }
 }
 
@@ -820,9 +815,13 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(jsg::Lock& js,
     function(js, jsg::Arguments(kj::mv(argv)));
   };
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /* repeats = */ true, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
+      /* repeat */ true, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); },
       msDelay.orDefault(0));
   return timeoutId.toNumber();
+}
+
+void ServiceWorkerGlobalScope::clearInterval(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId) {
+  clearTimeout(js, kj::mv(timeoutId));
 }
 
 jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto(jsg::Lock& js) {
@@ -902,26 +901,6 @@ double Performance::now() {
   // returns exactly what Date.now() returns.
   return dateNow();
 }
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-jsg::Optional<jsg::Ref<api::gpu::GPU>> Navigator::getGPU(
-    jsg::Lock& js, CompatibilityFlags::Reader flags) {
-  // is this a durable object?
-  KJ_IF_SOME(actor, IoContext::current().getActor()) {
-    if (actor.getPersistent() == kj::none) {
-      return kj::none;
-    }
-  } else {
-    return kj::none;
-  };
-
-  if (!flags.getWebgpu()) {
-    return kj::none;
-  }
-
-  return js.alloc<api::gpu::GPU>();
-}
-#endif
 
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   if (IoContext::hasCurrent()) {

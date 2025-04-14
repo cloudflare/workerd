@@ -136,12 +136,12 @@ wd_cc_library(
         "sqlite-metadata.h",
     ],
     implementation_deps = [
+        "//src/workerd/jsg:exception",
         "@sqlite3",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":sentry",
-        "//src/workerd/jsg:exception",
         "@capnp-cpp//src/kj:kj-async",
     ],
 )
@@ -215,6 +215,17 @@ wd_cc_library(
     hdrs = ["exception.h"],
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
+    name = "websocket-error-handler",
+    srcs = ["websocket-error-handler.c++"],
+    hdrs = ["websocket-error-handler.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg:exception",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
 )
 
 exports_files(["autogate.h"])

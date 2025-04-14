@@ -176,7 +176,7 @@ kj::Vector<kj::Own<void>> serializeJsValue(jsg::Lock& js,
   serializer.write(js, value);
   kj::Array<const byte> data = serializer.release().data;
   JSG_ASSERT(data.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
-      "Serialized RPC arguments or return values are limited to 1MiB, but the size of this value "
+      "Serialized RPC arguments or return values are limited to 32MiB, but the size of this value "
       "was: ",
       data.size(), " bytes.");
 
@@ -1764,7 +1764,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
-      kj::Maybe<kj::Own<WorkerTracer>> tracer)
+      kj::Maybe<kj::Own<BaseTracer>> tracer)
       : JsRpcTargetBase(ioCtx),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
@@ -1810,7 +1810,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  private:
   kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
-  kj::Maybe<kj::Own<WorkerTracer>> tracer;
+  kj::Maybe<kj::Own<BaseTracer>> tracer;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.

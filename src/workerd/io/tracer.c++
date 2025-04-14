@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/tracer.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <capnp/message.h>  // for capnp::clone()
 
@@ -97,13 +98,12 @@ WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
-      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)),
-      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
+      maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
+
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
-      self(kj::refcounted<WeakRef<WorkerTracer>>(kj::Badge<WorkerTracer>{}, *this)) {}
+          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)) {}
 
 constexpr kj::LiteralStringConst logSizeExceeded =
     "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
@@ -337,6 +337,20 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->outcome = outcome;
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
+
+  // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
+  // wd_test), we never set up a tail stream and accordingly should not report an outcome
+  // event. Worker events that should be traced need to set the event info at the start of the
+  // invocation to submit the onset event before any other tail events.
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
+    if (isPredictableModeForTest()) {
+      writer->report(
+          spanContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+    } else {
+      writer->report(spanContext, tracing::Outcome(outcome, cpuTime, wallTime));
+    }
+  }
 }
 
 void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {

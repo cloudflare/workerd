@@ -206,8 +206,13 @@ class IsolateBase {
     return JsSymbol(symbolAsyncDispose.Get(ptr));
   }
 
-  v8::ExternalMemoryAccounter& getExternalMemoryAccounter() {
-    return externalMemoryAccounter;
+  // Get an object referencing this isolate that can be used to adjust external memory usage later
+  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
+
+  // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
+  // increment and decrement.
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
+    return externalMemoryTarget->getAdjustment(amount);
   }
 
   AsyncContextFrame::StorageKey& getEnvAsyncContextKey() {
@@ -290,8 +295,11 @@ class IsolateBase {
   // Polyfilled Symbol.asyncDispose.
   v8::Global<v8::Symbol> symbolAsyncDispose;
 
-  // Used to account for external memory
-  v8::ExternalMemoryAccounter externalMemoryAccounter;
+  /* *** External Memory accounting *** */
+  // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments
+  // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
+  // outlive the isolate.
+  kj::Own<const ExternalMemoryTarget> externalMemoryTarget;
 
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;
@@ -308,7 +316,6 @@ class IsolateBase {
   // operation) outside of the queue lock.
   const kj::MutexGuarded<BatchQueue<Item>> queue{
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
-  std::atomic<int64_t> pendingExternalMemoryDecrement = {0};
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -344,11 +351,10 @@ class IsolateBase {
 
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
   void deferDestruction(Item item);
-  void deferExternalMemoryDecrement(int64_t size);
 
-  // Destroy everything in the deferred destruction queue. Must be called under the isolate lock.
-  void clearDestructionQueue();
-  void clearPendingExternalMemoryDecrement();
+  // Destroy everything in the deferred destruction queue and apply deferred external memory
+  // updates. Called each time a lock is taken. Must be called under the isolate lock.
+  void applyDeferredActions();
 
   static void fatalError(const char* location, const char* message);
   static void oomError(const char* location, const v8::OOMDetails& details);
@@ -369,7 +375,7 @@ class IsolateBase {
   friend class Data;
   friend class Wrappable;
   friend class HeapTracer;
-  friend class ExternalMemoryAdjustment;
+  friend class ExternalMemoryTarget;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);
@@ -521,8 +527,7 @@ class Isolate: public IsolateBase {
     Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr),
           jsgIsolate(const_cast<Isolate&>(isolate)) {
-      jsgIsolate.clearDestructionQueue();
-      jsgIsolate.clearPendingExternalMemoryDecrement();
+      jsgIsolate.applyDeferredActions();
     }
     KJ_DISALLOW_COPY_AND_MOVE(Lock);
     KJ_DISALLOW_AS_COROUTINE_PARAM;

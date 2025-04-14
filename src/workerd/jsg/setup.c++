@@ -150,8 +150,12 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 #endif
 
   v8::V8::InitializePlatform(&platformWrapper);
-  v8::V8::Initialize();
+
+  // A recent change in v8 initializes cppgc in V8::Initialize if it's not already initialized
+  // Hence the ordering here is important
   cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
+
+  v8::V8::Initialize();
   v8Initialized = true;
 }
 
@@ -192,26 +196,24 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
-void IsolateBase::deferExternalMemoryDecrement(int64_t size) {
-  pendingExternalMemoryDecrement.fetch_add(size, std::memory_order_relaxed);
-}
-void IsolateBase::clearPendingExternalMemoryDecrement() {
-  KJ_ASSERT(v8::Locker::IsLocked(ptr));
-  int64_t amount = pendingExternalMemoryDecrement.exchange(0, std::memory_order_relaxed);
-  if (amount > 0) {
-    externalMemoryAccounter.Decrease(ptr, amount);
-  }
+kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
+  return kj::atomicAddRef(*externalMemoryTarget);
 }
 
 void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
 
-void IsolateBase::clearDestructionQueue() {
-  // Safe to destroy the popped batch outside of the lock because the lock is only actually used to
-  // guard the push buffer.
-  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
-  auto drop = queue.lockExclusive()->pop();
+void IsolateBase::applyDeferredActions() {
+  // Clear the deferred desturction queue.
+  {
+    // Safe to destroy the popped batch outside of the lock because the lock is only actually used
+    // to guard the push buffer.
+    DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+    auto drop = queue.lockExclusive()->pop();
+  }
+
+  externalMemoryTarget->applyDeferredMemoryUpdate();
 }
 
 HeapTracer::HeapTracer(v8::Isolate* isolate)
@@ -333,6 +335,7 @@ IsolateBase::IsolateBase(const V8System& system,
     : system(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
+      externalMemoryTarget(kj::atomicRefcounted<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
       observer(kj::mv(observer)) {
@@ -354,9 +357,6 @@ IsolateBase::IsolateBase(const V8System& system,
     ptr->SetAllowAtomicsWait(false);
 
     ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
-
-    // Configure Date API to always use UTC timezone
-    ptr->DateTimeConfigurationChangeNotification(v8::Isolate::TimeZoneDetection::kSkip);
 
     // V8 10.5 introduced this API which is used to resolve the promise returned by
     // WebAssembly.compile(). For some reason, the default implementation of the callback does not
@@ -401,11 +401,14 @@ IsolateBase::IsolateBase(const V8System& system,
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
+  // Ensure objects that outlive the isolate won't attempt to modify external memory
+  // on the now-destroyed isolate.
+  externalMemoryTarget->detach();
+
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->Dispose();
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
-    ;
   });
 }
 
@@ -421,8 +424,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     v8::Isolate::Scope isolateScope(ptr);
 
     // Make sure everything in the deferred destruction queue is dropped.
-    clearDestructionQueue();
-    clearPendingExternalMemoryDecrement();
+    applyDeferredActions();
 
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.

@@ -44,6 +44,7 @@ import {
   destroy,
   undestroy,
   errorOrDestroy,
+  kOnConstructed,
 } from 'node-internal:streams_util';
 
 import {
@@ -205,6 +206,16 @@ Object.defineProperty(WritableState.prototype, 'bufferedRequestCount', {
   },
 });
 
+WritableState.prototype[kOnConstructed] = function onConstructed(stream) {
+  if (!this.writing) {
+    clearBuffer(stream, this);
+  }
+
+  if (!this.ending) {
+    finishMaybe(stream, this);
+  }
+};
+
 // ======================================================================================
 // Writable
 
@@ -343,7 +354,7 @@ function writeOrBuffer(stream, state, chunk, encoding, callback) {
   state.length += len;
 
   // stream._write resets state.length
-  const ret = state.length < state.highWaterMark;
+  const ret = state.length < state.highWaterMark || state.length === 0;
   // We must ensure that previous needDrain will not be reset to false.
   if (!ret) state.needDrain = true;
   if (state.writing || state.corked || state.errored || !state.constructed) {

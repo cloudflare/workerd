@@ -334,7 +334,7 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
       }
 
       KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-        KJ_IF_SOME(e, h->get(jsg::ByteString(kj::str("range")))) {
+        KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
           builder.setRangeHeader(kj::str(e));
         }
       }
@@ -530,9 +530,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(md5, o.md5) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(md5) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 16, TypeError, "MD5 is 16 bytes, not ", bin.size());
-            putBuilder.setMd5(bin);
+            putBuilder.setMd5(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 32, TypeError, "MD5 is 32 hex characters, not ",
@@ -546,9 +546,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha1, o.sha1) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha1) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 20, TypeError, "SHA-1 is 20 bytes, not ", bin.size());
-            putBuilder.setSha1(bin);
+            putBuilder.setSha1(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 40, TypeError, "SHA-1 is 40 hex characters, not ",
@@ -562,9 +562,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha256, o.sha256) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha256) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 32, TypeError, "SHA-256 is 32 bytes, not ", bin.size());
-            putBuilder.setSha256(bin);
+            putBuilder.setSha256(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 64, TypeError, "SHA-256 is 64 hex characters, not ",
@@ -579,9 +579,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha384, o.sha384) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha384) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 48, TypeError, "SHA-384 is 48 bytes, not ", bin.size());
-            putBuilder.setSha384(bin);
+            putBuilder.setSha384(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 96, TypeError, "SHA-384 is 96 hex characters, not ",
@@ -596,9 +596,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(sha512, o.sha512) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(sha512) {
-          KJ_CASE_ONEOF(bin, kj::Array<kj::byte>) {
+          KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 64, TypeError, "SHA-512 is 64 bytes, not ", bin.size());
-            putBuilder.setSha512(bin);
+            putBuilder.setSha512(bin.asArrayPtr());
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 128, TypeError, "SHA-512 is 128 hex characters, not ",
@@ -1036,17 +1036,17 @@ kj::Array<R2Bucket::Etag> buildSingleEtagArray(kj::StringPtr etagValue) {
 
 R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
-  KJ_IF_SOME(e, h.get(jsg::ByteString(kj::str("if-match")))) {
+  KJ_IF_SOME(e, h.getNoChecks(js, "if-match"_kj)) {
     etagMatches = parseConditionalEtagHeader(kj::str(e));
   }
-  KJ_IF_SOME(e, h.get(jsg::ByteString(kj::str("if-none-match")))) {
+  KJ_IF_SOME(e, h.getNoChecks(js, "if-none-match"_kj)) {
     etagDoesNotMatch = parseConditionalEtagHeader(kj::str(e));
   }
-  KJ_IF_SOME(d, h.get(jsg::ByteString(kj::str("if-modified-since")))) {
+  KJ_IF_SOME(d, h.getNoChecks(js, "if-modified-since"_kj)) {
     auto date = parseDate(js, d);
     uploadedAfter = date;
   }
-  KJ_IF_SOME(d, h.get(jsg::ByteString(kj::str("if-unmodified-since")))) {
+  KJ_IF_SOME(d, h.getNoChecks(js, "if-unmodified-since"_kj)) {
     auto date = parseDate(js, d);
     uploadedBefore = date;
   }
@@ -1074,22 +1074,22 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(const Conditional& c)
 
 R2Bucket::HttpMetadata R2Bucket::HttpMetadata::fromRequestHeaders(jsg::Lock& js, Headers& h) {
   HttpMetadata result;
-  KJ_IF_SOME(ct, h.get(jsg::ByteString(kj::str("content-type")))) {
+  KJ_IF_SOME(ct, h.getNoChecks(js, "content-type")) {
     result.contentType = kj::mv(ct);
   }
-  KJ_IF_SOME(ce, h.get(jsg::ByteString(kj::str("content-encoding")))) {
+  KJ_IF_SOME(ce, h.getNoChecks(js, "content-encoding"_kj)) {
     result.contentEncoding = kj::mv(ce);
   }
-  KJ_IF_SOME(cd, h.get(jsg::ByteString(kj::str("content-disposition")))) {
+  KJ_IF_SOME(cd, h.getNoChecks(js, "content-disposition"_kj)) {
     result.contentDisposition = kj::mv(cd);
   }
-  KJ_IF_SOME(cl, h.get(jsg::ByteString(kj::str("content-language")))) {
+  KJ_IF_SOME(cl, h.getNoChecks(js, "content-language"_kj)) {
     result.contentLanguage = kj::mv(cl);
   }
-  KJ_IF_SOME(cc, h.get(jsg::ByteString(kj::str("cache-control")))) {
+  KJ_IF_SOME(cc, h.getNoChecks(js, "cache-control"_kj)) {
     result.cacheControl = kj::mv(cc);
   }
-  KJ_IF_SOME(ceStr, h.get(jsg::ByteString(kj::str("expires")))) {
+  KJ_IF_SOME(ceStr, h.getNoChecks(js, "expires"_kj)) {
     result.cacheExpiry = parseDate(js, ceStr);
   }
 
@@ -1114,22 +1114,22 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   const auto& m = KJ_REQUIRE_NONNULL(httpMetadata);
 
   KJ_IF_SOME(ct, m.contentType) {
-    headers.set(jsg::ByteString(kj::str("content-type")), jsg::ByteString(kj::str(ct)));
+    headers.set(js, js.accountedByteString("content-type"_kj), js.accountedByteString(ct));
   }
   KJ_IF_SOME(cl, m.contentLanguage) {
-    headers.set(jsg::ByteString(kj::str("content-language")), jsg::ByteString(kj::str(cl)));
+    headers.set(js, js.accountedByteString("content-language"_kj), js.accountedByteString(cl));
   }
   KJ_IF_SOME(cd, m.contentDisposition) {
-    headers.set(jsg::ByteString(kj::str("content-disposition")), jsg::ByteString(kj::str(cd)));
+    headers.set(js, js.accountedByteString("content-disposition"_kj), js.accountedByteString(cd));
   }
   KJ_IF_SOME(ce, m.contentEncoding) {
-    headers.set(jsg::ByteString(kj::str("content-encoding")), jsg::ByteString(kj::str(ce)));
+    headers.set(js, js.accountedByteString("content-encoding"_kj), js.accountedByteString(ce));
   }
   KJ_IF_SOME(cc, m.cacheControl) {
-    headers.set(jsg::ByteString(kj::str("cache-control")), jsg::ByteString(kj::str(cc)));
+    headers.set(js, js.accountedByteString("cache-control"_kj), js.accountedByteString(cc));
   }
   KJ_IF_SOME(ce, m.cacheExpiry) {
-    headers.set(jsg::ByteString(kj::str("expires")), toUTCString(js, ce));
+    headers.set(js, js.accountedByteString("expires"_kj), toUTCString(js, ce));
   }
 }
 
@@ -1193,8 +1193,32 @@ R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
   };
 }
 
-kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr) {
-  return kj::heapArray(arr.asPtr());
+namespace {
+jsg::Optional<jsg::BufferSource> copyHash(
+    jsg::Lock& js, const jsg::Optional<kj::Array<kj::byte>>& maybeHash) {
+  KJ_IF_SOME(hash, maybeHash) {
+    auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, hash.size());
+    backing.asArrayPtr().copyFrom(hash);
+    return jsg::BufferSource(js, kj::mv(backing));
+  }
+  return kj::none;
+}
+}  // namespace
+
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getMd5(jsg::Lock& js) {
+  return copyHash(js, md5);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha1(jsg::Lock& js) {
+  return copyHash(js, sha1);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha256(jsg::Lock& js) {
+  return copyHash(js, sha256);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha384(jsg::Lock& js) {
+  return copyHash(js, sha384);
+}
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha512(jsg::Lock& js) {
+  return copyHash(js, sha512);
 }
 
 kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,

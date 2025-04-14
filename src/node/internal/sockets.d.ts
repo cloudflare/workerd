@@ -5,6 +5,18 @@ export interface SocketInfo {
   localAddress?: string | null;
 }
 
+export interface Reader {
+  close(): Promise<void>;
+  read(value: unknown): Promise<{ value: Buffer; done: boolean }>;
+}
+
+export interface Writer {
+  close(): Promise<void>;
+  write(data: string | ArrayBufferView): Promise<void>;
+  closed: Promise<void>;
+  desiredSize: number | null;
+}
+
 declare namespace sockets {
   function connect(
     input: string,
@@ -18,16 +30,10 @@ declare namespace sockets {
     closed: Promise<void>;
     close(): Promise<void>;
     readable: {
-      getReader(options: Record<string, string>): {
-        close(): Promise<void>;
-        read(value: unknown): Promise<{ value: Buffer; done: boolean }>;
-      };
+      getReader(options: Record<string, string>): Reader;
     };
     writable: {
-      getWriter(): {
-        close(): Promise<void>;
-        write(data: string | ArrayBufferView): Promise<void>;
-      };
+      getWriter(): Writer;
     };
   };
 }

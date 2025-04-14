@@ -371,9 +371,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables the `workerd:rtti` module for querying runtime-type-information from JavaScript.
 
-  webgpu @35 :Bool
+  obsolete35 @35 :Bool
       $compatEnableFlag("webgpu")
       $experimental;
+  # The experimental webgpu API was removed.
 
   cryptoPreservePublicExponent @36 :Bool
       $compatEnableFlag("crypto_preserve_public_exponent")
@@ -430,7 +431,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers @43 :Bool
       $compatEnableFlag("python_workers")
       $pythonSnapshotRelease(pyodide = "0.26.0a2", pyodideRevision = "2024-03-01",
-          packages = "20240829.4", backport = 28,
+          packages = "20240829.4", backport = 35,
           baselineSnapshotHash = "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5")
       $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
@@ -678,8 +679,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
       $experimental
-      $pythonSnapshotRelease(pyodide = "0.27.1", pyodideRevision = "2025-01-16",
-          packages = "20250324.1", backport = 16,
+      $pythonSnapshotRelease(pyodide = "0.27.5", pyodideRevision = "2025-01-16",
+          packages = "20250324.1", backport = 3,
           baselineSnapshotHash = "TODO");
 
   requestCfOverridesCacheRules @72 :Bool
@@ -720,7 +721,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   cacheApiRequestCfOverridesCacheRules @77 :Bool
       $compatEnableFlag("cache_api_request_cf_overrides_cache_rules")
-      $experimental
       $neededByFl;
   # Enables cache settings specified request in cache api cf object to override cache rules. (only for user owned or grey-clouded sites)
 
@@ -743,15 +743,24 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("cache_api_compat_flags")
       $compatDisableFlag("no_cache_api_compat_flags")
       $compatEnableDate("2025-04-19");
-    # when enabled, exports compability flags for FL to Cache API requests.
+  # when enabled, exports compability flags for FL to Cache API requests.
 
   pythonWorkersDurableObjects @81 :Bool
       $compatEnableFlag("python_workers_durable_objects")
       $experimental;
-    # when enabled, enables Durable Object support for Python Workers.
+  # when enabled, enables Durable Object support for Python Workers.
 
-  # Experimental support for streaming tail worker.
   streamingTailWorker @82 :Bool
       $compatEnableFlag("streaming_tail_worker")
       $experimental;
+  # Experimental support for streaming tail worker.
+
+  specCompliantUrlpattern @83 :Bool
+    $compatEnableFlag("urlpattern_standard")
+    $compatEnableDate("2025-05-01")
+    $compatDisableFlag("urlpattern_original");
+  # The original URLPattern implementation is not compliant with the
+  # WHATWG URLPattern Standard, leading to a number of issues reported by users. Unfortunately,
+  # making it spec compliant is a breaking change. This flag controls the availability
+  # of the new spec-compliant URLPattern implementation.
 }

@@ -53,10 +53,6 @@ export class NodeErrorAbstraction extends Error {
     super(message);
     this.code = code;
     this.name = name;
-    //This number changes depending on the name of this class
-    //20 characters as of now
-    (this as any).stack =
-      this.stack && `${name} [${this.code}]${this.stack.slice(20)}`;
   }
 
   override toString() {
@@ -654,7 +650,7 @@ export class EPIPE extends NodeError {
 export class ERR_SOCKET_CLOSED_BEFORE_CONNECTION extends NodeError {
   constructor() {
     super(
-      'ERR_SOCKET_CLOSED_BEFORE_CONNETION',
+      'ERR_SOCKET_CLOSED_BEFORE_CONNECTION',
       'Socket closed before connection established'
     );
   }
@@ -777,4 +773,10 @@ export function aggregateTwoErrors(innerError: any, outerError: any) {
     return err;
   }
   return innerError || outerError;
+}
+
+export class ERR_INVALID_IP_ADDRESS extends NodeTypeError {
+  constructor(ipAddress: string) {
+    super('ERR_INVALID_IP_ADDRESS', `Invalid IP address: ${ipAddress}`);
+  }
 }

@@ -26,11 +26,33 @@ using kj::uint;
 // Used to collect periodic metrics about queries and size of sqlite db
 class SqliteObserver {
  public:
+  void setDbWalSize(uint64_t dbWalSize) {
+    this->dbWalSize = dbWalSize;
+  }
+  uint64_t getDbWalSize() {
+    return dbWalSize;
+  }
+  kj::TimePoint now() {
+    return monotonicClock.now();
+  }
   virtual void addQueryStats(uint64_t rowsRead, uint64_t rowsWritten) {}
   // The method is not used by the SqliteDatabase, it is added here for convenience
   virtual void setSqliteStoredBytes(uint64_t sqliteStoredBytes) {}
 
+  virtual void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+      uint64_t queryRowsRead,
+      uint64_t queryRowsWritten,
+      kj::Duration queryLatency,
+      uint64_t dbWalBytesWritten,
+      int queryResult,
+      bool isInternalQuery,
+      kj::Maybe<kj::String> queryErrorDescription) {}
+
   static SqliteObserver DEFAULT;
+
+ private:
+  uint64_t dbWalSize = 0;
+  const kj::MonotonicClock& monotonicClock = kj::systemPreciseMonotonicClock();
 };
 
 // C++/KJ API for SQLite.
@@ -523,10 +545,57 @@ class SqliteDatabase::Query final: private ResetListener {
   }
 
  private:
+  class QueryEvent {
+   public:
+    explicit QueryEvent(SqliteObserver& sqliteObserver)
+        : observer(sqliteObserver),
+          dbWalSizeBefore(sqliteObserver.getDbWalSize()),
+          startTime(sqliteObserver.now()) {}
+
+    ~QueryEvent() noexcept(false) {
+      uint64_t dbWalSizeAfter = observer.getDbWalSize();
+      uint64_t dbWalBytesWritten = (dbWalSizeAfter - dbWalSizeBefore);
+      kj::Duration queryLatency = observer.now() - startTime;
+
+      observer.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten, queryLatency,
+          dbWalBytesWritten, queryResult, isInternalQuery, kj::mv(queryErrorDescription));
+    }
+
+    void setQueryEventStats(uint64_t rowsRead, uint64_t rowsWritten, bool isInternalQuery) {
+      this->rowsRead = rowsRead;
+      this->rowsWritten = rowsWritten;
+      this->isInternalQuery = isInternalQuery;
+    }
+
+    void setQueryStatement(kj::String queryStatement) {
+      this->queryStatement = kj::mv(queryStatement);
+    }
+
+    void setQueryErrorDescription(kj::String queryErrorDescription) {
+      this->queryErrorDescription = kj::mv(queryErrorDescription);
+    }
+
+    void setQueryResult(int res) {
+      queryResult = res;
+    }
+
+   private:
+    SqliteObserver& observer;
+    kj::Maybe<kj::String> queryStatement = kj::none;
+    bool isInternalQuery = false;
+    uint64_t dbWalSizeBefore;
+    kj::TimePoint startTime;
+    uint64_t rowsRead = 0;
+    uint64_t rowsWritten = 0;
+    int queryResult = 0;
+    kj::Maybe<kj::String> queryErrorDescription = kj::none;
+  };
+
   const Regulator& regulator;
   StatementAndEffect ownStatement;                // for one-off queries
   kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
   bool done = false;
+  QueryEvent queryEvent;
 
   // Storing the rowsRead and rowsWritten here to use in cases where a DB is reset.
   // When the DB is reset, getRowdRead and getRowsWritten will fail as the statement they
@@ -548,7 +617,8 @@ class SqliteDatabase::Query final: private ResetListener {
   Query(SqliteDatabase& db, const Regulator& regulator, Statement& statement, Params&&... bindings)
       : ResetListener(db),
         regulator(regulator),
-        maybeStatement(statement.prepareForExecution()) {
+        maybeStatement(statement.prepareForExecution()),
+        queryEvent(this->db.sqliteObserver) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
@@ -559,7 +629,8 @@ class SqliteDatabase::Query final: private ResetListener {
       : ResetListener(db),
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-        maybeStatement(ownStatement) {
+        maybeStatement(ownStatement),
+        queryEvent(this->db.sqliteObserver) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());

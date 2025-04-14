@@ -77,6 +77,20 @@ class InstanceImpl implements WorkflowInstance {
     });
     return result;
   }
+
+  public async sendEvent({
+    type,
+    payload,
+  }: {
+    type: string;
+    payload: unknown;
+  }): Promise<void> {
+    await callFetcher(this.fetcher, '/send-event', {
+      type,
+      payload,
+      id: this.id,
+    });
+  }
 }
 
 class WorkflowImpl {

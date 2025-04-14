@@ -29,10 +29,6 @@
 #include <kj/main.h>
 #include <kj/map.h>
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#endif
-
 #if _WIN32
 #include <windows.h>
 #include <winsock2.h>
@@ -79,6 +75,22 @@ static kj::StringPtr getVersionString() {
   static const kj::String result = kj::str("workerd ", SUPPORTED_COMPATIBILITY_DATE);
   return result;
 }
+
+// =======================================================================================
+
+// For ASan's leak sanitizer, suppress warnings about leaks with stacks that include "unknown
+// modules". This suppression is adopted from the GN build and applies to addresses that LSan can't
+// symbolize or even map to a binary – perhaps JIT or snapshot-generated code in V8's case?
+// TODO(someday): Suppression is needed to get several python tests to pass under LSan. Investigate
+// if this is an actual leak (perhaps a bug in V8 itself since it is suppressed there?) at a later
+// time.
+#if __has_feature(address_sanitizer)
+extern "C" __attribute__((no_sanitize("address"))) __attribute__((visibility("default")))
+__attribute__((used)) const char*
+__lsan_default_suppressions() {
+  return "leak:<unknown module>\n";
+}
+#endif
 
 // =======================================================================================
 
@@ -1647,10 +1659,6 @@ int main(int argc, char* argv[]) {
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  workerd::api::gpu::initialize();
-#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

@@ -96,7 +96,7 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
       return fromBlob(kj::mv(blob));
     }
     KJ_CASE_ONEOF(string, kj::String) {
-      return kj::mv(string);
+      return js.accountedKjString(kj::mv(string));
     }
   }
   KJ_UNREACHABLE;
@@ -318,9 +318,10 @@ void FormData::parse(jsg::Lock& js,
               kj::Maybe<kj::StringPtr> maybeType, kj::ArrayPtr<const kj::byte> message) {
         KJ_IF_SOME(filename, maybeFilename) {
           if (convertFilesToStrings) {
+            auto messageData = kj::heapArray<char>(message.asChars());
             data.add(FormData::Entry{
-              .name = kj::str(name),
-              .value = kj::str(message.asChars()),
+              .name = js.accountedKjString(name),
+              .value = js.accountedKjString(kj::str(kj::mv(messageData))),
             });
           } else {
             auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, message.size());
@@ -331,9 +332,10 @@ void FormData::parse(jsg::Lock& js,
                   kj::str(maybeType.orDefault(nullptr)), dateNow())});
           }
         } else {
+          auto messageData = kj::heapArray<char>(message.asChars());
           data.add(FormData::Entry{
-            .name = kj::str(name),
-            .value = kj::str(message.asChars()),
+            .name = js.accountedKjString(name),
+            .value = js.accountedKjString(kj::str(kj::mv(messageData))),
           });
         }
       });
@@ -348,8 +350,8 @@ void FormData::parse(jsg::Lock& js,
       data.reserve(query.size());
       for (auto& param: query) {
         data.add(Entry{
-          .name = kj::mv(param.name),
-          .value = kj::mv(param.value),
+          .name = js.accountedKjString(param.name),
+          .value = js.accountedKjString(param.value),
         });
       }
       return;
@@ -404,13 +406,14 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
   return builder.releaseAsArray().releaseAsBytes();
 }
 
-FormData::EntryType FormData::clone(FormData::EntryType& value) {
+FormData::EntryType FormData::clone(jsg::Lock& js, FormData::EntryType& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(file, jsg::Ref<File>) {
       return file.addRef();
     }
     KJ_CASE_ONEOF(string, kj::String) {
-      return kj::str(string);
+      auto data = kj::heapArray<char>(string);
+      return js.accountedKjString(kj::str(kj::mv(data)));
     }
   }
   KJ_UNREACHABLE;
@@ -434,20 +437,20 @@ void FormData::delete_(kj::String name) {
   data.truncate(pivot - data.begin());
 }
 
-kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(kj::String name) {
+kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(jsg::Lock& js, kj::String name) {
   for (auto& [k, v]: data) {
     if (k == name) {
-      return clone(v);
+      return clone(js, v);
     }
   }
   return kj::none;
 }
 
-kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(kj::String name) {
+kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(jsg::Lock& js, kj::String name) {
   kj::Vector<kj::OneOf<jsg::Ref<File>, kj::String>> result;
   for (auto& [k, v]: data) {
     if (k == name) {
-      result.add(clone(v));
+      result.add(clone(js, v));
     }
   }
   return result.releaseAsArray();
@@ -511,7 +514,7 @@ void FormData::forEach(jsg::Lock& js,
   // are added to the search params unconditionally on each iteration.
   for (size_t i = 0; i < this->data.size(); i++) {
     auto& [key, value] = this->data[i];
-    callback(js, clone(value), key, JSG_THIS);
+    callback(js, clone(js, value), key, JSG_THIS);
   }
 }
 

@@ -26,6 +26,8 @@ PATCHES = [
     "0018-Disable-memory-leak-assert-when-shutting-down-V8.patch",
     "0019-Enable-V8-shared-linkage.patch",
     "0020-Modify-where-to-look-for-fast_float-and-simdutf.patch",
+    "0021-Remove-unneded-latomic-linker-flag.patch",
+    "0022-Add-GetExternalMemory.patch",
 ]
 
 # V8 and its dependencies

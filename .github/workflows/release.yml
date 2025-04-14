@@ -124,6 +124,7 @@ jobs:
         run: |
           # Install lld and link it to /usr/local/bin. We overwrite any existing link, which may
           # exist from an older pre-installed LLVM version on the runner image.
+          brew update
           brew install lld
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
           # Enable lld identical code folding to significantly reduce binary size.

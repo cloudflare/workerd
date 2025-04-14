@@ -10,10 +10,6 @@
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/api/gpu/gpu.h>
-#endif
 
 namespace workerd::jsg {
 class DOMException;
@@ -78,18 +74,19 @@ class Navigator: public jsg::Object {
   kj::StringPtr getUserAgent() {
     return "Cloudflare-Workers"_kj;
   }
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  jsg::Optional<jsg::Ref<api::gpu::GPU>> getGPU(jsg::Lock& js, CompatibilityFlags::Reader flags);
-#endif
 
   bool sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body);
+
+  kj::uint getHardwareConcurrency() {
+    // Workers does not expose hardware concurrency to users.
+    // From the user code perspective there's only one core.
+    return 1;
+  }
 
   JSG_RESOURCE_TYPE(Navigator) {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
-#endif
+    JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
   }
 };
 
@@ -521,10 +518,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // ---------------------------------------------------------------------------
   // JS API
 
-  jsg::JsString btoa(jsg::Lock& js, jsg::JsValue data);
+  jsg::JsString btoa(jsg::Lock& js, jsg::JsString data);
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
-  void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
+  void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -539,7 +536,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Optional<double> msDelay,
       jsg::Arguments<jsg::Value> args);
-  void clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId);
+  void clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
   TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
 
@@ -547,9 +544,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Optional<double> msDelay,
       jsg::Arguments<jsg::Value> args);
-  void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) {
-    clearTimeout(timeoutId);
-  }
+  void clearInterval(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
   jsg::Promise<jsg::Ref<Response>> fetch(jsg::Lock& js,
       kj::OneOf<jsg::Ref<Request>, kj::String> request,
@@ -714,8 +709,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(URLSearchParams);
     }
 
-    // We conditionally enable a more spec compliant URLPattern to avoid any breakages.
-    if (util::Autogate::isEnabled(util::AutogateKey::URLPATTERN)) {
+    if (flags.getSpecCompliantUrlpattern()) {
       JSG_NESTED_TYPE_NAMED(urlpattern::URLPattern, URLPattern);
     } else {
       JSG_NESTED_TYPE(URLPattern);
@@ -736,20 +730,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-    // WebGPU
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUAdapter, GPUAdapter);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUOutOfMemoryError, GPUOutOfMemoryError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUValidationError, GPUValidationError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUInternalError, GPUInternalError);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUDeviceLostInfo, GPUDeviceLostInfo);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUMapMode, GPUMapMode);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUTextureUsage, GPUTextureUsage);
-    JSG_NESTED_TYPE_NAMED(api::gpu::GPUColorWrite, GPUColorWrite);
-#endif
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(
@@ -870,8 +850,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // `Module` is also declared `abstract` to disable its `BufferSource` constructor.
 
     JSG_TS_OVERRIDE({
-      btoa(data: string): string;
-
       setTimeout(callback: (...args: any[]) => void, msDelay?: number): number;
       setTimeout<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
@@ -879,6 +857,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       setInterval<Args extends any[]>(callback: (...args: Args) => void, msDelay?: number, ...args: Args): number;
 
       structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
+      queueMicrotask(task: Function): void;
 
       fetch(input: RequestInfo | URL, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
     });

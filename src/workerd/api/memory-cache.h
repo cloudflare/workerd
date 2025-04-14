@@ -10,6 +10,7 @@
 #include <kj/table.h>
 #include <kj/timer.h>
 
+#include <list>
 #include <set>
 
 namespace workerd {
@@ -232,7 +233,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     struct Waiter {
       kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> fulfiller;
     };
-    std::deque<Waiter> waiting;
+    std::list<Waiter> waiting;
 
     InProgress(kj::String&& key): key(kj::mv(key)) {}
 

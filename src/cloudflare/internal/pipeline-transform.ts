@@ -4,34 +4,52 @@
 
 import entrypoints from 'cloudflare-internal:workers';
 
+/**
+ * Reads a stream line by line, yielding each line as it becomes available.
+ *
+ * This function consumes a ReadableStream of Uint8Array chunks (binary data),
+ * converts it to text using TextDecoderStream, and yields each line
+ * encountered. Lines are delimited by newline characters ('\n'). The final
+ * line is yielded even if it doesn't end with a newline.
+ *
+ * @param stream - A ReadableStream containing binary data to be decoded as text
+ * @returns An AsyncGenerator that yields each line from the stream
+ */
 async function* readLines(
-  stream: ReadableStream<string>
+  stream: ReadableStream<Uint8Array>
 ): AsyncGenerator<string> {
-  let start = 0;
-  let end = 0;
-  let partial = '';
+  const textStream = stream.pipeThrough(new TextDecoderStream());
+  const reader = textStream.getReader();
 
-  // @ts-expect-error must have a '[Symbol.asyncIterator]()' method
-  // eslint-disable-next-line @typescript-eslint/await-thenable
-  for await (const chunk of stream) {
-    const full = partial + (chunk as string);
-    for (const char of full) {
-      if (char === '\n') {
-        yield full.substring(start, end);
-        end++;
-        start = end;
-      } else {
-        end++;
+  let buffer = '';
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    while (true) {
+      const { done, value } = await reader.read();
+
+      // Add any new content to the buffer
+      if (value) buffer += value;
+
+      // Process complete lines
+      let lineEndIndex = buffer.indexOf('\n');
+      while (lineEndIndex >= 0) {
+        yield buffer.substring(0, lineEndIndex);
+        buffer = buffer.substring(lineEndIndex + 1);
+        lineEndIndex = buffer.indexOf('\n');
+      }
+
+      // If we're done and have processed all complete lines,
+      // yield any remaining content and exit
+      if (done) {
+        if (buffer.length > 0) {
+          yield buffer;
+        }
+        break;
       }
     }
-
-    partial = full.substring(start, end);
-    start = 0;
-    end = 0;
-  }
-
-  if (partial.length > 0) {
-    yield partial;
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -128,11 +146,13 @@ export class PipelineTransformImpl<
     }
 
     const batch = this.#batch.data as ReadableStream<Uint8Array>;
-    const decoder = batch.pipeThrough(new TextDecoderStream());
 
     const data: I[] = [];
-    for await (const line of readLines(decoder)) {
-      data.push(JSON.parse(line) as I);
+    for await (const line of readLines(batch)) {
+      if (line.trim().length > 0) {
+        // guard against empty lines
+        data.push(JSON.parse(line) as I);
+      }
     }
 
     return data;

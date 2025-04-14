@@ -102,6 +102,9 @@ cargo_build_script(
     ),
     edition = "2018",
     pkg_name = "semver",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

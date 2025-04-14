@@ -325,12 +325,20 @@ class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
 
 V(Symbol)
 V(BigInt)
-V(Number)
 V(Int32)
 V(Uint32)
 V(Set)
 
 #undef V
+
+class JsNumber final: public JsBase<v8::Number, JsNumber> {
+ public:
+  kj::Maybe<double> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  bool isSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<double> toSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Number, JsNumber>::JsBase;
+};
 
 class JsObject final: public JsBase<v8::Object, JsObject> {
  public:
@@ -458,6 +466,16 @@ template <typename... Args>
 inline JsArray Lock::arr(const Args&... args) {
   v8::Local<v8::Value> values[] = {args...};
   return JsArray(v8::Array::New(v8Isolate, &values[0], sizeof...(Args)));
+}
+
+template <typename T, typename Func>
+inline JsArray Lock::arr(kj::ArrayPtr<T> values, Func fn) {
+  v8::LocalVector<v8::Value> vec(v8Isolate);
+  vec.reserve(values.size());
+  for (const T& val: values) {
+    vec.push_back(fn(*this, val));
+  }
+  return JsArray(v8::Array::New(v8Isolate, vec.data(), vec.size()));
 }
 
 template <typename... Args>
@@ -604,6 +622,8 @@ struct JsValueWrapper {
       return T(check(handle->ToString(context)));
     } else if constexpr (kj::isSameType<T, JsBoolean>()) {
       return T(handle->ToBoolean(context->GetIsolate()));
+    } else if constexpr (kj::isSameType<T, JsNumber>()) {
+      return T(check(handle->ToNumber(context)));
     } else {
       JsValue value(handle);
       KJ_IF_SOME(t, value.tryCast<T>()) {

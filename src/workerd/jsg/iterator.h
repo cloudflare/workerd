@@ -9,7 +9,7 @@
 #include <workerd/jsg/struct.h>
 
 #include <concepts>
-#include <deque>
+#include <list>
 
 namespace workerd::jsg {
 
@@ -791,7 +791,7 @@ class AsyncIteratorImpl {
   }
 
  private:
-  std::deque<Promise<void>> pendingStack;
+  std::list<Promise<void>> pendingStack;
 };
 
 // Provides the base implementation of JSG_ASYNC_ITERATOR types. See the documentation

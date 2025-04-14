@@ -63,7 +63,7 @@ rust_library(
         "@crates_vendor__itoa-1.0.15//:itoa",
         "@crates_vendor__matches-0.1.10//:matches",
         "@crates_vendor__phf-0.10.1//:phf",
-        "@crates_vendor__smallvec-1.14.0//:smallvec",
+        "@crates_vendor__smallvec-1.15.0//:smallvec",
     ],
 )
 
@@ -102,6 +102,9 @@ cargo_build_script(
     ),
     edition = "2018",
     pkg_name = "cssparser",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

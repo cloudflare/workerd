@@ -9,7 +9,7 @@ load("//:build/wd_test.bzl", "wd_test")
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, autogates = [], start_server = False, **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, **kwargs):
     """
     Main entry point.
 
@@ -24,8 +24,12 @@ def wpt_test(name, wpt_directory, config, autogates = [], start_server = False, 
     test_config_as_js = config.removesuffix(".ts") + ".js"
     wpt_tsproject = "//src/wpt:wpt-all@tsproject"
     harness_as_js = "//src/wpt:harness/harness.js"
-    compat_date = "//src/workerd/io:trimmed-supported-compatibility-date.txt"
     wpt_cacert = "@wpt//:tools/certs/cacert.pem"
+
+    if compat_date == "":
+        compat_date_path = "//src/workerd/io:trimmed-supported-compatibility-date.txt"
+    else:
+        compat_date_path = None
 
     _wpt_js_test_gen(
         name = js_test_gen_rule,
@@ -44,23 +48,30 @@ def wpt_test(name, wpt_directory, config, autogates = [], start_server = False, 
         test_js_generated = js_test_gen_rule,
         harness = harness_as_js,
         compat_date = compat_date,
+        compat_date_path = compat_date_path,
         autogates = autogates,
         wpt_cacert = wpt_cacert,
+        compat_flags = compat_flags + ["experimental", "nodejs_compat"],
     )
+
+    data = [
+        test_config_as_js,  # e.g. "url-test.js"
+        js_test_gen_rule,  # e.g. "url-test.generated.js",
+        wpt_directory,  # e.g. wpt/url/**",
+        harness_as_js,  # i.e. "harness/harness.js"
+        wpt_cacert,  # i.e. "wpt/tools/certs/cacert.pem",
+    ]
+
+    if compat_date_path:
+        data.append(compat_date_path)  # i.e. trimmed-supported-compatibility-date.txt
 
     wd_test(
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
+        sidecar_port_bindings = ["HTTP_PORT", "HTTPS_PORT"] if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
-        data = [
-            test_config_as_js,  # e.g. "url-test.js"
-            js_test_gen_rule,  # e.g. "url-test.generated.js",
-            wpt_directory,  # e.g. wpt/url/**",
-            compat_date,  # i.e. trimmed-supported-compatibility-date.txt
-            harness_as_js,  # i.e. "harness/harness.js"
-            wpt_cacert,  # i.e. "wpt/tools/certs/cacert.pem",
-        ],
+        data = data,
         **kwargs
     )
 
@@ -192,6 +203,12 @@ def _wpt_wd_test_gen_impl(ctx):
     """
     src = ctx.actions.declare_file("{}.wd-test".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
+
+    if ctx.file.compat_date_path != None:
+        compat_date = "compatibilityDate = embed \"{}\",".format(wd_test_relative_path(src, ctx.file.compat_date_path))
+    else:
+        compat_date = "compatibilityDate = \"{}\",".format(ctx.attr.compat_date)
+
     ctx.actions.write(
         output = src,
         content = WPT_WD_TEST_TEMPLATE.format(
@@ -200,9 +217,10 @@ def _wpt_wd_test_gen_impl(ctx):
             test_js_generated = ctx.file.test_js_generated.basename,
             bindings = generate_external_bindings(src, base, ctx.attr.wpt_directory.files),
             harness = wd_test_relative_path(src, ctx.file.harness),
-            compat_date = wd_test_relative_path(src, ctx.file.compat_date),
             wpt_cacert = wd_test_relative_path(src, ctx.file.wpt_cacert),
             autogates = generate_autogates_field(ctx.attr.autogates),
+            compat_date = compat_date,
+            compat_flags = generate_compat_flags_field(ctx.attr.compat_flags),
         ),
     )
 
@@ -223,12 +241,16 @@ _wpt_wd_test_gen = rule(
         "test_js_generated": attr.label(allow_single_file = True),
         # Target specifying the location of the WPT test harness
         "harness": attr.label(allow_single_file = True),
+        # A string representing the compatibility date
+        "compat_date": attr.string(mandatory = False, default = ""),
         # Target specifying the location of the trimmed-supported-compatibility-date.txt file
-        "compat_date": attr.label(allow_single_file = True),
+        "compat_date_path": attr.label(allow_single_file = True, mandatory = False, default = None),
         # Target specifying the location of the WPT CA certificate
         "wpt_cacert": attr.label(allow_single_file = True),
         # A list of autogates to specify in the generated wd-test file
         "autogates": attr.string_list(),
+        # A list of compatibility flags to specify in the generated wd-test file
+        "compat_flags": attr.string_list(),
     },
 )
 
@@ -246,10 +268,12 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "wpt", service = "wpt"),
           (name = "unsafe", unsafeEval = void),
+          (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
+          (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
           {bindings}
         ],
-        compatibilityDate = embed "{compat_date}",
-        compatibilityFlags = ["nodejs_compat", "experimental"],
+        {compat_date}
+        {compat_flags}
       )
     ),
     ( name = "internet",
@@ -281,6 +305,17 @@ def generate_autogates_field(autogates):
     autogate_list = ", ".join(['"{}"'.format(autogate) for autogate in autogates])
     return "autogates = [{}],".format(autogate_list)
 
+def generate_compat_flags_field(flags):
+    """
+    Generates a capnproto fragment listing the specified compatibility flags.
+    """
+
+    if not flags:
+        return ""
+
+    flag_list = ", ".join(['"{}"'.format(flag) for flag in flags])
+    return "compatibilityFlags = [{}],".format(flag_list)
+
 def generate_external_bindings(wd_test_file, base, files):
     """
     Generates appropriate bindings for each file in the WPT module:
@@ -309,11 +344,20 @@ def generate_external_bindings(wd_test_file, base, files):
 ### (Create a single no-args script that starts the WPT server)
 
 WPT_ENTRYPOINT_SCRIPT_TEMPLATE = """
-# Make /usr/sbin/sysctl visibile (Python needs to call it on macOS)
+# Make /usr/sbin/sysctl visible (Python needs to call it on macOS)
 export PATH="$PATH:/usr/sbin"
 
 cd $(dirname $0)
-{python} wpt.py serve --config {config_json}
+{python} wpt.py serve --no-h2 --config /dev/stdin <<EOF
+{{
+  "server_host": "localhost",
+  "check_subdomains": false,
+  "ports": {{
+    "http": [$HTTP_PORT, "auto"],
+    "https": [$HTTPS_PORT, "auto"]
+  }}
+}}
+EOF
 """
 
 def _wpt_server_entrypoint_impl(ctx):
@@ -330,14 +374,13 @@ def _wpt_server_entrypoint_impl(ctx):
         is_executable = True,
         content = WPT_ENTRYPOINT_SCRIPT_TEMPLATE.format(
             python = ctx.file.python.short_path,
-            config_json = ctx.file.config_json.basename,
         ),
     )
 
     return DefaultInfo(
         runfiles = ctx.runfiles(
             files = [start_src],
-            transitive_files = depset(ctx.files.srcs + [ctx.file.python, ctx.file.config_json]),
+            transitive_files = depset(ctx.files.srcs + [ctx.file.python]),
         ),
         executable = start_src,
     )
@@ -349,8 +392,6 @@ wpt_server_entrypoint = rule(
         "python": attr.label(allow_single_file = True),
         # All the Python code that should be visible
         "srcs": attr.label_list(allow_files = True),
-        # Config file to pass to wpt serve
-        "config_json": attr.label(allow_single_file = True),
     },
 )
 
