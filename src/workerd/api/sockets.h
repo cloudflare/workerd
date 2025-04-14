@@ -243,7 +243,8 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
     kj::String domain,
-    bool isDefaultFetchPort);
+    bool isDefaultFetchPort,
+    kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair);
 
 jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,

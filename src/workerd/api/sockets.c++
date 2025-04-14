@@ -83,7 +83,8 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
     SecureTransportKind secureTransport,
     kj::String domain,
-    bool isDefaultFetchPort) {
+    bool isDefaultFetchPort,
+    kj::Maybe<jsg::PromiseResolverPair<SocketInfo>> maybeOpenedPrPair) {
   auto& ioContext = IoContext::current();
 
   // Disconnection handling is annoyingly complicated:
@@ -157,7 +158,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
   if (!allowHalfOpen) {
     eofPromise = readable->onEof(js);
   }
-  auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
+  auto openedPrPair = kj::mv(maybeOpenedPrPair).orDefault(js.newPromiseAndResolver<SocketInfo>());
   openedPrPair.promise.markAsHandled(js);
   auto writable = js.alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable),
       ioContext.getMetrics().tryCreateWritableByteStreamObserver(),
@@ -253,7 +254,8 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   request.connection = request.connection.attach(kj::mv(httpClient));
 
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr), kj::mv(options),
-      kj::mv(tlsStarter), secureTransport, kj::mv(domain), isDefaultFetchPort);
+      kj::mv(tlsStarter), secureTransport, kj::mv(domain), isDefaultFetchPort,
+      kj::none /* maybeOpenedPrPair */);
   // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
   // a `connect`.
@@ -321,10 +323,14 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   //
   // Detach the AsyncIoStream from the Writable/Readable streams and make them unusable.
   auto& context = IoContext::current();
+  auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   auto secureStreamPromise = context.awaitJs(js,
       writable->flush(js).then(js,
           [this, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
-              tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
+              tlsStarter = kj::mv(tlsStarter),
+              openedResolverResolve = openedPrPair.resolver.addRef(js),
+              openedResolverReject = openedPrPair.resolver.addRef(js),
+              remoteAddress = kj::str(remoteAddress)](jsg::Lock& js) mutable {
     writable->detach(js);
     readable = readable->detach(js, true);
 
@@ -346,9 +352,28 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
     // that's the case.
     JSG_REQUIRE(
         *tlsStarter != kj::none, TypeError, "The request has finished before startTls completed.");
-    auto secureStream = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname)
+
+    auto& context = IoContext::current();
+    auto tlsStarterResult =
+        context.awaitIo(js, KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname))
+            .then(js,
+                [openedResolverResolve = kj::mv(openedResolverResolve),
+                    remoteAddress = kj::mv(remoteAddress)](jsg::Lock& js) mutable {
+      openedResolverResolve.resolve(js,
+          SocketInfo{
+            .remoteAddress = kj::mv(remoteAddress),
+            .localAddress = kj::none,
+          });
+    },
+                [openedResolverReject = kj::mv(openedResolverReject)](
+                    jsg::Lock& js, jsg::Value&& error) mutable {
+      openedResolverReject.reject(js, jsg::JsValue(error.getHandle(js)));
+    });
+
+    auto secureStream = context.awaitJs(js, kj::mv(tlsStarterResult))
                             .then([stream = connectionStream->addWrappedRef()]() mutable
                                 -> kj::Own<kj::AsyncIoStream> { return kj::mv(stream); });
+
     return kj::newPromisedStream(kj::mv(secureStream));
   }));
 
@@ -357,7 +382,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
   return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), kj::str(remoteAddress),
       kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON, kj::mv(domain),
-      isDefaultFetchPort);
+      isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
 void Socket::handleProxyStatus(
