@@ -67,7 +67,7 @@ class Socket: public jsg::Object {
       kj::Promise<void> watchForDisconnectTask,
       jsg::Optional<SocketOptions> options,
       kj::Own<kj::TlsStarterCallback> tlsStarter,
-      bool isSecureSocket,
+      SecureTransportKind secureTransport,
       kj::String domain,
       bool isDefaultFetchPort,
       jsg::PromiseResolverPair<SocketInfo> openedPrPair)
@@ -81,7 +81,7 @@ class Socket: public jsg::Object {
         options(kj::mv(options)),
         remoteAddress(kj::mv(remoteAddress)),
         tlsStarter(context.addObject(kj::mv(tlsStarter))),
-        isSecureSocket(isSecureSocket),
+        secureTransport(secureTransport),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
         openedResolver(kj::mv(openedPrPair.resolver)),
@@ -104,6 +104,17 @@ class Socket: public jsg::Object {
 
   bool getUpgraded() const {
     return upgraded;
+  }
+
+  kj::StringPtr getSecureTransport() const {
+    switch (secureTransport) {
+      case SecureTransportKind::OFF:
+        return "off"_kj;
+      case SecureTransportKind::STARTTLS:
+        return "starttls"_kj;
+      case SecureTransportKind::ON:
+        return "on"_kj;
+    }
   }
 
   // Closes the socket connection.
@@ -139,8 +150,13 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
     JSG_READONLY_PROTOTYPE_PROPERTY(opened, getOpened);
     JSG_READONLY_PROTOTYPE_PROPERTY(upgraded, getUpgraded);
+    JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
+
+    JSG_TS_OVERRIDE({
+      get secureTransport(): 'on' | 'off' | 'starttls';
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -178,11 +194,9 @@ class Socket: public jsg::Object {
   kj::String remoteAddress;
   // Callback used to upgrade the existing connection to a secure one.
   IoOwn<kj::TlsStarterCallback> tlsStarter;
-  // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by
-  // `startTls`.
-  bool isSecureSocket;
   // Set to true when the socket is upgraded to a secure one.
   bool upgraded = false;
+  SecureTransportKind secureTransport;
   // The domain/ip this socket is connected to. Used for startTls.
   kj::String domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
@@ -227,7 +241,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::String remoteAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
-    bool isSecureSocket,
+    SecureTransportKind secureTransport,
     kj::String domain,
     bool isDefaultFetchPort);
 

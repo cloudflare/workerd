@@ -2921,6 +2921,7 @@ interface Socket {
   get closed(): Promise<void>;
   get opened(): Promise<SocketInfo>;
   get upgraded(): boolean;
+  get secureTransport(): "on" | "off" | "starttls";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
