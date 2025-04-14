@@ -81,7 +81,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::String remoteAddress,
     jsg::Optional<SocketOptions> options,
     kj::Own<kj::TlsStarterCallback> tlsStarter,
-    bool isSecureSocket,
+    SecureTransportKind secureTransport,
     kj::String domain,
     bool isDefaultFetchPort) {
   auto& ioContext = IoContext::current();
@@ -165,7 +165,7 @@ jsg::Ref<Socket> setupSocket(jsg::Lock& js,
 
   auto result = js.alloc<Socket>(js, ioContext, kj::mv(refcountedConnection), kj::mv(remoteAddress),
       kj::mv(readable), kj::mv(writable), kj::mv(closedPrPair), kj::mv(watchForDisconnectTask),
-      kj::mv(options), kj::mv(tlsStarter), isSecureSocket, kj::mv(domain), isDefaultFetchPort,
+      kj::mv(options), kj::mv(tlsStarter), secureTransport, kj::mv(domain), isDefaultFetchPort,
       kj::mv(openedPrPair));
 
   KJ_IF_SOME(p, eofPromise) {
@@ -242,8 +242,10 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
   auto httpClient = asHttpClient(kj::mv(client));
   kj::HttpConnectSettings httpConnectSettings = {.useTls = false};
+  SecureTransportKind secureTransport = SecureTransportKind::OFF;
   KJ_IF_SOME(opts, options) {
-    httpConnectSettings.useTls = parseSecureTransport(opts) == SecureTransportKind::ON;
+    secureTransport = parseSecureTransport(opts);
+    httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
@@ -251,7 +253,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(jsg::Lock& js,
   request.connection = request.connection.attach(kj::mv(httpClient));
 
   auto result = setupSocket(js, kj::mv(request.connection), kj::mv(addressStr), kj::mv(options),
-      kj::mv(tlsStarter), httpConnectSettings.useTls, kj::mv(domain), isDefaultFetchPort);
+      kj::mv(tlsStarter), secureTransport, kj::mv(domain), isDefaultFetchPort);
   // `handleProxyStatus` needs an initialized refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
   // a `connect`.
@@ -304,17 +306,13 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
-  JSG_REQUIRE(!isSecureSocket, TypeError, "Cannot startTls on a TLS socket.");
+  JSG_REQUIRE(
+      secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
   // TODO: Track closed state of socket properly and assert that it hasn't been closed here.
   JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
-  KJ_IF_SOME(opts, options) {
-    JSG_REQUIRE(
-        parseSecureTransport(opts) == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
-  } else {
-    JSG_FAIL_REQUIRE(TypeError, invalidOptKindMsg);
-  }
+  JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
 
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about
@@ -358,7 +356,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
   return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), kj::str(remoteAddress),
-      kj::mv(options), kj::mv(newTlsStarter), true, kj::mv(domain), isDefaultFetchPort);
+      kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON, kj::mv(domain),
+      isDefaultFetchPort);
 }
 
 void Socket::handleProxyStatus(

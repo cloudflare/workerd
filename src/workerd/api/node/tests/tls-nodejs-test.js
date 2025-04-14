@@ -754,11 +754,13 @@ export const testStartTlsBehaviorOnUpgrade = {
     const socket = connect(`localhost:${env.HELLO_SERVER_PORT}`, {
       secureTransport: 'starttls',
     });
+    strictEqual(socket.secureTransport, 'starttls');
     strictEqual(socket.upgraded, false);
     await socket.opened;
     strictEqual(socket.upgraded, false);
     socket.closed
       .then(() => {
+        strictEqual(socket.secureTransport, 'starttls');
         strictEqual(socket.upgraded, true);
         resolve();
       })
@@ -766,6 +768,7 @@ export const testStartTlsBehaviorOnUpgrade = {
     const secureSocket = socket.startTls();
     // The newly created socket instance is not upgraded.
     strictEqual(secureSocket.upgraded, false);
+    strictEqual(secureSocket.secureTransport, 'on');
     await promise;
   },
 };
