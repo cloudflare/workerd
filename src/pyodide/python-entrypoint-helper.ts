@@ -102,9 +102,7 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     ) {
       await applyPatch(pyodide, 'httpx');
     }
-    if (TRANSITIVE_REQUIREMENTS.has('fastapi')) {
-      await injectSitePackagesModule(pyodide, 'asgi', 'asgi');
-    }
+    await injectSitePackagesModule(pyodide, 'asgi', 'asgi');
   });
 }
 
