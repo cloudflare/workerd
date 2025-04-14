@@ -2930,6 +2930,7 @@ export interface Socket {
   get writable(): WritableStream;
   get closed(): Promise<void>;
   get opened(): Promise<SocketInfo>;
+  get upgraded(): boolean;
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }

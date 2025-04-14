@@ -329,6 +329,10 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
               tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
     writable->detach(js);
     readable = readable->detach(js, true);
+
+    // We should set this before closedResolver.resolve() in order to give the user
+    // the option to check if the closed promise is resolved due to upgrade or not.
+    upgraded = true;
     closedResolver.resolve(js);
 
     auto acceptedHostname = domain.asPtr();
