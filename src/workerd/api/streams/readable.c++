@@ -699,7 +699,7 @@ jsg::Ref<ReadableStream> ReadableStream::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got ReadableStream on non-RPC serialized object?");
-  auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got ReadableStream on non-RPC serialized object?");
 
   auto reader = externalHandler->read();

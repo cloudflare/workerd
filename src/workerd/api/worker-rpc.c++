@@ -128,18 +128,18 @@ capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler:
   return result;
 }
 
-RpcDeserializerExternalHander::~RpcDeserializerExternalHander() noexcept(false) {
+RpcDeserializerExternalHandler::~RpcDeserializerExternalHandler() noexcept(false) {
   if (!unwindDetector.isUnwinding()) {
     KJ_ASSERT(i == externals.size(), "deserialization did not consume all of the externals");
   }
 }
 
-rpc::JsValue::External::Reader RpcDeserializerExternalHander::read() {
+rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
   KJ_ASSERT(i < externals.size());
   return externals[i++];
 }
 
-void RpcDeserializerExternalHander::setLastStream(capnp::Capability::Client stream) {
+void RpcDeserializerExternalHandler::setLastStream(capnp::Capability::Client stream) {
   KJ_IF_SOME(ss, streamSink) {
     ss.setSlot(i - 1, kj::mv(stream));
   } else {
@@ -205,7 +205,7 @@ DeserializeResult deserializeJsValue(
     jsg::Lock& js, rpc::JsValue::Reader reader, kj::Maybe<StreamSinkImpl&> streamSink = kj::none) {
   auto disposalGroup = kj::heap<RpcStubDisposalGroup>();
 
-  RpcDeserializerExternalHander externalHandler(reader.getExternals(), *disposalGroup, streamSink);
+  RpcDeserializerExternalHandler externalHandler(reader.getExternals(), *disposalGroup, streamSink);
 
   jsg::Deserializer deserializer(js, reader.getV8Serialized(), kj::none, kj::none,
       jsg::Deserializer::Options{
@@ -902,7 +902,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got JsRpcStub on non-RPC serialized object?");
-  auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got JsRpcStub on non-RPC serialized object?");
 
   auto reader = externalHandler->read();
