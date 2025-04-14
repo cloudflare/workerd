@@ -180,18 +180,26 @@ function makeEntrypointClass(className: string, classKind: AnyClass) {
           if (typeof prop !== 'string') {
             return Reflect.get(target, prop, receiver);
           }
+          // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
           const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
           if (isKnownHandler) {
             prop = 'on_' + prop;
           }
+
           return async function (...args: any[]) {
+            // Check if the requested method exists.
             const pyInstance = await target.pyInstance;
             if (typeof pyInstance[prop] === 'function') {
-              const res = await pyInstance[prop](...args);
-              if (isKnownHandler) {
-                return res?.js_object ?? res;
-              }
-              return res;
+              // Convert any JS arguments to Python SDK objects.
+              const pyodide = await getPyodide();
+              const workersSdkMod = pyodide.runPython(
+                'import workers; workers'
+              );
+
+              const pyArgs = args.map((x) => workersSdkMod.to_python(x, false));
+              const res = await pyInstance[prop](...pyArgs);
+              // Support returning Python SDK objects.
+              return res?.js_object ?? res;
             } else {
               throw new TypeError(`Method ${prop} does not exist`);
             }
@@ -287,7 +295,6 @@ try {
     const introspectionMod = await getIntrospectionMod(pyodide);
     pythonEntrypointClasses =
       introspectionMod.collect_entrypoint_classes(mainModule);
-    console.log(pythonEntrypointClasses);
   }
 } catch (e) {
   console.warn('Error in top level in python-entrypoint-helper.js');

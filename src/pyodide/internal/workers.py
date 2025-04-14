@@ -47,7 +47,7 @@ class RequestInitCfProperties(TypedDict, total=False):
 class FetchKwargs(TypedDict, total=False):
     headers: "Headers | None"
     body: "Body | None"
-    method: HTTPMethod = HTTPMethod.GET
+    method: HTTPMethod | None
     redirect: str | None
     cf: RequestInitCfProperties | None
 
@@ -145,10 +145,19 @@ def _to_js_headers(headers: Headers):
 
 
 class Response(FetchResponse):
+    """
+    This class represents the response to an HTTP request, with a similar API to that of the web
+    `Response` API: https://developer.mozilla.org/en-US/docs/Web/API/Response.
+
+    This is a static class to enable defining `FetchResponse` using a constructor more similar to
+    JS. All non-static methods for this class should be defined on the `FetchResponse` class it
+    extends.
+    """
+
     def __init__(
         self,
-        body: Body,
-        status: HTTPStatus | int = HTTPStatus.OK,
+        body: "Body | js.Response | None" = None,
+        status: HTTPStatus | int | None = None,
         status_text="",
         headers: Headers = None,
     ):
@@ -158,6 +167,14 @@ class Response(FetchResponse):
         Based on the JS API of the same name:
         https://developer.mozilla.org/en-US/docs/Web/API/Response/Response.
         """
+        if hasattr(body, "constructor") and (body.constructor.name == "Response"):
+            if status is not None or len(status_text) > 0 or headers is not None:
+                raise ValueError(
+                    "Expected no options when constructing Response from a js.Response"
+                )
+            super().__init__(body.url, body)
+            return
+
         options = self._create_options(status, status_text, headers)
 
         # Initialize via the FetchResponse super-class which gives us access to
@@ -169,13 +186,15 @@ class Response(FetchResponse):
 
     @staticmethod
     def _create_options(
-        status: HTTPStatus | int = HTTPStatus.OK,
+        status: HTTPStatus | int | None = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
     ):
-        options = {
-            "status": status.value if isinstance(status, HTTPStatus) else status,
-        }
+        options = {}
+        if status:
+            options["status"] = (
+                status.value if isinstance(status, HTTPStatus) else status
+            )
         if status_text:
             options["statusText"] = status_text
         if headers:
@@ -238,7 +257,10 @@ def _js_value_to_py(item: FormDataValue) -> "str | Blob | File":
 
 class FormData(MutableMapping[str, FormDataValue]):
     """
-    This API follows that of https://pypi.org/project/multidict/.
+    This class represents a set of key/value pairs for forms.
+
+    The API of this class follows that of https://pypi.org/project/multidict/ and
+    https://developer.mozilla.org/en-US/docs/Web/API/FormData.
     """
 
     def __init__(
@@ -473,7 +495,17 @@ class File(Blob):
 
 
 class Request:
-    def __init__(self, input: "Request | str", **other_options: Unpack[FetchKwargs]):
+    def __init__(
+        self, input: "Request | str | js.Request", **other_options: Unpack[FetchKwargs]
+    ):
+        if hasattr(input, "constructor") and (input.constructor.name == "Request"):
+            if len(other_options) > 0:
+                raise ValueError(
+                    "Expected no options when constructing Request from a js.Request"
+                )
+            self._js_request = input
+            return
+
         if "method" in other_options and isinstance(
             other_options["method"], HTTPMethod
         ):
@@ -605,6 +637,36 @@ class Request:
     async def text(self) -> str:
         self._raise_if_failed()
         return await self.js_object.text()
+
+
+def to_python(obj: "js.JsProxy", throw=True):
+    """
+    Converts JS objects like Response, Request, Blob, etc. to equivalent Python objects defined in
+    this module.
+    """
+    if not hasattr(obj, "constructor"):
+        if throw:
+            raise TypeError(
+                f"Expected a JS object with a `constructor` field, got {type(obj).__name__}"
+            )
+        else:
+            return obj
+
+    if obj.constructor.name == "Response":
+        return Response(obj)
+    elif obj.constructor.name == "FormData":
+        return FormData(obj)
+    elif obj.constructor.name == "Blob":
+        return Blob(obj)
+    elif obj.constructor.name == "File":
+        return File(obj)
+    elif obj.constructor.name == "Request":
+        return Request(obj)
+
+    if throw:
+        raise TypeError(f"Unsupported JS object, got {obj.constructor.name}")
+    else:
+        return obj
 
 
 def handler(func):
