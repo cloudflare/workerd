@@ -68,10 +68,8 @@ function collectIncluded(map: StructureMap, root?: string): Set<string> {
       case Type_Which.DICT: {
         const dict = type.dict;
         visitType(dict.key);
-        {
-          visitType(dict.value);
-          return;
-        }
+        visitType(dict.value);
+        return;
       }
       case Type_Which.ONE_OF: {
         type.oneOf.variants.forEach(visitType);
