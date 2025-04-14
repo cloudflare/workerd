@@ -33,13 +33,13 @@ constexpr size_t MAX_JS_RPC_MESSAGE_SIZE = 1u << 25;
 
 // ExternalHandler used when serializing RPC messages. Serialization functions with which to
 // handle RPC specially should use this.
-class RpcSerializerExternalHander final: public jsg::Serializer::ExternalHandler {
+class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandler {
  public:
   using GetStreamSinkFunc = kj::Function<rpc::JsValue::StreamSink::Client()>;
 
   // `getStreamSinkFunc` will be called at most once, the first time a stream is encountered in
   // serialization, to get the StreamSink that should be used.
-  RpcSerializerExternalHander(GetStreamSinkFunc getStreamSinkFunc)
+  RpcSerializerExternalHandler(GetStreamSinkFunc getStreamSinkFunc)
       : getStreamSinkFunc(kj::mv(getStreamSinkFunc)) {}
 
   using BuilderCallback = kj::Function<void(rpc::JsValue::External::Builder)>;

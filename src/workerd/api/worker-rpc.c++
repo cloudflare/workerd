@@ -98,7 +98,7 @@ class StreamSinkImpl final: public rpc::JsValue::StreamSink::Server, public kj::
   kj::Vector<Slot> table;
 };
 
-capnp::Capability::Client RpcSerializerExternalHander::writeStream(BuilderCallback callback) {
+capnp::Capability::Client RpcSerializerExternalHandler::writeStream(BuilderCallback callback) {
   rpc::JsValue::StreamSink::Client* streamSinkPtr;
   KJ_IF_SOME(ss, streamSink) {
     streamSinkPtr = &ss;
@@ -118,7 +118,7 @@ capnp::Capability::Client RpcSerializerExternalHander::writeStream(BuilderCallba
   return result;
 }
 
-capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHander::build(
+capnp::Orphan<capnp::List<rpc::JsValue::External>> RpcSerializerExternalHandler::build(
     capnp::Orphanage orphanage) {
   auto result = orphanage.newOrphan<capnp::List<rpc::JsValue::External>>(externals.size());
   auto builder = result.get();
@@ -159,7 +159,7 @@ namespace {
 template <typename Func>
 void serializeJsValue(jsg::Lock& js,
     jsg::JsValue value,
-    RpcSerializerExternalHander& externalHandler,
+    RpcSerializerExternalHandler& externalHandler,
     Func makeBuilder) {
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
@@ -541,7 +541,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           }
           auto arr = v8::Array::New(js.v8Isolate, argv.data(), argv.size());
 
-          auto externalHandler = RpcSerializerExternalHander([&]() -> rpc::JsValue::StreamSink::Client {
+          auto externalHandler =
+              RpcSerializerExternalHandler([&]() -> rpc::JsValue::StreamSink::Client {
             // A stream was encountered in the params, so we must expect the response to contain
             // paramsStreamSink. But we don't have the response yet. So, we need to set up a
             // temporary promise client, which we hook to the response a little bit later.
@@ -863,7 +864,7 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> JsRpcStub::getRpcMethod(jsg::Lock& js, kj::St
 void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "Remote RPC references can only be serialized for RPC.");
-  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "Remote RPC references can only be serialized for RPC.");
 
@@ -956,7 +957,7 @@ template <typename Func>
 MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     jsg::JsValue value,
     Func makeBuilder,
-    RpcSerializerExternalHander::GetStreamSinkFunc getStreamSinkFunc);
+    RpcSerializerExternalHandler::GetStreamSinkFunc getStreamSinkFunc);
 
 // Callee-side implementation of JsRpcTarget.
 //
@@ -1060,7 +1061,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           jsg::JsValue resultValue(value.getHandle(js));
 
           rpc::JsRpcTarget::CallResults::Builder results = nullptr;
-          auto maybePipeline = serializeJsValueWithPipeline(js, resultValue, [&](capnp::MessageSize hint) {
+          auto maybePipeline =
+              serializeJsValueWithPipeline(js, resultValue, [&](capnp::MessageSize hint) {
             hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
             hint.capCount += 1;  // for callPipeline
             results = callContext.initResults(hint);
@@ -1474,8 +1476,8 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     // take an isolate lock if there isn't one.
     auto getResult = object.get(js, js.symbolDispose());
     if (getResult.isFunction()) {
-      auto dispose = jsg::V8Ref<v8::Function>(js.v8Isolate,
-          v8::Local<v8::Value>(getResult).As<v8::Function>());
+      auto dispose = jsg::V8Ref<v8::Function>(
+          js.v8Isolate, v8::Local<v8::Value>(getResult).As<v8::Function>());
       disposeFulfiller = addDisposeTask(js, ioCtx, object, kj::mv(dispose), {});
     }
   }
@@ -1535,8 +1537,9 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
 
     auto obj = jsg::JsRef<jsg::JsObject>(js, object);
     auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
-    auto jsPromise =
-        ctx.awaitIo(js, kj::mv(promise), [obj = kj::mv(obj), dispose = kj::mv(dispose), stubDiposers = kj::mv(stubDisposers)](jsg::Lock& js) {
+    auto jsPromise = ctx.awaitIo(js, kj::mv(promise),
+        [obj = kj::mv(obj), dispose = kj::mv(dispose), stubDiposers = kj::mv(stubDisposers)](
+            jsg::Lock& js) {
       KJ_IF_SOME(d, dispose) {
         jsg::check(d.getHandle(js)->Call(js.v8Context(), obj.getHandle(js), 0, nullptr));
       }
@@ -1580,19 +1583,17 @@ static rpc::JsRpcTarget::Client makeJsRpcTargetForSingleLoopbackCall(
     jsg::Lock& js, jsg::JsObject obj) {
   // We intentionally do not want to hook up the disposer here since we're not taking ownership
   // of the object.
-  return rpc::JsRpcTarget::Client(
-      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), obj, kj::none, kj::Vector<kj::Own<void>>(), true));
+  return rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
+      js, IoContext::current(), obj, kj::none, kj::Vector<kj::Own<void>>(), true));
 }
 
 template <typename Func>
 MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     jsg::JsValue value,
     Func makeBuilder,
-    RpcSerializerExternalHander::GetStreamSinkFunc getStreamSinkFunc) {
+    RpcSerializerExternalHandler::GetStreamSinkFunc getStreamSinkFunc) {
   auto maybeDispose = js.withinHandleScope([&]() -> kj::Maybe<jsg::V8Ref<v8::Function>> {
-    jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), {
-      return kj::none;
-    });
+    jsg::JsObject obj = KJ_UNWRAP_OR(value.tryCast<jsg::JsObject>(), { return kj::none; });
 
     if (obj.getPrototype(js) == js.obj().getPrototype(js)) {
       // It's a plain object.
@@ -1613,7 +1614,7 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   auto hasDispose = maybeDispose != kj::none;
 
   // Now that we've extracted our dispose function, we can serialize our value.
-  auto externalHandler = RpcSerializerExternalHander(kj::mv(getStreamSinkFunc));
+  auto externalHandler = RpcSerializerExternalHandler(kj::mv(getStreamSinkFunc));
   serializeJsValue(js, value, externalHandler, kj::mv(makeBuilder));
 
   auto stubDisposers = externalHandler.releaseStubDisposers();
@@ -1624,19 +1625,17 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
       // to pipeline on it. (If we return null, we'll get "called null capability" out of
       // Cap'n Proto, which will be treated as an internal error.)
       return MakeCallPipeline::NonPipelinable{
-        .errorPipeline = rpc::JsRpcTarget::Client(
-            kj::heap<TransientJsRpcTarget>(js, IoContext::current(), js.obj(), kj::none, kj::Vector<kj::Own<void>>(), true))};
+        .errorPipeline = rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
+            js, IoContext::current(), js.obj(), kj::none, kj::Vector<kj::Own<void>>(), true))};
     });
 
     if (obj.getPrototype(js) == js.obj().getPrototype(js)) {
       // It's a plain object.
-      auto pipeline =
-          kj::heap<TransientJsRpcTarget>(js, IoContext::current(), obj, kj::mv(maybeDispose), kj::mv(stubDisposers), true);
+      auto pipeline = kj::heap<TransientJsRpcTarget>(
+          js, IoContext::current(), obj, kj::mv(maybeDispose), kj::mv(stubDisposers), true);
 
       return MakeCallPipeline::Object{
-        .cap = rpc::JsRpcTarget::Client(kj::mv(pipeline)),
-        .hasDispose = hasDispose
-      };
+        .cap = rpc::JsRpcTarget::Client(kj::mv(pipeline)), .hasDispose = hasDispose};
     } else if (obj.isInstanceOf<JsRpcStub>(js)) {
       // It's just a stub. It'll serialize as a single stub, obviously.
       return MakeCallPipeline::SingleStub();
@@ -1652,8 +1651,8 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
       // TODO(soon): What if someone returns e.g. a Map with a disposer on it? Should we honor that
       //   disposer?
       return MakeCallPipeline::NonPipelinable{
-        .errorPipeline = rpc::JsRpcTarget::Client(
-            kj::heap<TransientJsRpcTarget>(js, IoContext::current(), js.obj(), kj::none, kj::Vector<kj::Own<void>>(), true))};
+        .errorPipeline = rpc::JsRpcTarget::Client(kj::heap<TransientJsRpcTarget>(
+            js, IoContext::current(), js.obj(), kj::none, kj::Vector<kj::Own<void>>(), true))};
     }
   });
 }
@@ -1679,7 +1678,7 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "Remote RPC references can only be serialized for RPC.");
-  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "Remote RPC references can only be serialized for RPC.");
 
@@ -1693,7 +1692,7 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   });
 }
 
-void RpcSerializerExternalHander::serializeFunction(
+void RpcSerializerExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
   serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
@@ -1704,7 +1703,7 @@ void RpcSerializerExternalHander::serializeFunction(
   });
 }
 
-void RpcSerializerExternalHander::serializeProxy(
+void RpcSerializerExternalHandler::serializeProxy(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) {
   js.withinHandleScope([&]() {
     auto handle = jsg::JsObject(proxy);
