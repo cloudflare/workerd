@@ -522,47 +522,32 @@ namespace {
 // The jsrpc handler that receives aborts from the remote and triggers them locally
 class AbortSignalRpcImpl final: public rpc::AbortSignal::Server {
  public:
-  AbortSignalRpcImpl(IoContext& ctx, jsg::Ref<AbortSignal> signal)
-      : signal(kj::mv(signal)),
-        weakIoContext(ctx.getWeakRef()) {}
+  AbortSignalRpcImpl(kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller)
+      : fulfiller(kj::mv(fulfiller)) {}
 
   kj::Promise<void> triggerAbort(TriggerAbortContext triggerAbortCtx) override {
-    IoContext& ctx = JSG_REQUIRE_NONNULL(weakIoContext->tryGet(), Error,
-        "Destination abort signal no longer exists. Cannot deliver abort");
-
-    co_await ctx.run([&](auto& lock) {
-      JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-        auto params = triggerAbortCtx.getParams();
-        js.tryCatch([&]() {
-          jsg::Deserializer deserializer(js, params.getReason().getV8Serialized());
-          auto reason = deserializer.readValue(js);
-
-          signal->triggerAbort(js, reason);
-        }, [&](jsg::Value exc) {
-          auto context = js.v8Context();
-          auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-              context, context->Global());
-          global.reportError(js, jsg::JsValue(exc.getHandle(js)));
-        });
-      });
-    });
-
+    auto params = triggerAbortCtx.getParams();
+    auto reason = params.getReason().getV8Serialized();
+    fulfiller->fulfill(kj::heapArray(reason.asBytes()));
     triggerAbortCtx.initResults();
+    return kj::READY_NOW;
   }
 
  private:
-  jsg::Ref<AbortSignal> signal;
-  kj::Own<IoContext::WeakRef> weakIoContext;
+  kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller;
 };
 }  // namespace
 
-AbortSignal::AbortSignal(kj::Maybe<kj::Exception> exception,
+AbortSignal::AbortSignal(jsg::Lock& js,
+    kj::Maybe<kj::Exception> exception,
     jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
-    Flag flag)
+    Flag flag,
+    kj::Maybe<kj::Promise<kj::Array<kj::byte>>> maybeRpcAbortPromise)
     : canceler(
           IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
       flag(flag),
-      reason(kj::mv(maybeReason)) {}
+      reason(kj::mv(maybeReason)),
+      maybeRpcAbortPromise(kj::mv(maybeRpcAbortPromise)) {}
 
 kj::Maybe<jsg::JsValue> AbortSignal::getOnAbort(jsg::Lock& js) {
   return onAbortHandler.map(
@@ -575,10 +560,19 @@ void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler)
   KJ_IF_SOME(h, handler) {
     if (h.isFunction() || h.isObject()) {
       onAbortHandler = jsg::JsRef(js, h);
+      awaitRpcAbort(js);
       return;
     }
   }
   onAbortHandler = kj::none;
+}
+
+void AbortSignal::addEventListener(jsg::Lock& js,
+    kj::String type,
+    jsg::Identified<Handler> handler,
+    jsg::Optional<AddEventListenerOpts> maybeOptions) {
+  EventTarget::addEventListener(js, kj::mv(type), kj::mv(handler), kj::mv(maybeOptions));
+  awaitRpcAbort(js);
 }
 
 jsg::JsValue AbortSignal::getReason(jsg::Lock& js) {
@@ -607,9 +601,9 @@ kj::Exception AbortSignal::abortException(
 jsg::Ref<AbortSignal> AbortSignal::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   auto exception = abortException(js, maybeReason);
   KJ_IF_SOME(reason, maybeReason) {
-    return js.alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
+    return js.alloc<AbortSignal>(js, kj::mv(exception), reason.addRef(js));
   }
-  return js.alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
+  return js.alloc<AbortSignal>(js, kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
@@ -623,7 +617,7 @@ void AbortSignal::throwIfAborted(jsg::Lock& js) {
 }
 
 jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
-  auto signal = js.alloc<AbortSignal>();
+  auto signal = js.alloc<AbortSignal>(js);
 
   auto context = js.v8Context();
 
@@ -648,7 +642,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
-    return js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
+    return js.alloc<AbortSignal>(js, kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   }
 
   // Let's check to see if any of the signals are already aborted. If it is, we can
@@ -661,7 +655,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
 
   // Otherwise we need to create a new signal and register event handlers on all
   // of the signals that were passed in.
-  auto signal = js.alloc<AbortSignal>();
+  auto signal = js.alloc<AbortSignal>(js);
   for (auto& sig: signals) {
     // This is a bit of a hack. We want to call addEventListener, but that requires a
     // jsg::Identified<EventTarget::Handler>, which we can't create directly yet.
@@ -782,14 +776,15 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
 
   if (flag == Flag::NEVER_ABORTS) {
     // The signal can't be aborted. We don't need to setup RPC
-    return js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
+    return js.alloc<AbortSignal>(js, /* exception */ kj::none, /* maybeReason */ kj::none, flag);
   }
 
-  auto& ioContext = IoContext::current();
-  auto signal = js.alloc<AbortSignal>(/* exception */ kj::none, /* maybeReason */ kj::none, flag);
+  // The AbortSignalImpl will receive any remote triggerAbort requests and fulfill the promise with the reason for abort
+  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::byte>>();
+  externalHandler->setLastStream(kj::heap<AbortSignalRpcImpl>(kj::mv(paf.fulfiller)));
 
-  // The AbortSignalImpl will receive any remote triggerAbort requests and will convert this into a local call to signal->triggerAbort()
-  externalHandler->setLastStream(kj::heap<AbortSignalRpcImpl>(ioContext, signal.addRef()));
+  auto signal = js.alloc<AbortSignal>(
+      js, /* exception */ kj::none, /* maybeReason */ kj::none, flag, kj::mv(paf.promise));
   return signal;
 }
 
@@ -821,6 +816,18 @@ kj::Promise<void> AbortSignal::sendToRpc(kj::ArrayPtr<kj::byte> reason) {
   }
 
   co_await kj::joinPromises(promises.releaseAsArray());
+}
+
+void AbortSignal::awaitRpcAbort(jsg::Lock& js) {
+  KJ_IF_SOME(abortPromise, maybeRpcAbortPromise) {
+    IoContext::current().awaitIo(
+        js, kj::mv(abortPromise), [this](jsg::Lock& js, kj::Array<kj::byte> reason) {
+      jsg::Deserializer des(js, reason);
+      triggerAbort(js, des.readValue(js));
+    });
+
+    maybeRpcAbortPromise = kj::none;
+  }
 }
 
 void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
