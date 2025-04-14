@@ -35,6 +35,16 @@ export class RpcRemoteEnd extends WorkerEntrypoint {
     return this.countToInfinity(signal);
   }
 
+  async ignoreSignal(signal) {
+    let i = 0;
+
+    for (i = 0; i < 10; i++) {
+      await scheduler.wait(50);
+    }
+
+    return { counter: i, reason: signal.reason };
+  }
+
   async chainReaction(signal) {
     let onAbortWasFired = false;
 
@@ -497,5 +507,25 @@ export const rpcCrossRequestSignal = {
           "Cannot perform I/O on behalf of a different request. I/O objects (such as streams, request/response bodies, and others) created in the context of one request handler cannot be accessed from a different request's handler. This is a limitation of Cloudflare Workers which allows us to improve overall performance. (I/O type: RefcountedCanceler)",
       }
     );
+  },
+};
+
+export const rpcRemoteCanIgnoreSignal = {
+  async test(ctrl, env, ctx) {
+    const ac = new AbortController();
+    const resPromise = env.RpcRemoteEnd.ignoreSignal(ac.signal);
+
+    // Wait an arbitrary amount of time, then use the AbortController to abort the remote end.
+    await scheduler.wait(200);
+    const expectedReason = 'changed my mind';
+    ac.abort(expectedReason);
+
+    const res = await resPromise;
+
+    // Every iteration completes, the remote is not reacting to the abort
+    strictEqual(res.counter, 10);
+
+    // Make sure the reason was passed without being garbled
+    strictEqual(res.reason, expectedReason);
   },
 };
