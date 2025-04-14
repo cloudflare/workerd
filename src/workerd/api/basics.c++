@@ -732,7 +732,7 @@ void AbortSignal::triggerAbort(
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "AbortSignal can only be serialized for RPC.");
-  auto externalHandler = dynamic_cast<RpcSerializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
 
@@ -759,7 +759,7 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
   auto& handler = KJ_REQUIRE_NONNULL(
       deserializer.getExternalHandler(), "got AbortSignal on non-RPC serialized object?");
-  auto externalHandler = dynamic_cast<RpcDeserializerExternalHander*>(&handler);
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
   KJ_REQUIRE(externalHandler != nullptr, "got AbortSignal on non-RPC serialized object?");
 
   auto isCanceled = static_cast<bool>(deserializer.readRawUint32());
