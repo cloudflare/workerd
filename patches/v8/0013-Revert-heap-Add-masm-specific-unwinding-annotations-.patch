@@ -12,10 +12,10 @@ together? I'm not sure. In the meantime, I'm reverting this commit in the hope
 of getting our V8 upgrade unblocked.
 
 diff --git a/BUILD.gn b/BUILD.gn
-index bc75d8130b40d7c88044e39be2f50e66f8d89750..7dbbe9e17eb4dffa937212368b0f789a876e1812 100644
+index 9a2b2cdd94f9b9365b87995617b91ad8b777bf58..ee9c2351b7f8b6f977cf190b90469137c4aa85b6 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4223,8 +4223,8 @@ v8_header_set("v8_internal_headers") {
+@@ -4282,8 +4282,8 @@ v8_header_set("v8_internal_headers") {
      "src/temporal/temporal-parser.h",
      "src/third_party/rapidhash-v8/rapidhash.h",
      "src/torque/runtime-macro-shims.h",
@@ -25,7 +25,7 @@ index bc75d8130b40d7c88044e39be2f50e66f8d89750..7dbbe9e17eb4dffa937212368b0f789a
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -6863,12 +6863,7 @@ v8_source_set("v8_heap_base") {
+@@ -6929,12 +6929,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {

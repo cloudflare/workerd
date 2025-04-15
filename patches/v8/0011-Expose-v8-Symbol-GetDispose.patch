@@ -21,10 +21,10 @@ index f966ed55674841fdfc2a3c497607bf8574426ae6..50b07d9c10a7bbe1354f537c0a3c53b2
    V8_INLINE static Symbol* Cast(Data* data) {
  #ifdef V8_ENABLE_CHECKS
 diff --git a/src/api/api.cc b/src/api/api.cc
-index b582c2f699bbf1a081be1c1e37ea5674bb52562b..79c61466d041dc40a55174551c2d5ff2835b78c7 100644
+index 9fef8999b3c5275a2e9674290dd9fce4c0660200..81310d7e70b381eb587d475341967575048c2f54 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -9538,7 +9538,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
+@@ -9560,7 +9560,9 @@ Local<Symbol> v8::Symbol::ForApi(Isolate* v8_isolate, Local<String> name) {
    V(Split, split)                             \
    V(ToPrimitive, to_primitive)                \
    V(ToStringTag, to_string_tag)               \
