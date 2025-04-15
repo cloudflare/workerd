@@ -149,7 +149,8 @@ export declare class Socket extends _Socket {
   public connecting: boolean;
   public _aborted: boolean;
   public _hadError: boolean;
-  public _parent: null | Socket;
+  public _parent: null | Socket['_handle'];
+  public _parentWrap: null | Socket;
   public _host: null | string;
   public _peername: null | string;
   public _getsockname(): {
@@ -294,6 +295,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   this.connecting = false;
   this._hadError = false;
   this._parent = null;
+  this._parentWrap = null;
   this._host = null;
   this[kLastWriteQueueSize] = 0;
   this[kTimeout] = null;
@@ -375,7 +377,7 @@ Object.setPrototypeOf(Socket, Duplex);
 
 Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s != null; s = s._parent) {
+  for (let s: Socket | null = this; s != null; s = s._parentWrap) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
       s[kTimeout] = this.setTimeout(s.timeout, s._onTimeout.bind(s));
@@ -755,7 +757,7 @@ Socket.prototype._destroy = function (
   this.connecting = false;
 
   // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s !== null; s = s._parent) {
+  for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
@@ -807,7 +809,7 @@ Socket.prototype.connect = function (
     this.once('connect', cb);
   }
 
-  if (this._parent?.connecting) {
+  if (this._parentWrap?.connecting) {
     return this;
   }
 
@@ -1303,7 +1305,7 @@ export function onConnectionClosed(this: Socket): void {
     return;
   }
   // eslint-disable-next-line @typescript-eslint/no-this-alias
-  for (let s: Socket | null = this; s !== null; s = s._parent) {
+  for (let s: Socket | null = this; s !== null; s = s._parentWrap) {
     clearTimeout(s[kTimeout] as unknown as number);
   }
 
