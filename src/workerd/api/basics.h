@@ -519,13 +519,18 @@ class EventTarget: public jsg::Object {
 // An implementation of the Web Platform Standard AbortSignal API
 class AbortSignal final: public EventTarget {
  public:
+  using RpcReasonT = kj::OneOf<kj::Array<kj::byte>, /* V8 serialized JS value */
+      kj::Exception,                                /* capability was dropped; assuming abort */
+      kj::None                                      /* capability explicitly released */
+      >;
+
   enum class Flag { NONE, NEVER_ABORTS };
 
   AbortSignal(jsg::Lock& js,
       kj::Maybe<kj::Exception> exception = kj::none,
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
       Flag flag = Flag::NONE,
-      kj::Maybe<kj::Promise<kj::Array<kj::byte>>> maybeRpcAbortPromise = kj::none);
+      kj::Maybe<kj::Promise<RpcReasonT>> maybeRpcAbortPromise = kj::none);
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
@@ -623,6 +628,8 @@ class AbortSignal final: public EventTarget {
 
   JSG_SERIALIZABLE(rpc::SerializationTag::ABORT_SIGNAL);
 
+  virtual ~AbortSignal();
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
@@ -633,8 +640,12 @@ class AbortSignal final: public EventTarget {
   // Each rpcClient will be informed when this abort signal is triggered.
   kj::Vector<IoOwn<rpc::AbortSignal::Client>> rpcClients;
 
+  // Fulfilled when this AbortSignal is destructed; notifies rpcClients that the AbortSignal is
+  // released and abort will never be triggered.
+  kj::Maybe<IoOwn<kj::PromiseFulfiller<void>>> releaseFulfiller;
+
   // If this signal is a clone, stores a promise that is fulfilled when the original signal is aborted.
-  kj::Maybe<kj::Promise<kj::Array<kj::byte>>> maybeRpcAbortPromise;
+  kj::Maybe<kj::Promise<RpcReasonT>> maybeRpcAbortPromise;
 
   // Trigger an abort on all associated clients
   kj::Promise<void> sendToRpc(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsValue>>& reason);

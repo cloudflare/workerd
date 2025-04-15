@@ -1,5 +1,6 @@
 import { strictEqual, ok, throws, rejects } from 'node:assert';
 import { WorkerEntrypoint } from 'cloudflare:workers';
+import { scheduler } from 'node:timers/promises';
 
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -527,5 +528,14 @@ export const rpcRemoteCanIgnoreSignal = {
 
     // Make sure the reason was passed without being garbled
     strictEqual(res.reason, expectedReason);
+  },
+};
+
+export const rpcDestroySignal = {
+  async test(ctrl, env, ctx) {
+    let ac = new AbortController();
+    ac = null;
+    gc();
+    await scheduler.wait(10);
   },
 };

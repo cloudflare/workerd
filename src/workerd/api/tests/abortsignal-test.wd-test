@@ -15,5 +15,5 @@ const unitTests :Workerd.Config = (
       )
     ),
   ],
-  v8Flags = [ "--expose-gc" ],
+  v8Flags = ["--expose-gc"]
 );

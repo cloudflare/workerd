@@ -494,6 +494,10 @@ interface AbortSignal $Cxx.allowCancellation {
   # clone is the server.
   # reason is an arbitrary JavaScript value which will appear in the resulting AbortErrors.
   triggerAbort @0 (reason :JsValue) -> ();
+
+  # Informs a cloned signal that the original signal is being destroyed, and the abort will never
+  # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
+  release @1 () -> ();
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {

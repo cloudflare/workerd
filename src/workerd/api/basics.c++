@@ -522,7 +522,7 @@ namespace {
 // The jsrpc handler that receives aborts from the remote and triggers them locally
 class AbortSignalRpcImpl final: public rpc::AbortSignal::Server {
  public:
-  AbortSignalRpcImpl(kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller)
+  AbortSignalRpcImpl(kj::Own<kj::PromiseFulfiller<AbortSignal::RpcReasonT>> fulfiller)
       : fulfiller(kj::mv(fulfiller)) {}
 
   kj::Promise<void> triggerAbort(TriggerAbortContext triggerAbortCtx) override {
@@ -533,8 +533,23 @@ class AbortSignalRpcImpl final: public rpc::AbortSignal::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> release(ReleaseContext releaseCtx) override {
+    released = true;
+    releaseCtx.initResults();
+    return kj::READY_NOW;
+  }
+
+  ~AbortSignalRpcImpl() {
+    if (released) {
+      fulfiller->fulfill(kj::None{});
+    } else {
+      fulfiller->fulfill(KJ_EXCEPTION(FAILED, "Dropped capability; assuming abort"));
+    }
+  }
+
  private:
-  kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller;
+  kj::Own<kj::PromiseFulfiller<AbortSignal::RpcReasonT>> fulfiller;
+  bool released = false;
 };
 }  // namespace
 
@@ -542,7 +557,7 @@ AbortSignal::AbortSignal(jsg::Lock& js,
     kj::Maybe<kj::Exception> exception,
     jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason,
     Flag flag,
-    kj::Maybe<kj::Promise<kj::Array<kj::byte>>> maybeRpcAbortPromise)
+    kj::Maybe<kj::Promise<RpcReasonT>> maybeRpcAbortPromise)
     : canceler(
           IoContext::current().addObject(kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
       flag(flag),
@@ -753,6 +768,25 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Keep track of every AbortSignal cloned from this one.
   // If this->triggerAbort(...) is called, each rpcClient will be informed.
   rpcClients.add(ioContext.addObject(kj::heap(kj::mv(streamCap))));
+
+  if (releaseFulfiller == kj::none) {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    releaseFulfiller.emplace(ioContext.addObject(kj::mv(paf.fulfiller)));
+
+    auto jsPromise = ioContext.awaitIo(js, kj::mv(paf.promise), [this, &ioContext](jsg::Lock& js) {
+      kj::Vector<kj::Promise<void>> promises;
+      for (auto& cap: rpcClients) {
+        auto req = cap->releaseRequest();
+        promises.add(req.send().ignoreResult());
+      }
+
+      auto prom = kj::heap(kj::joinPromises(promises.releaseAsArray()));
+
+      return ioContext.addObject(kj::mv(prom));
+    });
+
+    ioContext.addTask(ioContext.awaitJs(js, kj::mv(jsPromise)));
+  }
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(
@@ -780,12 +814,18 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
   }
 
   // The AbortSignalImpl will receive any remote triggerAbort requests and fulfill the promise with the reason for abort
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::byte>>();
+  auto paf = kj::newPromiseAndFulfiller<RpcReasonT>();
   externalHandler->setLastStream(kj::heap<AbortSignalRpcImpl>(kj::mv(paf.fulfiller)));
 
   auto signal = js.alloc<AbortSignal>(
       js, /* exception */ kj::none, /* maybeReason */ kj::none, flag, kj::mv(paf.promise));
   return signal;
+}
+
+AbortSignal::~AbortSignal() {
+  KJ_IF_SOME(f, kj::mv(releaseFulfiller)) {
+    f->fulfill();
+  }
 }
 
 kj::Promise<void> AbortSignal::sendToRpc(
@@ -821,9 +861,21 @@ kj::Promise<void> AbortSignal::sendToRpc(kj::ArrayPtr<kj::byte> reason) {
 void AbortSignal::awaitRpcAbort(jsg::Lock& js) {
   KJ_IF_SOME(abortPromise, maybeRpcAbortPromise) {
     IoContext::current().awaitIo(
-        js, kj::mv(abortPromise), [this](jsg::Lock& js, kj::Array<kj::byte> reason) {
-      jsg::Deserializer des(js, reason);
-      triggerAbort(js, des.readValue(js));
+        js, kj::mv(abortPromise), [this](jsg::Lock& js, RpcReasonT reason) {
+      KJ_SWITCH_ONEOF(reason) {
+        KJ_CASE_ONEOF(v8Serialized, kj::Array<kj::byte>) {
+          jsg::Deserializer des(js, v8Serialized);
+          triggerAbort(js, des.readValue(js));
+        }
+
+        KJ_CASE_ONEOF(kjException, kj::Exception) {
+          triggerAbort(js, kjException);
+        }
+
+        KJ_CASE_ONEOF(_, kj::None) {
+          // Nothing to do
+        }
+      }
     });
 
     maybeRpcAbortPromise = kj::none;
