@@ -79,7 +79,6 @@ export declare class TLSSocket extends Socket {
   public _securePending: boolean;
   public _newSessionPending: boolean;
   public _controlReleased: boolean;
-  public _parent: Socket;
   public authorized: boolean;
   public encrypted: boolean;
   public handle: ReturnType<TLSSocket['_wrapHandle']>;
@@ -251,7 +250,7 @@ export function TLSSocket(
   let wrapHasActiveWriteFromPrevOwner = false;
 
   if (socket) {
-    if (socket instanceof Socket && socket._handle) {
+    if (socket instanceof Socket) {
       wrap = socket;
     } else {
       // Cloudflare Workers does not support any other socket type.
@@ -278,6 +277,9 @@ export function TLSSocket(
       lookup: tlsOptions.lookup,
     } as SocketOptions,
   ]);
+
+  this._parent = handle;
+  this._parentWrap = wrap;
 
   // Proxy for API compatibility
   this.ssl = this._handle; // C++ TLSWrap object
@@ -455,6 +457,24 @@ TLSSocket.prototype._finishInit = function _finishInit(this: TLSSocket): void {
 TLSSocket.prototype._start = function _start(this: TLSSocket): void {
   if (this.connecting) {
     this.once('connect', this._start.bind(this));
+    return;
+  }
+
+  // If a user calls tls.connect({ socket }) with a socket that is not initialized
+  // and the socket is not connected, we need to wait for the socket to connect
+  // before we can complete the process.
+  //
+  // Take a look at the following test for this particular edge case:
+  // https://github.com/nodejs/node/blob/91d8a524ada001103a2d1c6825ca17b8393c183f/test/parallel/test-tls-on-empty-socket.js
+  if (this._parentWrap != null && this._parentWrap._handle == null) {
+    this._parentWrap.once('connect', () => {
+      // We need to update the Socket handle of this TLSSocket
+      // since it was created after TLSSocket is initialized.
+      if (this._parentWrap?._handle != null) {
+        this._handle = this._parentWrap._handle;
+      }
+      this._start();
+    });
     return;
   }
 
@@ -709,9 +729,7 @@ export function connect(...args: unknown[]): TLSSocket {
       tlssock.setTimeout(options.timeout);
     }
 
-    // Node.js calls _start() here, but we don't.
-    // This is done to reduce calling unnecessary startTls() calls.
-    tlssock.connect(options);
+    tlssock.connect(options, tlssock._start.bind(tlssock));
   }
 
   tlssock._releaseControl();

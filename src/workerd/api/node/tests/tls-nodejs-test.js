@@ -774,3 +774,102 @@ export const testStartTlsBehaviorOnUpgrade = {
     await promise;
   },
 };
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/b1402835a512f14fa9f8dd23d3e0cee8cfe888a2/test/parallel/test-tls-junk-closes-server.js
+export const testTlsJunkClosesServer = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const c = net.createConnection(env.HELLO_SERVER_PORT);
+
+    c.on('data', function () {
+      // We must consume all data sent by the server. Otherwise the
+      // end event will not be sent and the test will hang.
+      // For example, when compiled with OpenSSL32 we see the
+      // following response '15 03 03 00 02 02 16' which
+      // decodes as a fatal (0x02) TLS error alert number 22 (0x16),
+      // which corresponds to TLS1_AD_RECORD_OVERFLOW which matches
+      // the error we see if NODE_DEBUG is turned on.
+      // Some earlier OpenSSL versions did not seem to send a response
+      // but the TLS spec seems to indicate there should be one
+      // https://datatracker.ietf.org/doc/html/rfc8446#page-85
+      // and error handling seems to have been re-written/improved
+      // in OpenSSL32. Consuming the data allows the test to pass
+      // either way.
+    });
+
+    const onConnectFn = mock.fn(() => {
+      c.write('blah\nblah\nblah\n');
+    });
+    c.on('connect', onConnectFn);
+    c.on('end', resolve);
+    await promise;
+    strictEqual(onConnectFn.mock.callCount(), 1);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/91d8a524ada001103a2d1c6825ca17b8393c183f/test/parallel/test-tls-on-empty-socket.js
+export const testTlsOnEmptySocket = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const socket = new net.Socket();
+    let out = '';
+
+    const s = tls.connect({ socket }, function () {
+      s.on('error', reject);
+      s.on('data', function (chunk) {
+        out += chunk;
+      });
+      s.on('end', resolve);
+    });
+
+    const onConnectFn = mock.fn();
+    socket.connect(env.HELLO_SERVER_PORT, onConnectFn);
+
+    await promise;
+    strictEqual(out, 'Hello');
+    strictEqual(onConnectFn.mock.callCount(), 1);
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/91d8a524ada001103a2d1c6825ca17b8393c183f/test/parallel/test-tls-pause.js
+export const testTlsPause = {
+  async test(ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const bufSize = 1024 * 1024;
+    let sent = 0;
+    let received = 0;
+    let resumed = false;
+    const client = tls.connect(
+      {
+        port: env.ECHO_SERVER_PORT,
+      },
+      () => {
+        client.pause();
+        const send = (() => {
+          const ret = client.write(Buffer.allocUnsafe(bufSize));
+          if (ret !== false) {
+            sent += bufSize;
+            ok(sent < 100 * 1024 * 1024); // max 100MB
+            return process.nextTick(send);
+          }
+          sent += bufSize;
+          resumed = true;
+          client.resume();
+        })();
+      }
+    );
+    client.on('data', (data) => {
+      ok(resumed);
+      received += data.length;
+      if (received >= sent) {
+        client.end();
+        resolve();
+      }
+    });
+
+    await promise;
+  },
+};
