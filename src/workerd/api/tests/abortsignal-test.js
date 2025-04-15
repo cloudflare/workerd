@@ -160,6 +160,30 @@ export const anyAbort3 = {
   },
 };
 
+function initAny(signal, resolve) {
+  const any = AbortSignal.any([signal]);
+  any.onabort = () => {
+    resolve();
+  };
+}
+
+export const anyAbort4 = {
+  async test() {
+    // Reproduces a failure seen under asan.
+    const ac = new AbortController();
+    ac.signal.addEventListener('abort', (event) => {});
+    const { promise, resolve } = Promise.withResolvers();
+
+    // Set up AbortSignal.any() to call "resolve" when ac.signal aborts.  We use a separate
+    // function to avoid accidentally capturing references in this scope.
+    initAny(ac.signal, resolve);
+
+    gc();
+    ac.abort();
+    await promise;
+  },
+};
+
 export const onabortPrototypeProperty = {
   test() {
     const ac = new AbortController();

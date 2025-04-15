@@ -276,7 +276,10 @@ void EventTarget::addEventListener(jsg::Lock& js,
                 removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
               });
 
-      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
+      // TODO(now): Attaching a strong reference to signal probably isn't correct; it fixes the
+      // memory error in AbortSignal::any(), but probably by creating a leaked cycle?
+      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true)
+          .attach(signal.addRef());
     });
 
     auto eventHandler = kj::heap<EventHandler>(
