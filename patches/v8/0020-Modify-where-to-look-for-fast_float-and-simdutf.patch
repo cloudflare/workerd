@@ -6,10 +6,10 @@ Subject: Modify where to look for fast_float and simdutf.
 Similar to fp16, these dependencies now needs to be downloaded by bazel.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index d17a4d15241b5b7a45e0cdad569efbc99152c758..a02e9ca4e9122d487deeae91d4ffe2cef44f9db0 100644
+index 1f3bb2ab91092e8235f01c1474da63776e6cb13e..37d1a068da6bac22966743f9617d7961df084632 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4339,12 +4339,6 @@ cc_library(
+@@ -4346,12 +4346,6 @@ cc_library(
      ],
  )
  
@@ -22,7 +22,7 @@ index d17a4d15241b5b7a45e0cdad569efbc99152c758..a02e9ca4e9122d487deeae91d4ffe2ce
  v8_library(
      name = "v8_libshared",
      srcs = [
-@@ -4373,9 +4367,9 @@ v8_library(
+@@ -4380,9 +4374,9 @@ v8_library(
          ":noicu/generated_torque_definitions",
      ],
      deps = [
@@ -35,7 +35,7 @@ index d17a4d15241b5b7a45e0cdad569efbc99152c758..a02e9ca4e9122d487deeae91d4ffe2ce
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index d75bc54dab07d62abaa5c94692c9054c324736e0..52b1189b5e9aa4a50c00d2e70eab37899fa4e59b 100644
+index f1a46d5b2c4822315b2171a562709f932db81949..5de29e9dd04488a319d8ed92aa7c4860a39cb603 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -12,7 +12,7 @@

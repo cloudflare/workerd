@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.5.212.10"
+VERSION = "13.6.233.6"
 
-INTEGRITY = "sha256-LEez3iJZH0OE91qkYjAeuf251mHuB/c8q5WonQp11a4="
+INTEGRITY = "sha256-WC28areti1avcJ7tGFUyUb/wJieSNUw69oqtcFyDg+Q="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -27,7 +27,7 @@ PATCHES = [
     "0019-Enable-V8-shared-linkage.patch",
     "0020-Modify-where-to-look-for-fast_float-and-simdutf.patch",
     "0021-Remove-unneded-latomic-linker-flag.patch",
-    "0022-Add-GetExternalMemory.patch",
+    "0022-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
 ]
 
 # V8 and its dependencies
@@ -57,7 +57,7 @@ def deps_v8():
     git_repository(
         name = "com_googlesource_chromium_icu",
         build_file = "@v8//:bazel/BUILD.icu",
-        commit = "d30b7b0bb3829f2e220df403ed461a1ede78b774",
+        commit = "c9fb4b3a6fb54aa8c20a03bbcaa0a4a985ffd34b",
         patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",

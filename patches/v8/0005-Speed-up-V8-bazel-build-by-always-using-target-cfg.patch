@@ -8,7 +8,7 @@ speedup for the build: Components like ICU were previously compiled in
 both target and exec configurations as generator tools depend on them.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29dd155afe9 100644
+index dc0b10774e71a27ad9ea94438395778c75fd92d6..723284dfbeb3ff267e28ea42fb73b5ae96a3db77 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -19,7 +19,7 @@ index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29d
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4235,22 +4236,20 @@ filegroup(
+@@ -4242,22 +4243,20 @@ filegroup(
      ],
  )
  
@@ -48,7 +48,7 @@ index 7521eac6a6a0ef4777e2d7602bda9e7495a00d24..56c6f15cbcbcedaae0176ca5fe45e29d
  )
  
  v8_mksnapshot(
-@@ -4459,7 +4458,6 @@ v8_binary(
+@@ -4466,7 +4465,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
