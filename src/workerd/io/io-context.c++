@@ -457,11 +457,9 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
     timeoutPromise = context->limitEnforcer->limitDrain();
   }
-  context->pumpMessageLoop();
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then(
-          [] {}, [](kj::Exception&& e) { KJ_LOG(INFO, "uncaught exception", e); }));
+      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&& e) {}));
 }
 
 kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
@@ -478,7 +476,6 @@ kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::Incomin
   // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
   KJ_ASSERT(context->incomingRequests.size() == 1);
   context->incomingRequests.front().waitedForWaitUntil = true;
-  context->pumpMessageLoop();
 
   auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
       [] { return IoContext_IncomingRequest::FinishScheduledResult::TIMEOUT; });
@@ -1101,19 +1098,32 @@ void IoContext::runImpl(Runnable& runnable,
         js.terminateExecution();
       }
 
-      // Running the microtask queue can itself trigger a pending exception in the isolate.
-      v8::TryCatch tryCatch(workerLock.getIsolate());
+      do {
+        // Running the microtask queue can itself trigger a pending exception in the isolate.
+        v8::TryCatch tryCatch(workerLock.getIsolate());
 
-      js.runMicrotasks();
+        js.runMicrotasks();
 
-      if (tryCatch.HasCaught()) {
-        // It really shouldn't be possible for microtasks to throw regular exceptions.
-        // so if we got here it should be a terminal condition.
-        KJ_ASSERT(tryCatch.HasTerminated());
-        // If we do not reset here we end up with a dangling exception in the isolate that
-        // leads to an assert in v8 when the Lock is destroyed.
-        tryCatch.Reset();
-      }
+        if (tryCatch.HasCaught()) {
+          // It really shouldn't be possible for microtasks to throw regular exceptions.
+          // so if we got here it should be a terminal condition.
+          KJ_ASSERT(tryCatch.HasTerminated());
+          // If we do not reset here we end up with a dangling exception in the isolate that
+          // leads to an assert in v8 when the Lock is destroyed.
+          tryCatch.Reset();
+          // Ensure we don't pump the message loop in this case
+          gotTermination = true;
+        }
+      } while ([&]() {
+        if (gotTermination) {
+          // TerminateExecution() doesn't drain any tasks from platform's task queue
+          // so we want to avoid pumping the message loop in this case
+          return false;
+        } else {
+          SuppressIoContextScope noIoCtxt;
+          return js.pumpMsgLoop();
+        }
+      }());
     });
 
     v8::TryCatch tryCatch(workerLock.getIsolate());
@@ -1382,73 +1392,6 @@ kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());
   }
-}
-
-void IoContext::pumpMessageLoop() {
-  kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
-  KJ_IF_SOME(a, actor) {
-    asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), a, getMetrics());
-  } else {
-    asyncLockPromise = worker->takeAsyncLock(getMetrics());
-  }
-
-  addWaitUntil(asyncLockPromise.then([](Worker::AsyncLock lock) {
-    return lock;
-  }).then([this](Worker::AsyncLock lock) mutable {
-    KJ_REQUIRE(threadId == getThreadId(), "IoContext cannot switch threads");
-    IoContext* previousRequest = threadLocalRequest;
-    KJ_DEFER(threadLocalRequest = previousRequest);
-    threadLocalRequest = nullptr;
-
-    worker->runInLockScope(lock, [&](Worker::Lock& workerLock) {
-      workerLock.requireNoPermanentException();
-
-      auto limiterScope = limitEnforcer->enterJs(workerLock, *this);
-
-      bool gotTermination = false;
-
-      KJ_DEFER({
-        jsg::Lock& js = workerLock;
-        if (gotTermination) {
-          js.terminateExecution();
-        }
-      });
-
-      v8::TryCatch tryCatch(workerLock.getIsolate());
-      try {
-        jsg::Lock& js = workerLock;
-        js.pumpMessageLoop();
-      } catch (const jsg::JsExceptionThrown&) {
-        if (tryCatch.HasTerminated()) {
-          gotTermination = true;
-          limiterScope = nullptr;
-
-          limitEnforcer->requireLimitsNotExceeded();
-
-          if (!abortFulfiller->isWaiting()) {
-            KJ_FAIL_ASSERT("request terminated because it was aborted");
-          }
-
-          // That should have thrown, so we shouldn't get here.
-          KJ_FAIL_ASSERT("script terminated for unknown reasons");
-        } else {
-          if (tryCatch.Message().IsEmpty()) {
-            // Should never happen, but check for it because otherwise V8 will crash.
-            KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??",
-                kj::getStackTrace());
-            JSG_FAIL_REQUIRE(Error, "(JavaScript exception with no message)");
-          } else {
-            auto jsException = tryCatch.Exception();
-
-            workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
-                jsg::JsValue(jsException), jsg::JsMessage(tryCatch.Message()));
-
-            jsg::throwTunneledException(workerLock.getIsolate(), jsException);
-          }
-        }
-      }
-    });
-  }));
 }
 
 // ======================================================================================

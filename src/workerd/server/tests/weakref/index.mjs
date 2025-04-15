@@ -1,19 +1,70 @@
-let counter = 0;
+let frCounter = 0;
+let weakRefState = { isDereferenced: false, value: null };
+
 const fr = new FinalizationRegistry(() => {
-  ++counter;
+  ++frCounter;
 });
+
+let wait = (delay) => new Promise((res) => setTimeout(res, delay));
 
 export default {
   async fetch(request, env, ctx) {
-    (function () {
-      let obj = {};
-      fr.register(obj, '');
-      obj = undefined;
-    })();
+    const url = new URL(request.url);
+    const test = url.searchParams.get('test') || 'fr';
 
-    // Ensure obj gets GC'd
-    gc();
+    if (test === 'fr') {
+      // Test FinalizationRegistry
+      (function () {
+        let obj = {};
+        fr.register(obj, '');
+        obj = undefined;
+      })();
 
-    return new Response(counter);
+      // Ensure obj gets GC'd
+      gc();
+
+      if (frCounter > 0) {
+        await wait(10);
+      }
+
+      return new Response(frCounter.toString());
+    } else if (test === 'weakref') {
+      // Test WeakRef
+      if (url.searchParams.has('create')) {
+        const obj = { message: "I'm alive!" };
+        const ref = new WeakRef(obj);
+
+        // Store the WeakRef for later testing
+        weakRefState.ref = ref;
+        weakRefState.isDereferenced = false;
+        weakRefState.value = ref.deref()?.message || null;
+
+        return new Response(
+          JSON.stringify({
+            created: true,
+            value: weakRefState.value,
+          })
+        );
+      }
+      if (url.searchParams.has('gc')) {
+        // Force garbage collection and check if the WeakRef has been cleared
+        gc();
+        await wait(10); // Give GC time to clean up
+      }
+
+      // Just return the current state
+      const value = weakRefState.ref?.deref()?.message || null;
+      weakRefState.isDereferenced = value === null;
+      weakRefState.value = value;
+
+      return new Response(
+        JSON.stringify({
+          isDereferenced: weakRefState.isDereferenced,
+          value: weakRefState.value,
+        })
+      );
+    }
+
+    return new Response('Invalid test', { status: 400 });
   },
 };

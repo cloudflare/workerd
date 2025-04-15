@@ -733,7 +733,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   jsWeakRef @84 :Bool
       $compatEnableFlag("enable_weak_ref")
-      $compatEnableDate("2025-03-24")
+      $compatEnableDate("2025-05-05")
       $compatDisableFlag("disable_weak_ref");
   # Enables WeakRefs and FinalizationRegistry API.
   # WebAssembly based projects often rely on this API for wasm memory cleanup

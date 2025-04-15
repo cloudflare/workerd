@@ -448,8 +448,10 @@ CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(jsg::Lock& lock) const {
-  jsg::NewContextOptions options{.newModuleRegistry = impl->tryGetModuleRegistry(),
-    .enableWeakRef = getFeatureFlags().getJsWeakRef()};
+  jsg::NewContextOptions options{
+    .newModuleRegistry = impl->tryGetModuleRegistry(),
+    .enableWeakRef = getFeatureFlags().getJsWeakRef(),
+  };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
       kj::mv(options), lock.v8Isolate);
 }
