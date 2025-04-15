@@ -326,56 +326,68 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   auto secureStreamPromise = context.awaitJs(js,
       writable->flush(js).then(js,
-          [this, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
-              tlsStarter = kj::mv(tlsStarter),
-              openedResolverResolve = openedPrPair.resolver.addRef(js),
-              openedResolverReject = openedPrPair.resolver.addRef(js),
-              remoteAddress = kj::str(remoteAddress)](jsg::Lock& js) mutable {
-    writable->detach(js);
-    readable = readable->detach(js, true);
+          // The openedResolver is a jsg::Promise::Resolver. It should be gc visited here in
+          // case the opened promise is resolves captures a circular references to itself in
+          // JavaScript (which is most likely). This prevents a possible memory leak.
+          // We also capture a strong reference to the original Socket instance that is being
+          // upgraded in order to prevent it from being GC'd while we are waiting for the
+          // flush to complete. While it is unlikely to be GC'd while we are waiting because
+          // the user code *likely* is holding a active reference to it at this point, we
+          // don't want to take any chances. This prevents a possible UAF.
+          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(domain),
+                                   tlsOptions = kj::mv(tlsOptions), tlsStarter = kj::mv(tlsStarter),
+                                   openedResolver = openedPrPair.resolver.addRef(js),
+                                   remoteAddress = kj::str(remoteAddress)),
+              (self, openedResolver), (jsg::Lock & js) mutable {
+                auto& context = IoContext::current();
 
-    // We should set this before closedResolver.resolve() in order to give the user
-    // the option to check if the closed promise is resolved due to upgrade or not.
-    upgraded = true;
-    closedResolver.resolve(js);
+                self->writable->detach(js);
+                self->readable = self->readable->detach(js, true);
 
-    auto acceptedHostname = domain.asPtr();
-    KJ_IF_SOME(s, tlsOptions) {
-      KJ_IF_SOME(expectedHost, s.expectedServerHostname) {
-        acceptedHostname = expectedHost;
-      }
-    }
+                // We should set this before closedResolver.resolve() in order to give the user
+                // the option to check if the closed promise is resolved due to upgrade or not.
+                self->upgraded = true;
+                self->closedResolver.resolve(js);
 
-    // All non-secure sockets should have a tlsStarter. Though since tlsStarter is an IoOwn, if
-    // the request's IoContext has ended then `tlsStarter` will be null. This can happen if the
-    // flush operation is taking a particularly long time (EW-8538), so we throw a JSG error if
-    // that's the case.
-    JSG_REQUIRE(
-        *tlsStarter != kj::none, TypeError, "The request has finished before startTls completed.");
+                auto acceptedHostname = domain.asPtr();
+                KJ_IF_SOME(s, tlsOptions) {
+                KJ_IF_SOME(expectedHost, s.expectedServerHostname) {
+                acceptedHostname = expectedHost;
+                } else {
+                }  // Needed to avoid compiler error/warning
+                } else {
+                }  // Needed to avoid compiler error/warning
 
-    auto& context = IoContext::current();
-    auto tlsStarterResult =
-        context.awaitIo(js, KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname))
-            .then(js,
-                [openedResolverResolve = kj::mv(openedResolverResolve),
-                    remoteAddress = kj::mv(remoteAddress)](jsg::Lock& js) mutable {
-      openedResolverResolve.resolve(js,
-          SocketInfo{
-            .remoteAddress = kj::mv(remoteAddress),
-            .localAddress = kj::none,
-          });
-    },
-                [openedResolverReject = kj::mv(openedResolverReject)](
-                    jsg::Lock& js, jsg::Value&& error) mutable {
-      openedResolverReject.reject(js, jsg::JsValue(error.getHandle(js)));
-    });
+                // All non-secure sockets should have a tlsStarter. Though since tlsStarter is an
+                // IoOwn, if the request's IoContext has ended then `tlsStarter` will be null. This
+                // can happen if the flush operation is taking a particularly long time (EW-8538),
+                // so we throw a JSG error if that's the case.
+                JSG_REQUIRE(*tlsStarter != kj::none, TypeError,
+                    "The request has finished before startTls completed.");
 
-    auto secureStream = context.awaitJs(js, kj::mv(tlsStarterResult))
-                            .then([stream = connectionStream->addWrappedRef()]() mutable
-                                -> kj::Own<kj::AsyncIoStream> { return kj::mv(stream); });
+                // Fork the starter promise because we need to create two separate things waiting
+                // on it below. The first is resolving the openedResolver with a JS promise that
+                // wraps one branch, the secnod is the kj::Promise that we use to resolve the
+                // secureStream for the promised stream. This keeps us from having to bounce in and
+                // out of the JS isolate lock.
+                auto forkedPromise = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname).fork();
 
-    return kj::newPromisedStream(kj::mv(secureStream));
-  }));
+                openedResolver.resolve(js,
+                    context.awaitIo(js, forkedPromise.addBranch(),
+                        [remoteAddress = kj::mv(remoteAddress)](
+                            jsg::Lock& js) mutable -> SocketInfo {
+                  return SocketInfo{
+                    .remoteAddress = kj::mv(remoteAddress),
+                    .localAddress = kj::none,
+                  };
+                }));
+
+                auto secureStream = forkedPromise.addBranch().then(
+                    [stream = self->connectionStream->addWrappedRef()]() mutable
+                    -> kj::Own<kj::AsyncIoStream> { return kj::mv(stream); });
+
+                return kj::newPromisedStream(kj::mv(secureStream));
+              })));
 
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
   // to `setupSocket`.
