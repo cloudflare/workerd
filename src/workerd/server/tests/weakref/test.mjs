@@ -1,7 +1,8 @@
 /*
 This is a node.js script which handlers workerd lifecycle and sends multiple requests.
-FinalizationRegistry callbacks run after the exported handler returns, and wd-test,
-which only run tests within a single test() handler, are not enough to test this behaviour
+FinalizationRegistry callbacks run, if scheduled, across I/O boundaries, and wd-test,
+which only run tests within a single test() handler, are not enough to test this behaviour.
+This test now covers both FinalizationRegistry and WeakRef APIs.
 */
 
 import { env } from 'node:process';
@@ -45,12 +46,55 @@ afterEach(async () => {
   workerd = null;
 });
 
-// FinalizationRegistry callbacks only run after the exported handler returns
-// So we should see its effects in a follow-up request
+// FinalizationRegistry callbacks run across I/O boundaries
 test('JS FinalizationRegistry', async () => {
   let httpPort = await workerd.getListenPort('http');
-  for (let i = 0; i < 3; ++i) {
-    const response = await fetch(`http://localhost:${httpPort}`);
-    assert.strictEqual(await response.text(), `${i}`);
+
+  // The first request doesn't do any I/O so we won't notice the effects
+  // of FinalizationRegistry cleanup callbacks as part of the response
+  const response = await fetch(`http://localhost:${httpPort}?test=fr`);
+  assert.strictEqual(await response.text(), '0');
+
+  // Subsequent requests do I/O so we will immediately see
+  // the effects of FinalizationRegistry cleanup callbacks
+  for (let i = 0; i < 2; ++i) {
+    const response = await fetch(`http://localhost:${httpPort}?test=fr`);
+    assert.strictEqual(await response.text(), `${i + 2}`);
   }
+});
+
+// Test WeakRef behavior
+test('JS WeakRef', async () => {
+  let httpPort = await workerd.getListenPort('http');
+
+  // Create a new object and a WeakRef to it
+  let response = await fetch(
+    `http://localhost:${httpPort}?test=weakref&create`
+  );
+  let data = await response.json();
+
+  // Verify the object is created and accessible via the WeakRef
+  assert.strictEqual(data.created, true);
+  assert.strictEqual(data.value, "I'm alive!");
+
+  // Check that the WeakRef is still valid
+  response = await fetch(`http://localhost:${httpPort}?test=weakref`);
+  data = await response.json();
+  assert.strictEqual(data.isDereferenced, false);
+  assert.strictEqual(data.value, "I'm alive!");
+
+  // Force garbage collection and check if the WeakRef is dereferenced
+  response = await fetch(`http://localhost:${httpPort}?test=weakref&gc`);
+  data = await response.json();
+  // Check if the reference is gone after GC
+  assert.strictEqual(data.isDereferenced, true);
+  assert.strictEqual(data.value, null);
+
+  // Create a new object again to verify WeakRef can be reset
+  response = await fetch(`http://localhost:${httpPort}?test=weakref&create`);
+  data = await response.json();
+
+  // The new object should be accessible
+  assert.strictEqual(data.created, true);
+  assert.strictEqual(data.value, "I'm alive!");
 });

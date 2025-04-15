@@ -4,13 +4,14 @@
 
 #include "jsg.h"
 
-#include <libplatform/libplatform.h>
 #include "setup.h"
 
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
+
+#include <libplatform/libplatform.h>
 
 namespace workerd::jsg {
 
@@ -273,9 +274,14 @@ void Lock::terminateExecution() {
   v8Isolate->TerminateExecution();
 }
 
-void Lock::pumpMessageLoop() {
-  auto platform = IsolateBase::from(v8Isolate).getDefaultPlatform();
-  while (v8::platform::PumpMessageLoop(platform, v8Isolate, v8::platform::MessageLoopBehavior::kDoNotWait)) {}
+bool Lock::pumpMsgLoop() {
+  bool tasksRun = false;
+  // Ensure that this runs under limit enforcer scope
+  // We currently disable Minor GC, so this while loop will only ever run at max one iteration
+  while (IsolateBase::from(v8Isolate).pumpMsgLoop()) {
+    tasksRun = true;
+  }
+  return tasksRun;
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {
