@@ -27,6 +27,8 @@ import {
   Socket,
   SocketOptions,
   _normalizeArgs,
+  onConnectionOpened,
+  onConnectionClosed,
 } from 'node-internal:internal_net';
 import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
@@ -251,7 +253,6 @@ export function TLSSocket(
   if (socket) {
     if (socket instanceof Socket && socket._handle) {
       wrap = socket;
-      // TODO(soon): Check TLS connection type and call starttls() if needed.
     } else {
       // Cloudflare Workers does not support any other socket type.
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.socket');
@@ -438,11 +439,73 @@ TLSSocket.prototype._finishInit = function _finishInit(this: TLSSocket): void {
     this.setTimeout(0, this._handleTimeout.bind(this));
   }
 
-  this.emit('secure');
+  // This queueMicrotask is required to ensure that 'secure' event is emitted after
+  // the next tick in case the user called tls.connect().destroy(). This is required
+  // for Node.js compatibility.
+  //
+  // This is required because "_start" function is trigger onConnectionClose on the next tick
+  // which is also required due to on('secure') event calling callback().
+  queueMicrotask(() => {
+    if (!this.destroyed && !this.isPaused()) {
+      this.emit('secure');
+    }
+  });
 };
 
 TLSSocket.prototype._start = function _start(this: TLSSocket): void {
-  // Do nothing.
+  if (this.connecting) {
+    this.once('connect', this._start.bind(this));
+    return;
+  }
+
+  // Guard against the following cases:
+  // - Socket was destroyed before the connection was established
+  // - TLSSocket can not be upgraded if the secureTransport is already 'on'.
+  if (this._handle == null || this._handle.socket.secureTransport === 'on') {
+    return;
+  }
+
+  // We first need to release the lock
+  this._handle.writer.releaseLock();
+  this._handle.reader.releaseLock();
+
+  try {
+    const socket = this._handle.socket.startTls();
+
+    this._handle = {
+      socket: socket,
+      writer: socket.writable.getWriter(),
+      reader: socket.readable.getReader({ mode: 'byob' }),
+      bytesRead: 0,
+      bytesWritten: 0,
+      reading: true,
+      options: this._handle.options,
+    };
+
+    // This is now an encrypted connection.
+    // There are cases where in node:net we have to distinguish between
+    // encrypted and unencrypted connections.
+    this.encrypted = true;
+
+    // This is required to simulate the real-world usage.
+    // TODO(soon): Replace this once this._handle.socket.opened is triggered for
+    // upgraded TCP connections.
+    queueMicrotask(() => {
+      onConnectionOpened.bind(this)();
+    });
+
+    // this._handle.socket.opened.then(onConnectionOpened.bind(this), (err: unknown) => {
+    //   this.emit('connectionAttemptFailed', host, port, addressType, err);
+    //   this.destroy(err as Error);
+    // });
+
+    this._handle.socket.closed.then(
+      onConnectionClosed.bind(this),
+      this.destroy.bind(socket)
+    );
+  } catch (error) {
+    this.destroy(error as Error);
+  }
 };
 
 TLSSocket.prototype.setServername = function setServername(
@@ -618,7 +681,6 @@ export function connect(...args: unknown[]): TLSSocket {
   const tlssock = new TLSSocket(options.socket, {
     allowHalfOpen: options.allowHalfOpen,
     pipe: !!options.path,
-    session: options.session,
     ALPNProtocols: options.ALPNProtocols,
     enableTrace: options.enableTrace,
     highWaterMark: options.highWaterMark,
@@ -647,7 +709,9 @@ export function connect(...args: unknown[]): TLSSocket {
       tlssock.setTimeout(options.timeout);
     }
 
-    tlssock.connect(options, tlssock._start.bind(tlssock));
+    // Node.js calls _start() here, but we don't.
+    // This is done to reduce calling unnecessary startTls() calls.
+    tlssock.connect(options);
   }
 
   tlssock._releaseControl();
