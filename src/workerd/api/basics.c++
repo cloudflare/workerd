@@ -218,7 +218,7 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
 
 void EventTarget::addEventListener(jsg::Lock& js,
     kj::String type,
-    jsg::Identified<Handler> handler,
+    kj::Maybe<jsg::Identified<Handler>> maybeHandler,
     jsg::Optional<AddEventListenerOpts> maybeOptions) {
   if (warnOnSpecialEvents && isSpecialEventType(type)) {
     js.logWarning(kj::str("When using module syntax, the '", type,
@@ -227,95 +227,97 @@ void EventTarget::addEventListener(jsg::Lock& js,
         "the global addEventListener()."));
   }
 
-  js.withinHandleScope([&] {
-    // Per the spec, the handler can be either a Function, or an object with a
-    // handleEvent member function.
-    HandlerFunction handlerFn = ([&]() {
-      KJ_SWITCH_ONEOF(handler.unwrapped) {
-        KJ_CASE_ONEOF(fn, HandlerFunction) {
-          return kj::mv(fn);
+  KJ_IF_SOME(handler, maybeHandler) {
+    js.withinHandleScope([&] {
+      // Per the spec, the handler can be either a Function, or an object with a
+      // handleEvent member function.
+      HandlerFunction handlerFn = ([&]() {
+        KJ_SWITCH_ONEOF(handler.unwrapped) {
+          KJ_CASE_ONEOF(fn, HandlerFunction) {
+            return kj::mv(fn);
+          }
+          KJ_CASE_ONEOF(obj, HandlerObject) {
+            return kj::mv(obj.handleEvent);
+          }
         }
-        KJ_CASE_ONEOF(obj, HandlerObject) {
-          return kj::mv(obj.handleEvent);
+        KJ_UNREACHABLE;
+      })();
+
+      bool once = false;
+      kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+      kj::Maybe<jsg::Ref<AbortSignal>> maybeFollowingSignal;
+      KJ_IF_SOME(value, maybeOptions) {
+        KJ_SWITCH_ONEOF(value) {
+          KJ_CASE_ONEOF(b, bool) {
+            JSG_REQUIRE(!b, TypeError, "addEventListener(): useCapture must be false.");
+          }
+          KJ_CASE_ONEOF(opts, AddEventListenerOptions) {
+            JSG_REQUIRE(!opts.capture.orDefault(false), TypeError,
+                "addEventListener(): options.capture must be false.");
+            JSG_REQUIRE(!opts.passive.orDefault(false), TypeError,
+                "addEventListener(): options.passive must be false.");
+            once = opts.once.orDefault(false);
+            maybeSignal = kj::mv(opts.signal);
+            maybeFollowingSignal = kj::mv(opts.followingSignal);
+          }
         }
       }
-      KJ_UNREACHABLE;
-    })();
-
-    bool once = false;
-    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
-    kj::Maybe<jsg::Ref<AbortSignal>> maybeFollowingSignal;
-    KJ_IF_SOME(value, maybeOptions) {
-      KJ_SWITCH_ONEOF(value) {
-        KJ_CASE_ONEOF(b, bool) {
-          JSG_REQUIRE(!b, TypeError, "addEventListener(): useCapture must be false.");
-        }
-        KJ_CASE_ONEOF(opts, AddEventListenerOptions) {
-          JSG_REQUIRE(!opts.capture.orDefault(false), TypeError,
-              "addEventListener(): options.capture must be false.");
-          JSG_REQUIRE(!opts.passive.orDefault(false), TypeError,
-              "addEventListener(): options.passive must be false.");
-          once = opts.once.orDefault(false);
-          maybeSignal = kj::mv(opts.signal);
-          maybeFollowingSignal = kj::mv(opts.followingSignal);
+      KJ_IF_SOME(signal, maybeSignal) {
+        // If the AbortSignal has already been triggered, then we need to stop here.
+        // Return without adding the event listener.
+        if (signal->getAborted()) {
+          return;
         }
       }
-    }
-    KJ_IF_SOME(signal, maybeSignal) {
-      // If the AbortSignal has already been triggered, then we need to stop here.
-      // Return without adding the event listener.
-      if (signal->getAborted()) {
-        return;
+
+      auto& set = getOrCreate(type);
+
+      auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
+        // The returned native handler captures a bare reference to signal and
+        // will be held by this EventTarget. The signal is the only thing that
+        // triggers it. If signal is gc'd the native handler created here could
+        // still be alive which means *technically* it will be holding a bare
+        // reference for something that is already destroyed. However, there's
+        // nothing else that would trigger it so it's generally safe-ish. That
+        // said, it's still a potential UAF so let's guard against it by attaching
+        // a strong reference to the signal to the event handler. This will mean
+        // likely keeping the signal in memory longer if it can otherwise be
+        // gc'd but that's ok, the impact should be minimal.
+        auto func =
+            JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js),
+                                     signal = signal.addRef()),
+                (handler, signal), (jsg::Lock& js, jsg::Ref<Event>) {
+                  removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
+                });
+
+        return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
+      });
+
+      auto eventHandler = kj::heap<EventHandler>(
+          EventHandler::JavaScriptHandler{
+            .identity = kj::mv(handler.identity),
+            .callback = kj::mv(handlerFn),
+            .abortHandler = kj::mv(maybeAbortHandler),
+          },
+          once);
+
+      // If maybeFollowingSignal is set, we need to attach it to the event handler
+      // in order to keep it alive. This is used only for AbortSignal.any() where
+      // the followed signal (this) is being followed by another signal. We need
+      // to make sure the following signal stays alive until either the followed
+      // signal is triggered or destroyed.
+      KJ_IF_SOME(following, maybeFollowingSignal) {
+        eventHandler = eventHandler.attach(kj::mv(following));
       }
-    }
 
-    auto& set = getOrCreate(type);
-
-    auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
-      // The returned native handler captures a bare reference to signal and
-      // will be held by this EventTarget. The signal is the only thing that
-      // triggers it. If signal is gc'd the native handler created here could
-      // still be alive which means *technically* it will be holding a bare
-      // reference for something that is already destroyed. However, there's
-      // nothing else that would trigger it so it's generally safe-ish. That
-      // said, it's still a potential UAF so let's guard against it by attaching
-      // a strong reference to the signal to the event handler. This will mean
-      // likely keeping the signal in memory longer if it can otherwise be
-      // gc'd but that's ok, the impact should be minimal.
-      auto func =
-          JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js),
-                                   signal = signal.addRef()),
-              (handler, signal), (jsg::Lock& js, jsg::Ref<Event>) {
-                removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
-              });
-
-      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
+      set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
     });
-
-    auto eventHandler = kj::heap<EventHandler>(
-        EventHandler::JavaScriptHandler{
-          .identity = kj::mv(handler.identity),
-          .callback = kj::mv(handlerFn),
-          .abortHandler = kj::mv(maybeAbortHandler),
-        },
-        once);
-
-    // If maybeFollowingSignal is set, we need to attach it to the event handler
-    // in order to keep it alive. This is used only for AbortSignal.any() where
-    // the followed signal (this) is being followed by another signal. We need
-    // to make sure the following signal stays alive until either the followed
-    // signal is triggered or destroyed.
-    KJ_IF_SOME(following, maybeFollowingSignal) {
-      eventHandler = eventHandler.attach(kj::mv(following));
-    }
-
-    set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
-  });
+  }
 }
 
 void EventTarget::removeEventListener(jsg::Lock& js,
     kj::String type,
-    jsg::HashableV8Ref<v8::Object> handler,
+    kj::Maybe<jsg::HashableV8Ref<v8::Object>> maybeHandler,
     jsg::Optional<EventListenerOpts> maybeOptions) {
   KJ_IF_SOME(value, maybeOptions) {
     KJ_SWITCH_ONEOF(value) {
@@ -329,11 +331,13 @@ void EventTarget::removeEventListener(jsg::Lock& js,
     }
   }
 
-  js.withinHandleScope([&] {
-    KJ_IF_SOME(handlerSet, typeMap.find(type)) {
-      handlerSet.handlers.eraseMatch(handler);
-    }
-  });
+  KJ_IF_SOME(handler, maybeHandler) {
+    js.withinHandleScope([&] {
+      KJ_IF_SOME(handlerSet, typeMap.find(type)) {
+        handlerSet.handlers.eraseMatch(handler);
+      }
+    });
+  }
 }
 
 void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {

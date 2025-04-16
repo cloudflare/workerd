@@ -333,11 +333,11 @@ class EventTarget: public jsg::Object {
 
   void addEventListener(jsg::Lock& js,
       kj::String type,
-      jsg::Identified<Handler> handler,
+      kj::Maybe<jsg::Identified<Handler>> maybeHandler,
       jsg::Optional<AddEventListenerOpts> maybeOptions);
   void removeEventListener(jsg::Lock& js,
       kj::String type,
-      jsg::HashableV8Ref<v8::Object> handler,
+      kj::Maybe<jsg::HashableV8Ref<v8::Object>> maybeHandler,
       jsg::Optional<EventListenerOpts> options);
   bool dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event);
 
