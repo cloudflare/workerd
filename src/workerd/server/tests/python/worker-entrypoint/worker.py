@@ -2,6 +2,8 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
+import os
+
 from workers import WorkerEntrypoint
 
 
@@ -11,6 +13,8 @@ class WorkerEntrypointExample(WorkerEntrypoint):
         self.counter = 0
 
     async def rpc_trigger_func(self):
+        # Test that entropy works in WorkerEntrypoint...
+        os.urandom(4)
         self.counter += 1
         return f"hello from python {self.counter}"
 
