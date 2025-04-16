@@ -83,8 +83,8 @@ uint32_t writeInto(jsg::Lock& js,
     return 0;
   }
 
-  static constexpr jsg::JsString::WriteOptions flags = static_cast<jsg::JsString::WriteOptions>(
-      jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
+  static constexpr jsg::JsString::WriteFlags flags =
+      jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8;
 
   switch (encoding) {
     case Encoding::ASCII:
@@ -120,10 +120,7 @@ uint32_t writeInto(jsg::Lock& js,
     }
     case Encoding::HEX: {
       KJ_STACK_ARRAY(kj::byte, buf, string.length(js), 1024, 536870888);
-      static constexpr jsg::JsString::WriteOptions options =
-          static_cast<jsg::JsString::WriteOptions>(
-              jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
-      string.writeInto(js, buf, options);
+      string.writeInto(js, buf, flags);
       auto backing = decodeHexTruncated(js, buf, false);
       auto bytes = backing.asArrayPtr();
       auto amountToCopy = kj::min(bytes.size(), dest.size());
@@ -140,8 +137,7 @@ jsg::BackingStore decodeStringImpl(
   auto length = string.length(js);
   if (length == 0) return jsg::BackingStore::alloc<v8::Uint8Array>(js, 0);
 
-  static constexpr jsg::JsString::WriteOptions options = static_cast<jsg::JsString::WriteOptions>(
-      jsg::JsString::NO_NULL_TERMINATION | jsg::JsString::REPLACE_INVALID_UTF8);
+  static constexpr jsg::JsString::WriteFlags options = jsg::JsString::REPLACE_INVALID_UTF8;
 
   switch (encoding) {
     case Encoding::ASCII:

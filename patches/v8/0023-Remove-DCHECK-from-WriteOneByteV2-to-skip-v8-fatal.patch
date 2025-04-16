@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ketan Gupta <ketan@cloudflare.com>
+Date: Mon, 24 Mar 2025 12:29:19 +0000
+Subject: Remove DCHECK from WriteOneByteV2 to skip v8 fatal
+
+We already check for this after calling WriteOneByteV2()
+and throw a TypeError if the input string isn't one-byte only.
+
+diff --git a/src/api/api.cc b/src/api/api.cc
+index b8cf3fc6ce105490ae19f569bd45dc85fc5a384d..45d538e79cd1a830cdd070315c2bb3221cf6e686 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -6018,7 +6018,8 @@ void String::WriteV2(Isolate* v8_isolate, uint32_t offset, uint32_t length,
+ 
+ void String::WriteOneByteV2(Isolate* v8_isolate, uint32_t offset,
+                             uint32_t length, uint8_t* buffer, int flags) const {
+-  DCHECK(IsOneByte());
++  // We want to throw a TypeError instead of a v8 fatal
++  // DCHECK(IsOneByte());
+   WriteHelperV2(reinterpret_cast<i::Isolate*>(v8_isolate), this, buffer, offset,
+                 length, flags);
+ }
