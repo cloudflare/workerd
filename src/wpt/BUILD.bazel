@@ -31,6 +31,12 @@ wpt_test(
 )
 
 wpt_test(
+    name = "dom/events",
+    config = "dom/events-test.ts",
+    wpt_directory = "@wpt//:dom/events@module",
+)
+
+wpt_test(
     name = "fetch/api",
     size = "large",
     config = "fetch/api-test.ts",
