@@ -418,7 +418,17 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
   auto& actor = KJ_ASSERT_NONNULL(context.getActor());
   auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
 
-  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(scheduledTime)) {
+  kj::String actorId;
+  KJ_SWITCH_ONEOF(actor.getId()) {
+    KJ_CASE_ONEOF(f, kj::Own<ActorIdFactory::ActorId>) {
+      actorId = f->toString();
+    }
+    KJ_CASE_ONEOF(s, kj::String) {
+      actorId = kj::str(s);
+    }
+  }
+
+  KJ_SWITCH_ONEOF(persistent.armAlarmHandler(scheduledTime, false, actorId)) {
     KJ_CASE_ONEOF(armResult, ActorCacheInterface::RunAlarmHandler) {
       auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
       if (handler.alarm == kj::none) {

@@ -164,7 +164,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
 }
 
 kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCache::armAlarmHandler(
-    kj::Date scheduledTime, bool noCache) {
+    kj::Date scheduledTime, bool noCache, kj::StringPtr actorId) {
   noCache = noCache || lru.options.noCache;
 
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
@@ -174,6 +174,8 @@ kj::OneOf<ActorCache::CancelAlarmHandler, ActorCache::RunAlarmHandler> ActorCach
       if (t.status == KnownAlarmTime::Status::CLEAN) {
         // If there's a clean scheduledTime that is different from ours, this run should be
         // canceled.
+        LOG_WARNING_PERIODICALLY("NOSENTRY CRDB alarm handler canceled.", scheduledTime,
+            t.time.orDefault(kj::UNIX_EPOCH), actorId);
         return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       } else {
         // There's a alarm write that hasn't been set yet pending for a time different than ours --
