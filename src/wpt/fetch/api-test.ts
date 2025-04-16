@@ -169,7 +169,6 @@ export default {
   'basic/scheme-data.any.js': {
     comment: 'Response.type must be basic',
     expectedFailures: [
-      // For this test: we should not return body when invoking HEAD on data url
       'Fetching [HEAD] data:,response%27s%20body is OK',
       'Fetching data:,response%27s%20body is OK',
       'Fetching data:,response%27s%20body is OK (same-origin)',
@@ -690,11 +689,7 @@ export default {
     ],
   },
   'request/request-init-002.any.js': {},
-  'request/request-init-contenttype.any.js': {
-    comment:
-      'We are expected to have a space between multipart/form-data and the boundary field',
-    expectedFailures: ['Default Content-Type for Request with FormData body'],
-  },
+  'request/request-init-contenttype.any.js': {},
   'request/request-init-priority.any.js': {
     comment: 'Request.priority is not implemented',
     skipAllTests: true,
@@ -789,11 +784,7 @@ export default {
     expectedFailures: ['Check default value for statusText attribute'],
   },
   'response/response-init-002.any.js': {},
-  'response/response-init-contenttype.any.js': {
-    comment:
-      'We are inserting a space between multipart/form-data and the boundary',
-    expectedFailures: ['Default Content-Type for Response with FormData body'],
-  },
+  'response/response-init-contenttype.any.js': {},
   'response/response-static-error.any.js': {
     comment:
       'We need to make Headers immutable when constructing Response.error()',
