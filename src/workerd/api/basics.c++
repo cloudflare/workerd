@@ -272,12 +272,6 @@ void EventTarget::addEventListener(jsg::Lock& js,
     auto& set = getOrCreate(type);
 
     auto maybeAbortHandler = maybeSignal.map([&](jsg::Ref<AbortSignal>& signal) {
-      auto func =
-          JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js)),
-              (handler), (jsg::Lock& js, jsg::Ref<Event>) {
-                removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
-              });
-
       // The returned native handler captures a bare reference to signal and
       // will be held by this EventTarget. The signal is the only thing that
       // triggers it. If signal is gc'd the native handler created here could
@@ -288,8 +282,14 @@ void EventTarget::addEventListener(jsg::Lock& js,
       // a strong reference to the signal to the event handler. This will mean
       // likely keeping the signal in memory longer if it can otherwise be
       // gc'd but that's ok, the impact should be minimal.
-      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true)
-          .attach(signal.addRef());
+      auto func =
+          JSG_VISITABLE_LAMBDA((this, type = kj::mv(type), handler = handler.identity.addRef(js),
+                                   signal = signal.addRef()),
+              (handler, signal), (jsg::Lock& js, jsg::Ref<Event>) {
+                removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
+              });
+
+      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
     });
 
     auto eventHandler = kj::heap<EventHandler>(
