@@ -57,6 +57,7 @@ export {
   isArrayBufferView,
   isBigInt64Array,
   isBigUint64Array,
+  isFloat16Array,
   isFloat32Array,
   isFloat64Array,
   isInt8Array,
