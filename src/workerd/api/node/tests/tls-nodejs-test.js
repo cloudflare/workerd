@@ -37,6 +37,7 @@ import { inspect } from 'node:util';
 import net from 'node:net';
 import { translatePeerCertificate } from '_tls_common';
 import { mock } from 'node:test';
+import stream from 'node:stream';
 
 export const checkPortsSetCorrectly = {
   test(ctrl, env, ctx) {
@@ -871,5 +872,42 @@ export const testTlsPause = {
     });
 
     await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/cb5f671a34da32e3c2d70d7f3e7f869cda6b806b/test/parallel/test-tls-socket-allow-half-open-option.js
+export const testTlsSocketAllowHalfOpenOption = {
+  async test() {
+    {
+      // The option is ignored when the `socket` argument is a `net.Socket`.
+      const socket = new tls.TLSSocket(new net.Socket(), {
+        allowHalfOpen: true,
+      });
+      strictEqual(socket.allowHalfOpen, false);
+    }
+
+    // TODO(soon): Support this.
+    // {
+    //   // The option is ignored when the `socket` argument is a generic
+    //   // `stream.Duplex`.
+    //   const duplex = new stream.Duplex({
+    //     allowHalfOpen: false,
+    //     read() {}
+    //   });
+    //   const socket = new tls.TLSSocket(duplex, { allowHalfOpen: true });
+    //   strictEqual(socket.allowHalfOpen, false);
+    // }
+
+    {
+      const socket = new tls.TLSSocket();
+      strictEqual(socket.allowHalfOpen, false);
+    }
+
+    {
+      // The option is honored when the `socket` argument is not specified.
+      const socket = new tls.TLSSocket(undefined, { allowHalfOpen: true });
+      strictEqual(socket.allowHalfOpen, true);
+    }
   },
 };
