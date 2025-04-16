@@ -56,5 +56,4 @@ class CommonJsModuleContext final: public jsg::Object {
   kj::Path path;
   jsg::Value exports;
 };
-
 }  // namespace workerd::jsg
