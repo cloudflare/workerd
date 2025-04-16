@@ -9,7 +9,6 @@ export default {
   'AddEventListenerOptions-passive.any.js': {
     comment: 'TODO investigate this',
     expectedFailures: [
-      'Supports passive option on addEventListener only',
       'preventDefault should be ignored if-and-only-if the passive option is true',
       'passive behavior of one listener should be unaffected by the presence of other listeners',
       'Equivalence of option values',
@@ -43,11 +42,7 @@ export default {
     ],
   },
   'EventTarget-add-remove-listener.any.js': {},
-  'EventTarget-addEventListener.any.js': {
-    comment:
-      "Failed to execute 'addEventListener' on 'EventTarget': parameter 2 is not of type 'function or HandlerObject'.",
-    expectedFailures: ['Adding a null event listener should succeed'],
-  },
+  'EventTarget-addEventListener.any.js': {},
   'EventTarget-constructible.any.js': {
     comment: 'Should be null, not EventTarget',
     expectedFailures: [
@@ -55,8 +50,7 @@ export default {
     ],
   },
   'EventTarget-removeEventListener.any.js': {
-    comment:
-      "Failed to execute 'removeEventListener' on 'EventTarget': parameter 2 is not of type 'Object'.",
+    comment: 'TypeError: removeEventListener(): useCapture must be false.',
     expectedFailures: ['removing a null event listener should succeed'],
   },
   'event-global-extra.window.js': {
