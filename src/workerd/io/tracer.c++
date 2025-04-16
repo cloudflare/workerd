@@ -27,15 +27,27 @@ TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
     : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
 
 void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::Event&& event) {
-  // Becomes a non-op if a terminal event (close or hibernate) has been reported.
+  // Becomes a non-op if a terminal event (close or hibernate) has been reported, of if the stream
+  // closed due to not receiving a well-formed event handler. We need to disambiguate these cases as
+  // the former indicates an implementation error resulting in trailing events whereas the latter
+  // case is caused by a user error and events being reported after the stream being closed are
+  // expected – reject events following an outcome event, but otherwise just exit if the state has
+  // been closed.
+  // This could be an assert, but just log an error in case this is prevalent in some edge case.
+  if (outcomeSeen) {
+    KJ_LOG(ERROR, "reported tail stream event after stream close");
+  }
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
   // The onset set must be first and most only happen once.
   if (event.is<tracing::Onset>()) {
-    KJ_ASSERT(!s.onsetSeen, "Tail stream onset already provided");
-    s.onsetSeen = true;
+    KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
+    onsetSeen = true;
   } else {
-    KJ_ASSERT(s.onsetSeen, "Tail stream onset was not reported");
+    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
+    if (event.is<tracing::Outcome>() || event.is<tracing::Hibernate>()) {
+      outcomeSeen = true;
+    }
   }
 
   tracing::TailEvent tailEvent(context, s.timeSource(), s.sequence++, kj::mv(event));
@@ -363,15 +375,13 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
 
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
   KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
-  // TODO(streaming-tail): The fetch response info is currently being reported when terminating the
-  // request observer. This results in it being reported after the outcome event, which we need to
-  // avoid.
-  // KJ_IF_SOME(writer, maybeTailStreamWriter) {
-  //   KJ_LOG(WARNING, "setFetchResponseInfo");
-  //   writer->report(KJ_ASSERT_NONNULL(topLevelInvocationSpanContext),
-  //       tracing::Return(tracing::Return::Info(info.clone())));
-  // }
   trace->fetchResponseInfo = kj::mv(info);
+
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
+    writer->report(
+        spanContext, tracing::Return({KJ_ASSERT_NONNULL(trace->fetchResponseInfo).clone()}));
+  }
 }
 
 kj::Maybe<kj::Own<tracing::TailStreamWriter>>& WorkerTracer::getTailStreamWriter() {

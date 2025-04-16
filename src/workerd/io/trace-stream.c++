@@ -1022,6 +1022,10 @@ void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
     // Oh! We have no active sessions. Well, never mind then, let's
     // transition to a closed state and drop everything on the floor.
     inner = Closed{};
+
+    // Since we have no more living sessions (e.g. because all tail workers failed to return a valid
+    // handler), mark the state as closing as we can't handle future events anyway.
+    closing = true;
     return;
   }
 
@@ -1128,7 +1132,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // The tail stream has already been closed because we have received either
         // an outcome or hibernate event. The writer should have failed and we
         // actually shouldn't get here. Assert!
-        KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback evoked after close");
+        KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback invoked after close");
       }
       KJ_CASE_ONEOF(pending, TailStreamWriterState::Pending) {
         // This is our first event! It has to be an onset event, which the writer
@@ -1157,7 +1161,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     state.reportImpl(kj::mv(event));
 
     // The state is determined to be closing when it receives a terminal event
-    // like tracing::Onset or tracing::Hibernate. If we return true, then the
+    // like tracing::Outcome or tracing::Hibernate. If we return true, then the
     // writer expects more events to be received. If we return false, then the
     // writer can release any state it is holding because we don't expect any
     // more events to be dispatched. The writer should handle that case by
