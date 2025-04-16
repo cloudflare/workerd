@@ -138,6 +138,10 @@ export const tests = {
       const body = await resp.json();
 
       assert.deepEqual(body, {
+        headers: {
+          'content-length': '322',
+          'content-type': 'application/json',
+        },
         result: [
           {
             endpoint: '@cf/meta/llama-3.1-8b-instruct',
@@ -147,6 +151,56 @@ export const tests = {
               'cf-aig-custom-cost': '{"total_cost":1.22}',
               'cf-aig-metadata': '{"user":123}',
               'cf-aig-skip-cache': 'false',
+              Authorization: 'Bearer abcde',
+            },
+            provider: 'workers-ai',
+            query: { prompt: 'What is Cloudflare?' },
+          },
+        ],
+        success: true,
+      });
+    }
+
+    // Universal Run with global options
+    {
+      const resp = await env.ai.gateway('my-gateway').run(
+        {
+          provider: 'workers-ai',
+          endpoint: '@cf/meta/llama-3.1-8b-instruct',
+          headers: {
+            Authorization: 'Bearer abcde',
+            'Content-Type': 'application/json',
+          },
+          query: {
+            prompt: 'What is Cloudflare?',
+          },
+        },
+        {
+          gateway: {
+            skipCache: false,
+            cacheTtl: 123,
+          },
+          extraHeaders: {
+            'x-custom': 'stuff',
+          },
+        }
+      );
+
+      const body = await resp.json();
+
+      assert.deepEqual(body, {
+        headers: {
+          'content-length': '189',
+          'content-type': 'application/json',
+          'cf-aig-skip-cache': 'false',
+          'cf-aig-cache-ttl': '123',
+          'x-custom': 'stuff',
+        },
+        result: [
+          {
+            endpoint: '@cf/meta/llama-3.1-8b-instruct',
+            headers: {
+              'Content-Type': 'application/json',
               Authorization: 'Bearer abcde',
             },
             provider: 'workers-ai',
