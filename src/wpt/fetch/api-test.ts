@@ -784,10 +784,7 @@ export default {
     comment: 'Likely just missing validation',
     expectedFailures: ['Ensure response headers are immutable'],
   },
-  'response/response-init-001.any.js': {
-    comment: 'statusText should be inited to OK',
-    expectedFailures: ['Check default value for statusText attribute'],
-  },
+  'response/response-init-001.any.js': {},
   'response/response-init-002.any.js': {},
   'response/response-init-contenttype.any.js': {
     comment:
@@ -802,28 +799,10 @@ export default {
     ],
   },
   'response/response-static-json.any.js': {
-    comment: 'statusText does not match the status code',
-    expectedFailures: [
-      // For this test specifically: failed to throw on non-encodable data
-      'Check static json() throws when data is not encodable',
-      'Check response returned by static json() with init undefined',
-      'Check response returned by static json() with init {"status":400}',
-      'Check response returned by static json() with init {"headers":{}}',
-      'Check response returned by static json() with init {"headers":{"content-type":"foo/bar"}}',
-      'Check response returned by static json() with init {"headers":{"x-foo":"bar"}}',
-    ],
+    comment: 'Failed to throw on non-encodable data',
+    expectedFailures: ['Check static json() throws when data is not encodable'],
   },
-  'response/response-static-redirect.any.js': {
-    comment: 'statusText does not match the status code',
-    expectedFailures: [
-      'Check default redirect response',
-      'Check response returned by static method redirect(), status = 301',
-      'Check response returned by static method redirect(), status = 302',
-      'Check response returned by static method redirect(), status = 303',
-      'Check response returned by static method redirect(), status = 307',
-      'Check response returned by static method redirect(), status = 308',
-    ],
-  },
+  'response/response-static-redirect.any.js': {},
   'response/response-stream-bad-chunk.any.js': {
     comment:
       'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
