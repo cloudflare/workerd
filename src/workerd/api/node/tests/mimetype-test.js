@@ -15,7 +15,7 @@ export const test_ok = {
     ok(!mt.params.has('boundary'));
     mt.params.set('boundary', 'foo');
     ok(mt.params.has('boundary'));
-    strictEqual(mt.toString(), 'text/plain;charset=utf-8;boundary=foo');
+    strictEqual(mt.toString(), 'text/plain;charset=utf-8; boundary=foo');
 
     deepStrictEqual(Array.from(mt.params), [
       ['charset', 'utf-8'],

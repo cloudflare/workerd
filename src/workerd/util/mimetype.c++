@@ -304,7 +304,15 @@ kj::String MimeType::paramsToString() const {
 void MimeType::paramsToString(MimeType::ToStringBuffer& buffer) const {
   bool first = true;
   for (auto& param: params()) {
-    buffer.append(first ? "" : ";", param.key, "=");
+    buffer.append(first ? "" : ";");
+    if (param.key == "boundary") {
+      // This is to pass a pedantic WPT test that expects a space before only the boundary parameter
+      // [1]: https://html.spec.whatwg.org/#submit-body
+      // [2]: https://github.com/web-platform-tests/wpt/pull/29554
+      buffer.append(" ");
+    }
+
+    buffer.append(param.key, "=");
     first = false;
     if (param.value.size() == 0) {
       buffer.append("\"\"");
