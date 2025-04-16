@@ -308,6 +308,12 @@ class EventTarget: public jsg::Object {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
     JSG_STRUCT(capture, passive, once, signal);
+
+    // A following signal is used when the EventTarget is an AbortSignal
+    // that is being followed by another AbortSignal via the AbortSignal.any.
+    // This is used to keep the following signal alive until either the
+    // signal is triggered or this AbortSignal is destroyed.
+    jsg::Optional<jsg::Ref<AbortSignal>> followingSignal;
   };
 
   using AddEventListenerOpts = kj::OneOf<AddEventListenerOptions, bool>;

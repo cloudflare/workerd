@@ -244,6 +244,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
 
     bool once = false;
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+    kj::Maybe<jsg::Ref<AbortSignal>> maybeFollowingSignal;
     KJ_IF_SOME(value, maybeOptions) {
       KJ_SWITCH_ONEOF(value) {
         KJ_CASE_ONEOF(b, bool) {
@@ -256,6 +257,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
               "addEventListener(): options.passive must be false.");
           once = opts.once.orDefault(false);
           maybeSignal = kj::mv(opts.signal);
+          maybeFollowingSignal = kj::mv(opts.followingSignal);
         }
       }
     }
@@ -276,7 +278,18 @@ void EventTarget::addEventListener(jsg::Lock& js,
                 removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
               });
 
-      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true);
+      // The returned native handler captures a bare reference to signal and
+      // will be held by this EventTarget. The signal is the only thing that
+      // triggers it. If signal is gc'd the native handler created here could
+      // still be alive which means *technically* it will be holding a bare
+      // reference for something that is already destroyed. However, there's
+      // nothing else that would trigger it so it's generally safe-ish. That
+      // said, it's still a potential UAF so let's guard against it by attaching
+      // a strong reference to the signal to the event handler. This will mean
+      // likely keeping the signal in memory longer if it can otherwise be
+      // gc'd but that's ok, the impact should be minimal.
+      return signal->newNativeHandler(js, kj::str("abort"), kj::mv(func), true)
+          .attach(signal.addRef());
     });
 
     auto eventHandler = kj::heap<EventHandler>(
@@ -286,6 +299,15 @@ void EventTarget::addEventListener(jsg::Lock& js,
           .abortHandler = kj::mv(maybeAbortHandler),
         },
         once);
+
+    // If maybeFollowingSignal is set, we need to attach it to the event handler
+    // in order to keep it alive. This is used only for AbortSignal.any() where
+    // the followed signal (this) is being followed by another signal. We need
+    // to make sure the following signal stays alive until either the followed
+    // signal is triggered or destroyed.
+    KJ_IF_SOME(following, maybeFollowingSignal) {
+      eventHandler = eventHandler.attach(kj::mv(following));
+    }
 
     set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
   });
@@ -623,8 +645,9 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     sig->addEventListener(js, kj::str("abort"), kj::mv(identified),
         AddEventListenerOptions{// Once the abort is triggered, this handler should remove itself.
           .once = true,
-          // When the signal is triggered, we'll use it to cancel the other registered signals.
-          .signal = signal.addRef()});
+          // Each of the followed signals will maintain a strong reference to this new
+          // one that's been created.
+          .followingSignal = signal.addRef()});
   }
   return signal;
 }
