@@ -50,6 +50,12 @@ wpt_test(
     wpt_directory = "@wpt//:fetch/api@module",
 )
 
+wpt_test(
+    name = "encoding",
+    config = "encoding-test.ts",
+    wpt_directory = "@wpt//:encoding@module",
+)
+
 srcs = glob(
     [
         "**/*.ts",
