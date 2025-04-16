@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <kj/debug.h>
 #include <kj/filesystem.h>
 #include <kj/function.h>
 #include <kj/list.h>
@@ -46,7 +47,8 @@ class SqliteObserver {
       uint64_t dbWalBytesWritten,
       int queryResult,
       bool isInternalQuery,
-      kj::Maybe<kj::String> queryErrorDescription) {}
+      kj::Maybe<kj::String> queryErrorDescription,
+      kj::String queryRayId) {}
 
   static SqliteObserver DEFAULT;
 
@@ -232,6 +234,14 @@ class SqliteDatabase {
   // may throw if they depend on tables that haven't been recreated yet).
   void reset();
 
+  void setQueryId(kj::String id) {
+    queryRayId = kj::mv(id);
+  }
+
+  kj::String getQueryId() {
+    return kj::str(queryRayId);
+  }
+
   // Objects that need to be notified when reset() is called may inherit `ResetListener`.
   class ResetListener {
    public:
@@ -292,6 +302,7 @@ class SqliteDatabase {
   const Vfs& vfs;
   kj::Path path;
   bool readOnly;
+  kj::String queryRayId;
   SqliteObserver& sqliteObserver;
 
   // This pointer can be left null if a call to reset() failed to re-open the database.
@@ -547,9 +558,10 @@ class SqliteDatabase::Query final: private ResetListener {
  private:
   class QueryEvent {
    public:
-    explicit QueryEvent(SqliteObserver& sqliteObserver)
+    explicit QueryEvent(SqliteObserver& sqliteObserver, kj::String queryRayId)
         : observer(sqliteObserver),
           dbWalSizeBefore(sqliteObserver.getDbWalSize()),
+          queryRayId(kj::mv(queryRayId)),
           startTime(sqliteObserver.now()) {}
 
     ~QueryEvent() noexcept(false) {
@@ -558,7 +570,8 @@ class SqliteDatabase::Query final: private ResetListener {
       kj::Duration queryLatency = observer.now() - startTime;
 
       observer.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten, queryLatency,
-          dbWalBytesWritten, queryResult, isInternalQuery, kj::mv(queryErrorDescription));
+          dbWalBytesWritten, queryResult, isInternalQuery, kj::mv(queryErrorDescription),
+          kj::mv(queryRayId));
     }
 
     void setQueryEventStats(uint64_t rowsRead, uint64_t rowsWritten, bool isInternalQuery) {
@@ -584,6 +597,7 @@ class SqliteDatabase::Query final: private ResetListener {
     kj::Maybe<kj::String> queryStatement = kj::none;
     bool isInternalQuery = false;
     uint64_t dbWalSizeBefore;
+    kj::String queryRayId;
     kj::TimePoint startTime;
     uint64_t rowsRead = 0;
     uint64_t rowsWritten = 0;
@@ -618,7 +632,7 @@ class SqliteDatabase::Query final: private ResetListener {
       : ResetListener(db),
         regulator(regulator),
         maybeStatement(statement.prepareForExecution()),
-        queryEvent(this->db.sqliteObserver) {
+        queryEvent(this->db.sqliteObserver, this->db.getQueryId()) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
@@ -630,7 +644,7 @@ class SqliteDatabase::Query final: private ResetListener {
         regulator(regulator),
         ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         maybeStatement(ownStatement),
-        queryEvent(this->db.sqliteObserver) {
+        queryEvent(this->db.sqliteObserver, this->db.getQueryId()) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
