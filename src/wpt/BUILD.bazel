@@ -56,6 +56,12 @@ wpt_test(
     wpt_directory = "@wpt//:encoding@module",
 )
 
+wpt_test(
+    name = "compression",
+    config = "compression-test.ts",
+    wpt_directory = "@wpt//:compression@module",
+)
+
 srcs = glob(
     [
         "**/*.ts",
