@@ -44,7 +44,8 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   // some users may want it anyway.
   auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
   auto sock = setupSocket(js, kj::mv(conn), kj::str(getHost(), ":", getPort()), kj::none,
-      kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(this->randomHost), false);
+      kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(this->randomHost), false,
+      kj::none /* maybeOpenedPrPair */);
   sock->handleProxyStatus(js, kj::mv(paf.promise));
   return sock;
 }
