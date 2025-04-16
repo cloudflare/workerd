@@ -25,11 +25,6 @@ bool getCaptureThrowsAsRejections(v8::Isolate* isolate) {
   return jsgIsolate.getCaptureThrowsAsRejections();
 }
 
-bool getCommonJsExportDefault(v8::Isolate* isolate) {
-  auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  return jsgIsolate.getCommonJsExportDefault();
-}
-
 bool getShouldSetToStringTag(v8::Isolate* isolate) {
   auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return jsgIsolate.shouldSetToStringTag();

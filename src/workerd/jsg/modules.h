@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/jsg/commonjs.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
@@ -97,7 +96,7 @@ class ModuleRegistry {
         kj::StringPtr content,
         kj::Own<CommonJsModuleProvider> provider)
         : provider(kj::mv(provider)),
-          evalFunc(initEvalFunc(lock, *provider, name, content)) {}
+          evalFunc(initEvalFunc(lock, *this->provider, name, content)) {}
 
     CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
     CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;

@@ -10,6 +10,7 @@
 #include <workerd/api/actor.h>
 #include <workerd/api/analytics-engine.h>
 #include <workerd/api/cache.h>
+#include <workerd/api/commonjs.h>
 #include <workerd/api/container.h>
 #include <workerd/api/crypto/impl.h>
 #include <workerd/api/encoding.h>
@@ -82,6 +83,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_BLOB_ISOLATE_TYPES,
     EW_CACHE_ISOLATE_TYPES,
     EW_CONTAINER_ISOLATE_TYPES,
+    EW_CJS_ISOLATE_TYPES,
     EW_CRYPTO_ISOLATE_TYPES,
     EW_ENCODING_ISOLATE_TYPES,
     EW_EVENTS_ISOLATE_TYPES,
@@ -114,9 +116,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
     jsg::InjectConfiguration<CompatibilityFlags::Reader>,
-    Worker::Api::ErrorInterface,
-    jsg::CommonJsModuleObject,
-    jsg::CommonJsModuleContext);
+    Worker::Api::ErrorInterface);
 
 static const PythonConfig defaultConfig{
   .packageDiskCacheRoot = kj::none,
@@ -611,25 +611,12 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
         named = compileNamedExports(module.getNamedExports());
       }
 
-      struct CommonJsImpl: public jsg::ModuleRegistry::CommonJsModuleInfo::CommonJsModuleProvider {
-        jsg::Ref<jsg::CommonJsModuleContext> context;
-        CommonJsImpl(jsg::Lock& js, kj::Path path)
-            : context(js.alloc<jsg::CommonJsModuleContext>(js, kj::mv(path))) {}
-        KJ_DISALLOW_COPY_AND_MOVE(CommonJsImpl);
-        jsg::JsObject getContext(jsg::Lock& js) override {
-          auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(js);
-          return jsg::JsObject(lock.wrap(js.v8Context(), context.addRef()));
-        }
-        jsg::JsValue getExports(jsg::Lock& js) override {
-          return jsg::JsValue(context->getModule(js)->getExports(js));
-        }
-      };
-
       return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(),
           named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
           jsg::ModuleRegistry::CommonJsModuleInfo(lock, module.getName(),
               module.getCommonJsModule(),
-              kj::heap<CommonJsImpl>(lock, kj::Path::parse(module.getName()))));
+              kj::heap<api::CommonJsImpl<JsgWorkerdIsolate::Lock>>(
+                  lock, kj::Path::parse(module.getName()))));
     }
     case config::Worker::Module::PYTHON_MODULE: {
       // Nothing to do. Handled in compileModules.

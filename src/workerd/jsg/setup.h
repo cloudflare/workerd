@@ -132,9 +132,6 @@ class IsolateBase {
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
   }
-  inline void setCommonJsExportDefault(kj::Badge<Lock>, bool exportDefault) {
-    exportCommonJsDefault = exportDefault;
-  }
 
   inline void setNodeJsCompatEnabled(kj::Badge<Lock>, bool enabled) {
     nodeJsCompatEnabled = enabled;
@@ -274,7 +271,6 @@ class IsolateBase {
   // and there are a number of async APIs that currently throw. When the captureThrowsAsRejections
   // flag is set, that old behavior is changed to be correct.
   bool captureThrowsAsRejections = false;
-  bool exportCommonJsDefault = false;
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
   bool setToStringTag = false;
@@ -345,10 +341,6 @@ class IsolateBase {
     return captureThrowsAsRejections;
   }
 
-  bool getCommonJsExportDefault() const {
-    return exportCommonJsDefault;
-  }
-
   // Add an item to the deferred destruction queue. Safe to call from any thread at any time.
   void deferDestruction(Item item);
 
@@ -378,7 +370,6 @@ class IsolateBase {
   friend class ExternalMemoryTarget;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
-  friend bool getCommonJsExportDefault(v8::Isolate* isolate);
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   friend kj::Exception createTunneledException(

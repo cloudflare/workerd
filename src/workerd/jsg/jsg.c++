@@ -211,10 +211,6 @@ void Lock::setToStringTag() {
   IsolateBase::from(v8Isolate).enableSetToStringTag();
 }
 
-void Lock::setCommonJsExportDefault(bool exportDefault) {
-  IsolateBase::from(v8Isolate).setCommonJsExportDefault({}, exportDefault);
-}
-
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
 }
