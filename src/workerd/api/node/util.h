@@ -126,6 +126,7 @@ class MIMEType final: public jsg::Object {
   V(DataView)                                                                                      \
   V(Date)                                                                                          \
   V(External)                                                                                      \
+  V(Float16Array)                                                                                  \
   V(Float32Array)                                                                                  \
   V(Float64Array)                                                                                  \
   V(GeneratorFunction)                                                                             \
