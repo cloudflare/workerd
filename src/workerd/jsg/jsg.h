@@ -2377,9 +2377,21 @@ class Lock {
 
   // Returns a DOMString with an external memory adjustment attached.
   DOMString accountedDOMString(kj::Array<char>&& str);
+  DOMString accountedDOMString(kj::String&& str) {
+    return accountedDOMString(str.releaseArray());
+  }
+  DOMString accountedDOMString(kj::StringPtr str) {
+    return accountedDOMString(kj::str(str));
+  }
 
   // Returns a USVString with an external memory adjustment attached.
   USVString accountedUSVString(kj::Array<char>&& str);
+  USVString accountedUSVString(kj::String&& str) {
+    return accountedUSVString(str.releaseArray());
+  }
+  USVString accountedUSVString(kj::StringPtr str) {
+    return accountedUSVString(kj::str(str));
+  }
 
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();

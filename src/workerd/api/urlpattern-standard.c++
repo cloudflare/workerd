@@ -67,17 +67,23 @@ ada::url_pattern_init URLPattern::URLPatternInit::toAdaType() const {
   return init;
 }
 
-URLPattern::URLPatternInit URLPattern::createURLPatternInit(const ada::url_pattern_init& other) {
+URLPattern::URLPatternInit URLPattern::createURLPatternInit(
+    jsg::Lock& js, const ada::url_pattern_init& other) {
+  // By converting to USVString we are asserting that these values are always valid UTF-8 data,
+  // with no unpaired surrogates, etc. This is true because these values are derived from user
+  // input that was already a USVString, and ada-url will not introduce invalid UTF-8 data when
+  // it processes input.
+
   URLPatternInit result{};
 #define V(_, name)                                                                                 \
   if (auto v = other.name) {                                                                       \
-    result.name = kj::str(kj::ArrayPtr(v->c_str(), v->size()));                                    \
+    result.name = js.accountedUSVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));             \
   }
   URL_PATTERN_COMPONENTS(V)
 #undef V
 
   if (auto v = other.base_url) {
-    result.baseURL = kj::str(kj::ArrayPtr(v->c_str(), v->size()));
+    result.baseURL = js.accountedUSVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));
   }
   return result;
 }
@@ -122,7 +128,7 @@ URLPattern::URLPatternResult URLPattern::createURLPatternResult(
     } else {
       KJ_DASSERT(std::holds_alternative<ada::url_pattern_init>(input));
       auto obj = std::get<ada::url_pattern_init>(input);
-      vecInputs[i] = createURLPatternInit(obj);
+      vecInputs[i] = createURLPatternInit(js, obj);
     }
     i++;
   }

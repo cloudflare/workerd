@@ -54,10 +54,10 @@ class URLPattern final: public jsg::Object {
   // it will be parsed to create a URLPatternInit. The URLPatternInit
   // API is defined as part of the URLPattern specification.
   struct URLPatternInit {
-#define V(_, name) jsg::Optional<kj::String> name;
+#define V(_, name) jsg::Optional<jsg::USVString> name;
     URL_PATTERN_COMPONENTS(V)
 #undef V
-    jsg::Optional<kj::String> baseURL;
+    jsg::Optional<jsg::USVString> baseURL;
 
     JSG_STRUCT(protocol, username, password, hostname, port, pathname, search, hash, baseURL);
     JSG_STRUCT_TS_OVERRIDE(URLPatternInit);
@@ -135,7 +135,7 @@ class URLPattern final: public jsg::Object {
  private:
   ada::url_pattern<URLPatternRegexEngine> inner;
 
-  static URLPatternInit createURLPatternInit(const ada::url_pattern_init& other);
+  static URLPatternInit createURLPatternInit(jsg::Lock& js, const ada::url_pattern_init& other);
   static URLPatternComponentResult createURLPatternComponentResult(
       jsg::Lock& js, const ada::url_pattern_component_result& other);
   static URLPatternResult createURLPatternResult(

@@ -14,10 +14,7 @@ export default {
     skipAllTests: true,
   },
   'urlpattern-hasregexpgroups.any.js': {},
-  'urlpattern.any.js': {
-    comment: 'Invalid tests',
-    expectedFailures: ['Pattern: [{"pathname":"\\ud83d \\udeb2"}] Inputs: []'],
-  },
+  'urlpattern.any.js': {},
   'urlpattern.https.any.js': {
     comment: 'Test cases are identical to urlpattern.any.js.',
     skipAllTests: true,
