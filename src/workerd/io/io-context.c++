@@ -1098,7 +1098,8 @@ void IoContext::runImpl(Runnable& runnable,
         js.terminateExecution();
       }
 
-      do {
+      // Run microtask checkpoint with an active IoContext
+      {
         // Running the microtask queue can itself trigger a pending exception in the isolate.
         v8::TryCatch tryCatch(workerLock.getIsolate());
 
@@ -1114,16 +1115,38 @@ void IoContext::runImpl(Runnable& runnable,
           // Ensure we don't pump the message loop in this case
           gotTermination = true;
         }
-      } while ([&]() {
-        if (gotTermination) {
-          // TerminateExecution() doesn't drain any tasks from platform's task queue
-          // so we want to avoid pumping the message loop in this case
-          return false;
-        } else {
-          SuppressIoContextScope noIoCtxt;
-          return js.pumpMsgLoop();
+      }
+
+      // Run FinalizationRegistry cleanup tasks without an IoContext
+      {
+        SuppressIoContextScope noIoCtxt;
+        while (!gotTermination && js.pumpMsgLoop()) {
+          // Check if FinalizationRegistry cleanup callbacks have not breached our limits
+          if (limitEnforcer->getLimitsExceeded() != kj::none) {
+            // We can potentially log this, but due to a lack of IoContext we cannot notify
+            // the worker
+            break;
+          }
+
+          // It is possible that a microtask got enqueued during pumpMsgLoop execution
+          // Microtasks enqueued by FinalizationRegistry cleanup tasks should also run
+          // without an active IoContext
+          v8::TryCatch tryCatch(workerLock.getIsolate());
+
+          js.runMicrotasks();
+
+          if (tryCatch.HasCaught()) {
+            // It really shouldn't be possible for microtasks to throw regular exceptions.
+            // so if we got here it should be a terminal condition.
+            KJ_ASSERT(tryCatch.HasTerminated());
+            // If we do not reset here we end up with a dangling exception in the isolate that
+            // leads to an assert in v8 when the Lock is destroyed.
+            tryCatch.Reset();
+            // Ensure we don't pump the message loop in this case
+            gotTermination = true;
+          }
         }
-      }());
+      }
     });
 
     v8::TryCatch tryCatch(workerLock.getIsolate());

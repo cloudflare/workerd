@@ -5,8 +5,6 @@ const fr = new FinalizationRegistry(() => {
   ++frCounter;
 });
 
-let wait = (delay) => new Promise((res) => setTimeout(res, delay));
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -15,16 +13,14 @@ export default {
     if (test === 'fr') {
       // Test FinalizationRegistry
       (function () {
-        let obj = {};
-        fr.register(obj, '');
-        obj = undefined;
+        fr.register({}, '');
       })();
 
       // Ensure obj gets GC'd
       gc();
 
       if (frCounter > 0) {
-        await wait(10);
+        await scheduler.wait(10);
       }
 
       return new Response(frCounter.toString());
@@ -39,17 +35,15 @@ export default {
         weakRefState.isDereferenced = false;
         weakRefState.value = ref.deref()?.message || null;
 
-        return new Response(
-          JSON.stringify({
-            created: true,
-            value: weakRefState.value,
-          })
-        );
+        return Response.json({
+          created: true,
+          value: weakRefState.value,
+        });
       }
       if (url.searchParams.has('gc')) {
         // Force garbage collection and check if the WeakRef has been cleared
         gc();
-        await wait(10); // Give GC time to clean up
+        await scheduler.wait(10); // Give GC time to clean up
       }
 
       // Just return the current state
@@ -57,12 +51,10 @@ export default {
       weakRefState.isDereferenced = value === null;
       weakRefState.value = value;
 
-      return new Response(
-        JSON.stringify({
-          isDereferenced: weakRefState.isDereferenced,
-          value: weakRefState.value,
-        })
-      );
+      return Response.json({
+        isDereferenced: weakRefState.isDereferenced,
+        value: weakRefState.value,
+      });
     }
 
     return new Response('Invalid test', { status: 400 });
