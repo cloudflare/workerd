@@ -1,7 +1,6 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
 load("//:build/python_metadata.bzl", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
@@ -195,9 +194,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     else:
         esbuild(
             name = "emscriptenSetup@" + version,
+            # exclude emscriptenSetup from source set so that rules_ts won't also try to create a JS output
+            # for it. The file is provided in entry_point instead.
             srcs = native.glob([
                 "internal/pool/*.ts",
-            ]) + [
+            ], exclude = ["internal/pool/emscriptenSetup.ts"]) + [
                 _out_path("pyodide.asm.js", version),
                 "internal/util.ts",
             ],
@@ -229,7 +230,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
             # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
+            # "internal/pool/*.ts",
             "types/*.ts",
             "types/*/*.ts",
         ],
