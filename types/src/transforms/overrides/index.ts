@@ -133,8 +133,8 @@ function groupMembersByKey<Member extends ts.ClassElement | ts.TypeElement>(
 
 // Returns the index of a member in `members` with the specified `key`, or -1 if
 // none exists
-function findMemberIndex<Member extends ts.ClassElement | ts.TypeElement>(
-  members: Member[],
+function findMemberIndex(
+  members: (ts.ClassElement | ts.TypeElement)[],
   key: string,
   fromIndex = 0
 ): number {

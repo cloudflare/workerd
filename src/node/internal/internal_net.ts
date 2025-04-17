@@ -646,7 +646,7 @@ Socket.prototype._final = function (
 Socket.prototype.end = function (
   this: Socket,
   data: string | Uint8Array,
-  encoding?: NodeJS.BufferEncoding,
+  encoding: NodeJS.BufferEncoding,
   cb?: () => void
 ): Socket {
   Duplex.prototype.end.call(this, data, encoding, cb);
