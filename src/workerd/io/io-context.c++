@@ -1122,9 +1122,7 @@ void IoContext::runImpl(Runnable& runnable,
         SuppressIoContextScope noIoCtxt;
         while (!gotTermination && js.pumpMsgLoop()) {
           // Check if FinalizationRegistry cleanup callbacks have not breached our limits
-          try {
-            limitEnforcer->requireLimitsNotExceeded();
-          } catch (...) {
+          if (limitEnforcer->getLimitsExceeded() != kj::none) {
             // We can potentially log this, but due to a lack of IoContext we cannot notify
             // the worker
             break;
