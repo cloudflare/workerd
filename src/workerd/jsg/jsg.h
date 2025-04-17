@@ -1061,7 +1061,13 @@ class USVString: public kj::String {
   // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
   // constructor instead.
   template <typename... Params>
-  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
+  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {
+    KJ_DASSERT(isValidUtf8());
+  }
+
+ private:
+  // This is a seperate method to avoid including simdutf8 in the header file.
+  bool isValidUtf8() const;
 };
 
 // A DOMString has the exact same representation as a kj::String, but may contain WTF-8 encoded

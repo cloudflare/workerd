@@ -5,6 +5,7 @@
 #include "jsg.h"
 
 #include "setup.h"
+#include "simdutf.h"
 
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
@@ -497,6 +498,10 @@ kj::String Name::toString(jsg::Lock& js) {
 
 bool isInGcDestructor() {
   return HeapTracer::isInCppgcDestructor();
+}
+
+bool USVString::isValidUtf8() const {
+  return simdutf::validate_utf8(cStr(), size());
 }
 
 }  // namespace workerd::jsg
