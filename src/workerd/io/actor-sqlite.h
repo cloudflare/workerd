@@ -77,7 +77,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false) override;
+      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   kj::Promise<kj::String> getCurrentBookmark() override;
