@@ -1001,7 +1001,6 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
-    lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
     if (features.getSetToStringTag()) {
       lock->setToStringTag();
     }

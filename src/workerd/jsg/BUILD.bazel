@@ -78,7 +78,6 @@ wd_cc_library(
     srcs = [
         "async-context.c++",
         "buffersource.c++",
-        "commonjs.c++",
         "dom-exception.c++",
         "jsg.c++",
         "jsvalue.c++",
@@ -95,7 +94,6 @@ wd_cc_library(
     hdrs = [
         "async-context.h",
         "buffersource.h",
-        "commonjs.h",
         "dom-exception.h",
         "function.h",
         "jsg.h",

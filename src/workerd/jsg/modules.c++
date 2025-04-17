@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "commonjs.h"
 #include "jsg.h"
 #include "setup.h"
 
@@ -158,44 +157,32 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
         }
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::CommonJsModuleInfo) {
-        bool ok = true;
         v8::TryCatch catcher(js.v8Isolate);
         // const_cast is safe here because we're protected by the isolate js.
         auto& commonjs = const_cast<ModuleRegistry::CommonJsModuleInfo&>(info);
         try {
           commonjs.evalFunc(js);
-        } catch (const JsExceptionThrown&) {
-          if (catcher.CanContinue()) catcher.ReThrow();
-          // leave `result` empty to propagate the JS exception
-          ok = false;
-        }
-
-        if (ok) {
-          // Handle the named exports...
-          auto exports = commonjs.moduleContext->module->getExports(js);
-          if (!module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, exports).IsJust()) {
-            ok = false;
-          }
-
-          if (ok && exports->IsObject()) {
-            JsObject obj = JsObject(exports.As<v8::Object>());
-            KJ_IF_SOME(exports, ref.module.maybeNamedExports) {
-              for (auto& name: exports) {
-                // Ignore default... just in case someone was silly enough to include it.
-                if (name == "default"_kj) continue;
-                auto val = obj.get(js, name);
-                if (!module->SetSyntheticModuleExport(js.v8Isolate, js.strIntern(name), val)
-                         .IsJust()) {
-                  ok = false;
-                  break;
+          auto exports = commonjs.getExports(js);
+          if (module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, exports).IsJust()) {
+            KJ_IF_SOME(obj, exports.tryCast<JsObject>()) {
+              KJ_IF_SOME(exports, ref.module.maybeNamedExports) {
+                for (auto& name: exports) {
+                  // Ignore default... just in case someone was silly enough to include it.
+                  if (name == "default"_kj) continue;
+                  auto val = obj.get(js, name);
+                  if (!module->SetSyntheticModuleExport(js.v8Isolate, js.strIntern(name), val)
+                           .IsJust()) {
+                    break;
+                  }
                 }
               }
             }
+            result = makeResolvedPromise();
           }
+        } catch (const JsExceptionThrown&) {
+          if (catcher.CanContinue()) catcher.ReThrow();
+          // leave `result` empty to propagate the JS exception
         }
-
-        if (ok) result = makeResolvedPromise();
-        // If ok is false, we leave result empty to propagate the JS exception
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::TextModuleInfo) {
         if (module->SetSyntheticModuleExport(js.v8Isolate, defaultStr, info.value.getHandle(js))
@@ -399,9 +386,8 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
   }
 }
 
-Ref<CommonJsModuleContext> ModuleRegistry::CommonJsModuleInfo::initModuleContext(
-    jsg::Lock& js, kj::StringPtr name) {
-  return js.alloc<jsg::CommonJsModuleContext>(js, kj::Path::parse(name));
+jsg::JsValue ModuleRegistry::CommonJsModuleInfo::getExports(jsg::Lock& js) {
+  return provider->getExports(js);
 }
 
 ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
@@ -447,7 +433,7 @@ JsValue ModuleRegistry::requireImpl(Lock& js, ModuleInfo& info, RequireImplOptio
       module->GetStatus() == v8::Module::Status::kInstantiating) {
     KJ_IF_SOME(synth, info.maybeSynthetic) {
       KJ_IF_SOME(cjs, synth.tryGet<ModuleRegistry::CommonJsModuleInfo>()) {
-        return JsValue(cjs.moduleContext->getExports(js));
+        return cjs.getExports(js);
       }
     }
   }
