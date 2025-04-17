@@ -433,7 +433,6 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions options) {
   requireNotBroken();
-
   kv.put(key, value);
   return kj::none;
 }
@@ -603,7 +602,7 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 }
 
 kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSqlite::
-    armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+    armAlarmHandler(kj::Date scheduledTime, bool noCache, kj::StringPtr actorId) {
   KJ_ASSERT(!inAlarmHandler);
 
   if (haveDeferredDelete) {
@@ -625,8 +624,13 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         //
         // TODO(perf): If we already have such a rescheduling request in-flight, might want to
         // coalesce with the existing request?
+        LOG_WARNING_PERIODICALLY(
+            "NOSENTRY SQLite alarm handler canceled with requestScheduledAlarm.", scheduledTime,
+            localAlarmState.orDefault(kj::UNIX_EPOCH), actorId);
         return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
       } else {
+        LOG_WARNING_PERIODICALLY("NOSENTRY SQLite alarm handler canceled.", scheduledTime, actorId,
+            localAlarmState.orDefault(kj::UNIX_EPOCH));
         return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
       }
     } else {

@@ -4,7 +4,7 @@
 
 #include <kj/filesystem.h>
 
-namespace workerd::jsg {
+namespace workerd::api {
 
 class CommonJsModuleObject final: public jsg::Object {
  public:
@@ -19,7 +19,7 @@ class CommonJsModuleObject final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(path, getPath);
   }
 
-  void visitForMemoryInfo(MemoryTracker& tracker) const;
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
   jsg::Value exports;
@@ -50,11 +50,29 @@ class CommonJsModuleContext final: public jsg::Object {
 
   jsg::Ref<CommonJsModuleObject> module;
 
-  void visitForMemoryInfo(MemoryTracker& tracker) const;
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
   kj::Path path;
   jsg::Value exports;
 };
 
-}  // namespace workerd::jsg
+// Used with the original module registry implementation.
+template <typename LockType>
+struct CommonJsImpl: public jsg::ModuleRegistry::CommonJsModuleInfo::CommonJsModuleProvider {
+  jsg::Ref<api::CommonJsModuleContext> context;
+  CommonJsImpl(jsg::Lock& js, kj::Path path)
+      : context(js.alloc<api::CommonJsModuleContext>(js, kj::mv(path))) {}
+  KJ_DISALLOW_COPY_AND_MOVE(CommonJsImpl);
+  jsg::JsObject getContext(jsg::Lock& js) override {
+    auto& lock = kj::downcast<LockType>(js);
+    return jsg::JsObject(lock.wrap(js.v8Context(), context.addRef()));
+  }
+  jsg::JsValue getExports(jsg::Lock& js) override {
+    return jsg::JsValue(context->getModule(js)->getExports(js));
+  }
+};
+
+#define EW_CJS_ISOLATE_TYPES api::CommonJsModuleObject, api::CommonJsModuleContext
+
+}  // namespace workerd::api

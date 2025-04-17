@@ -1001,7 +1001,6 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
     lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
-    lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
     if (features.getSetToStringTag()) {
       lock->setToStringTag();
     }
@@ -1658,7 +1657,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                         // Python Workers append all durable objects, worker entrypoint and workflow
                         // entrypoint classes in the pythonEntrypoints named export.
                         bool isPythonWorker = FeatureFlags::get(js).getPythonWorkers();
-                        bool hasDoSupport = FeatureFlags::get(js).getPythonWorkersDurableObjects();
                         if (handler.name == "pythonEntrypoints" && isPythonWorker) {
                           auto handle = obj.self.getHandle(js);
                           auto dict = js.toDict(handle);
@@ -1666,8 +1664,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                             auto unwrapped = api.unwrapExport(lock, field.value);
                             KJ_SWITCH_ONEOF(unwrapped) {
                               KJ_CASE_ONEOF(cls, EntrypointClass) {
-                                JSG_REQUIRE(hasDoSupport, Error,
-                                    "The python_workers_durable_objects compat flag needs to be enabled for custom entrypoint support.");
                                 processEntrypointClass(
                                     js, kj::mv(cls), entrypointClasses, kj::mv(field.name));
                               }

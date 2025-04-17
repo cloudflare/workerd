@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/jsg/commonjs.h>
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
@@ -18,9 +17,6 @@
 #include <kj/map.h>
 
 namespace workerd::jsg {
-
-class CommonJsModuleContext;
-class CommonJsModuleObject;
 
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause
@@ -86,26 +82,33 @@ class ModuleRegistry {
   };
 
   struct CommonJsModuleInfo {
-    Ref<CommonJsModuleContext> moduleContext;
+    struct CommonJsModuleProvider {
+      virtual JsObject getContext(Lock& js) = 0;
+      virtual JsValue getExports(Lock& js) = 0;
+      virtual ~CommonJsModuleProvider() noexcept(false) = default;
+    };
+
+    kj::Own<CommonJsModuleProvider> provider;
     jsg::Function<void()> evalFunc;
 
-    CommonJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
-        : moduleContext(initModuleContext(lock, name)),
-          evalFunc(initEvalFunc(lock, moduleContext, name, content)) {}
+    CommonJsModuleInfo(auto& lock,
+        kj::StringPtr name,
+        kj::StringPtr content,
+        kj::Own<CommonJsModuleProvider> provider)
+        : provider(kj::mv(provider)),
+          evalFunc(initEvalFunc(lock, *this->provider, name, content)) {}
 
     CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
     CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;
 
-    static Ref<CommonJsModuleContext> initModuleContext(jsg::Lock& js, kj::StringPtr name);
+    jsg::JsValue getExports(jsg::Lock& js);
 
-    static jsg::Function<void()> initEvalFunc(auto& lock,
-        Ref<CommonJsModuleContext>& moduleContext,
-        kj::StringPtr name,
-        kj::StringPtr content) {
+    static jsg::Function<void()> initEvalFunc(
+        auto& lock, CommonJsModuleProvider& provider, kj::StringPtr name, kj::StringPtr content) {
       v8::ScriptOrigin origin(v8StrIntern(lock.v8Isolate, name));
       v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
       auto context = lock.v8Context();
-      auto handle = lock.wrap(context, moduleContext.addRef());
+      v8::Local<v8::Object> handle = provider.getContext(lock);
       auto fn =
           jsg::check(v8::ScriptCompiler::CompileFunction(context, &source, 0, nullptr, 1, &handle));
       return lock.template unwrap<jsg::Function<void()>>(context, fn);

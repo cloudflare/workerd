@@ -2189,7 +2189,7 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
 
   // The Fetch spec defines responses to HEAD or CONNECT requests, or responses with null body
   // statuses, as having null bodies.
-  // See https://fetch.spec.whatwg.org/#main-fetch step 11.
+  // See https://fetch.spec.whatwg.org/#main-fetch step 21.
   //
   // Note that we don't handle the CONNECT case here because kj-http handles CONNECT specially,
   // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
@@ -2253,11 +2253,22 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
 
     KJ_IF_SOME(dataUrl, DataUrl::tryParse(jsRequest->getUrl())) {
       // If the URL is a data URL, we need to handle it specially.
-      auto data = dataUrl.releaseData();
+      kj::Maybe<kj::Array<kj::byte>> maybeResponseBody;
+
+      // The Fetch spec defines responses to HEAD or CONNECT requests, or responses with null body
+      // statuses, as having null bodies.
+      // See https://fetch.spec.whatwg.org/#main-fetch step 21.
+      //
+      // Note that we don't handle the CONNECT case here because kj-http handles CONNECT specially,
+      // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
+      if (jsRequest->getMethodEnum() == kj::HttpMethod::GET) {
+        maybeResponseBody.emplace(dataUrl.releaseData());
+      }
+
       auto headers = js.alloc<Headers>();
       headers->set(js, js.accountedByteString("content-type"_kj),
           js.accountedByteString(dataUrl.getMimeType().toString()));
-      return js.resolvedPromise(Response::constructor(js, kj::Maybe(kj::mv(data)),
+      return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
             .statusText = kj::str("OK"),

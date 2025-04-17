@@ -467,7 +467,7 @@ declare global {
   ): Promise<void>;
   function get_host_info(): HostInfo;
   function token(): string;
-  function setup(func: UnknownFunc): void;
+  function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
 }
 
@@ -999,6 +999,10 @@ globalThis.token = (): string => {
 };
 
 globalThis.setup = (func): void => {
+  if (typeof func === 'object') {
+    return;
+  }
+
   func();
 };
 

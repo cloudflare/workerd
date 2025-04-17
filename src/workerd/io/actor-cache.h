@@ -228,7 +228,7 @@ class ActorCacheInterface: public ActorCacheOps {
 
   // Call when entering the alarm handler.
   virtual kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false) = 0;
+      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") = 0;
 
   virtual void cancelDeferredAlarmDeletion() = 0;
 
@@ -337,7 +337,7 @@ class ActorCache final: public ActorCacheInterface {
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
 
   kj::OneOf<CancelAlarmHandler, RunAlarmHandler> armAlarmHandler(
-      kj::Date scheduledTime, bool noCache = false) override;
+      kj::Date scheduledTime, bool noCache = false, kj::StringPtr actorId = "") override;
   void cancelDeferredAlarmDeletion() override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
   // See ActorCacheInterface

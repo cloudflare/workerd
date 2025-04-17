@@ -4385,3 +4385,300 @@ export const makeSureUtilTypesIsExported = {
     assert.ok(types.default.isTypedArray);
   },
 };
+
+export const testTypes = {
+  async test() {
+    const {
+      isCryptoKey,
+      isKeyObject,
+      isAsyncFunction,
+      isGeneratorFunction,
+      isGeneratorObject,
+      isAnyArrayBuffer,
+      isArrayBuffer,
+      isArgumentsObject,
+      isBoxedPrimitive,
+      isDataView,
+      isMap,
+      isMapIterator,
+      isModuleNamespaceObject,
+      isNativeError,
+      isPromise,
+      isProxy,
+      isSet,
+      isSetIterator,
+      isSharedArrayBuffer,
+      isWeakMap,
+      isWeakSet,
+      isRegExp,
+      isDate,
+      isStringObject,
+      isSymbolObject,
+      isNumberObject,
+      isBooleanObject,
+      isBigIntObject,
+      isArrayBufferView,
+      isBigInt64Array,
+      isBigUint64Array,
+      isFloat16Array,
+      isFloat32Array,
+      isFloat64Array,
+      isInt8Array,
+      isInt16Array,
+      isInt32Array,
+      isTypedArray,
+      isUint8Array,
+      isUint8ClampedArray,
+      isUint16Array,
+      isUint32Array,
+      isExternal,
+    } = await import('node:util/types');
+
+    {
+      const key = await crypto.subtle.importKey(
+        'raw',
+        new Uint8Array(3),
+        {
+          name: 'HMAC',
+          hash: 'SHA-256',
+        },
+        false,
+        ['sign']
+      );
+      assert.ok(isCryptoKey(key));
+      assert.ok(!isCryptoKey(1));
+    }
+
+    {
+      const { createSecretKey } = await import('node:crypto');
+      const key = createSecretKey('hello', 'utf8');
+      assert.ok(isKeyObject(key));
+      assert.ok(!isKeyObject(1));
+    }
+
+    {
+      const foo = async () => {};
+      assert.ok(isAsyncFunction(foo));
+      assert.ok(!isAsyncFunction(1));
+    }
+
+    {
+      function* foo() {}
+      assert.ok(isGeneratorFunction(foo));
+      assert.ok(!isGeneratorFunction(1));
+    }
+
+    {
+      function* foo() {}
+      const gen = foo();
+      assert.ok(isGeneratorObject(gen));
+      assert.ok(!isGeneratorObject(1));
+    }
+
+    {
+      assert.ok(isAnyArrayBuffer(new ArrayBuffer(0)));
+      assert.ok(isAnyArrayBuffer(new SharedArrayBuffer(0)));
+      assert.ok(!isAnyArrayBuffer(1));
+    }
+
+    {
+      assert.ok(isArrayBuffer(new ArrayBuffer(0)));
+      assert.ok(!isArrayBuffer(new SharedArrayBuffer(0)));
+      assert.ok(!isArrayBuffer(1));
+    }
+
+    {
+      (function () {
+        assert.ok(isArgumentsObject(arguments));
+        assert.ok(!isArgumentsObject(1));
+      })();
+    }
+
+    {
+      assert.ok(isBoxedPrimitive(new String('')));
+      assert.ok(!isBoxedPrimitive(1));
+    }
+
+    {
+      assert.ok(isDataView(new DataView(new ArrayBuffer(1))));
+      assert.ok(!isDataView(1));
+    }
+
+    {
+      assert.ok(isMap(new Map()));
+      assert.ok(!isMap(1));
+    }
+
+    {
+      const map = new Map();
+      assert.ok(isMapIterator(map.values()));
+      assert.ok(!isMapIterator(1));
+    }
+
+    {
+      const mod = await import('node:net');
+      assert.ok(isModuleNamespaceObject(mod));
+      assert.ok(!isModuleNamespaceObject(1));
+    }
+
+    {
+      assert.ok(isNativeError(new Error()));
+      assert.ok(!isNativeError(1));
+    }
+
+    {
+      assert.ok(isPromise(Promise.resolve()));
+      assert.ok(!isPromise(1));
+    }
+
+    {
+      assert.ok(isProxy(new Proxy({}, {})));
+      assert.ok(!isProxy(1));
+    }
+
+    {
+      assert.ok(isSet(new Set()));
+      assert.ok(!isSet(1));
+    }
+
+    {
+      const set = new Set();
+      assert.ok(isSetIterator(set.values()));
+      assert.ok(!isSetIterator(1));
+    }
+
+    {
+      assert.ok(isSharedArrayBuffer(new SharedArrayBuffer(0)));
+      assert.ok(!isSharedArrayBuffer(new ArrayBuffer(0)));
+      assert.ok(!isSharedArrayBuffer(1));
+    }
+
+    {
+      assert.ok(isWeakMap(new WeakMap()));
+      assert.ok(!isWeakMap(1));
+    }
+
+    {
+      assert.ok(isWeakSet(new WeakSet()));
+      assert.ok(!isWeakSet(1));
+    }
+
+    {
+      assert.ok(isRegExp(/abc/));
+      assert.ok(!isRegExp(1));
+    }
+
+    {
+      assert.ok(isDate(new Date()));
+      assert.ok(!isDate(1));
+    }
+
+    {
+      assert.ok(isStringObject(new String('')));
+      assert.ok(!isStringObject(''));
+    }
+
+    {
+      assert.ok(isSymbolObject(Object(Symbol('test'))));
+      assert.ok(!isSymbolObject(1));
+    }
+
+    {
+      assert.ok(isNumberObject(new Number(1)));
+      assert.ok(!isNumberObject(1));
+    }
+
+    {
+      assert.ok(isBooleanObject(new Boolean()));
+      assert.ok(!isBooleanObject(1));
+    }
+
+    {
+      assert.ok(isBigIntObject(Object(1n)));
+      assert.ok(!isBigIntObject(1));
+    }
+
+    {
+      assert.ok(isArrayBufferView(new Uint8Array(0)));
+      assert.ok(isArrayBufferView(new DataView(new ArrayBuffer(0))));
+      assert.ok(!isArrayBufferView(1));
+    }
+
+    {
+      assert.ok(isBigInt64Array(new BigInt64Array(0)));
+      assert.ok(!isBigInt64Array(1));
+    }
+
+    {
+      assert.ok(isBigUint64Array(new BigUint64Array(0)));
+      assert.ok(!isBigUint64Array(1));
+    }
+
+    {
+      assert.ok(isFloat32Array(new Float32Array(0)));
+      assert.ok(!isFloat32Array(1));
+    }
+
+    {
+      assert.ok(isFloat64Array(new Float64Array(0)));
+      assert.ok(!isFloat64Array(1));
+    }
+
+    {
+      assert.ok(isInt8Array(new Int8Array(0)));
+      assert.ok(!isInt8Array(1));
+    }
+
+    {
+      assert.ok(isInt16Array(new Int16Array(0)));
+      assert.ok(!isInt16Array(1));
+    }
+
+    {
+      assert.ok(isInt32Array(new Int32Array(0)));
+      assert.ok(!isInt32Array(1));
+    }
+
+    {
+      assert.ok(isTypedArray(new Uint8Array(0)));
+      assert.ok(!isTypedArray(new DataView(new ArrayBuffer(0))));
+      assert.ok(!isTypedArray(1));
+    }
+
+    {
+      assert.ok(isUint8Array(new Uint8Array(0)));
+      assert.ok(!isUint8Array(1));
+    }
+
+    {
+      assert.ok(isUint8ClampedArray(new Uint8ClampedArray(0)));
+      assert.ok(!isUint8ClampedArray(new Uint8Array(0)));
+      assert.ok(!isUint8ClampedArray(1));
+    }
+
+    {
+      assert.ok(isUint16Array(new Uint16Array(0)));
+      assert.ok(!isUint16Array(1));
+    }
+
+    {
+      assert.ok(isUint32Array(new Uint32Array(0)));
+      assert.ok(!isUint32Array(1));
+    }
+
+    {
+      // We don't really expose any externals in any existing APIS
+      // where this would be useful, but hey, let's test it anyway.
+      assert.ok(!isExternal({}));
+    }
+
+    // TODO(soon): Remove this when Float16Array is available unflagged.
+    // The proposal is stage 4 and the v8 C++ APIs are available, but the
+    // flag is still currently required to use it in JavaScript. We aren't
+    // setting that flag but we can still prepare for it to be available.
+    if (globalThis.Float16Array !== undefined) {
+      assert.ok(isFloat16Array(new Float16Array(0)));
+      assert.ok(!isFloat16Array(1));
+    }
+  },
+};

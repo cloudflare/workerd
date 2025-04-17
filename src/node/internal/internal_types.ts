@@ -25,13 +25,14 @@
 
 import internal from 'node-internal:util';
 
+import { kHandle } from 'node-internal:crypto_util';
+
 export function isCryptoKey(value: unknown): boolean {
   return value instanceof CryptoKey;
 }
 
 export function isKeyObject(_value: unknown): boolean {
-  // TODO(nodecompat): We currently do not implement KeyObject
-  return false;
+  return _value != null && typeof _value === 'object' && kHandle in _value;
 }
 
 export const isAsyncFunction = internal.isAsyncFunction.bind(internal);
@@ -65,6 +66,7 @@ export const isBigIntObject = internal.isBigIntObject.bind(internal);
 export const isArrayBufferView = internal.isArrayBufferView.bind(internal);
 export const isBigInt64Array = internal.isBigInt64Array.bind(internal);
 export const isBigUint64Array = internal.isBigUint64Array.bind(internal);
+export const isFloat16Array = internal.isFloat16Array.bind(internal);
 export const isFloat32Array = internal.isFloat32Array.bind(internal);
 export const isFloat64Array = internal.isFloat64Array.bind(internal);
 export const isInt8Array = internal.isInt8Array.bind(internal);
@@ -109,6 +111,7 @@ export default {
   isArrayBufferView,
   isBigInt64Array,
   isBigUint64Array,
+  isFloat16Array,
   isFloat32Array,
   isFloat64Array,
   isInt8Array,

@@ -26,25 +26,37 @@
 import {
   checkServerIdentity,
   convertALPNProtocols,
+  createServer,
+  Server,
+  getCiphers,
 } from 'node-internal:internal_tls';
 import {
   createSecureContext,
   SecureContext,
 } from 'node-internal:internal_tls_common';
+import * as constants from 'node-internal:internal_tls_constants';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
+export * from 'node-internal:internal_tls_constants';
 export {
   TLSSocket,
   connect,
   createSecureContext,
+  createServer,
   checkServerIdentity,
   SecureContext,
+  Server,
   convertALPNProtocols,
+  getCiphers,
 };
 export default {
   SecureContext,
+  Server,
   TLSSocket,
   connect,
   createSecureContext,
+  createServer,
   checkServerIdentity,
   convertALPNProtocols,
+  getCiphers,
+  ...constants,
 };

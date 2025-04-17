@@ -2648,7 +2648,6 @@ class Lock {
   void installJspi();
 
   void setCaptureThrowsAsRejections(bool capture);
-  void setCommonJsExportDefault(bool exportDefault);
 
   void setNodeJsCompatEnabled();
   void setToStringTag();

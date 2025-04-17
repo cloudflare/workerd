@@ -254,3 +254,15 @@ export function convertALPNProtocols(
     );
   }
 }
+
+export function createServer(): void {
+  throw new Error('Not implemented');
+}
+
+export function Server(): void {
+  throw new Error('Not implemented');
+}
+
+export function getCiphers(): void {
+  throw new Error('Not implemented');
+}

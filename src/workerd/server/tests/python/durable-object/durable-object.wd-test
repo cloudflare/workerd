@@ -10,7 +10,7 @@ const config :Workerd.Config = (
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2025-03-04",
 
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workers_durable_objects"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
 
   modules = [
     (name = "worker.py", pythonModule = embed "worker.py"),

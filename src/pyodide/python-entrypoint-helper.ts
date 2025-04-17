@@ -201,7 +201,7 @@ function makeEntrypointClass(className: string, classKind: AnyClass) {
     }
 
     async initPyInstance(args: any[]) {
-      const mainModule = await getMainModule();
+      const mainModule = await preparePython();
       const pyClassConstructor = mainModule[className] as unknown as (
         ...args: any[]
       ) => PyModule;
@@ -287,7 +287,6 @@ try {
     const introspectionMod = await getIntrospectionMod(pyodide);
     pythonEntrypointClasses =
       introspectionMod.collect_entrypoint_classes(mainModule);
-    console.log(pythonEntrypointClasses);
   }
 } catch (e) {
   console.warn('Error in top level in python-entrypoint-helper.js');

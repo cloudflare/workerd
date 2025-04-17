@@ -37,12 +37,13 @@ class TailStreamWriter final: public kj::Refcounted {
     Reporter reporter;
     TimeSource timeSource;
     uint32_t sequence = 0;
-    bool onsetSeen = false;
     State(Reporter reporter, TimeSource timeSource)
         : reporter(kj::mv(reporter)),
           timeSource(kj::mv(timeSource)) {}
   };
   kj::Maybe<State> state;
+  bool onsetSeen = false;
+  bool outcomeSeen = false;
 };
 }  // namespace tracing
 

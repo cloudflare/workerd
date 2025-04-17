@@ -490,6 +490,7 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
   this._handle.reader.releaseLock();
 
   try {
+    const { host, port, addressType } = this._handle.options;
     const socket = this._handle.socket.startTls();
 
     this._handle = {
@@ -507,17 +508,13 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
     // encrypted and unencrypted connections.
     this.encrypted = true;
 
-    // This is required to simulate the real-world usage.
-    // TODO(soon): Replace this once this._handle.socket.opened is triggered for
-    // upgraded TCP connections.
-    queueMicrotask(() => {
-      onConnectionOpened.bind(this)();
-    });
-
-    // this._handle.socket.opened.then(onConnectionOpened.bind(this), (err: unknown) => {
-    //   this.emit('connectionAttemptFailed', host, port, addressType, err);
-    //   this.destroy(err as Error);
-    // });
+    this._handle.socket.opened.then(
+      onConnectionOpened.bind(this),
+      (err: unknown) => {
+        this.emit('connectionAttemptFailed', host, port, addressType, err);
+        this.destroy(err as Error);
+      }
+    );
 
     this._handle.socket.closed.then(
       onConnectionClosed.bind(this),

@@ -1,10 +1,10 @@
 #include "commonjs.h"
 
-#include "jsvalue.h"
-#include "modules.h"
-#include "resource.h"
+#include <workerd/io/features.h>
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/resource.h>
 
-namespace workerd::jsg {
+namespace workerd::api {
 
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
     : module(js.alloc<CommonJsModuleObject>(js, path.toString(true))),
@@ -12,11 +12,11 @@ CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
       exports(js.v8Isolate, module->getExports(js)) {}
 
 v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
-  auto modulesForResolveCallback = getModulesForResolveCallback(js.v8Isolate);
+  auto modulesForResolveCallback = jsg::getModulesForResolveCallback(js.v8Isolate);
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
   if (isNodeJsCompatEnabled(js)) {
-    KJ_IF_SOME(nodeSpec, checkNodeSpecifier(specifier)) {
+    KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
       specifier = kj::mv(nodeSpec);
     }
   }
@@ -34,22 +34,23 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   // require() is only exposed to worker bundle modules so the resolve here is only
   // permitted to require worker bundle or built-in modules. Internal modules are
   // excluded.
-  auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, path,
-                                       ModuleRegistry::ResolveOption::DEFAULT,
-                                       ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
-      Error, "No such module \"", targetPath.toString(), "\".");
+  auto& info =
+      JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath, path,
+                              jsg::ModuleRegistry::ResolveOption::DEFAULT,
+                              jsg::ModuleRegistry::ResolveMethod::REQUIRE, specifier.asPtr()),
+          Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
 
-  ModuleRegistry::RequireImplOptions options = ModuleRegistry::RequireImplOptions::DEFAULT;
-  if (getCommonJsExportDefault(js.v8Isolate)) {
-    options = ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
+  auto options = jsg::ModuleRegistry::RequireImplOptions::DEFAULT;
+  if (FeatureFlags::get(js).getExportCommonJsDefaultNamespace()) {
+    options = jsg::ModuleRegistry::RequireImplOptions::EXPORT_DEFAULT;
   }
 
-  return ModuleRegistry::requireImpl(js, info, options);
+  return jsg::ModuleRegistry::requireImpl(js, info, options);
 }
 
-void CommonJsModuleContext::visitForMemoryInfo(MemoryTracker& tracker) const {
+void CommonJsModuleContext::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("exports", exports);
   tracker.trackFieldWithSize("path", path.size());
 }
@@ -88,8 +89,8 @@ kj::StringPtr CommonJsModuleObject::getPath() const {
   return path;
 }
 
-void CommonJsModuleObject::visitForMemoryInfo(MemoryTracker& tracker) const {
+void CommonJsModuleObject::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("exports", exports);
   tracker.trackField("path", path);
 }
-}  // namespace workerd::jsg
+}  // namespace workerd::api
