@@ -588,6 +588,7 @@ class AbortSignal final: public EventTarget {
     }
     JSG_PROTOTYPE_PROPERTY(onabort, getOnAbort, setOnAbort);
     JSG_METHOD(throwIfAborted);
+    JSG_METHOD(skipReleaseForTest);
   }
 
   // Allows this AbortSignal to also serve as a kj::Canceler
@@ -620,6 +621,10 @@ class AbortSignal final: public EventTarget {
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+
+  // To test what happens if a capability is dropped before invoking release on the cloned abort
+  // signal, this method will tell every rpcClient to skip this step before destruction.
+  void skipReleaseForTest();
 
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);

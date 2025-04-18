@@ -532,12 +532,18 @@ class AbortTriggerRpcClient final {
   }
 
   ~AbortTriggerRpcClient() {
+    if (skipReleaseForTest) {
+      return;
+    }
+
     auto req = client.releaseRequest();
     // We call detach() on the resulting promise so that we can perform RPC in a destructor
     req.send().ignoreResult().detach([](kj::Exception exc) {
       LOG_PERIODICALLY(DBG, "Unable to send AbortTrigger release message", exc);
     });
   }
+
+  bool skipReleaseForTest = false;
 
  private:
   rpc::AbortTrigger::Client client;
@@ -867,6 +873,14 @@ jsg::Ref<AbortSignal> AbortSignal::deserialize(
   signal->maybeRpcAbortPromise = kj::mv(paf.promise);
 
   return signal;
+}
+
+void AbortSignal::skipReleaseForTest() {
+  for (auto& cap: rpcClients) {
+    cap->skipReleaseForTest = true;
+  }
+
+  rpcClients.clear();
 }
 
 kj::Promise<void> AbortSignal::sendToRpc(kj::Array<kj::byte>&& reason) {
