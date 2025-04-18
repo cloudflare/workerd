@@ -684,7 +684,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",
-          ArtifactBundler::makeDisabledBundler(), jsg::ModuleRegistry::Type::INTERNAL);
+          lockParam.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler()),
+          jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
       modules->addBuiltinModule("pyodide-internal:internalJaeger", DisabledInternalJaeger::create(),
@@ -1110,7 +1111,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<ArtifactBundler,
             JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable -> jsg::Ref<ArtifactBundler> {
-      return ArtifactBundler::makeDisabledBundler();
+      return js.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler());
     }));
     // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
     pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,

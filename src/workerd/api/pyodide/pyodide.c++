@@ -168,10 +168,10 @@ kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
 }
 
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
-  if (existingSnapshot == kj::none) {
+  if (inner->existingSnapshot == kj::none) {
     return 0;
   }
-  return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
+  return readToTarget(KJ_REQUIRE_NONNULL(inner->existingSnapshot), offset, buf);
 }
 
 kj::Array<kj::String> PythonModuleInfo::parsePythonScriptImports(kj::Array<kj::String> files) {
