@@ -522,6 +522,8 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
   return dispatchEventImpl(js, kj::mv(event));
 }
 
+// A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
+// the client is destroyed, informing the server that an abort will not be triggered in the future.
 class AbortTriggerRpcClient final {
  public:
   AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
@@ -531,6 +533,20 @@ class AbortTriggerRpcClient final {
     auto field = req.initReason();
     field.setV8Serialized(reason);
     return req.send().ignoreResult();
+  }
+
+  ~AbortTriggerRpcClient() noexcept(false) {
+    auto req = client.releaseRequest(capnp::MessageSize{4, 0});
+    // We call detach() on the resulting promise so that we can perform RPC in a destructor
+    req.send().ignoreResult().detach([](kj::Exception exc) {
+      if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
+        // It's possible we can't send the release message because we're already disconnected.
+        return;
+      };
+
+      // Other exceptions could be more interesting
+      LOG_EXCEPTION("abortTriggerReleaseRpc", exc);
+    });
   }
 
  private:
@@ -555,9 +571,31 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
     return kj::READY_NOW;
   }
 
+  kj::Promise<void> release(ReleaseContext releaseCtx) override {
+    released = true;
+    return kj::READY_NOW;
+  }
+
+  ~AbortTriggerRpcServer() noexcept(false) {
+    if (pendingReason->getWrapped() != nullptr) {
+      // Already triggered
+      return;
+    }
+
+    if (!released) {
+      pendingReason->getWrapped() = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
+          "An AbortSignal received over RPC was implicitly aborted because the connection back to "
+          "its trigger was lost.");
+    }
+
+    // Always fulfill the promise in case the AbortSignal was waiting
+    fulfiller->fulfill();
+  }
+
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
   kj::Own<AbortSignal::PendingReason> pendingReason;
+  bool released = false;
 };
 }  // namespace
 
