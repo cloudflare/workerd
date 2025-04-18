@@ -7,6 +7,8 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
+#include <pyodide/generated/pyodide_extra.capnp.h>
+
 #include <capnp/serialize.h>
 #include <kj/array.h>
 #include <kj/common.h>
@@ -476,3 +478,9 @@ kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapsho
       api::pyodide::MemorySnapshotResult, api::pyodide::SetupEmscripten
 
 }  // namespace workerd::api::pyodide
+
+namespace workerd {
+kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
+    CompatibilityFlags::Reader featureFlags);
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease);
+}  // namespace workerd

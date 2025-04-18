@@ -56,11 +56,12 @@ def make_bundle_version_info(versions):
         name = entry["name"]
         if entry["name"] != "development":
             entry["id"] = _bundle_id(**entry)
+        entry["feature_flags"] = [entry["flag"]]
         result[name] = entry
+    dev = result["development"]
+    result["development"] = result[dev["pyodide_version"]] | dev
     return result
 
-# NOTE: This data needs to be kept in sync with compatibility-date.capnp.
-# Particularly the packages and backport fields.
 BUNDLE_VERSION_INFO = make_bundle_version_info([
     {
         "name": "0.26.0a2",
@@ -69,11 +70,12 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "packages": "20240829.4",
         "backport": "40",
         "integrity": "sha256-+IFpZ/kgZrX9+JJnOhuNj+H/bh3PsM0ebPW0pBtk46Y=",
-        "feature_flags": [],
+        "flag": "pythonWorkers",
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
         "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
+        "baseline_snapshot_hash": "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5",
     },
     {
         "name": "0.27.5",
@@ -82,20 +84,18 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "packages": "20250324.1",
         "backport": "8",
         "integrity": "sha256-bhbu5YXHvOXTbMIbT7yA6s+19AvUz9q6kNG8QZBJ6GA=",
-        "feature_flags": ["pythonWorkers20250116"],
+        "flag": "pythonWorkers20250116",
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-cb0651452.bin",
         "baseline_snapshot_integrity": "sha256-fckrUGeHN443uCivfJC11F924K8g9HAy8RtyaGHmzW8=",
+        "baseline_snapshot_hash": "TODO",
     },
     {
         "name": "development",
+        "pyodide_version": "0.26.0a2",
         "id": "dev",
-        "feature_flags": ["pythonWorkersDevPyodide"],
-        "emscripten_version": "3.1.52",
-        "python_version": "3.12.1",
-        "packages": "20240829.4",
-        "baseline_snapshot": "baseline-d13ce2f4a.bin",
-        "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
+        "flag": "pythonWorkersDevPyodide",
+        "baseline_snapshot_hash": "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae",
     },
 ])

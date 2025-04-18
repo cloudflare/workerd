@@ -18,33 +18,6 @@ struct ImpliedByAfterDate @0x8f8c1b68151b6cff {
   date @1 :Text;
 }
 
-struct PythonSnapshotRelease @0x89c66fb883cb6975 {
-  # Used to indicate a specific Python release that introduces a change which likely breaks
-  # existing memory snapshots.
-  #
-  # The versions/dates specified here are used to generate a filename for the package memory
-  # snapshots created by the validator. They are also used to generate a filename of the Pyodide
-  # and package bundle that gets downloaded for Python Workers.
-  pyodide @0 :Text;
-  # The Pyodide version, for example "0.26.0a2".
-  pyodideRevision @1 :Text;
-  # A date identifying a revision of the above Pyodide version. A change in this field but not
-  # the `pyodide` version field may indicate that changes to the workerd Pyodide integration code
-  # were made with the Pyodide version remaining the same.
-  #
-  # For example "2024-05-25".
-  packages @2 :Text;
-  # A date identifying a revision of the Python package bundle.
-  #
-  # For example "2024-02-18".
-  backport @3 :Int64;
-  # A number that is incremented each time we need to backport a fix to an existing Python release.
-  baselineSnapshotHash @4 :Text;
-  # A sha256 checksum hash of the baseline/universal memory snapshot to use for Python Workers using
-  # this release.
-}
-
-
 struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Flags that change the basic behavior of the runtime API, especially for
   # backwards-compatibility with old bugs.
@@ -99,7 +72,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   annotation impliedByAfterDate @0xe3e5a63e76284d89 (field) :ImpliedByAfterDate;
 
-  annotation pythonSnapshotRelease @0xef74c0cc5d18cc0c (field) :PythonSnapshotRelease;
+  annotation pythonSnapshotRelease @0xef74c0cc5d18cc0c (field) :Void;
   # This annotation marks a compat flag as introducing a potentially breaking change to Python
   # memory snapshots. See the doc comment for the `PythonSnapshotRelease` struct above for more
   # details.
@@ -430,9 +403,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonWorkers @43 :Bool
       $compatEnableFlag("python_workers")
-      $pythonSnapshotRelease(pyodide = "0.26.0a2", pyodideRevision = "2024-03-01",
-          packages = "20240829.4", backport = 40,
-          baselineSnapshotHash = "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5")
+      $pythonSnapshotRelease
       $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
   # Python modules are restricted in EWC.
@@ -583,9 +554,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonWorkersDevPyodide @58 :Bool
     $compatEnableFlag("python_workers_development")
-    $pythonSnapshotRelease(pyodide = "dev", pyodideRevision = "dev",
-          packages = "20240829.4", backport = 0,
-          baselineSnapshotHash = "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae")
+    $pythonSnapshotRelease
     $experimental;
   # Enables Python Workers and uses the bundle from the Pyodide source directory directly. For testing only.
   #
@@ -679,9 +648,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
       $experimental
-      $pythonSnapshotRelease(pyodide = "0.27.5", pyodideRevision = "2025-01-16",
-          packages = "20250324.1", backport = 8,
-          baselineSnapshotHash = "TODO");
+      $pythonSnapshotRelease;
 
   requestCfOverridesCacheRules @72 :Bool
       $compatEnableFlag("request_cf_overrides_cache_rules")
