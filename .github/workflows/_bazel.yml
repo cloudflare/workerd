@@ -22,6 +22,10 @@ on:
         type: string
         required: false
         default: ''
+      upload_binary:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -102,11 +106,12 @@ jobs:
           du -ms -t 1 $GITHUB_WORKSPACE
 
       - name: Upload binary
-        if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
+        if: inputs.upload_binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
-          path: bazel-bin/src/workerd/server/workerd
+          path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
 
       - name: Drop large Bazel cache files
         if: always()
