@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return  */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/explicit-module-boundary-types  */
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
@@ -20,6 +20,20 @@ import {
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
+
+// Function to import JavaScript modules from Python
+let doAnImport: (mod: string) => Promise<any>;
+let cloudflareWorkersModule: any;
+let cloudflareSocketsModule: any;
+export function setDoAnImport(
+  func: (mod: string) => Promise<any>,
+  cloudflareWorkers: any,
+  cloudflareSockets: any
+): void {
+  doAnImport = func;
+  cloudflareWorkersModule = cloudflareWorkers;
+  cloudflareSocketsModule = cloudflareSockets;
+}
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {
@@ -84,6 +98,14 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
 
     // install any extra packages into the site-packages directory
     const sitePackages = pyodide.FS.sitePackages;
+
+    // Expose the doAnImport function and global modules to Python globals
+    // @ts-expect-error: Assign to global object
+    globalThis.pyodide_entrypoint_helper = {
+      doAnImport,
+      cloudflareWorkersModule,
+      cloudflareSocketsModule,
+    };
 
     // Inject modules that enable JS features to be used idiomatically from Python.
     //
