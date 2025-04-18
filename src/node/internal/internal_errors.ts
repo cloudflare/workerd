@@ -780,3 +780,12 @@ export class ERR_INVALID_IP_ADDRESS extends NodeTypeError {
     super('ERR_INVALID_IP_ADDRESS', `Invalid IP address: ${ipAddress}`);
   }
 }
+
+export class ERR_STREAM_WRAP extends NodeError {
+  constructor() {
+    super(
+      'ERR_STREAM_WRAP',
+      'Stream has StringDecoder set or is in objectMode'
+    );
+  }
+}

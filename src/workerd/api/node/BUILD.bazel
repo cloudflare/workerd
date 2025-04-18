@@ -383,6 +383,8 @@ wd_test(
     sidecar_port_bindings = [
         "ECHO_SERVER_PORT",
         "HELLO_SERVER_PORT",
+        "JS_STREAM_SERVER_PORT",
+        "STREAM_WRAP_SERVER_PORT",
     ],
 )
 

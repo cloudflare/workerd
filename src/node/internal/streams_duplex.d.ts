@@ -1,3 +1,4 @@
+import type { Duplex } from 'node:stream';
 export {
   Duplex,
   Writable,
@@ -6,3 +7,8 @@ export {
   ReadableOptions,
   duplexPair,
 } from 'node:stream';
+
+export function toBYOBWeb(duplex: Duplex): {
+  readable: ReadableStream;
+  writable: WritableStream;
+};

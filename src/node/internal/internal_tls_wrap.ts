@@ -29,7 +29,9 @@ import {
   _normalizeArgs,
   onConnectionOpened,
   onConnectionClosed,
+  tryReadStart,
 } from 'node-internal:internal_net';
+import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
@@ -54,6 +56,7 @@ import {
   ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
 import { SecureContext } from 'node-internal:internal_tls_common';
+import { ok } from 'node-internal:internal_assert';
 
 const kConnectOptions = Symbol('connect-options');
 const kErrorEmitted = Symbol('error-emitted');
@@ -253,9 +256,7 @@ export function TLSSocket(
     if (socket instanceof Socket) {
       wrap = socket;
     } else {
-      // TODO(soon): Support passing DuplexSocket to here to unblock mssql.
-      // Cloudflare Workers does not support any other socket type.
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socket');
+      wrap = new JSStreamSocket(socket);
     }
 
     handle = wrap._handle;
@@ -286,6 +287,8 @@ export function TLSSocket(
   this.ssl = this._handle; // C++ TLSWrap object
 
   this.on('error', this._tlsError.bind(this));
+
+  this._init();
 }
 Object.setPrototypeOf(TLSSocket.prototype, Socket.prototype);
 Object.setPrototypeOf(TLSSocket, Socket);
@@ -346,9 +349,25 @@ TLSSocket.prototype._init = function _init(this: TLSSocket): void {
   if (options.handshakeTimeout && options.handshakeTimeout > 0)
     this.setTimeout(options.handshakeTimeout, this._handleTimeout.bind(this));
 
-  this.on('error', (err: Error): void => {
-    this._emitTLSError(err);
-  });
+  // TLSSocket can be initialized with 2 different handles.
+  //
+  // 1. Socket instance created by "node:net". In this scenario, we need
+  //    to wait for 'connect' event to be emitted in order to trigger _finishInit().
+  // 2. Duplex stream. Duplex streams are initialized through JSStreamSocket class.
+  //    If that's the scenario, we can trigger _finishInit() immediately. Since, there
+  //    is no async calls required to wait.
+  if (this._parentWrap != null && this._parentWrap instanceof JSStreamSocket) {
+    queueMicrotask(() => {
+      this._finishInit();
+      ok(this._parentWrap instanceof JSStreamSocket);
+      this._parentWrap.readStart();
+      tryReadStart(this);
+    });
+  } else {
+    this.on('connect', () => {
+      this._finishInit();
+    });
+  }
 };
 
 TLSSocket.prototype.renegotiate = function (
@@ -442,17 +461,7 @@ TLSSocket.prototype._finishInit = function _finishInit(this: TLSSocket): void {
     this.setTimeout(0, this._handleTimeout.bind(this));
   }
 
-  // This queueMicrotask is required to ensure that 'secure' event is emitted after
-  // the next tick in case the user called tls.connect().destroy(). This is required
-  // for Node.js compatibility.
-  //
-  // This is required because "_start" function is trigger onConnectionClose on the next tick
-  // which is also required due to on('secure') event calling callback().
-  queueMicrotask(() => {
-    if (!this.destroyed && !this.isPaused()) {
-      this.emit('secure');
-    }
-  });
+  this.emit('secure');
 };
 
 TLSSocket.prototype._start = function _start(this: TLSSocket): void {
@@ -481,8 +490,8 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
   // Guard against the following cases:
   // - Socket was destroyed before the connection was established
-  // - TLSSocket can not be upgraded if the secureTransport is already 'on'.
-  if (this._handle == null || this._handle.socket.secureTransport === 'on') {
+  // - TLSSocket can not be upgraded if the secureTransport does not support 'starttls'
+  if (this._handle?.socket.secureTransport !== 'starttls') {
     return;
   }
 

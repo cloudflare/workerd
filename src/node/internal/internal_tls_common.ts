@@ -65,7 +65,8 @@ export function SecureContext(
   // if (maxVersion !== undefined) {
   //   throw new ERR_OPTION_NOT_IMPLEMENTED('maxVersion');
   // }
-  if (secureOptions) {
+
+  if (secureOptions !== undefined) {
     validateInteger(secureOptions, 'secureOptions');
   }
 
