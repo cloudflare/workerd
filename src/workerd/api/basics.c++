@@ -518,6 +518,8 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
   return dispatchEventImpl(js, kj::mv(event));
 }
 
+// A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
+// the client is destroyed, informing the server that an abort will not be triggered in the future.
 class AbortTriggerRpcClient final {
  public:
   AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
@@ -527,6 +529,14 @@ class AbortTriggerRpcClient final {
     auto field = req.initReason();
     field.setV8Serialized(reason);
     return req.send().ignoreResult();
+  }
+
+  ~AbortTriggerRpcClient() {
+    auto req = client.releaseRequest();
+    // We call detach() on the resulting promise so that we can perform RPC in a destructor
+    req.send().ignoreResult().detach([](kj::Exception exc) {
+      LOG_PERIODICALLY(DBG, "Unable to send AbortTrigger release message", exc);
+    });
   }
 
  private:
@@ -548,13 +558,36 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
 
     pendingReason->init<kj::Array<kj::byte>>(kj::heapArray(reason.asBytes()));
     fulfiller->fulfill();
+
     abortCtx.initResults();
     return kj::READY_NOW;
+  }
+
+  kj::Promise<void> release(ReleaseContext releaseCtx) override {
+    released = true;
+    releaseCtx.initResults();
+    return kj::READY_NOW;
+  }
+
+  ~AbortTriggerRpcServer() {
+    if (*pendingReason != nullptr) {
+      // Already triggered
+      return;
+    }
+
+    if (!released) {
+      pendingReason->init<kj::Exception>(kj::Exception(kj::Exception::Type::FAILED, __FILE__,
+          __LINE__, kj::str(JSG_ERROR_DOMAbortError ": Dropped capability, assuming abort")));
+    }
+
+    // Always fulfill the promise in case the AbortSignal was waiting
+    fulfiller->fulfill();
   }
 
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
   kj::Own<AbortSignal::PendingReason> pendingReason;
+  bool released = false;
 };
 }  // namespace
 
