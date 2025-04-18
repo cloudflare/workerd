@@ -1,0 +1,31 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "python-importable-env-test",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py"),
+          (name = "child", esModule = "import { env } from 'cloudflare:workers'; export { env };"),
+          (name = "child2", esModule = "import { env } from 'cloudflare:workers'; export { env };"),
+        ],
+        compatibilityDate = "2025-02-01",
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+          "nodejs_compat_v2",
+        ],
+        bindings = [
+          (name = "FOO", text = "BAR"),
+          (name = "CACHE", memoryCache = (
+            id = "abc123",
+            limits = (
+              maxKeys = 10,
+              maxValueSize = 1024,
+              maxTotalValueSize = 1024,
+            ),
+          ))
+        ],
+      )
+    ),
+  ],
+);

@@ -19,7 +19,16 @@ import {
 import {
   pythonEntrypointClasses,
   makeEntrypointClass,
+  setDoAnImport,
 } from 'pyodide:python-entrypoint-helper';
+
+// Function to dynamically import JavaScript modules from Python
+async function doAnImport(name) {
+  return await import(name);
+}
+
+// Pass the import function to the helper
+setDoAnImport(doAnImport);
 
 function makeEntrypointClassFromNames(names, cls) {
   return names.map((className) => [

@@ -16,6 +16,32 @@ import pyodide.http
 from pyodide.ffi import JsException, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
 
+
+# Get the import function from the entrypoint-helper
+def import_from_javascript(module_name: str) -> Any:
+    """
+    Import a JavaScript ES module from Python.
+
+    Args:
+        module_name: The name of the module to import. This can be a module name or a path.
+
+    Returns:
+        The imported module object.
+
+    Example:
+        env = await import_from_javascript('cloudflare:workers')
+    """
+    try:
+        # Get the doAnImport function from the entrypoint-helper
+        from js.globalThis import pyodide_entrypoint_helper
+        from pyodide.ffi import run_sync
+
+        # Call the JavaScript import function
+        return run_sync(pyodide_entrypoint_helper.doAnImport(module_name))
+    except JsException as e:
+        raise ImportError(f"Failed to import '{module_name}': {e}") from e
+
+
 JSBody = (
     "js.Blob | js.ArrayBuffer | js.TypedArray | js.DataView | js.FormData |"
     "js.ReadableStream | js.URLSearchParams"

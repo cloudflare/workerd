@@ -403,8 +403,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonWorkers @43 :Bool
       $compatEnableFlag("python_workers")
-      $pythonSnapshotRelease
-      $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
+      $pythonSnapshotRelease;
   # Enables Python Workers. Access to this flag is not restricted, instead bundles containing
   # Python modules are restricted in EWC.
   #
@@ -648,7 +647,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
       $experimental
-      $pythonSnapshotRelease;
+      $pythonSnapshotRelease
+      $impliedByAfterDate(name = "pythonWorkersDevPyodide", date = "2000-01-01");
 
   requestCfOverridesCacheRules @72 :Bool
       $compatEnableFlag("request_cf_overrides_cache_rules")
