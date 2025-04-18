@@ -269,7 +269,8 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.fd');
   }
 
-  // TODO(soon): Support both of these options.
+  // We do not support the noDelay and keepAlive options at this
+  // time and will just ignore them if they are passed.
   //
   // We shouldn't throw an error for the following validations,
   // because it breaks packages such as redis.
