@@ -347,25 +347,16 @@ wd_test(
         "--experimental",
     ],
     data = [
-        # To reduce complexity, tail-worker-test calls into other tests to get traces from them.
+        # To reduce complexity, tail-worker-test calls into other tests to get traces from them and
+        # includes several tail worker implementations.
         "actor-alarms-test.js",
         "http-test.js",
         "queue-test.js",
         "tail-worker-test.js",
         "tail-worker-test-receiver.js",
         "tail-worker-test-dummy.js",
-        "tests/websocket-hibernation.js",
-    ],
-)
-
-wd_test(
-    src = "tail-worker-test-invalid.wd-test",
-    args = [
-        "--experimental",
-    ],
-    data = [
-        "http-test.js",
         "tail-worker-test-invalid.js",
+        "tests/websocket-hibernation.js",
     ],
 )
 
