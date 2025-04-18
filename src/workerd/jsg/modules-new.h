@@ -356,9 +356,11 @@ class Module {
         fn(js);
         // If there are named exports specified for the module namespace,
         // then we want to examine the ext->getExports() to extract those.
-        auto exports = ext->getExports(js);
-        for (auto& name: ns.getNamedExports()) {
-          ns.set(js, name, exports.get(js, name));
+        JsValue exports = ext->getModuleExports(js);
+        KJ_IF_SOME(obj, exports.template tryCast<JsObject>()) {
+          for (auto& name: ns.getNamedExports()) {
+            ns.set(js, name, obj.get(js, name));
+          }
         }
         return ns.setDefault(js, exports);
       }, [&](Value exception) {

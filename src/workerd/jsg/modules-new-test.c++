@@ -82,6 +82,10 @@ struct TestType: public jsg::Object {
         [&](Value exception) -> JsValue { js.throwException(kj::mv(exception)); });
   }
 
+  jsg::JsValue getModuleExports(jsg::Lock& js) {
+    return getExports(js);
+  }
+
   JSG_RESOURCE_TYPE(TestType) {
     JSG_METHOD(bar);
     JSG_METHOD(require);

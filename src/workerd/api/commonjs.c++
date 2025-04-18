@@ -2,24 +2,38 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/resource.h>
 
 namespace workerd::api {
 
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
     : module(js.alloc<CommonJsModuleObject>(js, path.toString(true))),
-      path(kj::mv(path)),
+      pathOrSpecifier(kj::mv(path)),
       exports(js.v8Isolate, module->getExports(js)) {}
 
-v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
-  auto modulesForResolveCallback = jsg::getModulesForResolveCallback(js.v8Isolate);
-  KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
+CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, const jsg::Url& specifier)
+    : module(js.alloc<CommonJsModuleObject>(js, kj::str(specifier.getHref()))),
+      pathOrSpecifier(specifier.clone()),
+      exports(js.v8Isolate, module->getExports(js)) {}
 
+jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
   if (isNodeJsCompatEnabled(js)) {
     KJ_IF_SOME(nodeSpec, jsg::checkNodeSpecifier(specifier)) {
       specifier = kj::mv(nodeSpec);
     }
   }
+
+  if (FeatureFlags::get(js).getNewModuleRegistry()) {
+    return jsg::modules::ModuleRegistry::resolve(js, specifier, "default"_kj,
+        jsg::modules::ResolveContext::Type::BUNDLE, jsg::modules::ResolveContext::Source::REQUIRE,
+        KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<jsg::Url>()));
+  }
+
+  auto& path = KJ_ASSERT_NONNULL(pathOrSpecifier.tryGet<kj::Path>());
+
+  auto modulesForResolveCallback = jsg::getModulesForResolveCallback(js.v8Isolate);
+  KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
   kj::Path targetPath = ([&] {
     // If the specifier begins with one of our known prefixes, let's not resolve
@@ -52,23 +66,58 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
 
 void CommonJsModuleContext::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("exports", exports);
-  tracker.trackFieldWithSize("path", path.size());
+  KJ_SWITCH_ONEOF(pathOrSpecifier) {
+    KJ_CASE_ONEOF(path, kj::Path) {
+      tracker.trackFieldWithSize("path", path.size());
+    }
+    KJ_CASE_ONEOF(specifier, jsg::Url) {
+      tracker.trackField("specifier", specifier);
+    }
+  }
 }
 
 kj::String CommonJsModuleContext::getFilename() const {
-  return path.toString(true);
+  KJ_SWITCH_ONEOF(pathOrSpecifier) {
+    KJ_CASE_ONEOF(path, kj::Path) {
+      return path.toString(true);
+    }
+    KJ_CASE_ONEOF(specifier, jsg::Url) {
+      // The specifier is a URL. We want to parse it as a path and
+      // return just the filename portion.
+      // TODO(soon): kj::Path::parse() requires a kj::StringPtr but
+      // the path name here is a kj::ArrayPtr<const char>. We can
+      // avoid an extraneous copy here by updating kj::Path::parse
+      // to also accept a kj::ArrayPtr<const char>.
+      auto path = kj::str(specifier.getPathname().slice(1));
+      auto filename = kj::Path::parse(path).basename();
+      return filename.toString(false);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::String CommonJsModuleContext::getDirname() const {
-  return path.parent().toString(true);
+  KJ_SWITCH_ONEOF(pathOrSpecifier) {
+    KJ_CASE_ONEOF(path, kj::Path) {
+      return path.parent().toString(true);
+    }
+    KJ_CASE_ONEOF(specifier, jsg::Url) {
+      // The specifier is a URL. We want to parse it as a path and
+      // return just the directory portion.
+      auto path = kj::str(specifier.getPathname().slice(1));
+      auto pathObj = kj::Path::parse(path);
+      return pathObj.parent().toString(true);
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::Ref<CommonJsModuleObject> CommonJsModuleContext::getModule(jsg::Lock& js) {
   return module.addRef();
 }
 
-v8::Local<v8::Value> CommonJsModuleContext::getExports(jsg::Lock& js) const {
-  return exports.getHandle(js);
+jsg::JsValue CommonJsModuleContext::getExports(jsg::Lock& js) const {
+  return jsg::JsValue(exports.getHandle(js));
 }
 void CommonJsModuleContext::setExports(jsg::Value value) {
   exports = kj::mv(value);
@@ -78,8 +127,8 @@ CommonJsModuleObject::CommonJsModuleObject(jsg::Lock& js, kj::String path)
     : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)),
       path(kj::mv(path)) {}
 
-v8::Local<v8::Value> CommonJsModuleObject::getExports(jsg::Lock& js) const {
-  return exports.getHandle(js);
+jsg::JsValue CommonJsModuleObject::getExports(jsg::Lock& js) const {
+  return jsg::JsValue(exports.getHandle(js));
 }
 void CommonJsModuleObject::setExports(jsg::Value value) {
   exports = kj::mv(value);
