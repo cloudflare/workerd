@@ -3,7 +3,7 @@ from workers import import_from_javascript
 
 async def test():
     # Import the env module from cloudflare:workers
-    env_module = await import_from_javascript("cloudflare:workers")
+    env_module = import_from_javascript("cloudflare:workers")
 
     # Test that we can access the imported module's exports
     assert hasattr(env_module, "env"), "env property should exist"
@@ -16,7 +16,7 @@ async def test():
 
     # Try importing an unsafe module which should fail
     try:
-        await import_from_javascript("internal:unsafe-eval")
+        import_from_javascript("internal:unsafe-eval")
         raise AssertionError("Unsafe import should have failed but succeeded")
     except ImportError:
         # This is expected to fail, so the test passes
