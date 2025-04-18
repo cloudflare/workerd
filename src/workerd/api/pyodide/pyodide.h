@@ -350,10 +350,10 @@ class ArtifactBundler: public jsg::Object {
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(kj::String path) {
+  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(jsg::Lock& js, kj::String path) {
     KJ_IF_SOME(pacman, inner->packageManager) {
       KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
-        return jsg::alloc<ReadOnlyBuffer>(ptr);
+        return js.alloc<ReadOnlyBuffer>(ptr);
       }
     }
 
@@ -380,8 +380,8 @@ class ArtifactBundler: public jsg::Object {
 
 class DisabledInternalJaeger: public jsg::Object {
  public:
-  static jsg::Ref<DisabledInternalJaeger> create() {
-    return jsg::alloc<DisabledInternalJaeger>();
+  static jsg::Ref<DisabledInternalJaeger> create(jsg::Lock& js) {
+    return js.alloc<DisabledInternalJaeger>();
   }
   JSG_RESOURCE_TYPE(DisabledInternalJaeger) {}
 };
@@ -396,10 +396,6 @@ class DiskCache: public jsg::Object {
  public:
   DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
   DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
-
-  static jsg::Ref<DiskCache> makeDisabled() {
-    return jsg::alloc<DiskCache>();
-  }
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
@@ -429,8 +425,8 @@ class SimplePythonLimiter: public jsg::Object {
       : startupLimitMs(startupLimitMs),
         getTimeCb(kj::mv(getTimeCb)) {}
 
-  static jsg::Ref<SimplePythonLimiter> makeDisabled() {
-    return jsg::alloc<SimplePythonLimiter>();
+  static jsg::Ref<SimplePythonLimiter> makeDisabled(jsg::Lock& js) {
+    return js.alloc<SimplePythonLimiter>();
   }
 
   void beginStartup() {
