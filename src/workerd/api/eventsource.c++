@@ -322,7 +322,7 @@ void EventSource::reconnect(jsg::Lock& js) {
   readyState = State::CONNECTING;
   abortController = js.alloc<AbortController>(js);
   auto signal = abortController->getSignal();
-  context.awaitIo(js, signal->wrap(context.afterLimitTimeout(reconnectionTime)))
+  context.awaitIo(js, signal->wrap(js, context.afterLimitTimeout(reconnectionTime)))
       .then(js,
           JSG_VISITABLE_LAMBDA(
               (self = JSG_THIS), (self), (jsg::Lock & js) mutable { self->start(js); }),

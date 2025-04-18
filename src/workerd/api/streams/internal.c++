@@ -1209,7 +1209,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   // If a signal is provided, we need to check that it is not already triggered. If it
   // is, we return a rejected promise using the signal's reason.
   KJ_IF_SOME(signal, options.signal) {
-    if ((signal)->getAborted()) {
+    if (signal->getAborted(js)) {
       return rejectedMaybeHandledPromise<void>(js, signal->getReason(js), pipeThrough);
     }
   }
@@ -1758,7 +1758,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return handlePromise(js,
             ioContext.awaitIo(js,
                 writable->canceler.wrap(
-                    AbortSignal::maybeCancelWrap(request.maybeSignal, kj::mv(promise)))));
+                    AbortSignal::maybeCancelWrap(js, request.maybeSignal, kj::mv(promise)))));
       }
 
       // The ReadableStream is JavaScript-backed. We can still pipe the data but it's going to be
@@ -1813,7 +1813,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
 
 bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
   KJ_IF_SOME(signal, maybeSignal) {
-    if ((signal)->getAborted()) {
+    if (signal->getAborted(js)) {
       auto reason = signal->getReason(js);
 
       // abort process might call parent.drain which will delete this,

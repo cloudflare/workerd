@@ -1872,8 +1872,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   auto signal = jsRequest->getSignal();
   KJ_IF_SOME(s, signal) {
     // If the AbortSignal has already been triggered, then we need to stop here.
-    if ((s)->getAborted()) {
-      return js.rejectedPromise<jsg::Ref<Response>>((s)->getReason(js));
+    if (s->getAborted(js)) {
+      return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
   }
 
@@ -1917,7 +1917,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }
     auto webSocketResponse = client->openWebSocket(url, headers);
-    return ioContext.awaitIo(js, AbortSignal::maybeCancelWrap(signal, kj::mv(webSocketResponse)),
+    return ioContext.awaitIo(js,
+        AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse)),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
             client = kj::mv(client), signal = kj::mv(signal)](
             jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable
@@ -1933,8 +1934,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
           webSocket = webSocket.attach(kj::mv(client));
           KJ_IF_SOME(s, signal) {
             // If the AbortSignal has already been triggered, then we need to stop here.
-            if ((s)->getAborted()) {
-              return js.rejectedPromise<jsg::Ref<Response>>((s)->getReason(js));
+            if (s->getAborted(js)) {
+              return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
             }
             webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket), s->getCanceler());
           }
@@ -1993,13 +1994,13 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // TODO(someday): Allow deferred proxying for bidirectional streaming.
       ioContext.addWaitUntil(handleCancelablePump(
           AbortSignal::maybeCancelWrap(
-              signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
+              js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
           jsBody.addRef()));
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
     }
     return ioContext.awaitIo(js,
-        AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
+        AbortSignal::maybeCancelWrap(js, signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
             .catch_([](kj::Exception&& exception) -> kj::Promise<kj::HttpClient::Response> {
       if (exception.getDescription().startsWith("invalid Content-Length header value")) {
         return JSG_KJ_EXCEPTION(FAILED, Error, exception.getDescription());
@@ -2045,8 +2046,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
 
   KJ_IF_SOME(s, signal) {
     // If the AbortSignal has already been triggered, then we need to stop here.
-    if ((s)->getAborted()) {
-      return js.rejectedPromise<jsg::Ref<Response>>((s)->getReason(js));
+    if (s->getAborted(js)) {
+      return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
     response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body), s->getCanceler());
   }
