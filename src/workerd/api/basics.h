@@ -9,6 +9,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>
 
@@ -518,11 +519,18 @@ class EventTarget: public jsg::Object {
 // An implementation of the Web Platform Standard AbortSignal API
 class AbortSignal final: public EventTarget {
  public:
+  using RpcReasonT = kj::OneOf<kj::Array<kj::byte>, /* V8 serialized JS value */
+      kj::Exception,                                /* capability was dropped; assuming abort */
+      kj::None                                      /* capability explicitly released */
+      >;
+
   enum class Flag { NONE, NEVER_ABORTS };
 
-  AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
+  AbortSignal(jsg::Lock& js,
+      kj::Maybe<kj::Exception> exception = kj::none,
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
-      Flag flag = Flag::NONE);
+      Flag flag = Flag::NONE,
+      kj::Maybe<kj::Promise<RpcReasonT>> maybeRpcAbortPromise = kj::none);
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
@@ -563,6 +571,11 @@ class AbortSignal final: public EventTarget {
   // need to explicitly set it as a prototype property here.
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
   void setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler);
+
+  void addEventListener(jsg::Lock& js,
+      kj::String type,
+      jsg::Identified<Handler> handler,
+      jsg::Optional<AddEventListenerOpts> maybeOptions);
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -609,21 +622,48 @@ class AbortSignal final: public EventTarget {
     tracker.trackField("reason", reason);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<AbortSignal> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::ABORT_SIGNAL);
+
+  virtual ~AbortSignal();
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
+  // The collection of rpc clients associated with this abort signal
+  // Each rpcClient will be informed when this abort signal is triggered.
+  kj::Vector<IoOwn<rpc::AbortSignal::Client>> rpcClients;
+
+  // Fulfilled when this AbortSignal is destructed; notifies rpcClients that the AbortSignal is
+  // released and abort will never be triggered.
+  kj::Maybe<IoOwn<kj::PromiseFulfiller<void>>> releaseFulfiller;
+
+  // If this signal is a clone, stores a promise that is fulfilled when the original signal is aborted.
+  kj::Maybe<kj::Promise<RpcReasonT>> maybeRpcAbortPromise;
+
+  // Trigger an abort on all associated clients
+  kj::Promise<void> sendToRpc(jsg::Lock& js, kj::Maybe<jsg::JsRef<jsg::JsValue>>& reason);
+  kj::Promise<void> sendToRpc(kj::ArrayPtr<kj::byte> reason);
+
+  // Wait for abort over RPC
+  void awaitRpcAbort(jsg::Lock& js);
+
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class AbortController;
+  friend class AbortSignalImpl;
 };
 
 // An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
  public:
-  explicit AbortController(jsg::Lock& js): signal(js.alloc<AbortSignal>()) {}
+  explicit AbortController(jsg::Lock& js): signal(js.alloc<AbortSignal>(js)) {}
 
   static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
     return js.alloc<AbortController>(js);

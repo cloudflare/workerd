@@ -1138,7 +1138,7 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 template <typename Self>
 WritableImpl<Self>::WritableImpl(jsg::Lock& js, WritableStream& owner)
     : owner(owner.addWeakRef()),
-      signal(js.alloc<AbortSignal>()) {}
+      signal(js.alloc<AbortSignal>(js)) {}
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(

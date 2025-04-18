@@ -399,6 +399,8 @@ enum SerializationTag {
   # Keep this value in sync with the DOMException::SERIALIZATION_TAG in
   # /src/workerd/jsg/dom-exception (but we can't actually change this value
   # without breaking things).
+
+  abortSignal @9;
 }
 
 enum StreamEncoding {
@@ -460,6 +462,10 @@ struct JsValue {
         }
       }
 
+      # Indicates that an AbortSignal is being passed, see the AbortSignal interface for the
+      # mechanism used to trigger the abort later.
+      abortSignal @7 :Void;
+
       # TODO(soon): WebSocket, Request, Response
     }
   }
@@ -480,6 +486,18 @@ struct JsValue {
     # of capability returned depends on the type of external. E.g. for `readableStream`, it is a
     # `ByteStream`.
   }
+}
+
+interface AbortSignal $Cxx.allowCancellation {
+  # Allows a cloned abort signal to be triggered over RPC, when the original signal is triggered.
+  # When an AbortSignal is serialized, the original signal is the client, and the deserialized
+  # clone is the server.
+  # reason is an arbitrary JavaScript value which will appear in the resulting AbortErrors.
+  triggerAbort @0 (reason :JsValue) -> ();
+
+  # Informs a cloned signal that the original signal is being destroyed, and the abort will never
+  # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
+  release @1 () -> ();
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {
