@@ -479,7 +479,7 @@ template <typename Controller>
 kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSignal(
     jsg::Lock& js, Controller& self) {
   KJ_IF_SOME(signal, maybeSignal) {
-    if ((signal)->getAborted()) {
+    if (signal->getAborted(js)) {
       auto reason = signal->getReason(js);
       if (!preventCancel) {
         source.release(js, v8::Local<v8::Value>(reason));

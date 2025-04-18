@@ -1872,8 +1872,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   auto signal = jsRequest->getSignal();
   KJ_IF_SOME(s, signal) {
     // If the AbortSignal has already been triggered, then we need to stop here.
-    if ((s)->getAborted()) {
-      return js.rejectedPromise<jsg::Ref<Response>>((s)->getReason(js));
+    if (s->getAborted(js)) {
+      return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
   }
 
@@ -1933,8 +1933,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
           webSocket = webSocket.attach(kj::mv(client));
           KJ_IF_SOME(s, signal) {
             // If the AbortSignal has already been triggered, then we need to stop here.
-            if ((s)->getAborted()) {
-              return js.rejectedPromise<jsg::Ref<Response>>((s)->getReason(js));
+            if (s->getAborted(js)) {
+              return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
             }
             webSocket = kj::refcounted<AbortableWebSocket>(kj::mv(webSocket), s->getCanceler());
           }
@@ -2045,8 +2045,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
 
   KJ_IF_SOME(s, signal) {
     // If the AbortSignal has already been triggered, then we need to stop here.
-    if ((s)->getAborted()) {
-      return js.rejectedPromise<jsg::Ref<Response>>((s)->getReason(js));
+    if (s->getAborted(js)) {
+      return js.rejectedPromise<jsg::Ref<Response>>(s->getReason(js));
     }
     response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body), s->getCanceler());
   }
