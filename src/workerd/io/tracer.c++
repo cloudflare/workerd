@@ -150,6 +150,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 
 // TODO(cleanup): Needed to convert between span value definitions in LTW/STW. These should be the
 // same really.
+namespace {
 workerd::tracing::Attribute::Value convertSpanTag(const Span::TagValue& tag) {
   KJ_SWITCH_ONEOF(tag) {
     KJ_CASE_ONEOF(str, kj::String) {
@@ -167,6 +168,7 @@ workerd::tracing::Attribute::Value convertSpanTag(const Span::TagValue& tag) {
   }
   KJ_UNREACHABLE;
 }
+}  // namespace
 
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
