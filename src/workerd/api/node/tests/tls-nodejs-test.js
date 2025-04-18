@@ -43,6 +43,8 @@ export const checkPortsSetCorrectly = {
   test(ctrl, env, ctx) {
     ok(env.ECHO_SERVER_PORT);
     ok(env.HELLO_SERVER_PORT);
+    ok(env.JS_STREAM_SERVER_PORT);
+    ok(env.STREAM_WRAP_SERVER_PORT);
   },
 };
 
@@ -777,6 +779,74 @@ export const testStartTlsBehaviorOnUpgrade = {
 };
 
 // Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-destroy-whilst-write.js
+export const testTlsDestroyWhilstWrite = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const delay = new stream.Duplex({
+      read: function read() {},
+      write: function write(data, enc, cb) {
+        queueMicrotask(cb);
+      },
+    });
+
+    const secure = tls.connect({
+      socket: delay,
+    });
+    queueMicrotask(function () {
+      secure.destroy();
+    });
+    secure.on('close', resolve);
+    await promise;
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-js-stream.js
+export const testTlsJsStream = {
+  async test(ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const raw = net.connect(env.JS_STREAM_SERVER_PORT);
+
+    let pending = false;
+    raw.on('readable', function () {
+      if (pending) p._read();
+    });
+
+    raw.on('end', function () {
+      p.push(null);
+    });
+
+    const socket = new stream.Duplex({
+      read: function read() {
+        pending = false;
+
+        const chunk = raw.read();
+        if (chunk) {
+          this.push(chunk);
+        } else {
+          pending = true;
+        }
+      },
+      write: function write(data, enc, cb) {
+        raw.write(data, enc, cb);
+      },
+    });
+
+    const onConnectFn = mock.fn(() => {
+      socket.resume();
+      socket.end('hello');
+    });
+    const conn = tls.connect({ socket }, onConnectFn);
+    conn.once('error', reject);
+    conn.once('close', resolve);
+
+    await promise;
+    strictEqual(onConnectFn.mock.callCount(), 1);
+  },
+};
+
+// Tests are taken from:
 // https://github.com/nodejs/node/blob/b1402835a512f14fa9f8dd23d3e0cee8cfe888a2/test/parallel/test-tls-junk-closes-server.js
 export const testTlsJunkClosesServer = {
   async test(ctrl, env) {
@@ -887,17 +957,16 @@ export const testTlsSocketAllowHalfOpenOption = {
       strictEqual(socket.allowHalfOpen, false);
     }
 
-    // TODO(soon): Support this.
-    // {
-    //   // The option is ignored when the `socket` argument is a generic
-    //   // `stream.Duplex`.
-    //   const duplex = new stream.Duplex({
-    //     allowHalfOpen: false,
-    //     read() {}
-    //   });
-    //   const socket = new tls.TLSSocket(duplex, { allowHalfOpen: true });
-    //   strictEqual(socket.allowHalfOpen, false);
-    // }
+    {
+      // The option is ignored when the `socket` argument is a generic
+      // `stream.Duplex`.
+      const duplex = new stream.Duplex({
+        allowHalfOpen: false,
+        read() {},
+      });
+      const socket = new tls.TLSSocket(duplex, { allowHalfOpen: true });
+      strictEqual(socket.allowHalfOpen, false);
+    }
 
     {
       const socket = new tls.TLSSocket();
@@ -909,5 +978,54 @@ export const testTlsSocketAllowHalfOpenOption = {
       const socket = new tls.TLSSocket(undefined, { allowHalfOpen: true });
       strictEqual(socket.allowHalfOpen, true);
     }
+  },
+};
+
+// Tests are taken from:
+// https://github.com/nodejs/node/blob/52d95f53e466016120048fb43b3732ff9089ecd7/test/parallel/test-tls-streamwrap-buffersize.js
+export const testTlsStreamwrapBuffersize = {
+  async test(ctrl, env) {
+    // This test ensures that `bufferSize` also works for those tlsSockets
+    // created from `socket` of `Duplex`, with which, TLSSocket will wrap
+    // sockets in `StreamWrap`.
+    const iter = 10;
+
+    function createDuplex() {
+      const [clientSide, serverSide] = stream.duplexPair();
+      const dp = Promise.withResolvers();
+
+      const socket = net.connect(env.STREAM_WRAP_SERVER_PORT, () => {
+        clientSide.pipe(socket);
+        socket.pipe(clientSide);
+        clientSide.on('close', () => socket.destroy());
+        socket.on('close', () => clientSide.destroy());
+
+        dp.resolve(serverSide);
+      });
+
+      return dp.promise;
+    }
+
+    const socket = await createDuplex();
+    const { promise, resolve } = Promise.withResolvers();
+    const onCloseFn = mock.fn(() => {
+      strictEqual(client.bufferSize, 0);
+      resolve();
+    });
+    const client = tls.connect({ socket }, () => {
+      strictEqual(client.bufferSize, 0);
+
+      for (let i = 1; i < iter; i++) {
+        client.write('a');
+        strictEqual(client.bufferSize, i);
+      }
+
+      client.end();
+    });
+
+    client.on('close', onCloseFn);
+
+    await promise;
+    strictEqual(onCloseFn.mock.callCount(), 1);
   },
 };
