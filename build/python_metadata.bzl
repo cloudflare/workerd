@@ -60,6 +60,7 @@ def make_bundle_version_info(versions):
         result[name] = entry
     dev = result["development"]
     result["development"] = result[dev["pyodide_version"]] | dev
+    dev["pyodide_version"] = "dev"
     return result
 
 BUNDLE_VERSION_INFO = make_bundle_version_info([
