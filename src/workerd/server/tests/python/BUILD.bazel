@@ -18,20 +18,15 @@ py_wd_test("hello")
 
 py_wd_test("env-param")
 
-py_wd_test(
-    "asgi",
-    # TODO: investigate failure!
-    make_snapshot = False,
-    skip_python_flags = ["0.27.5"],
-)
+py_wd_test("asgi")
+
+py_wd_test("asgi-sse")
 
 py_wd_test("random")
 
 py_wd_test("subdirectory")
 
-py_wd_test(
-    "sdk",
-)
+py_wd_test("sdk")
 
 py_wd_test("seek-metadatafs")
 

@@ -1,4 +1,4 @@
-from asyncio import Future, Queue, ensure_future, sleep
+from asyncio import Event, Future, Queue, create_task, ensure_future, sleep
 from contextlib import contextmanager
 from inspect import isawaitable
 
@@ -98,54 +98,123 @@ async def start_application(app):
     return shutdown
 
 
-async def process_request(app, req, env):
-    from js import Object, Response
+async def process_request(app, req, env, ctx):
+    from js import Object, Response, TransformStream
 
     from pyodide.ffi import create_proxy
 
     status = None
     headers = None
     result = Future()
+    is_sse = False
+    finished_response = Event()
 
-    async def response_gen():
-        if req.body:
-            async for data in req.body:
-                yield {
+    receive_queue = Queue()
+    if req.body:
+        async for data in req.body:
+            await receive_queue.put(
+                {
                     "body": data.to_bytes(),
                     "more_body": True,
                     "type": "http.request",
                 }
-        yield {"body": b"", "more_body": False, "type": "http.request"}
-
-    responses = response_gen()
+            )
+    await receive_queue.put({"body": b"", "more_body": False, "type": "http.request"})
 
     async def receive():
-        return await anext(responses)
+        message = None
+        if not receive_queue.empty():
+            message = await receive_queue.get()
+        else:
+            await finished_response.wait()
+            message = {"type": "http.disconnect"}
+        return message
+
+    # Create a transform stream for handling streaming responses
+    transform_stream = TransformStream.new()
+    readable = transform_stream.readable
+    writable = transform_stream.writable
+    writer = writable.getWriter()
 
     async def send(got):
         nonlocal status
         nonlocal headers
+        nonlocal is_sse
+
         if got["type"] == "http.response.start":
             status = got["status"]
             # Like above, we need to convert byte-pairs into string explicitly.
             headers = [(k.decode(), v.decode()) for k, v in got["headers"]]
-        if got["type"] == "http.response.body":
-            # intentionally leak body to avoid a copy
-            #
-            # Apparently the `Response` constructor will not eagerly copy a
-            # TypedArray argument, so if we don't leak the argument the response
-            # body is corrupted. This is fine because the session is going to
-            # exit at this point.
-            px = create_proxy(got["body"])
+            # Check if this is a server-sent events response
+            for k, v in headers:
+                if k.lower() == "content-type" and v.lower().startswith(
+                    "text/event-stream"
+                ):
+                    is_sse = True
+                    break
+            if is_sse:
+                # For SSE, create and return the response immediately after http.response.start
+                resp = Response.new(
+                    readable, headers=Object.fromEntries(headers), status=status
+                )
+                result.set_result(resp)
+
+        elif got["type"] == "http.response.body":
+            body = got["body"]
+            more_body = got.get("more_body", False)
+
+            # Convert body to JS buffer
+            px = create_proxy(body)
             buf = px.getBuffer()
             px.destroy()
-            resp = Response.new(
-                buf.data, headers=Object.fromEntries(headers), status=status
-            )
-            result.set_result(resp)
 
-    await app(request_to_scope(req, env), receive, send)
-    return await result
+            if is_sse:
+                # For SSE, write chunk to the stream
+                await writer.write(buf.data)
+                # If this is the last chunk, close the writer
+                if not more_body:
+                    await writer.close()
+                    finished_response.set()
+            else:
+                resp = Response.new(
+                    buf.data, headers=Object.fromEntries(headers), status=status
+                )
+                result.set_result(resp)
+                await writer.close()
+                finished_response.set()
+
+    # Run the application in the background to handle SSE
+    async def run_app():
+        try:
+            await app(request_to_scope(req, env), receive, send)
+
+            # If we get here and no response has been set yet, the app didn't generate a response
+            if not result.done():
+                raise RuntimeError("The application did not generate a response")  # noqa: TRY301
+        except Exception as e:
+            # Handle any errors in the application
+            if not result.done():
+                result.set_exception(e)
+                await writer.close()  # Close the writer
+                finished_response.set()
+
+    # Create task to run the application in the background
+    app_task = create_task(run_app())
+
+    # Wait for the result (the response)
+    response = await result
+
+    # For non-SSE responses, we need to wait for the application to complete
+    if not is_sse:
+        await app_task
+    else:  # noqa: PLR5501
+        if ctx is not None:
+            ctx.waitUntil(create_proxy(app_task))
+        else:
+            raise RuntimeError(
+                "Server-Side-Events require ctx to be passed to asgi.fetch"
+            )
+    return response
 
 
 async def process_websocket(app, req):
@@ -200,9 +269,9 @@ async def process_websocket(app, req):
     return Response.new(None, status=101, webSocket=client)
 
 
-async def fetch(app, req, env):
+async def fetch(app, req, env, ctx=None):
     shutdown = await start_application(app)
-    result = await process_request(app, req, env)
+    result = await process_request(app, req, env, ctx)
     await shutdown()
     return result
 
