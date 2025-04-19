@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/url.h>
 
 #include <kj/filesystem.h>
 
@@ -10,7 +11,7 @@ class CommonJsModuleObject final: public jsg::Object {
  public:
   CommonJsModuleObject(jsg::Lock& js, kj::String path);
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js) const;
+  jsg::JsValue getExports(jsg::Lock& js) const;
   void setExports(jsg::Value value);
   kj::StringPtr getPath() const;
 
@@ -29,16 +30,21 @@ class CommonJsModuleObject final: public jsg::Object {
 class CommonJsModuleContext final: public jsg::Object {
  public:
   CommonJsModuleContext(jsg::Lock& js, kj::Path path);
+  CommonJsModuleContext(jsg::Lock& js, const jsg::Url& url);
 
-  v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
+  jsg::JsValue require(jsg::Lock& js, kj::String specifier);
 
   jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js);
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js) const;
+  jsg::JsValue getExports(jsg::Lock& js) const;
   void setExports(jsg::Value value);
 
   kj::String getFilename() const;
   kj::String getDirname() const;
+
+  jsg::JsValue getModuleExports(jsg::Lock& js) {
+    return getModule(js)->getExports(js);
+  }
 
   JSG_RESOURCE_TYPE(CommonJsModuleContext) {
     JSG_METHOD(require);
@@ -53,7 +59,10 @@ class CommonJsModuleContext final: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  kj::Path path;
+  // If pathOrSpecifier is a path, then we're using the old module registry
+  // implementation. If it is a jsg::Url, then we are using the new module
+  // registry implementation.
+  kj::OneOf<kj::Path, jsg::Url> pathOrSpecifier;
   jsg::Value exports;
 };
 

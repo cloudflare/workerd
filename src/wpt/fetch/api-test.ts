@@ -13,13 +13,34 @@ export default {
     ],
   },
   'abort/general.any.js': {
-    comment: 'These tests will be enabled in a later PR',
-    skipAllTests: true,
+    comment: 'See individual tests',
+    expectedFailures: [
+      // The fetch promise still resolves for some reason
+      'Aborting rejects with AbortError',
+      'Aborting rejects with abort reason',
+      'Already aborted signal rejects immediately',
+
+      // Doesn't reject
+      'response.arrayBuffer() rejects if already aborted',
+      'response.blob() rejects if already aborted',
+      'response.bytes() rejects if already aborted',
+      'response.json() rejects if already aborted',
+      'response.text() rejects if already aborted',
+      'Call text() twice on aborted response',
+
+      // Instead throws TypeError: Parsing a Body as FormData requires a Content-Type header.
+      'response.formData() rejects if already aborted',
+
+      // ReadableStream.cancel was not called synchronously at the right time
+      'Readable stream synchronously cancels with AbortError if aborted before reading',
+
+      // Cloned request needs to have a different signal object, that's in the same state as the original
+      'Signal state is cloned',
+      'Signal on request object should also have abort reason',
+      'Signal on request object',
+    ],
   },
-  'abort/request.any.js': {
-    comment: 'These tests will be enabled in a later PR',
-    skipAllTests: true,
-  },
+  'abort/request.any.js': {},
 
   'basic/accept-header.any.js': {
     comment: 'Response.type must be basic',

@@ -1061,7 +1061,13 @@ class USVString: public kj::String {
   // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
   // constructor instead.
   template <typename... Params>
-  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
+  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {
+    KJ_DASSERT(isValidUtf8());
+  }
+
+ private:
+  // This is a seperate method to avoid including simdutf8 in the header file.
+  bool isValidUtf8() const;
 };
 
 // A DOMString has the exact same representation as a kj::String, but may contain WTF-8 encoded
@@ -2377,9 +2383,21 @@ class Lock {
 
   // Returns a DOMString with an external memory adjustment attached.
   DOMString accountedDOMString(kj::Array<char>&& str);
+  DOMString accountedDOMString(kj::String&& str) {
+    return accountedDOMString(str.releaseArray());
+  }
+  DOMString accountedDOMString(kj::StringPtr str) {
+    return accountedDOMString(kj::str(str));
+  }
 
   // Returns a USVString with an external memory adjustment attached.
   USVString accountedUSVString(kj::Array<char>&& str);
+  USVString accountedUSVString(kj::String&& str) {
+    return accountedUSVString(str.releaseArray());
+  }
+  USVString accountedUSVString(kj::StringPtr str) {
+    return accountedUSVString(kj::str(str));
+  }
 
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();

@@ -437,6 +437,14 @@ declare global {
     descriptionOrFunc: string | ThrowingFn,
     maybeDescription?: string
   ): void;
+  function promise_rejects_dom(
+    test: Test,
+    type: number | string,
+    promiseOrConstructor: Promise<unknown> | typeof DOMException,
+    descriptionOrPromise: Promise<unknown> | string,
+    maybeDescription?: string
+  ): Promise<unknown>;
+
   function assert_not_own_property(
     object: object,
     property_name: string,
@@ -879,6 +887,78 @@ globalThis.assert_throws_dom = (
     },
     `Failed to throw: ${description}`
   );
+};
+
+/**
+ * Assert that a Promise is rejected with the right DOMException.
+ *
+ * For the remaining arguments, there are two ways of calling
+ * promise_rejects_dom:
+ *
+ * 1) If the DOMException is expected to come from the current global, the
+ * third argument should be the promise expected to reject, and a fourth,
+ * optional, argument is the assertion description.
+ *
+ * 2) If the DOMException is expected to come from some other global, the
+ * third argument should be the DOMException constructor from that global,
+ * the fourth argument the promise expected to reject, and the fifth,
+ * optional, argument the assertion description.
+ *
+ * @param _test - the `Test` to use for the assertion.
+ * @param type - See documentation for
+ * `assert_throws_dom <#assert_throws_dom>`_.
+ * @param promiseOrConstructor - Either the constructor
+ * for the expected exception (if the exception comes from another
+ * global), or the promise that's expected to reject (if the
+ * exception comes from the current global).
+ * @param descriptionOrPromise - Either the
+ * promise that's expected to reject (if the exception comes from
+ * another global), or the optional description of the condition
+ * being tested (if the exception comes from the current global).
+ * @param [maybeDescription] - Description of the condition
+ * being tested (if the exception comes from another global).
+ *
+ */
+globalThis.promise_rejects_dom = (
+  _test,
+  type,
+  promiseOrConstructor,
+  descriptionOrPromise,
+  maybeDescription
+): Promise<unknown> => {
+  let constructor, promise, description;
+  if (
+    typeof promiseOrConstructor === 'function' &&
+    promiseOrConstructor.name === 'DOMException'
+  ) {
+    constructor = promiseOrConstructor;
+    promise = descriptionOrPromise as Promise<unknown>;
+    description = maybeDescription as string;
+  } else {
+    constructor = DOMException;
+    promise = promiseOrConstructor as Promise<unknown>;
+    description = descriptionOrPromise as string;
+    strictEqual(
+      maybeDescription,
+      undefined,
+      'Too many args passed to no-constructor version of promise_rejects_dom, or accidentally explicitly passed undefined'
+    );
+  }
+
+  return promise
+    .then(() => {
+      assert_unreached('Should have rejected: ' + description);
+    })
+    .catch(function (e: unknown) {
+      assert_throws_dom(
+        type,
+        constructor,
+        function () {
+          throw e;
+        },
+        description
+      );
+    });
 };
 
 /**

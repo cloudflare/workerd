@@ -9,6 +9,52 @@
 namespace workerd::api {
 namespace {
 
+KJ_TEST("getPythonSnapshotRelease") {
+  capnp::MallocMessageBuilder arena;
+  // TODO(beta): Factor out FeatureFlags from WorkerBundle.
+  auto featureFlags = arena.initRoot<CompatibilityFlags>();
+
+  {
+    auto res = getPythonSnapshotRelease(featureFlags);
+    KJ_ASSERT(res == kj::none);
+  }
+
+  featureFlags.setPythonWorkers(true);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "0.26.0a2");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkers");
+  }
+
+  featureFlags.setPythonWorkersDevPyodide(true);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "0.26.0a2");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
+  }
+
+  featureFlags.setPythonWorkers(false);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "0.26.0a2");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
+  }
+
+  featureFlags.setPythonWorkers20250116(true);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "0.27.5");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
+  }
+
+  featureFlags.setPythonWorkersDevPyodide(false);
+  {
+    auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+    KJ_ASSERT(res.getPyodide() == "0.27.5");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
+  }
+}
+
 KJ_TEST("basic `import` tests") {
   auto files = kj::heapArrayBuilder<kj::String>(2);
   files.add(kj::str("import a\nimport z"));

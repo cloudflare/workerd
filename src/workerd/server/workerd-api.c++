@@ -1038,15 +1038,15 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         break;
       }
       case config::Worker::Module::COMMON_JS_MODULE: {
-        // TODO(soon): These are intentionally commented out for the time
-        // being and will be soon handled in a follow up PR. This branch
-        // is not yet taken in production.
-        // bundleBuilder.addSyntheticModule(
-        //     def.getName(), jsg::modules::Module::newCjsStyleModuleHandler<
-        //         jsg::CommonJsModuleContext,
-        //         JsgWorkerdIsolate_TypeWrapper>(
-        //             kj::str(def.getCommonJsModule()),
-        //             kj::str(def.getName())));
+        kj::Array<kj::StringPtr> named;
+        if (def.hasNamedExports()) {
+          named = compileNamedExports(def.getNamedExports());
+        }
+        bundleBuilder.addSyntheticModule(def.getName(),
+            jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
+                JsgWorkerdIsolate_TypeWrapper>(
+                kj::str(def.getCommonJsModule()), kj::str(def.getName())),
+            KJ_MAP(name, named) { return kj::str(name); });
         break;
       }
       case config::Worker::Module::PYTHON_MODULE: {

@@ -1856,7 +1856,7 @@ class Server::WorkerService final: public Service,
       return service->startRequest({});
     };
 
-    if (util::Autogate::isEnabled(util::AutogateKey::STREAMING_TAIL_WORKERS)) {
+    if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
       streamingTailWorkers = KJ_MAP(service, channels.streamingTails) -> kj::Own<WorkerInterface> {
         // Caution here... if the tail worker ends up have a circular dependency
         // on the worker we'll end up with an infinite loop trying to initialize.

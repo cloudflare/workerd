@@ -265,7 +265,7 @@ kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
 // Implementation of WorkerInterface on top of rpc::EventDispatcher. Since an EventDispatcher
 // is intended to be single-use, this class is also inherently single-use (i.e. only one event
 // can be delivered).
-class RpcWorkerInterface: public WorkerInterface {
+class RpcWorkerInterface final: public WorkerInterface {
  public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
       capnp::ByteStreamFactory& byteStreamFactory,

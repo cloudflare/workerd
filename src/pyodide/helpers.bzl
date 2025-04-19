@@ -2,9 +2,10 @@ load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
-load("//:build/python_metadata.bzl", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
+load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 def _out_name(src):
@@ -24,7 +25,7 @@ def _out(src, version):
 def _ts_bundle_out(prefix, name, version):
     return ":" + _out_path(prefix + name.removeprefix("internal/").replace("/", "_"), version)
 
-def copy_to_generated(src, version = None, out_name = None, name = None):
+def _copy_to_generated(src, version = None, out_name = None, name = None):
     out_name = out_name or _out_name(src)
     if name == None:
         name = out_name + "@copy"
@@ -32,16 +33,83 @@ def copy_to_generated(src, version = None, out_name = None, name = None):
         name += "@" + version
     copy_file(name = name, src = src, out = _out_path(out_name, version))
 
-def copy_and_capnp_embed(src, version = None, out_name = None):
+def _copy_and_capnp_embed(src, version = None, out_name = None):
     out_name = out_name or _out_name(src)
     name = out_name + "@capnp"
     if version:
         name += "@" + version
-    copy_to_generated(src, out_name = out_name, version = version)
+    _copy_to_generated(src, out_name = out_name, version = version)
     capnp_embed(
         name = name,
         src = _out_path(out_name, version),
         deps = [out_name + "@copy"],
+    )
+
+def _fmt_python_snapshot_release(
+        pyodide_version,
+        pyodide_date,
+        packages,
+        backport,
+        baseline_snapshot_hash,
+        flag,
+        **_kwds):
+    content = ", ".join(
+        [
+            'pyodide = "%s"' % pyodide_version,
+            'pyodideRevision = "%s"' % pyodide_date,
+            'packages = "%s"' % packages,
+            "backport = %s" % backport,
+            'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
+            'flagName = "%s"' % flag,
+        ],
+    )
+    return "(%s)" % content
+
+def pyodide_extra():
+    _copy_and_capnp_embed("python-entrypoint.js")
+    _copy_to_generated(
+        "pyodide_extra.capnp",
+        out_name = "pyodide_extra_tmpl.capnp",
+    )
+
+    expand_template(
+        name = "pyodide_extra_expand_template@rule",
+        out = "generated/pyodide_extra.capnp",
+        substitutions = {
+            "%PACKAGE_LOCKS": ",".join(
+                [
+                    '(packageDate = "%s", lock = embed "pyodide-lock_%s.json")' %
+                    (package_date, package_date)
+                    for package_date in PYTHON_LOCKFILES.keys()
+                ],
+            ),
+            "%PYTHON_RELEASES": ", ".join(
+                [_fmt_python_snapshot_release(**info) for info in BUNDLE_VERSION_INFO.values()],
+            ),
+        },
+        template = "generated/pyodide_extra_tmpl.capnp",
+    )
+
+    capnp_embed(
+        name = "pyodide_extra_file_embed",
+        src = "generated/pyodide_extra.capnp",
+        deps = ["pyodide_extra_expand_template@rule"],
+    )
+
+    for package_date in PYTHON_LOCKFILES:
+        _copy_and_capnp_embed("@pyodide-lock_" + package_date + ".json//file")
+
+    cc_capnp_library(
+        name = "pyodide_extra_capnp",
+        srcs = ["generated/pyodide_extra.capnp"],
+        visibility = ["//visibility:public"],
+        deps = [
+            ":pyodide_extra_file_embed",
+            ":python-entrypoint.js@capnp",
+        ] + [
+            ":pyodide-lock_" + package_date + ".json@capnp"
+            for package_date in PYTHON_LOCKFILES.keys()
+        ],
     )
 
 def python_bundles(overrides = {}):
@@ -67,11 +135,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     if not python_stdlib_zip:
         python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
 
-    copy_and_capnp_embed("python-entrypoint.js", version = version)
+    _copy_and_capnp_embed("python-entrypoint.js", version = version)
 
-    copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
+    _copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
 
-    copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
+    _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
     # pyodide.asm.js patches
     # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
@@ -191,7 +259,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     )
 
     if emscripten_setup_override:
-        copy_to_generated(out_name = "emscriptenSetup.js", name = "emscriptenSetup", src = emscripten_setup_override, version = version)
+        _copy_to_generated(out_name = "emscriptenSetup.js", name = "emscriptenSetup", src = emscripten_setup_override, version = version)
     else:
         esbuild(
             name = "emscriptenSetup@" + version,

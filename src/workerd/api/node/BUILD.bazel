@@ -9,6 +9,7 @@ wd_cc_library(
         "crypto.c++",
         "crypto-keys.c++",
         "diagnostics-channel.c++",
+        "module.c++",
         "timers.c++",
         "util.c++",
         "zlib-util.c++",
@@ -16,6 +17,7 @@ wd_cc_library(
     hdrs = [
         "crypto.h",
         "diagnostics-channel.h",
+        "module.h",
         "node.h",
         "timers.h",
         "util.h",
@@ -42,7 +44,6 @@ wd_cc_library(
         "buffer.c++",
         "dns.c++",
         "i18n.c++",
-        "module.c++",
         "url.c++",
     ],
     hdrs = [
@@ -51,7 +52,6 @@ wd_cc_library(
         "buffer-string-search.h",
         "dns.h",
         "i18n.h",
-        "module.h",
         "url.h",
     ],
     implementation_deps = [

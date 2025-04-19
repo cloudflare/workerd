@@ -25,6 +25,16 @@ const unitTests :Workerd.Config = (
           (name = "esm-error", esModule = "export default 1; throw new Error('boom');"),
           (name = "esm-error-dynamic", esModule = "export * as d from 'esm-error'"),
 
+          # CommonJS modules work
+          (name = "cjs1",
+           namedExports = ["foo", "bar"],
+           commonJsModule = "module.exports = { foo: 1, bar: 2, filename: __filename, dirname: __dirname, assert: require('assert') }"),
+          (name = "cjs2", commonJsModule = "module.exports = require('cjs1')"),
+          (name = "cjs3", commonJsModule = "throw new Error('boom')"),
+          # Intentional circular dependency
+          (name = "cjs4", commonJsModule = "module.exports = require('cjs5')"),
+          (name = "cjs5", commonJsModule = "module.exports = require('cjs4')"),
+
           # Other module types work
           (name = "text", text = "abc"),
           (name = "data", data = "abcdef"),

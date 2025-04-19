@@ -62,6 +62,9 @@ jobs:
             config: { suffix: -debug }
           - os: { name: linux, image: ubuntu-22.04 }
             config: { suffix: -debug }
+            # linux release is handled by separate test-linux job
+          - os: { name: linux, image: ubuntu-22.04 }
+            config: { suffix: '' }
       fail-fast: false
     uses: ./.github/workflows/_bazel.yml
     with:
@@ -72,6 +75,20 @@ jobs:
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
+  # Handled separately from `test` to speed up execution of workers-sdk-test which depends on it.
+  test-linux:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04
+      os_name: linux
+      suffix: ''
+      extra_bazel_args: '--config=ci-test'
+      upload_binary: true
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
@@ -149,9 +166,9 @@ jobs:
             The generated output of `@cloudflare/workers-types` matches the snapshot in `types/generated-snapshot` :tada:
 
   workers-sdk-test:
-    needs: [test, check-snapshot]
+    needs: [test-linux, check-snapshot]
     name: Run workers-sdk tests
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout workers-sdk
         uses: actions/checkout@v4
@@ -172,7 +189,7 @@ jobs:
       - name: Download workerd binary
         uses: actions/download-artifact@v4
         with:
-          name: linux-arm-ARM64-binary
+          name: linux-X64-binary
           path: /tmp
 
       - name: Make workerd binary executable

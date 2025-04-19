@@ -491,3 +491,86 @@ void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 }  // namespace workerd::api::pyodide
+
+#include "workerd/io/compatibility-date.h"
+
+#include <capnp/dynamic.h>
+#include <capnp/schema.h>
+
+namespace workerd {
+
+struct PythonSnapshotParsedField {
+  PythonSnapshotRelease::Reader pythonSnapshotRelease;
+  capnp::StructSchema::Field field;
+};
+
+kj::Array<const PythonSnapshotParsedField> makePythonSnapshotFieldTable(
+    capnp::StructSchema::FieldList fields) {
+  kj::Vector<PythonSnapshotParsedField> table(fields.size());
+
+  for (auto field: fields) {
+    bool isPythonField = false;
+
+    for (auto annotation: field.getProto().getAnnotations()) {
+      if (annotation.getId() == PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID) {
+        isPythonField = true;
+        break;
+      }
+    }
+    if (!isPythonField) {
+      continue;
+    }
+
+    auto name = field.getProto().getName();
+    kj::Maybe<PythonSnapshotRelease::Reader> pythonSnapshotRelease;
+    for (auto release: *RELEASES) {
+      if (release.getFlagName() == name) {
+        pythonSnapshotRelease = release;
+        break;
+      }
+    }
+    table.add(PythonSnapshotParsedField{
+      .pythonSnapshotRelease = KJ_REQUIRE_NONNULL(pythonSnapshotRelease),
+      .field = field,
+    });
+  }
+
+  return table.releaseAsArray();
+}
+
+kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
+    CompatibilityFlags::Reader featureFlags) {
+  uint latestFieldOrdinal = 0;
+  kj::Maybe<PythonSnapshotRelease::Reader> result;
+
+  static const auto fieldTable =
+      makePythonSnapshotFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
+
+  for (auto field: fieldTable) {
+    bool isEnabled = capnp::toDynamic(featureFlags).get(field.field).as<bool>();
+    if (!isEnabled) {
+      continue;
+    }
+
+    // We pick the flag with the highest ordinal value that is enabled and has a
+    // pythonSnapshotRelease annotation.
+    //
+    // The fieldTable is probably ordered by the ordinal anyway, but doesn't hurt to be explicit
+    // here.
+    if (latestFieldOrdinal < field.field.getIndex()) {
+      latestFieldOrdinal = field.field.getIndex();
+      result = field.pythonSnapshotRelease;
+    }
+  }
+
+  return result;
+}
+
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
+  if (pyodideRelease.getPyodide() == "dev") {
+    return kj::str("dev");
+  }
+  return kj::str(pyodideRelease.getPyodide(), "_", pyodideRelease.getPyodideRevision(), "_",
+      pyodideRelease.getBackport());
+}
+}  // namespace workerd

@@ -57,8 +57,8 @@ build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
 build:ci-linux-common --action_env=CC=/usr/lib/llvm-18/bin/clang
 build:ci-linux-common --host_action_env=CC=/usr/lib/llvm-18/bin/clang
 
-build:ci-linux --config=ci-linux-common
-build:ci-linux-arm --config=ci-linux --remote_download_regex=".*src/workerd/server/workerd.*"
+build:ci-linux --config=ci-linux-common --remote_download_regex=".*src/workerd/server/workerd.*"
+build:ci-linux-arm --config=ci-linux-common
 
 build:ci-linux-debug --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-debug --config=debug --config=rust-debug
