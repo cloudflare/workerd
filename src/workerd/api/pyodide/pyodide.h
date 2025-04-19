@@ -282,71 +282,78 @@ struct MemorySnapshotResult {
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
  public:
-  kj::Maybe<const PyodidePackageManager&> packageManager;
-  // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
-  // In other words:
-  // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
-  kj::Maybe<MemorySnapshotResult> storedSnapshot;
+  struct State: public kj::Refcounted {
+    kj::Maybe<const PyodidePackageManager&> packageManager;
+    // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
+    // In other words:
+    // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
+    kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
-  ArtifactBundler(kj::Maybe<const PyodidePackageManager&> packageManager,
-      kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
-      bool isValidating = false)
-      : packageManager(packageManager),
-        storedSnapshot(kj::none),
-        existingSnapshot(kj::mv(existingSnapshot)),
-        isValidating(isValidating) {};
+    // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
+    // up cold starts.
+    kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
+    bool isValidating;
+
+    State(kj::Maybe<const PyodidePackageManager&> packageManager,
+        kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
+        bool isValidating = false)
+        : packageManager(packageManager),
+          storedSnapshot(kj::none),
+          existingSnapshot(kj::mv(existingSnapshot)),
+          isValidating(isValidating) {};
+  };
+
+  ArtifactBundler(kj::Own<State> inner): inner(kj::mv(inner)) {};
 
   void storeMemorySnapshot(jsg::Lock& js, MemorySnapshotResult snapshot) {
-    KJ_REQUIRE(isValidating);
-    storedSnapshot = kj::mv(snapshot);
+    KJ_REQUIRE(inner->isValidating);
+    inner->storedSnapshot = kj::mv(snapshot);
   }
 
   bool hasMemorySnapshot() {
-    return existingSnapshot != kj::none;
+    return inner->existingSnapshot != kj::none;
   }
 
   int getMemorySnapshotSize() {
-    if (existingSnapshot == kj::none) {
+    if (inner->existingSnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(existingSnapshot).size();
+    return KJ_REQUIRE_NONNULL(inner->existingSnapshot).size();
   }
 
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
   void disposeMemorySnapshot() {
-    existingSnapshot = kj::none;
+    inner->existingSnapshot = kj::none;
   }
 
   // Determines whether this ArtifactBundler was created inside the validator.
   bool isEwValidating() {
-    return isValidating;
+    return inner->isValidating;
   }
 
-  static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
-    return jsg::alloc<ArtifactBundler>(kj::none, kj::none);
+  static kj::Own<State> makeDisabledBundler() {
+    return kj::refcounted<State>(kj::none, kj::none);
   }
 
   // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
-  static jsg::Ref<ArtifactBundler> makePackagesOnlyBundler(
-      kj::Maybe<const PyodidePackageManager&> manager) {
-    return jsg::alloc<ArtifactBundler>(manager, kj::none);
+  static kj::Own<State> makePackagesOnlyBundler(kj::Maybe<const PyodidePackageManager&> manager) {
+    return kj::refcounted<State>(manager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    if (existingSnapshot == kj::none) {
-      return;
+    KJ_IF_SOME(snap, inner->existingSnapshot) {
+      tracker.trackFieldWithSize("snapshot", snap.size());
     }
-    tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
   }
 
   bool isEnabled() {
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(kj::String path) {
-    KJ_IF_SOME(pacman, packageManager) {
+  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(jsg::Lock& js, kj::String path) {
+    KJ_IF_SOME(pacman, inner->packageManager) {
       KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
-        return jsg::alloc<ReadOnlyBuffer>(ptr);
+        return js.alloc<ReadOnlyBuffer>(ptr);
       }
     }
 
@@ -368,16 +375,13 @@ class ArtifactBundler: public jsg::Object {
   }
 
  private:
-  // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
-  // up cold starts.
-  kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
-  bool isValidating;
+  kj::Own<State> inner;
 };
 
 class DisabledInternalJaeger: public jsg::Object {
  public:
-  static jsg::Ref<DisabledInternalJaeger> create() {
-    return jsg::alloc<DisabledInternalJaeger>();
+  static jsg::Ref<DisabledInternalJaeger> create(jsg::Lock& js) {
+    return js.alloc<DisabledInternalJaeger>();
   }
   JSG_RESOURCE_TYPE(DisabledInternalJaeger) {}
 };
@@ -392,10 +396,6 @@ class DiskCache: public jsg::Object {
  public:
   DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
   DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
-
-  static jsg::Ref<DiskCache> makeDisabled() {
-    return jsg::alloc<DiskCache>();
-  }
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
@@ -425,8 +425,8 @@ class SimplePythonLimiter: public jsg::Object {
       : startupLimitMs(startupLimitMs),
         getTimeCb(kj::mv(getTimeCb)) {}
 
-  static jsg::Ref<SimplePythonLimiter> makeDisabled() {
-    return jsg::alloc<SimplePythonLimiter>();
+  static jsg::Ref<SimplePythonLimiter> makeDisabled(jsg::Lock& js) {
+    return js.alloc<SimplePythonLimiter>();
   }
 
   void beginStartup() {

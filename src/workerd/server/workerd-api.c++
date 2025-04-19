@@ -684,11 +684,12 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",
-          ArtifactBundler::makeDisabledBundler(), jsg::ModuleRegistry::Type::INTERNAL);
+          lockParam.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler()),
+          jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
-      modules->addBuiltinModule("pyodide-internal:internalJaeger", DisabledInternalJaeger::create(),
-          jsg::ModuleRegistry::Type::INTERNAL);
+      modules->addBuiltinModule("pyodide-internal:internalJaeger",
+          DisabledInternalJaeger::create(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject disk cache module
       modules->addBuiltinModule("pyodide-internal:disk_cache",
@@ -696,8 +697,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject a (disabled) SimplePythonLimiter
-      modules->addBuiltinModule("pyodide-internal:limiter", SimplePythonLimiter::makeDisabled(),
-          jsg::ModuleRegistry::Type::INTERNAL);
+      modules->addBuiltinModule("pyodide-internal:limiter",
+          SimplePythonLimiter::makeDisabled(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
     }
 
     for (auto module: confModules) {
@@ -1110,14 +1111,14 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<ArtifactBundler,
             JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable -> jsg::Ref<ArtifactBundler> {
-      return ArtifactBundler::makeDisabledBundler();
+      return js.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler());
     }));
     // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
     pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<DisabledInternalJaeger,
             JsgWorkerdIsolate_TypeWrapper>(
             [](jsg::Lock& js) mutable -> jsg::Ref<DisabledInternalJaeger> {
-      return DisabledInternalJaeger::create();
+      return DisabledInternalJaeger::create(js);
     }));
     // Inject disk cache module
     pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
@@ -1129,7 +1130,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         jsg::modules::Module::newJsgObjectModuleHandler<SimplePythonLimiter,
             JsgWorkerdIsolate_TypeWrapper>(
             [](jsg::Lock& js) mutable -> jsg::Ref<SimplePythonLimiter> {
-      return SimplePythonLimiter::makeDisabled();
+      return SimplePythonLimiter::makeDisabled(js);
     }));
 
     builder.add(pyodideBundleBuilder.finish());
