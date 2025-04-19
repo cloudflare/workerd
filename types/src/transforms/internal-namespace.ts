@@ -2,13 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import { Structure, StructureGroups } from "@workerd/jsg/rtti.capnp.js";
-import ts from "typescript";
-import { StructureMap, getTypeName } from "../generator";
-import { maybeExtractGlobalNode } from "./globals";
-import { ensureStatementModifiers } from "./helpers";
-import { createRenameVisitor } from "./overrides";
+import assert from 'node:assert';
+import { Structure, StructureGroups } from '@workerd/jsg/rtti';
+import ts from 'typescript';
+import { StructureMap, getTypeName } from '../generator';
+import { maybeExtractGlobalNode } from './globals';
+import { ensureStatementModifiers } from './helpers';
+import { createRenameVisitor } from './overrides';
 
 // Moves all members (excluding imports) of internal `declare module` blocks
 // into namespaces that are then `export default`ed:
@@ -86,11 +86,11 @@ function collectInternalModuleStructures(
   structureMap: StructureMap
 ): Map<string, Structure> {
   const moduleRoots = new Map</* specifier */ string, Structure>(); // TODO: add members here as well?
-  root.getModules().forEach((module) => {
-    if (!module.isStructureName()) return;
-    const structure = structureMap.get(module.getStructureName());
-    assert(structure !== undefined, "Structure is undefined");
-    const specifier = module.getSpecifier();
+  root.modules.forEach((module) => {
+    if (!module._isStructureName) return;
+    const structure = structureMap.get(module.structureName);
+    assert(structure !== undefined, 'Structure is undefined');
+    const specifier = module.specifier;
     moduleRoots.set(specifier, structure);
   });
   return moduleRoots;
@@ -122,11 +122,11 @@ function createInternalNamespaceVisitor(
       // global types (e.g. `cloudflare:workers` `DurableObjectBase` and
       // `DurableObject`)
       const renames = new Map</* from */ string, /* to */ string>();
-      moduleRoot.getMembers().forEach((member) => {
-        if (member.isNested()) {
-          const nested = member.getNested();
-          const generatedName = getTypeName(nested.getStructure());
-          const actualName = nested.getName();
+      moduleRoot.members.forEach((member) => {
+        if (member._isNested) {
+          const nested = member.nested;
+          const generatedName = getTypeName(nested.structure);
+          const actualName = nested.name;
           if (generatedName !== actualName) {
             renames.set(generatedName, actualName);
           }
@@ -170,7 +170,7 @@ function createInternalNamespaceVisitor(
       });
 
       // Add default namespace export to top-level statements
-      const defaultIdentifier = ctx.factory.createIdentifier("_default");
+      const defaultIdentifier = ctx.factory.createIdentifier('_default');
       const namespaceBody = ctx.factory.createModuleBlock(namespaceStatements);
       const namespaceDeclaration = ctx.factory.createModuleDeclaration(
         /* modifiers */ undefined,
