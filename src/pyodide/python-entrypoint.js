@@ -11,6 +11,8 @@ import {
   WorkerEntrypoint,
   WorkflowEntrypoint,
 } from 'cloudflare:workers';
+import * as cloudflareWorkersModule from 'cloudflare:workers';
+import * as cloudflareSocketsModule from 'cloudflare:sockets';
 
 // The creation of `pythonDurableObjects` et al. has to be done here because
 // python-entrypoint-helper is a BUILTIN and so cannot import `DurableObject` et al.
@@ -28,7 +30,7 @@ async function doAnImport(name) {
 }
 
 // Pass the import function to the helper
-setDoAnImport(doAnImport);
+setDoAnImport(doAnImport, cloudflareWorkersModule, cloudflareSocketsModule);
 
 function makeEntrypointClassFromNames(names, cls) {
   return names.map((className) => [

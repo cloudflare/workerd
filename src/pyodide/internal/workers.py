@@ -12,12 +12,14 @@ from typing import Any, TypedDict, Unpack
 
 import js
 
+# Get globals modules and import function from the entrypoint-helper
+from js.globalThis import pyodide_entrypoint_helper
+
 import pyodide.http
 from pyodide.ffi import JsException, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
 
 
-# Get the import function from the entrypoint-helper
 def import_from_javascript(module_name: str) -> Any:
     """
     Import a JavaScript ES module from Python.
@@ -31,11 +33,21 @@ def import_from_javascript(module_name: str) -> Any:
     Example:
         cloudflare_workers = import_from_javascript("cloudflare:workers")
         env = cloudflare_workers.env
-    """
-    try:
-        # Get the doAnImport function from the entrypoint-helper
-        from js.globalThis import pyodide_entrypoint_helper
 
+    Note:
+        Behind the scenes import_from_javascript uses JSPI to do imports but that means we need an
+        async context. To enable importing cloudflare:workers and cloudflare:sockets in the global
+        scope we specifically imported them in the global scope and exposed them here.
+    """
+    # Special case for global scope available modules
+    # JSPI won't work in the global scope so we need modules importable in the global scope to be
+    # imported beforehand.
+    if module_name == "cloudflare:workers":
+        return pyodide_entrypoint_helper.cloudflareWorkersModule
+    if module_name == "cloudflare:sockets":
+        return pyodide_entrypoint_helper.cloudflareSocketsModule
+
+    try:
         from pyodide.ffi import run_sync
 
         # Call the JavaScript import function

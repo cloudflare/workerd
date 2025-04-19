@@ -23,8 +23,16 @@ import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 
 // Function to import JavaScript modules from Python
 let doAnImport: (mod: string) => Promise<any>;
-export function setDoAnImport(func: (mod: string) => Promise<any>) {
+let cloudflareWorkersModule: any;
+let cloudflareSocketsModule: any;
+export function setDoAnImport(
+  func: (mod: string) => Promise<any>,
+  cloudflareWorkers: any,
+  cloudflareSockets: any
+) {
   doAnImport = func;
+  cloudflareWorkersModule = cloudflareWorkers;
+  cloudflareSocketsModule = cloudflareSockets;
 }
 
 function pyimportMainModule(pyodide: Pyodide): PyModule {
@@ -85,10 +93,12 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     // install any extra packages into the site-packages directory
     const sitePackages = pyodide.FS.sitePackages;
 
-    // Expose the doAnImport function to Python globals
+    // Expose the doAnImport function and global modules to Python globals
     // @ts-ignore: Assign to global object
     globalThis.pyodide_entrypoint_helper = {
       doAnImport,
+      cloudflareWorkersModule,
+      cloudflareSocketsModule,
     };
 
     // Inject modules that enable JS features to be used idiomatically from Python.

@@ -2,7 +2,7 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "python-importable-env-test",
+    ( name = "importable-env-test",
       worker = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
@@ -12,7 +12,6 @@ const unitTests :Workerd.Config = (
         compatibilityDate = "2025-02-01",
         compatibilityFlags = [
           %PYTHON_FEATURE_FLAGS,
-          "nodejs_compat_v2",
         ],
         bindings = [
           (name = "FOO", text = "BAR"),
