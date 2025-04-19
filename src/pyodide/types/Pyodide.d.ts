@@ -5,6 +5,10 @@ declare type Handler = (...args: any[]) => any;
 declare type PyCallable = ((...args: any[]) => any) & {
   call: (...args: any[]) => any;
   callRelaxed: (...args: any[]) => any;
+  callWithOptions?: (
+    options: { relaxed?: boolean; promising?: boolean; kwargs?: boolean },
+    ...args: any[]
+  ) => any;
 };
 
 interface PyModule {
