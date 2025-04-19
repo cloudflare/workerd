@@ -1420,6 +1420,35 @@ export class DurableObjectExample extends DurableObject {
     }
     return bookmark;
   }
+
+  async createTableForTestingAutoRollBackOnCriticalError() {
+    this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)");
+  }
+
+  async createCriticalErrorThatLeadsToAutoRollback() {
+    // Limit size of db so we can trigger a SQLITE_FULL error
+    // this.state.storage.sql.exec('PRAGMA max_page_count = 10');
+
+    try {
+      // Create large data to fill the database quickly
+      const largeData = new Uint8Array(1000000).fill(42);
+      this.state.storage.sql.exec("INSERT INTO test_full VALUES (?, ?)", 2, largeData);
+      throw new Error("should have thrown SQLITE_FULL exception before we reach here");
+    } catch (err) {
+      if (err.message !== "database or disk is full: SQLITE_FULL") {
+        throw err;
+      }
+    }
+
+    const smallData = new Uint8Array(10).fill(1);
+    this.state.storage.sql.exec("INSERT INTO test_full VALUES (?, ?)", 1, smallData);
+  }
+
+  async verifyAutoRollbackAfterCriticalError() {
+    if ([...this.state.storage.sql.exec("SELECT * FROM test_full")].length != 0) {
+      throw new Error("found data that was committed when a critical error happened")
+    }
+  }
 }
 
 export default {
@@ -1530,4 +1559,18 @@ export let testSessionsAPIBookmark = {
       bookmark = await stub.testSessionsAPIBookmark(bookmark);
     }
   },
+};
+
+export let testAutoRollBackOnCriticalError = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('auto-rollback-on-critical-error-test'));
+    await stub.createTableForTestingAutoRollBackOnCriticalError();
+    try {
+      await stub.createCriticalErrorThatLeadsToAutoRollback();
+      throw new Error("should have thrown SQLITE_FULL exception before we reach here");
+    } catch(err) {
+      // TODO - verify if SQLITE_FULL error is thrown
+    }
+    await stub.verifyAutoRollbackAfterCriticalError();
+  }
 };
