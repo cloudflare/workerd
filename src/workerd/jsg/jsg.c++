@@ -12,6 +12,8 @@
 #include <workerd/jsg/util.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <libplatform/libplatform.h>
+
 namespace workerd::jsg {
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
@@ -267,6 +269,16 @@ void Lock::runMicrotasks() {
 
 void Lock::terminateExecution() {
   v8Isolate->TerminateExecution();
+}
+
+bool Lock::pumpMsgLoop() {
+  bool tasksRun = false;
+  // Ensure that this runs under limit enforcer scope
+  // We currently disable Minor GC, so this while loop will only ever run at max one iteration
+  while (IsolateBase::from(v8Isolate).pumpMsgLoop()) {
+    tasksRun = true;
+  }
+  return tasksRun;
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {

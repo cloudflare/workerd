@@ -8,6 +8,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/uncaught-exception-source.h>
 
@@ -458,7 +459,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&&) {}));
+      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&& e) {}));
 }
 
 kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
@@ -1097,18 +1098,54 @@ void IoContext::runImpl(Runnable& runnable,
         js.terminateExecution();
       }
 
-      // Running the microtask queue can itself trigger a pending exception in the isolate.
-      v8::TryCatch tryCatch(workerLock.getIsolate());
+      // Run microtask checkpoint with an active IoContext
+      {
+        // Running the microtask queue can itself trigger a pending exception in the isolate.
+        v8::TryCatch tryCatch(workerLock.getIsolate());
 
-      js.runMicrotasks();
+        js.runMicrotasks();
 
-      if (tryCatch.HasCaught()) {
-        // It really shouldn't be possible for microtasks to throw regular exceptions.
-        // so if we got here it should be a terminal condition.
-        KJ_ASSERT(tryCatch.HasTerminated());
-        // If we do not reset here we end up with a dangling exception in the isolate that
-        // leads to an assert in v8 when the Lock is destroyed.
-        tryCatch.Reset();
+        if (tryCatch.HasCaught()) {
+          // It really shouldn't be possible for microtasks to throw regular exceptions.
+          // so if we got here it should be a terminal condition.
+          KJ_ASSERT(tryCatch.HasTerminated());
+          // If we do not reset here we end up with a dangling exception in the isolate that
+          // leads to an assert in v8 when the Lock is destroyed.
+          tryCatch.Reset();
+          // Ensure we don't pump the message loop in this case
+          gotTermination = true;
+        }
+      }
+
+      // Run FinalizationRegistry cleanup tasks without an IoContext
+      {
+        SuppressIoContextScope noIoCtxt;
+        while (!gotTermination && js.pumpMsgLoop()) {
+          // Check if FinalizationRegistry cleanup callbacks have not breached our limits
+          if (limitEnforcer->getLimitsExceeded() != kj::none) {
+            // We can potentially log this, but due to a lack of IoContext we cannot notify
+            // the worker
+            break;
+          }
+
+          // It is possible that a microtask got enqueued during pumpMsgLoop execution
+          // Microtasks enqueued by FinalizationRegistry cleanup tasks should also run
+          // without an active IoContext
+          v8::TryCatch tryCatch(workerLock.getIsolate());
+
+          js.runMicrotasks();
+
+          if (tryCatch.HasCaught()) {
+            // It really shouldn't be possible for microtasks to throw regular exceptions.
+            // so if we got here it should be a terminal condition.
+            KJ_ASSERT(tryCatch.HasTerminated());
+            // If we do not reset here we end up with a dangling exception in the isolate that
+            // leads to an assert in v8 when the Lock is destroyed.
+            tryCatch.Reset();
+            // Ensure we don't pump the message loop in this case
+            gotTermination = true;
+          }
+        }
       }
     });
 

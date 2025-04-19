@@ -832,6 +832,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().ioChannelFactory;
   }
 
+  void pumpMessageLoop();
+
  private:
   ThreadContext& thread;
 
