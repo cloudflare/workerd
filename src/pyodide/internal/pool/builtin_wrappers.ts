@@ -74,6 +74,9 @@ export function finishSetup() {
 }
 
 export function newWasmModule(buffer: Uint8Array): WebAssembly.Module {
+  if (!UnsafeEval) {
+    return new WebAssembly.Module(buffer);
+  }
   if (finishedSetup) {
     checkCallee();
   }
