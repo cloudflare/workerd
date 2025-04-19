@@ -46,7 +46,6 @@ export function normalizeEncoding(enc?: string): Encoding | undefined {
 }
 
 export function getEncodingOps(enc: unknown): Encoding | undefined {
-  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
   enc += '';
   // @ts-expect-error TS18046 TS complains about unknown can not have length.
   switch (enc.length) {

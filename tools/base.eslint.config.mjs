@@ -25,6 +25,7 @@ export function baseConfig() {
         "@typescript-eslint/no-non-null-assertion": "error",
         "@typescript-eslint/no-extraneous-class": "off",
         "@typescript-eslint/unified-signatures": "off",
+        "@typescript-eslint/restrict-plus-operands": "off",
         "@typescript-eslint/no-unused-vars": [
           "error",
           {

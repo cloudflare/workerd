@@ -211,7 +211,7 @@ export function escape(input: unknown): string {
   if (typeof input !== 'string') {
     // eslint-disable-next-line @typescript-eslint/no-base-to-string
     if (typeof input === 'object') str = String(input);
-    // eslint-disable-next-line @typescript-eslint/restrict-plus-operands,@typescript-eslint/no-base-to-string
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     else str = input + '';
   } else {
     str = input;
@@ -226,7 +226,6 @@ export function escape(input: unknown): string {
  */
 function stringifyPrimitive(v: unknown): string {
   if (typeof v === 'string') return v;
-  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
   if (typeof v === 'number' && Number.isFinite(v)) return '' + v;
   if (typeof v === 'bigint') return '' + v;
   if (typeof v === 'boolean') return v ? 'true' : 'false';
@@ -238,7 +237,6 @@ function encodeStringified(v: unknown, encode: EncodeFunction): string {
   if (typeof v === 'number' && Number.isFinite(v)) {
     // Values >= 1e21 automatically switch to scientific notation which requires
     // escaping due to the inclusion of a '+' in the output
-    // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
     return Math.abs(v) < 1e21 ? '' + v : encode('' + v);
   }
   if (typeof v === 'bigint') return '' + v;
