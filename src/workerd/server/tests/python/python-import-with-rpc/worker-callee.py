@@ -7,11 +7,11 @@ class TestService(WorkerEntrypoint):
 
     async def test_import(self):
         # Import a JavaScript module from the RPC target
-        node_assert = await import_from_javascript("node:assert")
+        node_assert = import_from_javascript("node:assert")
         assert hasattr(node_assert, "strictEqual"), "strictEqual function should exist"
 
         # Import the env module and test it works in the RPC context
-        cloudflare_workers = await import_from_javascript("cloudflare:workers")
+        cloudflare_workers = import_from_javascript("cloudflare:workers")
         env = cloudflare_workers.env
 
         # Verify the environment binding is correctly accessible

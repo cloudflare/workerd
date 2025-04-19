@@ -73,8 +73,20 @@ py_wd_test("durable-object")
 
 py_wd_test("worker-entrypoint")
 
-py_wd_test("python-js-import")
+py_wd_test(
+    "python-js-import",
+    # TODO(now): Change to 0.27.5 before merging
+    python_flags = ["development"],
+)
 
-py_wd_test("python-importable-env")
+py_wd_test(
+    "python-importable-env",
+    # TODO(now): Change to 0.27.5 before merging
+    python_flags = ["development"],
+)
 
-py_wd_test("python-import-with-rpc")
+py_wd_test(
+    "python-import-with-rpc",
+    # TODO(now): Change to 0.27.5 before merging
+    python_flags = ["development"],
+)

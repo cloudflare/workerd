@@ -7,7 +7,7 @@ async def test():
     console.log("Running Python import with RPC tests...")
 
     # Import JavaScript module
-    cloudflare_workers = await import_from_javascript("cloudflare:workers")
+    cloudflare_workers = import_from_javascript("cloudflare:workers")
     env = cloudflare_workers.env
 
     # Test RPC functionality

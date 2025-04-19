@@ -29,22 +29,22 @@ KJ_TEST("getPythonSnapshotRelease") {
   featureFlags.setPythonWorkersDevPyodide(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.26.0a2");
+    KJ_ASSERT(res.getPyodide() == "dev");
     KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
   }
 
   featureFlags.setPythonWorkers(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.26.0a2");
+    KJ_ASSERT(res.getPyodide() == "dev");
     KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
   }
 
   featureFlags.setPythonWorkers20250116(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.27.5");
-    KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
+    KJ_ASSERT(res.getPyodide() == "dev");
+    KJ_ASSERT(res.getFlagName() == "pythonWorkersDevPyodide");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);

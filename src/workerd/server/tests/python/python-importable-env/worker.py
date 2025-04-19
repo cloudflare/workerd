@@ -2,6 +2,9 @@ import asyncio
 
 from workers import import_from_javascript
 
+cloudflare_workers = import_from_javascript("cloudflare:workers")
+env = cloudflare_workers.env
+
 
 async def test():
     from js import console
@@ -9,11 +12,9 @@ async def test():
     console.log("Running Python importable-env tests...")
 
     # Import assert functionality from Node.js
-    node_assert = await import_from_javascript("node:assert")
+    node_assert = import_from_javascript("node:assert")
 
     # Import the env module from cloudflare:workers
-    cloudflare_workers = await import_from_javascript("cloudflare:workers")
-    env = cloudflare_workers.env
     withEnv = cloudflare_workers.withEnv
 
     # Test that env is populated at the top level scope
@@ -38,7 +39,7 @@ async def test():
 
     # Test mutation of env
     env.BAR = 123
-    child = await import_from_javascript("child")
+    child = import_from_javascript("child")
     node_assert.strictEqual(child.env.FOO, "BAR")
     node_assert.strictEqual(child.env.BAR, 123)
     console.log("env mutations are visible in imports")
@@ -46,7 +47,7 @@ async def test():
     # Test withEnv
     async def import_with_env():
         await asyncio.sleep(0)
-        return await import_from_javascript("child2")
+        return import_from_javascript("child2")
 
     result = await withEnv({"BAZ": 1}, import_with_env)
     child2_env = result.env

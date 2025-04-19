@@ -93,7 +93,7 @@ function validatePyodideVersion(Module: Module) {
   try {
     simpleRunPython(
       Module,
-      `from pyodide import __version__ as v; print(v); del v`
+      `from pyodide import __version__ as v; assert v == \'${expectedPyodideVersion}\'; del v`
     );
   } catch {
     throw new Error(

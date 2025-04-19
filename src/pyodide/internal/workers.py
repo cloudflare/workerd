@@ -29,11 +29,13 @@ def import_from_javascript(module_name: str) -> Any:
         The imported module object.
 
     Example:
-        env = await import_from_javascript('cloudflare:workers')
+        cloudflare_workers = import_from_javascript("cloudflare:workers")
+        env = cloudflare_workers.env
     """
     try:
         # Get the doAnImport function from the entrypoint-helper
         from js.globalThis import pyodide_entrypoint_helper
+
         from pyodide.ffi import run_sync
 
         # Call the JavaScript import function
