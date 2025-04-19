@@ -4386,8 +4386,18 @@ declare abstract class AiGateway {
 interface AutoRAGInternalError extends Error {}
 interface AutoRAGNotFoundError extends Error {}
 interface AutoRAGUnauthorizedError extends Error {}
+type ComparisonFilter = {
+  key: string;
+  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+  value: string | number | boolean;
+};
+type CompoundFilter = {
+  type: "and" | "or";
+  filters: ComparisonFilter[];
+};
 type AutoRagSearchRequest = {
   query: string;
+  filters?: CompoundFilter | ComparisonFilter;
   max_num_results?: number;
   ranking_options?: {
     ranker?: string;

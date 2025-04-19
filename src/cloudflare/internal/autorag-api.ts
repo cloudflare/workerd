@@ -45,8 +45,20 @@ async function parseError(
   }
 }
 
+export type ComparisonFilter = {
+  key: string;
+  type: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte';
+  value: string | number | boolean;
+};
+
+export type CompoundFilter = {
+  type: 'and' | 'or';
+  filters: ComparisonFilter[];
+};
+
 export type AutoRagSearchRequest = {
   query: string;
+  filters?: CompoundFilter | ComparisonFilter;
   max_num_results?: number;
   ranking_options?: {
     ranker?: string;
