@@ -59,7 +59,14 @@ def make_bundle_version_info(versions):
         entry["feature_flags"] = [entry["flag"]]
         result[name] = entry
     dev = result["development"]
-    result["development"] = result[dev["pyodide_version"]] | dev
+    real_pyodide_version = dev["pyodide_version"]
+    dev = result[real_pyodide_version] | dev
+    dev["real_pyodide_version"] = real_pyodide_version
+
+    # Set pyodide_version to dev.
+    # TODO: Update the code and remove this. The actual version is more useful.
+    dev["pyodide_version"] = "dev"
+    result["development"] = dev
     return result
 
 BUNDLE_VERSION_INFO = make_bundle_version_info([
