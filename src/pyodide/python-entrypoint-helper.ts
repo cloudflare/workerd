@@ -21,12 +21,18 @@ import {
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 
-function pyimportMainModule(pyodide: Pyodide): PyModule {
+async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {
     throw new Error('Main module needs to end with a .py file extension');
   }
   const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
-  return pyodide.pyimport(mainModuleName);
+  if (pyodide.version === '0.26.0a2') {
+    return pyodide.pyimport(mainModuleName);
+  } else {
+    return await pyodide._module.API.pyodide_base.pyimport_impl.callPromising(
+      mainModuleName
+    );
+  }
 }
 
 let pyodidePromise: Promise<Pyodide> | undefined;
@@ -117,7 +123,7 @@ function getMainModule(): Promise<PyModule> {
       await setupPatches(pyodide);
       Limiter.beginStartup();
       try {
-        return enterJaegerSpan('pyimport_main_module', () =>
+        return await enterJaegerSpan('pyimport_main_module', () =>
           pyimportMainModule(pyodide)
         );
       } finally {
@@ -135,6 +141,13 @@ async function preparePython(): Promise<PyModule> {
   return mainModule;
 }
 
+function callHandler(handler: PyCallable, args: any[]): any {
+  if (handler.callWithOptions) {
+    return handler.callWithOptions({ relaxed: true, promising: true }, ...args);
+  }
+  return handler.callRelaxed(...args);
+}
+
 function makeHandler(pyHandlerName: string): Handler {
   return async function (...args: any[]) {
     const mainModule = await enterJaegerSpan(
@@ -148,7 +161,7 @@ function makeHandler(pyHandlerName: string): Handler {
       );
     }
     const result = await enterJaegerSpan('python_code', () => {
-      return handler.callRelaxed(...args);
+      return callHandler(handler, args);
     });
 
     // Support returning a pyodide.ffi.FetchResponse.

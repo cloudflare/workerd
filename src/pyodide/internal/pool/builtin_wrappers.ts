@@ -74,6 +74,9 @@ export function finishSetup(): void {
 }
 
 export function newWasmModule(buffer: Uint8Array): WebAssembly.Module {
+  if (!UnsafeEval) {
+    return new WebAssembly.Module(buffer);
+  }
   if (finishedSetup) {
     checkCallee();
   }
@@ -105,15 +108,17 @@ export function wasmInstantiate(
  */
 function checkCallee(): void {
   const origPrepareStackTrace = Error.prepareStackTrace;
-  let isOkay;
+  let isOkay, funcName;
   try {
     Error.prepareStackTrace = prepareStackTrace;
-    isOkay = new Error().stack;
+    [isOkay, funcName] = new Error().stack as unknown as ReturnType<
+      typeof prepareStackTrace
+    >;
   } finally {
     Error.prepareStackTrace = origPrepareStackTrace;
   }
   if (!isOkay) {
-    console.warn('Invalid call to `WebAssembly.Module`');
+    console.warn('Invalid call to `WebAssembly.Module`', funcName);
     throw new Error();
   }
 }
@@ -123,24 +128,30 @@ function checkCallee(): void {
  * `convertJsFunctionToWasm` or `loadModule` in `pyodide.asm.js`, `false` if not. This will set
  * the `stack` field in the error so we can read back the result there.
  */
-function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
+function prepareStackTrace(
+  _error: Error,
+  stack: StackItem[]
+): [boolean, string] {
   // In case a logic error is ever introduced in this function, defend against
   // reentrant calls by setting `prepareStackTrace` to `undefined`.
   Error.prepareStackTrace = undefined;
   // Counting up, the bottom of the stack is `checkCallee`, then
   // `newWasmModule`, and the third entry should be our callee.
   if (stack.length < 3) {
-    return false;
+    return [false, ''];
   }
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
     if (fileName !== 'pyodide-internal:generated/emscriptenSetup') {
-      return false;
+      return [false, funcName];
     }
-    return ['loadModule', 'convertJsFunctionToWasm'].includes(funcName);
+    return [
+      ['loadModule', 'convertJsFunctionToWasm', 'generate'].includes(funcName),
+      funcName,
+    ];
   } catch (e) {
     console.warn(e);
-    return false;
+    return [false, ''];
   }
 }
