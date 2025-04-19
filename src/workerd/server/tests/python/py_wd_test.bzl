@@ -4,7 +4,7 @@ load("//:build/wd_test.bzl", "wd_test")
 FEATURE_FLAGS = {
     "0.26.0a2": [],
     "0.27.5": ["python_workers_20250116"],
-    "development": ["python_workers_development", "python_external_packages"],
+    "development": ["python_workers_development"],
 }
 
 def _py_wd_test_helper(
@@ -25,7 +25,7 @@ def _py_wd_test_helper(
         name = name_flag + "@rule",
         out = templated_src,
         template = src,
-        substitutions = {"%PYTHON_FEATURE_FLAGS": feature_flags_txt},
+        substitutions = {"%PYTHON_FEATURE_FLAGS": feature_flags_txt, "%PYTHON_FLAG": python_flag},
     )
 
     wd_test(

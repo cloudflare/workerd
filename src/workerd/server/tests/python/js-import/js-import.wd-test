@@ -9,9 +9,7 @@ const unitTests :Workerd.Config = (
           (name = "child", esModule = "export const value = 'Child module loaded successfully';"),
         ],
         compatibilityDate = "2025-02-01",
-        compatibilityFlags = [
-          %PYTHON_FEATURE_FLAGS,
-        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
         bindings = [
           (name = "TEST_VALUE", text = "TEST_STRING"),
         ],

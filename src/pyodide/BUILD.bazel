@@ -8,19 +8,19 @@ python_bundles()
 
 alias(
     name = "pyodide.capnp.bin",
-    actual = "pyodide.capnp.bin@rule@0.27.5",
+    actual = "pyodide.capnp.bin@rule@0.26.0a2",
     visibility = ["//visibility:public"],
 )
 
 alias(
     name = "pyodide.capnp.bin@rule",
-    actual = "pyodide.capnp.bin@rule@0.27.5",
+    actual = "pyodide.capnp.bin@rule@0.26.0a2",
     visibility = ["//visibility:public"],
 )
 
 alias(
     name = "pyodide",
-    actual = "pyodide@0.27.5",
+    actual = "pyodide@0.26.0a2",
     visibility = ["//visibility:public"],
 )
 

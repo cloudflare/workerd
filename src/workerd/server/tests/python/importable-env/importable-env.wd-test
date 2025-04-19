@@ -6,13 +6,9 @@ const unitTests :Workerd.Config = (
       worker = (
         modules = [
           (name = "worker.py", pythonModule = embed "worker.py"),
-          (name = "child", esModule = "import { env } from 'cloudflare:workers'; export { env };"),
-          (name = "child2", esModule = "import { env } from 'cloudflare:workers'; export { env };"),
         ],
         compatibilityDate = "2025-02-01",
-        compatibilityFlags = [
-          %PYTHON_FEATURE_FLAGS,
-        ],
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
         bindings = [
           (name = "FOO", text = "BAR"),
           (name = "CACHE", memoryCache = (
@@ -22,7 +18,8 @@ const unitTests :Workerd.Config = (
               maxValueSize = 1024,
               maxTotalValueSize = 1024,
             ),
-          ))
+          )),
+          (name = "PYTHON_FLAG", text = "%PYTHON_FLAG" ),
         ],
       )
     ),

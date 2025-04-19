@@ -15,7 +15,10 @@ try:
     )
 except RuntimeError:
     # This should throw "RuntimeError: No suspender"
-    pass
+    assert env.PYTHON_FLAG not in ["development", "0.26.0a2"]
+except ImportError:
+    # This should throw "ImportError: Failed to import 'cloudflare:vectorize': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
+    assert env.PYTHON_FLAG in ["development", "0.26.0a2"]
 
 
 async def test():
@@ -27,32 +30,6 @@ async def test():
     # Test that cache exists and is accessible
     assert env.CACHE, "env.CACHE should exist"
 
-    # Test accessing the cache
-    async def memory_cache_read(x):
-        from js import Date
-
-        return to_js(
-            {
-                "value": 123,
-                "expiration": Date.now() + 10000,
-            }
-        )
-
-    cached = await env.CACHE.read(
-        "hello",
-        create_proxy(memory_cache_read),
-    )
-    assert cached == 123, "cached value should be 123"
-
-    # Test withEnv
-    async def import_with_env():
-        workers_module = import_from_javascript("cloudflare:workers")
-        env = workers_module.env
-        return env.FOO
-
-    result = await workers_module.withEnv(to_js({"FOO": 1}), import_with_env)
-    assert result == 1
-
     # Assert that non existent modules throw ImportError
     try:
         import_from_javascript("crypto")
@@ -60,6 +37,43 @@ async def test():
     except ImportError:
         pass
 
-    # Assert that imports that depend on JSPI work as expected
-    vectorize = import_from_javascript("cloudflare:vectorize")
-    assert hasattr(vectorize, "DistanceMetric")
+    if env.PYTHON_FLAG not in ["development", "0.26.0a2"]:
+        # to_js doesn't work correctly in 0.26.0a2 for some reason
+        # Test accessing the cache
+        async def memory_cache_read(x):
+            from js import Date
+
+            return to_js(
+                {
+                    "value": 123,
+                    "expiration": Date.now() + 10000,
+                }
+            )
+
+        cached = await env.CACHE.read(
+            "hello",
+            create_proxy(memory_cache_read),
+        )
+        assert cached == 123, "cached value should be 123"
+
+        # Test withEnv
+        async def import_with_env():
+            workers_module = import_from_javascript("cloudflare:workers")
+            env = workers_module.env
+            return env.FOO
+
+        result = await workers_module.withEnv(to_js({"FOO": 1}), import_with_env)
+        assert result == 1
+
+    if env.PYTHON_FLAG in ["development", "0.26.0a2"]:
+        try:
+            vectorize = import_from_javascript("cloudflare:vectorize")
+        except ImportError as e:
+            assert (
+                e.args[0]
+                == "Failed to import 'cloudflare:vectorize': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
+            )
+    else:
+        # Assert that imports that depend on JSPI work as expected
+        vectorize = import_from_javascript("cloudflare:vectorize")
+        assert hasattr(vectorize, "DistanceMetric")

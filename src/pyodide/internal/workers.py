@@ -54,6 +54,18 @@ def import_from_javascript(module_name: str) -> Any:
         return run_sync(pyodide_entrypoint_helper.doAnImport(module_name))
     except JsException as e:
         raise ImportError(f"Failed to import '{module_name}': {e}") from e
+    except RuntimeError as e:
+        if e.args[0] == "No suspender":
+            raise ImportError(
+                f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available in the global scope."
+            ) from e
+        raise
+    except ImportError as e:
+        if e.args[0].startswith("cannot import name 'run_sync' from 'pyodide.ffi'"):
+            raise ImportError(
+                f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
+            ) from e
+        raise
 
 
 JSBody = (
