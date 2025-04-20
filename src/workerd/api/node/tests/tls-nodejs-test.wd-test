@@ -12,6 +12,8 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "ECHO_SERVER_PORT", fromEnvironment = "ECHO_SERVER_PORT"),
           (name = "HELLO_SERVER_PORT", fromEnvironment = "HELLO_SERVER_PORT"),
+          (name = "JS_STREAM_SERVER_PORT", fromEnvironment = "JS_STREAM_SERVER_PORT"),
+          (name = "STREAM_WRAP_SERVER_PORT", fromEnvironment = "STREAM_WRAP_SERVER_PORT"),
         ]
       ),
     ),

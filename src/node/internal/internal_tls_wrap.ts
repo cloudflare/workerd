@@ -30,6 +30,7 @@ import {
   onConnectionOpened,
   onConnectionClosed,
 } from 'node-internal:internal_net';
+import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 import { checkServerIdentity } from 'node-internal:internal_tls';
 import type {
   ConnectionOptions,
@@ -253,8 +254,13 @@ export function TLSSocket(
     if (socket instanceof Socket) {
       wrap = socket;
     } else {
+      // 2. socket has no handle so it is js not c++
+      // 3. unconnected sockets are wrapped
+      // TLS expects to interact from C++ with a net.Socket that has a C++ stream
+      // handle, but a JS stream doesn't have one. Wrap it up to make it look like
+      // a socket.
       // Cloudflare Workers does not support any other socket type.
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socket');
+      wrap = new JSStreamSocket(socket);
     }
 
     handle = wrap._handle;
