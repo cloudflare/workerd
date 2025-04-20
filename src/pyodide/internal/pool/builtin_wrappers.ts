@@ -74,6 +74,9 @@ export function finishSetup() {
 }
 
 export function newWasmModule(buffer: Uint8Array): WebAssembly.Module {
+  if (!UnsafeEval) {
+    return new WebAssembly.Module(buffer);
+  }
   if (finishedSetup) {
     checkCallee();
   }
@@ -138,7 +141,7 @@ function prepareStackTrace(_error: Error, stack: StackItem[]): boolean {
     if (fileName !== 'pyodide-internal:generated/emscriptenSetup') {
       return false;
     }
-    return ['loadModule', 'convertJsFunctionToWasm'].includes(funcName);
+    return ['loadModule', 'convertJsFunctionToWasm', 'createInvokeModule'].includes(funcName);
   } catch (e) {
     console.warn(e);
     return false;
