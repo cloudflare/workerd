@@ -119,5 +119,5 @@ const logLegacy :Workerd.Worker = (
   ],
   compatibilityDate = "2024-10-14",
   compatibilityFlags = ["streaming_tail_worker"],
-  # streamingTails = ["log"],
+  streamingTails = ["log"],
 );
