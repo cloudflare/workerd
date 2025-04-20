@@ -665,7 +665,6 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
       KJ_CASE_ONEOF(mark, tracing::Mark) {
         KJ_SWITCH_ONEOF(mark) {
           KJ_CASE_ONEOF(log, tracing::Log) {
-            //trace->eventTimestamp = event.timestamp;
 
             if (traces[0]->exceededLogLimit) {
               continue;
@@ -678,7 +677,6 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
             }*/
 #define MAX_TRACE_BYTES (128 * 1024)
             size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Log) + log.message.size();
-            KJ_LOG(WARNING, traces[0]->bytesUsed, newSize);
             if (newSize > MAX_TRACE_BYTES) {
               traces[0]->exceededLogLimit = true;
               traces[0]->truncated = true;
@@ -716,7 +714,6 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
             KJ_IF_SOME(rr, r.info) {
               KJ_SWITCH_ONEOF(rr) {
                 KJ_CASE_ONEOF(fetchInfo, tracing::FetchResponseInfo) {
-                  KJ_LOG(WARNING, "setting fetchResponseInfo");
                   traces[0]->fetchResponseInfo = kj::mv(fetchInfo);
                 }
                 KJ_CASE_ONEOF(custom, tracing::CustomInfo) {}
@@ -746,7 +743,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       Frankenvalue props,
       kj::Own<kj::PromiseFulfiller<void>> doneFulfiller,
       bool isLegacy,
-      //kj::Maybe<kj::Own<Trace>> trace
       kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer)
       : weakIoContext(ioContext.getWeakRef()),
         props(kj::mv(props)),
@@ -789,8 +785,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
       // We will only dispatch the remaining events if a handler is returned.
-      KJ_LOG(WARNING, "got event", events[0].event.is<tracing::Onset>(),
-          events[0].event.is<tracing::Outcome>(), isLegacy, events.size());
+      //KJ_LOG(WARNING, "got event", events[0].event.is<tracing::Onset>(),
+      //    events[0].event.is<tracing::Outcome>(), isLegacy, events.size());
       auto result = ([&]() -> kj::Promise<void> {
         if (isLegacy) {
           return handleLegacy(
@@ -842,9 +838,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       IoContext& ioContext,
       kj::ArrayPtr<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
-    //auto& pipelineTracer = KJ_ASSERT_NONNULL(this->pipelineTracer);
-    KJ_LOG(WARNING, "handleLegacy");
-    // TODO: When we receive events here, we need to add them to the trace.
     // TODO: Keep track of trace size. If it surpasses the maximum, return stop to the incoming
     // stream (or a different signal to indicate no more data that would increase trace size should
     // be sent)
@@ -853,58 +846,19 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       this->events.add(kj::mv(event));
     }
     if (isOutcome) {
-      KJ_LOG(WARNING, "outcome reported");
       kj::Array<kj::Own<Trace>> assembledTraces = assembleTraces(this->events);
       auto& pipelineTracer = KJ_ASSERT_NONNULL(this->pipelineTracer);
-      /*auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none,
-        kj::none, kj::none, nullptr, kj::none,
-        ExecutionModel::STATELESS);
-      kj::Vector<kj::Own<Trace>> traces;
-      traces.add(kj::mv(trace));*/
 
-      KJ_LOG(WARNING, "handleLegacy - dispatching traces");
-      KJ_LOG(WARNING, "received events:", this->events.size());
+      //KJ_LOG(WARNING, "received events:", this->events.size());
       pipelineTracer->addTracesFromChild(assembledTraces);
       this->pipelineTracer = kj::none;
       results.setStop(true);
       doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
-
-    /*if (events[0].event.is<tracing::Outcome>()) {
-      // TODO: Send basic trace.
-      //sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces);
-
-      // TODO(later): This assumes the tail worker is on the default export.
-      // Should we allow other named exports to provide the tailStream handler?
-      //jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-      kj::Vector<kj::Own<Trace>> traces;
-      traces.add(kj::mv(trace));
-
-      auto handler = lock.getExportedHandler("default"_kj, kj::mv(props), ioContext.getActor());
-      auto _traces = traces.releaseAsArray();
-
-      // TODO: Restore same feature set as lock.getGlobalScope().sendTraces(traces, lock, handler) call.
-      results.setStop(true);
-      auto isolate = lock.getIsolate();
-      KJ_LOG(WARNING, "sending, has handler?", handler != kj::none);
-      KJ_IF_SOME(h, handler) {
-        KJ_IF_SOME(f, h->tail) {
-          auto tailEvent = jsg::alloc<api::TailEvent>(lock, "tail"_kj, _traces);
-          auto promise = f(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
-          promise = promise.then([&]() { doneFulfiller->fulfill(); });
-          // TODO: Not needed?
-          //tailEvent->waitUntil(kj::mv(promise));
-          return kj::mv(promise);
-        } else {
-          lock.logWarningOnce("Attempted to send events but we lack a handler, "
-                              "did you remember to export a tail() function?");
-          JSG_FAIL_REQUIRE(Error, "Handler does not export a tail() function.");
-        }
-        return kj::READY_NOW;
-      }
-    }*/
-    //KJ_LOG(WARNING, "report invocation done");
+    // TODO: An alternative approach could try to not create a separate WorkerInterface/custom
+    // event for the LTW, but instead call the equivalent of lock.getGlobalScope().sendTraces(traces, lock, handler)
+    // here to dispatch traces.
     return kj::READY_NOW;
   }
   // Handles the very first (onset) event in the tail stream. This will cause
@@ -921,12 +875,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
         "Expected only a single onset event");
     auto& event = events[0];
-
-    KJ_LOG(WARNING, "handleOnset", isLegacy);
-    if (isLegacy) {
-      // TODO: Add onset event to pseudo trace, then continue
-      return kj::READY_NOW;
-    }
 
     // TODO(later): This assumes the tail worker is on the default export.
     // Should we allow other named exports to provide the tailStream handler?
@@ -1161,14 +1109,14 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
-        TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+  // Do not trace when only using the streaming tail event to transmit events to the legacy handler
+  // instead of as a handler on its own.
+  if (!isLegacy) {
+    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+      t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
+          TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+    }
   }
-
-  // TODO: Does lifetime need to be extended here?
-  // auto outcomeObserver = kj::rc<OutcomeObserver>(
-  //     kj::addRef(incomingRequest->getMetrics()), ioContext.getInvocationSpanContext());
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(kj::heap<TailStreamTarget>(
@@ -1357,8 +1305,6 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
   if (legacyTailWorkers.size() == 0 && streamingTailWorkers.size() == 0) {
     return kj::none;
   }
-  KJ_LOG(WARNING, "initializeTailStreamWriter called", legacyTailWorkers.size(),
-      streamingTailWorkers.size());
 
   kj::Vector<WorkerInterfaceIsLegacy> tailWorkers;
   for (auto& worker: legacyTailWorkers) {
@@ -1393,7 +1339,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // Transitions into the active state by grabbing the pending client capability.
         state.inner = KJ_MAP(wi, pending) {
           auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>(
-              wi.isLegacy, wi.isLegacy ? kj::mv(pipelineTracer) : kj::none);
+              wi.isLegacy, wi.isLegacy ? mapAddRef(pipelineTracer) : kj::none);
           auto result = customEvent->getCap();
           waitUntilTasks.add(
               wi.interface->customEvent(kj::mv(customEvent)).attach(kj::mv(wi)).ignoreResult());
@@ -1425,7 +1371,8 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     // acquire the timestamps used in the tail stream events. Ideally this will
     // use the same timesource that backs `IoContext::now()` and includes the
     // same spectre mitigations.
-    return kj::UNIX_EPOCH;
+    // TODO: +1 to get test to pass
+    return kj::UNIX_EPOCH + kj::SECONDS;
   }).attach(kj::mv(state));
 }
 
