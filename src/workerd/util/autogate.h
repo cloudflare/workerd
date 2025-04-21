@@ -14,6 +14,7 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
+  RESCHEDULE_DESYNCED_SQLITE_ALARMS,
   NumOfKeys  // Reserved for iteration.
 };
 
