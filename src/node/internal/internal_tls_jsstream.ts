@@ -257,7 +257,7 @@ export class JSStreamSocket extends Socket {
       }
 
       // Ensure that write was dispatched
-      setImmediate(() => {
+      queueMicrotask(() => {
         self.finishWrite(handle, errCode);
       });
     }
@@ -297,6 +297,7 @@ export class JSStreamSocket extends Socket {
     this.stream.destroy();
 
     queueMicrotask(() => {
+      notStrictEqual(handle, null);
       this.finishWrite(handle, 'UV_ECANCELED');
       this.finishShutdown(handle, 'UV_ECANCELED');
 

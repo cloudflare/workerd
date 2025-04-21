@@ -810,11 +810,11 @@ export const testTlsJsStream = {
 
     let pending = false;
     raw.on('readable', function () {
-      if (pending) p._read();
+      if (pending) socket._read();
     });
 
     raw.on('end', function () {
-      p.push(null);
+      socket.push(null);
     });
 
     const socket = new stream.Duplex({
@@ -1009,6 +1009,7 @@ export const testTlsStreamwrapBuffersize = {
     const socket = await createDuplex();
     const { promise, resolve } = Promise.withResolvers();
     const onCloseFn = mock.fn(() => {
+      // TODO(soon): This should be undefined, not 0.
       strictEqual(client.bufferSize, 0);
       resolve();
     });

@@ -29,6 +29,7 @@ import {
   _normalizeArgs,
   onConnectionOpened,
   onConnectionClosed,
+  tryReadStart,
 } from 'node-internal:internal_net';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 import { checkServerIdentity } from 'node-internal:internal_tls';
@@ -55,6 +56,7 @@ import {
   ERR_TLS_INVALID_CONTEXT,
 } from 'node-internal:internal_errors';
 import { SecureContext } from 'node-internal:internal_tls_common';
+import { ok } from 'node-internal:internal_assert';
 
 const kConnectOptions = Symbol('connect-options');
 const kErrorEmitted = Symbol('error-emitted');
@@ -355,7 +357,12 @@ TLSSocket.prototype._init = function _init(this: TLSSocket): void {
   //    If that's the scenario, we can trigger _finishInit() immediately. Since, there
   //    is no async calls required to wait.
   if (this._parentWrap != null && this._parentWrap instanceof JSStreamSocket) {
-    this._finishInit();
+    queueMicrotask(() => {
+      this._finishInit();
+      ok(this._parentWrap instanceof JSStreamSocket);
+      this._parentWrap.readStart();
+      tryReadStart(this);
+    });
   } else {
     this.on('connect', () => {
       this._finishInit();
@@ -454,17 +461,7 @@ TLSSocket.prototype._finishInit = function _finishInit(this: TLSSocket): void {
     this.setTimeout(0, this._handleTimeout.bind(this));
   }
 
-  // This queueMicrotask is required to ensure that 'secure' event is emitted after
-  // the next tick in case the user called tls.connect().destroy(). This is required
-  // for Node.js compatibility.
-  //
-  // This is required because "_start" function is trigger onConnectionClose on the next tick
-  // which is also required due to on('secure') event calling callback().
-  queueMicrotask(() => {
-    if (!this.destroyed && !this.isPaused()) {
-      this.emit('secure');
-    }
-  });
+  this.emit('secure');
 };
 
 TLSSocket.prototype._start = function _start(this: TLSSocket): void {
