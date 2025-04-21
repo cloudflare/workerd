@@ -28,6 +28,7 @@ filegroup(
             "urlpattern.c++",
             "urlpattern-standard.c++",
             "util.c++",
+            "filesystem.c++",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -55,6 +56,7 @@ filegroup(
             "urlpattern.h",
             "urlpattern-standard.h",
             "util.h",
+            "filesystem.h",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -89,6 +91,18 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "filesystem",
+    srcs = ["filesystem.c++"],
+    hdrs = ["filesystem.h"],
+    implementation_deps = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/jsg:url",
+    ],
+)
+
+wd_cc_library(
     name = "rtti",
     srcs = [
         "modules.c++",
@@ -104,6 +118,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":filesystem",
         ":html-rewriter",
         ":hyperdrive",
         ":memory-cache",

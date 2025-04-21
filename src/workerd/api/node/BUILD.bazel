@@ -9,6 +9,7 @@ wd_cc_library(
         "crypto.c++",
         "crypto-keys.c++",
         "diagnostics-channel.c++",
+        "filesystem.c++",
         "module.c++",
         "timers.c++",
         "util.c++",
@@ -17,6 +18,7 @@ wd_cc_library(
     hdrs = [
         "crypto.h",
         "diagnostics-channel.h",
+        "filesystem.h",
         "module.h",
         "node.h",
         "timers.h",
@@ -30,6 +32,7 @@ wd_cc_library(
     deps = [
         ":node-core",
         "//src/node",
+        "//src/workerd/api:filesystem",
         "//src/workerd/io",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",

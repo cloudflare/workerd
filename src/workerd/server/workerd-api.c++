@@ -16,6 +16,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/hyperdrive.h>
@@ -108,6 +109,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_URLPATTERN_STANDARD_ISOLATE_TYPES,
     EW_WEBSOCKET_ISOLATE_TYPES,
     EW_SQL_ISOLATE_TYPES,
+    EW_FILESYSTEM_ISOLATE_TYPES,
     EW_NODE_ISOLATE_TYPES,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,

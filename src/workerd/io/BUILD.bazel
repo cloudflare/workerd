@@ -102,6 +102,7 @@ wd_cc_library(
         "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:encoding",
+        "//src/workerd/api:filesystem",
         "//src/workerd/api:url",
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
