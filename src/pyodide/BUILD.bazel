@@ -6,21 +6,23 @@ pyodide_extra()
 
 python_bundles()
 
+DEV_VERSION = BUNDLE_VERSION_INFO["development"]["real_pyodide_version"]
+
 alias(
     name = "pyodide.capnp.bin",
-    actual = "pyodide.capnp.bin@rule@0.26.0a2",
+    actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
     visibility = ["//visibility:public"],
 )
 
 alias(
     name = "pyodide.capnp.bin@rule",
-    actual = "pyodide.capnp.bin@rule@0.26.0a2",
+    actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
     visibility = ["//visibility:public"],
 )
 
 alias(
     name = "pyodide",
-    actual = "pyodide@0.26.0a2",
+    actual = "pyodide@" + DEV_VERSION,
     visibility = ["//visibility:public"],
 )
 

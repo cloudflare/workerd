@@ -59,7 +59,7 @@ def make_bundle_version_info(versions):
         entry["feature_flags"] = [entry["flag"]]
         result[name] = entry
     dev = result["development"]
-    result["development"] = result[dev["pyodide_version"]] | dev
+    result["development"] = result[dev["real_pyodide_version"]] | dev
     return result
 
 BUNDLE_VERSION_INFO = make_bundle_version_info([
@@ -92,8 +92,10 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "baseline_snapshot_hash": "TODO",
     },
     {
+        "real_pyodide_version": "0.26.0a2",
         "name": "development",
-        "pyodide_version": "0.26.0a2",
+        "pyodide_version": "dev",
+        "pyodide_date": "dev",
         "id": "dev",
         "flag": "pythonWorkersDevPyodide",
         "baseline_snapshot_hash": "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae",
