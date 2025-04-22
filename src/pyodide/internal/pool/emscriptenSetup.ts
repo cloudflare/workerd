@@ -5,8 +5,6 @@
  * js file.
  */
 
-import { reportError } from 'pyodide-internal:util';
-
 /**
  * _createPyodideModule and pyodideWasmModule together are produced by the
  * Emscripten linker
@@ -59,21 +57,17 @@ function getWaitForDynlibs(resolveReadyPromise: PreRunHook): PreRunHook {
  */
 function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
   return function prepareFileSystem(Module: Module): void {
-    try {
-      const pymajor = Module._py_version_major();
-      const pyminor = Module._py_version_minor();
-      Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
-      Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
-      Module.FS.mkdirTree(Module.FS.sitePackages);
-      Module.FS.writeFile(
-        `/lib/python${pymajor}${pyminor}.zip`,
-        new Uint8Array(pythonStdlib),
-        { canOwn: true }
-      );
-      Module.FS.mkdirTree(Module.API.config.env.HOME);
-    } catch (e) {
-      reportError(e);
-    }
+    const pymajor = Module._py_version_major();
+    const pyminor = Module._py_version_minor();
+    Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+    Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
+    Module.FS.mkdirTree(Module.FS.sitePackages);
+    Module.FS.writeFile(
+      `/lib/python${pymajor}${pyminor}.zip`,
+      new Uint8Array(pythonStdlib),
+      { canOwn: true }
+    );
+    Module.FS.mkdirTree(Module.API.config.env.HOME);
   };
 }
 
@@ -204,21 +198,16 @@ export async function instantiateEmscriptenModule(
     pythonStdlib,
     wasmModule
   );
-  try {
-    for (const _ of featureDetectionMonkeyPatchesContextManager()) {
-      // Ignore the returned promise, it won't resolve until we're done preloading dynamic
-      // libraries.
-      const _promise = _createPyodideModule(emscriptenSettings);
-    }
-
-    // Wait until we've executed all the preRun hooks before proceeding
-    const emscriptenModule = await emscriptenSettings.readyPromise;
-    emscriptenModule.setUnsafeEval = setUnsafeEval;
-    emscriptenModule.setGetRandomValues = setGetRandomValues;
-    finishSetup();
-    return emscriptenModule;
-  } catch (e) {
-    console.warn('Error in instantiateEmscriptenModule');
-    reportError(e);
+  for (const _ of featureDetectionMonkeyPatchesContextManager()) {
+    // Ignore the returned promise, it won't resolve until we're done preloading dynamic
+    // libraries.
+    const _promise = _createPyodideModule(emscriptenSettings);
   }
+
+  // Wait until we've executed all the preRun hooks before proceeding
+  const emscriptenModule = await emscriptenSettings.readyPromise;
+  emscriptenModule.setUnsafeEval = setUnsafeEval;
+  emscriptenModule.setGetRandomValues = setGetRandomValues;
+  finishSetup();
+  return emscriptenModule;
 }

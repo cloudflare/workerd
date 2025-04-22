@@ -9,7 +9,7 @@ import {
   MEMORY_SNAPSHOT_READER,
   REQUIREMENTS,
 } from 'pyodide-internal:metadata';
-import { reportError, simpleRunPython } from 'pyodide-internal:util';
+import { simpleRunPython } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 let LOADED_BASELINE_SNAPSHOT: number;
@@ -192,36 +192,31 @@ export function preloadDynamicLibs(Module: Module): void {
     });
   }
 
-  try {
-    for (const soFile of SO_FILES_TO_LOAD) {
-      let node: TarFSInfo | undefined = VIRTUALIZED_DIR.getSitePackagesRoot();
+  for (const soFile of SO_FILES_TO_LOAD) {
+    let node: TarFSInfo | undefined = VIRTUALIZED_DIR.getSitePackagesRoot();
+    for (const part of soFile) {
+      node = node?.children?.get(part);
+    }
+    if (!node?.contentsOffset) {
+      node = VIRTUALIZED_DIR.getDynlibRoot();
       for (const part of soFile) {
         node = node?.children?.get(part);
       }
-      if (!node?.contentsOffset) {
-        node = VIRTUALIZED_DIR.getDynlibRoot();
-        for (const part of soFile) {
-          node = node?.children?.get(part);
-        }
-      }
-      if (!node?.contentsOffset) {
-        throw Error('fs node could not be found for ' + soFile);
-      }
-      const { contentsOffset, size } = node;
-      if (contentsOffset === undefined) {
-        throw Error('contentsOffset not defined for ' + soFile);
-      }
-      const wasmModuleData = new Uint8Array(size);
-      (node.reader ?? EmbeddedPackagesTarReader).read(
-        contentsOffset,
-        wasmModuleData
-      );
-      const path = sitePackages + soFile.join('/');
-      loadDynlib(Module, path, wasmModuleData);
     }
-  } catch (e) {
-    console.warn('Error in preloadDynamicLibs');
-    reportError(e);
+    if (!node?.contentsOffset) {
+      throw Error('fs node could not be found for ' + soFile);
+    }
+    const { contentsOffset, size } = node;
+    if (contentsOffset === undefined) {
+      throw Error('contentsOffset not defined for ' + soFile);
+    }
+    const wasmModuleData = new Uint8Array(size);
+    (node.reader ?? EmbeddedPackagesTarReader).read(
+      contentsOffset,
+      wasmModuleData
+    );
+    const path = sitePackages + soFile.join('/');
+    loadDynlib(Module, path, wasmModuleData);
   }
 }
 
@@ -410,28 +405,23 @@ export function restoreSnapshot(Module: Module): void {
 
 let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
 (function () {
-  try {
-    // Lookup memory snapshot from artifact store.
-    if (!MEMORY_SNAPSHOT_READER) {
-      // snapshots are disabled or there isn't one yet
-      return;
-    }
-
-    // Simple sanity check to ensure this snapshot isn't corrupted.
-    //
-    // TODO(later): we need better detection when this is corrupted. Right now the isolate will
-    // just die.
-    const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
-    if (snapshotSize <= 100) {
-      TEST_SNAPSHOT = new Uint8Array(snapshotSize);
-      MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
-      return;
-    }
-    decodeSnapshot();
-  } catch (e) {
-    console.warn('Error in top level of python.js');
-    reportError(e);
+  // Lookup memory snapshot from artifact store.
+  if (!MEMORY_SNAPSHOT_READER) {
+    // snapshots are disabled or there isn't one yet
+    return;
   }
+
+  // Simple sanity check to ensure this snapshot isn't corrupted.
+  //
+  // TODO(later): we need better detection when this is corrupted. Right now the isolate will
+  // just die.
+  const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
+  if (snapshotSize <= 100) {
+    TEST_SNAPSHOT = new Uint8Array(snapshotSize);
+    MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
+    return;
+  }
+  decodeSnapshot();
 })();
 
 export function finishSnapshotSetup(pyodide: Pyodide): void {
