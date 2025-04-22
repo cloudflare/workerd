@@ -24,7 +24,7 @@ just compile-commands
 
 ## Dependencies
 
-In order to install dependencies, please run the following command:
+In order to install dependencies, please run the following command. Also refer to Building workerd in README.md for the list of required dependencies by platform.
 
 - For Ubuntu:
 
