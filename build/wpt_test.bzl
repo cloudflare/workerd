@@ -163,9 +163,11 @@ import {{ createRunner }} from 'harness/harness';
 import config from '{test_config}';
 
 const allTestFiles = {all_test_files};
-const run = createRunner(config, '{test_name}', allTestFiles);
+const {{ run, printResults }} = createRunner(config, '{test_name}', allTestFiles);
 
 {cases}
+
+export const zzz_results = printResults();
 """
 
 def generate_external_cases(base, files):
@@ -270,6 +272,7 @@ const unitTests :Workerd.Config = (
           (name = "unsafe", unsafeEval = void),
           (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
           (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
+          (name = "GEN_TEST_CONFIG", fromEnvironment = "GEN_TEST_CONFIG"),
           {bindings}
         ],
         {compat_date}
