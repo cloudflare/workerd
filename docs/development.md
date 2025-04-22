@@ -22,6 +22,16 @@ just prepare
 just compile-commands
 ```
 
+## Dependencies
+
+In order to install dependencies, please run the following command:
+
+- For Ubuntu:
+
+```sh
+just prepare-ubuntu
+```
+
 ## Code Formatting
 
 workerd code is automatically formatted by clang-format. Run `python ./tools/cross/format.py` to reformat the code
