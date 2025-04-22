@@ -7,17 +7,20 @@ declare type PyCallable = ((...args: any[]) => any) & {
   callRelaxed: (...args: any[]) => any;
 };
 
+declare type PyDict = object;
+
 interface PyModule {
   [handlerName: string]: PyCallable;
 }
 
 interface Pyodide {
   _module: Module;
-  runPython: (code: string, opts?: { globals?: any }) => any;
+  runPython: (code: string, opts?: { globals?: PyDict }) => any;
   registerJsModule: (handle: string, mod: object) => void;
   pyimport: (moduleName: string) => PyModule;
   FS: FS;
   loadPackage: (names: string | string[], options: object) => Promise<any[]>;
   setStdout: (options?: any) => void;
   setStderr: (options?: any) => void;
+  version: string;
 }

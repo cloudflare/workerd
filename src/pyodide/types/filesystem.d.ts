@@ -15,14 +15,14 @@ interface TarFSInfo {
   reader: Reader | null;
 }
 
-declare type MetadataDirInfo = Map<string, MetadataDirInfo>;
+declare type MetadataDirInfo = Map<string, MetadataFSInfo>;
 declare type MetadataFSInfo = MetadataDirInfo | number; // file infos are numbers and dir infos are maps
 
 interface FS {
   mkdir: (dirname: string) => void;
   mkdirTree: (dirname: string) => void;
   writeFile: (fname: string, contents: Uint8Array, options: object) => void;
-  mount<Info>(fs: object, options: { info?: Info }, path: string): void;
+  mount(fs: object, options: { info?: any }, path: string): void;
   createNode<Info>(
     parent: FSNode<Info> | null,
     name: string,
@@ -45,7 +45,11 @@ interface FSOps<Info> {
     permissions: number;
     isDir: boolean;
   };
-  setNodeAttributes: (node: FSNode<Info>, info: Info, isDir: boolean) => void;
+  setNodeAttributes: (
+    node: FSNode<Info>,
+    info: Info | undefined,
+    isDir: boolean
+  ) => void;
   readdir: (node: FSNode<Info>) => string[];
   lookup: (parent: FSNode<Info>, name: string) => Info;
   read: (

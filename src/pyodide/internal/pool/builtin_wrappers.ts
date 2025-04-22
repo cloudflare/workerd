@@ -2,7 +2,7 @@ import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:to
 import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
 
 let getRandomValuesInner: typeof getRandomValuesType;
-export function setGetRandomValues(func: typeof getRandomValuesType) {
+export function setGetRandomValues(func: typeof getRandomValuesType): void {
   getRandomValuesInner = func;
 }
 
@@ -13,7 +13,7 @@ export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
 // We can't import UnsafeEval directly here because it isn't available when setting up Python pool.
 // Thus, we inject it from outside via this function.
 let UnsafeEval: typeof UnsafeEvalType;
-export function setUnsafeEval(mod: typeof UnsafeEvalType) {
+export function setUnsafeEval(mod: typeof UnsafeEvalType): void {
   UnsafeEval = mod;
 }
 
@@ -69,7 +69,7 @@ export function monotonicDateNow(): number {
  *      - Normally ctypes allocates all closures up front
  */
 let finishedSetup = false;
-export function finishSetup() {
+export function finishSetup(): void {
   finishedSetup = true;
 }
 
@@ -80,7 +80,7 @@ export function newWasmModule(buffer: Uint8Array): WebAssembly.Module {
   return UnsafeEval.newWasmModule(buffer);
 }
 
-export async function wasmInstantiate(
+export function wasmInstantiate(
   mod: WebAssembly.Module | Uint8Array,
   imports: WebAssembly.Imports
 ): Promise<{ module: WebAssembly.Module; instance: WebAssembly.Instance }> {
@@ -94,7 +94,7 @@ export async function wasmInstantiate(
     module = UnsafeEval.newWasmModule(mod);
   }
   const instance = new WebAssembly.Instance(module, imports);
-  return { module, instance };
+  return Promise.resolve({ module, instance });
 }
 
 /**

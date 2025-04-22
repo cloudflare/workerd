@@ -41,12 +41,16 @@ function prepareWasmLinearMemory(Module: Module): void {
   // Note: if we are restoring from a snapshot, runtime is not initialized yet.
   Module.noInitialRun = !SHOULD_RESTORE_SNAPSHOT;
 
-  enterJaegerSpan('preload_dynamic_libs', () => preloadDynamicLibs(Module));
-  enterJaegerSpan('remove_run_dependency', () =>
-    Module.removeRunDependency('dynlibs')
-  );
+  enterJaegerSpan('preload_dynamic_libs', () => {
+    preloadDynamicLibs(Module);
+  });
+  enterJaegerSpan('remove_run_dependency', () => {
+    Module.removeRunDependency('dynlibs');
+  });
   if (SHOULD_RESTORE_SNAPSHOT) {
-    enterJaegerSpan('restore_snapshot', () => restoreSnapshot(Module));
+    enterJaegerSpan('restore_snapshot', () => {
+      restoreSnapshot(Module);
+    });
     // Invalidate caches if we have a snapshot because the contents of site-packages
     // may have changed.
     simpleRunPython(
@@ -65,7 +69,7 @@ function prepareWasmLinearMemory(Module: Module): void {
   adjustSysPath(Module);
 }
 
-function maybeAddVendorDirectoryToPath(pyodide: Pyodide) {
+function maybeAddVendorDirectoryToPath(pyodide: Pyodide): void {
   pyodide.runPython(`
     def _tmp():
       import sys
@@ -85,17 +89,12 @@ function maybeAddVendorDirectoryToPath(pyodide: Pyodide) {
  * prevent us accidentally releasing a Pyodide bundle built against a different version than one
  * we expect.
  */
-function validatePyodideVersion(Module: Module) {
+function validatePyodideVersion(pyodide: Pyodide): void {
   const expectedPyodideVersion = MetadataReader.getPyodideVersion();
   if (expectedPyodideVersion == 'dev') {
     return;
   }
-  try {
-    simpleRunPython(
-      Module,
-      `from pyodide import __version__ as v; assert v == \'${expectedPyodideVersion}\'; del v`
-    );
-  } catch {
+  if (pyodide.version !== expectedPyodideVersion) {
     throw new Error(
       `Pyodide version mismatch, expected '${expectedPyodideVersion}'`
     );
@@ -126,9 +125,9 @@ export async function loadPyodide(
     loadPackages(Module, TRANSITIVE_REQUIREMENTS)
   );
 
-  enterJaegerSpan('prepare_wasm_linear_memory', () =>
-    prepareWasmLinearMemory(Module)
-  );
+  enterJaegerSpan('prepare_wasm_linear_memory', () => {
+    prepareWasmLinearMemory(Module);
+  });
 
   maybeCollectSnapshot(Module);
   // Mount worker files after doing snapshot upload so we ensure that data from the files is never
@@ -141,14 +140,18 @@ export async function loadPyodide(
 
   finishSnapshotSetup(pyodide);
 
-  validatePyodideVersion(Module);
+  validatePyodideVersion(pyodide);
 
   // Need to set these here so that the logs go to the right context. If we don't they will go
   // to SetupEmscripten's context and end up being KJ_LOG'd, which we do not want.
   Module.API.initializeStreams(
     null,
-    (msg) => console.log(msg),
-    (msg) => console.error(msg)
+    (msg) => {
+      console.log(msg);
+    },
+    (msg) => {
+      console.error(msg);
+    }
   );
   maybeAddVendorDirectoryToPath(pyodide);
   return pyodide;
