@@ -124,27 +124,10 @@ def _python_bundle_helper(info, overrides):
     override = overrides.get(version, {})
     return _python_bundle(version, **override)
 
-def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
-    pyodide_package = "@pyodide-%s//" % version
-    if not pyodide_asm_wasm:
-        pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
+# pyodide.asm.js patches
+# TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
 
-    if not pyodide_asm_js:
-        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
-
-    if not python_stdlib_zip:
-        python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
-
-    _copy_and_capnp_embed("python-entrypoint.js", version = version)
-
-    _copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
-
-    _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
-
-    # pyodide.asm.js patches
-    # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
-
-    PRELUDE = """
+PRELUDE = """
     import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } from "pyodide-internal:pool/builtin_wrappers";
 
     // Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
@@ -181,69 +164,113 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     }
     """
 
-    REPLACEMENTS = [
+REPLACEMENTS = [
+    [
+        # Convert pyodide.asm.js into an es6 module.
+        # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
+        # automatically.
+        "var _createPyodideModule",
+        PRELUDE + "export const _createPyodideModule",
+    ],
+    [
+        "globalThis._createPyodideModule = _createPyodideModule;",
+        "",
+    ],
+    [
+        "new WebAssembly.Module",
+        "newWasmModule",
+    ],
+    [
+        "WebAssembly.instantiate",
+        "wasmInstantiate",
+    ],
+    [
+        "Date.now",
+        "monotonicDateNow",
+    ],
+    [
+        "reportUndefinedSymbols()",
+        "reportUndefinedSymbolsPatched(Module)",
+    ],
+    [
+        "crypto.getRandomValues(",
+        "getRandomValues(Module, ",
+    ],
+    [
+        # Direct eval disallowed in esbuild, see:
+        # https://esbuild.github.io/content-types/#direct-eval
+        "eval(func)",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "eval(data)",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    [
+        "eval(UTF8ToString(ptr))",
+        "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
+    ],
+    # Dynamic linking patches:
+    # library lookup
+    [
+        "!libData",
+        "!(libData ??= patchDynlibLookup(Module, libName))",
+    ],
+    # for ensuring memory base of dynlib is stable when restoring snapshots
+    [
+        "getMemory(",
+        "Module.getMemoryPatched(Module, libName, ",
+    ],
+    # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
+    [
+        "nullToUndefined(func.apply(",
+        "nullToUndefined(patchedApplyFunc(func, ",
+    ],
+]
+
+def internal_modules():
+    return native.glob(
         [
-            # Convert pyodide.asm.js into an es6 module.
-            # When we link our own we can pass `-sES6_MODULE` to the linker and it will do this for us
-            # automatically.
-            "var _createPyodideModule",
-            PRELUDE + "export const _createPyodideModule",
+            "internal/*.ts",
+            "internal/topLevelEntropy/*.ts",
+            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
+            "internal/pool/*.ts",
+            "types/*.ts",
+            "types/*/*.ts",
         ],
-        [
-            "globalThis._createPyodideModule = _createPyodideModule;",
-            "",
-        ],
-        [
-            "new WebAssembly.Module",
-            "newWasmModule",
-        ],
-        [
-            "WebAssembly.instantiate",
-            "wasmInstantiate",
-        ],
-        [
-            "Date.now",
-            "monotonicDateNow",
-        ],
-        [
-            "reportUndefinedSymbols()",
-            "reportUndefinedSymbolsPatched(Module)",
-        ],
-        [
-            "crypto.getRandomValues(",
-            "getRandomValues(Module, ",
-        ],
-        [
-            # Direct eval disallowed in esbuild, see:
-            # https://esbuild.github.io/content-types/#direct-eval
-            "eval(func)",
-            "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-        ],
-        [
-            "eval(data)",
-            "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-        ],
-        [
-            "eval(UTF8ToString(ptr))",
-            "(() => {throw new Error('Internal Emscripten code tried to eval, this should not happen, please file a bug report with your requirements.txt file\\'s contents')})()",
-        ],
-        # Dynamic linking patches:
-        # library lookup
-        [
-            "!libData",
-            "!(libData ??= patchDynlibLookup(Module, libName))",
-        ],
-        # for ensuring memory base of dynlib is stable when restoring snapshots
-        [
-            "getMemory(",
-            "Module.getMemoryPatched(Module, libName, ",
-        ],
-        # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
-        [
-            "nullToUndefined(func.apply(",
-            "nullToUndefined(patchedApplyFunc(func, ",
-        ],
+        allow_empty = True,
+    )
+
+def modules():
+    return ["python-entrypoint-helper.ts"]
+
+def internal_data_modules(version):
+    return native.glob([
+        "internal/*.py",
+        "internal/patches/*.py",
+        "internal/topLevelEntropy/*.py",
+    ]) + [
+        _out_path("python_stdlib.zip", version),
+        _out_path("pyodide.asm.wasm", version),
+        _out_path("emscriptenSetup.js", version),
     ]
+
+def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
+    pyodide_package = "@pyodide-%s//" % version
+    if not pyodide_asm_wasm:
+        pyodide_asm_wasm = pyodide_package + ":pyodide/pyodide.asm.wasm"
+
+    if not pyodide_asm_js:
+        pyodide_asm_js = pyodide_package + ":pyodide/pyodide.asm.js"
+
+    if not python_stdlib_zip:
+        python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
+
+    _copy_and_capnp_embed("python-entrypoint.js", version = version)
+
+    _copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
+
+    _copy_to_generated(python_stdlib_zip, version, out_name = "python_stdlib.zip")
 
     expand_template(
         name = "pyodide.asm.js@rule@" + version,
@@ -292,29 +319,9 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             deps = ["pyodide.asm.js@rule_js@" + version],
         )
 
-    INTERNAL_MODULES = native.glob(
-        [
-            "internal/*.ts",
-            "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
-            "types/*.ts",
-            "types/*/*.ts",
-        ],
-        allow_empty = True,
-    )
-
-    MODULES = ["python-entrypoint-helper.ts"]
-
-    INTERNAL_DATA_MODULES = native.glob([
-        "internal/*.py",
-        "internal/patches/*.py",
-        "internal/topLevelEntropy/*.py",
-    ]) + [
-        _out_path("python_stdlib.zip", version),
-        _out_path("pyodide.asm.wasm", version),
-        _out_path("emscriptenSetup.js", version),
-    ]
+    MODULES = modules()
+    INTERNAL_MODULES = internal_modules()
+    INTERNAL_DATA_MODULES = internal_data_modules(version)
 
     wd_ts_bundle(
         name = "pyodide@" + version,
