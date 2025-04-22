@@ -253,6 +253,7 @@ export function TLSSocket(
     if (socket instanceof Socket) {
       wrap = socket;
     } else {
+      // TODO(soon): Support passing DuplexSocket to here to unblock mssql.
       // Cloudflare Workers does not support any other socket type.
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.socket');
     }
