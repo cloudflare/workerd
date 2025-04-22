@@ -4,6 +4,8 @@
 
 // Type definitions for c++ implementation.
 
+import { type Fetcher } from 'cloudflare-internal:http';
+
 export class Socket {
   readonly readable: unknown;
   readonly writable: unknown;
@@ -30,3 +32,5 @@ export function connect(
   address: string | SocketAddress,
   options?: SocketOptions
 ): Socket;
+
+export function internalNewHttpClient(socket: Socket): Promise<Fetcher>;
