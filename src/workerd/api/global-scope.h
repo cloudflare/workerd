@@ -238,6 +238,8 @@ class ExecutionContext: public jsg::Object {
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
 
+    JSG_TS_OVERRIDE({ props?: Cloudflare.Props })
+
     if (flags.getWorkerdExperimental()) {
       // TODO(soon): Before making this generally available we need to:
       // * Consider whether to use TerminateExecution() instead of throwing.

@@ -158,6 +158,7 @@ declare namespace Rpc {
 
 declare namespace Cloudflare {
   interface Env {}
+  interface Props {}
 }
 
 declare module 'cloudflare:workers' {
