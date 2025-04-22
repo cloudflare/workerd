@@ -74,14 +74,45 @@ static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {
   return kj::Own<v8::Platform>(&platform, kj::NullDisposer::instance);
 }
 
-V8System::V8System(): V8System(defaultPlatform(0), nullptr) {}
-V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags): V8System(defaultPlatform(0), flags) {}
-V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr) {}
-V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : V8System(userPlatform(platformParam), flags) {}
-V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : platformInner(kj::mv(platformParam)),
-      platformWrapper(*platformInner) {
+V8System::V8System(kj::ArrayPtr<const kj::StringPtr> flags) {
+  auto platform = defaultPlatform(0);
+  auto defaultPlatformPtr = platform.get();
+  init(kj::mv(platform), flags, [defaultPlatformPtr](v8::Isolate* isolate) {
+    return v8::platform::PumpMessageLoop(
+        defaultPlatformPtr, isolate, v8::platform::MessageLoopBehavior::kDoNotWait);
+  }, [defaultPlatformPtr](v8::Isolate* isolate) {
+    v8::platform::NotifyIsolateShutdown(defaultPlatformPtr, isolate);
+  });
+}
+
+V8System::V8System(v8::Platform& platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    v8::Platform* defaultPlatformPtr) {
+  KJ_REQUIRE_NONNULL(defaultPlatformPtr);
+  init(userPlatform(platformParam), flags, [defaultPlatformPtr](v8::Isolate* isolate) {
+    return v8::platform::PumpMessageLoop(
+        defaultPlatformPtr, isolate, v8::platform::MessageLoopBehavior::kDoNotWait);
+  }, [defaultPlatformPtr](v8::Isolate* isolate) {
+    v8::platform::NotifyIsolateShutdown(defaultPlatformPtr, isolate);
+  });
+}
+
+V8System::V8System(v8::Platform& platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    PumpMsgLoopType pumpMsgLoopFn,
+    ShutdownIsolateType shutdownIsolateFn) {
+  init(userPlatform(platformParam), flags, kj::mv(pumpMsgLoopFn), kj::mv(shutdownIsolateFn));
+}
+
+void V8System::init(kj::Own<v8::Platform> platformParam,
+    kj::ArrayPtr<const kj::StringPtr> flags,
+    PumpMsgLoopType pumpMsgLoopFn,
+    ShutdownIsolateType shutdownIsolateFn) {
+  platformInner = kj::mv(platformParam);
+  platformWrapper = kj::heap<V8PlatformWrapper>(*platformInner);
+  pumpMsgLoop = kj::mv(pumpMsgLoopFn);
+  shutdownIsolate = kj::mv(shutdownIsolateFn);
+
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
@@ -149,11 +180,11 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   v8::V8::InitializeICUDefaultLocation(nullptr);
 #endif
 
-  v8::V8::InitializePlatform(&platformWrapper);
+  v8::V8::InitializePlatform(platformWrapper.get());
 
   // A recent change in v8 initializes cppgc in V8::Initialize if it's not already initialized
   // Hence the ordering here is important
-  cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
+  cppgc::InitializeProcess(platformWrapper->GetPageAllocator());
 
   v8::V8::Initialize();
   v8Initialized = true;
@@ -329,11 +360,10 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params, v8::CppHeap* 
 }
 }  // namespace
 
-IsolateBase::IsolateBase(const V8System& system,
-    v8::Isolate::CreateParams&& createParams,
-    kj::Own<IsolateObserver> observer)
-    : system(system),
-      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(&system.platformWrapper))),
+IsolateBase::IsolateBase(
+    V8System& system, v8::Isolate::CreateParams&& createParams, kj::Own<IsolateObserver> observer)
+    : v8System(system),
+      cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release())),
       externalMemoryTarget(kj::atomicRefcounted<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
@@ -406,6 +436,8 @@ IsolateBase::~IsolateBase() noexcept(false) {
   externalMemoryTarget->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // Terminate the v8::platform's task queue associated with this isolate
+    v8System.shutdownIsolate(ptr);
     ptr->Dispose();
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();

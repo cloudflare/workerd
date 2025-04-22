@@ -41,22 +41,27 @@ kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
 // construct one of these per process. This performs process-wide initialization of the V8
 // library.
 class V8System {
+  using PumpMsgLoopType = kj::Function<bool(v8::Isolate*)>;
+  using ShutdownIsolateType = kj::Function<void(v8::Isolate*)>;
+
  public:
-  // Use the default v8::Platform implementation, as if by:
+  // Uses the default v8::Platform implementation, as if by:
   //   auto v8Platform = jsg::defaultPlatform();
-  //   auto v8System = V8System(*v8Platform);
-  V8System();
-
-  // `flags` is a list of command-line flags to pass to V8, like "--expose-gc" or
+  //   auto v8System = V8System(*v8Platform, flags);
+  // (Optional) `flags` is a list of command-line flags to pass to V8, like "--expose-gc" or
   // "--single_threaded_gc". An exception will be thrown if any flags are not recognized.
-  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags);
+  explicit V8System(kj::ArrayPtr<const kj::StringPtr> flags = nullptr);
 
-  // Use a possibly-custom v8::Platform implementation. Use this if you need to override any
-  // functionality provided by the v8::Platform API.
-  explicit V8System(v8::Platform& platform);
+  // Use a possibly-custom v8::Platform wrapper over default v8::Platform, and apply flags.
+  explicit V8System(v8::Platform& platform,
+      kj::ArrayPtr<const kj::StringPtr> flags,
+      v8::Platform* defaultPlatformPtr);
 
-  // Use a possibly-custom v8::Platform implementation, and apply flags.
-  explicit V8System(v8::Platform& platform, kj::ArrayPtr<const kj::StringPtr> flags);
+  // Use a possibly-custom v8::Platform implementation with custom task queue, and apply flags.
+  explicit V8System(v8::Platform& platform,
+      kj::ArrayPtr<const kj::StringPtr> flags,
+      PumpMsgLoopType,
+      ShutdownIsolateType);
 
   ~V8System() noexcept(false);
 
@@ -65,10 +70,15 @@ class V8System {
 
  private:
   kj::Own<v8::Platform> platformInner;
-  V8PlatformWrapper platformWrapper;
+  kj::Own<V8PlatformWrapper> platformWrapper;
+  PumpMsgLoopType pumpMsgLoop;
+  ShutdownIsolateType shutdownIsolate;
   friend class IsolateBase;
 
-  explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);
+  void init(kj::Own<v8::Platform>,
+      kj::ArrayPtr<const kj::StringPtr>,
+      PumpMsgLoopType,
+      ShutdownIsolateType);
 };
 
 // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
@@ -224,6 +234,10 @@ class IsolateBase {
     return usingNewModuleRegistry;
   }
 
+  bool pumpMsgLoop() {
+    return v8System.pumpMsgLoop(ptr);
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -256,7 +270,7 @@ class IsolateBase {
 
   using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
 
-  const V8System& system;
+  V8System& v8System;
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
@@ -329,7 +343,7 @@ class IsolateBase {
   // Maps instructions to source code locations.
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
 
-  explicit IsolateBase(const V8System& system,
+  explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer);
   ~IsolateBase() noexcept(false);
@@ -358,7 +372,6 @@ class IsolateBase {
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
-  friend class IsolateBase;
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   HeapTracer heapTracer;
@@ -445,7 +458,7 @@ class Isolate: public IsolateBase {
   // and should be instantiated with `instantiateTypeWrapper` before `newContext` is called on
   // a jsg::Lock of this Isolate.
   template <typename MetaConfiguration>
-  explicit Isolate(const V8System& system,
+  explicit Isolate(V8System& system,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
@@ -458,7 +471,7 @@ class Isolate: public IsolateBase {
   }
 
   // Use this constructor when no wrappers have any required configuration.
-  explicit Isolate(const V8System& system,
+  explicit Isolate(V8System& system,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
       : Isolate(system, nullptr, kj::mv(observer), kj::mv(createParams)) {}

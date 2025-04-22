@@ -269,6 +269,10 @@ void Lock::terminateExecution() {
   v8Isolate->TerminateExecution();
 }
 
+bool Lock::pumpMsgLoop() {
+  return IsolateBase::from(v8Isolate).pumpMsgLoop();
+}
+
 Name Lock::newSymbol(kj::StringPtr symbol) {
   return Name(*this, v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, symbol)));
 }

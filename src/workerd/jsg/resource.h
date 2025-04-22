@@ -1288,6 +1288,7 @@ class ModuleRegistryBase {
 
 struct NewContextOptions {
   kj::Maybe<ModuleRegistryBase&> newModuleRegistry = kj::none;
+  bool enableWeakRef = false;
 };
 
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
@@ -1431,10 +1432,10 @@ class ResourceWrapper {
     // "skip callback and just allow".)
     context->AllowCodeGenerationFromStrings(false);
 
-    // We do not allow use of WeakRef or FinalizationRegistry because they introduce
-    // non-deterministic behavior.
-    check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
-    check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+    if (!options.enableWeakRef) {
+      check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
+      check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+    }
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
     context->SetAlignedPointerInEmbedderData(1, ptr.get());
