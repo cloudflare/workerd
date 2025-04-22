@@ -139,6 +139,10 @@ class SqliteCallScope {
     }
   }
 
+  kj::Maybe<const kj::Exception&> getException() {
+    return error;
+  }
+
   // Hack to allow block syntax with for(); see SQLITE_CALL_SCOPE.
   bool done = false;
 
@@ -175,6 +179,7 @@ class SqliteCallScope {
     int _ec = code;                                                                                \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */      \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__);                      \
+    handleCriticalError(_ec, dbErrorMessage(_ec, db), sqliteCallScope.getException());             \
     if (_ec == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                    \
     SQLITE_REQUIRE(_ec == SQLITE_OK, _ec, dbErrorMessage(_ec, db), ##__VA_ARGS__);                 \
   } while (false)
@@ -184,6 +189,7 @@ class SqliteCallScope {
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
+    handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
     if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
@@ -532,6 +538,31 @@ SqliteDatabase::operator sqlite3*() {
 void SqliteDatabase::notifyWrite() {
   KJ_IF_SOME(cb, onWriteCallback) {
     cb();
+  }
+}
+
+void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
+    kj::StringPtr errorMessage,
+    kj::Maybe<const kj::Exception&> maybeException) {
+  KJ_IF_SOME(code, errorCode) {
+    if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_BUSY ||
+        code == SQLITE_NOMEM || code == SQLITE_INTERRUPT) {
+
+      sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
+      // We are in a transaction
+      if (inTransaction || !savepoints.empty()) {
+        // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
+        if (sqlite3_get_autocommit(db) != 0) {
+          KJ_IF_SOME(cb, onCriticalErrorCallback) {
+            KJ_IF_SOME(e, maybeException) {
+              cb(kj::cp(e));
+            } else {
+              cb(KJ_EXCEPTION(FAILED, "SQLite failed", errorMessage));
+            }
+          }
+        }
+      }
+    }
   }
 }
 
