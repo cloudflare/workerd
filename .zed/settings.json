@@ -1,0 +1,27 @@
+// Folder-specific settings
+//
+// For a full list of overridable settings, and general information on folder-specific settings,
+// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
+{
+  "languages": {
+    "C++": {
+      "formatter": {
+        "external": {
+          "command": "bazel-bin/build/deps/formatters/clang-format",
+          "args": ["-i", "{buffer_path}"]
+        }
+      }
+    }
+  },
+  "lsp": {
+    "clangd": {
+      "binary": {
+        "arguments": [
+          "--background-index",
+          "--header-insertion=never",
+          "--query-driver=**"
+        ]
+      }
+    }
+  }
+}
