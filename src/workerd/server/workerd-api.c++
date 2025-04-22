@@ -16,6 +16,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/hyperdrive.h>
@@ -109,6 +110,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_WEBSOCKET_ISOLATE_TYPES,
     EW_SQL_ISOLATE_TYPES,
     EW_NODE_ISOLATE_TYPES,
+    EW_FILESYSTEM_ISOLATE_TYPES,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
@@ -324,6 +326,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
+  kj::Maybe<kj::Own<VirtualFileSystem>> vfs;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
@@ -357,8 +360,10 @@ struct WorkerdApi::Impl final {
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig = defaultConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
+      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none,
+      kj::Maybe<kj::Own<VirtualFileSystem>> vfs = kj::none)
       : features(capnp::clone(featuresParam)),
+        vfs(kj::mv(vfs)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
@@ -430,14 +435,16 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
-    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
+    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
+    kj::Maybe<kj::Own<VirtualFileSystem>> vfs)
     : impl(kj::heap<Impl>(v8System,
           features,
           kj::mv(createParams),
           kj::mv(observer),
           memoryCacheProvider,
           pythonConfig,
-          kj::mv(newModuleRegistry))) {}
+          kj::mv(newModuleRegistry),
+          kj::mv(vfs))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -982,9 +989,10 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const jsg::ResolveObserver& observer,
     const config::Worker::Reader& conf,
     const CompatibilityFlags::Reader& featureFlags,
-    const PythonConfig& pythonConfig) {
+    const PythonConfig& pythonConfig,
+    const jsg::Url& bundleBase) {
   jsg::modules::ModuleRegistry::Builder builder(
-      observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+      observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 
   // This callback is used when a module is being loaded to arrange evaluating the
   // module outside of the current IoContext.
@@ -1003,7 +1011,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
   // Add the module bundles that are configured by the worker.
-  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder;
+  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
   bool firstEsm = true;
   bool hasPythonModules = false;
   using namespace workerd::api::pyodide;
@@ -1138,6 +1146,13 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   }
 
   return builder.finish();
+}
+
+kj::Maybe<const VirtualFileSystem&> WorkerdApi::getVirtualFileSystem() const {
+  KJ_IF_SOME(vfs, impl->vfs) {
+    return *vfs;
+  }
+  return kj::none;
 }
 
 }  // namespace workerd::server

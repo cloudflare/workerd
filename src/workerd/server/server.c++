@@ -4,6 +4,7 @@
 
 #include "server.h"
 
+#include "bundle-fs.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -20,6 +21,7 @@
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-entrypoint.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 #include <workerd/util/autogate.h>
@@ -160,7 +162,6 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 }  // namespace
 
 // =======================================================================================
-
 Server::Server(kj::Filesystem& fs,
     kj::Timer& timer,
     kj::Network& network,
@@ -3092,18 +3093,32 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
 
+  // Create the FsMap that will be used to map known file system
+  // roots to configurable locations.
+  // TODO(node-fs): This is set up to allow users to configure the "mount"
+  // points for known roots but we currently do not expose that in the
+  // config. So for now this just uses the defaults.
+  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(conf));
+
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (featureFlags.getNewModuleRegistry()) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
+
+    // We use the same path for modules that the virtual file system uses.
+    // For instance, if the user specifies a bundle path of "/foo/bar" and
+    // there is a module in the bundle at "/foo/bar/baz.js", then the module's
+    // import specifier url will be "file:///foo/bar/baz.js".
+    const jsg::Url& bundleBase = workerFs->getBundleRoot();
+
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
-        *jsgobserver, conf, featureFlags.asReader(), pythonConfig);
+        *jsgobserver, conf, featureFlags.asReader(), pythonConfig, bundleBase);
   }
 
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
       limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
-      kj::mv(newModuleRegistry));
+      kj::mv(newModuleRegistry), kj::mv(workerFs));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -3313,7 +3328,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   },
       IsolateObserver::StartType::COLD,
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
-      Worker::Lock::TakeSynchronously(kj::none), errorReporter);
+      Worker::Lock::TakeSynchronously(kj::none), errorReporter, kj::none);
 
   worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     lock.validateHandlers(errorReporter);
