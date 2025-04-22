@@ -1,8 +1,3 @@
-export function reportError(e: any): never {
-  e.stack?.split('\n').forEach((s: any) => console.warn(s));
-  throw e;
-}
-
 /**
  *  Simple as possible runPython function which works with no foreign function
  *  interface. We need to use this rather than the normal easier to use
@@ -32,17 +27,13 @@ export function simpleRunPython(
   emscriptenModule: Module,
   code: string
 ): string {
-  const [status, err] = emscriptenModule.API.rawRun(code);
+  const [status, cause] = emscriptenModule.API.rawRun(code);
   // status 0: Ok
   // status -1: Error
-  if (status) {
+  if (status === -1) {
     // PyRun_SimpleString will have written a Python traceback to stderr.
     console.warn('Command failed:', code);
-    console.warn('Error was:');
-    for (const line of err.split('\n')) {
-      console.warn(line);
-    }
-    throw new Error('Failed to run Python code: ' + err);
+    throw new Error('Failed to run Python code', { cause });
   }
-  return err;
+  return cause;
 }

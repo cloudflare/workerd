@@ -17,7 +17,6 @@ import {
   DURABLE_OBJECT_CLASSES,
   WORKER_ENTRYPOINT_CLASSES,
 } from 'pyodide-internal:metadata';
-import { reportError } from 'pyodide-internal:util';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 
@@ -137,30 +136,25 @@ async function preparePython(): Promise<PyModule> {
 
 function makeHandler(pyHandlerName: string): Handler {
   return async function (...args: any[]) {
-    try {
-      const mainModule = await enterJaegerSpan(
-        'prep_python',
-        async () => await preparePython()
+    const mainModule = await enterJaegerSpan(
+      'prep_python',
+      async () => await preparePython()
+    );
+    const handler = mainModule[pyHandlerName];
+    if (!handler) {
+      throw new Error(
+        `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`
       );
-      const handler = mainModule[pyHandlerName];
-      if (!handler) {
-        throw new Error(
-          `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`
-        );
-      }
-      const result = await enterJaegerSpan('python_code', () => {
-        return handler.callRelaxed(...args);
-      });
+    }
+    const result = await enterJaegerSpan('python_code', () => {
+      return handler.callRelaxed(...args);
+    });
 
-      // Support returning a pyodide.ffi.FetchResponse.
-      if (result && result.js_response !== undefined) {
-        return result.js_response;
-      } else {
-        return result;
-      }
-    } catch (e) {
-      console.warn('Error in makeHandler');
-      reportError(e);
+    // Support returning a pyodide.ffi.FetchResponse.
+    if (result && result.js_response !== undefined) {
+      return result.js_response;
+    } else {
+      return result;
     }
   };
 }
@@ -249,48 +243,43 @@ let pythonEntrypointClasses: {
   workflowEntrypoints: string[];
 } = { durableObjects: [], workerEntrypoints: [], workflowEntrypoints: [] };
 
-try {
-  // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
-  // needs to be called inside an IO context.
-  if (IS_WORKERD || IS_TRACING) {
-    // Currently when we're running via workerd or when tracing we cannot perform IO in the
-    // top-level. So we have some custom logic for handlers here in that case.
-    //
-    // TODO: rewrite package download logic in workerd to fetch the packages in the same way as in
-    // edgeworker.
-    pythonEntrypointClasses.durableObjects = DURABLE_OBJECT_CLASSES ?? [];
-    // We currently have no way to discern between worker entrypoint classes and workflow entrypoint
-    // classes in workerd. But workflow entrypoints appear to be just a special case of worker
-    // entrypoints, so this should still work just fine.
-    pythonEntrypointClasses.workerEntrypoints = WORKER_ENTRYPOINT_CLASSES ?? [];
+// Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
+// needs to be called inside an IO context.
+if (IS_WORKERD || IS_TRACING) {
+  // Currently when we're running via workerd or when tracing we cannot perform IO in the
+  // top-level. So we have some custom logic for handlers here in that case.
+  //
+  // TODO: rewrite package download logic in workerd to fetch the packages in the same way as in
+  // edgeworker.
+  pythonEntrypointClasses.durableObjects = DURABLE_OBJECT_CLASSES ?? [];
+  // We currently have no way to discern between worker entrypoint classes and workflow entrypoint
+  // classes in workerd. But workflow entrypoints appear to be just a special case of worker
+  // entrypoints, so this should still work just fine.
+  pythonEntrypointClasses.workerEntrypoints = WORKER_ENTRYPOINT_CLASSES ?? [];
 
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
+  for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+    const pyHandlerName = 'on_' + handlerName;
+    handlers[handlerName] = makeHandler(pyHandlerName);
+  }
+
+  handlers.test = makeHandler('test');
+} else {
+  const mainModule = await getMainModule();
+  for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+    const pyHandlerName = 'on_' + handlerName;
+    if (typeof mainModule[pyHandlerName] === 'function') {
       handlers[handlerName] = makeHandler(pyHandlerName);
     }
-
-    handlers.test = makeHandler('test');
-  } else {
-    const mainModule = await getMainModule();
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
-      if (typeof mainModule[pyHandlerName] === 'function') {
-        handlers[handlerName] = makeHandler(pyHandlerName);
-      }
-    }
-
-    // In order to get the entrypoint classes exported by the worker, we use a Python module
-    // to introspect the user's main module. So we are effectively using Python to analyse the
-    // classes exported by the user worker here. The class names are then exported from here and
-    // used to create the equivalent JS classes via makeEntrypointClass.
-    const pyodide = await getPyodide();
-    const introspectionMod = await getIntrospectionMod(pyodide);
-    pythonEntrypointClasses =
-      introspectionMod.collect_entrypoint_classes(mainModule);
   }
-} catch (e) {
-  console.warn('Error in top level in python-entrypoint-helper.js');
-  reportError(e);
+
+  // In order to get the entrypoint classes exported by the worker, we use a Python module
+  // to introspect the user's main module. So we are effectively using Python to analyse the
+  // classes exported by the user worker here. The class names are then exported from here and
+  // used to create the equivalent JS classes via makeEntrypointClass.
+  const pyodide = await getPyodide();
+  const introspectionMod = await getIntrospectionMod(pyodide);
+  pythonEntrypointClasses =
+    introspectionMod.collect_entrypoint_classes(mainModule);
 }
 
 export { pythonEntrypointClasses, makeEntrypointClass };
