@@ -1035,7 +1035,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
   KJ_IF_SOME(ex, abortException) {
-    kj::throwFatalException(kj::cp(ex));
+    return kj::cp(ex);
   }
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
