@@ -117,6 +117,8 @@ class Test {
   public isDone: Promise<void>;
   private resolve: () => void;
 
+  public isSkipped: boolean = false;
+
   public constructor(name: string, properties: unknown) {
     this.name = name;
     this.properties = properties;
@@ -142,6 +144,10 @@ class Test {
     this_obj?: object,
     ...rest: unknown[]
   ): unknown {
+    if (this.isSkipped) {
+      return undefined;
+    }
+
     if (this.phase > Test.Phases.STARTED) {
       return undefined;
     }
@@ -272,6 +278,10 @@ class Test {
   }
 
   public done(): void {
+    if (this.isSkipped) {
+      return;
+    }
+
     if (this.phase >= Test.Phases.CLEANING) {
       return;
     }
@@ -280,6 +290,10 @@ class Test {
   }
 
   public cleanup(): void {
+    if (this.isSkipped) {
+      return undefined;
+    }
+
     // TODO(soon): Cleanup functions can also return a promise instead of being synchronous, but we don't need this for any tests currently.
     for (const cleanFn of this.cleanup_callbacks) {
       cleanFn();
@@ -391,7 +405,7 @@ declare global {
   var GLOBAL: { isWindow(): boolean; isWorker(): boolean };
   /* eslint-enable no-var */
 
-  function test(func: TestFn, name: string, properties?: unknown): void;
+  function test(func: TestFn, name: string, properties?: unknown): Test;
   function done(): undefined;
   function subsetTestByKey(
     _key: string,
@@ -404,7 +418,7 @@ declare global {
     name: string,
     properties?: unknown
   ): void;
-  function async_test(func: TestFn, name: string, properties?: unknown): void;
+  function async_test(func: TestFn, name: string, properties?: unknown): Test;
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
   function assert_true(val: unknown, message?: string): void;
@@ -573,6 +587,12 @@ globalThis.Response = class _Response extends Response {
   }
 };
 
+globalThis.EventSource = class _EventSource extends EventSource {
+  public constructor(input: string | URL, options?: EventSourceInit) {
+    super(relativizeUrl(input), options);
+  }
+};
+
 globalThis.fetch = async (
   input: RequestInfo | URL,
   init?: RequestInit
@@ -649,13 +669,17 @@ globalThis.promise_test = (func, name, properties): void => {
   );
 };
 
-globalThis.async_test = (func, name, properties): void => {
+globalThis.async_test = (func, name, properties): Test => {
+  const testCase = new Test(name, properties);
+
   if (!shouldRunTest(name)) {
-    return;
+    testCase.isSkipped = true;
+    return testCase;
   }
 
-  const testCase = new Test(name, properties);
-  testCase.step(func, testCase, testCase);
+  if (typeof func === 'function') {
+    testCase.step(func, testCase, testCase);
+  }
 
   globalThis.state.promises.push(
     testCase.isDone.then(() => {
@@ -664,6 +688,8 @@ globalThis.async_test = (func, name, properties): void => {
       }
     })
   );
+
+  return testCase;
 };
 
 /**
@@ -677,18 +703,25 @@ globalThis.async_test = (func, name, properties): void => {
  * @param name - Test name. This must be unique in a
  * given file and must be invariant between runs.
  */
-globalThis.test = (func, name, properties): void => {
+globalThis.test = (func, name, properties): Test => {
+  const testCase = new Test(name, properties);
+
   if (!shouldRunTest(name)) {
-    return;
+    testCase.isSkipped = true;
+    return testCase;
   }
 
-  const testCase = new Test(name, properties);
-  testCase.step(func, testCase, testCase);
+  if (typeof func === 'function') {
+    testCase.step(func, testCase, testCase);
+  }
+
   testCase.done();
 
   if (testCase.error) {
     globalThis.state.errors.push(testCase.error);
   }
+
+  return testCase;
 };
 
 globalThis.assert_equals = (a, b, message): void => {
