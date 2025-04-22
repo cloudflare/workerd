@@ -387,7 +387,7 @@ export interface TestController {}
 export interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  props: any;
+  props?: Cloudflare.Props;
 }
 export type ExportedHandlerFetchHandler<
   Env = unknown,
@@ -6100,6 +6100,7 @@ export declare namespace Rpc {
 }
 export declare namespace Cloudflare {
   interface Env {}
+  interface Props {}
 }
 export interface SecretsStoreSecret {
   /**

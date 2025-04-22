@@ -391,7 +391,7 @@ interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
   exports: any;
-  props: any;
+  props?: Cloudflare.Props;
   abort(reason?: any): void;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
@@ -6213,6 +6213,7 @@ declare namespace Rpc {
 }
 declare namespace Cloudflare {
   interface Env {}
+  interface Props {}
 }
 declare module "cloudflare:workers" {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
