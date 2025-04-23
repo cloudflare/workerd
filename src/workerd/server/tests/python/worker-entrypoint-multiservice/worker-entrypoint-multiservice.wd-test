@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "caller",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "caller.py"),
+        ],
+        compatibilityDate = "2025-02-01",
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+        ],
+        bindings = [
+          (name = "RPC", service = (name = "callee", entrypoint = "TestService")),
+        ],
+      )
+    ),
+    ( name = "callee",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "callee.py"),
+        ],
+        compatibilityDate = "2025-02-01",
+        compatibilityFlags = [
+          %PYTHON_FEATURE_FLAGS,
+        ],
+        bindings = [
+          (name = "TEST_VALUE", text = "TEST_IN_RPC"),
+        ],
+      )
+    ),
+  ],
+);
