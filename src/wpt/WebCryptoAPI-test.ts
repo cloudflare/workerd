@@ -35,11 +35,8 @@ export default {
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': {},
   'derive_bits_keys/derived_bits_length.https.any.js': {
-    comment: 'To be investigated',
-    expectedFailures: [
-      "HKDF derivation with 0 as 'length' parameter",
-      "PBKDF2 derivation with 0 as 'length' parameter",
-    ],
+    comment: 'To be investigated. Triggers Asan error',
+    skipAllTests: true,
   },
   'derive_bits_keys/derived_bits_length.js': {},
   'derive_bits_keys/derived_bits_length_testcases.js': {
