@@ -9,6 +9,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-own.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>
 
@@ -516,6 +517,8 @@ class EventTarget: public jsg::Object {
 };
 
 // An implementation of the Web Platform Standard AbortSignal API
+class AbortTriggerRpcClient;
+
 class AbortSignal final: public EventTarget {
  public:
   enum class Flag { NONE, NEVER_ABORTS };
@@ -524,13 +527,15 @@ class AbortSignal final: public EventTarget {
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
       Flag flag = Flag::NONE);
 
+  using PendingReason = kj::RefcountedWrapper<
+      kj::OneOf<kj::Array<kj::byte> /* v8Serialized */, kj::Exception /* if capability is dropped */
+          >>;
+
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
   static jsg::Ref<AbortSignal> constructor() = delete;
 
-  bool getAborted() {
-    return canceler->isCanceled();
-  }
+  bool getAborted(jsg::Lock& js);
 
   jsg::JsValue getReason(jsg::Lock& js);
 
@@ -564,6 +569,11 @@ class AbortSignal final: public EventTarget {
   kj::Maybe<jsg::JsValue> getOnAbort(jsg::Lock& js);
   void setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler);
 
+  void addEventListener(jsg::Lock& js,
+      kj::String type,
+      jsg::Identified<Handler> handler,
+      jsg::Optional<AddEventListenerOpts> maybeOptions);
+
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_STATIC_METHOD(abort);
@@ -578,27 +588,31 @@ class AbortSignal final: public EventTarget {
     }
     JSG_PROTOTYPE_PROPERTY(onabort, getOnAbort, setOnAbort);
     JSG_METHOD(throwIfAborted);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(skipReleaseForTest);
+      JSG_TS_OVERRIDE({ skipReleaseForTest: never });
+    }
   }
 
   // Allows this AbortSignal to also serve as a kj::Canceler
   template <typename T>
-  kj::Promise<T> wrap(kj::Promise<T> promise) {
+  kj::Promise<T> wrap(jsg::Lock& js, kj::Promise<T> promise) {
+    subscribeToRpcAbort(js);
+
     JSG_REQUIRE(!canceler->isCanceled(), TypeError, "The AbortSignal has already been triggered");
     return canceler->wrap(kj::mv(promise));
   }
 
   template <typename T>
   static kj::Promise<T> maybeCancelWrap(
-      kj::Maybe<jsg::Ref<AbortSignal>>& signal, kj::Promise<T> promise) {
+      jsg::Lock& js, kj::Maybe<jsg::Ref<AbortSignal>>& signal, kj::Promise<T> promise) {
     KJ_IF_SOME(s, signal) {
-      return s->wrap(kj::mv(promise));
+      return s->wrap(js, kj::mv(promise));
     } else {
       return kj::mv(promise);
     }
   }
-
-  static kj::Exception abortException(
-      jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason = kj::none);
 
   RefcountedCanceler& getCanceler();
 
@@ -609,15 +623,59 @@ class AbortSignal final: public EventTarget {
     tracker.trackField("reason", reason);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+
+  // To test what happens if a capability is dropped before invoking release on the cloned abort
+  // signal, this method will tell every rpcClient to skip this step before destruction.
+  void skipReleaseForTest();
+
+  static jsg::Ref<AbortSignal> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::ABORT_SIGNAL);
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
+  static kj::Exception abortException(
+      jsg::Lock& js, jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason);
+
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class AbortController;
+
+  // -------------------------------------------------------------
+  // RPC client functionality. Used if this signal was serialized.
+
+  // A collection of rpcClients, which will be notified if this signal is triggered and when this
+  // signal is destroyed.
+  kj::Vector<IoOwn<AbortTriggerRpcClient>> rpcClients;
+
+  // Trigger an abort on all associated clients
+  kj::Promise<void> sendToRpc(kj::Array<kj::byte>&& reason);
+
+  // ---------------------------------------------------------------
+  // RPC server functionality. Used if this signal was deserialized.
+
+  // A promise that is fulfilled if an abort() message is received over RPC.
+  kj::Maybe<IoOwn<kj::Promise<void>>> rpcAbortPromise;
+
+  // A refcounted object used to receive a serialized abort reason
+  // The abort reason is required in asynchronous event handlers as well as synchronous methods
+  // like getReason(). As a result, we can't pass the abort reason in the above promise, and both
+  // sync and async methods will need to check this value.
+  kj::Maybe<IoOwn<PendingReason>> pendingReason;
+
+  // Synchronously check if an abort reason was sent over RPC
+  bool hasPendingReason();
+  kj::Maybe<jsg::JsValue> deserializePendingReason(jsg::Lock& js);
+
+  // Wait for abort over RPC.
+  // We invoke this once at least one event handler is attached to the AbortSignal
+  void subscribeToRpcAbort(jsg::Lock& js);
 };
 
 // An implementation of the Web Platform Standard AbortController API
