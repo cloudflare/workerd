@@ -91,3 +91,9 @@ wpt_test(
     config = "compression-test.ts",
     wpt_directory = "@wpt//:compression@module",
 )
+
+wpt_test(
+    name = "WebCryptoAPI",
+    config = "WebCryptoAPI-test.ts",
+    wpt_directory = "@wpt//:WebCryptoAPI@module",
+)
