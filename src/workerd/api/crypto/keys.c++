@@ -51,6 +51,9 @@ SubtleCrypto::ExportKeyData AsymmetricKeyCryptoKeyImpl::exportKey(
   // DER is the binary format which *should* work to export any EVP_PKEY.
 
   uint8_t* der = nullptr;
+  // The caller takes ownership of the buffer and, unless the buffer was fixed with CBB_init_fixed,
+  // must call OPENSSL_free when done.
+  // https://commondatastorage.googleapis.com/chromium-boringssl-docs/bytestring.h.html#CBB_finish
   KJ_DEFER(if (der != nullptr) { OPENSSL_free(der); });
   size_t derLen;
   bssl::ScopedCBB cbb;

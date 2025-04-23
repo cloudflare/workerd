@@ -93,6 +93,10 @@ jsg::BufferSource Ec::getRawPublicKey(jsg::Lock& js) const {
 
   // Serialize the public key as an uncompressed point in X9.62 form.
   uint8_t* raw;
+  // The caller takes ownership of the buffer and, unless the buffer was fixed with CBB_init_fixed,
+  // must call OPENSSL_free when done.
+  // https://commondatastorage.googleapis.com/chromium-boringssl-docs/bytestring.h.html#CBB_finish
+  KJ_DEFER(if (raw != nullptr) { OPENSSL_free(raw); });
   size_t raw_len;
   CBB cbb;
 
