@@ -21,6 +21,9 @@ interface API {
     stderr?: (a: string) => void
   ) => void;
   version: string;
+  pyodide_base: {
+    pyimport_impl: PyCallable;
+  };
 }
 
 interface LDSO {
