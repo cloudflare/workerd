@@ -47,6 +47,17 @@ lldb-wpt-test test_name: build
 asan-wpt-test test_name:
   bazel test //src/workerd/api/wpt:{{test_name}} --config=asan
 
+new-wpt-test test_name:
+  mkdir -p src/wpt/$(dirname {{test_name}})
+  echo "export default {};" > src/wpt/{{test_name}}-test.ts
+  git add src/wpt/{{test_name}}-test.ts
+
+  echo >> src/wpt/BUILD.bazel
+  echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
+
+  ./tools/cross/format.py
+  bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+
 format: rustfmt
   python3 tools/cross/format.py
 

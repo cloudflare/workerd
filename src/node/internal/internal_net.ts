@@ -245,7 +245,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
       'is not supported'
     );
   }
-  if (typeof options?.keepAliveInitialDelay !== 'undefined') {
+  if (options?.keepAliveInitialDelay !== undefined) {
     validateNumber(
       options.keepAliveInitialDelay,
       'options.keepAliveInitialDelay'
@@ -269,12 +269,19 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     throw new ERR_OPTION_NOT_IMPLEMENTED('options.fd');
   }
 
-  if (options.noDelay) {
-    throw new ERR_OPTION_NOT_IMPLEMENTED('truthy options.noDelay');
-  }
-  if (options.keepAlive) {
-    throw new ERR_OPTION_NOT_IMPLEMENTED('truthy options.keepAlive');
-  }
+  // We do not support the noDelay and keepAlive options at this
+  // time and will just ignore them if they are passed.
+  //
+  // We shouldn't throw an error for the following validations,
+  // because it breaks packages such as redis.
+  //
+  // if (options.noDelay) {
+  //   throw new ERR_OPTION_NOT_IMPLEMENTED('truthy options.noDelay');
+  // }
+  //
+  // if (options.keepAlive) {
+  //   throw new ERR_OPTION_NOT_IMPLEMENTED('truthy options.keepAlive');
+  // }
 
   options.allowHalfOpen = Boolean(options.allowHalfOpen);
   // TODO(now): Match behavior with Node.js

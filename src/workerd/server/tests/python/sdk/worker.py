@@ -224,7 +224,7 @@ async def can_use_response_json(env):
         "http://example.com/response_json",
     )
     text = await response.text()
-    assert text == '{"obj":{"field":123}}'
+    assert text == '{"obj": {"field": 123}}'
 
 
 async def can_request_form_data(env):
@@ -395,6 +395,54 @@ async def can_use_event_decorator(env):
     assert text == "success"
 
 
+async def response_unit_tests(env):
+    response_json = Response.json([1, 2, 3])
+    assert await response_json.text() == "[1, 2, 3]"
+
+    response_json = Response.json("test")
+    assert await response_json.text() == '"test"'
+
+    response_json = Response.json(["hi", "foo", 42])
+    assert await response_json.text() == '["hi", "foo", 42]'
+
+    response_json = Response.json({"field": 42})
+    assert await response_json.text() == '{"field": 42}'
+
+    response_json = Response.json("test")
+    assert response_json.headers.get("content-type") == "application/json"
+
+    response_json = Response.json("test", headers={"x-other-header": "42"})
+    assert response_json.headers.get("content-type") == "application/json"
+
+    response_json = Response.json("test", headers={"Content-Type": "42"})
+    assert response_json.headers.get("content-type") == "42"
+
+    class Test:
+        def __init__(self, x):
+            self.x = x
+
+    try:
+        response_json = Response.json(Test(42))
+        await response_json.text()
+        raise ValueError("Should have raised")  # noqa: TRY301
+    except Exception as err:
+        assert str(err) == "Object of type Test is not JSON serializable"
+
+    try:
+        response_json = Response.json({1, 2, 3})
+        await response_json.text()
+        raise ValueError("Should have raised")  # noqa: TRY301
+    except Exception as err:
+        assert str(err) == "Object of type set is not JSON serializable"
+
+    try:
+        response_json = Response(Test(42))
+        await response_json.text()
+        raise ValueError("Should have raised")  # noqa: TRY301
+    except Exception as err:
+        assert str(err) == "Unsupported type in Response: Test"
+
+
 async def test(ctrl, env):
     await can_return_custom_fetch_response(env)
     await can_modify_response(env)
@@ -413,3 +461,4 @@ async def test(ctrl, env):
     await can_use_cf_fetch_opts(env)
     await request_unit_tests(env)
     await can_use_event_decorator(env)
+    await response_unit_tests(env)

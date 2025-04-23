@@ -91,10 +91,3 @@ selects.config_setting_group(
         ":not_dbg_build",
     ],
 )
-
-# prettier
-js_library(
-    name = "prettierrc",
-    srcs = [".prettierrc.json"],
-    visibility = ["//visibility:public"],
-)

@@ -457,8 +457,8 @@ export const testNetConnectImmediateFinish = {
 // something different than the original Node.js test
 export const testNetConnectKeepAlive = {
   async test() {
-    // Test that setKeepAlive call does not throw.
-    throws(() => new net.Socket({ keepAlive: true }));
+    // We are not throwing on truthy keepAlive value for mysql/redis clients.
+    // throws(() => new net.Socket({ keepAlive: true }));
     const c = new net.Socket();
     c.setKeepAlive(false);
     c.setKeepAlive(true);

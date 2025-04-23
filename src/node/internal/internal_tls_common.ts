@@ -24,7 +24,6 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import type tls from 'node:tls';
-import { ERR_OPTION_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { validateInteger } from 'node-internal:validators';
 
 // @ts-expect-error TS2323 Redeclare error.
@@ -56,12 +55,16 @@ export function SecureContext(
       maxVersion
     );
   }
-  if (minVersion !== undefined) {
-    throw new ERR_OPTION_NOT_IMPLEMENTED('minVersion');
-  }
-  if (maxVersion !== undefined) {
-    throw new ERR_OPTION_NOT_IMPLEMENTED('maxVersion');
-  }
+  // We do not support the minVersion and maxVersion options at this
+  // time and will just ignore them if they are passed.
+  // We have to omit these errors in order to support mssql.
+  //
+  // if (minVersion !== undefined) {
+  //   throw new ERR_OPTION_NOT_IMPLEMENTED('minVersion');
+  // }
+  // if (maxVersion !== undefined) {
+  //   throw new ERR_OPTION_NOT_IMPLEMENTED('maxVersion');
+  // }
   if (secureOptions) {
     validateInteger(secureOptions, 'secureOptions');
   }
@@ -73,12 +76,6 @@ export function SecureContext(
 export function createSecureContext(
   options: tls.SecureContextOptions = {}
 ): SecureContext {
-  const nonNullEntry = Object.entries(options).find(
-    ([_key, value]) => value != null
-  );
-  if (nonNullEntry) {
-    throw new ERR_OPTION_NOT_IMPLEMENTED(`options.${nonNullEntry[0]}`);
-  }
   return new SecureContext(
     options.secureProtocol,
     options.secureOptions,

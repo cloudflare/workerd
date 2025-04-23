@@ -13,7 +13,7 @@ from typing import Any, TypedDict, Unpack
 import js
 
 import pyodide.http
-from pyodide.ffi import JsException, create_proxy, destroy_proxies, to_js
+from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
 
 JSBody = (
@@ -158,6 +158,23 @@ class Response(FetchResponse):
         Based on the JS API of the same name:
         https://developer.mozilla.org/en-US/docs/Web/API/Response/Response.
         """
+        # Verify passed in types.
+        if hasattr(body, "constructor"):
+            if body.constructor.name not in (
+                "Blob",
+                "ArrayBuffer",
+                "TypedArray",
+                "DataView",
+                "FormData",
+                "ReadableStream",
+                "URLSearchParams",
+            ):
+                raise TypeError(
+                    f"Unsupported type in Response: {body.constructor.name}"
+                )
+        elif not isinstance(body, str | FormData):
+            raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
+
         options = self._create_options(status, status_text, headers)
 
         # Initialize via the FetchResponse super-class which gives us access to
@@ -198,22 +215,28 @@ class Response(FetchResponse):
 
     @staticmethod
     def json(
-        data: str | dict[str, str],
+        data: str | dict[str, Any] | list[Any] | JsProxy,
         status: HTTPStatus | int = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
     ):
         options = Response._create_options(status, status_text, headers)
-        with _manage_pyproxies() as pyproxies:
-            try:
-                return js.Response.json(
-                    to_js(
-                        data, dict_converter=js.Object.fromEntries, pyproxies=pyproxies
-                    ),
-                    **options,
-                )
-            except JsException as exc:
-                raise _to_python_exception(exc) from exc
+        js_resp = None
+        try:
+            if isinstance(data, JsProxy):
+                js_resp = js.Response.json(data, **options)
+            else:
+                if "headers" not in options:
+                    options["headers"] = _to_js_headers(
+                        {"content-type": "application/json"}
+                    )
+                elif not options["headers"].has("content-type"):
+                    options["headers"].set("content-type", "application/json")
+                js_resp = js.Response.new(json.dumps(data), **options)
+        except JsException as exc:
+            raise _to_python_exception(exc) from exc
+
+        return FetchResponse(js_resp.url, js_resp)
 
 
 FormDataValue = "str | js.Blob | Blob"

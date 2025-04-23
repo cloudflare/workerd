@@ -83,7 +83,7 @@ type Env = {
 };
 
 type TestCase = {
-  test(_: unknown, env: Env): Promise<void>;
+  test(_: unknown, env: Env): Promise<void> | void;
 };
 
 type UnknownFunc = (...args: unknown[]) => unknown;
@@ -1277,11 +1277,16 @@ function evalAsBlock(env: Env, files: string[]): void {
   env.unsafe.eval(block);
 }
 
+type Runner = {
+  run: (file: string) => TestCase | Record<string, never>;
+  printResults: () => TestCase;
+};
+
 export function createRunner(
   config: TestRunnerConfig,
   moduleBase: string,
   allTestFiles: string[]
-): (file: string) => TestCase {
+): Runner {
   const testsNotFound = new Set(Object.keys(config)).difference(
     new Set(allTestFiles)
   );
@@ -1294,57 +1299,104 @@ export function createRunner(
 
   const onlyFlagUsed = Object.values(config).some((options) => options.only);
 
-  return (file: string): TestCase => {
-    return {
-      async test(_: unknown, env: Env): Promise<void> {
-        const options = config[file];
+  return {
+    run(file: string): TestCase | Record<string, never> {
+      if (onlyFlagUsed && !config[file]?.only) {
+        // Return an empty object to avoid printing extra output from all the other disabled test cases.
+        return {};
+      }
 
-        if (!options) {
-          throw new Error(
-            `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
-          );
-        }
-
-        if (onlyFlagUsed && !options.only) {
-          return;
-        }
-
-        if (options.skipAllTests) {
-          console.warn(`All tests in ${file} have been skipped.`);
-          return;
-        }
-
-        const testUrl = new URL(
-          path.join(moduleBase, file),
-          'http://localhost'
-        );
-
-        // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
-        // Update the URL's port so we can connect to it
-        testUrl.port = env.HTTP_PORT ?? '';
-
-        globalThis.state = new RunnerState(testUrl, file, env, options);
-        const meta = parseWptMetadata(String(env[file]));
-
-        if (options.before) {
-          options.before();
-        }
-
-        const files = [];
-
-        for (const script of meta.scripts) {
-          files.push(getCodeAtPath(env, path.dirname(file), script));
-        }
-
-        files.push(getCodeAtPath(env, './', file, options.replace));
-        evalAsBlock(env, files);
-
-        if (options.after) {
-          options.after();
-        }
-
-        await globalThis.state.validate();
-      },
-    };
+      return {
+        async test(_: unknown, env: Env): Promise<void> {
+          return runTest(config[file], env, moduleBase, file);
+        },
+      };
+    },
+    printResults(): TestCase {
+      return {
+        test(_: unknown, env: Env): void {
+          printResults(config, allTestFiles, moduleBase, env);
+        },
+      };
+    },
   };
+}
+
+async function runTest(
+  options: TestRunnerOptions | undefined,
+  env: Env,
+  moduleBase: string,
+  file: string
+): Promise<void> {
+  if (!options) {
+    throw new Error(
+      `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
+    );
+  }
+
+  if (options.skipAllTests) {
+    console.warn(`All tests in ${file} have been skipped.`);
+    return;
+  }
+
+  const testUrl = new URL(path.join(moduleBase, file), 'http://localhost');
+
+  // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
+  // Update the URL's port so we can connect to it
+  testUrl.port = env.HTTP_PORT ?? '';
+
+  globalThis.state = new RunnerState(testUrl, file, env, options);
+  const meta = parseWptMetadata(String(env[file]));
+
+  if (options.before) {
+    options.before();
+  }
+
+  const files = [];
+
+  for (const script of meta.scripts) {
+    files.push(getCodeAtPath(env, path.dirname(file), script));
+  }
+
+  files.push(getCodeAtPath(env, './', file, options.replace));
+  evalAsBlock(env, files);
+
+  if (options.after) {
+    options.after();
+  }
+
+  await globalThis.state.validate();
+}
+
+function printResults(
+  config: TestRunnerConfig,
+  allTestFiles: string[],
+  moduleBase: string,
+  env: Env
+): void {
+  if (env.GEN_TEST_CONFIG) {
+    console.log(generateConfig(config, allTestFiles, moduleBase));
+  }
+}
+
+function generateConfig(
+  config: TestRunnerConfig,
+  allTestFiles: string[],
+  moduleBase: string
+): string {
+  const generatedConfig: TestRunnerConfig = {};
+  for (const file of allTestFiles) {
+    // Copy config if the user has created any so far, else initialize to blank
+    generatedConfig[file] = config[file] ?? {};
+  }
+
+  return `\x1b[1;7;35m*** Copy this config to src/wpt/${moduleBase}-test.ts ***\x1b[0m
+
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+import { type TestRunnerConfig } from 'harness/harness';
+
+export default ${JSON.stringify(generatedConfig, null, 2)} satisfies TestRunnerConfig;`;
 }
