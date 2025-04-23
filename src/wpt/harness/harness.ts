@@ -385,10 +385,26 @@ type HostInfo = {
   HTTP_PORT: string;
   HTTPS_PORT: string;
 };
+
+/**
+ * Exception type that represents a failing assert.
+ * NOTE: This a custom error type defined by WPT - it's not the same as node:assert's AssertionError
+ * @param message - Error message.
+ */
+declare class AssertionError extends Error {}
+
+function AssertionError(this: AssertionError, message: string): void {
+  if (typeof message == 'string') {
+    message = sanitize_unpaired_surrogates(message);
+  }
+  this.message = message;
+}
+
 declare global {
   /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   var state: RunnerState;
   var GLOBAL: { isWindow(): boolean; isWorker(): boolean };
+  var AssertionError: unknown;
   /* eslint-enable no-var */
 
   function test(func: TestFn, name: string, properties?: unknown): void;
@@ -473,27 +489,23 @@ declare global {
     promise: Promise<unknown>,
     description?: string
   ): Promise<void>;
+
+  function assert_in_array(
+    actual: unknown,
+    expected: unknown[],
+    description?: string
+  ): void;
+
   function get_host_info(): HostInfo;
   function token(): string;
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
 }
 
-/**
- * Exception type that represents a failing assert.
- * NOTE: This a custom error type defined by WPT - it's not the same as node:assert's AssertionError
- * @param message - Error message.
- */
-declare class AssertionError extends Error {}
-function AssertionError(this: AssertionError, message: string): void {
-  if (typeof message == 'string') {
-    message = sanitize_unpaired_surrogates(message);
-  }
-  this.message = message;
-}
-
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
 AssertionError.prototype = Object.create(Error.prototype);
+
+globalThis.AssertionError = AssertionError;
 
 declare class OptionalFeatureUnsupportedError extends AssertionError {}
 function OptionalFeatureUnsupportedError(
@@ -1050,6 +1062,23 @@ globalThis.promise_rejects_exactly = (
         description
       );
     });
+};
+
+/**
+ * Assert that ``expected`` is an array and ``actual`` is one of the members.
+ * This is implemented using ``indexOf``, so doesn't handle NaN or ±0 correctly.
+ *
+ * @param actual - Test value.
+ * @param expected - An array that ``actual`` is expected to
+ * be a member of.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_in_array = (actual, expected, description): void => {
+  notStrictEqual(
+    expected.indexOf(actual),
+    -1,
+    `assert_in_array ${description}: value ${actual} not in array ${expected}`
+  );
 };
 
 globalThis.get_host_info = (): HostInfo => {
