@@ -360,6 +360,14 @@ wd_test(
     ],
 )
 
+# Test for a worker that can log to itself using the isTracer parameter
+wd_test(
+    src = "self-logger-test.wd-test",
+    data = [
+        "self-logger-test.js",
+    ],
+)
+
 wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],

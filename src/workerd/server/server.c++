@@ -1837,14 +1837,16 @@ class Server::WorkerService final: public Service,
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
-      kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
+      kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none,
+      bool isTracer = false) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
 
-    kj::Array<kj::Own<WorkerInterface>> legacyTailWorkers = nullptr;
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers = nullptr;
-    legacyTailWorkers = KJ_MAP(service, channels.tails) -> kj::Own<WorkerInterface> {
+    kj::Vector<kj::Own<WorkerInterface>> legacyTailWorkers(channels.tails.size());
+    kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers(channels.streamingTails.size());
+    auto addWorkerIfNotRecursiveTracer =
+        [this, isTracer](kj::Vector<kj::Own<WorkerInterface>>& workers, Service& service) {
       // Caution here... if the tail worker ends up have a circular dependency
       // on the worker we'll end up with an infinite loop trying to initialize.
       // We can test this directly but it's more difficult to test indirect
@@ -1852,22 +1854,33 @@ class Server::WorkerService final: public Service,
       // it simple and just check the direct dependency.
       // If service refers to an EntrypointService, we need to compare with the underlying
       // WorkerService to match this.
-      KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
-      return service->startRequest({});
+      if (service.service() == this) {
+        if (!isTracer) {
+          // This is a self-reference. Create a request with isTracer=true.
+          KJ_IF_SOME(s, kj::dynamicDowncastIfAvailable<WorkerService>(service)) {
+            workers.add(s.startRequest({}, kj::none, {}, kj::none, true));
+          } else KJ_IF_SOME(s, kj::dynamicDowncastIfAvailable<EntrypointService>(service)) {
+            workers.add(s.startRequest({}, true));
+          } else {
+            KJ_FAIL_ASSERT("Unexpected service type in recursive tail worker declaration");
+          }
+        } else {
+          // Intentionally left empty to prevent infinite recursion with tail workers tailing
+          // themselves
+        }
+      } else {
+        workers.add(service.startRequest({}));
+      }
     };
 
+    for (auto& service: channels.tails) {
+      addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
+    }
+
     if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
-      streamingTailWorkers = KJ_MAP(service, channels.streamingTails) -> kj::Own<WorkerInterface> {
-        // Caution here... if the tail worker ends up have a circular dependency
-        // on the worker we'll end up with an infinite loop trying to initialize.
-        // We can test this directly but it's more difficult to test indirect
-        // loops (dependency of dependency, etc). Here we're just going to keep
-        // it simple and just check the direct dependency.
-        // If service refers to an EntrypointService, we need to compare with the underlying
-        // WorkerService to match this.
-        KJ_ASSERT(service->service() != this, "A worker currently cannot log to itself");
-        return service->startRequest({});
-      };
+      for (auto& service: channels.streamingTails) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
+      }
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
@@ -1883,7 +1896,8 @@ class Server::WorkerService final: public Service,
           tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel, kj::none /* scriptId */,
               kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
               kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */,
-              tracing::initializeTailStreamWriter(kj::mv(streamingTailWorkers), waitUntilTasks));
+              tracing::initializeTailStreamWriter(
+                  streamingTailWorkers.releaseAsArray(), waitUntilTasks));
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
@@ -1897,7 +1911,7 @@ class Server::WorkerService final: public Service,
       // one held by the observer and one that will be passed to the IoContext.
       // The PipelineTracer will be destroyed once both of those are freed.
       waitUntilTasks.add(tracer->onComplete().then(
-          kj::coCapture([tailWorkers = kj::mv(legacyTailWorkers)](
+          kj::coCapture([tailWorkers = legacyTailWorkers.releaseAsArray()](
                             kj::Array<kj::Own<Trace>> traces) mutable -> kj::Promise<void> {
         for (auto& worker: tailWorkers) {
           auto event = kj::heap<workerd::api::TraceCustomEventImpl>(
@@ -2431,7 +2445,12 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      return worker.startRequest(kj::mv(metadata), entrypoint, props.clone());
+      return startRequest(kj::mv(metadata), false);
+    }
+
+    kj::Own<WorkerInterface> startRequest(
+        IoChannelFactory::SubrequestMetadata metadata, bool isTracer) {
+      return worker.startRequest(kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer);
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
