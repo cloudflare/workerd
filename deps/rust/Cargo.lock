@@ -111,9 +111,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.20"
+version = "1.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04da6a0d40b948dfc4fa8f5bbf402b0fc1a64a28dbf7d12ffd683550f2c1b63a"
+checksum = "8691782945451c1c383942c4874dbe63814f61cb57ef773cda2972682b7bb3c0"
 dependencies = [
  "shlex",
 ]
@@ -158,7 +158,6 @@ checksum = "efd9466fac8543255d3b1fcad4762c5e116ffe808c8a3043d4263cd4fd4862a2"
 dependencies = [
  "anstyle",
  "clap_lex",
- "strsim",
 ]
 
 [[package]]
@@ -237,51 +236,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cxx"
-version = "1.0.158"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a71ea7f29c73f7ffa64c50b83c9fe4d3a6d4be89a86b009eb80d5a6d3429d741"
-dependencies = [
- "cc",
- "cxxbridge-cmd",
- "cxxbridge-flags",
- "cxxbridge-macro",
- "foldhash",
- "link-cplusplus",
-]
-
-[[package]]
-name = "cxxbridge-cmd"
-version = "1.0.158"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f44296c8693e9ea226a48f6a122727f77aa9e9e338380cb021accaeeb7ee279"
-dependencies = [
- "clap",
- "codespan-reporting",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "cxxbridge-flags"
-version = "1.0.158"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42f69c181c176981ae44ba9876e2ea41ce8e574c296b38d06925ce9214fb8e4"
-
-[[package]]
-name = "cxxbridge-macro"
-version = "1.0.158"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8faff5d4467e0709448187df29ccbf3b0982cc426ee444a193f87b11afb565a8"
-dependencies = [
- "proc-macro2",
- "quote",
- "rustversion",
- "syn",
-]
-
-[[package]]
 name = "derive_more"
 version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,12 +253,12 @@ dependencies = [
  "anyhow",
  "capnp",
  "capnpc",
+ "cc",
  "clang-ast",
  "clap",
  "codespan-reporting",
- "cxx",
- "cxxbridge-cmd",
  "flate2",
+ "foldhash",
  "lol_html_c_api",
  "nix",
  "pico-args",
@@ -312,6 +266,8 @@ dependencies = [
  "quote",
  "ruff_python_ast",
  "ruff_python_parser",
+ "rustversion",
+ "scratch",
  "serde",
  "serde_json",
  "syn",
@@ -415,9 +371,9 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "hashbrown"
-version = "0.15.2"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
+checksum = "84b26c544d002229e640969970a2e74021aadf6e2f96372b9c58eff97de08eb3"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -462,15 +418,6 @@ name = "libc"
 version = "0.2.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
-
-[[package]]
-name = "link-cplusplus"
-version = "1.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a6f6da007f968f9def0d65a05b187e2960183de70c160204ecfccf0ee330212"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "log"
@@ -790,6 +737,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
+name = "scratch"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f6280af86e5f559536da57a45ebc84948833b3bee313a7dd25232e09c878a52"
+
+[[package]]
 name = "selectors"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -888,12 +841,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "strsim"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"

@@ -4,8 +4,8 @@ def rust_cxx_include(name, visibility = [], include_prefix = None):
     native.genrule(
         name = "%s/generated" % name,
         outs = ["cxx.h"],
-        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) --header > \"$@\"",
-        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
+        cmd = "$(location @workerd-cxx//:codegen) --header > \"$@\"",
+        tools = ["@workerd-cxx//:codegen"],
     )
 
     native.cc_library(
@@ -30,8 +30,8 @@ def rust_cxx_bridge(
             src + ".h",
             src + ".cc",
         ],
-        cmd = "$(location @cxxbridge-cmd//:cxxbridge-cmd) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
-        tools = ["@cxxbridge-cmd//:cxxbridge-cmd"],
+        cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        tools = ["@workerd-cxx//:codegen"],
     )
 
     native.cc_library(
@@ -91,12 +91,12 @@ def wd_rust_crate(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [
-                "@crates_vendor//:cxx",
+                "@workerd-cxx//:cxx",
                 "//src/rust/cxx-integration:cxx-include",
             ],
         )
 
-        deps.append("@crates_vendor//:cxx")
+        deps.append("@workerd-cxx//:cxx")
         deps.append(name + "@cxx")
 
     crate_features = []

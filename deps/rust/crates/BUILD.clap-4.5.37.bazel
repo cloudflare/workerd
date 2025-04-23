@@ -34,11 +34,8 @@ rust_library(
     ),
     crate_features = [
         "derive",
-        "error-context",
         "help",
         "std",
-        "suggestions",
-        "usage",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -81,11 +78,8 @@ rust_binary(
     ),
     crate_features = [
         "derive",
-        "error-context",
         "help",
         "std",
-        "suggestions",
-        "usage",
     ],
     crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",

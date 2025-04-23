@@ -68,6 +68,18 @@ alias(
 )
 
 alias(
+    name = "cc-1.2.21",
+    actual = "@crates_vendor__cc-1.2.21//:cc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "cc",
+    actual = "@crates_vendor__cc-1.2.21//:cc",
+    tags = ["manual"],
+)
+
+alias(
     name = "clang-ast-0.1.31",
     actual = "@crates_vendor__clang-ast-0.1.31//:clang_ast",
     tags = ["manual"],
@@ -104,24 +116,6 @@ alias(
 )
 
 alias(
-    name = "cxx-1.0.158",
-    actual = "@crates_vendor__cxx-1.0.158//:cxx",
-    tags = ["manual"],
-)
-
-alias(
-    name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.158//:cxx",
-    tags = ["manual"],
-)
-
-alias(
-    name = "cxx_cc",
-    actual = "@crates_vendor__cxx-1.0.158//:cxx_cc",
-    tags = ["manual"],
-)
-
-alias(
     name = "flate2-1.1.1",
     actual = "@crates_vendor__flate2-1.1.1//:flate2",
     tags = ["manual"],
@@ -130,6 +124,18 @@ alias(
 alias(
     name = "flate2",
     actual = "@crates_vendor__flate2-1.1.1//:flate2",
+    tags = ["manual"],
+)
+
+alias(
+    name = "foldhash-0.1.5",
+    actual = "@crates_vendor__foldhash-0.1.5//:foldhash",
+    tags = ["manual"],
+)
+
+alias(
+    name = "foldhash",
+    actual = "@crates_vendor__foldhash-0.1.5//:foldhash",
     tags = ["manual"],
 )
 
@@ -214,6 +220,30 @@ alias(
 alias(
     name = "ruff_python_parser",
     actual = "@crates_vendor__ruff_python_parser-0.0.0//:ruff_python_parser",
+    tags = ["manual"],
+)
+
+alias(
+    name = "rustversion-1.0.20",
+    actual = "@crates_vendor__rustversion-1.0.20//:rustversion",
+    tags = ["manual"],
+)
+
+alias(
+    name = "rustversion",
+    actual = "@crates_vendor__rustversion-1.0.20//:rustversion",
+    tags = ["manual"],
+)
+
+alias(
+    name = "scratch-1.0.8",
+    actual = "@crates_vendor__scratch-1.0.8//:scratch",
+    tags = ["manual"],
+)
+
+alias(
+    name = "scratch",
+    actual = "@crates_vendor__scratch-1.0.8//:scratch",
     tags = ["manual"],
 )
 
