@@ -1,14 +1,14 @@
 import { createReadonlyFS } from 'pyodide-internal:readOnlyFS';
 
 const FSOps: FSOps<TarFSInfo> = {
-  getNodeMode(parent, name, info) {
+  getNodeMode(_parent, _name, info) {
     return {
       permissions: info.mode,
       isDir: info.children !== undefined,
     };
   },
   setNodeAttributes(node, info, isDir) {
-    node.info = info;
+    node.info = info!;
     node.modtime = node.info.modtime;
     node.usedBytes = 0;
     if (!isDir) {
@@ -42,6 +42,6 @@ const FSOps: FSOps<TarFSInfo> = {
   },
 };
 
-export function createTarFS(Module: Module) {
+export function createTarFS(Module: Module): EmscriptenFS<TarFSInfo> {
   return createReadonlyFS(FSOps, Module);
 }

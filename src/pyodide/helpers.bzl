@@ -124,6 +124,33 @@ def _python_bundle_helper(info, overrides):
     override = overrides.get(version, {})
     return _python_bundle(version, **override)
 
+def internal_modules():
+    return native.glob(
+        [
+            "internal/*.ts",
+            "internal/topLevelEntropy/*.ts",
+            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
+            "internal/pool/*.ts",
+            "types/*.ts",
+            "types/*/*.ts",
+        ],
+        allow_empty = True,
+    )
+
+def modules():
+    return ["python-entrypoint-helper.ts"]
+
+def internal_data_modules(version):
+    return native.glob([
+        "internal/*.py",
+        "internal/patches/*.py",
+        "internal/topLevelEntropy/*.py",
+    ]) + [
+        _out_path("python_stdlib.zip", version),
+        _out_path("pyodide.asm.wasm", version),
+        _out_path("emscriptenSetup.js", version),
+    ]
+
 def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
     pyodide_package = "@pyodide-%s//" % version
     if not pyodide_asm_wasm:
@@ -292,29 +319,9 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             deps = ["pyodide.asm.js@rule_js@" + version],
         )
 
-    INTERNAL_MODULES = native.glob(
-        [
-            "internal/*.ts",
-            "internal/topLevelEntropy/*.ts",
-            # The pool directory is only needed by typescript, it shouldn't be used at runtime.
-            "internal/pool/*.ts",
-            "types/*.ts",
-            "types/*/*.ts",
-        ],
-        allow_empty = True,
-    )
-
-    MODULES = ["python-entrypoint-helper.ts"]
-
-    INTERNAL_DATA_MODULES = native.glob([
-        "internal/*.py",
-        "internal/patches/*.py",
-        "internal/topLevelEntropy/*.py",
-    ]) + [
-        _out_path("python_stdlib.zip", version),
-        _out_path("pyodide.asm.wasm", version),
-        _out_path("emscriptenSetup.js", version),
-    ]
+    INTERNAL_DATA_MODULES = internal_data_modules(version)
+    INTERNAL_MODULES = internal_modules()
+    MODULES = modules()
 
     wd_ts_bundle(
         name = "pyodide@" + version,

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return  */
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
@@ -72,7 +73,7 @@ async function applyPatch(pyodide: Pyodide, patchName: string): Promise<void> {
 }
 
 async function setupPatches(pyodide: Pyodide): Promise<void> {
-  return await enterJaegerSpan('setup_patches', async () => {
+  await enterJaegerSpan('setup_patches', async () => {
     patchLoadPackage(pyodide);
 
     // install any extra packages into the site-packages directory
@@ -111,7 +112,7 @@ function getMainModule(): Promise<PyModule> {
     if (mainModulePromise) {
       return mainModulePromise;
     }
-    mainModulePromise = (async function () {
+    mainModulePromise = (async function (): Promise<PyModule> {
       const pyodide = await getPyodide();
       await setupPatches(pyodide);
       Limiter.beginStartup();
@@ -159,18 +160,18 @@ function makeHandler(pyHandlerName: string): Handler {
   };
 }
 
-function makeEntrypointClass(className: string, classKind: AnyClass) {
+function makeEntrypointClass(className: string, classKind: AnyClass): any {
   class EntrypointWrapper extends classKind {
-    pyInstance: Promise<PyModule>;
+    private pyInstance: Promise<PyModule>;
 
-    constructor(...args: any[]) {
+    public constructor(...args: any[]) {
       super(...args);
       // Initialise a Python instance of the class.
       this.pyInstance = this.initPyInstance(args);
       // We do not know the methods that are defined on the RPC class, so we need a proxy to
       // support any possible method name.
       return new Proxy(this, {
-        get(target, prop, receiver) {
+        get(target, prop, receiver): any {
           if (typeof prop !== 'string') {
             return Reflect.get(target, prop, receiver);
           }
@@ -178,7 +179,7 @@ function makeEntrypointClass(className: string, classKind: AnyClass) {
           if (isKnownHandler) {
             prop = 'on_' + prop;
           }
-          return async function (...args: any[]) {
+          return async function (...args: any[]): Promise<any> {
             const pyInstance = await target.pyInstance;
             if (typeof pyInstance[prop] === 'function') {
               const res = await pyInstance[prop](...args);
@@ -194,7 +195,7 @@ function makeEntrypointClass(className: string, classKind: AnyClass) {
       });
     }
 
-    async initPyInstance(args: any[]) {
+    public async initPyInstance(args: any[]): Promise<PyModule> {
       const mainModule = await preparePython();
       const pyClassConstructor = mainModule[className] as unknown as (
         ...args: any[]
@@ -212,12 +213,18 @@ function makeEntrypointClass(className: string, classKind: AnyClass) {
   return EntrypointWrapper;
 }
 
-async function getIntrospectionMod(pyodide: Pyodide) {
-  // @ts-ignore TS isn't aware of this module's existence, but it does exist.
+type IntrospectionMod = {
+  __dict__: PyDict;
+  collect_entrypoint_classes: (mod: PyModule) => typeof pythonEntrypointClasses;
+};
+
+async function getIntrospectionMod(
+  pyodide: Pyodide
+): Promise<IntrospectionMod> {
   const introspectionSource = await import('pyodide-internal:introspection.py');
   const introspectionMod = pyodide.runPython(
     "from types import ModuleType; ModuleType('introspection')"
-  );
+  ) as IntrospectionMod;
   const decoder = new TextDecoder();
   pyodide.runPython(decoder.decode(introspectionSource.default), {
     globals: introspectionMod.__dict__,

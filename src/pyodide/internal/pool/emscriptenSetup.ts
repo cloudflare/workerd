@@ -95,14 +95,20 @@ function getInstantiateWasm(
       mod: WebAssembly.Module
     ) => void
   ): WebAssembly.Exports {
-    (async function () {
+    (async function (): Promise<void> {
       // Instantiate pyodideWasmModule with wasmImports
       const instance = await WebAssembly.instantiate(
         pyodideWasmModule,
         wasmImports
       );
       successCallback(instance, pyodideWasmModule);
-    })();
+    })().catch((e: unknown) => {
+      console.error(
+        'Internal error: wasm instantiation failed. This should never happen.',
+        e
+      );
+      // Execution hangs at this point.
+    });
 
     return {};
   };
@@ -152,7 +158,7 @@ function getEmscriptenSettings(
     // important because the file system lives outside of linear memory.
     preRun: [prepareFileSystem, setEnv, waitForDynlibs],
     instantiateWasm,
-    reportUndefinedSymbolsNoOp() {},
+    reportUndefinedSymbolsNoOp(): void {},
     readyPromise,
     API, // Pyodide requires we pass this in.
   };
@@ -162,11 +168,12 @@ function getEmscriptenSettings(
  * Force Emscripten to feature detect the way we want.
  * We want it to think we're the browser main thread.
  */
-function* featureDetectionMonkeyPatchesContextManager() {
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
   const global = globalThis as any;
   // Make Emscripten think we're in the browser main thread
   global.window = { sessionStorage: {} };
-  global.document = { createElement() {} };
+  global.document = { createElement(): void {} };
   global.sessionStorage = {};
   // Make Emscripten think we're not in a worker
   global.importScripts = 1;
@@ -179,6 +186,7 @@ function* featureDetectionMonkeyPatchesContextManager() {
     delete global.importScripts;
   }
 }
+/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 
 /**
  * Simple wrapper around _createPyodideModule that applies some monkey patches

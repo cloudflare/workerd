@@ -57,7 +57,7 @@ class VirtualizedDir {
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
   private soFiles: FilePath[];
   private loadedRequirements: Set<string>;
-  constructor() {
+  public constructor() {
     this.rootInfo = createTarFsInfo();
     this.dynlibTarFs = createTarFsInfo();
     this.soFiles = [];
@@ -70,7 +70,7 @@ class VirtualizedDir {
    * If a file or directory already exists, an error is thrown.
    * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
    */
-  mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
+  public mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
@@ -92,7 +92,7 @@ class VirtualizedDir {
    * @param {String} requirement The canonicalized package name this small bundle corresponds to
    * @param {InstallDir} installDir The `install_dir` field from the metadata about the package taken from the lockfile
    */
-  addSmallBundle(
+  public addSmallBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirement: string,
@@ -112,7 +112,7 @@ class VirtualizedDir {
    * @param {List<String>} soFiles A list of .so files contained in the big bundle
    * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
    */
-  addBigBundle(
+  public addBigBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirements: Set<string>
@@ -136,23 +136,23 @@ class VirtualizedDir {
     }
   }
 
-  getSitePackagesRoot(): TarFSInfo {
+  public getSitePackagesRoot(): TarFSInfo {
     return this.rootInfo;
   }
 
-  getDynlibRoot(): TarFSInfo {
+  public getDynlibRoot(): TarFSInfo {
     return this.dynlibTarFs;
   }
 
-  getSoFilesToLoad(): FilePath[] {
+  public getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
 
-  hasRequirementLoaded(req: string): boolean {
+  public hasRequirementLoaded(req: string): boolean {
     return this.loadedRequirements.has(req);
   }
 
-  mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>) {
+  public mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
     Module.FS.mkdirTree(Module.FS.sessionSitePackages);
     Module.FS.mount(
       tarFS,
@@ -184,7 +184,7 @@ export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
 
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
-  let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
+  const requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
 
   // Currently, we include all packages within the big bundle in Edgeworker.
   // During this transitionary period, we add the option (via autogate)
@@ -241,7 +241,7 @@ export function mountSitePackages(Module: Module, pkgs: VirtualizedDir): void {
 /**
  * This mounts the metadataFS (which contains user code).
  */
-export function mountWorkerFiles(Module: Module) {
+export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');

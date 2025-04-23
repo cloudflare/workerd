@@ -1,19 +1,25 @@
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { createReadonlyFS } from 'pyodide-internal:readOnlyFS';
 
-function createTree(paths: string[]): MetadataFSInfo {
-  const tree = new Map();
+function createTree(paths: string[]): MetadataDirInfo {
+  const tree: MetadataFSInfo = new Map();
   paths.forEach((elt: string, idx: number) => {
-    let subTree = tree;
+    let subTree: MetadataFSInfo = tree;
     const parts = elt.split('/');
-    const name = parts.pop();
+    const name = parts.pop()!;
     for (const part of parts) {
-      let next = subTree.get(part);
+      if (typeof subTree === 'number') {
+        throw new Error('internal error');
+      }
+      let next: MetadataFSInfo | undefined = subTree.get(part);
       if (!next) {
         next = new Map();
         subTree.set(part, next);
       }
       subTree = next;
+    }
+    if (typeof subTree === 'number') {
+      throw new Error('internal error');
     }
     subTree.set(name, idx);
   });
@@ -27,7 +33,7 @@ export function createMetadataFS(Module: Module): object {
   const sizes = MetadataReader.getSizes();
   const rootInfo = createTree(names);
   const FSOps: FSOps<MetadataFSInfo> = {
-    getNodeMode(parent, name, info) {
+    getNodeMode(_parent, _name, info) {
       return {
         permissions: 0o555, // read and execute but not write
         isDir: typeof info !== 'number',

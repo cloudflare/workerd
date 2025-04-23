@@ -204,11 +204,11 @@ export function preloadDynamicLibs(Module: Module): void {
       }
     }
     if (!node?.contentsOffset) {
-      throw Error('fs node could not be found for ' + soFile);
+      throw Error(`fs node could not be found for ${soFile.join('/')}`);
     }
     const { contentsOffset, size } = node;
     if (contentsOffset === undefined) {
-      throw Error('contentsOffset not defined for ' + soFile);
+      throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
     }
     const wasmModuleData = new Uint8Array(size);
     (node.reader ?? EmbeddedPackagesTarReader).read(
@@ -365,7 +365,7 @@ function decodeSnapshot(): void {
   if (!MEMORY_SNAPSHOT_READER) {
     throw Error('Memory snapshot reader not available');
   }
-  let buf = new Uint32Array(2);
+  const buf = new Uint32Array(2);
   let offset = 0;
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
   offset += 8;
@@ -382,9 +382,9 @@ function decodeSnapshot(): void {
   const jsonBuf = new Uint8Array(jsonLength);
   MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
   const jsonTxt = new TextDecoder().decode(jsonBuf);
-  DSO_METADATA = JSON.parse(jsonTxt);
+  DSO_METADATA = JSON.parse(jsonTxt) as DylinkInfo;
   LOADED_BASELINE_SNAPSHOT = Number(DSO_METADATA?.settings?.baselineSnapshot);
-  READ_MEMORY = function (Module) {
+  READ_MEMORY = function (Module): void {
     // restore memory from snapshot
     if (!MEMORY_SNAPSHOT_READER) {
       throw Error('Memory snapshot reader not available when reading memory');
@@ -404,7 +404,7 @@ export function restoreSnapshot(Module: Module): void {
 }
 
 let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
-(function () {
+(function (): void {
   // Lookup memory snapshot from artifact store.
   if (!MEMORY_SNAPSHOT_READER) {
     // snapshots are disabled or there isn't one yet

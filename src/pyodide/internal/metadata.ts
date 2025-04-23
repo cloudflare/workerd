@@ -22,9 +22,9 @@ export const WORKERD_INDEX_URL = USING_OLDEST_PACKAGES_VERSION
     '/'
   : 'https://python-packages.edgeworker.net/' + PACKAGES_VERSION + '/';
 // The package lock is embedded in the binary. See `getPyodideLock` and `packageLocks`.
-export const LOCKFILE: PackageLock = JSON.parse(
+export const LOCKFILE = JSON.parse(
   MetadataReader.getPackagesLock()
-);
+) as PackageLock;
 export const REQUIREMENTS = MetadataReader.getRequirements();
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
