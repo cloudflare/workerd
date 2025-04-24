@@ -12,9 +12,61 @@ from typing import Any, TypedDict, Unpack
 
 import js
 
+# Get globals modules and import function from the entrypoint-helper
+from js import pyodide_entrypoint_helper
+
 import pyodide.http
 from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
+
+
+def import_from_javascript(module_name: str) -> Any:
+    """
+    Import a JavaScript ES module from Python.
+
+    Args:
+        module_name: The name of the module to import. This can be a module name or a path.
+
+    Returns:
+        The imported module object.
+
+    Example:
+        cloudflare_workers = import_from_javascript("cloudflare:workers")
+        env = cloudflare_workers.env
+
+    Note:
+        Behind the scenes import_from_javascript uses JSPI to do imports but that means we need an
+        async context. To enable importing cloudflare:workers and cloudflare:sockets in the global
+        scope we specifically imported them in the global scope and exposed them here.
+    """
+    # Special case for global scope available modules
+    # JSPI won't work in the global scope in 0.26.0a2 so we need modules importable in the global
+    # scope to be imported beforehand.
+    if module_name == "cloudflare:workers":
+        return pyodide_entrypoint_helper.cloudflareWorkersModule
+    elif module_name == "cloudflare:sockets":
+        return pyodide_entrypoint_helper.cloudflareSocketsModule
+
+    try:
+        from pyodide.ffi import run_sync
+
+        # Call the JavaScript import function
+        return run_sync(pyodide_entrypoint_helper.doAnImport(module_name))
+    except JsException as e:
+        raise ImportError(f"Failed to import '{module_name}': {e}") from e
+    except RuntimeError as e:
+        if e.args[0] == "No suspender":
+            raise ImportError(
+                f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available in the global scope."
+            ) from e
+        raise
+    except ImportError as e:
+        if e.args[0].startswith("cannot import name 'run_sync' from 'pyodide.ffi'"):
+            raise ImportError(
+                f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
+            ) from e
+        raise
+
 
 JSBody = (
     "js.Blob | js.ArrayBuffer | js.TypedArray | js.DataView | js.FormData |"
