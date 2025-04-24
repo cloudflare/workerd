@@ -85,3 +85,6 @@ bench path:
 # example: just clippy dns
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
+
+prepare-ubuntu:
+  sudo apt-get install -y --no-install-recommends libc++abi1-18 libc++1-18 libc++-18-dev lld-18 bazelisk python3
