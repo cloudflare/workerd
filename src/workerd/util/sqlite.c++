@@ -554,11 +554,7 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
         // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
         if (sqlite3_get_autocommit(db) != 0) {
           KJ_IF_SOME(cb, onCriticalErrorCallback) {
-            KJ_IF_SOME(e, maybeException) {
-              cb(kj::cp(e));
-            } else {
-              cb(KJ_EXCEPTION(FAILED, "SQLite failed", errorMessage));
-            }
+            cb(errorMessage, maybeException);
           }
         }
       }
