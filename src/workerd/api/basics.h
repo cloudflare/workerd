@@ -522,7 +522,7 @@ class AbortTriggerRpcClient;
 
 class AbortSignal final: public EventTarget {
  public:
-  enum class Flag { NONE, NEVER_ABORTS };
+  enum class Flag { NONE, NEVER_ABORTS, IGNORE_FOR_SUBREQUESTS };
 
   AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
       jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
@@ -635,9 +635,18 @@ class AbortSignal final: public EventTarget {
 
   JSG_SERIALIZABLE(rpc::SerializationTag::ABORT_SIGNAL);
 
+  // True if this is a signal on the request of an incoming fetch. When the compat flag
+  // `requestSignalPassthrough` is set, this flag has no effect. But to ensure backwards
+  // compatibility, when this flag is not set, this signal will not be passed through to
+  // subrequests derived from the incoming request.
+  bool isIgnoredForSubrequests() const {
+    return flag == Flag::IGNORE_FOR_SUBREQUESTS;
+  }
+
  private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
+
   kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onAbortHandler;
 
@@ -682,7 +691,10 @@ class AbortSignal final: public EventTarget {
 // An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
  public:
-  explicit AbortController(jsg::Lock& js): signal(js.alloc<AbortSignal>()) {}
+  explicit AbortController(
+      jsg::Lock& js, AbortSignal::Flag abortSignalFlag = AbortSignal::Flag::NONE)
+      : signal(js.alloc<AbortSignal>(
+            kj::none /* exception */, kj::none /* maybeReason */, abortSignalFlag)) {}
 
   static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
     return js.alloc<AbortController>(js);
