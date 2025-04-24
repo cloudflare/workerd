@@ -105,6 +105,7 @@ struct TestFixture {
   ThreadContext threadContext;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
+  v8::IsolateGroup isolateGroup;
   kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
