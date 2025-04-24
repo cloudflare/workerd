@@ -2,6 +2,36 @@ load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("//:build/eslint_test.bzl", "eslint_test")
 load("//:build/wpt_test.bzl", "wpt_test")
 
+srcs = glob(
+    [
+        "**/*.ts",
+    ],
+)
+
+ts_project(
+    name = "wpt-all@tsproject",
+    srcs = srcs,
+    allow_js = True,
+    composite = True,
+    declaration = True,
+    source_map = True,
+    tsconfig = "tsconfig.json",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//:node_modules/@types/node",
+    ],
+)
+
+eslint_test(
+    name = "wpt-all",
+    srcs = srcs,
+    data = [
+        "//:node_modules/@types/node",
+    ],
+    eslintrc_json = "eslint.config.mjs",
+    tsconfig_json = "tsconfig.json",
+)
+
 wpt_test(
     name = "url",
     config = "url-test.ts",
@@ -62,32 +92,10 @@ wpt_test(
     wpt_directory = "@wpt//:compression@module",
 )
 
-srcs = glob(
-    [
-        "**/*.ts",
-    ],
-)
-
-ts_project(
-    name = "wpt-all@tsproject",
-    srcs = srcs,
-    allow_js = True,
-    composite = True,
-    declaration = True,
-    source_map = True,
-    tsconfig = "tsconfig.json",
-    visibility = ["//visibility:public"],
-    deps = [
-        "//:node_modules/@types/node",
-    ],
-)
-
-eslint_test(
-    name = "wpt-all",
-    srcs = srcs,
-    data = [
-        "//:node_modules/@types/node",
-    ],
-    eslintrc_json = "eslint.config.mjs",
-    tsconfig_json = "tsconfig.json",
+wpt_test(
+    name = "WebCryptoAPI",
+    size = "large",
+    config = "WebCryptoAPI-test.ts",
+    wpt_directory = "@wpt//:WebCryptoAPI@module",
+    # If you are here because this test is timing out on Windows, just disable it for Windows.
 )
