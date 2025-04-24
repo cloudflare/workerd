@@ -1577,21 +1577,20 @@ void testCriticalError(const char* expectedErrorMessage,
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
-  kj::Maybe<kj::Exception> capturedException = kj::none;
 
   // Register a critical error callback
-  db.onCriticalError([&](kj::Maybe<kj::Exception> exception) {
+  db.onCriticalError([&](kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
     criticalErrorCallbackCalled = true;
-    capturedException = exception;
+    KJ_IF_SOME(exception, maybeException) {
+      KJ_EXPECT(exception.getDescription().contains(expectedErrorMessage));
+    } else {
+      KJ_EXPECT(errorMessage.contains(expectedErrorMessage));
+    }
   });
 
   KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
-  KJ_ASSERT(capturedException != kj::none);
-  KJ_IF_SOME(exception, capturedException) {
-    KJ_EXPECT(exception.getDescription().contains(expectedErrorMessage));
-  }
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
@@ -1601,11 +1600,14 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
 
   // Create a tracker to verify our callback is called
   bool criticalErrorCallbackCalled = false;
-  kj::Maybe<kj::Exception> capturedException;
   // Register a critical error callback
-  db.onCriticalError([&](kj::Exception exception) {
+  db.onCriticalError([&](kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
     criticalErrorCallbackCalled = true;
-    capturedException = exception;
+    KJ_IF_SOME(exception, maybeException) {
+      KJ_EXPECT(exception.getDescription().contains("test-vfs-error"));
+    } else {
+      KJ_EXPECT(errorMessage.contains("test-vfs-error"));
+    }
   });
 
   // Use a small cache size to force flushing to disk on even a small write
@@ -1629,10 +1631,6 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   )")));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
-  KJ_ASSERT(capturedException != kj::none);
-  KJ_IF_SOME(exception, capturedException) {
-    KJ_EXPECT(exception.getDescription().startsWith("test-vfs-error"));
-  }
 }
 
 // No test for SQLITE_BUSY as a critical error because we haven't been able to figure out how to

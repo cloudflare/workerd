@@ -1588,7 +1588,7 @@ export let testAutoRollBackOnCriticalError = {
         'should have thrown SQLITE_FULL exception before we reach here'
       );
     } catch (err) {
-      if (!err.message.startsWith('internal error; reference =')) {
+      if (!err.message.startsWith('database or disk is full: SQLITE_FULL')) {
         throw err;
       }
     }

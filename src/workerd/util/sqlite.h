@@ -200,7 +200,9 @@ class SqliteDatabase {
     onWriteCallback = kj::mv(callback);
   }
 
-  void onCriticalError(kj::Function<void(kj::Exception exception)> callback) {
+  void onCriticalError(
+      kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>
+          callback) {
     onCriticalErrorCallback = kj::mv(callback);
   }
 
@@ -314,7 +316,8 @@ class SqliteDatabase {
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
-  kj::Maybe<kj::Function<void(kj::Exception)>> onCriticalErrorCallback;
+  kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
+      onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;

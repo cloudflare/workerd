@@ -199,10 +199,15 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
   }
 }
 
-void ActorSqlite::onCriticalError(kj::Exception exception) {
+void ActorSqlite::onCriticalError(
+    kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
   // If we have already experienced a terminal exception, no need to replace it
   if (broken == kj::none) {
-    broken.emplace(kj::mv(exception));
+    KJ_IF_SOME(e, maybeException) {
+      broken.emplace(kj::mv(e));
+    } else {
+      broken.emplace(JSG_KJ_EXCEPTION(FAILED, Error, errorMessage));
+    }
   }
 }
 
