@@ -94,6 +94,8 @@ wpt_test(
 
 wpt_test(
     name = "WebCryptoAPI",
+    size = "large",
     config = "WebCryptoAPI-test.ts",
     wpt_directory = "@wpt//:WebCryptoAPI@module",
+    # If you are here because this test is timing out on Windows, just disable it for Windows.
 )
