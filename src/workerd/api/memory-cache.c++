@@ -400,7 +400,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
       KJ_CASE_ONEOF(promise, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>) {
         return IoContext::current().awaitIo(js, kj::mv(promise),
             [fallback = kj::mv(fallback), key = kj::str(key.value), span = kj::mv(readSpan),
-                userSpan = kj::mv(userReadSpan)](
+                userSpan = kj::mv(userReadSpan), self = JSG_THIS](
                 jsg::Lock& js, SharedMemoryCache::Use::GetWithFallbackOutcome cacheResult) mutable
             -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
           KJ_SWITCH_ONEOF(cacheResult) {
@@ -428,11 +428,13 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
                 return kj::mv(result.value);
               })
                   .catch_(js,
-                      [callback = context.addObject(kj::mv(heapCallback))](jsg::Lock& js,
-                          jsg::Value&& exception) mutable -> jsg::JsRef<jsg::JsValue> {
-                (*callback)(kj::none);
-                js.throwException(kj::mv(exception));
-              });
+                  JSG_VISITABLE_LAMBDA(
+                      (self = kj::mv(self), callback = context.addObject(kj::mv(heapCallback))),
+                      (self),
+                      (jsg::Lock & js, jsg::Value&& exception) mutable->jsg::JsRef<jsg::JsValue> {
+                        (*callback)(kj::none);
+                        js.throwException(kj::mv(exception));
+                      }));
             }
           }
           KJ_UNREACHABLE;
