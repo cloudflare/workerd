@@ -163,11 +163,26 @@ async function preparePython(): Promise<PyModule> {
   return mainModule;
 }
 
-function callHandler(handler: PyCallable, args: any[]): any {
-  if (handler.callWithOptions) {
-    return handler.callWithOptions({ relaxed: true, promising: true }, ...args);
+function doPyCallHelper(
+  relaxed: boolean,
+  pyfunc: PyCallable,
+  args: any[]
+): any {
+  if (pyfunc.callWithOptions) {
+    return pyfunc.callWithOptions({ relaxed, promising: true }, ...args);
   }
-  return handler.callRelaxed(...args);
+  if (relaxed) {
+    return pyfunc.callRelaxed(...args);
+  }
+  return pyfunc(...args);
+}
+
+function doPyCall(pyfunc: PyCallable, args: any[]): any {
+  return doPyCallHelper(false, pyfunc, args);
+}
+
+function doRelaxedPyCall(pyfunc: PyCallable, args: any[]): any {
+  return doPyCallHelper(true, pyfunc, args);
 }
 
 function makeHandler(pyHandlerName: string): Handler {
@@ -183,7 +198,7 @@ function makeHandler(pyHandlerName: string): Handler {
       );
     }
     const result = await enterJaegerSpan('python_code', () => {
-      return callHandler(handler, args);
+      return doRelaxedPyCall(handler, args);
     });
 
     // Support returning a pyodide.ffi.FetchResponse.
@@ -217,7 +232,7 @@ function makeEntrypointClass(className: string, classKind: AnyClass): any {
           return async function (...args: any[]): Promise<any> {
             const pyInstance = await target.pyInstance;
             if (typeof pyInstance[prop] === 'function') {
-              const res = await pyInstance[prop](...args);
+              const res = await doPyCall(pyInstance[prop], args);
               if (isKnownHandler) {
                 return res?.js_object ?? res;
               }
@@ -232,16 +247,14 @@ function makeEntrypointClass(className: string, classKind: AnyClass): any {
 
     public async initPyInstance(args: any[]): Promise<PyModule> {
       const mainModule = await preparePython();
-      const pyClassConstructor = mainModule[className] as unknown as (
-        ...args: any[]
-      ) => PyModule;
+      const pyClassConstructor = mainModule[className];
       if (typeof pyClassConstructor !== 'function') {
         throw new TypeError(
           `There is no '${className}' class defined in the Python Worker's main module`
         );
       }
-
-      return pyClassConstructor(...args);
+      const res = await doPyCall(pyClassConstructor, args);
+      return res as PyModule;
     }
   }
 
