@@ -373,7 +373,7 @@ kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
 kj::Promise<void> RpcWorkerInterface::prewarm(kj::StringPtr url) {
   auto req = dispatcher.prewarmRequest(capnp::MessageSize{url.size() / sizeof(capnp::word) + 4, 0});
   req.setUrl(url);
-  return req.send().ignoreResult();
+  return req.sendIgnoringResult();
 }
 
 kj::Promise<WorkerInterface::ScheduledResult> RpcWorkerInterface::runScheduled(

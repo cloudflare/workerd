@@ -459,7 +459,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([] {}, [](kj::Exception&& e) {}));
+      .exclusiveJoin(context->abortPromise.addBranch().catch_([](kj::Exception&&) {}));
 }
 
 kj::Promise<IoContext_IncomingRequest::FinishScheduledResult> IoContext::IncomingRequest::
