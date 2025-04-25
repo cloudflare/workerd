@@ -532,7 +532,7 @@ class AbortTriggerRpcClient final {
     auto req = client.abortRequest(capnp::MessageSize{reason.size() / sizeof(capnp::word) + 8, 0});
     auto field = req.initReason();
     field.setV8Serialized(reason);
-    return req.send().ignoreResult();
+    return req.sendIgnoringResult();
   }
 
   ~AbortTriggerRpcClient() noexcept(false) {
@@ -542,7 +542,7 @@ class AbortTriggerRpcClient final {
 
     auto req = client.releaseRequest(capnp::MessageSize{4, 0});
     // We call detach() on the resulting promise so that we can perform RPC in a destructor
-    req.send().ignoreResult().detach([](kj::Exception exc) {
+    req.sendIgnoringResult().detach([](kj::Exception exc) {
       if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
         // It's possible we can't send the release message because we're already disconnected.
         return;
