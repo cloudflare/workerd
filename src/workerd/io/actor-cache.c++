@@ -629,7 +629,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       list.set(i, keysToFetch[i].asBytes());
     }
     req.setStream(streamClient);
-    return req.send().ignoreResult();
+    return req.sendIgnoringResult();
   });
 
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
@@ -1102,7 +1102,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
     }
 
     req.setStream(streamClient);
-    return req.send().ignoreResult();
+    return req.sendIgnoringResult();
   });
 
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
@@ -1430,7 +1430,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>> Act
       req.setLimit(l - streamServerRef.fetchedEntries.size());
     }
     req.setStream(streamClient);
-    return req.send().ignoreResult();
+    return req.sendIgnoringResult();
   });
 
   // Wait on the RPC only until stream.end() is called, then report the results. We prevent
@@ -2696,7 +2696,7 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
     auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(
         clock, 1 * kj::SECONDS, "storage operation took longer than expected: single put");
-    co_await request.send().ignoreResult();
+    co_await request.sendIgnoringResult();
   }
 }
 
@@ -2723,7 +2723,7 @@ kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush m
     auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(
         clock, 1 * kj::SECONDS, "storage operation took longer than expected: muted delete");
-    co_await request.send().ignoreResult();
+    co_await request.sendIgnoringResult();
   }
 }
 
@@ -2764,7 +2764,7 @@ kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
   KJ_IF_SOME(newTime, dirty.newTime) {
     auto req = storage.setAlarmRequest();
     req.setScheduledTimeMs((newTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-    co_await req.send().ignoreResult();
+    co_await req.sendIgnoringResult();
     co_return;
   } else {
     // Alarm deletes are a bit trickier because we have to take DeferredAlarmDeletes into account.
@@ -2917,11 +2917,11 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
   }
 
   for (auto& request: rpcMutedDeletes) {
-    promises.add(request.send().ignoreResult());
+    promises.add(request.sendIgnoringResult());
   }
 
   for (auto& request: rpcPuts) {
-    promises.add(request.send().ignoreResult());
+    promises.add(request.sendIgnoringResult());
   }
 
   KJ_SWITCH_ONEOF(maybeAlarmChange) {
@@ -2929,7 +2929,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
       KJ_IF_SOME(newTime, dirty.newTime) {
         auto req = txn.setAlarmRequest();
         req.setScheduledTimeMs((newTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-        promises.add(req.send().ignoreResult());
+        promises.add(req.sendIgnoringResult());
       } else {
         auto req = txn.deleteAlarmRequest();
         KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
@@ -2956,7 +2956,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
           // and READY is set when the run completes -- only FLUSHING indicates we actually
           // need to send a request.
         } else {
-          promises.add(req.send().ignoreResult());
+          promises.add(req.sendIgnoringResult());
         }
       }
     }
@@ -2973,7 +2973,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(PutFlush putFlush,
     auto writeObserver = recordStorageWrite(hooks, clock);
     util::DurationExceededLogger logger(clock, 1 * kj::SECONDS,
         "storage operation took longer than expected: commit flush transaction");
-    promises.add(txn.commitRequest(capnp::MessageSize{4, 0}).send().ignoreResult());
+    promises.add(txn.commitRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());
 
     co_await kj::joinPromises(promises.finish());
     for (auto& rpcCountedDelete: rpcCountedDeletes) {

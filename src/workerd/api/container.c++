@@ -47,7 +47,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
     }
   }
 
-  IoContext::current().addTask(req.send().ignoreResult());
+  IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
 }
@@ -56,7 +56,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
   return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send().ignoreResult())
+      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).sendIgnoringResult())
       .then(js, [this](jsg::Lock& js) {
     running = false;
     KJ_IF_SOME(d, destroyReason) {
@@ -79,7 +79,7 @@ jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> e
   }
 
   return IoContext::current().awaitIo(
-      js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).send().ignoreResult());
+      js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());
 }
 
 void Container::signal(jsg::Lock& js, int signo) {
@@ -88,7 +88,7 @@ void Container::signal(jsg::Lock& js, int signo) {
 
   auto req = rpcClient->signalRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);
-  IoContext::current().addTask(req.send().ignoreResult());
+  IoContext::current().addTask(req.sendIgnoringResult());
 }
 
 // =======================================================================================

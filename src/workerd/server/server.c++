@@ -4384,15 +4384,13 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
     return context.getParams()
         .getStream()
         .endRequest(capnp::MessageSize{2, 0})
-        .send()
-        .ignoreResult();
+        .sendIgnoringResult();
   }
   kj::Promise<void> list(ListContext context) override {
     return context.getParams()
         .getStream()
         .endRequest(capnp::MessageSize{2, 0})
-        .send()
-        .ignoreResult();
+        .sendIgnoringResult();
   }
   kj::Promise<void> getAlarm(GetAlarmContext context) override {
     return kj::READY_NOW;
@@ -4413,15 +4411,13 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
       return context.getParams()
           .getStream()
           .endRequest(capnp::MessageSize{2, 0})
-          .send()
-          .ignoreResult();
+          .sendIgnoringResult();
     }
     kj::Promise<void> list(ListContext context) override {
       return context.getParams()
           .getStream()
           .endRequest(capnp::MessageSize{2, 0})
-          .send()
-          .ignoreResult();
+          .sendIgnoringResult();
     }
     kj::Promise<void> getAlarm(GetAlarmContext context) override {
       return kj::READY_NOW;
