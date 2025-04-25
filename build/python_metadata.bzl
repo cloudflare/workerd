@@ -59,6 +59,9 @@ def make_bundle_version_info(versions):
         entry["feature_flags"] = [entry["flag"]]
         result[name] = entry
     dev = result["development"]
+
+    # Uncomment to test with development = 0.27.5
+    # dev["real_pyodide_version"] = "0.27.5"
     result["development"] = result[dev["real_pyodide_version"]] | dev
     return result
 
@@ -68,8 +71,8 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": "20240829.4",
-        "backport": "49",
-        "integrity": "sha256-aBIiSUq3DJVdnhjjslp56/cwgCWHcByW8JjJlxQD9FM=",
+        "backport": "53",
+        "integrity": "sha256-GUlSlenbOwPN6KOqWPJ+W9JSTVjGuNz9wyQ13gmDIaM=",
         "flag": "pythonWorkers",
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
@@ -82,8 +85,8 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_version": "0.27.5",
         "pyodide_date": "2025-01-16",
         "packages": "20250324.1",
-        "backport": "17",
-        "integrity": "sha256-/ddWUKbNzMWrBnFHwEg85QvKdlOmSrQeY/2kQCyKXKg=",
+        "backport": "21",
+        "integrity": "sha256-mmfHsBPBTzzigicvjgwIPniZCKq7DzoqW4IdrJKGheM=",
         "flag": "pythonWorkers20250116",
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",

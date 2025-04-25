@@ -163,11 +163,26 @@ async function preparePython(): Promise<PyModule> {
   return mainModule;
 }
 
-function callHandler(handler: PyCallable, args: any[]): any {
-  if (handler.callWithOptions) {
-    return handler.callWithOptions({ relaxed: true, promising: true }, ...args);
+function doPyCallHelper(
+  relaxed: boolean,
+  pyfunc: PyCallable,
+  args: any[]
+): any {
+  if (pyfunc.callWithOptions) {
+    return pyfunc.callWithOptions({ relaxed, promising: true }, ...args);
   }
-  return handler.callRelaxed(...args);
+  if (relaxed) {
+    return pyfunc.callRelaxed(...args);
+  }
+  return pyfunc(...args);
+}
+
+function doPyCall(pyfunc: PyCallable, args: any[]): any {
+  return doPyCallHelper(false, pyfunc, args);
+}
+
+function doRelaxedPyCall(pyfunc: PyCallable, args: any[]): any {
+  return doPyCallHelper(true, pyfunc, args);
 }
 
 function makeHandler(pyHandlerName: string): Handler {
@@ -183,69 +198,68 @@ function makeHandler(pyHandlerName: string): Handler {
       );
     }
     const result = await enterJaegerSpan('python_code', () => {
-      return callHandler(handler, args);
+      return doRelaxedPyCall(handler, args);
     });
 
     // Support returning a pyodide.ffi.FetchResponse.
-    if (result && result.js_response !== undefined) {
-      return result.js_response;
-    } else {
-      return result;
-    }
+    return result?.js_response ?? result;
+  };
+}
+
+async function initPyInstance(
+  className: string,
+  args: any[]
+): Promise<PyModule> {
+  const mainModule = await preparePython();
+  const pyClassConstructor = mainModule[className];
+  if (typeof pyClassConstructor !== 'function') {
+    throw new TypeError(
+      `There is no '${className}' class defined in the Python Worker's main module`
+    );
+  }
+  const res = await doPyCall(pyClassConstructor, args);
+  return res as PyModule;
+}
+
+function makeEntrypointProxyHandler(
+  pyInstancePromise: Promise<PyModule>
+): ProxyHandler<any> {
+  return {
+    get(target, prop, receiver): any {
+      if (typeof prop !== 'string') {
+        return Reflect.get(target, prop, receiver);
+      }
+      const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
+      if (isKnownHandler) {
+        prop = 'on_' + prop;
+      }
+      return async function (...args: any[]): Promise<any> {
+        const pyInstance = await pyInstancePromise;
+        if (typeof pyInstance[prop] === 'function') {
+          const res = await doPyCall(pyInstance[prop], args);
+          if (isKnownHandler) {
+            return res?.js_object ?? res;
+          }
+          return res;
+        } else {
+          throw new TypeError(`Method ${prop} does not exist`);
+        }
+      };
+    },
   };
 }
 
 function makeEntrypointClass(className: string, classKind: AnyClass): any {
-  class EntrypointWrapper extends classKind {
-    private pyInstance: Promise<PyModule>;
-
+  return class EntrypointWrapper extends classKind {
     public constructor(...args: any[]) {
       super(...args);
       // Initialise a Python instance of the class.
-      this.pyInstance = this.initPyInstance(args);
+      const pyInstancePromise = initPyInstance(className, args);
       // We do not know the methods that are defined on the RPC class, so we need a proxy to
       // support any possible method name.
-      return new Proxy(this, {
-        get(target, prop, receiver): any {
-          if (typeof prop !== 'string') {
-            return Reflect.get(target, prop, receiver);
-          }
-          const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
-          if (isKnownHandler) {
-            prop = 'on_' + prop;
-          }
-          return async function (...args: any[]): Promise<any> {
-            const pyInstance = await target.pyInstance;
-            if (typeof pyInstance[prop] === 'function') {
-              const res = await pyInstance[prop](...args);
-              if (isKnownHandler) {
-                return res?.js_object ?? res;
-              }
-              return res;
-            } else {
-              throw new TypeError(`Method ${prop} does not exist`);
-            }
-          };
-        },
-      });
+      return new Proxy(this, makeEntrypointProxyHandler(pyInstancePromise));
     }
-
-    public async initPyInstance(args: any[]): Promise<PyModule> {
-      const mainModule = await preparePython();
-      const pyClassConstructor = mainModule[className] as unknown as (
-        ...args: any[]
-      ) => PyModule;
-      if (typeof pyClassConstructor !== 'function') {
-        throw new TypeError(
-          `There is no '${className}' class defined in the Python Worker's main module`
-        );
-      }
-
-      return pyClassConstructor(...args);
-    }
-  }
-
-  return EntrypointWrapper;
+  };
 }
 
 type IntrospectionMod = {

@@ -2,7 +2,11 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
+from asyncio import sleep
+
 from workers import DurableObject, Response
+
+import pyodide
 
 
 class DurableObjectExample(DurableObject):
@@ -19,6 +23,12 @@ class DurableObjectExample(DurableObject):
 
     async def args_method(self, arg):
         return "value from python " + arg
+
+    def jspi_method(self, arg):
+        from pyodide.ffi import run_sync
+
+        run_sync(sleep(0.01))
+        return arg + 1
 
 
 async def test(ctrl, env, ctx):
@@ -38,3 +48,7 @@ async def test(ctrl, env, ctx):
 
     arg_resp = await obj.args_method("test")
     assert arg_resp == "value from python test"
+
+    if pyodide.__version__ != "0.26.0a2":
+        res = await obj.jspi_method(9)
+        assert res == 10
