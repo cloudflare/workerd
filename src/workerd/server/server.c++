@@ -1850,7 +1850,7 @@ class Server::WorkerService final: public Service,
     kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers(channels.streamingTails.size());
     auto addWorkerIfNotRecursiveTracer =
         [this, isTracer](kj::Vector<kj::Own<WorkerInterface>>& workers, Service& service) {
-      // Caution here... if the tail worker ends up have a circular dependency
+      // Caution here... if the tail worker ends up having a circular dependency
       // on the worker we'll end up with an infinite loop trying to initialize.
       // We can test this directly but it's more difficult to test indirect
       // loops (dependency of dependency, etc). Here we're just going to keep

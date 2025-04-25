@@ -4085,7 +4085,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
         .cancel =
             [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto reason) mutable {
     return generator->generator.return_(js, kj::none)
-        .then(js, [genertor = kj::mv(generator)](auto& lock) {});
+        .then(js, [generator = kj::mv(generator)](auto& lock) {});
   },
       },
       StreamQueuingStrategy{
