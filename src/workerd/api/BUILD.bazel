@@ -151,11 +151,13 @@ wd_cc_library(
         "pyodide/requirements.h",
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
+        "//src/pyodide:pyodide_static.capnp.h",
     ],
     implementation_deps = ["//src/workerd/io"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/pyodide:pyodide_static",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
     ],

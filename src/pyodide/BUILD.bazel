@@ -1,11 +1,13 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@workerd//:build/eslint_test.bzl", "eslint_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
-load(":helpers.bzl", "internal_modules", "modules", "pyodide_extra", "python_bundles")
+load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
 
 pyodide_extra()
 
 python_bundles()
+
+pyodide_static()
 
 DEV_VERSION = BUNDLE_VERSION_INFO["development"]["real_pyodide_version"]
 
@@ -31,11 +33,4 @@ write_file(
     name = "bundle_version_info",
     out = "bundle_version_info.json",
     content = [json.encode(BUNDLE_VERSION_INFO)],
-)
-
-eslint_test(
-    name = "pyodide_eslint",
-    srcs = modules() + internal_modules(),
-    eslintrc_json = "eslint.config.mjs",
-    tsconfig_json = "tsconfig.json",
 )

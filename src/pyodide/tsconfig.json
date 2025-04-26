@@ -25,5 +25,5 @@
     "allowArbitraryExtensions": true
   },
   "include": ["./**/*"],
-  "exclude": ["./generated/**/*"]
+  "exclude": ["./**/generated/**/*"]
 }

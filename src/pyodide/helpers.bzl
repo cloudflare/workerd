@@ -6,6 +6,7 @@ load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 load("//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 def _out_name(src):
@@ -124,8 +125,13 @@ def _python_bundle_helper(info, overrides):
     override = overrides.get(version, {})
     return _python_bundle(version, **override)
 
-def internal_modules():
-    return native.glob(
+def pyodide_static():
+    internal_data_modules = native.glob([
+        "internal/*.py",
+        "internal/patches/*.py",
+        "internal/topLevelEntropy/*.py",
+    ])
+    internal_modules = native.glob(
         [
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
@@ -136,20 +142,19 @@ def internal_modules():
         ],
         allow_empty = True,
     )
+    modules = ["python-entrypoint-helper.ts"]
 
-def modules():
-    return ["python-entrypoint-helper.ts"]
-
-def internal_data_modules(version):
-    return native.glob([
-        "internal/*.py",
-        "internal/patches/*.py",
-        "internal/topLevelEntropy/*.py",
-    ]) + [
-        _out_path("python_stdlib.zip", version),
-        _out_path("pyodide.asm.wasm", version),
-        _out_path("emscriptenSetup.js", version),
-    ]
+    wd_ts_bundle(
+        name = "pyodide_static",
+        eslintrc_json = "eslint.config.mjs",
+        import_name = "pyodide",
+        internal_data_modules = internal_data_modules,
+        internal_modules = internal_modules,
+        lint = True,
+        modules = modules,
+        schema_id = "0xdc8d02dfbdf14025",
+        tsconfig_json = "tsconfig.json",
+    )
 
 def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, python_stdlib_zip = None, emscripten_setup_override = None):
     pyodide_package = "@pyodide-%s//" % version
@@ -161,8 +166,6 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
 
     if not python_stdlib_zip:
         python_stdlib_zip = pyodide_package + ":pyodide/python_stdlib.zip"
-
-    _copy_and_capnp_embed("python-entrypoint.js", version = version)
 
     _copy_to_generated(pyodide_asm_wasm, version, out_name = "pyodide.asm.wasm")
 
@@ -319,25 +322,22 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             deps = ["pyodide.asm.js@rule_js@" + version],
         )
 
-    INTERNAL_DATA_MODULES = internal_data_modules(version)
-    INTERNAL_MODULES = internal_modules()
-    MODULES = modules()
-
-    wd_ts_bundle(
+    import_name = "pyodideRuntime"
+    wd_js_bundle(
         name = "pyodide@" + version,
-        eslintrc_json = "eslint.config.mjs",
-        import_name = "pyodide",
-        internal_data_modules = INTERNAL_DATA_MODULES,
-        internal_modules = INTERNAL_MODULES,
-        js_deps = [
+        import_name = import_name,
+        builtin_modules = [],
+        schema_id = "0xbcc8f57c63814005",
+        internal_data_modules = [
+            _out_path("python_stdlib.zip", version),
+            _out_path("pyodide.asm.wasm", version),
+            _out_path("emscriptenSetup.js", version),
+        ],
+        deps = [
             "emscriptenSetup@" + version,
             "pyodide.asm.wasm@copy@" + version,
             "python_stdlib.zip@copy@" + version,
         ],
-        lint = False,
-        modules = MODULES,
-        schema_id = "0xbcc8f57c63814005",
-        tsconfig_json = "tsconfig.json",
         out_dir = _out_path("", version),
     )
 
@@ -347,28 +347,9 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         srcs = [
             ":pyodide@%s.capnp" % version,
             "//src/workerd/jsg:modules.capnp",
-        ] + [
-            _ts_bundle_out("pyodide-internal_", m.removesuffix(".ts"), version)
-            for m in INTERNAL_MODULES
-            if not m.endswith(".d.ts")
-        ] + [
-            ":" + _out_path(m.removesuffix(".ts") + ".d.ts", version)
-            for m in INTERNAL_MODULES
-            if not m.endswith(".d.ts") and m.endswith(".ts")
-        ] + [
-            _ts_bundle_out("pyodide_", m.removesuffix(".ts"), version)
-            for m in MODULES
-        ] + [
-            ":" + _out_path(m.removesuffix(".ts") + ".d.ts", version)
-            for m in MODULES
-        ] + [
-            ":" + _out_path("pyodide-" + m.replace("/", "_"), version)
-            for m in INTERNAL_DATA_MODULES
-            if m.endswith(".py")
-        ] + [
-            _ts_bundle_out("pyodide-internal_", "emscriptenSetup.js", version),
-            _ts_bundle_out("pyodide-internal_", "pyodide.asm.wasm", version),
-            _ts_bundle_out("pyodide-internal_", "python_stdlib.zip", version),
+            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup.js", version),
+            _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
+            _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
         ],
         outs = [_out_path("pyodide.capnp.bin", version)],
         cmd = " ".join([
@@ -378,7 +359,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             "$(execpath @capnp-cpp//src/capnp:capnp_tool)",
             "eval",
             "$(location :pyodide@%s.capnp)" % version,
-            "pyodideBundle",
+            import_name + "Bundle",
             "-I $$INCLUDE",
             "-o binary",
             "> $@",

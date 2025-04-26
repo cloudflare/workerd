@@ -6,8 +6,10 @@
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/pyodide_static.capnp.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
@@ -470,6 +472,26 @@ class SetupEmscripten: public jsg::Object {
 };
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
+
+template <class Registry>
+void registerPyodideModules(Registry& registry, auto featureFlags) {
+  // We add `pyodide:` packages here including python-entrypoint-helper.js.
+  registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+}
+
+kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  return builder.finish();
+}
+
+kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  return builder.finish();
+}
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
