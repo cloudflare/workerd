@@ -28,66 +28,66 @@ JsMap::operator JsObject() {
   return JsObject(inner);
 }
 
-void JsMap::set(Lock& js, const JsValue& name, const JsValue& value) {
+void JsMap::set(const Lock& js, const JsValue& name, const JsValue& value) {
   check(inner->Set(js.v8Context(), name.inner, value.inner));
 }
 
-void JsMap::set(Lock& js, kj::StringPtr name, const JsValue& value) {
+void JsMap::set(const Lock& js, kj::StringPtr name, const JsValue& value) {
   set(js, js.strIntern(name), value);
 }
 
-JsValue JsMap::get(Lock& js, const JsValue& name) {
+JsValue JsMap::get(const Lock& js, const JsValue& name) {
   return JsValue(check(inner->Get(js.v8Context(), name.inner)));
 }
 
-JsValue JsMap::get(Lock& js, kj::StringPtr name) {
+JsValue JsMap::get(const Lock& js, kj::StringPtr name) {
   return get(js, js.strIntern(name));
 }
 
-bool JsMap::has(Lock& js, const JsValue& name) {
+bool JsMap::has(const Lock& js, const JsValue& name) {
   return check(inner->Has(js.v8Context(), name.inner));
 }
 
-bool JsMap::has(Lock& js, kj::StringPtr name) {
+bool JsMap::has(const Lock& js, kj::StringPtr name) {
   return has(js, js.strIntern(name));
 }
 
-void JsMap::delete_(Lock& js, const JsValue& name) {
+void JsMap::delete_(const Lock& js, const JsValue& name) {
   check(inner->Delete(js.v8Context(), name.inner));
 }
 
-void JsMap::delete_(Lock& js, kj::StringPtr name) {
+void JsMap::delete_(const Lock& js, kj::StringPtr name) {
   delete_(js, js.strIntern(name));
 }
 
-void JsObject::set(Lock& js, const JsValue& name, const JsValue& value) {
+void JsObject::set(const Lock& js, const JsValue& name, const JsValue& value) {
   check(inner->Set(js.v8Context(), name.inner, value.inner));
 }
 
-void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
+void JsObject::set(const Lock& js, kj::StringPtr name, const JsValue& value) {
   set(js, js.strIntern(name), value);
 }
 
-void JsObject::setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value) {
+void JsObject::setReadOnly(const Lock& js, kj::StringPtr name, const JsValue& value) {
   v8::Local<v8::String> nameStr = js.strIntern(name);
   check(inner->DefineOwnProperty(js.v8Context(), nameStr, value,
       static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete)));
 }
 
-void JsObject::setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value) {
+void JsObject::setNonEnumerable(const Lock& js, const JsSymbol& name, const JsValue& value) {
   check(inner->DefineOwnProperty(
       js.v8Context(), name.inner, value.inner, v8::PropertyAttribute::DontEnum));
 }
 
-JsValue JsObject::get(Lock& js, const JsValue& name) {
+JsValue JsObject::get(const Lock& js, const JsValue& name) {
   return JsValue(check(inner->Get(js.v8Context(), name.inner)));
 }
 
-JsValue JsObject::get(Lock& js, kj::StringPtr name) {
+JsValue JsObject::get(const Lock& js, kj::StringPtr name) {
   return get(js, js.strIntern(name));
 }
 
-bool JsObject::has(Lock& js, const JsValue& name, HasOption option) {
+bool JsObject::has(const Lock& js, const JsValue& name, HasOption option) {
   if (option == HasOption::OWN) {
     KJ_ASSERT(name.inner->IsName());
     return check(inner->HasOwnProperty(js.v8Context(), name.inner.As<v8::Name>()));
@@ -96,29 +96,29 @@ bool JsObject::has(Lock& js, const JsValue& name, HasOption option) {
   }
 }
 
-bool JsObject::has(Lock& js, kj::StringPtr name, HasOption option) {
+bool JsObject::has(const Lock& js, kj::StringPtr name, HasOption option) {
   return has(js, js.strIntern(name), option);
 }
 
-void JsObject::delete_(Lock& js, const JsValue& name) {
+void JsObject::delete_(const Lock& js, const JsValue& name) {
   check(inner->Delete(js.v8Context(), name.inner));
 }
 
-void JsObject::delete_(Lock& js, kj::StringPtr name) {
+void JsObject::delete_(const Lock& js, kj::StringPtr name) {
   delete_(js, js.strIntern(name));
 }
 
-void JsObject::setPrivate(Lock& js, kj::StringPtr name, const JsValue& value) {
+void JsObject::setPrivate(const Lock& js, kj::StringPtr name, const JsValue& value) {
   auto p = v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, name));
   check(inner->SetPrivate(js.v8Context(), p, value.inner));
 }
 
-JsValue JsObject::getPrivate(Lock& js, kj::StringPtr name) {
+JsValue JsObject::getPrivate(const Lock& js, kj::StringPtr name) {
   auto p = v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, name));
   return JsValue(check(inner->GetPrivate(js.v8Context(), p)));
 }
 
-bool JsObject::hasPrivate(Lock& js, kj::StringPtr name) {
+bool JsObject::hasPrivate(const Lock& js, kj::StringPtr name) {
   auto p = v8::Private::ForApi(js.v8Isolate, v8StrIntern(js.v8Isolate, name));
   return check(inner->HasPrivate(js.v8Context(), p));
 }
@@ -131,7 +131,7 @@ kj::String JsObject::getConstructorName() {
   return kj::str(inner->GetConstructorName());
 }
 
-JsArray JsObject::getPropertyNames(Lock& js,
+JsArray JsObject::getPropertyNames(const Lock& js,
     KeyCollectionFilter keyFilter,
     PropertyFilter propertyFilter,
     IndexFilter indexFilter) {
@@ -150,21 +150,21 @@ JsArray JsObject::previewEntries(bool* isKeyValue) {
   return JsArray(check(inner->PreviewEntries(isKeyValue)));
 }
 
-void JsObject::recursivelyFreeze(Lock& js) {
+void JsObject::recursivelyFreeze(const Lock& js) {
   jsg::recursivelyFreeze(js.v8Context(), inner);
 }
 
-void JsObject::seal(Lock& js) {
+void JsObject::seal(const Lock& js) {
   check(inner->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kSealed));
 }
 
-JsObject JsObject::jsonClone(Lock& js) {
+JsObject JsObject::jsonClone(const Lock& js) {
   auto tmp = JsValue(inner).toJson(js);
   auto obj = KJ_ASSERT_NONNULL(JsValue::fromJson(js, tmp).tryCast<jsg::JsObject>());
   return JsObject(obj);
 }
 
-JsValue JsObject::getPrototype(Lock& js) {
+JsValue JsObject::getPrototype(const Lock& js) {
   if (inner->IsProxy()) {
     // Here we emulate the behavior of v8's GetPrototypeV2() function for proxies.
     // If the proxy has a getPrototypeOf trap, we call it and return the result.
@@ -202,7 +202,7 @@ JsValue JsObject::getPrototype(Lock& js) {
   return JsValue(inner->GetPrototypeV2());
 }
 
-kj::Maybe<double> JsNumber::value(Lock& js) const {
+kj::Maybe<double> JsNumber::value(const Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   double value;
   // The NumberValue(...) operation can fail with a JS exception, in which case
@@ -214,7 +214,7 @@ kj::Maybe<double> JsNumber::value(Lock& js) const {
 }
 
 // ECMA-262, 15th edition, 21.1.2.5. Number.isSafeInteger
-bool JsNumber::isSafeInteger(Lock& js) const {
+bool JsNumber::isSafeInteger(const Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   if (!inner->IsNumber()) return false;
   KJ_IF_SOME(value, value(js)) {
@@ -225,29 +225,29 @@ bool JsNumber::isSafeInteger(Lock& js) const {
   return false;
 }
 
-kj::Maybe<double> JsNumber::toSafeInteger(Lock& js) const {
+kj::Maybe<double> JsNumber::toSafeInteger(const Lock& js) const {
   if (isSafeInteger(js)) {
     return inner.As<v8::Number>()->Value();
   }
   return kj::none;
 }
 
-bool JsValue::isTruthy(Lock& js) const {
+bool JsValue::isTruthy(const Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return inner->BooleanValue(js.v8Isolate);
 }
 
-kj::String JsValue::toString(Lock& js) const {
+kj::String JsValue::toString(const Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return kj::str(inner);
 }
 
-JsString JsValue::toJsString(Lock& js) const {
+JsString JsValue::toJsString(const Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return JsString(check(inner->ToString(js.v8Context())));
 }
 
-kj::String JsValue::typeOf(Lock& js) const {
+kj::String JsValue::typeOf(const Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return kj::str(inner->TypeOf(js.v8Isolate));
 }
@@ -259,19 +259,19 @@ kj::String JsValue::typeOf(Lock& js) const {
 JS_IS_TYPES(V)
 #undef V
 
-kj::String JsValue::toJson(Lock& js) const {
+kj::String JsValue::toJson(const Lock& js) const {
   return kj::str(check(v8::JSON::Stringify(js.v8Context(), inner)));
 }
 
-JsValue JsValue::fromJson(Lock& js, kj::ArrayPtr<const char> input) {
+JsValue JsValue::fromJson(const Lock& js, kj::ArrayPtr<const char> input) {
   return JsValue(check(v8::JSON::Parse(js.v8Context(), js.str(input))));
 }
 
-JsValue JsValue::fromJson(Lock& js, const JsValue& input) {
+JsValue JsValue::fromJson(const Lock& js, const JsValue& input) {
   return JsValue(check(v8::JSON::Parse(js.v8Context(), input.inner.As<v8::String>())));
 }
 
-bool JsBoolean::value(Lock& js) const {
+bool JsBoolean::value(const Lock& js) const {
   return inner->BooleanValue(js.v8Isolate);
 }
 
@@ -279,11 +279,11 @@ uint32_t JsArray::size() const {
   return inner->Length();
 }
 
-JsValue JsArray::get(Lock& js, uint32_t i) const {
+JsValue JsArray::get(const Lock& js, uint32_t i) const {
   return JsValue(check(inner->Get(js.v8Context(), i)));
 }
 
-void JsArray::add(Lock& js, const JsValue& value) {
+void JsArray::add(const Lock& js, const JsValue& value) {
   check(inner->Set(js.v8Context(), size(), value.inner));
 }
 
@@ -291,15 +291,15 @@ JsArray::operator JsObject() const {
   return JsObject(inner.As<v8::Object>());
 }
 
-int JsString::length(jsg::Lock& js) const {
+int JsString::length(const jsg::Lock& js) const {
   return inner->Length();
 }
 
-size_t JsString::utf8Length(jsg::Lock& js) const {
+size_t JsString::utf8Length(const jsg::Lock& js) const {
   return inner->Utf8LengthV2(js.v8Isolate);
 }
 
-kj::String JsString::toString(jsg::Lock& js) const {
+kj::String JsString::toString(const jsg::Lock& js) const {
   return kj::str(inner);
 }
 
@@ -307,7 +307,7 @@ int JsString::hashCode() const {
   return kj::hashCode(inner->GetIdentityHash());
 }
 
-JsString JsString::concat(Lock& js, const JsString& one, const JsString& two) {
+JsString JsString::concat(const Lock& js, const JsString& one, const JsString& two) {
   return JsString(v8::String::Concat(js.v8Isolate, one.inner, two.inner));
 }
 
@@ -315,7 +315,7 @@ bool JsString::operator==(const JsString& other) const {
   return inner->StringEquals(other.inner);
 }
 
-JsString JsString::internalize(Lock& js) const {
+JsString JsString::internalize(const Lock& js) const {
   return JsString(inner->InternalizeString(js.v8Isolate));
 }
 
@@ -356,24 +356,24 @@ bool JsString::containsOnlyOneByte() const {
   return inner->ContainsOnlyOneByte();
 }
 
-kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
+kj::Maybe<JsArray> JsRegExp::operator()(const Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
   if (result->IsNullOrUndefined()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
-kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
+kj::Maybe<JsArray> JsRegExp::operator()(const Lock& js, kj::StringPtr input) const {
   auto result = check(inner->Exec(js.v8Context(), js.str(input)));
   if (result->IsNull()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
-bool JsRegExp::match(Lock& js, kj::StringPtr input) {
+bool JsRegExp::match(const Lock& js, kj::StringPtr input) {
   auto result = check(inner->Exec(js.v8Context(), js.str(input)));
   return !result->IsNull();
 }
 
-jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
+jsg::ByteString JsDate::toUTCString(const jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
   return js.accountedByteString(str.toString(js));
 }
@@ -382,100 +382,101 @@ JsDate::operator kj::Date() const {
   return kj::UNIX_EPOCH + (int64_t(inner->ValueOf()) * kj::MILLISECONDS);
 }
 
-JsObject Lock::global() {
+JsObject Lock::global() const {
   return JsObject(v8Context()->Global());
 }
 
-JsValue Lock::undefined() {
+JsValue Lock::undefined() const {
   return JsValue(v8::Undefined(v8Isolate));
 }
 
-JsValue Lock::null() {
+JsValue Lock::null() const {
   return JsValue(v8::Null(v8Isolate));
 }
 
-JsBoolean Lock::boolean(bool val) {
+JsBoolean Lock::boolean(bool val) const {
   return JsBoolean(v8::Boolean::New(v8Isolate, val));
 }
 
-JsNumber Lock::num(double val) {
+JsNumber Lock::num(double val) const {
   return JsNumber(v8::Number::New(v8Isolate, val));
 }
 
-JsNumber Lock::num(float val) {
+JsNumber Lock::num(float val) const {
   return JsNumber(v8::Number::New(v8Isolate, val));
 }
 
-JsInt32 Lock::num(int8_t val) {
+JsInt32 Lock::num(int8_t val) const {
   return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
 }
 
-JsInt32 Lock::num(int16_t val) {
+JsInt32 Lock::num(int16_t val) const {
   return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
 }
 
-JsInt32 Lock::num(int32_t val) {
+JsInt32 Lock::num(int32_t val) const {
   return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
 }
 
-JsBigInt Lock::bigInt(int64_t val) {
+JsBigInt Lock::bigInt(int64_t val) const {
   return JsBigInt(v8::BigInt::New(v8Isolate, val));
 }
 
-JsUint32 Lock::num(uint8_t val) {
+JsUint32 Lock::num(uint8_t val) const {
   return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
 }
 
-JsUint32 Lock::num(uint16_t val) {
+JsUint32 Lock::num(uint16_t val) const {
   return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
 }
 
-JsUint32 Lock::num(uint32_t val) {
+JsUint32 Lock::num(uint32_t val) const {
   return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
 }
 
-JsBigInt Lock::bigInt(uint64_t val) {
+JsBigInt Lock::bigInt(uint64_t val) const {
   return JsBigInt(v8::BigInt::NewFromUnsigned(v8Isolate, val));
 }
 
-JsString Lock::str() {
+JsString Lock::str() const {
   return JsString(v8::String::Empty(v8Isolate));
 }
 
-JsString Lock::str(kj::ArrayPtr<const char16_t> str) {
+JsString Lock::str(kj::ArrayPtr<const char16_t> str) const {
   return JsString(check(v8::String::NewFromTwoByte(v8Isolate,
       reinterpret_cast<const uint16_t*>(str.begin()), v8::NewStringType::kNormal, str.size())));
 }
 
-JsString Lock::str(kj::ArrayPtr<const uint16_t> str) {
+JsString Lock::str(kj::ArrayPtr<const uint16_t> str) const {
   return JsString(check(
       v8::String::NewFromTwoByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
-JsString Lock::str(kj::ArrayPtr<const char> str) {
+JsString Lock::str(kj::ArrayPtr<const char> str) const {
   return JsString(check(
       v8::String::NewFromUtf8(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
-JsString Lock::str(kj::ArrayPtr<const kj::byte> str) {
+JsString Lock::str(kj::ArrayPtr<const kj::byte> str) const {
   return JsString(check(
       v8::String::NewFromOneByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
 }
 
-JsString Lock::strIntern(kj::StringPtr str) {
+JsString Lock::strIntern(kj::StringPtr str) const {
   return JsString(check(v8::String::NewFromUtf8(
       v8Isolate, str.begin(), v8::NewStringType::kInternalized, str.size())));
 }
 
-JsString Lock::strExtern(kj::ArrayPtr<const char> str) {
+JsString Lock::strExtern(kj::ArrayPtr<const char> str) const {
   return JsString(newExternalOneByteString(*this, str));
 }
 
-JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
+JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) const {
   return JsString(newExternalTwoByteString(*this, str));
 }
 
-JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> backtrackLimit) {
+JsRegExp Lock::regexp(
+    kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> backtrackLimit) const {
   KJ_IF_SOME(limit, backtrackLimit) {
     return JsRegExp(check(v8::RegExp::NewWithBacktrackLimit(
         v8Context(), v8Str(v8Isolate, str), static_cast<v8::RegExp::Flags>(flags), limit)));
@@ -484,11 +485,11 @@ JsRegExp Lock::regexp(kj::StringPtr str, RegExpFlags flags, kj::Maybe<uint32_t> 
       v8::RegExp::New(v8Context(), v8Str(v8Isolate, str), static_cast<v8::RegExp::Flags>(flags))));
 }
 
-JsObject Lock::obj() {
+JsObject Lock::obj() const {
   return JsObject(v8::Object::New(v8Isolate));
 }
 
-JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
+JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) const {
   KJ_DASSERT(keys.size() == values.size());
   v8::LocalVector<v8::Name> keys_(v8Isolate);
   v8::LocalVector<v8::Value> values_(v8Isolate);
@@ -498,54 +499,54 @@ JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> value
     v8::Local<v8::String> key = str(k);
     keys_.push_back(key);
   }
-  for (auto& v: values) {
+  for (const auto& v: values) {
     values_.push_back(v);
   }
   return JsObject(
       v8::Object::New(v8Isolate, v8::Null(v8Isolate), keys_.data(), values_.data(), keys.size()));
 }
 
-JsObject Lock::objNoProto() {
+JsObject Lock::objNoProto() const {
   return JsObject(v8::Object::New(v8Isolate, v8::Null(v8Isolate), nullptr, nullptr, 0));
 }
 
-JsMap Lock::map() {
+JsMap Lock::map() const {
   return JsMap(v8::Map::New(v8Isolate));
 }
 
-JsValue Lock::external(void* ptr) {
+JsValue Lock::external(void* ptr) const {
   return JsValue(v8::External::New(v8Isolate, ptr));
 }
 
-JsValue Lock::error(kj::StringPtr message) {
+JsValue Lock::error(kj::StringPtr message) const {
   return JsValue(v8::Exception::Error(v8Str(v8Isolate, message)));
 }
 
-JsValue Lock::typeError(kj::StringPtr message) {
+JsValue Lock::typeError(kj::StringPtr message) const {
   return JsValue(v8::Exception::TypeError(v8Str(v8Isolate, message)));
 }
 
-JsValue Lock::rangeError(kj::StringPtr message) {
+JsValue Lock::rangeError(kj::StringPtr message) const {
   return JsValue(v8::Exception::RangeError(v8Str(v8Isolate, message)));
 }
 
-BufferSource Lock::bytes(kj::Array<kj::byte> data) {
+BufferSource Lock::bytes(kj::Array<kj::byte> data) const {
   return BufferSource(*this, BackingStore::from(kj::mv(data)));
 }
 
-JsSymbol Lock::symbol(kj::StringPtr str) {
+JsSymbol Lock::symbol(kj::StringPtr str) const {
   return JsSymbol(v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, str)));
 }
 
-JsSymbol Lock::symbolShared(kj::StringPtr str) {
+JsSymbol Lock::symbolShared(kj::StringPtr str) const {
   return JsSymbol(v8::Symbol::For(v8Isolate, v8StrIntern(v8Isolate, str)));
 }
 
-JsSymbol Lock::symbolInternal(kj::StringPtr str) {
+JsSymbol Lock::symbolInternal(kj::StringPtr str) const {
   return JsSymbol(v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, str)));
 }
 
-JsArray Lock::arr(kj::ArrayPtr<JsValue> values) {
+JsArray Lock::arr(kj::ArrayPtr<JsValue> values) const {
   v8::LocalVector<v8::Value> items(v8Isolate, values.size());
   for (size_t n = 0; n < values.size(); n++) {
     items[n] = values[n];
@@ -554,28 +555,28 @@ JsArray Lock::arr(kj::ArrayPtr<JsValue> values) {
 }
 
 #define V(Name)                                                                                    \
-  JsSymbol Lock::symbol##Name() {                                                                  \
+  JsSymbol Lock::symbol##Name() const {                                                            \
     return JsSymbol(v8::Symbol::Get##Name(v8Isolate));                                             \
   }
 JS_V8_SYMBOLS(V)
 #undef V
 
-JsDate Lock::date(double timestamp) {
+JsDate Lock::date(double timestamp) const {
   return JsDate(check(v8::Date::New(v8Context(), timestamp)).As<v8::Date>());
 }
 
-JsDate Lock::date(kj::Date date) {
+JsDate Lock::date(kj::Date date) const {
   return JsDate(jsg::check(v8::Date::New(v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS))
                     .As<v8::Date>());
 }
 
-JsDate Lock::date(kj::StringPtr date) {
+JsDate Lock::date(kj::StringPtr date) const {
   v8::Local<v8::Value> converted = check(v8::Date::Parse(v8Context(), str(date)));
   KJ_REQUIRE(converted->IsDate());
   return JsDate(converted.As<v8::Date>());
 }
 
-JsPromise Lock::rejectedJsPromise(jsg::JsValue exception) {
+JsPromise Lock::rejectedJsPromise(jsg::JsValue exception) const {
   v8::EscapableHandleScope handleScope(v8Isolate);
   auto context = v8Context();
   auto resolver = check(v8::Promise::Resolver::New(context));
@@ -583,7 +584,7 @@ JsPromise Lock::rejectedJsPromise(jsg::JsValue exception) {
   return JsPromise(handleScope.Escape(resolver->GetPromise()));
 }
 
-JsPromise Lock::rejectedJsPromise(kj::Exception&& exception) {
+JsPromise Lock::rejectedJsPromise(kj::Exception&& exception) const {
   return rejectedJsPromise(exceptionToJsValue(kj::mv(exception)).getHandle(*this));
 }
 
@@ -611,19 +612,20 @@ JsValue JsProxy::handler() {
   return JsValue(inner->GetHandler());
 }
 
-JsRef<JsValue> JsValue::addRef(Lock& js) {
+JsRef<JsValue> JsValue::addRef(const Lock& js) {
   return JsRef<JsValue>(js, *this);
 }
 
-JsValue JsValue::structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers) {
+JsValue JsValue::structuredClone(
+    const Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers) const {
   return jsg::structuredClone(js, *this, kj::mv(maybeTransfers));
 }
 
-JsMessage JsMessage::create(Lock& js, const JsValue& exception) {
+JsMessage JsMessage::create(const Lock& js, const JsValue& exception) {
   return JsMessage(v8::Exception::CreateMessage(js.v8Isolate, exception));
 }
 
-void JsMessage::addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines) {
+void JsMessage::addJsStackTrace(const Lock& js, kj::Vector<kj::String>& lines) {
   if (inner.IsEmpty()) return;
 
   // TODO(someday): Relying on v8::Message to pass around source locations means

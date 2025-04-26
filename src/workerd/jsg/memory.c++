@@ -99,7 +99,7 @@ class MemoryRetainerNode final: public v8::EmbedderGraph::Node {
 };
 
 namespace {
-kj::Maybe<MemoryRetainerNode&> getCurrentNode(const std::stack<MemoryRetainerNode*> stack) {
+kj::Maybe<MemoryRetainerNode&> getCurrentNode(const std::stack<MemoryRetainerNode*>& stack) {
   if (stack.empty()) return kj::none;
   return *stack.top();
 }

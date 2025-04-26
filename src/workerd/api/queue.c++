@@ -171,7 +171,7 @@ jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
 }  // namespace
 
 kj::Promise<void> WorkerQueue::send(
-    jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options) {
+    jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options) const {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
@@ -229,7 +229,7 @@ kj::Promise<void> WorkerQueue::send(
 
 kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
     jsg::Sequence<MessageSendRequest> batch,
-    jsg::Optional<SendBatchOptions> options) {
+    jsg::Optional<SendBatchOptions> options) const {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
@@ -345,7 +345,7 @@ QueueMessage::QueueMessage(
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
       body(deserialize(js, message).addRef(js)),
       attempts(message.getAttempts()),
-      result(result) {}
+      result(kj::mv(result)) {}
 // Note that we must make deep copies of all data here since the incoming Reader may be
 // deallocated while JS's GC wrappers still exist.
 
@@ -355,7 +355,7 @@ QueueMessage::QueueMessage(
       timestamp(message.timestamp),
       body(deserialize(js, kj::mv(message.body), message.contentType).addRef(js)),
       attempts(message.attempts),
-      result(result) {}
+      result(kj::mv(result)) {}
 
 jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
   return body.getHandle(js);

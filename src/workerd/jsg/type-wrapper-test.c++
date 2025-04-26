@@ -216,7 +216,7 @@ struct UnimplementedContext: public ContextGlobalObject {
     static Ref<UnimplementedConstructorParam> constructor(jsg::Lock& js, int i, Unimplemented) {
       return js.alloc<UnimplementedConstructorParam>(i);
     }
-    int getI() {
+    int getI() const {
       return i;
     }
     int i;
@@ -287,7 +287,7 @@ struct UnimplementedContext: public ContextGlobalObject {
     JSG_STRUCT(optionalString, unimplementedMember, wontImplementMember);
   };
 
-  void takeStructWithUnimplementedMembers(StructWithUnimplementedMembers) {}
+  void takeStructWithUnimplementedMembers(const StructWithUnimplementedMembers&) {}
 
   JSG_RESOURCE_TYPE(UnimplementedContext) {
     JSG_NESTED_TYPE(UnimplementedConstructor);

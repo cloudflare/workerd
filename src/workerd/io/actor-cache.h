@@ -564,7 +564,7 @@ class ActorCache final: public ActorCacheInterface {
     CountedDelete() = default;
     KJ_DISALLOW_COPY_AND_MOVE(CountedDelete);
 
-    kj::Promise<void> forgiveIfFinished(kj::Promise<void> promise) {
+    kj::Promise<void> forgiveIfFinished(kj::Promise<void> promise) const {
       try {
         co_await promise;
       } catch (...) {
@@ -643,7 +643,7 @@ class ActorCache final: public ActorCacheInterface {
       innerSize -= entry.size();
     }
 
-    size_t sizeInBytes() {
+    size_t sizeInBytes() const {
       return innerSize;
     }
 

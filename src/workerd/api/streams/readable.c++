@@ -630,7 +630,7 @@ class NoDeferredProxyReadableStream final: public ReadableStreamSource {
     return inner->tryGetLength(encoding);
   }
 
-  void cancel(kj::Exception reason) override {
+  void cancel(const kj::Exception& reason) override {
     return inner->cancel(kj::mv(reason));
   }
 

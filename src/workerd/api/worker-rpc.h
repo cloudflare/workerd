@@ -446,7 +446,7 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
       capnp::ByteStreamFactory& byteStreamFactory,
       rpc::EventDispatcher::Client dispatcher) override;
 
-  uint16_t getType() override {
+  uint16_t getType() const override {
     return typeId;
   }
 

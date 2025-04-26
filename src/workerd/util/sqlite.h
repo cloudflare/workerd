@@ -29,7 +29,7 @@ class SqliteObserver {
   void setDbWalSize(uint64_t dbWalSize) {
     this->dbWalSize = dbWalSize;
   }
-  uint64_t getDbWalSize() {
+  uint64_t getDbWalSize() const {
     return dbWalSize;
   }
   kj::TimePoint now() {
@@ -477,7 +477,7 @@ class SqliteDatabase::Query final: private ResetListener {
   uint64_t getRowsWritten();
 
   // If true, there are no more rows. (When true, the methods below must not be called.)
-  bool isDone() {
+  bool isDone() const {
     return done;
   }
 

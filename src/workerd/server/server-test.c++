@@ -4324,8 +4324,8 @@ KJ_TEST("Server: Catch websocket server errors") {
     auto smallResponse = ws->receive().wait(waitScope);
     KJ_EXPECT(smallResponse.get<kj::String>() == smallMessage);
     const auto bigMessage = kj::heapArray<kj::byte>(2 * 1024 * 1024);
-    auto sendProm =
-        kj::evalNow([&]() { return ws->send(bigMessage); }).then([]() {}, [](kj::Exception ex) {});
+    auto sendProm = kj::evalNow([&]() { return ws->send(bigMessage); }).then([]() {
+    }, [](kj::Exception&& ex) {});
     // Message is too big; we should close the connection.
     auto msg = ws->receive().wait(waitScope);
     sendProm.wait(waitScope);

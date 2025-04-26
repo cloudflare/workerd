@@ -78,7 +78,7 @@ KJ_TEST("methods") {
 // ========================================================================================
 
 struct Mixin {
-  int getValue() {
+  int getValue() const {
     return i;
   }
   Mixin(int i): i(i) {}
@@ -118,7 +118,7 @@ struct PrototypePropertyObject: public Object {
     return js.alloc<PrototypePropertyObject>(value);
   }
 
-  double getValue() {
+  double getValue() const {
     return value;
   }
   void setValue(double v) {
@@ -202,7 +202,7 @@ struct NonConstructibleContext: public ContextGlobalObject {
 
     double x;
 
-    double method() {
+    double method() const {
       return x;
     }
 

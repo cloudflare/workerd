@@ -347,7 +347,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
 
   // Has event.passThroughOnException() been called?
-  bool isFailOpen() {
+  bool isFailOpen() const {
     return failOpen;
   }
 
@@ -510,7 +510,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
 
   // Returns the number of times addTask() has been called (even if the tasks have completed).
-  uint taskCount() {
+  uint taskCount() const {
     return addTaskCounter;
   }
 
@@ -599,7 +599,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
 
   // Called by ServiceWorkerGlobalScope::runScheduled
-  bool shouldRetryScheduled() {
+  bool shouldRetryScheduled() const {
     return retryScheduled;
   }
 

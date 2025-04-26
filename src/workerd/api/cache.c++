@@ -62,7 +62,7 @@ kj::StringPtr validateUrl(kj::StringPtr url) {
 
 Cache::Cache(kj::Maybe<kj::String> cacheName): cacheName(kj::mv(cacheName)) {}
 
-jsg::Unimplemented Cache::add(Request::Info request) {
+jsg::Unimplemented Cache::add(const Request::Info& request) {
   return {};
 }
 

@@ -490,7 +490,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   template <typename U>
   auto unwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
-      TypeErrorContext errorContext,
+      const TypeErrorContext& errorContext,
       kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none) -> RemoveRvalueRef<U> {
     auto maybe = this->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr, parentObject);
     KJ_IF_SOME(result, maybe) {
@@ -507,7 +507,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   auto unwrap(v8::Local<v8::Context> context,
       const v8::FunctionCallbackInfo<v8::Value>& args,
       size_t parameterIndex,
-      TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
+      const TypeErrorContext& errorContext) -> RemoveRvalueRef<U> {
     using V = kj::Decay<U>;
 
     if constexpr (kj::isSameType<V, Varargs>()) {

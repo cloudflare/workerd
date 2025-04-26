@@ -1708,23 +1708,23 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
   }
 }
 
-int Response::getStatus() {
+int Response::getStatus() const {
   return statusCode;
 }
-kj::StringPtr Response::getStatusText() {
+kj::StringPtr Response::getStatusText() const {
   return statusText;
 }
 jsg::Ref<Headers> Response::getHeaders(jsg::Lock& js) {
   return headers.addRef();
 }
 
-bool Response::getOk() {
+bool Response::getOk() const {
   return statusCode >= 200 && statusCode < 300;
 }
-bool Response::getRedirected() {
+bool Response::getRedirected() const {
   return urlList.size() > 1;
 }
-kj::StringPtr Response::getUrl() {
+kj::StringPtr Response::getUrl() const {
   if (urlList.size() > 0) {
     // We're supposed to drop any fragment from the URL. Instead of doing it here, we rely on the
     // code that calls the Response constructor (e.g. makeHttpResponse()) to drop the fragments

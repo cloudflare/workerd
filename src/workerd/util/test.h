@@ -13,11 +13,10 @@ namespace workerd {
 // detect thrown JS exceptions will probably want to use a separate macro.
 #define WD_EXPECT_THROW(expException, code, ...)                                                   \
   do {                                                                                             \
-    auto expExcObj = expException;                                                                 \
     KJ_IF_SOME(e, ::kj::runCatchingExceptions([&]() { (void)({ code; }); })) {                     \
-      KJ_EXPECT(e.getType() == expExcObj.getType(), "code threw wrong exception type: " #code, e,  \
-          ##__VA_ARGS__);                                                                          \
-      KJ_EXPECT(e.getDescription() == expExcObj.getDescription(),                                  \
+      KJ_EXPECT(e.getType() == expException.getType(), "code threw wrong exception type: " #code,  \
+          e, ##__VA_ARGS__);                                                                       \
+      KJ_EXPECT(e.getDescription() == expException.getDescription(),                               \
           "exception description didn't match", e, ##__VA_ARGS__);                                 \
     } else {                                                                                       \
       KJ_FAIL_EXPECT("code did not throw: " #code, ##__VA_ARGS__);                                 \

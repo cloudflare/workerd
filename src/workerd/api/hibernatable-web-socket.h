@@ -73,7 +73,7 @@ class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::Custom
       capnp::ByteStreamFactory& byteStreamFactory,
       rpc::EventDispatcher::Client dispatcher) override;
 
-  uint16_t getType() override {
+  uint16_t getType() const override {
     return typeId;
   }
 

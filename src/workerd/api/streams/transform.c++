@@ -60,10 +60,10 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
           .autoAllocateChunkSize = kj::none,
           .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(
               JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->getStartPromise(js); })),
+                  (jsg::Lock & js, auto&& c) mutable { return controller->getStartPromise(js); })),
           .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(
               JSG_VISITABLE_LAMBDA((controller = controller.addRef()), (controller),
-                  (jsg::Lock & js, auto c) mutable { return controller->pull(js); })),
+                  (jsg::Lock & js, auto&& c) mutable { return controller->pull(js); })),
           .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>( JSG_VISITABLE_LAMBDA(
               (controller = controller.addRef()), (controller),
               (jsg::Lock & js, auto reason) mutable { return controller->cancel(js, reason); })),

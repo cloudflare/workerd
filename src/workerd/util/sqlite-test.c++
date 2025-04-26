@@ -1030,13 +1030,13 @@ class MockRollbackCallback {
     };
   }
 
-  bool isStillLive() {
+  bool isStillLive() const {
     return !destroyed && !called;
   }
-  bool wasRolledBack() {
+  bool wasRolledBack() const {
     return called && destroyed;
   }
-  bool wasCommitted() {
+  bool wasCommitted() const {
     return !called && destroyed;
   }
 

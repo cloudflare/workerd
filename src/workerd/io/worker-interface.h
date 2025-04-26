@@ -126,7 +126,7 @@ class WorkerInterface: public kj::HttpService {
     // Get the type for this event for logging / metrics purposes. This is intended for use by the
     // RequestObserver. The RequestObserver implementation will define what numbers correspond to
     // what types.
-    virtual uint16_t getType() = 0;
+    virtual uint16_t getType() const = 0;
   };
 
   // Allows delivery of a variety of event types by implementing a callback that delivers the

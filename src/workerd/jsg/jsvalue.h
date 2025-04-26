@@ -140,26 +140,26 @@ class JsValue final {
   bool operator==(const JsValue& other) const;
   bool strictEquals(const JsValue& other) const;
 
-  bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  JsString toJsString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  bool isTruthy(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::String toString(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::String typeOf(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JsString toJsString(const Lock& js) const KJ_WARN_UNUSED_RESULT;
 
 #define V(Type) bool is##Type() const KJ_WARN_UNUSED_RESULT;
   JS_IS_TYPES(V)
 #undef V
 
-  kj::String toJson(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  static JsValue fromJson(Lock& js, kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
-  static JsValue fromJson(Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
+  kj::String toJson(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  static JsValue fromJson(const Lock& js, kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
+  static JsValue fromJson(const Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
 
-  JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JsRef<JsValue> addRef(const Lock& js) KJ_WARN_UNUSED_RESULT;
 
-  JsValue structuredClone(
-      Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none) KJ_WARN_UNUSED_RESULT;
+  JsValue structuredClone(const Lock& js,
+      kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none) const KJ_WARN_UNUSED_RESULT;
 
   template <typename T>
-  static kj::Maybe<T&> tryGetExternal(Lock& js, const JsValue& value) KJ_WARN_UNUSED_RESULT;
+  static kj::Maybe<T&> tryGetExternal(const Lock& js, const JsValue& value) KJ_WARN_UNUSED_RESULT;
 
   explicit JsValue(v8::Local<v8::Value> inner);
 
@@ -199,7 +199,7 @@ class JsBase {
   explicit JsBase(v8::Local<T> inner): inner(inner) {
     requireOnStack(this);
   }
-  JsRef<Self> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JsRef<Self> addRef(const Lock& js) KJ_WARN_UNUSED_RESULT;
 
  private:
   v8::Local<T> inner;
@@ -216,7 +216,7 @@ class JsBase {
 
 class JsBoolean final: public JsBase<v8::Boolean, JsBoolean> {
  public:
-  bool value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  bool value(const Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   using JsBase<v8::Boolean, JsBoolean>::JsBase;
 };
@@ -225,17 +225,17 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
  public:
   operator JsObject() const;
   uint32_t size() const KJ_WARN_UNUSED_RESULT;
-  JsValue get(Lock& js, uint32_t i) const KJ_WARN_UNUSED_RESULT;
-  void add(Lock& js, const JsValue& value);
+  JsValue get(const Lock& js, uint32_t i) const KJ_WARN_UNUSED_RESULT;
+  void add(const Lock& js, const JsValue& value);
 
   using JsBase<v8::Array, JsArray>::JsBase;
 };
 
 class JsString final: public JsBase<v8::String, JsString> {
  public:
-  int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  int length(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  size_t utf8Length(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::String toString(const Lock& js) const KJ_WARN_UNUSED_RESULT;
   int hashCode() const;
 
   bool containsOnlyOneByte() const;
@@ -246,9 +246,10 @@ class JsString final: public JsBase<v8::String, JsString> {
   // to all other internalized strings with the same content. If the string is already
   // internalized, this returns the same value. Note that strings originating from literals in the
   // code are always internalized.
-  JsString internalize(Lock& js) const;
+  JsString internalize(const Lock& js) const;
 
-  static JsString concat(Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
+  static JsString concat(
+      const Lock& js, const JsString& one, const JsString& two) KJ_WARN_UNUSED_RESULT;
 
   enum WriteFlags {
     NONE = v8::String::WriteFlags::kNone,
@@ -257,7 +258,8 @@ class JsString final: public JsBase<v8::String, JsString> {
   };
 
   template <typename T>
-  kj::Array<T> toArray(Lock& js, WriteFlags options = WriteFlags::NONE) const KJ_WARN_UNUSED_RESULT;
+  kj::Array<T> toArray(
+      const Lock& js, WriteFlags options = WriteFlags::NONE) const KJ_WARN_UNUSED_RESULT;
 
   struct WriteIntoStatus {
     // The number of elements (e.g. char, byte, uint16_t) read from this string.
@@ -277,16 +279,16 @@ class JsString final: public JsBase<v8::String, JsString> {
 
 class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
  public:
-  kj::Maybe<JsArray> operator()(Lock& js, const JsString& input) const KJ_WARN_UNUSED_RESULT;
-  kj::Maybe<JsArray> operator()(Lock& js, kj::StringPtr input) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<JsArray> operator()(const Lock& js, const JsString& input) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<JsArray> operator()(const Lock& js, kj::StringPtr input) const KJ_WARN_UNUSED_RESULT;
   using JsBase<v8::RegExp, JsRegExp>::JsBase;
 
-  bool match(Lock& js, kj::StringPtr input);
+  bool match(const Lock& js, kj::StringPtr input);
 };
 
 class JsDate final: public JsBase<v8::Date, JsDate> {
  public:
-  jsg::ByteString toUTCString(Lock& js) const;
+  jsg::ByteString toUTCString(const Lock& js) const;
   operator kj::Date() const;
   using JsBase<v8::Date, JsDate>::JsBase;
 };
@@ -332,9 +334,9 @@ V(Set)
 
 class JsNumber final: public JsBase<v8::Number, JsNumber> {
  public:
-  kj::Maybe<double> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  bool isSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  kj::Maybe<double> toSafeInteger(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<double> value(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  bool isSafeInteger(const Lock& js) const KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<double> toSafeInteger(const Lock& js) const KJ_WARN_UNUSED_RESULT;
 
   using JsBase<v8::Number, JsNumber>::JsBase;
 };
@@ -355,31 +357,34 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
     }
   }
 
-  void set(Lock& js, const JsValue& name, const JsValue& value);
-  void set(Lock& js, kj::StringPtr name, const JsValue& value);
-  void setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value);
-  void setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value);
-  JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
-  JsValue get(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  void set(const Lock& js, const JsValue& name, const JsValue& value);
+  void set(const Lock& js, kj::StringPtr name, const JsValue& value);
+  void setReadOnly(const Lock& js, kj::StringPtr name, const JsValue& value);
+  void setNonEnumerable(const Lock& js, const JsSymbol& name, const JsValue& value);
+  JsValue get(const Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
+  JsValue get(const Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 
   enum class HasOption {
     NONE,
     OWN,
   };
 
-  bool has(Lock& js, const JsValue& name, HasOption option = HasOption::NONE) KJ_WARN_UNUSED_RESULT;
-  bool has(Lock& js, kj::StringPtr name, HasOption option = HasOption::NONE) KJ_WARN_UNUSED_RESULT;
-  void delete_(Lock& js, const JsValue& name);
-  void delete_(Lock& js, kj::StringPtr name);
+  bool has(const Lock& js,
+      const JsValue& name,
+      HasOption option = HasOption::NONE) KJ_WARN_UNUSED_RESULT;
+  bool has(
+      const Lock& js, kj::StringPtr name, HasOption option = HasOption::NONE) KJ_WARN_UNUSED_RESULT;
+  void delete_(const Lock& js, const JsValue& name);
+  void delete_(const Lock& js, kj::StringPtr name);
 
-  void setPrivate(Lock& js, kj::StringPtr name, const JsValue& value);
-  JsValue getPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
-  bool hasPrivate(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  void setPrivate(const Lock& js, kj::StringPtr name, const JsValue& value);
+  JsValue getPrivate(const Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  bool hasPrivate(const Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 
   int hashCode() const;
 
   kj::String getConstructorName() KJ_WARN_UNUSED_RESULT;
-  JsArray getPropertyNames(Lock& js,
+  JsArray getPropertyNames(const Lock& js,
       KeyCollectionFilter keyFilter,
       PropertyFilter propertyFilter,
       IndexFilter indexFilter) KJ_WARN_UNUSED_RESULT;
@@ -390,13 +395,13 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   // Note that when called on a class constructor, this does NOT return `.prototype`, it still
   // returns `.__proto__`. Usefully, though, a class constructor's `__proto__` is always the
   // parent class's constructor.
-  JsValue getPrototype(Lock& js) KJ_WARN_UNUSED_RESULT;
+  JsValue getPrototype(const Lock& js) KJ_WARN_UNUSED_RESULT;
 
   using JsBase<v8::Object, JsObject>::JsBase;
 
-  void recursivelyFreeze(Lock&);
-  void seal(Lock&);
-  JsObject jsonClone(Lock&);
+  void recursivelyFreeze(const Lock&);
+  void seal(const Lock&);
+  JsObject jsonClone(const Lock&);
 };
 
 // Defined here because `JsObject` is an incomplete type in `jsg.h`.
@@ -409,14 +414,14 @@ class JsMap final: public JsBase<v8::Map, JsMap> {
  public:
   operator JsObject();
 
-  void set(Lock& js, const JsValue& name, const JsValue& value);
-  void set(Lock& js, kj::StringPtr name, const JsValue& value);
-  JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
-  JsValue get(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
-  bool has(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
-  bool has(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
-  void delete_(Lock& js, const JsValue& name);
-  void delete_(Lock& js, kj::StringPtr name);
+  void set(const Lock& js, const JsValue& name, const JsValue& value);
+  void set(const Lock& js, kj::StringPtr name, const JsValue& value);
+  JsValue get(const Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
+  JsValue get(const Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  bool has(const Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
+  bool has(const Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
+  void delete_(const Lock& js, const JsValue& name);
+  void delete_(const Lock& js, kj::StringPtr name);
 
   int hashCode() const;
 
@@ -441,13 +446,13 @@ inline kj::Maybe<T> JsValue::tryCast() const {
 }
 
 template <typename T>
-inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
+inline kj::Maybe<T&> JsValue::tryGetExternal(const Lock& js, const JsValue& value) {
   if (!value.isExternal()) return kj::none;
   return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
 }
 
 template <typename T>
-inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
+inline kj::Array<T> JsString::toArray(const Lock& js, WriteFlags options) const {
   if constexpr (kj::isSameType<T, kj::byte>()) {
     KJ_DASSERT(inner->ContainsOnlyOneByte());
     auto buf = kj::heapArray<kj::byte>(inner->Length());
@@ -462,13 +467,13 @@ inline kj::Array<T> JsString::toArray(Lock& js, WriteFlags options) const {
 
 template <typename... Args>
   requires(std::assignable_from<JsValue&, Args> && ...)
-inline JsArray Lock::arr(const Args&... args) {
+inline JsArray Lock::arr(const Args&... args) const {
   v8::Local<v8::Value> values[] = {args...};
   return JsArray(v8::Array::New(v8Isolate, &values[0], sizeof...(Args)));
 }
 
 template <typename T, typename Func>
-inline JsArray Lock::arr(kj::ArrayPtr<T> values, Func fn) {
+inline JsArray Lock::arr(kj::ArrayPtr<T> values, Func fn) const {
   v8::LocalVector<v8::Value> vec(v8Isolate);
   vec.reserve(values.size());
   for (const T& val: values) {
@@ -479,14 +484,14 @@ inline JsArray Lock::arr(kj::ArrayPtr<T> values, Func fn) {
 
 template <typename... Args>
   requires(std::assignable_from<JsValue&, Args> && ...)
-inline JsSet Lock::set(const Args&... args) {
+inline JsSet Lock::set(const Args&... args) const {
   auto set = v8::Set::New(v8Isolate);
   (check(set->Add(v8Context(), args.inner)), ...);
   return JsSet(set);
 }
 
 template <typename T>
-inline JsObject Lock::opaque(T&& inner) {
+inline JsObject Lock::opaque(T&& inner) const {
   auto wrapped = wrapOpaque(v8Context(), kj::mv(inner));
   KJ_ASSERT(!wrapped.IsEmpty());
   KJ_ASSERT(wrapped->IsObject());
@@ -520,21 +525,21 @@ class JsRef final {
  public:
   JsRef(): JsRef(nullptr) {}
   JsRef(decltype(nullptr)): value(nullptr) {}
-  JsRef(Lock& js, const T& value): value(js.v8Isolate, value.inner) {}
+  JsRef(const Lock& js, const T& value): value(js.v8Isolate, value.inner) {}
   JsRef(JsRef<T>& other) = delete;
   JsRef(JsRef<T>&& other) = default;
   template <typename U>
-  JsRef(Lock& js, V8Ref<U>&& v8Value)
+  JsRef(const Lock& js, V8Ref<U>&& v8Value)
       : value(js.v8Isolate, v8Value.getHandle(js).template As<v8::Value>()) {}
   JsRef& operator=(JsRef<T>& other) = delete;
   JsRef& operator=(JsRef<T>&& other) = default;
 
-  T getHandle(Lock& js) const KJ_WARN_UNUSED_RESULT {
+  T getHandle(const Lock& js) const KJ_WARN_UNUSED_RESULT {
     JsValue handle(value.getHandle(js));
     return KJ_ASSERT_NONNULL(handle.tryCast<T>());
   }
 
-  JsRef<T> addRef(Lock& js) KJ_WARN_UNUSED_RESULT {
+  JsRef<T> addRef(const Lock& js) KJ_WARN_UNUSED_RESULT {
     return JsRef<T>(js, getHandle(js));
   }
 
@@ -549,7 +554,7 @@ class JsRef final {
   // Supported only to allow for an easier transition for code that still
   // requires V8Ref types.
   template <typename U>
-  V8Ref<U> addV8Ref(Lock& js) KJ_WARN_UNUSED_RESULT {
+  V8Ref<U> addV8Ref(const Lock& js) KJ_WARN_UNUSED_RESULT {
     return value.addRef(js);
   }
 
@@ -575,7 +580,7 @@ class JsRef final {
 };
 
 template <typename T, typename Self>
-inline JsRef<Self> JsBase<T, Self>::addRef(Lock& js) {
+inline JsRef<Self> JsBase<T, Self>::addRef(const Lock& js) {
   return JsRef<Self>(js, *static_cast<Self*>(this));
 }
 
@@ -649,7 +654,7 @@ struct JsValueWrapper {
 
 class JsMessage final {
  public:
-  static JsMessage create(Lock& js, const JsValue& exception);
+  static JsMessage create(const Lock& js, const JsValue& exception);
   explicit inline JsMessage(): inner(v8::Local<v8::Message>()) {
     requireOnStack(this);
   }
@@ -668,7 +673,7 @@ class JsMessage final {
 
   // Adds the JS Stack associated with this JsMessage to the given
   // kj::Vector.
-  void addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines);
+  void addJsStackTrace(const Lock& js, kj::Vector<kj::String>& lines);
 
  private:
   v8::Local<v8::Message> inner;

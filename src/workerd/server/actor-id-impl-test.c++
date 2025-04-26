@@ -25,7 +25,7 @@ KJ_TEST("ActorIdImpl equals test") {
         const char* rightString,
         bool expectedResult)
         : expectedResult(expectedResult) {
-      kj::byte idParamCopier[SHA256_DIGEST_LENGTH];
+      kj::byte idParamCopier[SHA256_DIGEST_LENGTH]{};
       memset(idParamCopier, leftFill, SHA256_DIGEST_LENGTH);
       if (leftString == nullptr) {
         actorLeft = ActorIdImpl(idParamCopier, kj::none);
@@ -59,10 +59,10 @@ kj::String computeProperTestMac(const char* strId, const char* strKey) {
   auto id = kj::decodeHex(kj::heapString(strId));
   KJ_ASSERT(!id.hadErrors);
   KJ_ASSERT(id.size() == SHA256_DIGEST_LENGTH);
-  kj::byte key[SHA256_DIGEST_LENGTH];
+  kj::byte key[SHA256_DIGEST_LENGTH]{};
   auto stringPtrKey = kj::StringPtr(strKey);
   SHA256(stringPtrKey.asBytes().begin(), stringPtrKey.size(), key);
-  kj::byte hmacOut[SHA256_DIGEST_LENGTH];
+  kj::byte hmacOut[SHA256_DIGEST_LENGTH]{};
   unsigned int len = SHA256_DIGEST_LENGTH;
   HMAC(EVP_sha256(), key, sizeof(key), id.begin(), BASE_LENGTH, hmacOut, &len);
   KJ_ASSERT(len == SHA256_DIGEST_LENGTH);

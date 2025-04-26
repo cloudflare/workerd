@@ -706,7 +706,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed read)") {
         UnderlyingSource{
           .type = kj::str("bytes"),
           .pull =
-              [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+              [&](jsg::Lock& js, UnderlyingSource::Controller&& controller) {
       checked++;
       return js.rejectedPromise<void>(js.error("boom"));
     }
@@ -748,7 +748,7 @@ KJ_TEST("ReadableStream read all bytes (value readable, failed read)") {
     rs->getController().setup(js,
         UnderlyingSource{
           .pull =
-              [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+              [&](jsg::Lock& js, UnderlyingSource::Controller&& controller) {
       checked++;
       return js.rejectedPromise<void>(js.error("boom"));
     }
@@ -791,7 +791,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start)") {
         UnderlyingSource{
           .type = kj::str("bytes"),
           .start = [&](jsg::Lock& js,
-                       UnderlyingSource::Controller controller) -> jsg::Promise<void> {
+                       UnderlyingSource::Controller&& controller) -> jsg::Promise<void> {
       checked++;
       return js.rejectedPromise<void>(js.error("boom"));
     }
@@ -834,7 +834,7 @@ KJ_TEST("ReadableStream read all bytes (byte readable, failed start 2)") {
         UnderlyingSource{
           .type = kj::str("bytes"),
           .start = [&](jsg::Lock& js,
-                       UnderlyingSource::Controller controller) -> jsg::Promise<void> {
+                       UnderlyingSource::Controller&& controller) -> jsg::Promise<void> {
       checked++;
       JSG_FAIL_REQUIRE(Error, "boom");
     }

@@ -127,13 +127,13 @@ class CloseEvent: public Event {
         kj::mv(init.reason).orDefault(nullptr), init.wasClean.orDefault(false));
   }
 
-  int getCode() {
+  int getCode() const {
     return code;
   }
-  kj::StringPtr getReason() {
+  kj::StringPtr getReason() const {
     return reason;
   }
-  bool getWasClean() {
+  bool getWasClean() const {
     return clean;
   }
 

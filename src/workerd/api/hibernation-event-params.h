@@ -51,7 +51,7 @@ struct HibernatableSocketParams {
 
   HibernatableSocketParams(HibernatableSocketParams&& other) = default;
 
-  bool isCloseEvent() {
+  bool isCloseEvent() const {
     return eventType.is<Close>();
   }
 

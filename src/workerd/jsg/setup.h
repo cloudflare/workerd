@@ -177,7 +177,7 @@ class IsolateBase {
   // The logger will be optionally set by the isolate setup logic if there is anywhere
   // for the log to go (for instance, if debug logging is enabled or the inspector is
   // being used).
-  inline void logWarning(Lock& js, kj::StringPtr message) {
+  inline void logWarning(const Lock& js, kj::StringPtr message) {
     KJ_IF_SOME(logger, maybeLogger) {
       logger(js, message);
     }
@@ -214,11 +214,11 @@ class IsolateBase {
   }
 
   // Get an object referencing this isolate that can be used to adjust external memory usage later
-  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
+  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget() const;
 
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
-  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) const {
     return externalMemoryTarget->getAdjustment(amount);
   }
 
@@ -655,12 +655,12 @@ class Isolate: public IsolateBase {
 
     template <typename T, typename... Args>
     JsContext<T> newContextWithWrapper(
-        TypeWrapper* wrapper, NewContextOptions options, Args&&... args) {
+        TypeWrapper* wrapper, NewContextOptions&& options, Args&&... args) {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
-      auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
-          static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
+      auto context = wrapper->newContext(*this, kj::fwd<NewContextOptions>(options),
+          jsgIsolate.getObserver(), static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
       context.getHandle(v8Isolate)->SetAlignedPointerInEmbedderData(3, wrapper);
       return context;
     }
@@ -669,11 +669,11 @@ class Isolate: public IsolateBase {
     // executing JavaScript code. T should be one of your API types which you want to use as the
     // global object. `args...` are passed to the type's constructor.
     template <typename T, typename... Args>
-    JsContext<T> newContext(NewContextOptions options, Args&&... args) {
+    JsContext<T> newContext(NewContextOptions&& options, Args&&... args) {
       KJ_DASSERT(!jsgIsolate.wrappers.empty());
       KJ_DASSERT(jsgIsolate.wrappers[0].get() != nullptr);
-      return newContextWithWrapper<T>(
-          jsgIsolate.wrappers[0].get(), options, kj::fwd<Args>(args)...);
+      return newContextWithWrapper<T>(jsgIsolate.wrappers[0].get(),
+          kj::fwd<NewContextOptions>(options), kj::fwd<Args>(args)...);
     }
 
     // Creates a new JavaScript "context", i.e. the global object. This is the first step to
@@ -686,11 +686,12 @@ class Isolate: public IsolateBase {
 
     template <typename T, typename MetaConfiguration, typename... Args>
     JsContext<T> newContextWithConfiguration(
-        MetaConfiguration&& configuration, NewContextOptions options, Args&&... args) {
+        MetaConfiguration&& configuration, NewContextOptions&& options, Args&&... args) {
       jsgIsolate.hasExtraWrappers = true;
       auto& wrapper = jsgIsolate.wrappers.add(
           kj::heap<TypeWrapper>(jsgIsolate.ptr, kj::fwd<MetaConfiguration>(configuration)));
-      return newContextWithWrapper<T>(wrapper.get(), options, kj::fwd<Args>(args)...);
+      return newContextWithWrapper<T>(
+          wrapper.get(), kj::fwd<NewContextOptions>(options), kj::fwd<Args>(args)...);
     }
 
     void reportError(const JsValue& value) override {
@@ -755,7 +756,7 @@ class Isolate: public IsolateBase {
   }
 
  protected:
-  inline TypeWrapper* getWrapperByContext(jsg::Lock& js) {
+  inline TypeWrapper* getWrapperByContext(const jsg::Lock& js) {
     if (KJ_LIKELY(!hasExtraWrappers)) {
       return wrappers[0].get();
     } else {

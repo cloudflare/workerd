@@ -183,20 +183,20 @@ struct NumberBox: public Object {
     value += amount.value;
   }
 
-  double add(double other) {
+  double add(double other) const {
     return value + other;
   }
-  double addBox(NumberBox& other) {
+  double addBox(NumberBox& other) const {
     return value + other.value;
   }
-  Ref<NumberBox> addReturnBox(jsg::Lock& js, double other) {
+  Ref<NumberBox> addReturnBox(jsg::Lock& js, double other) const {
     return js.alloc<NumberBox>(value + other);
   }
-  double addMultiple(NumberBox& a, double b, NumberBox& c) {
+  double addMultiple(NumberBox& a, double b, NumberBox& c) const {
     return value + a.value + b + c.value;
   }
 
-  double getValue() {
+  double getValue() const {
     return value;
   }
   void setValue(double newValue) {
@@ -268,7 +268,7 @@ struct ExtendedNumberBox: public NumberBox {
     return result;
   }
 
-  kj::StringPtr getText() {
+  kj::StringPtr getText() const {
     return text;
   }
   void setText(kj::String newText) {

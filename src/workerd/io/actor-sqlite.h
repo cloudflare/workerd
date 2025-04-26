@@ -128,7 +128,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     ~ExplicitTxn() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(ExplicitTxn);
 
-    bool getAlarmDirty();
+    bool getAlarmDirty() const;
     void setAlarmDirty();
 
     kj::Maybe<kj::Promise<void>> commit() override;

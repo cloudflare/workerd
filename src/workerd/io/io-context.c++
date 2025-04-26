@@ -1025,7 +1025,7 @@ void IoContext::runInContextScope(Worker::LockType lockType,
   SuppressIoContextScope previousRequest;
   threadLocalRequest = this;
 
-  worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
+  worker->runInLockScope(kj::mv(lockType), [&](Worker::Lock& lock) {
     KJ_REQUIRE(currentInputLock == kj::none);
     KJ_REQUIRE(currentLock == kj::none);
     KJ_DEFER(currentLock = kj::none; currentInputLock = kj::none);
@@ -1063,7 +1063,7 @@ void IoContext::runImpl(Runnable& runnable,
 
   getIoChannelFactory().getTimer().syncTime();
 
-  runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
+  runInContextScope(kj::mv(lockType), kj::mv(inputLock), [&](Worker::Lock& workerLock) {
     if (!allowPermanentException) {
       workerLock.requireNoPermanentException();
     }

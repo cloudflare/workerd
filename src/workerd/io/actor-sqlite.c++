@@ -137,7 +137,7 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
   }
 }
 
-bool ActorSqlite::ExplicitTxn::getAlarmDirty() {
+bool ActorSqlite::ExplicitTxn::getAlarmDirty() const {
   return alarmDirty;
 }
 

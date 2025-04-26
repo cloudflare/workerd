@@ -90,7 +90,7 @@ class Url final {
 
   kj::uint hashCode() const;
 
-  kj::Maybe<Url> resolve(kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<Url> resolve(kj::ArrayPtr<const char> input) const KJ_WARN_UNUSED_RESULT;
 
   // Copies this Url. If the option is set of EquivalenceOption::IGNORE_FRAGMENTS, the
   // copied Url will clear any fragment/hash that exists.

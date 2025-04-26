@@ -271,10 +271,10 @@ class AlarmInvocationInfo: public jsg::Object {
  public:
   AlarmInvocationInfo(uint32_t retry): retryCount(retry) {}
 
-  bool getIsRetry() {
+  bool getIsRetry() const {
     return retryCount > 0;
   }
-  uint32_t getRetryCount() {
+  uint32_t getRetryCount() const {
     return retryCount;
   }
 

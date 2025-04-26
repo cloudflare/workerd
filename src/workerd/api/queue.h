@@ -65,11 +65,12 @@ class WorkerQueue: public jsg::Object {
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
 
-  kj::Promise<void> send(jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options);
+  kj::Promise<void> send(
+      jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options) const;
 
   kj::Promise<void> sendBatch(jsg::Lock& js,
       jsg::Sequence<MessageSendRequest> batch,
-      jsg::Optional<SendBatchOptions> options);
+      jsg::Optional<SendBatchOptions> options) const;
 
   JSG_RESOURCE_TYPE(WorkerQueue) {
     JSG_METHOD(send);
@@ -156,14 +157,14 @@ class QueueMessage final: public jsg::Object {
   QueueMessage(jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result);
   QueueMessage(jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result);
 
-  kj::StringPtr getId() {
+  kj::StringPtr getId() const {
     return id;
   }
-  kj::Date getTimestamp() {
+  kj::Date getTimestamp() const {
     return timestamp;
   }
   jsg::JsValue getBody(jsg::Lock& js);
-  uint16_t getAttempts() {
+  uint16_t getAttempts() const {
     return attempts;
   };
 
@@ -260,7 +261,7 @@ class QueueEvent final: public ExtendableEvent {
   typedef kj::OneOf<Incomplete, CompletedSuccessfully, CompletedWithError> CompletionStatus;
 
   void setCompletionStatus(CompletionStatus status) {
-    completionStatus = status;
+    completionStatus = kj::mv(status);
   }
 
   CompletionStatus getCompletionStatus() const {
@@ -349,7 +350,7 @@ class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj
       rpc::EventDispatcher::Client dispatcher) override;
 
   static const uint16_t EVENT_TYPE = 5;
-  uint16_t getType() override {
+  uint16_t getType() const override {
     return EVENT_TYPE;
   }
 

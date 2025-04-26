@@ -1079,7 +1079,7 @@ struct NonCoercibleContext: public ContextGlobalObject {
     return true;
   }
 
-  bool testOneOf(kj::OneOf<NonCoercible<bool>, NonCoercible<kj::String>> value) {
+  bool testOneOf(const kj::OneOf<NonCoercible<bool>, NonCoercible<kj::String>>& value) {
     return true;
   }
 
@@ -1229,7 +1229,7 @@ KJ_TEST("Identified values") {
 
 struct ExceptionContext: public ContextGlobalObject {
 
-  kj::String testToException(kj::Exception exception) {
+  kj::String testToException(const kj::Exception& exception) {
     return kj::str(exception.getDescription());
   }
 

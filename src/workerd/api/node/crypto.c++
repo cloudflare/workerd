@@ -253,7 +253,7 @@ jsg::BufferSource CryptoImpl::DiffieHellmanHandle::generateKeys(jsg::Lock& js) {
   return dh.generateKeys(js);
 }
 
-int CryptoImpl::DiffieHellmanHandle::getVerifyError() {
+int CryptoImpl::DiffieHellmanHandle::getVerifyError() const {
   return verifyError;
 }
 #pragma endregion  // DiffieHellman

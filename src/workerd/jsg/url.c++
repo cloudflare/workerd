@@ -171,7 +171,7 @@ kj::Maybe<Url> Url::tryParse(
   return Url(wrap(result));
 }
 
-kj::Maybe<Url> Url::resolve(kj::ArrayPtr<const char> input) {
+kj::Maybe<Url> Url::resolve(kj::ArrayPtr<const char> input) const {
   return tryParse(input, getHref());
 }
 

@@ -43,7 +43,7 @@ public:
                                 jsg::USVString>;
 
   // Constructor called by the static constructor method.
-  URLSearchParams(Initializer init);
+  URLSearchParams(const Initializer& init);
 
   // Constructor called by the URL class when created.
   URLSearchParams(kj::Maybe<kj::ArrayPtr<const char>> maybeQuery, URL& url);
@@ -216,7 +216,7 @@ public:
   // ].filter((test) => URL.canParse(test));
   //
   static bool canParse(jsg::USVString url, jsg::Optional<jsg::USVString> base = kj::none);
-  static jsg::JsString createObjectURL(jsg::Lock& js, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>> object);
+  static jsg::JsString createObjectURL(jsg::Lock& js, const kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>>& object);
   static void revokeObjectURL(jsg::Lock& js, jsg::USVString object_url);
 
   JSG_RESOURCE_TYPE(URL) {

@@ -415,7 +415,7 @@ class IdentityTransformStreamImpl: public kj::Refcounted,
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
-  void cancel(kj::Exception reason) override;
+  void cancel(const kj::Exception& reason) override;
 
   // WritableStreamSink implementation ---------------------------------------------------
 

@@ -421,20 +421,21 @@ class ZlibUtil final: public jsg::Object {
   using CompressCallbackArg = kj::OneOf<jsg::JsValue, kj::Array<kj::byte>>;
   using CompressCallback = jsg::Function<void(CompressCallbackArg)>;
 
-  uint32_t crc32Sync(InputSource data, uint32_t value);
+  uint32_t crc32Sync(const InputSource& data, uint32_t value);
   void zlibWithCallback(jsg::Lock& js,
-      InputSource data,
+      const InputSource& data,
       ZlibContext::Options options,
       ZlibModeValue mode,
       CompressCallback cb);
   kj::Array<kj::byte> zlibSync(
-      jsg::Lock& js, InputSource data, ZlibContext::Options options, ZlibModeValue mode);
+      jsg::Lock& js, const InputSource& data, ZlibContext::Options options, ZlibModeValue mode);
 
   template <typename Context>
-  kj::Array<kj::byte> brotliSync(jsg::Lock& js, InputSource data, BrotliContext::Options options);
+  kj::Array<kj::byte> brotliSync(
+      jsg::Lock& js, const InputSource& data, BrotliContext::Options options);
   template <typename Context>
   void brotliWithCallback(
-      jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
+      jsg::Lock& js, const InputSource& data, BrotliContext::Options options, CompressCallback cb);
 
   JSG_RESOURCE_TYPE(ZlibUtil) {
     JSG_METHOD_NAMED(crc32, crc32Sync);

@@ -141,10 +141,10 @@ class File: public Blob {
   static jsg::Ref<File> constructor(
       jsg::Lock& js, jsg::Optional<Bits> bits, kj::String name, jsg::Optional<Options> options);
 
-  kj::StringPtr getName() {
+  kj::StringPtr getName() const {
     return name;
   }
-  double getLastModified() {
+  double getLastModified() const {
     return lastModified;
   }
 

@@ -244,7 +244,7 @@ class ReadableStreamSource {
   // NOTE: By "propagate the error back to the writable stream", I mean: if the WritableStream is in
   //   the Writable state, set it to the Errored state and reject its closed fulfiller with
   //   `reason`. I'm not sure how I'm going to do this yet.
-  virtual void cancel(kj::Exception reason);
+  virtual void cancel(const kj::Exception& reason);
   // TODO(conform): Should return promise.
   //
   // TODO(conform): `reason` should be allowed to be any JS value, and not just an exception.

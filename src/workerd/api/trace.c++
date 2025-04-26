@@ -249,7 +249,7 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
   });
 }
 
-kj::Maybe<double> TraceItem::getEventTimestamp() {
+kj::Maybe<double> TraceItem::getEventTimestamp() const {
   return eventTimestamp;
 }
 
@@ -269,11 +269,11 @@ kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
   return scriptName.map([](auto& name) -> kj::StringPtr { return name; });
 }
 
-jsg::Optional<kj::StringPtr> TraceItem::getEntrypoint() {
+jsg::Optional<kj::StringPtr> TraceItem::getEntrypoint() const {
   return entrypoint;
 }
 
-jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {
+jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() const {
   return scriptVersion;
 }
 
@@ -286,7 +286,7 @@ jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
 }
 
-kj::StringPtr TraceItem::getExecutionModel() {
+kj::StringPtr TraceItem::getExecutionModel() const {
   return executionModel;
 }
 
@@ -294,19 +294,19 @@ kj::ArrayPtr<jsg::Ref<OTelSpan>> TraceItem::getSpans() {
   return spans;
 }
 
-kj::StringPtr TraceItem::getOutcome() {
+kj::StringPtr TraceItem::getOutcome() const {
   return outcome;
 }
 
-bool TraceItem::getTruncated() {
+bool TraceItem::getTruncated() const {
   return truncated;
 }
 
-uint TraceItem::getCpuTime() {
+uint TraceItem::getCpuTime() const {
   return cpuTime;
 }
 
-uint TraceItem::getWallTime() {
+uint TraceItem::getWallTime() const {
   return wallTime;
 }
 
@@ -370,11 +370,11 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
   return HeaderDict{builder.finish()};
 }
 
-kj::StringPtr TraceItem::FetchEventInfo::Request::getMethod() {
+kj::StringPtr TraceItem::FetchEventInfo::Request::getMethod() const {
   return detail->method;
 }
 
-kj::String TraceItem::FetchEventInfo::Request::getUrl() {
+kj::String TraceItem::FetchEventInfo::Request::getUrl() const {
   return (redacted ? redactUrl(detail->url) : kj::str(detail->url));
 }
 
@@ -387,7 +387,7 @@ TraceItem::FetchEventInfo::Response::Response(
     const Trace& trace, const tracing::FetchResponseInfo& responseInfo)
     : status(responseInfo.statusCode) {}
 
-uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
+uint16_t TraceItem::FetchEventInfo::Response::getStatus() const {
   return status;
 }
 
@@ -395,7 +395,7 @@ TraceItem::JsRpcEventInfo::JsRpcEventInfo(
     const Trace& trace, const tracing::JsRpcEventInfo& eventInfo)
     : rpcMethod(kj::str(eventInfo.methodName)) {}
 
-kj::StringPtr TraceItem::JsRpcEventInfo::getRpcMethod() {
+kj::StringPtr TraceItem::JsRpcEventInfo::getRpcMethod() const {
   return rpcMethod;
 }
 
@@ -404,10 +404,10 @@ TraceItem::ScheduledEventInfo::ScheduledEventInfo(
     : scheduledTime(eventInfo.scheduledTime),
       cron(kj::str(eventInfo.cron)) {}
 
-double TraceItem::ScheduledEventInfo::getScheduledTime() {
+double TraceItem::ScheduledEventInfo::getScheduledTime() const {
   return scheduledTime;
 }
-kj::StringPtr TraceItem::ScheduledEventInfo::getCron() {
+kj::StringPtr TraceItem::ScheduledEventInfo::getCron() const {
   return cron;
 }
 
@@ -415,7 +415,7 @@ TraceItem::AlarmEventInfo::AlarmEventInfo(
     const Trace& trace, const tracing::AlarmEventInfo& eventInfo)
     : scheduledTime(eventInfo.scheduledTime) {}
 
-kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
+kj::Date TraceItem::AlarmEventInfo::getScheduledTime() const {
   return scheduledTime;
 }
 
@@ -424,11 +424,11 @@ TraceItem::QueueEventInfo::QueueEventInfo(
     : queueName(kj::str(eventInfo.queueName)),
       batchSize(eventInfo.batchSize) {}
 
-kj::StringPtr TraceItem::QueueEventInfo::getQueueName() {
+kj::StringPtr TraceItem::QueueEventInfo::getQueueName() const {
   return queueName;
 }
 
-uint32_t TraceItem::QueueEventInfo::getBatchSize() {
+uint32_t TraceItem::QueueEventInfo::getBatchSize() const {
   return batchSize;
 }
 
@@ -438,15 +438,15 @@ TraceItem::EmailEventInfo::EmailEventInfo(
       rcptTo(kj::str(eventInfo.rcptTo)),
       rawSize(eventInfo.rawSize) {}
 
-kj::StringPtr TraceItem::EmailEventInfo::getMailFrom() {
+kj::StringPtr TraceItem::EmailEventInfo::getMailFrom() const {
   return mailFrom;
 }
 
-kj::StringPtr TraceItem::EmailEventInfo::getRcptTo() {
+kj::StringPtr TraceItem::EmailEventInfo::getRcptTo() const {
   return rcptTo;
 }
 
-uint32_t TraceItem::EmailEventInfo::getRawSize() {
+uint32_t TraceItem::EmailEventInfo::getRawSize() const {
   return rawSize;
 }
 
@@ -471,7 +471,7 @@ kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo
 TraceItem::TailEventInfo::TailItem::TailItem(const tracing::TraceEventInfo::TraceItem& traceItem)
     : scriptName(traceItem.scriptName.map([](auto& s) { return kj::str(s); })) {}
 
-kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
+kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() const {
   return scriptName;
 }
 
@@ -481,7 +481,7 @@ TraceDiagnosticChannelEvent::TraceDiagnosticChannelEvent(
       channel(kj::heapString(eventInfo.channel)),
       message(kj::heapArray<kj::byte>(eventInfo.message)) {}
 
-kj::StringPtr TraceDiagnosticChannelEvent::getChannel() {
+kj::StringPtr TraceDiagnosticChannelEvent::getChannel() const {
   return channel;
 }
 
@@ -491,7 +491,7 @@ jsg::JsValue TraceDiagnosticChannelEvent::getMessage(jsg::Lock& js) {
   return des.readValue(js);
 }
 
-double TraceDiagnosticChannelEvent::getTimestamp() {
+double TraceDiagnosticChannelEvent::getTimestamp() const {
   return timestamp;
 }
 
@@ -553,11 +553,11 @@ TraceItem::HibernatableWebSocketEventInfo::Type TraceItem::HibernatableWebSocket
   KJ_UNREACHABLE;
 }
 
-uint16_t TraceItem::HibernatableWebSocketEventInfo::Close::getCode() {
+uint16_t TraceItem::HibernatableWebSocketEventInfo::Close::getCode() const {
   return eventInfo.code;
 }
 
-bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
+bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() const {
   return eventInfo.wasClean;
 }
 
@@ -607,11 +607,11 @@ TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log)
       level(getTraceLogLevel(log)),
       message(getTraceLogMessage(js, log)) {}
 
-double TraceLog::getTimestamp() {
+double TraceLog::getTimestamp() const {
   return timestamp;
 }
 
-kj::StringPtr TraceLog::getLevel() {
+kj::StringPtr TraceLog::getLevel() const {
   return level;
 }
 
@@ -625,15 +625,15 @@ TraceException::TraceException(const Trace& trace, const tracing::Exception& exc
       message(kj::str(exception.message)),
       stack(exception.stack.map([](kj::StringPtr s) { return kj::str(s); })) {}
 
-double TraceException::getTimestamp() {
+double TraceException::getTimestamp() const {
   return timestamp;
 }
 
-kj::StringPtr TraceException::getMessage() {
+kj::StringPtr TraceException::getMessage() const {
   return message;
 }
 
-kj::StringPtr TraceException::getName() {
+kj::StringPtr TraceException::getName() const {
   return name;
 }
 

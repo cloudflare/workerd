@@ -32,7 +32,7 @@ class CryptoImpl final: public jsg::Object {
     jsg::BufferSource getPrime(jsg::Lock& js);
     jsg::BufferSource computeSecret(jsg::Lock& js, kj::Array<kj::byte> key);
     jsg::BufferSource generateKeys(jsg::Lock& js);
-    int getVerifyError();
+    int getVerifyError() const;
 
     JSG_RESOURCE_TYPE(DiffieHellmanHandle) {
       JSG_METHOD(setPublicKey);
@@ -209,8 +209,8 @@ class CryptoImpl final: public jsg::Object {
   kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
 
   jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, jsg::BufferSource keyData);
-  jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
-  jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
+  jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, const CreateAsymmetricKeyOptions& options);
+  jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, const CreateAsymmetricKeyOptions& options);
   static kj::Maybe<const ncrypto::EVPKeyPointer&> tryGetKey(jsg::Ref<CryptoKey>& key);
   static kj::Maybe<kj::ArrayPtr<const kj::byte>> tryGetSecretKeyData(jsg::Ref<CryptoKey>& key);
 
@@ -247,11 +247,11 @@ class CryptoImpl final: public jsg::Object {
     JSG_STRUCT(primeOrGroup, generator);
   };
 
-  CryptoKeyPair generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options);
-  CryptoKeyPair generateDsaKeyPair(jsg::Lock& js, DsaKeyPairOptions options);
-  CryptoKeyPair generateEcKeyPair(jsg::Lock& js, EcKeyPairOptions options);
-  CryptoKeyPair generateEdKeyPair(jsg::Lock& js, EdKeyPairOptions options);
-  CryptoKeyPair generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions options);
+  CryptoKeyPair generateRsaKeyPair(jsg::Lock& js, const RsaKeyPairOptions& options);
+  CryptoKeyPair generateDsaKeyPair(jsg::Lock& js, const DsaKeyPairOptions& options);
+  CryptoKeyPair generateEcKeyPair(jsg::Lock& js, const EcKeyPairOptions& options);
+  CryptoKeyPair generateEdKeyPair(jsg::Lock& js, const EdKeyPairOptions& options);
+  CryptoKeyPair generateDhKeyPair(jsg::Lock& js, const DhKeyPairOptions& options);
 
   // Sign/Verify
   class SignHandle final: public jsg::Object {

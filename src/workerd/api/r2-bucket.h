@@ -125,11 +125,11 @@ class R2Bucket: public jsg::Object {
           sha384(kj::mv(sha384)),
           sha512(kj::mv(sha512)) {}
 
-    jsg::Optional<jsg::BufferSource> getMd5(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha1(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha256(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha384(jsg::Lock& js);
-    jsg::Optional<jsg::BufferSource> getSha512(jsg::Lock& js);
+    jsg::Optional<jsg::BufferSource> getMd5(jsg::Lock& js) const;
+    jsg::Optional<jsg::BufferSource> getSha1(jsg::Lock& js) const;
+    jsg::Optional<jsg::BufferSource> getSha256(jsg::Lock& js) const;
+    jsg::Optional<jsg::BufferSource> getSha384(jsg::Lock& js) const;
+    jsg::Optional<jsg::BufferSource> getSha512(jsg::Lock& js) const;
 
     StringChecksums toJSON();
 

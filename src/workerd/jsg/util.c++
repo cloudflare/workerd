@@ -342,24 +342,24 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
   return tunneledException.handle;
 }
 
-Value Lock::exceptionToJs(kj::Exception&& exception) {
+Value Lock::exceptionToJs(kj::Exception&& exception) const {
   return withinHandleScope(
       [&] { return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception))); });
 }
 
-JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) {
+JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) const {
   return withinHandleScope([&] {
     JsValue val = JsValue(makeInternalError(v8Isolate, kj::mv(exception)));
     return val.addRef(*this);
   });
 }
 
-void Lock::throwException(Value&& exception) {
+void Lock::throwException(Value&& exception) const {
   withinHandleScope([&] { v8Isolate->ThrowException(exception.getHandle(*this)); });
   throw JsExceptionThrown();
 }
 
-void Lock::throwException(const JsValue& exception) {
+void Lock::throwException(const JsValue& exception) const {
   withinHandleScope([&] { v8Isolate->ThrowException(exception); });
   throw JsExceptionThrown();
 }
@@ -399,7 +399,7 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
   }
 }
 
-static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType) {
+static kj::String typeErrorMessage(const TypeErrorContext& c, const char* expectedType) {
   kj::String type;
 
   KJ_IF_SOME(t, c.type) {
@@ -443,7 +443,7 @@ static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType)
   KJ_UNREACHABLE;
 }
 
-static kj::String unimplementedErrorMessage(TypeErrorContext c) {
+static kj::String unimplementedErrorMessage(const TypeErrorContext& c) {
   kj::String type;
 
   KJ_IF_SOME(t, c.type) {
@@ -487,18 +487,21 @@ void throwTypeError(v8::Isolate* isolate, kj::StringPtr message) {
   throw JsExceptionThrown();
 }
 
-void throwTypeError(v8::Isolate* isolate, TypeErrorContext errorContext, kj::String expectedType) {
+void throwTypeError(
+    v8::Isolate* isolate, const TypeErrorContext& errorContext, kj::String expectedType) {
   kj::String message = typeErrorMessage(errorContext, expectedType.cStr());
   throwTypeError(isolate, message);
 }
 
-void throwTypeError(v8::Isolate* isolate, TypeErrorContext errorContext, const char* expectedType) {
+void throwTypeError(
+    v8::Isolate* isolate, const TypeErrorContext& errorContext, const char* expectedType) {
   kj::String message = typeErrorMessage(errorContext, expectedType);
   throwTypeError(isolate, message);
 }
 
-void throwTypeError(
-    v8::Isolate* isolate, TypeErrorContext errorContext, const std::type_info& expectedType) {
+void throwTypeError(v8::Isolate* isolate,
+    const TypeErrorContext& errorContext,
+    const std::type_info& expectedType) {
   if (expectedType == typeid(Unimplemented)) {
     isolate->ThrowError(v8StrIntern(isolate, unimplementedErrorMessage(errorContext)));
     throw JsExceptionThrown();
@@ -524,12 +527,12 @@ kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value>
   return jsgIsolate.unwrapException(isolate->GetCurrentContext(), exception);
 }
 
-kj::Exception Lock::exceptionToKj(Value&& exception) {
+kj::Exception Lock::exceptionToKj(Value&& exception) const {
   return withinHandleScope(
       [&] { return createTunneledException(v8Isolate, exception.getHandle(*this)); });
 }
 
-kj::Exception Lock::exceptionToKj(const JsValue& exception) {
+kj::Exception Lock::exceptionToKj(const JsValue& exception) const {
   return withinHandleScope([&] { return createTunneledException(v8Isolate, exception); });
 }
 
@@ -723,11 +726,11 @@ class ExternString: public Type {
 using ExternOneByteString = ExternString<v8::String::ExternalOneByteStringResource, char>;
 using ExternTwoByteString = ExternString<v8::String::ExternalStringResource, uint16_t>;
 
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf) {
+v8::Local<v8::String> newExternalOneByteString(const Lock& js, kj::ArrayPtr<const char> buf) {
   return check(ExternOneByteString::createExtern(js.v8Isolate, buf));
 }
 
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
+v8::Local<v8::String> newExternalTwoByteString(const Lock& js, kj::ArrayPtr<const uint16_t> buf) {
   return check(ExternTwoByteString::createExtern(js.v8Isolate, buf));
 }
 

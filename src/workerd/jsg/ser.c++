@@ -21,7 +21,7 @@ void Serializer::ExternalHandler::serializeProxy(
   JSG_FAIL_REQUIRE(DOMDataCloneError, proxy, " could not be cloned.");
 }
 
-Serializer::Serializer(Lock& js, Options options)
+Serializer::Serializer(const Lock& js, Options options)
     : externalHandler(options.externalHandler),
       treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
       ser(js.v8Isolate, this) {
@@ -171,7 +171,7 @@ Serializer::Released Serializer::release() {
   };
 }
 
-void Serializer::transfer(Lock& js, const JsValue& value) {
+void Serializer::transfer(const Lock& js, const JsValue& value) {
   KJ_ASSERT(!released, "The data has already been released.");
   // Currently we only allow transfer of ArrayBuffers
   v8::Local<v8::ArrayBuffer> arrayBuffer;
@@ -198,14 +198,14 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   ser.TransferArrayBuffer(n, arrayBuffer);
 }
 
-void Serializer::write(Lock& js, const JsValue& value) {
+void Serializer::write(const Lock& js, const JsValue& value) {
   KJ_ASSERT(!released, "The data has already been released.");
   KJ_ASSERT(check(ser.WriteValue(js.v8Context(), value)));
 }
 
 Deserializer::ExternalHandler::~ExternalHandler() noexcept(false) {}
 
-Deserializer::Deserializer(Lock& js,
+Deserializer::Deserializer(const Lock& js,
     kj::ArrayPtr<const kj::byte> data,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers,
@@ -220,14 +220,14 @@ Deserializer::Deserializer(Lock& js,
 }
 
 Deserializer::Deserializer(
-    Lock& js, Serializer::Released& released, kj::Maybe<Options> maybeOptions)
+    const Lock& js, Serializer::Released& released, kj::Maybe<Options> maybeOptions)
     : Deserializer(js,
           released.data.asPtr(),
           released.transferredArrayBuffers.asPtr(),
           released.sharedArrayBuffers.asPtr(),
           kj::mv(maybeOptions)) {}
 
-void Deserializer::init(Lock& js,
+void Deserializer::init(const Lock& js,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
   auto options = kj::mv(maybeOptions).orDefault({});
@@ -246,7 +246,7 @@ void Deserializer::init(Lock& js,
   }
 }
 
-JsValue Deserializer::readValue(Lock& js) {
+JsValue Deserializer::readValue(const Lock& js) {
   return JsValue(check(deser.ReadValue(js.v8Context())));
 }
 
@@ -315,7 +315,7 @@ void SerializedBufferDisposer::disposeImpl(void* firstElement,
 }
 
 JsValue structuredClone(
-    Lock& js, const JsValue& value, kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
+    const Lock& js, const JsValue& value, kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
   Serializer ser(js);
   KJ_IF_SOME(transfers, maybeTransfer) {
     for (auto& item: transfers) {

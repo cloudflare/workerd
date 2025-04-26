@@ -308,7 +308,7 @@ KJ_TEST("jsg::Lock logWarning") {
   LockLogIsolate isolate(v8System, kj::heap<IsolateObserver>());
   bool called = false;
   isolate.runInLockScope([&](LockLogIsolate::Lock& lock) {
-    lock.setLoggerCallback([&called](jsg::Lock& js, auto message) {
+    lock.setLoggerCallback([&called](const jsg::Lock& js, auto message) {
       KJ_ASSERT(message == "Yes that happened"_kj);
       called = true;
     });

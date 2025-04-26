@@ -227,7 +227,7 @@ void IsolateBase::deferDestruction(Item item) {
   queue.lockExclusive()->push(kj::mv(item));
 }
 
-kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() {
+kj::Own<const ExternalMemoryTarget> IsolateBase::getExternalMemoryTarget() const {
   return kj::atomicAddRef(*externalMemoryTarget);
 }
 

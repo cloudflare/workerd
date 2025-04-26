@@ -335,7 +335,7 @@ class AsymmetricKey final: public CryptoKey::Impl {
     return isPrivate ? "private"_kj : "public"_kj;
   }
 
-  kj::Own<AsymmetricKey> cloneAsPublicKey() {
+  kj::Own<AsymmetricKey> cloneAsPublicKey() const {
     if (!key) return kj::Own<AsymmetricKey>();
     auto cloned = key.clone();
     if (!cloned) return kj::Own<AsymmetricKey>();
@@ -458,7 +458,7 @@ std::optional<ncrypto::EVPKeyPointer> tryParsingPrivate(
 }  // namespace
 
 jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
-    jsg::Lock& js, CreateAsymmetricKeyOptions options) {
+    jsg::Lock& js, const CreateAsymmetricKeyOptions& options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   // Unlike with Web Crypto, where the CryptoKey being created is always
@@ -494,7 +494,8 @@ jsg::Ref<CryptoKey> CryptoImpl::createPrivateKey(
   KJ_UNREACHABLE;
 }
 
-jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options) {
+jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(
+    jsg::Lock& js, const CreateAsymmetricKeyOptions& options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   KJ_SWITCH_ONEOF(options.key) {
@@ -561,7 +562,7 @@ jsg::Ref<CryptoKey> CryptoImpl::createPublicKey(jsg::Lock& js, CreateAsymmetricK
   KJ_UNREACHABLE;
 }
 
-CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, const RsaKeyPairOptions& options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto ctx = ncrypto::EVPKeyCtxPointer::NewFromID(
@@ -626,7 +627,7 @@ CryptoKeyPair CryptoImpl::generateRsaKeyPair(jsg::Lock& js, RsaKeyPairOptions op
   };
 }
 
-CryptoKeyPair CryptoImpl::generateDsaKeyPair(jsg::Lock& js, DsaKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateDsaKeyPair(jsg::Lock& js, const DsaKeyPairOptions& options) {
   // TODO(later): BoringSSL does not implement DSA key generation using
   // EVP_PKEY_keygen. We would need to implement this using the DSA-specific
   // APIs which get a bit complicated when it comes to using a user-provided
@@ -664,7 +665,7 @@ CryptoKeyPair CryptoImpl::generateDsaKeyPair(jsg::Lock& js, DsaKeyPairOptions op
   JSG_FAIL_REQUIRE(Error, "Not yet implemented");
 }
 
-CryptoKeyPair CryptoImpl::generateEcKeyPair(jsg::Lock& js, EcKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateEcKeyPair(jsg::Lock& js, const EcKeyPairOptions& options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto nid = getCurveFromName(options.namedCurve);
@@ -703,7 +704,7 @@ CryptoKeyPair CryptoImpl::generateEcKeyPair(jsg::Lock& js, EcKeyPairOptions opti
   };
 }
 
-CryptoKeyPair CryptoImpl::generateEdKeyPair(jsg::Lock& js, EdKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateEdKeyPair(jsg::Lock& js, const EdKeyPairOptions& options) {
   ncrypto::ClearErrorOnReturn clearErrorOnReturn;
 
   auto nid = ([&] {
@@ -738,7 +739,7 @@ CryptoKeyPair CryptoImpl::generateEdKeyPair(jsg::Lock& js, EdKeyPairOptions opti
   };
 }
 
-CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, DhKeyPairOptions options) {
+CryptoKeyPair CryptoImpl::generateDhKeyPair(jsg::Lock& js, const DhKeyPairOptions& options) {
 
   // TODO(soon): Older versions of boringssl+fips do not support EVP with
   // DH key pairs that are required to make the following work. A compile

@@ -156,10 +156,10 @@ class TextDecoder final: public jsg::Object {
 
   kj::StringPtr getEncoding();
 
-  bool getFatal() {
+  bool getFatal() const {
     return ctorOptions.fatal;
   }
-  bool getIgnoreBom() {
+  bool getIgnoreBom() const {
     return ctorOptions.ignoreBOM;
   }
 

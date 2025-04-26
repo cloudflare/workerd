@@ -297,7 +297,7 @@ KJ_TEST("WritableStreamInternalController observability") {
       return kj::READY_NOW;
     }
     void abort(kj::Exception reason) override {}
-    uint getWriteCount() {
+    uint getWriteCount() const {
       return writeCount;
     }
 

@@ -29,7 +29,7 @@ kj::ArrayPtr<const kj::byte> getInputFromSource(const ZlibUtil::InputSource& dat
   KJ_UNREACHABLE;
 }
 
-uint32_t ZlibUtil::crc32Sync(InputSource data, uint32_t value) {
+uint32_t ZlibUtil::crc32Sync(const InputSource& data, uint32_t value) {
   auto dataPtr = getInputFromSource(data);
   return crc32(value, dataPtr.begin(), dataPtr.size());
 }
@@ -806,8 +806,10 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
 }
 }  // namespace
 
-kj::Array<kj::byte> ZlibUtil::zlibSync(
-    jsg::Lock& js, ZlibUtil::InputSource data, ZlibContext::Options opts, ZlibModeValue mode) {
+kj::Array<kj::byte> ZlibUtil::zlibSync(jsg::Lock& js,
+    const ZlibUtil::InputSource& data,
+    ZlibContext::Options opts,
+    ZlibModeValue mode) {
   // Any use of zlib APIs constitutes an implicit dependency on Allocator which must
   // remain alive until the zlib stream is destroyed
   CompressionAllocator allocator(js.getExternalMemoryTarget());
@@ -844,7 +846,7 @@ kj::Array<kj::byte> ZlibUtil::zlibSync(
 }
 
 void ZlibUtil::zlibWithCallback(jsg::Lock& js,
-    InputSource data,
+    const InputSource& data,
     ZlibContext::Options options,
     ZlibModeValue mode,
     CompressCallback cb) {
@@ -861,7 +863,7 @@ void ZlibUtil::zlibWithCallback(jsg::Lock& js,
 
 template <typename Context>
 kj::Array<kj::byte> ZlibUtil::brotliSync(
-    jsg::Lock& js, InputSource data, BrotliContext::Options opts) {
+    jsg::Lock& js, const InputSource& data, BrotliContext::Options opts) {
   // Any use of brotli APIs constitutes an implicit dependency on Allocator which must
   // remain alive until the brotli state is destroyed
   CompressionAllocator allocator(js.getExternalMemoryTarget());
@@ -913,7 +915,7 @@ kj::Array<kj::byte> ZlibUtil::brotliSync(
 
 template <typename Context>
 void ZlibUtil::brotliWithCallback(
-    jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb) {
+    jsg::Lock& js, const InputSource& data, BrotliContext::Options options, CompressCallback cb) {
   // Capture only relevant errors so they can be passed to the callback
   auto res = js.tryCatch([&]() {
     return CompressCallbackArg(brotliSync<Context>(js, kj::mv(data), kj::mv(options)));
@@ -951,13 +953,13 @@ template bool ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>::initializ
     jsg::Lock&, jsg::BufferSource, jsg::BufferSource, jsg::Function<void()>);
 
 template kj::Array<kj::byte> ZlibUtil::brotliSync<BrotliEncoderContext>(
-    jsg::Lock& js, InputSource data, BrotliContext::Options opts);
+    jsg::Lock& js, const InputSource& data, BrotliContext::Options opts);
 template kj::Array<kj::byte> ZlibUtil::brotliSync<BrotliDecoderContext>(
-    jsg::Lock& js, InputSource data, BrotliContext::Options opts);
+    jsg::Lock& js, const InputSource& data, BrotliContext::Options opts);
 template void ZlibUtil::brotliWithCallback<BrotliEncoderContext>(
-    jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
+    jsg::Lock& js, const InputSource& data, BrotliContext::Options options, CompressCallback cb);
 template void ZlibUtil::brotliWithCallback<BrotliDecoderContext>(
-    jsg::Lock& js, InputSource data, BrotliContext::Options options, CompressCallback cb);
+    jsg::Lock& js, const InputSource& data, BrotliContext::Options options, CompressCallback cb);
 #undef CREATE_TEMPLATE
 #endif
 }  // namespace workerd::api::node

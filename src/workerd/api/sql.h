@@ -234,7 +234,7 @@ class SqlStorage::Cursor final: public jsg::Object {
     tracker.trackField("columnNames", columnNames);
   }
 
-  bool getReusedCachedQueryForTest() {
+  bool getReusedCachedQueryForTest() const {
     return reusedCachedQuery;
   }
 

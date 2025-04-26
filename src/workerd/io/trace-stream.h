@@ -33,7 +33,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
     JSG_FAIL_REQUIRE(TypeError, "The receiver is not a tail stream");
   }
 
-  uint16_t getType() override {
+  uint16_t getType() const override {
     return typeId;
   }
 

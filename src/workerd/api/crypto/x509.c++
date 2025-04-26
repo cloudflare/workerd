@@ -839,7 +839,8 @@ jsg::JsObject X509Certificate::toLegacyObject(jsg::Lock& js) {
   }
   KJ_IF_SOME(keyUsage, getKeyUsage()) {
     obj.set(js, "ext_key_usage",
-        js.arr(keyUsage.asPtr(), [](jsg::Lock& js, const kj::String& val) { return js.str(val); }));
+        js.arr(keyUsage.asPtr(),
+            [](const jsg::Lock& js, const kj::String& val) { return js.str(val); }));
   }
   KJ_IF_SOME(serialNumber, getSerialNumber()) {
     obj.set(js, "serialNumber", js.str(serialNumber));

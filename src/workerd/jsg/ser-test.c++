@@ -29,7 +29,7 @@ struct SerTestContext: public ContextGlobalObject {
       return js.alloc<Foo>(i);
     }
 
-    int getI() {
+    int getI() const {
       return i;
     }
 
@@ -37,7 +37,7 @@ struct SerTestContext: public ContextGlobalObject {
       JSG_READONLY_PROTOTYPE_PROPERTY(i, getI);
     }
 
-    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) const {
       serializer.writeRawUint32(i);
     }
     static jsg::Ref<Foo> deserialize(Lock& js, SerializationTag tag, Deserializer& deserializer) {
@@ -89,7 +89,7 @@ struct SerTestContext: public ContextGlobalObject {
 
     JSG_RESOURCE_TYPE(Baz) {}
 
-    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) const {
       JSG_REQUIRE(!serializeThrows, Error, "throw from serialize()");
     }
     static jsg::Ref<Bar> deserialize(Lock& js, SerializationTag tag, Deserializer& deserializer) {
@@ -186,7 +186,7 @@ struct SerTestContextV2: public ContextGlobalObject {
       JSG_READONLY_PROTOTYPE_PROPERTY(val, getVal);
     }
 
-    void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+    void serialize(jsg::Lock& js, jsg::Serializer& serializer) const {
       // V2 just writes a value!
       serializer.write(js, JsValue(val.getHandle(js)));
     }

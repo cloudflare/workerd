@@ -139,17 +139,17 @@ struct TypeErrorContext {
 // Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
 // of type JsExceptionThrown, which will be caught by liftKj().
 [[noreturn]] void throwTypeError(
-    v8::Isolate* isolate, TypeErrorContext errorContext, const char* expectedType);
+    v8::Isolate* isolate, const TypeErrorContext& errorContext, const char* expectedType);
 
 // Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
 // of type JsExceptionThrown, which will be caught by liftKj().
 [[noreturn]] void throwTypeError(
-    v8::Isolate* isolate, TypeErrorContext errorContext, const std::type_info& expectedType);
+    v8::Isolate* isolate, const TypeErrorContext& errorContext, const std::type_info& expectedType);
 
 // Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
 // of type JsExceptionThrown, which will be caught by liftKj().
 [[noreturn]] void throwTypeError(
-    v8::Isolate* isolate, TypeErrorContext errorContext, kj::String expectedType);
+    v8::Isolate* isolate, const TypeErrorContext& errorContext, kj::String expectedType);
 
 // Throw a JavaScript TypeError with a free-form message.
 [[noreturn]] void throwTypeError(v8::Isolate* isolate, kj::StringPtr message);
@@ -450,7 +450,7 @@ class Lock;
 // Note that these intentionally do not use the v8Str naming convention like the other
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+v8::Local<v8::String> newExternalOneByteString(const Lock& js, kj::ArrayPtr<const char> buf);
 
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
@@ -464,7 +464,7 @@ v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char
 // Note that these intentionally do not use the v8Str naming convention like the other
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+v8::Local<v8::String> newExternalTwoByteString(const Lock& js, kj::ArrayPtr<const uint16_t> buf);
 
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.

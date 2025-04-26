@@ -1205,19 +1205,19 @@ jsg::Optional<jsg::BufferSource> copyHash(
 }
 }  // namespace
 
-jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getMd5(jsg::Lock& js) {
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getMd5(jsg::Lock& js) const {
   return copyHash(js, md5);
 }
-jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha1(jsg::Lock& js) {
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha1(jsg::Lock& js) const {
   return copyHash(js, sha1);
 }
-jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha256(jsg::Lock& js) {
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha256(jsg::Lock& js) const {
   return copyHash(js, sha256);
 }
-jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha384(jsg::Lock& js) {
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha384(jsg::Lock& js) const {
   return copyHash(js, sha384);
 }
-jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha512(jsg::Lock& js) {
+jsg::Optional<jsg::BufferSource> R2Bucket::Checksums::getSha512(jsg::Lock& js) const {
   return copyHash(js, sha512);
 }
 

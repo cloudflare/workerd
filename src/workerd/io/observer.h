@@ -208,7 +208,7 @@ class IsolateObserver: public kj::AtomicRefcounted {
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
   // request (if any) is being traced.
   virtual kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
-      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const {
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>>&& parentOrRequest) const {
     return kj::none;
   }
 

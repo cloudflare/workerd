@@ -818,12 +818,12 @@ class Data {
   }
 
   // Get the raw underlying v8 handle.
-  v8::Local<v8::Data> getHandle(Lock& js) const;
+  v8::Local<v8::Data> getHandle(const Lock& js) const;
 
-  Data addRef(v8::Isolate* isolate) {
+  Data addRef(v8::Isolate* isolate) const {
     return Data(isolate, getHandle(isolate));
   }
-  Data addRef(Lock& js);
+  Data addRef(const Lock& js) const;
 
   inline bool operator==(const Data& other) const {
     return handle == other.handle;
@@ -893,12 +893,12 @@ class V8Ref: private Data {
       return Data::getHandle(isolate).template As<T>();
     }
   }
-  v8::Local<T> getHandle(jsg::Lock& js) const;
+  v8::Local<T> getHandle(const jsg::Lock& js) const;
 
   V8Ref addRef(v8::Isolate* isolate) {
     return V8Ref(isolate, getHandle(isolate));
   }
-  V8Ref addRef(jsg::Lock& js);
+  V8Ref addRef(const jsg::Lock& js);
 
   V8Ref deepClone(jsg::Lock& js);
 
@@ -941,7 +941,7 @@ class HashableV8Ref: public V8Ref<T> {
   HashableV8Ref addRef(v8::Isolate* isolate) {
     return HashableV8Ref(isolate, this->getHandle(isolate), identityHash);
   }
-  HashableV8Ref addRef(jsg::Lock& js);
+  HashableV8Ref addRef(const jsg::Lock& js);
 
   int hashCode() const {
     return identityHash;
@@ -1157,7 +1157,7 @@ class Varargs {
   Varargs(Varargs&&) = default;
   KJ_DISALLOW_COPY(Varargs);
 
-  size_t size() {
+  size_t size() const {
     return length;
   }
 
@@ -2364,42 +2364,42 @@ class Lock {
   }
 
   // Returns a kj::String with an external memory adjustment attached.
-  kj::String accountedKjString(kj::Array<char>&& str);
-  kj::String accountedKjString(kj::String&& str) {
+  kj::String accountedKjString(kj::Array<char>&& str) const;
+  kj::String accountedKjString(kj::String&& str) const {
     return accountedKjString(str.releaseArray());
   }
-  kj::String accountedKjString(kj::StringPtr str) {
+  kj::String accountedKjString(kj::StringPtr str) const {
     return accountedKjString(kj::str(str));
   }
 
   // Returns a ByteString with an external memory adjustment attached.
-  ByteString accountedByteString(kj::Array<char>&& str);
-  ByteString accountedByteString(kj::String&& str) {
+  ByteString accountedByteString(kj::Array<char>&& str) const;
+  ByteString accountedByteString(kj::String&& str) const {
     return accountedByteString(str.releaseArray());
   }
-  ByteString accountedByteString(kj::StringPtr str) {
+  ByteString accountedByteString(kj::StringPtr str) const {
     return accountedByteString(kj::str(str));
   }
 
   // Returns a DOMString with an external memory adjustment attached.
-  DOMString accountedDOMString(kj::Array<char>&& str);
-  DOMString accountedDOMString(kj::String&& str) {
+  DOMString accountedDOMString(kj::Array<char>&& str) const;
+  DOMString accountedDOMString(kj::String&& str) const {
     return accountedDOMString(str.releaseArray());
   }
-  DOMString accountedDOMString(kj::StringPtr str) {
+  DOMString accountedDOMString(kj::StringPtr str) const {
     return accountedDOMString(kj::str(str));
   }
 
   // Returns a USVString with an external memory adjustment attached.
-  USVString accountedUSVString(kj::Array<char>&& str);
-  USVString accountedUSVString(kj::String&& str) {
+  USVString accountedUSVString(kj::Array<char>&& str) const;
+  USVString accountedUSVString(kj::String&& str) const {
     return accountedUSVString(str.releaseArray());
   }
-  USVString accountedUSVString(kj::StringPtr str) {
+  USVString accountedUSVString(kj::StringPtr str) const {
     return accountedUSVString(kj::str(str));
   }
 
-  v8::Local<v8::Context> v8Context() {
+  v8::Local<v8::Context> v8Context() const {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
     return context;
@@ -2420,15 +2420,15 @@ class Lock {
   // until the next time the lock is held. The ExternalMemoryAdjustment itself can be
   // moved and can be used to increment or decrement the amount of external memory
   // held.
-  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount = 0);
+  ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount = 0) const;
 
   // Used to save a reference to an isolate that is responsible for external memory usage.
   // getAdjustment() can be invoked at any time to create a new RAII adjustment object
   // pointing to this isolate
-  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
+  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget() const;
 
-  Value parseJson(kj::ArrayPtr<const char> data);
-  Value parseJson(v8::Local<v8::String> text);
+  Value parseJson(kj::ArrayPtr<const char> data) const;
+  Value parseJson(v8::Local<v8::String> text) const;
   template <typename T>
   kj::String serializeJson(V8Ref<T>& value) {
     return serializeJson(value.getHandle(*this));
@@ -2438,7 +2438,7 @@ class Lock {
     return serializeJson(value.getHandle(*this));
   }
 
-  void recursivelyFreeze(Value& value);
+  void recursivelyFreeze(Value& value) const;
 
   // ---------------------------------------------------------------------------
   // Exception-related stuff
@@ -2447,30 +2447,30 @@ class Lock {
   // error, this reproduces the original error. If it is not a tunneled error, then it is treated
   // as an internal error: the KJ exception message is logged to stderr, and a JavaScript error
   // is returned with a generic description.
-  Value exceptionToJs(kj::Exception&& exception);
+  Value exceptionToJs(kj::Exception&& exception) const;
 
-  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception);
-
-  // Encodes the given JavaScript exception into a KJ exception, formatting the description in
-  // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
-  // JavaScript error.
-  kj::Exception exceptionToKj(const JsValue& exception);
+  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception) const;
 
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
   // JavaScript error.
-  kj::Exception exceptionToKj(Value&& exception);
+  kj::Exception exceptionToKj(const JsValue& exception) const;
+
+  // Encodes the given JavaScript exception into a KJ exception, formatting the description in
+  // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
+  // JavaScript error.
+  kj::Exception exceptionToKj(Value&& exception) const;
 
   // Throws a JavaScript exception. The exception is scheduled on the isolate, and then an
   // instance of `JsExceptionThrown` is thrown in C++. All places where JavaScript calls into C++
   // via JSG understand how to handle this and propagate the exception back to JavaScript.
-  [[noreturn]] void throwException(Value&& exception);
+  [[noreturn]] void throwException(Value&& exception) const;
 
-  [[noreturn]] void throwException(kj::Exception&& exception) {
+  [[noreturn]] void throwException(kj::Exception&& exception) const {
     throwException(exceptionToJs(kj::mv(exception)));
   }
 
-  [[noreturn]] void throwException(const JsValue& exception);
+  [[noreturn]] void throwException(const JsValue& exception) const;
 
   // Invokes `func()` synchronously, catching exceptions. In the event of an exception,
   // `errorHandler()` will be called, passing the exception as type `jsg::Value`.
@@ -2535,7 +2535,7 @@ class Lock {
   //
   //     auto [promise, resolver] = js.newPromiseAndResolver();
   template <typename T>
-  PromiseResolverPair<T> newPromiseAndResolver();
+  PromiseResolverPair<T> newPromiseAndResolver() const;
 
   // Construct an immediately-resolved promise resolving to the given value.
   template <typename T>
@@ -2557,8 +2557,8 @@ class Lock {
   Promise<T> rejectedPromise(kj::Exception&& exception);
 
   // Like above, but return a pure-JS promise, not a typed Promise.
-  JsPromise rejectedJsPromise(jsg::JsValue exception);
-  JsPromise rejectedJsPromise(kj::Exception&& exception);
+  JsPromise rejectedJsPromise(jsg::JsValue exception) const;
+  JsPromise rejectedJsPromise(kj::Exception&& exception) const;
 
   // Like `kj::evalNow()`, but returns a jsg::Promise for the result. Synchronous exceptions are
   // caught and returned as a rejected promise.
@@ -2595,7 +2595,7 @@ class Lock {
 
   // Emits the warning only if there is anywhere for the log to go (for instance,
   // if debug logging is enabled or the inspector is being used).
-  void logWarning(kj::StringPtr message);
+  void logWarning(kj::StringPtr message) const;
 
   // TODO(later): Add the other log variants from IoContext? eg. logWarningOnce,
   // logErrorOnce, logUncaughtException, etc.
@@ -2609,27 +2609,27 @@ class Lock {
   // Convenience methods to unwrap various types of V8 values. All of these could be done manually
   // via the V8 API, but these methods are much easier.
 
-  v8::Local<v8::Value> v8Undefined();
-  v8::Local<v8::Value> v8Null();
+  v8::Local<v8::Value> v8Undefined() const;
+  v8::Local<v8::Value> v8Null() const;
 
-  v8::Local<v8::Value> v8Error(kj::StringPtr message);
-  v8::Local<v8::Value> v8TypeError(kj::StringPtr message);
+  v8::Local<v8::Value> v8Error(kj::StringPtr message) const;
+  v8::Local<v8::Value> v8TypeError(kj::StringPtr message) const;
 
-  void v8Set(v8::Local<v8::Object> obj, V8Ref<v8::String>& name, Value& value);
-  void v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, v8::Local<v8::Value> value);
-  void v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, Value& value);
-  v8::Local<v8::Value> v8Get(v8::Local<v8::Object> obj, kj::StringPtr name);
-  v8::Local<v8::Value> v8Get(v8::Local<v8::Array> obj, uint idx);
-  bool v8Has(v8::Local<v8::Object> obj, kj::StringPtr name);
-  bool v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name);
+  void v8Set(v8::Local<v8::Object> obj, V8Ref<v8::String>& name, Value& value) const;
+  void v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, v8::Local<v8::Value> value) const;
+  void v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, Value& value) const;
+  v8::Local<v8::Value> v8Get(v8::Local<v8::Object> obj, kj::StringPtr name) const;
+  v8::Local<v8::Value> v8Get(v8::Local<v8::Array> obj, uint idx) const;
+  bool v8Has(v8::Local<v8::Object> obj, kj::StringPtr name) const;
+  bool v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) const;
 
   template <typename T>
-  V8Ref<T> v8Ref(v8::Local<T> local);
-  Data v8Data(v8::Local<v8::Data> data);
+  V8Ref<T> v8Ref(v8::Local<T> local) const;
+  Data v8Data(v8::Local<v8::Data> data) const;
 
   kj::String serializeJson(v8::Local<v8::Value> value);
 
-  v8::Local<v8::String> wrapString(kj::StringPtr text);
+  v8::Local<v8::String> wrapString(kj::StringPtr text) const;
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
       jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
@@ -2650,7 +2650,7 @@ class Lock {
 
   virtual v8::Local<v8::Promise> wrapSimplePromise(Promise<Value> promise) = 0;
 
-  bool toBool(v8::Local<v8::Value> value);
+  bool toBool(v8::Local<v8::Value> value) const;
   virtual kj::String toString(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<JsValue> toDict(const jsg::JsValue& value) = 0;
@@ -2660,22 +2660,22 @@ class Lock {
   // Setup stuff
 
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
-  void setAllowEval(bool allow);
+  void setAllowEval(bool allow) const;
 
   // Install JSPI on the current context. Currently used only for Python workers.
-  void installJspi();
+  void installJspi() const;
 
-  void setCaptureThrowsAsRejections(bool capture);
+  void setCaptureThrowsAsRejections(bool capture) const;
 
-  void setNodeJsCompatEnabled();
-  void setToStringTag();
-  void disableTopLevelAwait();
+  void setNodeJsCompatEnabled() const;
+  void setToStringTag() const;
+  void disableTopLevelAwait() const;
 
-  using Logger = void(Lock&, kj::StringPtr);
-  void setLoggerCallback(kj::Function<Logger>&& logger);
+  using Logger = void(const Lock&, kj::StringPtr);
+  void setLoggerCallback(kj::Function<Logger>&& logger) const;
 
   using ErrorReporter = void(Lock&, kj::String, const JsValue&, const JsMessage&);
-  void setErrorReporterCallback(kj::Function<ErrorReporter>&& errorReporter);
+  void setErrorReporterCallback(kj::Function<ErrorReporter>&& errorReporter) const;
 
   // ---------------------------------------------------------------------------
   // Misc. Stuff
@@ -2693,7 +2693,7 @@ class Lock {
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then
   // v8::EscapableHandleScope is used ensuring that the v8::Local<T> return
   // value is properly handled.
-  auto withinHandleScope(auto&& fn) {
+  auto withinHandleScope(auto&& fn) const {
     using Ret = decltype(fn());
     if constexpr (isV8Local<Ret>()) {
       v8::EscapableHandleScope scope(v8Isolate);
@@ -2718,55 +2718,55 @@ class Lock {
   JsObject getPrototypeFor();
 
   // ====================================================================================
-  JsObject global() KJ_WARN_UNUSED_RESULT;
-  JsValue undefined() KJ_WARN_UNUSED_RESULT;
-  JsValue null() KJ_WARN_UNUSED_RESULT;
-  JsBoolean boolean(bool val) KJ_WARN_UNUSED_RESULT;
-  JsNumber num(double) KJ_WARN_UNUSED_RESULT;
-  JsNumber num(float) KJ_WARN_UNUSED_RESULT;
-  JsInt32 num(int8_t) KJ_WARN_UNUSED_RESULT;
-  JsInt32 num(int16_t) KJ_WARN_UNUSED_RESULT;
-  JsInt32 num(int32_t) KJ_WARN_UNUSED_RESULT;
-  JsUint32 num(uint8_t) KJ_WARN_UNUSED_RESULT;
-  JsUint32 num(uint16_t) KJ_WARN_UNUSED_RESULT;
-  JsUint32 num(uint32_t) KJ_WARN_UNUSED_RESULT;
-  JsBigInt bigInt(int64_t) KJ_WARN_UNUSED_RESULT;
-  JsBigInt bigInt(uint64_t) KJ_WARN_UNUSED_RESULT;
-  JsString str() KJ_WARN_UNUSED_RESULT;
-  JsString str(kj::ArrayPtr<const char16_t>) KJ_WARN_UNUSED_RESULT;
-  JsString str(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
-  JsString str(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
-  JsString str(kj::ArrayPtr<const kj::byte>) KJ_WARN_UNUSED_RESULT;
-  JsString strIntern(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
-  JsString strExtern(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
-  JsString strExtern(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
-  JsSymbol symbol(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
-  JsSymbol symbolShared(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
-  JsSymbol symbolInternal(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
-  JsObject obj() KJ_WARN_UNUSED_RESULT;
-  JsObject obj(
-      kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
-  JsObject objNoProto() KJ_WARN_UNUSED_RESULT;
-  JsMap map() KJ_WARN_UNUSED_RESULT;
-  JsValue external(void*) KJ_WARN_UNUSED_RESULT;
-  JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
-  JsValue typeError(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
-  JsValue rangeError(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
-  JsDate date(double timestamp) KJ_WARN_UNUSED_RESULT;
-  JsDate date(kj::Date date) KJ_WARN_UNUSED_RESULT;
-  JsDate date(kj::StringPtr date) KJ_WARN_UNUSED_RESULT;
+  JsObject global() const KJ_WARN_UNUSED_RESULT;
+  JsValue undefined() const KJ_WARN_UNUSED_RESULT;
+  JsValue null() const KJ_WARN_UNUSED_RESULT;
+  JsBoolean boolean(bool val) const KJ_WARN_UNUSED_RESULT;
+  JsNumber num(double) const KJ_WARN_UNUSED_RESULT;
+  JsNumber num(float) const KJ_WARN_UNUSED_RESULT;
+  JsInt32 num(int8_t) const KJ_WARN_UNUSED_RESULT;
+  JsInt32 num(int16_t) const KJ_WARN_UNUSED_RESULT;
+  JsInt32 num(int32_t) const KJ_WARN_UNUSED_RESULT;
+  JsUint32 num(uint8_t) const KJ_WARN_UNUSED_RESULT;
+  JsUint32 num(uint16_t) const KJ_WARN_UNUSED_RESULT;
+  JsUint32 num(uint32_t) const KJ_WARN_UNUSED_RESULT;
+  JsBigInt bigInt(int64_t) const KJ_WARN_UNUSED_RESULT;
+  JsBigInt bigInt(uint64_t) const KJ_WARN_UNUSED_RESULT;
+  JsString str() const KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const char16_t>) const KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const uint16_t>) const KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const char>) const KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const kj::byte>) const KJ_WARN_UNUSED_RESULT;
+  JsString strIntern(kj::StringPtr) const KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::ArrayPtr<const char>) const KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::ArrayPtr<const uint16_t>) const KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbol(kj::StringPtr) const KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolShared(kj::StringPtr) const KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolInternal(kj::StringPtr) const KJ_WARN_UNUSED_RESULT;
+  JsObject obj() const KJ_WARN_UNUSED_RESULT;
+  JsObject obj(kj::ArrayPtr<kj::StringPtr> keys,
+      kj::ArrayPtr<jsg::JsValue> values) const KJ_WARN_UNUSED_RESULT;
+  JsObject objNoProto() const KJ_WARN_UNUSED_RESULT;
+  JsMap map() const KJ_WARN_UNUSED_RESULT;
+  JsValue external(void*) const KJ_WARN_UNUSED_RESULT;
+  JsValue error(kj::StringPtr message) const KJ_WARN_UNUSED_RESULT;
+  JsValue typeError(kj::StringPtr message) const KJ_WARN_UNUSED_RESULT;
+  JsValue rangeError(kj::StringPtr message) const KJ_WARN_UNUSED_RESULT;
+  JsDate date(double timestamp) const KJ_WARN_UNUSED_RESULT;
+  JsDate date(kj::Date date) const KJ_WARN_UNUSED_RESULT;
+  JsDate date(kj::StringPtr date) const KJ_WARN_UNUSED_RESULT;
 
   // Returns a JsObject that is backed internally by a v8::External object that
   // takes ownership over the inner.
   template <typename T>
-  JsObject opaque(T&& inner) KJ_WARN_UNUSED_RESULT;
+  JsObject opaque(T&& inner) const KJ_WARN_UNUSED_RESULT;
 
   // Returns a jsg::BufferSource whose underlying JavaScript handle is a Uint8Array.
-  BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  BufferSource bytes(kj::Array<kj::byte> data) const KJ_WARN_UNUSED_RESULT;
 
   // Returns a jsg::BufferSource whose underlying JavaScript handle is an ArrayBuffer
   // as opposed to the default Uint8Array.
-  BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  BufferSource arrayBuffer(kj::Array<kj::byte> data) const KJ_WARN_UNUSED_RESULT;
 
   enum RegExpFlags {
     kNONE = v8::RegExp::Flags::kNone,
@@ -2783,33 +2783,33 @@ class Lock {
 
   JsRegExp regexp(kj::StringPtr pattern,
       RegExpFlags flags = RegExpFlags::kNONE,
-      kj::Maybe<uint32_t> backtrackLimit = kj::none) KJ_WARN_UNUSED_RESULT;
+      kj::Maybe<uint32_t> backtrackLimit = kj::none) const KJ_WARN_UNUSED_RESULT;
 
   template <typename... Args>
     requires(std::assignable_from<JsValue&, Args> && ...)
-  JsArray arr(const Args&... args) KJ_WARN_UNUSED_RESULT;
+  JsArray arr(const Args&... args) const KJ_WARN_UNUSED_RESULT;
 
-  JsArray arr(kj::ArrayPtr<JsValue> values) KJ_WARN_UNUSED_RESULT;
+  JsArray arr(kj::ArrayPtr<JsValue> values) const KJ_WARN_UNUSED_RESULT;
 
   // Create a JavaScript array from the given kj::ArrayPtr, passing each
   // item through the given transformation function to create the appropriate
   // JsValue.
   template <typename T, typename Func>
-  JsArray arr(kj::ArrayPtr<T> values, Func fn) KJ_WARN_UNUSED_RESULT;
+  JsArray arr(kj::ArrayPtr<T> values, Func fn) const KJ_WARN_UNUSED_RESULT;
 
   template <typename... Args>
     requires(std::assignable_from<JsValue&, Args> && ...)
-  JsSet set(const Args&... args) KJ_WARN_UNUSED_RESULT;
+  JsSet set(const Args&... args) const KJ_WARN_UNUSED_RESULT;
 
-#define V(Name) JsSymbol symbol##Name() KJ_WARN_UNUSED_RESULT;
+#define V(Name) JsSymbol symbol##Name() const KJ_WARN_UNUSED_RESULT;
   JS_V8_SYMBOLS(V)
 #undef V
-  JsSymbol symbolDispose() KJ_WARN_UNUSED_RESULT;
-  JsSymbol symbolAsyncDispose() KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolDispose() const KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolAsyncDispose() const KJ_WARN_UNUSED_RESULT;
 
-  void runMicrotasks();
-  void terminateExecution();
-  bool pumpMsgLoop();
+  void runMicrotasks() const;
+  void terminateExecution() const;
+  bool pumpMsgLoop() const;
 
   // Logs and reports the error to tail workers (if called within an request),
   // the inspector (if attached), or to KJ_LOG(Info).
@@ -2922,23 +2922,23 @@ inline kj::Maybe<T> PropertyReflection<T>::get(Lock& js, kj::StringPtr name) {
 }
 
 template <typename T>
-inline V8Ref<T> Lock::v8Ref(v8::Local<T> local) {
+inline V8Ref<T> Lock::v8Ref(v8::Local<T> local) const {
   return V8Ref(v8Isolate, local);
 }
 
-inline Data Lock::v8Data(v8::Local<v8::Data> local) {
+inline Data Lock::v8Data(v8::Local<v8::Data> local) const {
   return Data(v8Isolate, local);
 }
 
-inline v8::Local<v8::Value> Lock::v8Undefined() {
+inline v8::Local<v8::Value> Lock::v8Undefined() const {
   return v8::Undefined(v8Isolate);
 }
 
-inline v8::Local<v8::Value> Lock::v8Null() {
+inline v8::Local<v8::Value> Lock::v8Null() const {
   return v8::Null(v8Isolate);
 }
 
-inline Data Data::addRef(jsg::Lock& js) {
+inline Data Data::addRef(const jsg::Lock& js) const {
   return Data(js.v8Isolate, getHandle(js));
 }
 
@@ -2948,7 +2948,7 @@ kj::Maybe<v8::Local<v8::Object>> Ref<T>::tryGetHandle(Lock& js) {
 }
 
 template <typename T>
-inline V8Ref<T> V8Ref<T>::addRef(jsg::Lock& js) {
+inline V8Ref<T> V8Ref<T>::addRef(const jsg::Lock& js) {
   return js.v8Ref(getHandle(js));
 }
 
@@ -2961,16 +2961,16 @@ V8Ref<T> V8Ref<T>::deepClone(jsg::Lock& js) {
 }
 
 template <typename T>
-inline HashableV8Ref<T> HashableV8Ref<T>::addRef(jsg::Lock& js) {
+inline HashableV8Ref<T> HashableV8Ref<T>::addRef(const jsg::Lock& js) {
   return HashableV8Ref(js.v8Isolate, this->getHandle(js), identityHash);
 }
 
 template <typename T>
-inline v8::Local<T> V8Ref<T>::getHandle(jsg::Lock& js) const {
+inline v8::Local<T> V8Ref<T>::getHandle(const jsg::Lock& js) const {
   return getHandle(js.v8Isolate);
 }
 
-inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) const {
+inline v8::Local<v8::Data> Data::getHandle(const jsg::Lock& js) const {
   return getHandle(js.v8Isolate);
 }
 
@@ -2981,6 +2981,7 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 
 }  // namespace workerd::jsg
 
+// NOLINTBEGIN
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
 #include "modules.h"
@@ -2995,3 +2996,4 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 #ifndef JSG_IMPLEMENTATION
 #include <workerd/jsg/type-wrapper.h>
 #endif  // JSG_IMPLEMENTATION
+// NOLINTEND

@@ -33,7 +33,7 @@ class Container: public jsg::Object {
     JSG_STRUCT(entrypoint, enableInternet, env);
   };
 
-  bool getRunning() {
+  bool getRunning() const {
     return running;
   }
 

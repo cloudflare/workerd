@@ -45,7 +45,7 @@ bool determineIsIntegerType(auto& handle) {
   return false;
 }
 
-Value createHandle(Lock& js, BackingStore& backingStore) {
+Value createHandle(const Lock& js, BackingStore& backingStore) {
   return js.withinHandleScope([&] { return js.v8Ref(backingStore.createHandle(js)); });
 }
 
@@ -78,7 +78,7 @@ bool BackingStore::operator==(const BackingStore& other) {
       byteOffset == other.byteOffset;
 }
 
-kj::Maybe<BufferSource> BufferSource::tryAlloc(Lock& js, size_t size) {
+kj::Maybe<BufferSource> BufferSource::tryAlloc(const Lock& js, size_t size) {
   v8::Local<v8::ArrayBuffer> buffer;
   if (v8::ArrayBuffer::MaybeNew(js.v8Isolate, size).ToLocal(&buffer)) {
     return BufferSource(js, v8::Uint8Array::New(buffer, 0, size).As<v8::Value>());
@@ -86,7 +86,7 @@ kj::Maybe<BufferSource> BufferSource::tryAlloc(Lock& js, size_t size) {
   return kj::none;
 }
 
-BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
+BufferSource::BufferSource(const Lock& js, v8::Local<v8::Value> handle)
     : handle(js.v8Ref(handle)),
       maybeBackingStore(BackingStore(getBacking(handle),
           getByteLength(handle),
@@ -95,7 +95,7 @@ BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
           determineConstructor(handle),
           determineIsIntegerType(handle))) {}
 
-BufferSource::BufferSource(Lock& js, BackingStore&& backingStore)
+BufferSource::BufferSource(const Lock& js, BackingStore&& backingStore)
     : handle(createHandle(js, backingStore)),
       maybeBackingStore(kj::mv(backingStore)) {}
 
@@ -133,7 +133,7 @@ void BufferSource::setDetachKey(Lock& js, v8::Local<v8::Value> key) {
 }
 
 BufferSource BufferSource::wrap(
-    Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx) {
+    const Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx) {
   return BufferSource(js, BackingStore::wrap(data, size, disposer, ctx));
 }
 

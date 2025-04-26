@@ -467,7 +467,7 @@ struct PromiseResolverPair {
 };
 
 template <typename T>
-PromiseResolverPair<T> Lock::newPromiseAndResolver() {
+PromiseResolverPair<T> Lock::newPromiseAndResolver() const {
   return withinHandleScope([&]() -> PromiseResolverPair<T> {
     auto resolver = check(v8::Promise::Resolver::New(v8Context()));
     auto promise = resolver->GetPromise();

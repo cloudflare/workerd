@@ -78,7 +78,7 @@ void headersToCDP(const kj::HttpHeaders& in, capnp::JsonValue::Builder out) {
   }
 }
 
-void stackTraceToCDP(jsg::Lock& js, cdp::Runtime::StackTrace::Builder builder) {
+void stackTraceToCDP(const jsg::Lock& js, cdp::Runtime::StackTrace::Builder builder) {
   // TODO(cleanup): Maybe use V8Inspector::captureStackTrace() which does this for us. However, it
   //   produces protocol objects in its own format which want to handle their whole serialization
   //   to JSON. Also, those protocol objects are defined in generated code which we currently don't
@@ -1012,7 +1012,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
-      lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
+      lock->setLoggerCallback([this](const jsg::Lock& js, kj::StringPtr message) {
         if (impl->inspector != kj::none) {
           logMessage(js, static_cast<uint16_t>(cdp::LogType::WARNING), message);
         }
@@ -1921,14 +1921,14 @@ struct Worker::Lock::Impl {
   jsg::Lock& inner;
 
   Impl(const Worker& worker, LockType lockType, jsg::V8StackScope& stackScope)
-      : recordedLock(worker.getIsolate(), lockType, stackScope),
+      : recordedLock(worker.getIsolate(), kj::mv(lockType), stackScope),
         inner(*recordedLock.lock) {}
 };
 
 Worker::Lock::Lock(const Worker& constWorker, LockType lockType, jsg::V8StackScope& stackScope)
     :  // const_cast OK because we took out a lock.
       worker(const_cast<Worker&>(constWorker)),
-      impl(kj::heap<Impl>(worker, lockType, stackScope)) {
+      impl(kj::heap<Impl>(worker, kj::mv(lockType), stackScope)) {
   kj::requireOnStack(this, "Worker::Lock MUST be allocated on the stack.");
 }
 
@@ -2471,7 +2471,7 @@ class Worker::Isolate::LimitedBodyWrapper: public kj::OutputStream {
     }
   }
 
-  size_t getWrittenSize() {
+  size_t getWrittenSize() const {
     return this->size;
   }
 
@@ -3167,7 +3167,7 @@ void Worker::Isolate::logErrorOnce(kj::StringPtr description) {
   });
 }
 
-void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description) {
+void Worker::Isolate::logMessage(const jsg::Lock& js, uint16_t type, kj::StringPtr description) {
   if (impl->inspector != kj::none) {
     // We want to log a warning to the devtools console, as if `console.warn()` were called.
     // However, the only public interface to call the real `console.warn()` is via JavaScript,

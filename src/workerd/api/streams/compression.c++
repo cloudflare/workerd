@@ -222,12 +222,12 @@ class LazyBuffer {
   // For convenience, provide the size of the valid data that has not been read back yet. This may
   // be smaller than the size of the internal vector, which is not relevant for the stream
   // implementation.
-  size_t size() {
+  size_t size() const {
     return valid_size_;
   }
 
   // As with size(), the buffer is considered empty if there is no valid data remaining.
-  size_t empty() {
+  size_t empty() const {
     return valid_size_ == 0;
   }
 
@@ -315,7 +315,7 @@ class CompressionStreamImpl: public kj::Refcounted,
     KJ_UNREACHABLE;
   }
 
-  void cancel(kj::Exception reason) override {
+  void cancel(const kj::Exception& reason) override {
     cancelInternal(kj::mv(reason));
   }
 
@@ -327,7 +327,7 @@ class CompressionStreamImpl: public kj::Refcounted,
     kj::Own<kj::PromiseFulfiller<size_t>> promise;
   };
 
-  void cancelInternal(kj::Exception reason) {
+  void cancelInternal(const kj::Exception& reason) {
     output.clear();
 
     while (!pendingReads.empty()) {

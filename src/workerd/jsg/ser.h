@@ -134,8 +134,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
     kj::Array<std::shared_ptr<v8::BackingStore>> transferredArrayBuffers;
   };
 
-  explicit Serializer(Lock& js): Serializer(js, {}) {}
-  explicit Serializer(Lock& js, Options options);
+  explicit Serializer(const Lock& js): Serializer(js, {}) {}
+  explicit Serializer(const Lock& js, Options options);
   inline ~Serializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
   KJ_DISALLOW_COPY_AND_MOVE(Serializer);
@@ -148,14 +148,14 @@ class Serializer final: v8::ValueSerializer::Delegate {
   //
   // You can call this multiple times to write multiple values, then call `readValue()` the same
   // number of times on the deserialization side.
-  void write(Lock& js, const JsValue& value);
+  void write(const Lock& js, const JsValue& value);
 
   // Implements the `transfer` option of `structuredClone()`. Pass each item in the transfer array
   // to this method before calling `write()`. This gives the Serializer permission to serialize
   // these values by detaching them (destroying the caller's handle) rather than make a copy. The
   // detached content will show up as part of `Released`, where it should then be delivered to the
   // Deserializer later.
-  void transfer(Lock& js, const JsValue& value);
+  void transfer(const Lock& js, const JsValue& value);
 
   Released release();
 
@@ -235,14 +235,14 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     kj::Maybe<ExternalHandler&> externalHandler;
   };
 
-  explicit Deserializer(Lock& js,
+  explicit Deserializer(const Lock& js,
       kj::ArrayPtr<const kj::byte> data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
 
   explicit Deserializer(
-      Lock& js, Serializer::Released& released, kj::Maybe<Options> maybeOptions = kj::none);
+      const Lock& js, Serializer::Released& released, kj::Maybe<Options> maybeOptions = kj::none);
 
   ~Deserializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
@@ -252,7 +252,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     return externalHandler;
   }
 
-  JsValue readValue(Lock& js);
+  JsValue readValue(const Lock& js);
 
   uint32_t readRawUint32();
   uint64_t readRawUint64();
@@ -274,7 +274,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   }
 
  private:
-  void init(Lock& js,
+  void init(const Lock& js,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
 
@@ -301,6 +301,6 @@ class SerializedBufferDisposer: public kj::ArrayDisposer {
 constexpr SerializedBufferDisposer SERIALIZED_BUFFER_DISPOSER;
 
 JsValue structuredClone(
-    Lock& js, const JsValue& value, kj::Maybe<kj::Array<JsValue>> maybeTransfer = kj::none);
+    const Lock& js, const JsValue& value, kj::Maybe<kj::Array<JsValue>> maybeTransfer = kj::none);
 
 }  // namespace workerd::jsg

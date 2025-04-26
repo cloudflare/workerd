@@ -1114,13 +1114,13 @@ public:
       jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
       kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
 
-  int getStatus();
-  kj::StringPtr getStatusText();
+  int getStatus() const;
+  kj::StringPtr getStatusText() const;
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
-  bool getOk();
-  bool getRedirected();
-  kj::StringPtr getUrl();
+  bool getOk() const;
+  bool getRedirected() const;
+  kj::StringPtr getUrl() const;
 
   kj::Maybe<jsg::Ref<WebSocket>> getWebSocket(jsg::Lock& js);
 
@@ -1130,7 +1130,7 @@ public:
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was
   // determined that only the `'default'` and `'error'` properties should be implemented.
-  kj::StringPtr getType() {
+  kj::StringPtr getType() const {
     if (statusCode == 0) return "error"_kj;
     return "default"_kj;
   }

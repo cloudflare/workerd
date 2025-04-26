@@ -107,7 +107,7 @@ class OwnedObjectList {
   // returned from those finalizers.
   kj::Vector<kj::StringPtr> finalize();
 
-  bool isFinalized() {
+  bool isFinalized() const {
     return finalizersRan;
   }
 

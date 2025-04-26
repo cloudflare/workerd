@@ -139,23 +139,23 @@ class TraceItem final: public jsg::Object {
       jsg::Ref<HibernatableWebSocketEventInfo>>
       EventInfo;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
-  kj::Maybe<double> getEventTimestamp();
+  kj::Maybe<double> getEventTimestamp() const;
 
   kj::ArrayPtr<jsg::Ref<TraceLog>> getLogs();
   kj::ArrayPtr<jsg::Ref<TraceException>> getExceptions();
   kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> getDiagnosticChannelEvents();
   kj::Maybe<kj::StringPtr> getScriptName();
-  jsg::Optional<kj::StringPtr> getEntrypoint();
-  jsg::Optional<ScriptVersion> getScriptVersion();
+  jsg::Optional<kj::StringPtr> getEntrypoint() const;
+  jsg::Optional<ScriptVersion> getScriptVersion() const;
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
-  kj::StringPtr getExecutionModel();
+  kj::StringPtr getExecutionModel() const;
   kj::ArrayPtr<jsg::Ref<OTelSpan>> getSpans();
-  kj::StringPtr getOutcome();
+  kj::StringPtr getOutcome() const;
 
-  uint getCpuTime();
-  uint getWallTime();
-  bool getTruncated();
+  uint getCpuTime() const;
+  uint getWallTime() const;
+  bool getTruncated() const;
 
   JSG_RESOURCE_TYPE(TraceItem, CompatibilityFlags::Reader flags) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(event, getEvent);
@@ -272,8 +272,8 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 
   jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
   jsg::Dict<jsg::ByteString, jsg::ByteString> getHeaders(jsg::Lock& js);
-  kj::StringPtr getMethod();
-  kj::String getUrl();
+  kj::StringPtr getMethod() const;
+  kj::String getUrl() const;
 
   jsg::Ref<Request> getUnredacted(jsg::Lock& js);
 
@@ -299,7 +299,7 @@ class TraceItem::FetchEventInfo::Response final: public jsg::Object {
  public:
   explicit Response(const Trace& trace, const tracing::FetchResponseInfo& responseInfo);
 
-  uint16_t getStatus();
+  uint16_t getStatus() const;
 
   JSG_RESOURCE_TYPE(Response) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(status, getStatus);
@@ -318,7 +318,7 @@ class TraceItem::JsRpcEventInfo final: public jsg::Object {
   // since HTTP also has methods.)
   //
   // TODO(someday): Clearly there should be a better way to distinguish event types?
-  kj::StringPtr getRpcMethod();
+  kj::StringPtr getRpcMethod() const;
 
   JSG_RESOURCE_TYPE(JsRpcEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(rpcMethod, getRpcMethod);
@@ -336,8 +336,8 @@ class TraceItem::ScheduledEventInfo final: public jsg::Object {
  public:
   explicit ScheduledEventInfo(const Trace& trace, const tracing::ScheduledEventInfo& eventInfo);
 
-  double getScheduledTime();
-  kj::StringPtr getCron();
+  double getScheduledTime() const;
+  kj::StringPtr getCron() const;
 
   JSG_RESOURCE_TYPE(ScheduledEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
@@ -357,7 +357,7 @@ class TraceItem::AlarmEventInfo final: public jsg::Object {
  public:
   explicit AlarmEventInfo(const Trace& trace, const tracing::AlarmEventInfo& eventInfo);
 
-  kj::Date getScheduledTime();
+  kj::Date getScheduledTime() const;
 
   JSG_RESOURCE_TYPE(AlarmEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
@@ -371,8 +371,8 @@ class TraceItem::QueueEventInfo final: public jsg::Object {
  public:
   explicit QueueEventInfo(const Trace& trace, const tracing::QueueEventInfo& eventInfo);
 
-  kj::StringPtr getQueueName();
-  uint32_t getBatchSize();
+  kj::StringPtr getQueueName() const;
+  uint32_t getBatchSize() const;
   // TODO(now): Add something about the timestamp(s) of the newest/oldest message(s) in the batch?
 
   JSG_RESOURCE_TYPE(QueueEventInfo) {
@@ -393,9 +393,9 @@ class TraceItem::EmailEventInfo final: public jsg::Object {
  public:
   explicit EmailEventInfo(const Trace& trace, const tracing::EmailEventInfo& eventInfo);
 
-  kj::StringPtr getMailFrom();
-  kj::StringPtr getRcptTo();
-  uint32_t getRawSize();
+  kj::StringPtr getMailFrom() const;
+  kj::StringPtr getRcptTo() const;
+  uint32_t getRawSize() const;
 
   JSG_RESOURCE_TYPE(EmailEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(mailFrom, getMailFrom);
@@ -437,7 +437,7 @@ class TraceItem::TailEventInfo::TailItem final: public jsg::Object {
  public:
   explicit TailItem(const tracing::TraceEventInfo::TraceItem& traceItem);
 
-  kj::Maybe<kj::StringPtr> getScriptName();
+  kj::Maybe<kj::StringPtr> getScriptName() const;
 
   JSG_RESOURCE_TYPE(TailItem) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
@@ -488,7 +488,7 @@ class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Obje
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "message"_kj;
-  kj::StringPtr getWebSocketEventType() {
+  kj::StringPtr getWebSocketEventType() const {
     return webSocketEventType;
   }
 
@@ -506,12 +506,12 @@ class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "close"_kj;
-  kj::StringPtr getWebSocketEventType() {
+  kj::StringPtr getWebSocketEventType() const {
     return webSocketEventType;
   }
 
-  uint16_t getCode();
-  bool getWasClean();
+  uint16_t getCode() const;
+  bool getWasClean() const;
 
   JSG_RESOURCE_TYPE(Close) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
@@ -529,7 +529,7 @@ class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object
       : eventInfo(eventInfo) {}
 
   static constexpr kj::StringPtr webSocketEventType = "error"_kj;
-  kj::StringPtr getWebSocketEventType() {
+  kj::StringPtr getWebSocketEventType() const {
     return webSocketEventType;
   }
 
@@ -556,8 +556,8 @@ class TraceDiagnosticChannelEvent final: public jsg::Object {
   explicit TraceDiagnosticChannelEvent(
       const Trace& trace, const tracing::DiagnosticChannelEvent& eventInfo);
 
-  double getTimestamp();
-  kj::StringPtr getChannel();
+  double getTimestamp() const;
+  kj::StringPtr getChannel() const;
   jsg::JsValue getMessage(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TraceDiagnosticChannelEvent) {
@@ -581,8 +581,8 @@ class TraceLog final: public jsg::Object {
  public:
   TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log);
 
-  double getTimestamp();
-  kj::StringPtr getLevel();
+  double getTimestamp() const;
+  kj::StringPtr getLevel() const;
   jsg::V8Ref<v8::Object> getMessage(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TraceLog) {
@@ -606,9 +606,9 @@ class TraceException final: public jsg::Object {
  public:
   TraceException(const Trace& trace, const tracing::Exception& exception);
 
-  double getTimestamp();
-  kj::StringPtr getName();
-  kj::StringPtr getMessage();
+  double getTimestamp() const;
+  kj::StringPtr getName() const;
+  kj::StringPtr getMessage() const;
   jsg::Optional<kj::StringPtr> getStack(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TraceException) {
@@ -634,10 +634,10 @@ class TraceMetrics final: public jsg::Object {
  public:
   explicit TraceMetrics(uint cpuTime, uint wallTime);
 
-  uint getCPUTime() {
+  uint getCPUTime() const {
     return cpuTime;
   };
-  uint getWallTime() {
+  uint getWallTime() const {
     return wallTime;
   };
 
@@ -679,7 +679,7 @@ class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
       capnp::ByteStreamFactory& byteStreamFactory,
       rpc::EventDispatcher::Client dispatcher) override;
 
-  uint16_t getType() override {
+  uint16_t getType() const override {
     return typeId;
   }
 

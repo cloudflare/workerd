@@ -226,6 +226,42 @@ struct MethodCallback<TypeWrapper,
   }
 };
 
+// Implements the V8 callback function for calling a const method of the C++ class.
+template <typename TypeWrapper,
+    const char* methodName,
+    bool isContext,
+    typename T,
+    typename U,
+    typename Ret,
+    typename... Args,
+    Ret (U::*method)(Args...) const,
+    size_t... indexes>
+struct MethodCallback<TypeWrapper,
+    methodName,
+    isContext,
+    T,
+    Ret (U::*)(Args...) const,
+    method,
+    kj::_::Indexes<indexes...>> {
+  static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    liftKj(args, [&]() {
+      auto isolate = args.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto obj = args.This();
+      auto& wrapper = TypeWrapper::from(isolate);
+      auto& self = extractInternalPointer<T, isContext>(context, obj);
+      if constexpr (isVoid<Ret>()) {
+        (self.*method)(wrapper.template unwrap<Args>(context, args, indexes,
+            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+      } else {
+        return wrapper.wrap(context, obj,
+            (self.*method)(wrapper.template unwrap<Args>(context, args, indexes,
+                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+      }
+    });
+  }
+};
+
 // Specialization for methods that take `Lock&` as their first parameter.
 template <typename TypeWrapper,
     const char* methodName,
@@ -241,6 +277,45 @@ struct MethodCallback<TypeWrapper,
     isContext,
     T,
     Ret (U::*)(Lock&, Args...),
+    method,
+    kj::_::Indexes<indexes...>> {
+  static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    liftKj(args, [&]() {
+      auto isolate = args.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto obj = args.This();
+      auto& wrapper = TypeWrapper::from(isolate);
+      auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto& lock = Lock::from(isolate);
+      if constexpr (isVoid<Ret>()) {
+        (self.*method)(lock,
+            wrapper.template unwrap<Args>(context, args, indexes,
+                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+      } else {
+        return wrapper.wrap(context, obj,
+            (self.*method)(lock,
+                wrapper.template unwrap<Args>(context, args, indexes,
+                    TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+      }
+    });
+  }
+};
+
+// Specialization for const methods that take `Lock&` as their first parameter.
+template <typename TypeWrapper,
+    const char* methodName,
+    bool isContext,
+    typename T,
+    typename U,
+    typename Ret,
+    typename... Args,
+    Ret (U::*method)(Lock&, Args...) const,
+    size_t... indexes>
+struct MethodCallback<TypeWrapper,
+    methodName,
+    isContext,
+    T,
+    Ret (U::*)(Lock&, Args...) const,
     method,
     kj::_::Indexes<indexes...>> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -723,6 +798,14 @@ struct SerializeInvoker<TypeWrapper,
     target.serialize(js, serializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...);
   }
 };
+template <typename TypeWrapper, typename T, typename... Types>
+struct SerializeInvoker<TypeWrapper,
+    T,
+    void (T::*)(Lock&, Serializer&, const TypeHandler<Types>&...) const> {
+  static void call(TypeWrapper& wrapper, T& target, Lock& js, Serializer& serializer) {
+    target.serialize(js, serializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...);
+  }
+};
 
 // Helper to call T::deserialize() and pass along any TypeHandlers it needs, as well as wrap
 // the result.
@@ -732,6 +815,17 @@ template <typename TypeWrapper, typename T, typename Ret, typename Tag, typename
 struct DeserializeInvoker<TypeWrapper,
     T,
     Ret(Lock&, Tag, Deserializer&, const TypeHandler<Types>&...)> {
+  static v8::Local<v8::Object> call(
+      TypeWrapper& wrapper, Lock& js, Tag tag, Deserializer& deserializer) {
+    return wrapper.wrap(js.v8Context(), kj::none,
+        T::deserialize(
+            js, tag, deserializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...));
+  }
+};
+template <typename TypeWrapper, typename T, typename Ret, typename Tag, typename... Types>
+struct DeserializeInvoker<TypeWrapper,
+    T,
+    Ret(Lock&, Tag, Deserializer&, const TypeHandler<Types>&...) const> {
   static v8::Local<v8::Object> call(
       TypeWrapper& wrapper, Lock& js, Tag tag, Deserializer& deserializer) {
     return wrapper.wrap(js.v8Context(), kj::none,
@@ -1399,7 +1493,7 @@ class ResourceWrapper {
 
   template <typename... Args>
   JsContext<T> newContext(jsg::Lock& js,
-      jsg::NewContextOptions options,
+      jsg::NewContextOptions&& options,
       CompilationObserver& compilationObserver,
       T*,
       Args&&... args) {

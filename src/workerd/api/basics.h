@@ -36,12 +36,12 @@ class Event: public jsg::Object {
   inline explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
       : ownType(kj::mv(ownType)),
         type(this->ownType),
-        init(init),
+        init(kj::mv(init)),
         trusted(trusted) {}
 
   inline explicit Event(kj::StringPtr type, Init init = Init(), bool trusted = true)
       : type(type),
-        init(init),
+        init(kj::mv(init)),
         trusted(trusted) {}
 
   inline bool isPreventDefault() const {

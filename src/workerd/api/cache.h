@@ -38,7 +38,7 @@ class Cache: public jsg::Object {
  public:
   explicit Cache(kj::Maybe<kj::String> cacheName);
 
-  jsg::Unimplemented add(Request::Info request);
+  jsg::Unimplemented add(const Request::Info& request);
   jsg::Unimplemented addAll(kj::Array<Request::Info> requests);
 
   jsg::Promise<jsg::Optional<jsg::Ref<Response>>> match(jsg::Lock& js,
@@ -112,7 +112,7 @@ class CacheStorage: public jsg::Object {
 
   // Our cache does not support namespace enumeration, so none of these are possible to implement.
 
-  jsg::WontImplement match(Request::Info, jsg::Optional<CacheQueryOptions>) {
+  jsg::WontImplement match(const Request::Info&, jsg::Optional<CacheQueryOptions>) {
     return {};
   }
   jsg::WontImplement has(kj::String) {

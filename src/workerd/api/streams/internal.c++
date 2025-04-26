@@ -317,7 +317,7 @@ class TeeBranch final: public ReadableStreamSource {
     return kj::none;
   }
 
-  void cancel(kj::Exception reason) override {
+  void cancel(const kj::Exception& reason) override {
     // TODO(someday): What to do?
   }
 
@@ -415,7 +415,7 @@ class WarnIfUnusedStream final: public ReadableStreamSource {
 
   // TODO(someday): we set `wasRead` to avoid warning here, but TeeBranch might still buffer the
   // body. We should fix it not to buffer when cancelled.
-  void cancel(kj::Exception reason) override {
+  void cancel(const kj::Exception& reason) override {
     wasRead = true;
     return inner->cancel(reason);
   }
@@ -496,7 +496,7 @@ kj::Promise<kj::String> ReadableStreamSource::readAllText(uint64_t limit) {
   }
 }
 
-void ReadableStreamSource::cancel(kj::Exception reason) {}
+void ReadableStreamSource::cancel(const kj::Exception& reason) {}
 
 kj::Maybe<ReadableStreamSource::Tee> ReadableStreamSource::tryTee(uint64_t limit) {
   return kj::none;
@@ -2313,7 +2313,7 @@ kj::Maybe<uint64_t> IdentityTransformStreamImpl::tryGetLength(StreamEncoding enc
   }
 }
 
-void IdentityTransformStreamImpl::cancel(kj::Exception reason) {
+void IdentityTransformStreamImpl::cancel(const kj::Exception& reason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(idle, Idle) {
       // This is fine.

@@ -96,7 +96,17 @@ struct RustCopy {
 
 struct RustMutable {
   template <typename T>
+  static ::rust::Slice<T> from(const kj::ArrayPtr<T>* arr) {
+    return ::rust::Slice<T>(arr->begin(), arr->size());
+  }
+
+  template <typename T>
   static ::rust::Slice<T> from(kj::ArrayPtr<T>* arr) {
+    return ::rust::Slice<T>(arr->begin(), arr->size());
+  }
+
+  template <typename T>
+  static ::rust::Slice<T> from(const kj::Array<T>* arr) {
     return ::rust::Slice<T>(arr->begin(), arr->size());
   }
 

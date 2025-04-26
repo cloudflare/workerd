@@ -587,7 +587,7 @@ class WritableStreamDefaultController: public jsg::Object {
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
 
-  bool isStarted() {
+  bool isStarted() const {
     return impl.started;
   }
 

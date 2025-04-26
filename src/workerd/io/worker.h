@@ -484,7 +484,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   // Log a message as if with console.{log,warn,error,etc}. `type` must be one of the cdp::LogType
   // enum, which unfortunately we cannot forward-declare, ugh.
-  void logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description);
+  void logMessage(const jsg::Lock& js, uint16_t type, kj::StringPtr description);
 
   class SubrequestClient;
   class ResponseStreamWrapper;
@@ -686,7 +686,7 @@ class Worker::LockType {
 // The func must be a callback with the signature: T (jsg::Lock&), where T is any type.
 auto Worker::runInLockScope(LockType lockType, auto func) const {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> auto {
-    Worker::Lock lock(*this, lockType, stackScope);
+    Worker::Lock lock(*this, kj::mv(lockType), stackScope);
     return func(lock);
   });
 }

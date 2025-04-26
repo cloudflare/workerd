@@ -16,10 +16,10 @@ class ScheduledEvent final: public ExtendableEvent {
 
   static jsg::Ref<ScheduledEvent> constructor(kj::String type) = delete;
 
-  double getScheduledTime() {
+  double getScheduledTime() const {
     return scheduledTime;
   }
-  kj::StringPtr getCron() {
+  kj::StringPtr getCron() const {
     return cron;
   }
   void noRetry();

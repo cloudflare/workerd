@@ -49,11 +49,11 @@ class GcDetector: public jsg::Object {
 
   kj::Maybe<GcDetector&> sibling;
 
-  bool getSiblingCollected() {
+  bool getSiblingCollected() const {
     return sibling == kj::none;
   }
 
-  bool touch() {
+  bool touch() const {
     return true;
   }
 

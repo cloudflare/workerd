@@ -64,7 +64,7 @@ static constexpr size_t checkIsIntegerType() {
 
 class BufferSource;
 class BackingStore;
-using BufferSourceViewConstructor = v8::Local<v8::Value> (*)(Lock&, BackingStore&);
+using BufferSourceViewConstructor = v8::Local<v8::Value> (*)(const Lock&, BackingStore&);
 
 // The jsg::BackingStore wraps a v8::BackingStore and retains information about the
 // type of ArrayBuffer or ArrayBufferView to which it is associated. Namely, it records
@@ -178,7 +178,7 @@ class BackingStore {
         construct<T>, checkIsIntegerType<T>());
   }
 
-  inline v8::Local<v8::Value> createHandle(Lock& js) {
+  inline v8::Local<v8::Value> createHandle(const Lock& js) {
     return ctor(js, *this);
   }
 
@@ -238,7 +238,7 @@ class BackingStore {
   bool integerType;
 
   template <BufferSourceType T>
-  static v8::Local<v8::Value> construct(Lock& js, BackingStore& store) {
+  static v8::Local<v8::Value> construct(const Lock& js, BackingStore& store) {
     if constexpr (kj::isSameType<v8::ArrayBuffer, T>()) {
       return v8::ArrayBuffer::New(js.v8Isolate, store.backingStore);
     } else if constexpr (kj::isSameType<v8::ArrayBufferView, T>()) {
@@ -295,15 +295,15 @@ class BackingStore {
 //   };
 class BufferSource {
  public:
-  static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
+  static kj::Maybe<BufferSource> tryAlloc(const Lock& js, size_t size);
   static BufferSource wrap(
-      Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx);
+      const Lock& js, void* data, size_t size, BackingStore::Disposer disposer, void* ctx);
 
   // Create a new BufferSource that takes over ownership of the given BackingStore.
-  explicit BufferSource(Lock& js, BackingStore&& backingStore);
+  explicit BufferSource(const Lock& js, BackingStore&& backingStore);
 
   // Create a BufferSource from the given JavaScript handle.
-  explicit BufferSource(Lock& js, v8::Local<v8::Value> handle);
+  explicit BufferSource(const Lock& js, v8::Local<v8::Value> handle);
 
   BufferSource(BufferSource&&) = default;
   BufferSource& operator=(BufferSource&&) = default;
@@ -472,7 +472,7 @@ class BufferSourceWrapper {
   }
 };
 
-inline BufferSource Lock::arrayBuffer(kj::Array<kj::byte> data) {
+inline BufferSource Lock::arrayBuffer(kj::Array<kj::byte> data) const {
   return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(kj::mv(data)));
 }
 

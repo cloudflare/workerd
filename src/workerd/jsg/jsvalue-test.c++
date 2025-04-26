@@ -70,7 +70,7 @@ struct JsValueContext: public ContextGlobalObject {
     JsValue v = value.getHandle(js);
     persisted = v.addRef(js);
   }
-  JsValue getRef(Lock& js) {
+  JsValue getRef(Lock& js) const {
     return persisted.getHandle(js);
   }
   JsDate getDate(Lock& js) {
