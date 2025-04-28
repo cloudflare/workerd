@@ -2071,25 +2071,13 @@ class Server::WorkerService final: public Service,
         return kj::addRef(*this);
       }
 
-      kj::Maybe<Worker::Actor&> tryGetActor() {
-        requireNotBroken();
-        return actor;
-      }
-
-      Worker::Actor& setActor(kj::Own<Worker::Actor> newActor) {
-        requireNotBroken();
-        KJ_ASSERT(actor == kj::none);
-        Worker::Actor& actorRef = *newActor;
-        actor = kj::mv(newActor);
-        onBrokenTask = monitorOnBroken(actorRef);
-        return actorRef;
-      }
-
       // Get the actor, starting it if it's not already running.
       kj::Promise<kj::Own<Worker::Actor>> getActor() {
-        KJ_IF_SOME(a, tryGetActor()) {
+        requireNotBroken();
+
+        KJ_IF_SOME(a, actor) {
           // This actor was used recently and hasn't been evicted, let's reuse it.
-          return a.addRef();
+          return a->addRef();
         }
 
         return start();
@@ -2198,12 +2186,14 @@ class Server::WorkerService final: public Service,
         // synchronously, so this has the effect of pushing off to a later turn of the event loop.
         auto asyncLock = co_await service.worker->takeAsyncLockWithoutRequest(nullptr);
 
-        KJ_IF_SOME(a, tryGetActor()) {
+        requireNotBroken();
+
+        KJ_IF_SOME(a, actor) {
           // Someone else created the actor while we were waiting for the lock.
           // TODO(cleanup): It would be cleaner if the first request temporarily left a
           //   ForkedPromise that other requests could wait on but that would be more complicated
           //   to implement.
-          co_return a.addRef();
+          co_return a->addRef();
         }
 
         auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
@@ -2268,11 +2258,11 @@ class Server::WorkerService final: public Service,
           // work for local development we need to pass an event type.
           static constexpr uint16_t hibernationEventTypeId = 8;
 
-          auto& actorRef = setActor(
-              kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
-                  kj::str(key), true, kj::mv(makeActorCache), parent.className, kj::mv(makeStorage),
-                  lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-                  tryGetManagerRef(), hibernationEventTypeId));
+          auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker,
+              getTracker(), kj::str(key), true, kj::mv(makeActorCache), parent.className,
+              kj::mv(makeStorage), lock, kj::mv(loopback), timerChannel,
+              kj::refcounted<ActorObserver>(), tryGetManagerRef(), hibernationEventTypeId));
+          onBrokenTask = monitorOnBroken(actorRef);
 
           // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
           return actorRef.addRef();
