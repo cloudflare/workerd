@@ -2079,10 +2079,12 @@ class Server::WorkerService final: public Service,
       }
 
       kj::Maybe<Worker::Actor&> tryGetActor() {
+        requireNotBroken();
         return actor;
       }
 
       Worker::Actor& setActor(kj::Own<Worker::Actor> newActor) {
+        requireNotBroken();
         KJ_ASSERT(actor == kj::none);
         Worker::Actor& actorRef = *newActor;
         actor = kj::mv(newActor);
@@ -2102,26 +2104,40 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
+      kj::Maybe<kj::Exception> brokenReason;
 
       // Non-empty if at least one client has a reference to this actor.
       // If no clients are connected, we may be evicted by `cleanupLoop`.
       kj::Maybe<ActorContainerRef&> containerRef;
       friend class ActorContainerRef;
 
+      void requireNotBroken() {
+        KJ_IF_SOME(e, brokenReason) {
+          kj::throwFatalException(kj::cp(e));
+        }
+      }
+
       kj::Promise<void> monitorOnBroken(Worker::Actor& actor) {
         try {
           // It's possible for this to never resolve if the actor never breaks,
           // in which case the returned promise will just be canceled.
           co_await actor.onBroken();
+          KJ_FAIL_ASSERT("actor.onBroken() resolved normally?");
         } catch (...) {
-          // We are intentionally ignoring any errors here. We just want to ensure
-          // that the actor is removed if the onBroken promise is resolved or errors.
+          brokenReason = kj::getCaughtExceptionAsKj();
         }
 
         // HACK: Dropping the ActorContainer will delete onBrokenTask, cancelling ourselves. This
         //   would crash. To avoid the problem, detach ourselves. This is safe because we know that
         //   once we return there's nothing left for this promise to do anyway.
         KJ_ASSERT_NONNULL(onBrokenTask).detach([](kj::Exception&& e) {});
+
+        // Hollow out the object, so that if it still has references, they won't keep these parts
+        // alive. Since any further calls to `tryGetActor()` or `setActor()` will throw, we don't
+        // have to worry about the actor being recreated.
+        auto actorToDrop = kj::mv(this->actor);
+        tracker->shutdown();
+        auto managerToDrop = kj::mv(manager);
 
         // Note that we remove the entire ActorContainer from the map -- this drops the
         // HibernationManager so any connected hibernatable websockets will be disconnected.
