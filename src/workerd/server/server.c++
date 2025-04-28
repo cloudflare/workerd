@@ -1720,7 +1720,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<Service>> streamingTails;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
-  using AbortActorsCallback = kj::Function<void()>;
+  using AbortActorsCallback = kj::Function<void(kj::Maybe<const kj::Exception&> reason)>;
 
   WorkerService(ThreadContext& threadContext,
       kj::Own<const Worker> worker,
@@ -2099,6 +2099,28 @@ class Server::WorkerService final: public Service,
             .attach(kj::addRef(*this));
       }
 
+      void abort(kj::Maybe<const kj::Exception&> reason) {
+        if (brokenReason != kj::none) return;
+
+        KJ_IF_SOME(a, actor) {
+          // Unknown broken reason.
+          a->shutdown(0, reason);
+        }
+
+        onBrokenTask = kj::none;
+        shutdownTask = kj::none;
+        startTask = kj::none;
+        manager = kj::none;
+        tracker->shutdown();
+        actor = kj::none;
+
+        KJ_IF_SOME(r, reason) {
+          brokenReason = kj::cp(r);
+        } else {
+          brokenReason = JSG_KJ_EXCEPTION(FAILED, Error, "Actor aborted for uknown reason.");
+        }
+      }
+
      private:
       // The actor is constructed after the ActorContainer so it starts off empty.
       kj::Maybe<kj::Own<Worker::Actor>> actor;
@@ -2204,6 +2226,9 @@ class Server::WorkerService final: public Service,
         // synchronously, so this has the effect of pushing off to a later turn of the event loop.
         auto asyncLock = co_await service.worker->takeAsyncLockWithoutRequest(nullptr);
 
+        // Just in case abort() was called concurrently...
+        requireNotBroken();
+
         auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
                                   OutputGate& outputGate, ActorCache::Hooks& hooks,
                                   SqliteObserver& sqliteObserver) mutable {
@@ -2285,7 +2310,10 @@ class Server::WorkerService final: public Service,
       })->addRef();
     }
 
-    void abortAll() {
+    void abortAll(kj::Maybe<const kj::Exception&> reason) {
+      for (auto& actor: actors) {
+        actor.value->abort(reason);
+      }
       actors.clear();
     }
 
@@ -2594,8 +2622,8 @@ class Server::WorkerService final: public Service,
     return ns.getActorChannel(kj::str(id));
   }
 
-  void abortAllActors() override {
-    abortActorsCallback();
+  void abortAllActors(kj::Maybe<kj::Exception&> reason) override {
+    abortActorsCallback(reason);
   }
 
   // ---------------------------------------------------------------------------
@@ -2982,7 +3010,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
 uint startInspector(
     kj::StringPtr inspectorAddress, Server::InspectorServiceIsolateRegistrar& registrar);
 
-void Server::abortAllActors() {
+void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
   for (auto& service: services) {
     if (WorkerService* worker = dynamic_cast<WorkerService*>(&*service.value)) {
       for (auto& [className, ns]: worker->getActorNamespaces()) {
@@ -2995,7 +3023,7 @@ void Server::abortAllActors() {
             isEvictable = c.isEvictable;
           }
         }
-        if (isEvictable) ns->abortAll();
+        if (isEvictable) ns->abortAll(reason);
       }
     }
   }

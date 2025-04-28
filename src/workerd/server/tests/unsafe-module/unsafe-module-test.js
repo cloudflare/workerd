@@ -42,6 +42,16 @@ export const test_abort_all_durable_objects = {
 
     await unsafe.abortAllDurableObjects();
 
+    // Since the objects were aborted, trying to use their stubs now should reject.
+    await assert.rejects(() => durableStub.fetch('http://x'), {
+      name: 'Error',
+      message: 'Application called abortAllDurableObjects().',
+    });
+    await assert.rejects(() => ephemeralStub.fetch('http://x'), {
+      name: 'Error',
+      message: 'Application called abortAllDurableObjects().',
+    });
+
     // Recreate the stubs because they are broken.
     durableStub = env.DURABLE.get(durableId);
     ephemeralStub = env.EPHEMERAL.get('thing');
