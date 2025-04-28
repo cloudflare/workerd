@@ -1849,6 +1849,57 @@ KJ_TEST("Server: Durable Objects (in memory)") {
       "/bar", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
 }
 
+KJ_TEST("Server: Simultaneous requests to a DO that hasn't started don't cause split brain") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers"
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    let promise1 = actor.increment()
+                `    let promise2 = actor.increment()
+                `    let promise3 = actor.increment()
+                `    return new Response(`${await promise1} ${await promise2} ${await promise3}`)
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async increment() {
+                `    return this.counter++;
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 1 2");
+}
+
 KJ_TEST("Server: Durable Objects (on disk)") {
   kj::StringPtr config = R"((
     services = [
