@@ -2338,25 +2338,22 @@ class Server::WorkerService final: public Service,
           return GetActorResult{.actor = a->addRef(), .ref = kj::mv(containerRef)};
         }
 
-        auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
-
-        auto makeActorCache = [&](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                                  ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
+        auto makeActorCache = [this, idStr = kj::str(idPtr)](const ActorCache::SharedLru& sharedLru,
+                                  OutputGate& outputGate, ActorCache::Hooks& hooks,
+                                  SqliteObserver& sqliteObserver) mutable {
           return config.tryGet<Durable>().map(
               [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
+            auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
+
             KJ_IF_SOME(as, channels.actorStorage) {
-              // The idPtr can end up being freed if the Actor gets hibernated so we need
-              // to create a copy that is ensured to live as long as the ActorSqliteHooks
-              // instance we're creating here.
-              // TODO(cleanup): Is there a better way to handle the ActorKey in general here?
-              auto idStr = kj::str(idPtr);
+              kj::Path path({d.uniqueKey, kj::str(idStr, ".sqlite")});
+
               auto sqliteHooks = kj::heap<ActorSqliteHooks>(
                   channels.alarmScheduler, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
                                      .attach(kj::mv(idStr));
 
-              auto db =
-                  kj::heap<SqliteDatabase>(*as, kj::Path({d.uniqueKey, kj::str(idPtr, ".sqlite")}),
-                      kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+              auto db = kj::heap<SqliteDatabase>(*as, kj::mv(path),
+                  kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
 
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
