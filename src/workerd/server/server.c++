@@ -2073,14 +2073,20 @@ class Server::WorkerService final: public Service,
 
       // Get the actor, starting it if it's not already running.
       kj::Promise<kj::Own<Worker::Actor>> getActor() {
-        requireNotBroken();
+        for (;;) {
+          requireNotBroken();
 
-        KJ_IF_SOME(a, actor) {
-          // This actor was used recently and hasn't been evicted, let's reuse it.
-          return a->addRef();
+          KJ_IF_SOME(a, actor) {
+            // This actor was used recently and hasn't been evicted, let's reuse it.
+            co_return a->addRef();
+          }
+
+          KJ_IF_SOME(s, startTask) {
+            co_await s;
+          } else {
+            co_await startTask.emplace(start().fork());
+          }
         }
-
-        return start();
       }
 
      private:
@@ -2093,6 +2099,7 @@ class Server::WorkerService final: public Service,
       kj::Timer& timer;
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
+      kj::Maybe<kj::ForkedPromise<void>> startTask;
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
@@ -2173,9 +2180,10 @@ class Server::WorkerService final: public Service,
         }
         // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
+        startTask = kj::none;  // so next tryGetActor() will call start() again
       }
 
-      kj::Promise<kj::Own<Worker::Actor>> start() {
+      kj::Promise<void> start() {
         KJ_REQUIRE(actor == nullptr);
 
         WorkerService& service = parent.service;
@@ -2185,16 +2193,6 @@ class Server::WorkerService final: public Service,
         // are the same isolate (as is commonly the case), we really don't want to do this stuff
         // synchronously, so this has the effect of pushing off to a later turn of the event loop.
         auto asyncLock = co_await service.worker->takeAsyncLockWithoutRequest(nullptr);
-
-        requireNotBroken();
-
-        KJ_IF_SOME(a, actor) {
-          // Someone else created the actor while we were waiting for the lock.
-          // TODO(cleanup): It would be cleaner if the first request temporarily left a
-          //   ForkedPromise that other requests could wait on but that would be more complicated
-          //   to implement.
-          co_return a->addRef();
-        }
 
         auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
                                   OutputGate& outputGate, ActorCache::Hooks& hooks,
@@ -2253,7 +2251,7 @@ class Server::WorkerService final: public Service,
 
         auto loopback = kj::refcounted<Loopback>(parent, kj::str(key));
 
-        co_return service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
           // We define this event ID in the internal codebase, but to have WebSocket Hibernation
           // work for local development we need to pass an event type.
           static constexpr uint16_t hibernationEventTypeId = 8;
@@ -2263,9 +2261,6 @@ class Server::WorkerService final: public Service,
               kj::mv(makeStorage), lock, kj::mv(loopback), timerChannel,
               kj::refcounted<ActorObserver>(), tryGetManagerRef(), hibernationEventTypeId));
           onBrokenTask = monitorOnBroken(actorRef);
-
-          // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
-          return actorRef.addRef();
         });
       }
     };
