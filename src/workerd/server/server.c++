@@ -2295,96 +2295,92 @@ class Server::WorkerService final: public Service,
 
       KJ_IF_SOME(a, containerRef->tryGetActor()) {
         // This actor was used recently and hasn't been evicted, let's reuse it.
-        return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
+        co_return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
       }
 
       // `getActor()` is often called with the calling isolate's lock held. We need to drop that
       // lock and take a lock on the target isolate before constructing the actor. Even if these
       // are the same isolate (as is commonly the case), we really don't want to do this stuff
       // synchronously, so this has the effect of pushing off to a later turn of the event loop.
-      return service.worker->takeAsyncLockWithoutRequest(nullptr).then(
-          [this, idPtr, containerRef = kj::mv(containerRef)](
-              Worker::AsyncLock asyncLock) mutable -> GetActorResult {
-        // We don't have an actor so we need to create it.
+      auto asyncLock = co_await service.worker->takeAsyncLockWithoutRequest(nullptr);
 
-        KJ_IF_SOME(a, containerRef->tryGetActor()) {
-          // Someone else created the actor while we were waiting for the lock.
-          // TODO(cleanup): It would be cleaner if the first request temporarily left a
-          //   ForkedPromise that other requests could wait on but that would be more complicated
-          //   to implement.
-          return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
-        }
+      KJ_IF_SOME(a, containerRef->tryGetActor()) {
+        // Someone else created the actor while we were waiting for the lock.
+        // TODO(cleanup): It would be cleaner if the first request temporarily left a
+        //   ForkedPromise that other requests could wait on but that would be more complicated
+        //   to implement.
+        co_return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
+      }
 
-        auto makeActorCache = [this, idStr = kj::str(idPtr)](const ActorCache::SharedLru& sharedLru,
-                                  OutputGate& outputGate, ActorCache::Hooks& hooks,
-                                  SqliteObserver& sqliteObserver) mutable {
-          return config.tryGet<Durable>().map(
-              [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
-            auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
+      auto makeActorCache = [this, idStr = kj::str(idPtr)](const ActorCache::SharedLru& sharedLru,
+                                OutputGate& outputGate, ActorCache::Hooks& hooks,
+                                SqliteObserver& sqliteObserver) mutable {
+        return config.tryGet<Durable>().map(
+            [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
+          auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
 
-            KJ_IF_SOME(as, channels.actorStorage) {
-              kj::Path path({d.uniqueKey, kj::str(idStr, ".sqlite")});
+          KJ_IF_SOME(as, channels.actorStorage) {
+            kj::Path path({d.uniqueKey, kj::str(idStr, ".sqlite")});
 
-              auto sqliteHooks = kj::heap<ActorSqliteHooks>(
-                  channels.alarmScheduler, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
-                                     .attach(kj::mv(idStr));
+            auto sqliteHooks = kj::heap<ActorSqliteHooks>(
+                channels.alarmScheduler, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
+                                    .attach(kj::mv(idStr));
 
-              auto db = kj::heap<SqliteDatabase>(*as, kj::mv(path),
-                  kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+            auto db = kj::heap<SqliteDatabase>(*as, kj::mv(path),
+                kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
 
-              // Before we do anything, make sure the database is in WAL mode. We also need to
-              // do this after reset() is used, so register a callback for that.
-              auto setWalMode = [](SqliteDatabase& db) { db.run("PRAGMA journal_mode=WAL;"); };
-              setWalMode(*db);
-              db->afterReset(kj::mv(setWalMode));
+            // Before we do anything, make sure the database is in WAL mode. We also need to
+            // do this after reset() is used, so register a callback for that.
+            auto setWalMode = [](SqliteDatabase& db) { db.run("PRAGMA journal_mode=WAL;"); };
+            setWalMode(*db);
+            db->afterReset(kj::mv(setWalMode));
 
-              return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
-                  []() -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
-                  .attach(kj::mv(sqliteHooks));
-            } else {
-              // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
-              // ActorCache never to flush, so this effectively creates in-memory storage.
-              return kj::heap<ActorCache>(
-                  newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
-            }
-          });
-        };
-
-        bool enableSql = true;
-        KJ_SWITCH_ONEOF(config) {
-          KJ_CASE_ONEOF(c, Durable) {
-            enableSql = c.enableSql;
+            return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
+                []() -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
+                .attach(kj::mv(sqliteHooks));
+          } else {
+            // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
+            // ActorCache never to flush, so this effectively creates in-memory storage.
+            return kj::heap<ActorCache>(
+                newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
           }
-          KJ_CASE_ONEOF(c, Ephemeral) {
-            enableSql = c.enableSql;
-          }
-        }
-
-        auto makeStorage =
-            [enableSql = enableSql](jsg::Lock& js, const Worker::Api& api,
-                ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
-          return js.alloc<api::DurableObjectStorage>(
-              js, IoContext::current().addObject(actorCache), enableSql);
-        };
-
-        TimerChannel& timerChannel = service;
-
-        auto loopback = kj::refcounted<Loopback>(*this, kj::str(idPtr));
-
-        return service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
-          // We define this event ID in the internal codebase, but to have WebSocket Hibernation
-          // work for local development we need to pass an event type.
-          static constexpr uint16_t hibernationEventTypeId = 8;
-
-          auto& actorRef = containerRef->setActor(
-              kj::refcounted<Worker::Actor>(*service.worker, containerRef->getTracker(),
-                  kj::str(idPtr), true, kj::mv(makeActorCache), className, kj::mv(makeStorage),
-                  lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-                  containerRef->tryGetManagerRef(), hibernationEventTypeId));
-
-          // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
-          return GetActorResult{.actor = actorRef.addRef(), .ref = kj::mv(containerRef)};
         });
+      };
+
+      bool enableSql = true;
+      KJ_SWITCH_ONEOF(config) {
+        KJ_CASE_ONEOF(c, Durable) {
+          enableSql = c.enableSql;
+        }
+        KJ_CASE_ONEOF(c, Ephemeral) {
+          enableSql = c.enableSql;
+        }
+      }
+
+      auto makeStorage =
+          [enableSql = enableSql](jsg::Lock& js, const Worker::Api& api,
+              ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
+        return js.alloc<api::DurableObjectStorage>(
+            js, IoContext::current().addObject(actorCache), enableSql);
+      };
+
+      TimerChannel& timerChannel = service;
+
+      auto loopback = kj::refcounted<Loopback>(*this, kj::str(idPtr));
+
+      co_return service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        // We define this event ID in the internal codebase, but to have WebSocket Hibernation
+        // work for local development we need to pass an event type.
+        static constexpr uint16_t hibernationEventTypeId = 8;
+
+        auto& actorRef = containerRef->setActor(
+            kj::refcounted<Worker::Actor>(*service.worker, containerRef->getTracker(),
+                kj::str(idPtr), true, kj::mv(makeActorCache), className, kj::mv(makeStorage),
+                lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
+                containerRef->tryGetManagerRef(), hibernationEventTypeId));
+
+        // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
+        return GetActorResult{.actor = actorRef.addRef(), .ref = kj::mv(containerRef)};
       });
     }
   };
