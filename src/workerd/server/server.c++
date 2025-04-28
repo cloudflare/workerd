@@ -1988,9 +1988,6 @@ class Server::WorkerService final: public Service,
       return kj::heap<ActorChannelImpl>(*this, kj::mv(id));
     }
 
-    // Forward declaration.
-    class ActorContainerRef;
-
     // ActorContainer mostly serves as a wrapper around Worker::Actor.
     // We use it to associate a HibernationManager with the Worker::Actor, since the
     // Worker::Actor can be destroyed during periods of prolonged inactivity.
@@ -1999,7 +1996,7 @@ class Server::WorkerService final: public Service,
     // Once there are no Worker::Actor's left (excluding our own), `inactive()` is triggered and we
     // initiate the eviction of the Durable Object. If no requests arrive in the next 10 seconds,
     // the DO is evicted, otherwise we cancel the eviction task.
-    class ActorContainer final: public RequestTracker::Hooks {
+    class ActorContainer final: public RequestTracker::Hooks, public kj::Refcounted {
      public:
       ActorContainer(kj::StringPtr key, ActorNamespace& parent, kj::Timer& timer)
           : key(key),
@@ -2016,12 +2013,6 @@ class Server::WorkerService final: public Service,
           // Unknown broken reason.
           auto reason = 0;
           a->shutdown(reason);
-        }
-
-        KJ_IF_SOME(ref, containerRef) {
-          // We're being destroyed before the ActorContainerRef, probably because the actor broke.
-          // Let's drop the ActorContainerRef's reference to us to prevent another eviction attempt.
-          ref.container = kj::none;
         }
       }
 
@@ -2072,10 +2063,12 @@ class Server::WorkerService final: public Service,
       }
 
       bool hasClients() {
-        return containerRef != kj::none;
+        // If anyone holds a reference to the container other than the actor map, then it must be
+        // a client.
+        return isShared();
       }
-      kj::Maybe<ActorContainerRef&> getContainerRef() {
-        return containerRef;
+      kj::Own<ActorContainer> addRef() {
+        return kj::addRef(*this);
       }
 
       kj::Maybe<Worker::Actor&> tryGetActor() {
@@ -2105,11 +2098,6 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
-
-      // Non-empty if at least one client has a reference to this actor.
-      // If no clients are connected, we may be evicted by `cleanupLoop`.
-      kj::Maybe<ActorContainerRef&> containerRef;
-      friend class ActorContainerRef;
 
       void requireNotBroken() {
         KJ_IF_SOME(e, brokenReason) {
@@ -2190,38 +2178,6 @@ class Server::WorkerService final: public Service,
       }
     };
 
-    // This class tracks clients that a have reference to the given actor.
-    // Upon destruction, we update the lastAccess time for the actor and
-    // `ActorContainer::hasClients()` starts returning false. After 70 seconds, the cleanupLoop
-    // will remove the `ActorContainer` from `actors`.
-    class ActorContainerRef: public kj::Refcounted {
-     public:
-      ActorContainerRef(ActorContainer& container): container(container) {
-        // Link this ref to the actual ActorContainer.
-        container.containerRef = *this;
-      }
-      ~ActorContainerRef() noexcept(false) {
-        KJ_IF_SOME(ref, container) {
-          ref.updateAccessTime();
-          ref.containerRef = kj::none;
-        }
-      }
-
-      kj::Own<ActorContainerRef> addRef() {
-        return kj::addRef(*this);
-      }
-
-      kj::Maybe<ActorContainer&> get() {
-        return container;
-      }
-
-     private:
-      // This is a maybe because the ActorContainer could be destroyed before ActorContainerRef
-      // if the actor is broken.
-      kj::Maybe<ActorContainer&> container;
-      friend class ActorContainer;
-    };
-
     void abortAll() {
       actors.clear();
     }
@@ -2241,7 +2197,7 @@ class Server::WorkerService final: public Service,
     // used to track the client that requested it.
     struct GetActorResult {
       kj::Own<Worker::Actor> actor;
-      kj::Own<ActorContainerRef> ref;
+      kj::Own<ActorContainer> ref;
     };
 
     kj::Promise<kj::Own<WorkerInterface>> getActorThenStartRequest(
@@ -2329,27 +2285,15 @@ class Server::WorkerService final: public Service,
     kj::Promise<GetActorResult> getActorImpl(kj::String id) {
       kj::StringPtr idPtr = id;
 
-      ActorContainer& actorContainer = *actors.findOrCreate(id, [&]() mutable {
-        auto container = kj::heap<ActorContainer>(id, *this, timer);
+      kj::Own<ActorContainer> containerRef = actors
+                                                 .findOrCreate(id, [&]() mutable {
+        auto container = kj::refcounted<ActorContainer>(id, *this, timer);
 
         return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry{
           kj::mv(id), kj::mv(container)};
-      });
+      })->addRef();
 
-      // If we don't have an ActorContainerRef, we'll create one to track the client.
-      // Note it's important that we obtain this before waiting on the lock, so that the
-      // ActorContainer can't be evicted while waiting.
-      kj::Own<ActorContainerRef> containerRef;
-      KJ_IF_SOME(ref, actorContainer.getContainerRef()) {
-        containerRef = ref.addRef();
-      } else {
-        // We have an actor, but all the clients dropped their reference to the DO so we need
-        // make a new `ActorContainerRef`. Note that `hasClients()` will return true now,
-        // preventing cleanupLoop from evicting us.
-        containerRef = kj::refcounted<ActorContainerRef>(actorContainer);
-      }
-
-      KJ_IF_SOME(a, actorContainer.tryGetActor()) {
+      KJ_IF_SOME(a, containerRef->tryGetActor()) {
         // This actor was used recently and hasn't been evicted, let's reuse it.
         return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
       }
@@ -2363,11 +2307,7 @@ class Server::WorkerService final: public Service,
               Worker::AsyncLock asyncLock) mutable -> GetActorResult {
         // We don't have an actor so we need to create it.
 
-        // The only way the container could be evicted while it has an active ref is if the actor
-        // became broken, but that can't happen if the actor hasn't even started up yet...
-        ActorContainer& actorContainer =
-            KJ_ASSERT_NONNULL(containerRef->get(), "ActorContainer evicted during actor startup?");
-        KJ_IF_SOME(a, actorContainer.tryGetActor()) {
+        KJ_IF_SOME(a, containerRef->tryGetActor()) {
           // Someone else created the actor while we were waiting for the lock.
           // TODO(cleanup): It would be cleaner if the first request temporarily left a
           //   ForkedPromise that other requests could wait on but that would be more complicated
@@ -2436,11 +2376,11 @@ class Server::WorkerService final: public Service,
           // work for local development we need to pass an event type.
           static constexpr uint16_t hibernationEventTypeId = 8;
 
-          auto& actorRef = actorContainer.setActor(
-              kj::refcounted<Worker::Actor>(*service.worker, actorContainer.getTracker(),
+          auto& actorRef = containerRef->setActor(
+              kj::refcounted<Worker::Actor>(*service.worker, containerRef->getTracker(),
                   kj::str(idPtr), true, kj::mv(makeActorCache), className, kj::mv(makeStorage),
                   lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-                  actorContainer.tryGetManagerRef(), hibernationEventTypeId));
+                  containerRef->tryGetManagerRef(), hibernationEventTypeId));
 
           // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
           return GetActorResult{.actor = actorRef.addRef(), .ref = kj::mv(containerRef)};
