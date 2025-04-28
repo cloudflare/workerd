@@ -2028,8 +2028,6 @@ class Server::WorkerService final: public Service,
         if (!onBrokenTriggered) {
           parent.onBrokenTasks.erase(key);
         }
-        // We need to make sure we're removed from the actors map.
-        parent.actors.erase(key);
       }
 
       void active() override {
