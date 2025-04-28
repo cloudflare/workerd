@@ -1876,13 +1876,18 @@ class Server::WorkerService final: public Service,
       }
     };
 
-    for (auto& service: channels.tails) {
-      addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
-    }
+    // Only add tracers for events other than the test event – it does not support tracing/does not
+    // produce completed trace objects but can still result in the tail worker being called,
+    // resulting in unsightly JS errors in the self-logger-test.
+    if (entrypointName.orDefault("") != "test"_kj) {
+      for (auto& service: channels.tails) {
+        addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
+      }
 
-    if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
-      for (auto& service: channels.streamingTails) {
-        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
+      if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
+        for (auto& service: channels.streamingTails) {
+          addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
+        }
       }
     }
 
