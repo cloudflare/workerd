@@ -2265,6 +2265,16 @@ class Server::WorkerService final: public Service,
       }
     };
 
+    kj::Own<ActorContainer> getActorContainer(kj::String id) {
+      return actors
+          .findOrCreate(id, [&]() mutable {
+        auto container = kj::refcounted<ActorContainer>(id, *this, timer);
+
+        return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry{
+          kj::mv(id), kj::mv(container)};
+      })->addRef();
+    }
+
     void abortAll() {
       actors.clear();
     }
@@ -2280,16 +2290,11 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
 
-    // An owned actor and an ActorContainerRef
-    // used to track the client that requested it.
-    struct GetActorResult {
-      kj::Own<Worker::Actor> actor;
-      kj::Own<ActorContainer> ref;
-    };
-
     kj::Promise<kj::Own<WorkerInterface>> getActorThenStartRequest(
         kj::String id, IoChannelFactory::SubrequestMetadata metadata) {
-      auto [actor, refTracker] = co_await getActorImpl(kj::mv(id));
+      auto refTracker = getActorContainer(kj::mv(id));
+
+      auto actor = co_await refTracker->getActor();
 
       if (cleanupTask == kj::none) {
         // Need to start the cleanup loop.
@@ -2368,20 +2373,6 @@ class Server::WorkerService final: public Service,
       AlarmScheduler& alarmScheduler;
       ActorKey actor;
     };
-
-    kj::Promise<GetActorResult> getActorImpl(kj::String id) {
-      kj::Own<ActorContainer> containerRef = actors
-                                                 .findOrCreate(id, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(id, *this, timer);
-
-        return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry{
-          kj::mv(id), kj::mv(container)};
-      })->addRef();
-
-      auto actor = co_await containerRef->getActor();
-
-      co_return GetActorResult{.actor = kj::mv(actor), .ref = kj::mv(containerRef)};
-    }
   };
 
  private:
