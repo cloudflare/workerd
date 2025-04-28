@@ -2023,11 +2023,6 @@ class Server::WorkerService final: public Service,
           // Let's drop the ActorContainerRef's reference to us to prevent another eviction attempt.
           ref.container = kj::none;
         }
-
-        // Don't erase the onBrokenTask if it is the reason we are being destroyed.
-        if (!onBrokenTriggered) {
-          parent.onBrokenTasks.erase(key);
-        }
       }
 
       void active() override {
@@ -2065,11 +2060,9 @@ class Server::WorkerService final: public Service,
         // JS WebSockets.
         // TODO(someday): We could make this timeout configurable to make testing less burdensome.
         co_await timer.afterDelay(10 * kj::SECONDS);
-        KJ_IF_SOME(onBroken, parent.onBrokenTasks.findEntry(getKey())) {
-          // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
-          // want to trigger it.
-          parent.onBrokenTasks.erase(onBroken);
-        }
+        // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
+        // want to trigger it.
+        onBrokenTask = kj::none;
         KJ_IF_SOME(a, actor) {
           if (a->isShared()) {
             // Our ActiveRequest refcounting has broken somewhere. This is likely because we're
@@ -2128,13 +2121,16 @@ class Server::WorkerService final: public Service,
         return containerRef;
       }
 
-      // `onBrokenTriggered` indicates the actor has been broken.
-      void setOnBroken() {
-        onBrokenTriggered = true;
-      }
-
       // The actor is constructed after the ActorContainer so it starts off empty.
       kj::Maybe<kj::Own<Worker::Actor>> actor;
+
+      Worker::Actor& setActor(kj::Own<Worker::Actor> newActor) {
+        KJ_ASSERT(actor == kj::none);
+        Worker::Actor& actorRef = *newActor;
+        actor = kj::mv(newActor);
+        onBrokenTask = monitorOnBroken(actorRef);
+        return actorRef;
+      }
 
      private:
       kj::StringPtr key;
@@ -2144,12 +2140,36 @@ class Server::WorkerService final: public Service,
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
+      kj::Maybe<kj::Promise<void>> onBrokenTask;
       bool onBrokenTriggered = false;
 
       // Non-empty if at least one client has a reference to this actor.
       // If no clients are connected, we may be evicted by `cleanupLoop`.
       kj::Maybe<ActorContainerRef&> containerRef;
       friend class ActorContainerRef;
+
+      kj::Promise<void> monitorOnBroken(Worker::Actor& actor) {
+        try {
+          // It's possible for this to never resolve if the actor never breaks,
+          // in which case the returned promise will just be canceled.
+          co_await actor.onBroken();
+        } catch (...) {
+          // We are intentionally ignoring any errors here. We just want to ensure
+          // that the actor is removed if the onBroken promise is resolved or errors.
+        }
+        onBrokenTriggered = true;
+
+        // HACK: Dropping the ActorContainer will delete onBrokenTask, cancelling ourselves. This
+        //   would crash. To avoid the problem, detach ourselves. This is safe because we know that
+        //   once we return there's nothing left for this promise to do anyway.
+        KJ_ASSERT_NONNULL(onBrokenTask).detach([](kj::Exception&& e) {});
+
+        // Note that we remove the entire ActorContainer from the map -- this drops the
+        // HibernationManager so any connected hibernatable websockets will be disconnected.
+        parent.actors.erase(key);
+
+        // WARNING: `this` MAY HAVE BEEN DELETED
+      }
     };
 
     // This class tracks clients that a have reference to the given actor.
@@ -2196,7 +2216,6 @@ class Server::WorkerService final: public Service,
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
     // request comes in, we recreate the Own<Worker::Actor>.
     kj::HashMap<kj::String, kj::Own<ActorContainer>> actors;
-    kj::HashMap<kj::String, kj::Maybe<kj::Promise<void>>> onBrokenTasks;
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
 
@@ -2399,41 +2418,16 @@ class Server::WorkerService final: public Service,
           // work for local development we need to pass an event type.
           static constexpr uint16_t hibernationEventTypeId = 8;
 
-          actorContainer.actor.emplace(
+          auto& actorRef = actorContainer.setActor(
               kj::refcounted<Worker::Actor>(*service.worker, actorContainer.getTracker(),
                   kj::str(idPtr), true, kj::mv(makeActorCache), className, kj::mv(makeStorage),
                   lock, kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
                   actorContainer.tryGetManagerRef(), hibernationEventTypeId));
 
-          // If the actor becomes broken, remove it from the map, so a new one will be created
-          // next time.
-          auto& actorRef = KJ_REQUIRE_NONNULL(actorContainer.actor);
-          auto& entry = onBrokenTasks.findOrCreateEntry(actorContainer.getKey(), [&]() {
-            return decltype(onBrokenTasks)::Entry{kj::str(actorContainer.getKey()), kj::none};
-          });
-          entry.value = onActorBroken(actorRef->onBroken(), actorContainer)
-                            .eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
-
           // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
-          return GetActorResult{.actor = actorRef->addRef(), .ref = kj::mv(containerRef)};
+          return GetActorResult{.actor = actorRef.addRef(), .ref = kj::mv(containerRef)};
         });
       });
-    }
-
-    kj::Promise<void> onActorBroken(kj::Promise<void> broken, ActorContainer& entryRef) {
-      try {
-        // It's possible for this to never resolve if the actor never breaks,
-        // in which case the returned promise will just be canceled.
-        co_await broken;
-      } catch (...) {
-        // We are intentionally ignoring any errors here. We just want to ensure
-        // that the actor is removed if the onBroken promise is resolved or errors.
-      }
-      // Note that we remove the entire ActorContainer from the map -- this drops the
-      // HibernationManager so any connected hibernatable websockets will be disconnected.
-      entryRef.setOnBroken();
-      auto key = kj::str(entryRef.getKey());
-      actors.erase(key.asPtr());
     }
   };
 
