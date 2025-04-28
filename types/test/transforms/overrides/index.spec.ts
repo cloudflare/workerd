@@ -2,29 +2,25 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
-import { test } from "node:test";
-import path from "path";
-import {
-  Member_Nested,
-  StructureGroups,
-  Type,
-} from "@workerd/jsg/rtti.capnp.js";
-import { Message } from "capnp-ts";
-import ts from "typescript";
-import { generateDefinitions } from "../../../src/generator";
-import { printNodeList, printer } from "../../../src/print";
-import { createMemoryProgram } from "../../../src/program";
+import assert from 'assert';
+import { test } from 'node:test';
+import path from 'path';
+import { Member_Nested, StructureGroups, Type } from '@workerd/jsg/rtti';
+import { Message } from 'capnp-es';
+import ts from 'typescript';
+import { generateDefinitions } from '../../../src/generator';
+import { printNodeList, printer } from '../../../src/print';
+import { createMemoryProgram } from '../../../src/program';
 import {
   compileOverridesDefines,
   createOverrideDefineTransformer,
-} from "../../../src/transforms";
+} from '../../../src/transforms';
 
 function printDefinitionsWithOverrides(root: StructureGroups): string {
   const { nodes } = generateDefinitions(root);
 
   const [sources, replacements] = compileOverridesDefines(root);
-  const sourcePath = path.resolve(__dirname, "source.ts");
+  const sourcePath = path.resolve(__dirname, 'source.ts');
   const source = printNodeList(nodes);
   sources.set(sourcePath, source);
 
@@ -40,42 +36,42 @@ function printDefinitionsWithOverrides(root: StructureGroups): string {
   return printer.printFile(result.transformed[0]);
 }
 
-test("createOverrideDefineTransformer: applies type renames", () => {
+test('createOverrideDefineTransformer: applies type renames', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(2);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(2);
 
   const thing = structures.get(0);
-  thing.setName("Thing");
-  thing.setFullyQualifiedName("workerd::api::Thing");
-  thing.setTsOverride("RenamedThing");
+  thing.name = 'Thing';
+  thing.fullyQualifiedName = 'workerd::api::Thing';
+  thing.tsOverride = 'RenamedThing';
   function referenceThing(type: Type | Member_Nested) {
-    const structureType = type.initStructure();
-    structureType.setName("Thing");
-    structureType.setFullyQualifiedName("workerd::api::Thing");
+    const structureType = type._initStructure();
+    structureType.name = 'Thing';
+    structureType.fullyQualifiedName = 'workerd::api::Thing';
   }
 
   // Create type root that references Thing in different ways to test renaming
   const root1 = structures.get(1);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
   // Make sure references to original names in overrides get renamed too
-  root1.setTsOverride("{ newProp: Thing; }");
+  root1.tsOverride = '{ newProp: Thing; }';
   {
-    const members = root1.initMembers(3);
+    const members = root1._initMembers(3);
 
-    const prop = members.get(0).initProperty();
-    prop.setName("prop");
-    referenceThing(prop.initType());
+    const prop = members.get(0)._initProperty();
+    prop.name = 'prop';
+    referenceThing(prop._initType());
 
-    const method = members.get(1).initMethod();
-    method.setName("method");
-    referenceThing(method.initArgs(1).get(0));
-    referenceThing(method.initReturnType());
+    const method = members.get(1)._initMethod();
+    method.name = 'method';
+    referenceThing(method._initArgs(1).get(0));
+    referenceThing(method._initReturnType());
 
-    const nested = members.get(2).initNested();
-    nested.setName("Thing"); // Should keep original name
+    const nested = members.get(2)._initNested();
+    nested.name = 'Thing'; // Should keep original name
     referenceThing(nested);
   }
 
@@ -93,60 +89,60 @@ interface Root1 {
   );
 });
 
-test("createOverrideDefineTransformer: applies property overrides", () => {
+test('createOverrideDefineTransformer: applies property overrides', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(1);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(1);
 
   const root1 = structures.get(0);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
   {
-    const members = root1.initMembers(6);
+    const members = root1._initMembers(6);
 
     // Readonly instance property, overridden to be mutable and optional
-    const prop1 = members.get(0).initProperty();
-    prop1.setName("prop1");
-    prop1.initType().initString().setName("kj::String");
-    prop1.setReadonly(true);
+    const prop1 = members.get(0)._initProperty();
+    prop1.name = 'prop1';
+    prop1._initType()._initString().name = 'kj::String';
+    prop1.readonly = true;
 
     // Mutable instance property, overridden to be readonly and required
-    const prop2 = members.get(1).initProperty();
-    prop2.setName("prop2");
-    prop2.initType().initMaybe().initValue().setBoolt();
+    const prop2 = members.get(1)._initProperty();
+    prop2.name = 'prop2';
+    prop2._initType()._initMaybe()._initValue().boolt = true;
 
     // Readonly prototype property, overridden to be mutable
-    const prop3 = members.get(2).initProperty();
-    prop3.setName("prop3");
-    prop3.initType().initArray().initElement().setBoolt();
-    prop3.setReadonly(true);
-    prop3.setPrototype(true);
+    const prop3 = members.get(2)._initProperty();
+    prop3.name = 'prop3';
+    prop3._initType()._initArray()._initElement().boolt = true;
+    prop3.readonly = true;
+    prop3.prototype = true;
 
     // Mutable prototype property, overridden to be readonly
-    const prop4 = members.get(3).initProperty();
-    prop4.setName("prop4");
-    prop4.initType().initNumber().setName("int");
-    prop4.setPrototype(true);
+    const prop4 = members.get(3)._initProperty();
+    prop4.name = 'prop4';
+    prop4._initType()._initNumber().name = 'int';
+    prop4.prototype = true;
 
     // Deleted property
-    const prop5 = members.get(4).initProperty();
-    prop5.setName("prop5");
-    prop5.initType().setBoolt();
+    const prop5 = members.get(4)._initProperty();
+    prop5.name = 'prop5';
+    prop5._initType().boolt = true;
 
     // Untouched property
-    const prop6 = members.get(5).initProperty();
-    prop6.setName("prop6");
-    prop6.initType().initPromise().initValue().setVoidt();
+    const prop6 = members.get(5)._initProperty();
+    prop6.name = 'prop6';
+    prop6._initType()._initPromise()._initValue().voidt = true;
   }
-  root1.setTsOverride(`{
+  root1.tsOverride = `{
     prop1?: "thing";
     readonly prop2: true;
     get prop3(): false;
     set prop3(value: false);
     get prop4(): 1 | 2 | 3;
     prop5: never;
-  }`);
+  }`;
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
@@ -162,65 +158,65 @@ test("createOverrideDefineTransformer: applies property overrides", () => {
   );
 });
 
-test("createOverrideDefineTransformer: applies method overrides", () => {
+test('createOverrideDefineTransformer: applies method overrides', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(1);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(1);
 
   const root1 = structures.get(0);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
   {
-    const members = root1.initMembers(7);
+    const members = root1._initMembers(7);
 
     // Static and instance methods with the same names
-    const method1 = members.get(0).initMethod();
-    method1.setName("one");
-    method1.initReturnType().initNumber().setName("int");
-    const staticMethod1 = members.get(1).initMethod();
-    staticMethod1.setName("one");
-    staticMethod1.initReturnType().initNumber().setName("int");
-    staticMethod1.setStatic(true);
-    const method2 = members.get(2).initMethod();
-    method2.setName("two");
-    method2.initReturnType().initNumber().setName("int");
-    const staticMethod2 = members.get(3).initMethod();
-    staticMethod2.setName("two");
-    staticMethod2.initReturnType().initNumber().setName("int");
-    staticMethod2.setStatic(true);
+    const method1 = members.get(0)._initMethod();
+    method1.name = 'one';
+    method1._initReturnType()._initNumber().name = 'int';
+    const staticMethod1 = members.get(1)._initMethod();
+    staticMethod1.name = 'one';
+    staticMethod1._initReturnType()._initNumber().name = 'int';
+    staticMethod1.static = true;
+    const method2 = members.get(2)._initMethod();
+    method2.name = 'two';
+    method2._initReturnType()._initNumber().name = 'int';
+    const staticMethod2 = members.get(3)._initMethod();
+    staticMethod2.name = 'two';
+    staticMethod2._initReturnType()._initNumber().name = 'int';
+    staticMethod2.static = true;
 
     // Method with multiple overloads
-    const methodGet = members.get(4).initMethod();
-    methodGet.setName("get");
+    const methodGet = members.get(4)._initMethod();
+    methodGet.name = 'get';
     {
-      const args = methodGet.initArgs(2);
-      args.get(0).initString().setName("kj::String");
-      const variants = args.get(1).initOneOf().initVariants(2);
-      variants.get(0).initString().setName("kj::String");
-      variants.get(1).setUnknown();
+      const args = methodGet._initArgs(2);
+      args.get(0)._initString().name = 'kj::String';
+      const variants = args.get(1)._initOneOf()._initVariants(2);
+      variants.get(0)._initString().name = 'kj::String';
+      variants.get(1).unknown = true;
     }
-    const methodGetReturn = methodGet.initReturnType().initMaybe();
-    methodGetReturn.setName("kj::Maybe");
-    methodGetReturn.initValue().setUnknown();
+    const methodGetReturn = methodGet._initReturnType()._initMaybe();
+    methodGetReturn.name = 'kj::Maybe';
+    methodGetReturn._initValue().unknown = true;
 
     // Deleted method
-    const methodDeleteAll = members.get(5).initMethod();
-    methodDeleteAll.setName("deleteAll");
-    methodDeleteAll.initReturnType().setVoidt();
+    const methodDeleteAll = members.get(5)._initMethod();
+    methodDeleteAll.name = 'deleteAll';
+    methodDeleteAll._initReturnType().voidt = true;
 
     // Untouched method
-    const methodThing = members.get(6).initMethod();
-    methodThing.setName("thing");
-    methodThing.initArgs(1).get(0).setBoolt();
-    methodThing.initReturnType().setBoolt();
+    const methodThing = members.get(6)._initMethod();
+    methodThing.name = 'thing';
+    methodThing._initArgs(1).get(0).boolt = true;
+    methodThing._initReturnType().boolt = true;
   }
   // These overrides test:
   // - Overriding a static method with an instance method of the same name
   // - Overriding an instance method with a static method of the same name
   // - Split overloads, these should be grouped
   // - Deleted method
-  root1.setTsOverride(`{
+  root1.tsOverride = `{
     static one(): 1;
     two(): 2;
 
@@ -230,7 +226,7 @@ test("createOverrideDefineTransformer: applies method overrides", () => {
     deleteAll: never;
 
     get<T>(key: string, type: "json"): Promise<T | null>;
-  }`);
+  }`;
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
@@ -248,44 +244,44 @@ test("createOverrideDefineTransformer: applies method overrides", () => {
   );
 });
 
-test("createOverrideDefineTransformer: applies type parameter overrides", () => {
+test('createOverrideDefineTransformer: applies type parameter overrides', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(2);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(2);
 
   const struct = structures.get(0);
-  struct.setName("Struct");
-  struct.setFullyQualifiedName("workerd::api::Struct");
+  struct.name = 'Struct';
+  struct.fullyQualifiedName = 'workerd::api::Struct';
   {
-    const members = struct.initMembers(1);
-    const prop = members.get(0).initProperty();
-    prop.setName("type");
-    prop.initType().setUnknown();
+    const members = struct._initMembers(1);
+    const prop = members.get(0)._initProperty();
+    prop.name = 'type';
+    prop._initType().unknown = true;
   }
-  struct.setTsOverride(`RenamedStruct<Type extends string = string> {
+  struct.tsOverride = `RenamedStruct<Type extends string = string> {
     type: Type;
-  }`);
+  }`;
 
   const root1 = structures.get(1);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
   {
-    const members = root1.initMembers(2);
+    const members = root1._initMembers(2);
 
-    const methodGet = members.get(0).initMethod();
-    methodGet.setName("get");
-    const returnStruct = methodGet.initReturnType().initStructure();
-    returnStruct.setName("Struct");
-    returnStruct.setFullyQualifiedName("workerd::api::Struct");
+    const methodGet = members.get(0)._initMethod();
+    methodGet.name = 'get';
+    const returnStruct = methodGet._initReturnType()._initStructure();
+    returnStruct.name = 'Struct';
+    returnStruct.fullyQualifiedName = 'workerd::api::Struct';
 
-    const methodRead = members.get(1).initMethod();
-    methodRead.setName("read");
-    methodRead.initReturnType().initPromise().initValue().setUnknown();
+    const methodRead = members.get(1)._initMethod();
+    methodRead.name = 'read';
+    methodRead._initReturnType()._initPromise()._initValue().unknown = true;
   }
-  root1.setTsOverride(`<R> {
+  root1.tsOverride = `<R> {
     read(): Promise<R>;
-  }`);
+  }`;
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
@@ -300,52 +296,50 @@ interface Root1<R> {
   );
 });
 
-test("createOverrideDefineTransformer: applies heritage overrides", () => {
+test('createOverrideDefineTransformer: applies heritage overrides', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(4);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(4);
 
   const superclass = structures.get(0);
-  superclass.setName(`Superclass`);
-  superclass.setFullyQualifiedName(`workerd::api::Superclass`);
-  superclass.setTsOverride("<T, U = unknown>");
+  superclass.name = `Superclass`;
+  superclass.fullyQualifiedName = `workerd::api::Superclass`;
+  superclass.tsOverride = '<T, U = unknown>';
 
   const root1 = structures.get(1);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  const root1Extends = root1.initExtends().initStructure();
-  root1Extends.setName("Superclass");
-  root1Extends.setFullyQualifiedName("workerd::api::Superclass");
-  root1.setTsRoot(true);
-  root1.setTsOverride(
-    `extends Superclass<ArrayBuffer | ArrayBufferView, Uint8Array>`
-  );
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  const root1Extends = root1._initExtends()._initStructure();
+  root1Extends.name = 'Superclass';
+  root1Extends.fullyQualifiedName = 'workerd::api::Superclass';
+  root1.tsRoot = true;
+  root1.tsOverride = `extends Superclass<ArrayBuffer | ArrayBufferView, Uint8Array>`;
 
   const root2 = structures.get(2);
-  root2.setName("Root2");
-  root2.setFullyQualifiedName("workerd::api::Root2");
-  const root2Extends = root1.initExtends().initStructure();
-  root2Extends.setName("Superclass");
-  root2Extends.setFullyQualifiedName("workerd::api::Superclass");
-  root2.setTsRoot(true);
-  root2.setTsOverride("Root2<T> implements Superclass<T>");
+  root2.name = 'Root2';
+  root2.fullyQualifiedName = 'workerd::api::Root2';
+  const root2Extends = root1._initExtends()._initStructure();
+  root2Extends.name = 'Superclass';
+  root2Extends.fullyQualifiedName = 'workerd::api::Superclass';
+  root2.tsRoot = true;
+  root2.tsOverride = 'Root2<T> implements Superclass<T>';
 
   const root3 = structures.get(3);
-  root3.setName("Root3");
-  root3.setFullyQualifiedName("workerd::api::Root3");
-  const root3Extends = root1.initExtends().initStructure();
-  root3Extends.setName("Superclass");
-  root3Extends.setFullyQualifiedName("workerd::api::Superclass");
-  root3.setTsRoot(true);
+  root3.name = 'Root3';
+  root3.fullyQualifiedName = 'workerd::api::Root3';
+  const root3Extends = root1._initExtends()._initStructure();
+  root3Extends.name = 'Superclass';
+  root3Extends.fullyQualifiedName = 'workerd::api::Superclass';
+  root3.tsRoot = true;
   {
-    const members = root3.initMembers(1);
-    const prop = members.get(0).initProperty();
-    prop.setName("prop");
-    prop.initType().initNumber().setName("int");
+    const members = root3._initMembers(1);
+    const prop = members.get(0)._initProperty();
+    prop.name = 'prop';
+    prop._initType()._initNumber().name = 'int';
   }
-  root3.setTsOverride(`extends Superclass<boolean> {
+  root3.tsOverride = `extends Superclass<boolean> {
     prop: 1 | 2 | 3;
-  }`);
+  }`;
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
@@ -362,39 +356,37 @@ interface Root3 extends Superclass<boolean> {
   );
 });
 
-test("createOverrideDefineTransformer: applies full type replacements", () => {
+test('createOverrideDefineTransformer: applies full type replacements', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(4);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(4);
 
   const root1 = structures.get(0);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
-  root1.setTsOverride(`const Root1 = {
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
+  root1.tsOverride = `const Root1 = {
     new (): { 0: Root2; 1: Root3; };
-  }`);
+  }`;
 
   const root2 = structures.get(1);
-  root2.setName("Root2");
-  root2.setFullyQualifiedName("workerd::api::Root2");
-  root2.setTsRoot(true);
-  root2.setTsOverride(`enum Root2 { ONE, TWO, THREE; }`);
+  root2.name = 'Root2';
+  root2.fullyQualifiedName = 'workerd::api::Root2';
+  root2.tsRoot = true;
+  root2.tsOverride = `enum Root2 { ONE, TWO, THREE; }`;
 
   const root3 = structures.get(2);
-  root3.setName("Root3");
-  root3.setFullyQualifiedName("workerd::api::Root3");
-  root3.setTsRoot(true);
+  root3.name = 'Root3';
+  root3.fullyQualifiedName = 'workerd::api::Root3';
+  root3.tsRoot = true;
   // Check renames still applied with full-type replacements
-  root3.setTsOverride(
-    `type RenamedRoot3<T = any> = { done: false; value: T; } | { done: true; value: undefined; }`
-  );
+  root3.tsOverride = `type RenamedRoot3<T = any> = { done: false; value: T; } | { done: true; value: undefined; }`;
 
   const root4 = structures.get(3);
-  root4.setName("Root4");
-  root4.setFullyQualifiedName("workerd::api::Root4");
-  root4.setTsRoot(true);
-  root4.setTsOverride(`type Root4 = never`);
+  root4.name = 'Root4';
+  root4.fullyQualifiedName = 'workerd::api::Root4';
+  root4.tsRoot = true;
+  root4.tsOverride = `type Root4 = never`;
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
@@ -420,22 +412,22 @@ type RenamedRoot3<T = any> = {
   );
 });
 
-test("createOverrideDefineTransformer: applies overrides with literals", () => {
+test('createOverrideDefineTransformer: applies overrides with literals', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(1);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(1);
 
   const root1 = structures.get(0);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
-  root1.setTsOverride(`{
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
+  root1.tsOverride = `{
     literalString: "hello";
     literalNumber: 42;
     literalArray: [a: "a", b: 2];
     literalObject: { a: "a"; b: 2; };
     literalTemplate: \`\${string}-\${number}\`;
-  }`);
+  }`;
 
   assert.strictEqual(
     printDefinitionsWithOverrides(root),
@@ -456,22 +448,22 @@ test("createOverrideDefineTransformer: applies overrides with literals", () => {
   );
 });
 
-test("createOverrideDefineTransformer: inserts extra defines", () => {
+test('createOverrideDefineTransformer: inserts extra defines', () => {
   const root = new Message().initRoot(StructureGroups);
-  const group = root.initGroups(1).get(0);
-  const structures = group.initStructures(2);
+  const group = root._initGroups(1).get(0);
+  const structures = group._initStructures(2);
 
   const root1 = structures.get(0);
-  root1.setName("Root1");
-  root1.setFullyQualifiedName("workerd::api::Root1");
-  root1.setTsRoot(true);
+  root1.name = 'Root1';
+  root1.fullyQualifiedName = 'workerd::api::Root1';
+  root1.tsRoot = true;
 
   const root2 = structures.get(1);
-  root2.setName("Root2");
-  root2.setFullyQualifiedName("workerd::api::Root2");
-  root2.setTsRoot(true);
-  root2.setTsDefine("interface Root2Extra<Type> { prop: Type }");
-  root2.setTsOverride("RenamedRoot2");
+  root2.name = 'Root2';
+  root2.fullyQualifiedName = 'workerd::api::Root2';
+  root2.tsRoot = true;
+  root2.tsDefine = 'interface Root2Extra<Type> { prop: Type }';
+  root2.tsOverride = 'RenamedRoot2';
 
   // Check defines inserted before structure
   assert.strictEqual(

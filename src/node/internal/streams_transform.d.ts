@@ -175,6 +175,7 @@ export class Readable extends Stream implements NodeJS.ReadableStream {
     listener: (...args: any[]) => void
   ): this;
 
+  // @ts-expect-error
   [Symbol.asyncIterator](): AsyncIterableIterator<any>;
 }
 

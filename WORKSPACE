@@ -18,7 +18,7 @@ deps_gen()
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 
-NODE_VERSION = "22.11.0"
+NODE_VERSION = "22.14.0"
 
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
@@ -212,13 +212,6 @@ load("@aspect_rules_js//npm:repositories.bzl", "npm_translate_lock")
 npm_translate_lock(
     name = "npm",
     npmrc = "//:.npmrc",
-    patch_args = {
-        "capnp-ts@0.7.0": ["-p1"],
-    },
-    # Patches required for `capnp-ts` to type-check
-    patches = {
-        "capnp-ts@0.7.0": ["//:patches/capnp-ts@0.7.0.patch"],
-    },
     pnpm_lock = "//:pnpm-lock.yaml",
 )
 

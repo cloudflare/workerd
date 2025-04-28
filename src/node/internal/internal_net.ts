@@ -656,6 +656,7 @@ Socket.prototype.end = function (
   encoding?: NodeJS.BufferEncoding,
   cb?: () => void
 ): Socket {
+  // @ts-expect-error this fails after upgrading to @types/node@22.14
   Duplex.prototype.end.call(this, data, encoding, cb);
   return this;
 };

@@ -2,34 +2,34 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "assert";
-import { test } from "node:test";
-import ts, { factory as f } from "typescript";
-import { printNode, printNodeList } from "../src/print";
+import assert from 'assert';
+import { test } from 'node:test';
+import ts, { factory as f } from 'typescript';
+import { printNode, printNodeList } from '../src/print';
 
-test("printNode: prints type", () => {
-  const type = f.createTypeReferenceNode("Promise", [
-    f.createTypeReferenceNode("void"),
+test('printNode: prints type', () => {
+  const type = f.createTypeReferenceNode('Promise', [
+    f.createTypeReferenceNode('void'),
   ]);
-  assert.strictEqual(printNode(type), "Promise<void>");
+  assert.strictEqual(printNode(type), 'Promise<void>');
 });
 
-test("printNode: prints interface", () => {
+test('printNode: prints interface', () => {
   const property = f.createPropertySignature(
     [f.createToken(ts.SyntaxKind.ReadonlyKeyword)],
-    "thing",
+    'thing',
     f.createToken(ts.SyntaxKind.QuestionToken),
-    f.createTypeReferenceNode("T")
+    f.createTypeReferenceNode('T')
   );
 
   const typeParam = f.createTypeParameterDeclaration(
     /* modifiers */ undefined,
-    "T",
-    f.createTypeReferenceNode("string")
+    'T',
+    f.createTypeReferenceNode('string')
   );
   const declaration = f.createInterfaceDeclaration(
     [f.createToken(ts.SyntaxKind.ExportKeyword)],
-    "Test",
+    'Test',
     [typeParam],
     /* heritageClauses */ undefined,
     [property]
@@ -43,17 +43,17 @@ test("printNode: prints interface", () => {
   );
 });
 
-test("printNodeList: prints statements", () => {
+test('printNodeList: prints statements', () => {
   const interfaceDeclaration = f.createInterfaceDeclaration(
     /* modifiers */ undefined,
-    "Interface",
+    'Interface',
     /* typeParams */ undefined,
     /* heritageClauses */ undefined,
     []
   );
   const classDeclaration = f.createClassDeclaration(
     /* modifiers */ undefined,
-    "Class",
+    'Class',
     /* typeParams */ undefined,
     /* heritageClauses */ undefined,
     []
