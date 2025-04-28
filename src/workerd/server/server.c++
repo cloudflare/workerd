@@ -2078,8 +2078,9 @@ class Server::WorkerService final: public Service,
         return containerRef;
       }
 
-      // The actor is constructed after the ActorContainer so it starts off empty.
-      kj::Maybe<kj::Own<Worker::Actor>> actor;
+      kj::Maybe<Worker::Actor&> tryGetActor() {
+        return actor;
+      }
 
       Worker::Actor& setActor(kj::Own<Worker::Actor> newActor) {
         KJ_ASSERT(actor == kj::none);
@@ -2090,6 +2091,9 @@ class Server::WorkerService final: public Service,
       }
 
      private:
+      // The actor is constructed after the ActorContainer so it starts off empty.
+      kj::Maybe<kj::Own<Worker::Actor>> actor;
+
       kj::StringPtr key;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
@@ -2331,9 +2335,9 @@ class Server::WorkerService final: public Service,
         containerRef = kj::refcounted<ActorContainerRef>(actorContainer);
       }
 
-      KJ_IF_SOME(a, actorContainer.actor) {
+      KJ_IF_SOME(a, actorContainer.tryGetActor()) {
         // This actor was used recently and hasn't been evicted, let's reuse it.
-        return GetActorResult{.actor = a->addRef(), .ref = kj::mv(containerRef)};
+        return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
       }
 
       // `getActor()` is often called with the calling isolate's lock held. We need to drop that
@@ -2349,12 +2353,12 @@ class Server::WorkerService final: public Service,
         // became broken, but that can't happen if the actor hasn't even started up yet...
         ActorContainer& actorContainer =
             KJ_ASSERT_NONNULL(containerRef->get(), "ActorContainer evicted during actor startup?");
-        KJ_IF_SOME(a, actorContainer.actor) {
+        KJ_IF_SOME(a, actorContainer.tryGetActor()) {
           // Someone else created the actor while we were waiting for the lock.
           // TODO(cleanup): It would be cleaner if the first request temporarily left a
           //   ForkedPromise that other requests could wait on but that would be more complicated
           //   to implement.
-          return GetActorResult{.actor = a->addRef(), .ref = kj::mv(containerRef)};
+          return GetActorResult{.actor = a.addRef(), .ref = kj::mv(containerRef)};
         }
 
         auto makeActorCache = [this, idStr = kj::str(idPtr)](const ActorCache::SharedLru& sharedLru,
