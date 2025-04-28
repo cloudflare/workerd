@@ -2054,49 +2054,6 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      // Processes the eviction of the Durable Object and hibernates active websockets.
-      kj::Promise<void> handleShutdown() {
-        // After 10 seconds of inactivity, we destroy the Worker::Actor and hibernate any active
-        // JS WebSockets.
-        // TODO(someday): We could make this timeout configurable to make testing less burdensome.
-        co_await timer.afterDelay(10 * kj::SECONDS);
-        // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
-        // want to trigger it.
-        onBrokenTask = kj::none;
-        KJ_IF_SOME(a, actor) {
-          if (a->isShared()) {
-            // Our ActiveRequest refcounting has broken somewhere. This is likely because we're
-            // `addRef`-ing an actor that has had an ActiveRequest attached to its kj::Own (in other
-            // words, the ActiveRequest count is less than it should be).
-            //
-            // Rather than dropping our actor and possibly ending up with split-brain,
-            // we should opt out of the deferred proxy optimization and log the error to Sentry.
-            KJ_LOG(ERROR,
-                "Detected internal bug in hibernation: Durable Object has strong references "
-                "when hibernation timeout expired.");
-
-            co_return;
-          }
-          KJ_IF_SOME(m, manager) {
-            auto& worker = a->getWorker();
-            auto workerStrongRef = kj::atomicAddRef(worker);
-            // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
-            // have an `IncomingRequest` at this point.
-            //
-            // Note that we do not have a race here because this is part of the `shutdownTask`
-            // promise. If a new request comes in while we're waiting to get the lock then we will
-            // cancel this promise.
-            Worker::AsyncLock asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
-            workerStrongRef->runInLockScope(
-                asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
-          }
-          a->shutdown(
-              0, KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor freed due to inactivity"));
-        }
-        // Destroy the last strong Worker::Actor reference.
-        actor = kj::none;
-      }
-
       kj::StringPtr getKey() {
         return key;
       }
@@ -2169,6 +2126,49 @@ class Server::WorkerService final: public Service,
         parent.actors.erase(key);
 
         // WARNING: `this` MAY HAVE BEEN DELETED
+      }
+
+      // Processes the eviction of the Durable Object and hibernates active websockets.
+      kj::Promise<void> handleShutdown() {
+        // After 10 seconds of inactivity, we destroy the Worker::Actor and hibernate any active
+        // JS WebSockets.
+        // TODO(someday): We could make this timeout configurable to make testing less burdensome.
+        co_await timer.afterDelay(10 * kj::SECONDS);
+        // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
+        // want to trigger it.
+        onBrokenTask = kj::none;
+        KJ_IF_SOME(a, actor) {
+          if (a->isShared()) {
+            // Our ActiveRequest refcounting has broken somewhere. This is likely because we're
+            // `addRef`-ing an actor that has had an ActiveRequest attached to its kj::Own (in other
+            // words, the ActiveRequest count is less than it should be).
+            //
+            // Rather than dropping our actor and possibly ending up with split-brain,
+            // we should opt out of the deferred proxy optimization and log the error to Sentry.
+            KJ_LOG(ERROR,
+                "Detected internal bug in hibernation: Durable Object has strong references "
+                "when hibernation timeout expired.");
+
+            co_return;
+          }
+          KJ_IF_SOME(m, manager) {
+            auto& worker = a->getWorker();
+            auto workerStrongRef = kj::atomicAddRef(worker);
+            // Take an async lock, we can't use `takeAsyncLock(RequestObserver&)` since we don't
+            // have an `IncomingRequest` at this point.
+            //
+            // Note that we do not have a race here because this is part of the `shutdownTask`
+            // promise. If a new request comes in while we're waiting to get the lock then we will
+            // cancel this promise.
+            Worker::AsyncLock asyncLock = co_await worker.takeAsyncLockWithoutRequest(nullptr);
+            workerStrongRef->runInLockScope(
+                asyncLock, [&](Worker::Lock& lock) { m->hibernateWebSockets(lock); });
+          }
+          a->shutdown(
+              0, KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor freed due to inactivity"));
+        }
+        // Destroy the last strong Worker::Actor reference.
+        actor = kj::none;
       }
     };
 
