@@ -2492,7 +2492,16 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
                 `    // 7. Wake actor by using websocket
                 `    //  - This confirms we get back hibernation manager.
                 `    //    8. Use websocket once
-                `    return await obj.fetch(request);
+                `    try {
+                `      return await obj.fetch(request);
+                `    } catch (err) {
+                `      if (request.url.endsWith("/abort")) {
+                `        // expected
+                `        return new Response("OK");
+                `      } else {
+                `        throw err;
+                `      }
+                `    }
                 `  }
                 `}
                 `
@@ -2529,6 +2538,8 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
                 `      }
                 `
                 `      return new Response("OK");
+                `    } else if (request.url.endsWith("/abort")) {
+                `      this.state.abort("test abort message");
                 `    }
                 `    return new Error("Unknown path!");
                 `  }
@@ -2601,8 +2612,10 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   // 2. Hibernate
   test.wait(10);
   // 3. Use normal connection and read from ws.
-  auto conn = test.connect("test-addr");
-  conn.httpGet200("/wakeUpAndCheckWS", "OK"_kj);
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/wakeUpAndCheckWS", "OK"_kj);
+  }
   constexpr kj::StringPtr unpromptedResponse = "Hello! Just woke up from a nap."_kj;
   wsConn.recvWebSocket(unpromptedResponse);
 
@@ -2614,6 +2627,21 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   constexpr kj::StringPtr evicted = "OK"_kj;
   wsConn.send(kj::str("\x81\x1a", confirmEviction));
   wsConn.recvWebSocket(evicted);
+
+  // 6. Hibernate again
+  test.wait(10);
+
+  // 7. Wake up the actor and have it abort itself. This should disconnect the WebSocket, even
+  // though the WebSocket itself is still hibernated.
+  KJ_EXPECT_LOG(INFO, "Error: test abort message");
+  KJ_EXPECT_LOG(INFO, "Error: test abort message");
+  KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/abort", "OK"_kj);
+  }
+
+  KJ_EXPECT(wsConn.isEof());
 }
 
 KJ_TEST("Server: tail workers") {
