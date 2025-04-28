@@ -1962,8 +1962,7 @@ class Server::WorkerService final: public Service,
       return config;
     }
 
-    kj::Own<WorkerInterface> getActor(
-        Worker::Actor::Id id, IoChannelFactory::SubrequestMetadata metadata) {
+    kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
       kj::String idStr;
       KJ_SWITCH_ONEOF(id) {
         KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
@@ -1976,17 +1975,13 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      return getActor(kj::mv(idStr), kj::mv(metadata));
+      return kj::heap<ActorChannelImpl>(getActorContainer(kj::mv(idStr)));
     }
 
     kj::Own<WorkerInterface> getActor(
         kj::String id, IoChannelFactory::SubrequestMetadata metadata) {
       return newPromisedWorkerInterface(
           getActorContainer(kj::mv(id))->startRequest(kj::mv(metadata)));
-    }
-
-    kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
-      return kj::heap<ActorChannelImpl>(*this, kj::mv(id));
     }
 
     // ActorContainer mostly serves as a wrapper around Worker::Actor.
@@ -2429,15 +2424,15 @@ class Server::WorkerService final: public Service,
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
-    ActorChannelImpl(ActorNamespace& ns, Worker::Actor::Id id): ns(ns), id(kj::mv(id)) {}
+    ActorChannelImpl(kj::Own<ActorNamespace::ActorContainer> actorContainer)
+        : actorContainer(kj::mv(actorContainer)) {}
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      return ns.getActor(Worker::Actor::cloneId(id), kj::mv(metadata));
+      return newPromisedWorkerInterface(actorContainer->startRequest(kj::mv(metadata)));
     }
 
    private:
-    ActorNamespace& ns;
-    Worker::Actor::Id id;
+    kj::Own<ActorNamespace::ActorContainer> actorContainer;
   };
 
   // ---------------------------------------------------------------------------

@@ -1900,6 +1900,70 @@ KJ_TEST("Server: Simultaneous requests to a DO that hasn't started don't cause s
   conn.httpGet200("/", "0 1 2");
 }
 
+KJ_TEST("Server: Broken DO stays broken until stub replaced") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers"
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    let i1 = await actor.increment()
+                `    try { await actor.abort() } catch {}
+                `    try {
+                `      let i2 = await actor.increment();
+                `      throw new Error(`expected error from broken stub, got ${i2}`);
+                `    } catch (err) {
+                `      if (!err.message.includes("test abort reason")) {
+                `        throw err
+                `      }
+                `    }
+                `    actor = env.ns.get(id)
+                `    let i3 = await actor.increment()
+                `    return new Response(`${i1} ${i3}`)
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async increment() {
+                `    return this.counter++;
+                `  }
+                `  async abort() {
+                `    this.ctx.abort(new Error("test abort reason"));
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 0");
+}
+
 KJ_TEST("Server: Durable Objects (on disk)") {
   kj::StringPtr config = R"((
     services = [

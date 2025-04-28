@@ -23,11 +23,11 @@ export const test_abort_all_durable_objects = {
     const durableId = env.DURABLE.newUniqueId();
     const durablePreventEvictionId = env.DURABLE_PREVENT_EVICTION.newUniqueId();
 
-    const durableStub = env.DURABLE.get(durableId);
+    let durableStub = env.DURABLE.get(durableId);
     const durablePreventEvictionStub = env.DURABLE_PREVENT_EVICTION.get(
       durablePreventEvictionId
     );
-    const ephemeralStub = env.EPHEMERAL.get('thing');
+    let ephemeralStub = env.EPHEMERAL.get('thing');
     const ephemeralPreventEvictionStub =
       env.EPHEMERAL_PREVENT_EVICTION.get('thing');
 
@@ -41,6 +41,10 @@ export const test_abort_all_durable_objects = {
     ).text();
 
     await unsafe.abortAllDurableObjects();
+
+    // Recreate the stubs because they are broken.
+    durableStub = env.DURABLE.get(durableId);
+    ephemeralStub = env.EPHEMERAL.get('thing');
 
     const durableRes2 = await (await durableStub.fetch('http://x')).text();
     const durablePreventEvictionRes2 = await (
