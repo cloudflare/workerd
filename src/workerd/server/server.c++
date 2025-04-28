@@ -2102,7 +2102,6 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
-      bool onBrokenTriggered = false;
 
       // Non-empty if at least one client has a reference to this actor.
       // If no clients are connected, we may be evicted by `cleanupLoop`.
@@ -2118,7 +2117,6 @@ class Server::WorkerService final: public Service,
           // We are intentionally ignoring any errors here. We just want to ensure
           // that the actor is removed if the onBroken promise is resolved or errors.
         }
-        onBrokenTriggered = true;
 
         // HACK: Dropping the ActorContainer will delete onBrokenTask, cancelling ourselves. This
         //   would crash. To avoid the problem, detach ourselves. This is safe because we know that
