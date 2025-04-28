@@ -1981,7 +1981,8 @@ class Server::WorkerService final: public Service,
 
     kj::Own<WorkerInterface> getActor(
         kj::String id, IoChannelFactory::SubrequestMetadata metadata) {
-      return newPromisedWorkerInterface(getActorThenStartRequest(kj::mv(id), kj::mv(metadata)));
+      return newPromisedWorkerInterface(
+          getActorContainer(kj::mv(id))->startRequest(kj::mv(metadata)));
     }
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
@@ -2087,6 +2088,20 @@ class Server::WorkerService final: public Service,
             co_await startTask.emplace(start().fork());
           }
         }
+      }
+
+      kj::Promise<kj::Own<WorkerInterface>> startRequest(
+          IoChannelFactory::SubrequestMetadata metadata) {
+        auto actor = co_await getActor();
+
+        if (parent.cleanupTask == kj::none) {
+          // Need to start the cleanup loop.
+          parent.cleanupTask = parent.cleanupLoop();
+        }
+
+        // Actors always have empty `props`, at least for now.
+        co_return parent.service.startRequest(kj::mv(metadata), parent.className, {}, kj::mv(actor))
+            .attach(kj::addRef(*this));
       }
 
      private:
@@ -2289,22 +2304,6 @@ class Server::WorkerService final: public Service,
     kj::HashMap<kj::String, kj::Own<ActorContainer>> actors;
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
-
-    kj::Promise<kj::Own<WorkerInterface>> getActorThenStartRequest(
-        kj::String id, IoChannelFactory::SubrequestMetadata metadata) {
-      auto refTracker = getActorContainer(kj::mv(id));
-
-      auto actor = co_await refTracker->getActor();
-
-      if (cleanupTask == kj::none) {
-        // Need to start the cleanup loop.
-        cleanupTask = cleanupLoop();
-      }
-
-      // Actors always have empty `props`, at least for now.
-      co_return service.startRequest(kj::mv(metadata), className, {}, kj::mv(actor))
-          .attach(kj::mv(refTracker));
-    }
 
     // Removes actors from `actors` after 70 seconds of last access.
     kj::Promise<void> cleanupLoop() {
