@@ -34,11 +34,10 @@ const unitTests :Workerd.Config = (
     (name = "alarms", worker = .alarmsWorker),
     (name = "hiber", worker = .hiberWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
-    # Receives trace events from STW, used to check that STW produces trace events properly –
-    # disabled until instrumentation for STW itself is supported.
-    # (name = "receiver", worker = .logReceiver, ),
     # Dummy legacy tail worker (gets traces from alarms worker and produces trace for main tracer)
     (name = "legacy", worker = .logLegacy, ),
+    # Receives trace events from STW, used to check that STW produces trace events properly
+    (name = "receiver", worker = .logReceiver, ),
     # Unified tail worker with tests
     # tests are executed in order, so logWorker needs to be last to have all traces available
     (name = "log", worker = .logWorker, ),
@@ -52,7 +51,6 @@ const unitTests :Workerd.Config = (
         compatibilityDate = "2024-10-14",
       ),
     ),
-
   ],
 );
 
@@ -103,8 +101,8 @@ const logWorker :Workerd.Worker = (
     (name = "worker", esModule = embed "tail-worker-test.js")
   ],
   compatibilityDate = "2024-10-14",
-  compatibilityFlags = ["experimental", "nodejs_compat"],
-  # tails = ["receiver"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+  streamingTails = ["receiver"],
 );
 
 const logReceiver :Workerd.Worker = (

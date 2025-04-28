@@ -7,7 +7,7 @@ import * as assert from 'node:assert';
 let receivedLogsInTail = false;
 
 export default {
-  async fetch(request, env) {
+  fetch(request, env) {
     // Log some messages that should be captured by the tail handler
     console.log('Self-logger test: Message 1');
     console.log('Self-logger test: Message 2');
@@ -17,7 +17,7 @@ export default {
   },
 
   // Tail handler in the same worker that generates logs
-  async tail(events) {
+  tail(events) {
     console.log(`Self-logger received ${events.length} events`);
 
     // Check that we have the logs we expect
