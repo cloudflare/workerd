@@ -40,7 +40,7 @@ interface API {
 
 interface LDSO {
   loadedLibsByHandle: {
-    [handle: string]: DSO;
+    [handle: number]: DSO;
   };
   loadedLibsByName: {
     [name: string]: DSO;

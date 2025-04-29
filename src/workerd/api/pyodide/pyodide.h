@@ -227,6 +227,8 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::none;
   }
 
+  static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -248,6 +250,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getDurableObjectClasses);
     JSG_METHOD(getEntrypointClasses);
+    JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -355,8 +358,6 @@ class ArtifactBundler: public jsg::Object {
     return kj::none;
   }
 
-  static kj::Array<kj::StringPtr> getSnapshotImports();
-
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
     JSG_METHOD(getMemorySnapshotSize);
@@ -366,7 +367,6 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
-    JSG_STATIC_METHOD(getSnapshotImports);
   }
 
  private:
