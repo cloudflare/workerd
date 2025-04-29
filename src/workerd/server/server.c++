@@ -2080,7 +2080,7 @@ class Server::WorkerService final: public Service,
 
         // Actors always have empty `props`, at least for now.
         co_return parent.service.startRequest(kj::mv(metadata), parent.className, {}, kj::mv(actor))
-            .attach(kj::addRef(*this));
+            .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
       }
 
       void abort(kj::Maybe<const kj::Exception&> reason) {
@@ -2451,6 +2451,9 @@ class Server::WorkerService final: public Service,
    public:
     ActorChannelImpl(kj::Own<ActorNamespace::ActorContainer> actorContainer)
         : actorContainer(kj::mv(actorContainer)) {}
+    ~ActorChannelImpl() noexcept(false) {
+      actorContainer->updateAccessTime();
+    }
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return newPromisedWorkerInterface(actorContainer->startRequest(kj::mv(metadata)));
