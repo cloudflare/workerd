@@ -2,17 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "actor-state.h"
-#include "actor.h"
-#include "basics.h"
-#include "blob.h"
-#include "form-data.h"
 #include "http.h"
-#include "queue.h"
-#include "sockets.h"
-#include "sql.h"
-#include "streams.h"
-#include "web-socket.h"
 
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/jsg/jsg-test.h>
@@ -102,22 +92,7 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
 
 JSG_DECLARE_ISOLATE_TYPE(HeadersIsolate,
     HeadersContext,
-    // It's unfortunate but we have to pull in all of these sets of
-    // types just for the test to build, even tho they aren't actually
-    // used by or relevant to the test.
-    EW_ACTOR_ISOLATE_TYPES,
-    EW_ACTOR_STATE_ISOLATE_TYPES,
-    EW_BASICS_ISOLATE_TYPES,
-    EW_BLOB_ISOLATE_TYPES,
-    EW_FORMDATA_ISOLATE_TYPES,
-    EW_QUEUE_ISOLATE_TYPES,
-    EW_URL_ISOLATE_TYPES,
-    EW_URL_STANDARD_ISOLATE_TYPES,
-    EW_SOCKETS_ISOLATE_TYPES,
-    EW_SQL_ISOLATE_TYPES,
-    EW_STREAMS_ISOLATE_TYPES,
-    EW_WEBSOCKET_ISOLATE_TYPES,
-    EW_HTTP_ISOLATE_TYPES,
+    workerd::api::Headers,
     jsg::TypeWrapperExtension<PromiseWrapper>);
 
 KJ_TEST("Header memory is accounted for") {
