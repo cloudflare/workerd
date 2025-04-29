@@ -506,6 +506,7 @@ declare global {
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
   function garbageCollect(): void;
+  function format_value(val: unknown): string;
   function createBuffer(
     type: 'ArrayBuffer' | 'SharedArrayBuffer',
     length: number,
@@ -1143,6 +1144,10 @@ globalThis.garbageCollect = (): void => {
   if (typeof gc === 'function') {
     gc();
   }
+};
+
+globalThis.format_value = (val): string => {
+  return JSON.stringify(val, null, 2);
 };
 
 globalThis.createBuffer = (
