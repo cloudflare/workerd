@@ -226,7 +226,7 @@ class Server::Service {
   }
 };
 
-class Server::ActorClass {
+class Server::ActorClass: public kj::Refcounted {
  public:
   // Construct a new instance of the class. The parameters here are passed into `Worker::Actor`'s
   // constructor.
@@ -508,7 +508,8 @@ class Server::InvalidConfigActorClass final: public ActorClass {
       Worker::Actor::MakeActorCacheFunc makeActorCache,
       Worker::Actor::MakeStorageFunc makeStorage,
       kj::Own<Worker::Actor::Loopback> loopback,
-      kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager) override {
+      kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
+      kj::Maybe<rpc::Container::Client> container) override {
     JSG_FAIL_REQUIRE(
         Error, "Cannot instantiate Durable Object class because its config is invalid.");
   }
@@ -1833,7 +1834,7 @@ class Server::WorkerService final: public Service,
                 "workerd may make this a startup-time error."));
       }
 
-      auto actorClass = kj::heap<ActorClassImpl>(*this, entry.key, kj::none);
+      auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, kj::none);
       auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
           threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(),
           network, dockerPath);
@@ -1885,7 +1886,7 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::Own<ActorClass>> getActorClass(
       kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
     KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
-      return kj::heap<ActorClassImpl>(*this, className, propsJson);
+      return kj::refcounted<ActorClassImpl>(*this, className, propsJson);
     } else {
       return kj::none;
     }
@@ -2101,12 +2102,14 @@ class Server::WorkerService final: public Service,
       ActorContainer(kj::String key,
           Worker::Actor::Id id,
           ActorNamespace& parent,
+          kj::Own<ActorClass> actorClass,
           kj::Timer& timer,
           capnp::ByteStreamFactory& byteStreamFactory)
           : key(kj::mv(key)),
             id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             parent(parent),
+            actorClass(kj::mv(actorClass)),
             timer(timer),
             byteStreamFactory(byteStreamFactory),
             lastAccess(timer.now()) {}
@@ -2197,7 +2200,7 @@ class Server::WorkerService final: public Service,
           parent.cleanupTask = parent.cleanupLoop();
         }
 
-        co_return parent.actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
+        co_return actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
             .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
       }
 
@@ -2230,6 +2233,7 @@ class Server::WorkerService final: public Service,
       Worker::Actor::Id id;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
+      kj::Own<ActorClass> actorClass;
       kj::Timer& timer;
       capnp::ByteStreamFactory& byteStreamFactory;
       kj::TimePoint lastAccess;
@@ -2405,7 +2409,7 @@ class Server::WorkerService final: public Service,
               kj::str(imageName), service.waitUntilTasks);
         }
 
-        auto actor = parent.actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
+        auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
             kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
             kj::mv(containerClient));
         onBrokenTask = monitorOnBroken(*actor);
@@ -2430,7 +2434,7 @@ class Server::WorkerService final: public Service,
       return actors
           .findOrCreate(key, [&]() mutable {
         auto container = kj::refcounted<ActorContainer>(
-            kj::mv(key), kj::mv(id), *this, timer, byteStreamFactory);
+            kj::mv(key), kj::mv(id), *this, kj::addRef(*actorClass), timer, byteStreamFactory);
 
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};
