@@ -501,6 +501,25 @@ class Server::InvalidConfigService final: public Service {
   }
 };
 
+class Server::InvalidConfigActorClass final: public ActorClass {
+ public:
+  kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
+      Worker::Actor::Id actorId,
+      Worker::Actor::MakeActorCacheFunc makeActorCache,
+      Worker::Actor::MakeStorageFunc makeStorage,
+      kj::Own<Worker::Actor::Loopback> loopback,
+      kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager) override {
+    JSG_FAIL_REQUIRE(
+        Error, "Cannot instantiate Durable Object class because its config is invalid.");
+  }
+
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
+    // Can't get here because creating the actor would have required calling the other method.
+    KJ_UNREACHABLE;
+  }
+};
+
 // Return a fake Own pointing to the singleton.
 kj::Own<Server::Service> Server::makeInvalidConfigService() {
   return {invalidConfigServiceSingleton.get(), kj::NullDisposer::instance};
@@ -2847,12 +2866,18 @@ struct FutureActorChannel {
   kj::String errorContext;
 };
 
+struct FutureActorClassChannel {
+  config::ServiceDesignator::Reader designator;
+  kj::String errorContext;
+};
+
 static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     config::Worker::Reader conf,
     config::Worker::Binding::Reader binding,
     Worker::ValidationErrorReporter& errorReporter,
     kj::Vector<FutureSubrequestChannel>& subrequestChannels,
     kj::Vector<FutureActorChannel>& actorChannels,
+    kj::Vector<FutureActorClassChannel>& actorClassChannels,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
@@ -3069,7 +3094,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_SOME(global,
             createBinding(workerName, conf, innerBinding, errorReporter, subrequestChannels,
-                actorChannels, actorConfigs, experimental)) {
+                actorChannels, actorClassChannels, actorConfigs, experimental)) {
           innerGlobals.add(kj::mv(global));
         } else {
           // we've already communicated the error
@@ -3158,6 +3183,19 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       cacheCopy.maxValueSize = limits.getMaxValueSize();
       cacheCopy.maxTotalValueSize = limits.getMaxTotalValueSize();
       return makeGlobal(kj::mv(cacheCopy));
+    }
+
+    case config::Worker::Binding::DURABLE_OBJECT_CLASS: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+            "Durable Object class bindings are an experimental feature which may change or go away "
+            "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+      uint channel = actorClassChannels.size();
+      actorClassChannels.add(
+          FutureActorClassChannel{binding.getDurableObjectClass(), kj::mv(errorContext)});
+      return makeGlobal(Global::ActorClass{.channel = channel});
     }
   }
   errorReporter.addError(kj::str(errorContext,
@@ -3313,6 +3351,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
+  kj::Vector<FutureActorClassChannel> actorClassChannels;
 
   auto confBindings = conf.getBindings();
   using Global = WorkerdApi::Global;
@@ -3320,7 +3359,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   for (auto binding: confBindings) {
     KJ_IF_SOME(global,
         createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorConfigs, experimental)) {
+            actorClassChannels, actorConfigs, experimental)) {
       globals.add(kj::mv(global));
     }
   }
@@ -3391,6 +3430,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
   auto linkCallback = [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
                           actorChannels = kj::mv(actorChannels),
+                          actorClassChannels = kj::mv(actorClassChannels),
                           &localActorConfigs](WorkerService& workerService) mutable {
     WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
@@ -3430,6 +3470,19 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     }
 
     result.subrequest = services.finish();
+
+    // Set up actor class channels
+    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(actorClassChannels.size());
+
+    for (auto& channel: actorClassChannels) {
+      actorClasses.add(lookupActorClass(channel.designator, kj::mv(channel.errorContext)));
+    }
+
+    // TODO(facets): Implement self-referential actor classes (i.e. in ctx.exports). What about
+    //   classes that actually have a namespace defined? Can the self-referential namespace binding
+    //   also be used as a class binding?
+
+    result.actorClass = actorClasses.finish();
 
     auto linkedActorChannels = kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(
         actorChannels.size() + localActorConfigs.size());
@@ -3632,6 +3685,65 @@ kj::Own<Server::Service> Server::lookupService(
     }
 
     return fakeOwn(*service);
+  }
+}
+
+kj::Own<Server::ActorClass> Server::lookupActorClass(
+    config::ServiceDesignator::Reader designator, kj::String errorContext) {
+  // TODO(cleanup): There's a lot of repeated code with lookupService(), should it be refactored?
+
+  kj::StringPtr targetName = designator.getName();
+  Service* service = KJ_UNWRAP_OR(services.find(targetName), {
+    reportConfigError(kj::str(errorContext, " refers to a service \"", targetName,
+        "\", but no such service is defined."));
+    return fakeOwn(*invalidConfigActorClassSingleton);
+  });
+
+  kj::Maybe<kj::StringPtr> entrypointName;
+  if (designator.hasEntrypoint()) {
+    entrypointName = designator.getEntrypoint();
+  }
+
+  auto propsJson = [&]() -> kj::Maybe<kj::StringPtr> {
+    auto props = designator.getProps();
+    switch (props.which()) {
+      case config::ServiceDesignator::Props::EMPTY:
+        return kj::none;
+      case config::ServiceDesignator::Props::JSON:
+        return props.getJson();
+    }
+    reportConfigError(kj::str(errorContext,
+        " has unrecognized props type. Was the config compiled with a "
+        "newer version of the schema?"));
+    return kj::none;
+  }();
+
+  if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
+    KJ_IF_SOME(ep, worker->getActorClass(entrypointName, propsJson)) {
+      return kj::mv(ep);
+    } else KJ_IF_SOME(ep, entrypointName) {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\" with a Durable Object entrypoint \"", ep, "\", but \"", targetName,
+          "\" has no such exported entrypoint class."));
+      return fakeOwn(*invalidConfigActorClassSingleton);
+    } else {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\", but does not specify an entrypoint, and the service does export a "
+          "Durable Object class as its default entrypoint."));
+      return fakeOwn(*invalidConfigActorClassSingleton);
+    }
+  } else {
+    KJ_IF_SOME(ep, entrypointName) {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\" with a named Durable Object entrypoint \"", ep, "\", but \"", targetName,
+          "\" is not a Worker, so does not have any named entrypoints."));
+    } else {
+      reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
+          "\" as a Durable Object class, but \"", targetName,
+          "\" is not a Worker, so cannot be used as a class."));
+    }
+
+    return fakeOwn(*invalidConfigActorClassSingleton);
   }
 }
 
@@ -3984,6 +4096,7 @@ kj::Promise<void> Server::run(
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::heap<InvalidConfigService>();
+  invalidConfigActorClassSingleton = kj::heap<InvalidConfigActorClass>();
 
   auto [fatalPromise, fatalFulfiller] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
