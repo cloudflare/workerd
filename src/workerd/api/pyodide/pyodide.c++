@@ -118,15 +118,16 @@ kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
   return result;
 }
 
-kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports() {
+kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports(kj::StringPtr version) {
   auto workerFiles = this->getPythonFileContents();
   auto importedNames = parsePythonScriptImports(kj::mv(workerFiles));
   auto workerModules = getWorkerModuleSet();
-  return PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(importedNames));
+  return PythonModuleInfo::filterPythonScriptImports(
+      kj::mv(workerModules), kj::mv(importedNames), version);
 }
 
-kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports() {
-  return state->moduleInfo.getPackageSnapshotImports();
+kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports(kj::String version) {
+  return state->moduleInfo.getPackageSnapshotImports(version);
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
@@ -394,7 +395,9 @@ kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
 }
 
 kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
-    kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports) {
+    kj::HashSet<kj::String> workerModules,
+    kj::ArrayPtr<kj::String> imports,
+    kj::StringPtr version) {
   auto baselineSnapshotImportsSet = kj::HashSet<kj::StringPtr>();
   for (auto& pkgImport: snapshotImports) {
     baselineSnapshotImportsSet.upsert(kj::mv(pkgImport), [](auto&&, auto&&) {});
@@ -412,11 +415,16 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
 
     // don't include modules that we provide and that are likely to be imported by most
     // workers.
-    if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray() ||
-        firstComponent == "asgi"_kj.asArray() || firstComponent == "workers"_kj.asArray() ||
-        firstComponent == "httpx"_kj.asArray() || firstComponent == "openai"_kj.asArray() ||
-        firstComponent == "starlette"_kj.asArray() || firstComponent == "urllib3"_kj.asArray()) {
+    if (firstComponent == "js"_kj.asArray() || firstComponent == "asgi"_kj.asArray() ||
+        firstComponent == "workers"_kj.asArray()) {
       continue;
+    }
+    if (version == "0.26.0a2") {
+      if (firstComponent == "pyodide"_kj.asArray() || firstComponent == "httpx"_kj.asArray() ||
+          firstComponent == "openai"_kj.asArray() || firstComponent == "starlette"_kj.asArray() ||
+          firstComponent == "urllib3"_kj.asArray()) {
+        continue;
+      }
     }
 
     // Don't include anything that went into the baseline snapshot

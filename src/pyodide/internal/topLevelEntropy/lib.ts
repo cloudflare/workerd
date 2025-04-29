@@ -58,6 +58,9 @@ export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
     return crypto.getRandomValues(arr);
   }
   if (!shouldAllowBadEntropy(Module)) {
+    console.log('Entropy call failed');
+    console.log('JS stack:', new Error().stack);
+    console.log('Python stack:');
     Module._dump_traceback();
     throw new Error('Disallowed operation called within global scope');
   }

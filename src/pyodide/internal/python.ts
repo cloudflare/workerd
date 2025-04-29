@@ -12,6 +12,8 @@ import {
   maybeCollectSnapshot,
   restoreSnapshot,
   preloadDynamicLibs,
+  shouldCreateSnapshot,
+  HIWIRE_STATE,
 } from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
@@ -19,6 +21,7 @@ import {
   entropyBeforeTopLevel,
   getRandomValues,
 } from 'pyodide-internal:topLevelEntropy/lib';
+
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
  * emscripten seperately from this code in another context.
@@ -60,13 +63,16 @@ function prepareWasmLinearMemory(Module: Module): void {
   }
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   entropyAfterRuntimeInit(Module);
-  if (SHOULD_RESTORE_SNAPSHOT) {
-    return;
+  if (!SHOULD_RESTORE_SNAPSHOT) {
+    // The effects of these are purely in Python state so they only need to be run
+    // if we didn't restore a snapshot.
+    entropyBeforeTopLevel(Module);
+    adjustSysPath(Module);
   }
-  // The effects of these are purely in Python state so they only need to be run
-  // if we didn't restore a snapshot.
-  entropyBeforeTopLevel(Module);
-  adjustSysPath(Module);
+  if (Module.API.version !== '0.26.0a2') {
+    Module.API.config._makeSnapshot = shouldCreateSnapshot();
+    Module.API.finalizeBootstrap(HIWIRE_STATE);
+  }
 }
 
 function maybeAddVendorDirectoryToPath(pyodide: Pyodide): void {
@@ -134,8 +140,11 @@ export async function loadPyodide(
   // present in snapshot memory.
   mountWorkerFiles(Module);
 
-  // Finish setting up Pyodide's ffi so we can use the nice Python interface
-  enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
+  if (Module.API.version === '0.26.0a2') {
+    // Finish setting up Pyodide's ffi so we can use the nice Python interface
+    // In newer versions we already did this in prepareWasmLinearMemory.
+    enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
+  }
   const pyodide = Module.API.public_api;
 
   finishSnapshotSetup(pyodide);

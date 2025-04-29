@@ -26,6 +26,7 @@ MODULES_TO_PATCH = [
     "numpy.random.mtrand",
     "tempfile",
     "aiohttp.http_websocket",
+    "aiohttp.connector",
     *RUST_PACKAGES,
 ]
 
@@ -157,6 +158,20 @@ def aiohttp_http_websocket_context(module):
         yield
     finally:
         random.Random = Random
+
+
+@contextmanager
+def aiohttp_connector_context(module):
+    # aiohttp will call ssl.create_default_context() at top level which uses entropy. But it has a
+    # work around for Pyodide where it skips this. By setting sys.modules["ssl"] = None temporarily,
+    # we exercise the Pyodide workaround and so avoid the entropy calls.
+    # After, we put the ssl module back to the normal value.
+    try:
+        ssl = sys.modules["ssl"]
+        sys.modules["ssl"] = None
+        yield
+    finally:
+        sys.modules["ssl"] = ssl
 
 
 class DeterministicRandomNameSequence:
