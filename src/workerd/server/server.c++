@@ -22,6 +22,7 @@
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/server/actor-id-impl.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -1963,25 +1964,7 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
-      kj::String idStr;
-      KJ_SWITCH_ONEOF(id) {
-        KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
-          KJ_REQUIRE(config.is<Durable>());
-          idStr = obj->toString();
-        }
-        KJ_CASE_ONEOF(str, kj::String) {
-          KJ_REQUIRE(config.is<Ephemeral>());
-          idStr = kj::str(str);
-        }
-      }
-
-      return kj::heap<ActorChannelImpl>(getActorContainer(kj::mv(idStr)));
-    }
-
-    kj::Own<WorkerInterface> getActor(
-        kj::String id, IoChannelFactory::SubrequestMetadata metadata) {
-      return newPromisedWorkerInterface(
-          getActorContainer(kj::mv(id))->startRequest(kj::mv(metadata)));
+      return kj::heap<ActorChannelImpl>(getActorContainer(kj::mv(id)));
     }
 
     // ActorContainer mostly serves as a wrapper around Worker::Actor.
@@ -1994,8 +1977,9 @@ class Server::WorkerService final: public Service,
     // the DO is evicted, otherwise we cancel the eviction task.
     class ActorContainer final: public RequestTracker::Hooks, public kj::Refcounted {
      public:
-      ActorContainer(kj::StringPtr key, ActorNamespace& parent, kj::Timer& timer)
-          : key(key),
+      ActorContainer(kj::String key, Worker::Actor::Id id, ActorNamespace& parent, kj::Timer& timer)
+          : key(kj::mv(key)),
+            id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             parent(parent),
             timer(timer),
@@ -2125,7 +2109,8 @@ class Server::WorkerService final: public Service,
       // The actor is constructed after the ActorContainer so it starts off empty.
       kj::Maybe<kj::Own<Worker::Actor>> actor;
 
-      kj::StringPtr key;
+      kj::String key;
+      Worker::Actor::Id id;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
       kj::Timer& timer;
@@ -2284,7 +2269,7 @@ class Server::WorkerService final: public Service,
 
         TimerChannel& timerChannel = service;
 
-        auto loopback = kj::refcounted<Loopback>(parent, kj::str(key));
+        auto loopback = kj::refcounted<Loopback>(*this);
 
         service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
           // We define this event ID in the internal codebase, but to have WebSocket Hibernation
@@ -2292,21 +2277,34 @@ class Server::WorkerService final: public Service,
           static constexpr uint16_t hibernationEventTypeId = 8;
 
           auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker,
-              getTracker(), kj::str(key), true, kj::mv(makeActorCache), parent.className,
-              kj::mv(makeStorage), lock, kj::mv(loopback), timerChannel,
+              getTracker(), Worker::Actor::cloneId(id), true, kj::mv(makeActorCache),
+              parent.className, kj::mv(makeStorage), lock, kj::mv(loopback), timerChannel,
               kj::refcounted<ActorObserver>(), tryGetManagerRef(), hibernationEventTypeId));
           onBrokenTask = monitorOnBroken(actorRef);
         });
       }
     };
 
-    kj::Own<ActorContainer> getActorContainer(kj::String id) {
-      return actors
-          .findOrCreate(id, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(id, *this, timer);
+    kj::Own<ActorContainer> getActorContainer(Worker::Actor::Id id) {
+      kj::String key;
 
-        return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry{
-          kj::mv(id), kj::mv(container)};
+      KJ_SWITCH_ONEOF(id) {
+        KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
+          KJ_REQUIRE(config.is<Durable>());
+          key = obj->toString();
+        }
+        KJ_CASE_ONEOF(str, kj::String) {
+          KJ_REQUIRE(config.is<Ephemeral>());
+          key = kj::str(str);
+        }
+      }
+
+      return actors
+          .findOrCreate(key, [&]() mutable {
+        auto container = kj::refcounted<ActorContainer>(kj::mv(key), kj::mv(id), *this, timer);
+
+        return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
+          container->getKey(), kj::mv(container)};
       })->addRef();
     }
 
@@ -2324,7 +2322,7 @@ class Server::WorkerService final: public Service,
     // If the actor is broken, we remove it from the map. However, if it's just evicted due to
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
     // request comes in, we recreate the Own<Worker::Actor>.
-    kj::HashMap<kj::String, kj::Own<ActorContainer>> actors;
+    kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>> actors;
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
 
@@ -2361,10 +2359,10 @@ class Server::WorkerService final: public Service,
     // actor from the websocket's read loop.
     class Loopback: public Worker::Actor::Loopback, public kj::Refcounted {
      public:
-      Loopback(ActorNamespace& ns, kj::String id): ns(ns), id(kj::mv(id)) {}
+      Loopback(ActorContainer& actorContainer): actorContainer(actorContainer) {}
 
       kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
-        return ns.getActor(kj::str(id), kj::mv(metadata));
+        return newPromisedWorkerInterface(actorContainer.startRequest(kj::mv(metadata)));
       }
 
       kj::Own<Worker::Actor::Loopback> addRef() {
@@ -2372,8 +2370,7 @@ class Server::WorkerService final: public Service,
       }
 
      private:
-      ActorNamespace& ns;
-      kj::String id;
+      ActorContainer& actorContainer;
     };
 
     class ActorSqliteHooks final: public ActorSqlite::Hooks {
@@ -3439,9 +3436,14 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         auto& actorNs =
             ns;  // clangd gets confused trying to use ns directly in the capture below??
 
-        alarmScheduler->registerNamespace(
-            config.uniqueKey, [&actorNs](kj::String id) -> kj::Own<WorkerInterface> {
-          return actorNs->getActor(kj::mv(id), IoChannelFactory::SubrequestMetadata{});
+        auto idFactory = kj::heap<ActorIdFactoryImpl>(config.uniqueKey);
+
+        alarmScheduler->registerNamespace(config.uniqueKey,
+            [&actorNs, idFactory = kj::mv(idFactory)](
+                kj::String idStr) mutable -> kj::Own<WorkerInterface> {
+          Worker::Actor::Id id = idFactory->idFromString(kj::mv(idStr));
+          auto actorContainer = actorNs->getActorContainer(kj::mv(id));
+          return newPromisedWorkerInterface(actorContainer->startRequest({}));
         });
       }
     }

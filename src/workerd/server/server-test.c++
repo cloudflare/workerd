@@ -1804,6 +1804,10 @@ KJ_TEST("Server: Durable Objects (in memory)") {
                 `  constructor(state, env) {
                 `    this.storage = state.storage;
                 `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;
@@ -1984,6 +1988,10 @@ KJ_TEST("Server: Durable Objects (on disk)") {
                 `  constructor(state, env) {
                 `    this.storage = state.storage;
                 `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;
@@ -2107,6 +2115,10 @@ KJ_TEST("Server: Ephemeral Objects") {
                 `  constructor(state, env) {
                 `    if (state.storage) throw new Error("storage shouldn't be present");
                 `    this.id = state.id;
+                `    if (typeof this.id != "string") {
+                `      throw new Error("ephemeral ID should be type string, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `    this.count = 0;
                 `  }
                 `  async fetch(request) {
