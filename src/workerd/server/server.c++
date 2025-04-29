@@ -226,6 +226,22 @@ class Server::Service {
   }
 };
 
+class Server::ActorClass {
+ public:
+  struct ServiceAndClassName {
+    WorkerService& service;
+    kj::StringPtr className;
+  };
+
+  // Get the underlying WorkerService and class name for this actor. Needed to construct the Actor.
+  // TOOD(now): Replace this with a method newActor() that directly constructs an Actor.
+  virtual ServiceAndClassName getServiceAndClassName() = 0;
+
+  // Start a request on the actor.
+  virtual kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
+};
+
 Server::~Server() noexcept {
   // This destructor is explicitly `noexcept` because if one of the `unlink()`s throws then we'd
   // have a hard time avoiding a segfault later... and we're shutting down the server anyway so
@@ -1755,6 +1771,7 @@ class Server::WorkerService final: public Service,
   struct LinkedIoChannels {
     kj::Array<kj::Own<Service>> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
+    kj::Array<kj::Own<ActorClass>> actorClass;
     kj::Maybe<kj::Own<Service>> cache;
     kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
     AlarmScheduler& alarmScheduler;
@@ -1768,7 +1785,7 @@ class Server::WorkerService final: public Service,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
-      kj::HashSet<kj::String> actorClassEntrypoints,
+      kj::HashSet<kj::String> actorClassEntrypointsParam,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
@@ -1779,7 +1796,7 @@ class Server::WorkerService final: public Service,
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         namedEntrypoints(kj::mv(namedEntrypoints)),
-        actorClassEntrypoints(kj::mv(actorClassEntrypoints)),
+        actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
         network(network),
@@ -1787,7 +1804,18 @@ class Server::WorkerService final: public Service,
 
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
-      auto ns = kj::heap<ActorNamespace>(*this, entry.key, entry.value,
+      if (!actorClassEntrypoints.contains(entry.key)) {
+        KJ_LOG(WARNING,
+            kj::str("A DurableObjectNamespace in the config referenced the class \"", entry.key,
+                "\", but no such Durable Object class is exported from the worker. Please make "
+                "sure the class name matches, it is exported, and the class extends "
+                "'DurableObject'. Attempts to call to this Durable Object class will fail at "
+                "runtime, but historically this was not a startup-time error. Future versions of "
+                "workerd may make this a startup-time error."));
+      }
+
+      auto actorClass = kj::heap<ActorClassImpl>(*this, entry.key, kj::none);
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
           threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory());
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
@@ -1832,6 +1860,15 @@ class Server::WorkerService final: public Service,
       }
     }
     return kj::heap<EntrypointService>(*this, name, propsJson, *handlers);
+  }
+
+  kj::Maybe<kj::Own<ActorClass>> getActorClass(
+      kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
+    KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
+      return kj::heap<ActorClassImpl>(*this, className, propsJson);
+    } else {
+      return kj::none;
+    }
   }
 
   bool hasDefaultEntrypoint() {
@@ -1997,26 +2034,14 @@ class Server::WorkerService final: public Service,
 
   class ActorNamespace final {
    public:
-    ActorNamespace(WorkerService& service,
-        kj::StringPtr className,
+    ActorNamespace(kj::Own<ActorClass> actorClass,
         const ActorConfig& config,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory)
-        : service(service),
-          className(className),
+        : actorClass(kj::mv(actorClass)),
           config(config),
           timer(timer),
-          byteStreamFactory(byteStreamFactory) {
-      if (!service.actorClassEntrypoints.contains(className)) {
-        KJ_LOG(WARNING,
-            kj::str("A DurableObjectNamespace in the config referenced the class \"", className,
-                "\", but no such Durable Object class is exported from the worker. Please make "
-                "sure the class name matches, it is exported, and the class extends "
-                "'DurableObject'. Attempts to call to this Durable Object class will fail at "
-                "runtime, but historically this was not a startup-time error. Future versions of "
-                "workerd may make this a startup-time error."));
-      }
-    }
+          byteStreamFactory(byteStreamFactory) {}
 
     const ActorConfig& getConfig() {
       return config;
@@ -2135,8 +2160,7 @@ class Server::WorkerService final: public Service,
           parent.cleanupTask = parent.cleanupLoop();
         }
 
-        // Actors always have empty `props`, at least for now.
-        co_return parent.service.startRequest(kj::mv(metadata), parent.className, {}, kj::mv(actor))
+        co_return parent.actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
             .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
       }
 
@@ -2259,27 +2283,30 @@ class Server::WorkerService final: public Service,
       void start() {
         KJ_REQUIRE(actor == nullptr);
 
-        WorkerService& service = parent.service;
+        // TODO(now): Refactor to use parent.actorClass->newActor() so that we don't directly
+        //   access the `service`.
+        auto [service, className] = parent.actorClass->getServiceAndClassName();
+        auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
+        kj::Maybe<SqliteDatabase::Vfs&> actorStorage = channels.actorStorage;
+        AlarmScheduler& alarmScheduler = channels.alarmScheduler;
 
         // Just in case abort() was called concurrently...
         requireNotBroken();
 
-        auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
-                                  OutputGate& outputGate, ActorCache::Hooks& hooks,
+        auto makeActorCache = [this, idStr = kj::str(key), actorStorage, &alarmScheduler](
+                                  const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
+                                  ActorCache::Hooks& hooks,
                                   SqliteObserver& sqliteObserver) mutable {
           return parent.config.tryGet<Durable>().map(
               [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
-            auto& channels =
-                KJ_ASSERT_NONNULL(parent.service.ioChannels.tryGet<LinkedIoChannels>());
-
-            KJ_IF_SOME(as, channels.actorStorage) {
+            KJ_IF_SOME(as, actorStorage) {
               kj::Path path({d.uniqueKey, kj::str(idStr, ".sqlite")});
 
               auto sqliteHooks = kj::heap<ActorSqliteHooks>(
-                  channels.alarmScheduler, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
+                  alarmScheduler, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
                                      .attach(kj::mv(idStr));
 
-              auto db = kj::heap<SqliteDatabase>(*as, kj::mv(path),
+              auto db = kj::heap<SqliteDatabase>(as, kj::mv(path),
                   kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
 
               // Before we do anything, make sure the database is in WAL mode. We also need to
@@ -2352,7 +2379,7 @@ class Server::WorkerService final: public Service,
         }
 
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
-            Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
+            Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
             tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient)));
         onBrokenTask = monitorOnBroken(actorRef);
@@ -2391,8 +2418,7 @@ class Server::WorkerService final: public Service,
     }
 
    private:
-    WorkerService& service;
-    kj::StringPtr className;
+    kj::Own<ActorClass> actorClass;
     const ActorConfig& config;
     // If the actor is broken, we remove it from the map. However, if it's just evicted due to
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
@@ -2507,6 +2533,34 @@ class Server::WorkerService final: public Service,
     WorkerService& worker;
     kj::Maybe<kj::StringPtr> entrypoint;
     const kj::HashSet<kj::String>& handlers;
+    Frankenvalue props;
+  };
+
+  class ActorClassImpl final: public ActorClass {
+   public:
+    ActorClassImpl(
+        WorkerService& service, kj::StringPtr className, kj::Maybe<kj::StringPtr> propsJson)
+        : service(service),
+          className(className) {
+      KJ_IF_SOME(m, propsJson) {
+        props = Frankenvalue::fromJson(kj::str(m));
+      }
+    }
+
+    ServiceAndClassName getServiceAndClassName() override {
+      return {service, className};
+    }
+
+    kj::Own<WorkerInterface> startRequest(
+        IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
+      // The `props` parameter is empty here because props are not passed per-request, they are
+      // passed at Actor construction time.
+      return service.startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
+    }
+
+   private:
+    WorkerService& service;
+    kj::StringPtr className;
     Frankenvalue props;
   };
 
