@@ -228,14 +228,15 @@ class Server::Service {
 
 class Server::ActorClass {
  public:
-  struct ServiceAndClassName {
-    WorkerService& service;
-    kj::StringPtr className;
-  };
-
-  // Get the underlying WorkerService and class name for this actor. Needed to construct the Actor.
-  // TOOD(now): Replace this with a method newActor() that directly constructs an Actor.
-  virtual ServiceAndClassName getServiceAndClassName() = 0;
+  // Construct a new instance of the class. The parameters here are passed into `Worker::Actor`'s
+  // constructor.
+  virtual kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
+      Worker::Actor::Id actorId,
+      Worker::Actor::MakeActorCacheFunc makeActorCache,
+      Worker::Actor::MakeStorageFunc makeStorage,
+      kj::Own<Worker::Actor::Loopback> loopback,
+      kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
+      kj::Maybe<rpc::Container::Client> container) = 0;
 
   // Start a request on the actor.
   virtual kj::Own<WorkerInterface> startRequest(
@@ -1790,7 +1791,7 @@ class Server::WorkerService final: public Service,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
       kj::Network& network,
-      kj::Maybe<kj::String> dockerPath)
+      kj::Maybe<kj::String> dockerPathParam)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
@@ -1799,8 +1800,7 @@ class Server::WorkerService final: public Service,
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        network(network),
-        dockerPath(kj::mv(dockerPath)) {
+        dockerPath(kj::mv(dockerPathParam)) {
 
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
@@ -1816,7 +1816,8 @@ class Server::WorkerService final: public Service,
 
       auto actorClass = kj::heap<ActorClassImpl>(*this, entry.key, kj::none);
       auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
-          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory());
+          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(),
+          network, dockerPath);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2043,11 +2044,15 @@ class Server::WorkerService final: public Service,
     ActorNamespace(kj::Own<ActorClass> actorClass,
         const ActorConfig& config,
         kj::Timer& timer,
-        capnp::ByteStreamFactory& byteStreamFactory)
+        capnp::ByteStreamFactory& byteStreamFactory,
+        kj::Network& dockerNetwork,
+        kj::Maybe<kj::StringPtr> dockerPath)
         : actorClass(kj::mv(actorClass)),
           config(config),
           timer(timer),
-          byteStreamFactory(byteStreamFactory) {}
+          byteStreamFactory(byteStreamFactory),
+          dockerNetwork(dockerNetwork),
+          dockerPath(dockerPath) {}
 
     // Called at link time to provide needed resources.
     void link(
@@ -2296,13 +2301,6 @@ class Server::WorkerService final: public Service,
       void start() {
         KJ_REQUIRE(actor == nullptr);
 
-        // TODO(now): Refactor to use parent.actorClass->newActor() so that we don't directly
-        //   access the `service`.
-        auto [service, className] = parent.actorClass->getServiceAndClassName();
-
-        // Just in case abort() was called concurrently...
-        requireNotBroken();
-
         auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
                                   OutputGate& outputGate, ActorCache::Hooks& hooks,
                                   SqliteObserver& sqliteObserver) mutable {
@@ -2364,17 +2362,11 @@ class Server::WorkerService final: public Service,
               js, IoContext::current().addObject(actorCache), enableSql);
         };
 
-        TimerChannel& timerChannel = service;
-
         auto loopback = kj::refcounted<Loopback>(*this);
-
-        // We define this event ID in the internal codebase, but to have WebSocket Hibernation
-        // work for local development we need to pass an event type.
-        static constexpr uint16_t hibernationEventTypeId = 8;
 
         kj::Maybe<rpc::Container::Client> containerClient = kj::none;
         KJ_IF_SOME(config, containerOptions) {
-          auto& dockerPathRef = KJ_ASSERT_NONNULL(service.dockerPath,
+          auto& dockerPathRef = KJ_ASSERT_NONNULL(parent.dockerPath,
               "dockerPath needs to be defined in order enable containers on this durable object.");
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto imageName = config.getImageName();
@@ -2387,17 +2379,18 @@ class Server::WorkerService final: public Service,
               containerId = kj::str(existingId);
             }
           }
-          containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer, service.network,
+          containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer,
+              parent.dockerNetwork,
               kj::str(dockerPathRef),
               kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
               kj::str(imageName), service.waitUntilTasks);
         }
 
-        auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
-            Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), className,
-            kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-            tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient)));
-        onBrokenTask = monitorOnBroken(actorRef);
+        auto actor = parent.actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
+            kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
+            kj::mv(containerClient));
+        onBrokenTask = monitorOnBroken(*actor);
+        this->actor = kj::mv(actor);
       }
     };
 
@@ -2442,6 +2435,8 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
     capnp::ByteStreamFactory& byteStreamFactory;
+    kj::Network& dockerNetwork;
+    kj::Maybe<kj::StringPtr> dockerPath;
     kj::Maybe<SqliteDatabase::Vfs&> actorStorage;
     kj::Maybe<AlarmScheduler&> alarmScheduler;
 
@@ -2564,8 +2559,23 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    ServiceAndClassName getServiceAndClassName() override {
-      return {service, className};
+    kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
+        Worker::Actor::Id actorId,
+        Worker::Actor::MakeActorCacheFunc makeActorCache,
+        Worker::Actor::MakeStorageFunc makeStorage,
+        kj::Own<Worker::Actor::Loopback> loopback,
+        kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
+        kj::Maybe<rpc::Container::Client> container) override {
+      TimerChannel& timerChannel = service;
+
+      // We define this event ID in the internal codebase, but to have WebSocket Hibernation
+      // work for local development we need to pass an event type.
+      static constexpr uint16_t hibernationEventTypeId = 8;
+
+      return kj::refcounted<Worker::Actor>(*service.worker, tracker, kj::mv(actorId), true,
+          kj::mv(makeActorCache), className, kj::mv(makeStorage), kj::mv(loopback), timerChannel,
+          kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
+          kj::mv(container));
     }
 
     kj::Own<WorkerInterface> startRequest(
@@ -2593,7 +2603,6 @@ class Server::WorkerService final: public Service,
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
-  kj::Network& network;
   kj::Maybe<kj::String> dockerPath;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
