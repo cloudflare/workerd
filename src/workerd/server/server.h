@@ -154,6 +154,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
+  class ActorClass;
+
   // Information about all known actor namespaces. Maps serviceName -> className -> config.
   // This needs to be populated in advance of constructing any services, in order to be able to
   // correctly construct dependent services.
