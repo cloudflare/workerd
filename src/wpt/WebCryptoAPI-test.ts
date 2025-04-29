@@ -49,16 +49,10 @@ export default {
   'derive_bits_keys/ecdh_bits.js': {},
   'derive_bits_keys/ecdh_keys.https.any.js': {},
   'derive_bits_keys/ecdh_keys.js': {},
-  'derive_bits_keys/hkdf.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found.',
-    skipAllTests: true,
-  },
+  'derive_bits_keys/hkdf.https.any.js': {},
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
-  'derive_bits_keys/pbkdf2.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found.',
-    skipAllTests: true,
-  },
+  'derive_bits_keys/pbkdf2.https.any.js': {},
   'derive_bits_keys/pbkdf2.js': {},
   'derive_bits_keys/pbkdf2_vectors.js': {},
 
@@ -158,59 +152,23 @@ export default {
     skipAllTests: true,
   },
   'generateKey/successes.js': {},
-  'generateKey/successes_AES-CBC.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_AES-CTR.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_AES-GCM.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_AES-KW.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_ECDH.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_ECDSA.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_Ed25519.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
+  'generateKey/successes_AES-CBC.https.any.js': {},
+  'generateKey/successes_AES-CTR.https.any.js': {},
+  'generateKey/successes_AES-GCM.https.any.js': {},
+  'generateKey/successes_AES-KW.https.any.js': {},
+  'generateKey/successes_ECDH.https.any.js': {},
+  'generateKey/successes_ECDSA.https.any.js': {},
+  'generateKey/successes_Ed25519.https.any.js': {},
   'generateKey/successes_Ed448.https.any.js': {
     comment:
       'Ed448 is not supported by BoringSSL and is intentionally disabled.',
     skipAllTests: true,
   },
-  'generateKey/successes_HMAC.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_RSA-OAEP.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_RSA-PSS.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
-  'generateKey/successes_X25519.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
+  'generateKey/successes_HMAC.https.any.js': {},
+  'generateKey/successes_RSA-OAEP.https.any.js': {},
+  'generateKey/successes_RSA-PSS.https.any.js': {},
+  'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {},
+  'generateKey/successes_X25519.https.any.js': {},
   'generateKey/successes_X448.https.any.js': {
     comment:
       'X448 is not supported by BoringSSL and is intentionally disabled.',

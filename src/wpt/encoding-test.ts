@@ -6,10 +6,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'api-basics.any.js': {},
-  'api-invalid-label.any.js': {
-    comment: 'Error: Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
+  'api-invalid-label.any.js': {},
   'api-replacement-encodings.any.js': {},
   'api-surrogates-utf8.any.js': {},
   'encodeInto.any.js': {
@@ -190,10 +187,7 @@ export default {
     skipAllTests: true,
   },
   'textdecoder-eof.any.js': {},
-  'textdecoder-fatal-single-byte.any.js': {
-    comment: '/common/subset-tests.js',
-    skipAllTests: true,
-  },
+  'textdecoder-fatal-single-byte.any.js': {},
   'textdecoder-fatal-streaming.any.js': {},
   'textdecoder-fatal.any.js': {},
   'textdecoder-ignorebom.any.js': {},

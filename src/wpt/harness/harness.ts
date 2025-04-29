@@ -415,6 +415,11 @@ declare global {
     testCallback: TestFn | PromiseTestFn,
     testMessage: string
   ): void;
+  function subsetTest(
+    testType: TestRunnerFn,
+    testCallback: TestFn | PromiseTestFn,
+    testMessage: string
+  ): void;
   function promise_test(
     func: PromiseTestFn,
     name: string,
@@ -621,6 +626,15 @@ globalThis.subsetTestByKey = (
   testCallback,
   testMessage
 ): void => {
+  // This function is designed to allow selecting only certain tests when
+  // running in a browser, by changing the query string. We'll always run
+  // all the tests.
+
+  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
+  return testType(testCallback, testMessage);
+};
+
+globalThis.subsetTest = (testType, testCallback, testMessage): void => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
@@ -1265,6 +1279,7 @@ function getBindingPath(base: string, rawPath: string): string {
 const EXCLUDED_PATHS = new Set([
   // Implemented in harness.ts
   '/common/subset-tests-by-key.js',
+  '/common/subset-tests.js',
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
