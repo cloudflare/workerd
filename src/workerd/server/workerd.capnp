@@ -354,6 +354,10 @@ struct Worker {
       service @9 :ServiceDesignator;
       # Binding to a named service (possibly, a worker).
 
+      durableObjectClass @26 :ServiceDesignator;
+      # A Durable Object class binding, without an actual storage namespace. This can be used to
+      # implement a facet.
+
       durableObjectNamespace @10 :DurableObjectNamespaceDesignator;
       # Binding to the durable object namespace implemented by the given class.
       #
@@ -438,6 +442,7 @@ struct Worker {
         queue @11 :Void;
         analyticsEngine @12 : Void;
         hyperdrive @13: Void;
+        durableObjectClass @14: Void;
       }
     }
 
