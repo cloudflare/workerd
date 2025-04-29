@@ -236,11 +236,17 @@ class Server::ActorClass: public kj::Refcounted {
       Worker::Actor::MakeStorageFunc makeStorage,
       kj::Own<Worker::Actor::Loopback> loopback,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
-      kj::Maybe<rpc::Container::Client> container) = 0;
+      kj::Maybe<rpc::Container::Client> container,
+      kj::Maybe<Worker::Actor::FacetManager&> facetManager) = 0;
 
   // Start a request on the actor.
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
+
+  // Look up the appropriate actor class to use for a facet of this actor. Requires looking up in
+  // the channels table of the actor's service.
+  virtual kj::Own<ActorClass> getActorClassForFacet(
+      const Worker::Actor::FacetManager::StartInfo& startInfo) = 0;
 };
 
 Server::~Server() noexcept {
@@ -509,13 +515,20 @@ class Server::InvalidConfigActorClass final: public ActorClass {
       Worker::Actor::MakeStorageFunc makeStorage,
       kj::Own<Worker::Actor::Loopback> loopback,
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
-      kj::Maybe<rpc::Container::Client> container) override {
+      kj::Maybe<rpc::Container::Client> container,
+      kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
     JSG_FAIL_REQUIRE(
         Error, "Cannot instantiate Durable Object class because its config is invalid.");
   }
 
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
+    // Can't get here because creating the actor would have required calling the other method.
+    KJ_UNREACHABLE;
+  }
+
+  kj::Own<ActorClass> getActorClassForFacet(
+      const Worker::Actor::FacetManager::StartInfo& startInfo) override {
     // Can't get here because creating the actor would have required calling the other method.
     KJ_UNREACHABLE;
   }
@@ -2100,7 +2113,9 @@ class Server::WorkerService final: public Service,
     // Once there are no Worker::Actor's left (excluding our own), `inactive()` is triggered and we
     // initiate the eviction of the Durable Object. If no requests arrive in the next 10 seconds,
     // the DO is evicted, otherwise we cancel the eviction task.
-    class ActorContainer final: public RequestTracker::Hooks, public kj::Refcounted {
+    class ActorContainer final: public RequestTracker::Hooks,
+                                public kj::Refcounted,
+                                public Worker::Actor::FacetManager {
      public:
       ActorContainer(kj::String key,
           Worker::Actor::Id id,
@@ -2252,8 +2267,9 @@ class Server::WorkerService final: public Service,
         }
       }
 
-      kj::Own<ActorContainer> getFacet(
+      kj::Own<ActorContainer> getFacetContainer(
           kj::String childKey, Worker::Actor::Id childId, kj::Own<ActorClass> childActorClass) {
+        // TODO(now): Check for mismatching actor class or childId and restart if needed.
         return facets
             .findOrCreate(childKey, [&]() mutable {
           auto container = kj::refcounted<ActorContainer>(
@@ -2263,6 +2279,24 @@ class Server::WorkerService final: public Service,
           return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
             container->getKey(), kj::mv(container)};
         })->addRef();
+      }
+
+      kj::Own<IoChannelFactory::ActorChannel> getFacet(
+          kj::StringPtr name, StartInfo startInfo) override {
+        auto facetClass = actorClass->getActorClassForFacet(startInfo);
+        auto facet = getFacetContainer(kj::str(name), kj::mv(startInfo.id), kj::mv(facetClass));
+        return kj::heap<ActorChannelImpl>(kj::mv(facet));
+      }
+
+      void abortFacet(kj::StringPtr name, kj::Exception reason) override {
+        KJ_IF_SOME(entry, facets.findEntry(name)) {
+          entry.value->abort(reason);
+          facets.erase(entry);
+        }
+      }
+
+      void deleteFacet(kj::StringPtr name) override {
+        KJ_UNIMPLEMENTED("TODO(now): deleteFacet()");
       }
 
      private:
@@ -2466,7 +2500,7 @@ class Server::WorkerService final: public Service,
 
         auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
             kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef(),
-            kj::mv(containerClient));
+            kj::mv(containerClient), *this);
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
       }
@@ -2651,7 +2685,8 @@ class Server::WorkerService final: public Service,
         Worker::Actor::MakeStorageFunc makeStorage,
         kj::Own<Worker::Actor::Loopback> loopback,
         kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
-        kj::Maybe<rpc::Container::Client> container) override {
+        kj::Maybe<rpc::Container::Client> container,
+        kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
       TimerChannel& timerChannel = service;
 
       // We define this event ID in the internal codebase, but to have WebSocket Hibernation
@@ -2661,7 +2696,7 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<Worker::Actor>(*service.worker, tracker, kj::mv(actorId), true,
           kj::mv(makeActorCache), className, kj::mv(makeStorage), kj::mv(loopback), timerChannel,
           kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
-          kj::mv(container));
+          kj::mv(container), facetManager);
     }
 
     kj::Own<WorkerInterface> startRequest(
@@ -2669,6 +2704,17 @@ class Server::WorkerService final: public Service,
       // The `props` parameter is empty here because props are not passed per-request, they are
       // passed at Actor construction time.
       return service.startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
+    }
+
+    kj::Own<ActorClass> getActorClassForFacet(
+        const Worker::Actor::FacetManager::StartInfo& startInfo) override {
+      auto& channels = KJ_REQUIRE_NONNULL(
+          service.ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+
+      KJ_REQUIRE(startInfo.actorClassChannel < channels.actorClass.size(),
+          "invalid actor class channel number");
+
+      return kj::addRef(*channels.actorClass[startInfo.actorClassChannel]);
     }
 
    private:
