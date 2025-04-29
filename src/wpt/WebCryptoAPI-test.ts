@@ -49,10 +49,16 @@ export default {
   'derive_bits_keys/ecdh_bits.js': {},
   'derive_bits_keys/ecdh_keys.https.any.js': {},
   'derive_bits_keys/ecdh_keys.js': {},
-  'derive_bits_keys/hkdf.https.any.js': {},
+  'derive_bits_keys/hkdf.https.any.js': {
+    comment: 'Fixed in PR #4040',
+    expectedFailures: [/0 length/],
+  },
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
-  'derive_bits_keys/pbkdf2.https.any.js': {},
+  'derive_bits_keys/pbkdf2.https.any.js': {
+    comment: 'Fixed in PR #4040',
+    expectedFailures: [/0 length/],
+  },
   'derive_bits_keys/pbkdf2.js': {},
   'derive_bits_keys/pbkdf2_vectors.js': {},
 
@@ -82,39 +88,32 @@ export default {
 
   'generateKey/failures.js': {},
   'generateKey/failures_AES-CBC.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_AES-CTR.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_AES-GCM.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_AES-KW.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_ECDH.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_ECDSA.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_Ed25519.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_Ed448.https.any.js': {
     comment:
@@ -122,29 +121,24 @@ export default {
     skipAllTests: true,
   },
   'generateKey/failures_HMAC.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_RSA-OAEP.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_RSA-PSS.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_X25519.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_X448.https.any.js': {
     comment:
@@ -152,23 +146,59 @@ export default {
     skipAllTests: true,
   },
   'generateKey/successes.js': {},
-  'generateKey/successes_AES-CBC.https.any.js': {},
-  'generateKey/successes_AES-CTR.https.any.js': {},
-  'generateKey/successes_AES-GCM.https.any.js': {},
-  'generateKey/successes_AES-KW.https.any.js': {},
-  'generateKey/successes_ECDH.https.any.js': {},
-  'generateKey/successes_ECDSA.https.any.js': {},
-  'generateKey/successes_Ed25519.https.any.js': {},
+  'generateKey/successes_AES-CBC.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_AES-CTR.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_AES-GCM.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_AES-KW.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_ECDH.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_ECDSA.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_Ed25519.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
   'generateKey/successes_Ed448.https.any.js': {
     comment:
       'Ed448 is not supported by BoringSSL and is intentionally disabled.',
     skipAllTests: true,
   },
-  'generateKey/successes_HMAC.https.any.js': {},
-  'generateKey/successes_RSA-OAEP.https.any.js': {},
-  'generateKey/successes_RSA-PSS.https.any.js': {},
-  'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {},
-  'generateKey/successes_X25519.https.any.js': {},
+  'generateKey/successes_HMAC.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_RSA-OAEP.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_RSA-PSS.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
+  'generateKey/successes_X25519.https.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
+  },
   'generateKey/successes_X448.https.any.js': {
     comment:
       'X448 is not supported by BoringSSL and is intentionally disabled.',
@@ -195,12 +225,14 @@ export default {
   'import_export/crashtests/importKey-unsettled-promise.https.any.js': {},
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
-    comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    comment:
+      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+    expectedFailures: [/^Bad key length:/, /^Missing JWK 'crv' parameter:/],
   },
   'import_export/ec_importKey_failures_ECDSA.https.any.js': {
-    comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    comment:
+      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+    expectedFailures: [/^Bad key length:/, /^Missing JWK 'crv' parameter:/],
   },
   'import_export/ec_importKey_failures_fixtures.js': {},
   'import_export/importKey_failures.js': {},
