@@ -226,14 +226,14 @@ class Server::Service {
 
 class Server::ActorClass {
  public:
-  struct ServiceAndClassName {
-    WorkerService& service;
-    kj::StringPtr className;
-  };
-
-  // Get the underlying WorkerService and class name for this actor. Needed to construct the Actor.
-  // TOOD(now): Replace this with a method newActor() that directly constructs an Actor.
-  virtual ServiceAndClassName getServiceAndClassName() = 0;
+  // Construct a new instance of the class. The parameters here are passed into `Worker::Actor`'s
+  // constructor.
+  virtual kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
+      Worker::Actor::Id actorId,
+      Worker::Actor::MakeActorCacheFunc makeActorCache,
+      Worker::Actor::MakeStorageFunc makeStorage,
+      kj::Own<Worker::Actor::Loopback> loopback,
+      kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager) = 0;
 
   // Start a request on the actor.
   virtual kj::Own<WorkerInterface> startRequest(
@@ -2132,7 +2132,8 @@ class Server::WorkerService final: public Service,
         KJ_IF_SOME(r, reason) {
           brokenReason = kj::cp(r);
         } else {
-          brokenReason = JSG_KJ_EXCEPTION(FAILED, Error, "Actor aborted for uknown reason.");
+          auto e = JSG_KJ_EXCEPTION(FAILED, Error, "Actor aborted for uknown reason.");
+          brokenReason = kj::mv(e);
         }
       }
 
@@ -2233,13 +2234,6 @@ class Server::WorkerService final: public Service,
       void start() {
         KJ_REQUIRE(actor == nullptr);
 
-        // TODO(now): Refactor to use parent.actorClass->newActor() so that we don't directly
-        //   access the `service`.
-        auto [service, className] = parent.actorClass->getServiceAndClassName();
-
-        // Just in case abort() was called concurrently...
-        requireNotBroken();
-
         auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
                                   OutputGate& outputGate, ActorCache::Hooks& hooks,
                                   SqliteObserver& sqliteObserver) mutable {
@@ -2296,19 +2290,12 @@ class Server::WorkerService final: public Service,
               js, IoContext::current().addObject(actorCache), enableSql);
         };
 
-        TimerChannel& timerChannel = service;
-
         auto loopback = kj::refcounted<Loopback>(*this);
 
-        // We define this event ID in the internal codebase, but to have WebSocket Hibernation
-        // work for local development we need to pass an event type.
-        static constexpr uint16_t hibernationEventTypeId = 8;
-
-        auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
-            Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), className,
-            kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-            tryGetManagerRef(), hibernationEventTypeId));
-        onBrokenTask = monitorOnBroken(actorRef);
+        auto actor = parent.actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
+            kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef());
+        onBrokenTask = monitorOnBroken(*actor);
+        this->actor = kj::mv(actor);
       }
     };
 
@@ -2473,8 +2460,21 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    ServiceAndClassName getServiceAndClassName() override {
-      return {service, className};
+    kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
+        Worker::Actor::Id actorId,
+        Worker::Actor::MakeActorCacheFunc makeActorCache,
+        Worker::Actor::MakeStorageFunc makeStorage,
+        kj::Own<Worker::Actor::Loopback> loopback,
+        kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager) override {
+      TimerChannel& timerChannel = service;
+
+      // We define this event ID in the internal codebase, but to have WebSocket Hibernation
+      // work for local development we need to pass an event type.
+      static constexpr uint16_t hibernationEventTypeId = 8;
+
+      return kj::refcounted<Worker::Actor>(*service.worker, tracker, kj::mv(actorId), true,
+          kj::mv(makeActorCache), className, kj::mv(makeStorage), kj::mv(loopback), timerChannel,
+          kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId);
     }
 
     kj::Own<WorkerInterface> startRequest(
