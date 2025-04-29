@@ -506,6 +506,11 @@ declare global {
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
   function garbageCollect(): void;
+  function createBuffer(
+    type: 'ArrayBuffer' | 'SharedArrayBuffer',
+    length: number,
+    opts: { maxByteLength?: number } | undefined
+  ): ArrayBuffer | SharedArrayBuffer;
 }
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
@@ -1140,6 +1145,19 @@ globalThis.garbageCollect = (): void => {
   }
 };
 
+globalThis.createBuffer = (
+  type,
+  length,
+  _opts
+): ArrayBuffer | SharedArrayBuffer => {
+  switch (type) {
+    case 'ArrayBuffer':
+      return new ArrayBuffer(length);
+    case 'SharedArrayBuffer':
+      return new SharedArrayBuffer(length);
+  }
+};
+
 class Location {
   public get ancestorOrigins(): DOMStringList {
     return {
@@ -1284,6 +1302,7 @@ const EXCLUDED_PATHS = new Set([
   '/common/utils.js',
   '/common/get-host-info.sub.js',
   '/common/gc.js',
+  '/common/sab.js',
 ]);
 
 function replaceInterpolation(code: string): string {
