@@ -500,6 +500,7 @@ declare global {
   function token(): string;
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
+  function garbageCollect(): void;
 }
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
@@ -1119,6 +1120,12 @@ globalThis.add_completion_callback = (func: UnknownFunc): void => {
   globalThis.state.completionCallbacks.push(func);
 };
 
+globalThis.garbageCollect = (): void => {
+  if (typeof gc === 'function') {
+    gc();
+  }
+};
+
 class Location {
   public get ancestorOrigins(): DOMStringList {
     return {
@@ -1261,6 +1268,7 @@ const EXCLUDED_PATHS = new Set([
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
+  '/common/gc.js',
 ]);
 
 function replaceInterpolation(code: string): string {

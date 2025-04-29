@@ -234,10 +234,7 @@ export default {
     skipAllTests: true,
   },
 
-  'import_export/crashtests/importKey-unsettled-promise.https.any.js': {
-    comment: 'Test file /common/gc.js not found',
-    skipAllTests: true,
-  },
+  'import_export/crashtests/importKey-unsettled-promise.https.any.js': {},
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
     comment: 'Too many failures to list individually',

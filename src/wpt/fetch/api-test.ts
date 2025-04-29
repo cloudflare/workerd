@@ -61,10 +61,7 @@ export default {
       'Stream disconnected prematurely and a dropped promise when faced with intentionally bad chunked encoding from WPT',
     skipAllTests: true,
   },
-  'basic/gc.any.js': {
-    comment: 'Run WPT tests with --expose-gc if we want to run this test',
-    skipAllTests: true,
-  },
+  'basic/gc.any.js': {},
   'basic/header-value-combining.any.js': {
     comment:
       "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
