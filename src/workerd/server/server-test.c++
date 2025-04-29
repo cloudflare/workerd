@@ -4507,5 +4507,74 @@ KJ_TEST("Server: Catch websocket server errors") {
   }
 }
 
+KJ_TEST("Server: Durable Object facets") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = env.NS.idFromName(request.url);
+                `    let actor = env.NS.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    let results = [];
+                `    let facet = this.ctx.facets.get("foo", {class: this.env.COUNTER});
+                `    results.push(await facet.increment());
+                `    results.push(await facet.increment());
+                `    results.push(await facet.increment());
+                `
+                `    let facet2 = this.ctx.facets.get("bar", {class: this.env.COUNTER});
+                `    results.push(await facet2.increment());
+                `
+                `    let facet3 = this.ctx.facets.get("foo", {class: this.env.COUNTER});
+                `    results.push(await facet3.increment());
+                `    return new Response(results.join(" "));
+                `  }
+                `}
+                `export class CounterFacet extends DurableObject {
+                `  i = 0;
+                `  increment() {
+                `    return this.i++;
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "NS", durableObjectNamespace = "MyActorClass"),
+            (name = "COUNTER", durableObjectClass = (name = "hello", entrypoint = "CounterFacet"))
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 1 2 0 3");
+}
+
 }  // namespace
 }  // namespace workerd::server
