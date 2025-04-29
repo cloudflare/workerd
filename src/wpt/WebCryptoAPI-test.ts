@@ -56,8 +56,10 @@ export default {
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
   'derive_bits_keys/pbkdf2.https.any.js': {
-    comment: 'Fixed in PR #4040',
+    comment:
+      'Expected failures: Fixed in PR #4040, Skipped tests: keeps timing out',
     expectedFailures: [/0 length/],
+    skippedTests: [/with 100000 iterations/],
   },
   'derive_bits_keys/pbkdf2.js': {},
   'derive_bits_keys/pbkdf2_vectors.js': {},
