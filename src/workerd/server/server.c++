@@ -224,7 +224,7 @@ class Server::Service {
   }
 };
 
-class Server::ActorClass {
+class Server::ActorClass: public kj::Refcounted {
  public:
   // Construct a new instance of the class. The parameters here are passed into `Worker::Actor`'s
   // constructor.
@@ -1790,7 +1790,7 @@ class Server::WorkerService final: public Service,
                 "workerd may make this a startup-time error."));
       }
 
-      auto actorClass = kj::heap<ActorClassImpl>(*this, entry.key, kj::none);
+      auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, kj::none);
       auto ns =
           kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer());
       actorNamespaces.insert(entry.key, kj::mv(ns));
@@ -1841,7 +1841,7 @@ class Server::WorkerService final: public Service,
   kj::Maybe<kj::Own<ActorClass>> getActorClass(
       kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
     KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
-      return kj::heap<ActorClassImpl>(*this, className, propsJson);
+      return kj::refcounted<ActorClassImpl>(*this, className, propsJson);
     } else {
       return kj::none;
     }
@@ -2036,11 +2036,16 @@ class Server::WorkerService final: public Service,
     // the DO is evicted, otherwise we cancel the eviction task.
     class ActorContainer final: public RequestTracker::Hooks, public kj::Refcounted {
      public:
-      ActorContainer(kj::String key, Worker::Actor::Id id, ActorNamespace& parent, kj::Timer& timer)
+      ActorContainer(kj::String key,
+          Worker::Actor::Id id,
+          ActorNamespace& parent,
+          kj::Own<ActorClass> actorClass,
+          kj::Timer& timer)
           : key(kj::mv(key)),
             id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             parent(parent),
+            actorClass(kj::mv(actorClass)),
             timer(timer),
             lastAccess(timer.now()) {}
 
@@ -2130,7 +2135,7 @@ class Server::WorkerService final: public Service,
           parent.cleanupTask = parent.cleanupLoop();
         }
 
-        co_return parent.actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
+        co_return actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
             .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
       }
 
@@ -2164,6 +2169,7 @@ class Server::WorkerService final: public Service,
       Worker::Actor::Id id;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
+      kj::Own<ActorClass> actorClass;
       kj::Timer& timer;
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
@@ -2311,7 +2317,7 @@ class Server::WorkerService final: public Service,
 
         auto loopback = kj::refcounted<Loopback>(*this);
 
-        auto actor = parent.actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
+        auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
             kj::mv(makeActorCache), kj::mv(makeStorage), kj::mv(loopback), tryGetManagerRef());
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
@@ -2334,7 +2340,8 @@ class Server::WorkerService final: public Service,
 
       return actors
           .findOrCreate(key, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(kj::mv(key), kj::mv(id), *this, timer);
+        auto container = kj::refcounted<ActorContainer>(
+            kj::mv(key), kj::mv(id), *this, kj::addRef(*actorClass), timer);
 
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};
