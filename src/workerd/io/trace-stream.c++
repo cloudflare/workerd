@@ -200,8 +200,14 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SCHEDULED_STR));
-  // TODO (streaming-tail-worker): Make timestamp available again, except when running tests
-  obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
+  if (isPredictableModeForTest()) {
+    obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
+  } else {
+    // TODO(streaming-tail): Depending on if the schedule handler is invoked with a scheduledTime
+    // argument or not, the value in the trace can be either the current time or the scheduledTime
+    // parameter. Is this the correct behavior?
+    obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
+  }
   obj.set(js, CRON_STR, js.str(info.cron));
   return obj;
 }
@@ -209,8 +215,11 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, String
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ALARM_STR));
-  // TODO (streaming-tail-worker): Make timestamp available again, except when running tests
-  obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
+  if (isPredictableModeForTest()) {
+    obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
+  } else {
+    obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
+  }
   return obj;
 }
 
