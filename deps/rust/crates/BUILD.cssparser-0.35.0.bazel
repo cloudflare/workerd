@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "rustc_version",
+    name = "cssparser",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,18 +30,24 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2018",
+    proc_macro_deps = [
+        "@crates_vendor__cssparser-macros-0.6.1//:cssparser_macros",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=rustc_version",
+        "crate-name=cssparser",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.4.1",
+    version = "0.35.0",
     deps = [
-        "@crates_vendor__semver-1.0.26//:semver",
+        "@crates_vendor__dtoa-short-0.3.5//:dtoa_short",
+        "@crates_vendor__itoa-1.0.15//:itoa",
+        "@crates_vendor__phf-0.11.3//:phf",
+        "@crates_vendor__smallvec-1.15.0//:smallvec",
     ],
 )
