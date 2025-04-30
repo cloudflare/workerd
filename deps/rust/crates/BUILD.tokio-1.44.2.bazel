@@ -6,15 +6,9 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
-
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
 
 rust_library(
     name = "tokio",
@@ -50,9 +44,6 @@ rust_library(
     }),
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -70,19 +61,19 @@ rust_library(
         "@crates_vendor__socket2-0.5.9//:socket2",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.171//:libc",  # aarch64-apple-darwin
+            "@crates_vendor__libc-0.2.172//:libc",  # aarch64-apple-darwin
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.171//:libc",  # aarch64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.172//:libc",  # aarch64-unknown-linux-gnu
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.171//:libc",  # x86_64-apple-darwin
+            "@crates_vendor__libc-0.2.172//:libc",  # x86_64-apple-darwin
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__windows-sys-0.52.0//:windows_sys",  # x86_64-pc-windows-msvc
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.171//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__libc-0.2.172//:libc",  # x86_64-unknown-linux-gnu
         ],
         "//conditions:default": [],
     }),

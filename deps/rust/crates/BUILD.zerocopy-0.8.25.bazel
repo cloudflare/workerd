@@ -6,22 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//cargo:defs.bzl",
-    "cargo_build_script",
-    "cargo_toml_env_vars",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
-
 rust_library(
-    name = "libc",
+    name = "zerocopy",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -39,28 +30,23 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "extra_traits",
-        "std",
+        "simd",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=zerocopy",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.171",
+    version = "0.8.25",
     deps = [
-        "@crates_vendor__libc-0.2.171//:build_script_build",
+        "@crates_vendor__zerocopy-0.8.25//:build_script_build",
     ],
 )
 
@@ -84,9 +70,7 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "default",
-        "extra_traits",
-        "std",
+        "simd",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -103,21 +87,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "libc",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
+    pkg_name = "zerocopy",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=zerocopy",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.171",
+    version = "0.8.25",
     visibility = ["//visibility:private"],
 )
 

@@ -6,15 +6,9 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
-
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
 
 rust_library(
     name = "backtrace",
@@ -36,9 +30,6 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -56,19 +47,19 @@ rust_library(
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@crates_vendor__addr2line-0.24.2//:addr2line",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
-            "@crates_vendor__libc-0.2.171//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
+            "@crates_vendor__libc-0.2.172//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__miniz_oxide-0.8.8//:miniz_oxide",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__object-0.36.7//:object",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
             "@crates_vendor__addr2line-0.24.2//:addr2line",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
-            "@crates_vendor__libc-0.2.171//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
+            "@crates_vendor__libc-0.2.172//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__miniz_oxide-0.8.8//:miniz_oxide",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__object-0.36.7//:object",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@crates_vendor__addr2line-0.24.2//:addr2line",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
-            "@crates_vendor__libc-0.2.171//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
+            "@crates_vendor__libc-0.2.172//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__miniz_oxide-0.8.8//:miniz_oxide",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__object-0.36.7//:object",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
         ],
@@ -77,7 +68,7 @@ rust_library(
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
             "@crates_vendor__addr2line-0.24.2//:addr2line",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
-            "@crates_vendor__libc-0.2.171//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
+            "@crates_vendor__libc-0.2.172//:libc",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__miniz_oxide-0.8.8//:miniz_oxide",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
             "@crates_vendor__object-0.36.7//:object",  # cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))
         ],
