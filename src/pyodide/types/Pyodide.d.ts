@@ -27,5 +27,5 @@ interface Pyodide {
   loadPackage: (names: string | string[], options: object) => Promise<any[]>;
   setStdout: (options?: any) => void;
   setStderr: (options?: any) => void;
-  version: string;
+  version: API['version'];
 }
