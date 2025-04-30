@@ -6,18 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
-
 rust_library(
-    name = "syn",
+    name = "cxx",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,35 +30,41 @@ rust_library(
         ],
     ),
     crate_features = [
-        "clone-impls",
+        "alloc",
         "default",
-        "derive",
-        "extra-traits",
-        "fold",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
+    proc_macro_deps = [
+        "@crates_vendor__cxxbridge-macro-1.0.158//:cxxbridge_macro",
     ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=cxx",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.100",
+    version = "1.0.158",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
-        "@crates_vendor__quote-1.0.40//:quote",
-        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
+        ":cxx_cc",
+        "@crates_vendor__foldhash-0.1.5//:foldhash",
+        "@crates_vendor__link-cplusplus-1.0.10//:link_cplusplus",
     ],
+)
+
+# Additive BUILD file content
+cc_library(
+    name = "cxx_cc",
+    srcs = ["src/cxx.cc"],
+    hdrs = ["include/cxx.h"],
+    include_prefix = "rust",
+    includes = ["include"],
+    linkstatic = True,
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
 )

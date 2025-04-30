@@ -6,22 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
-
 rust_library(
-    name = "clap",
+    name = "nix",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -39,44 +30,54 @@ rust_library(
         ],
     ),
     crate_features = [
-        "derive",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
+        "default",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.32//:clap_derive",
-    ],
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=nix",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.35",
+    version = "0.30.0",
     deps = [
-        "@crates_vendor__clap_builder-4.5.35//:clap_builder",
+        "@crates_vendor__bitflags-2.9.0//:bitflags",
+        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+        "@crates_vendor__libc-0.2.172//:libc",
+        "@crates_vendor__nix-0.30.0//:build_script_build",
     ],
 )
 
-rust_binary(
-    name = "stdio-fixture__bin",
+cargo_build_script(
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
     compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
+    crate_features = [
+        "default",
+    ],
+    crate_name = "build_script_build",
+    crate_root = "build.rs",
+    data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -88,35 +89,27 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "error-context",
-        "help",
-        "std",
-        "suggestions",
-        "usage",
-    ],
-    crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.32//:clap_derive",
-    ],
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
+    pkg_name = "nix",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=nix",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.35",
+    version = "0.30.0",
+    visibility = ["//visibility:private"],
     deps = [
-        ":clap",
-        "@crates_vendor__clap_builder-4.5.35//:clap_builder",
+        "@crates_vendor__cfg_aliases-0.2.1//:cfg_aliases",
     ],
+)
+
+alias(
+    name = "build_script_build",
+    actual = ":_bs",
+    tags = ["manual"],
 )

@@ -6,19 +6,10 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//cargo:defs.bzl",
-    "cargo_build_script",
-    "cargo_toml_env_vars",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
-
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
 
 rust_library(
     name = "cssparser",
@@ -42,9 +33,6 @@ rust_library(
     edition = "2018",
     proc_macro_deps = [
         "@crates_vendor__cssparser-macros-0.6.1//:cssparser_macros",
-    ],
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -102,9 +90,6 @@ cargo_build_script(
     ),
     edition = "2018",
     pkg_name = "cssparser",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -118,7 +103,7 @@ cargo_build_script(
     version = "0.29.6",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__proc-macro2-1.0.94//:proc_macro2",
+        "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
         "@crates_vendor__quote-1.0.40//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],

@@ -6,22 +6,13 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//cargo:defs.bzl",
-    "cargo_build_script",
-    "cargo_toml_env_vars",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-cargo_toml_env_vars(
-    name = "cargo_toml_env_vars",
-    src = "Cargo.toml",
-)
-
 rust_library(
-    name = "lolhtml",
+    name = "proc_macro2",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -39,31 +30,26 @@ rust_library(
         ],
     ),
     crate_features = [
-        "capi",
         "default",
+        "proc-macro",
+        "span-locations",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lol_html_c_api",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.1.2",
+    version = "1.0.95",
     deps = [
-        "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
-        "@crates_vendor__libc-0.2.171//:libc",
-        "@crates_vendor__lol_html-2.2.0//:lol_html",
-        "@crates_vendor__lol_html_c_api-1.1.2//:build_script_build",
-        "@crates_vendor__thiserror-2.0.12//:thiserror",
+        "@crates_vendor__proc-macro2-1.0.95//:build_script_build",
+        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
     ],
 )
 
@@ -87,8 +73,9 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "capi",
         "default",
+        "proc-macro",
+        "span-locations",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -105,22 +92,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    links = "lolhtml",
-    pkg_name = "lol_html_c_api",
-    rustc_env_files = [
-        ":cargo_toml_env_vars",
-    ],
+    pkg_name = "proc-macro2",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lol_html_c_api",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.1.2",
+    version = "1.0.95",
     visibility = ["//visibility:private"],
 )
 
