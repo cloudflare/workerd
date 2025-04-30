@@ -2,9 +2,9 @@
 
 load("@//:build/http.bzl", "http_file")
 
-TAG_NAME = "v8.0.3"
-URL = "https://github.com/bazelbuild/buildtools/releases/download/v8.0.3/buildifier-darwin-amd64"
-SHA256 = "b7a3152cde0b3971b1107f2274afe778c5c154dcdf6c9c669a231e3c004f047e"
+TAG_NAME = "v8.2.0"
+URL = "https://github.com/bazelbuild/buildtools/releases/download/v8.2.0/buildifier-darwin-amd64"
+SHA256 = "309b3c3bfcc4b1533d5f7f796adbd266235cfb6f01450f3e37423527d209a309"
 
 def dep_buildifier_darwin_amd64():
     http_file(

@@ -2,9 +2,9 @@
 
 load("@//:build/http.bzl", "http_file")
 
-TAG_NAME = "v8.0.3"
-URL = "https://github.com/bazelbuild/buildtools/releases/download/v8.0.3/buildifier-linux-arm64"
-SHA256 = "bdd9b92e2c65d46affeecaefb54e68d34c272d1f4a8c5b54929a3e92ab78820a"
+TAG_NAME = "v8.2.0"
+URL = "https://github.com/bazelbuild/buildtools/releases/download/v8.2.0/buildifier-linux-arm64"
+SHA256 = "c624a833bfa64d3a457ef0235eef0dbda03694768aab33f717a7ffd3f803d272"
 
 def dep_buildifier_linux_arm64():
     http_file(

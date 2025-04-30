@@ -105,9 +105,7 @@
       "type": "github_release",
       "owner": "aspect-build",
       "repo": "rules_esbuild",
-      "file_regex": "^rules_esbuild-.*\\.tar\\.gz$",
-      // All releases are marked as prerelease, so github_last_release() fails.
-      "freeze_version": "v0.21.0"
+      "file_regex": "^rules_esbuild-.*\\.tar\\.gz$"
     },
     {
       // Needed for running the latest Node.js due to aspect_rules_js using older
@@ -119,27 +117,18 @@
       "file_regex": "^rules_nodejs-.*\\.tar\\.gz$"
     },
     {
-      // Needed for aspect_rules_js, build fails on Windows if it is not fetched explicitly.
-      // rules_js 2.1.0 uses a fixed version, once we update to that version this can be dropped.
-      "name": "aspect_bazel_lib",
-      "type": "github_release",
-      "owner": "bazel-contrib",
-      "repo": "bazel-lib",
-      "file_regex": "^bazel-lib-"
-    },
-    {
       "name": "aspect_rules_js",
       "type": "github_release",
       "owner": "aspect-build",
       "repo": "rules_js",
-      "file_regex": "^rules_js-"
+      "file_regex": "^rules_js-.*\\.tar\\.gz$"
     },
     {
       "name": "aspect_rules_ts",
       "type": "github_release",
       "owner": "aspect-build",
       "repo": "rules_ts",
-      "file_regex": "^rules_ts-"
+      "file_regex": "^rules_ts-.*\\.tar\\.gz$"
     },
     //clang-format
     {
