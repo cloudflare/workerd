@@ -148,6 +148,7 @@ wd_cc_library(
 
 wd_cc_library(
     name = "test-util",
+    testonly = True,
     srcs = ["capnp-mock.c++"],
     hdrs = ["capnp-mock.h"],
     visibility = ["//visibility:public"],
