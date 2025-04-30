@@ -51,9 +51,8 @@ class HkdfKey final: public CryptoKey::Impl {
     uint32_t length = JSG_REQUIRE_NONNULL(
         maybeLength, DOMOperationError, "HKDF cannot derive a key with null length.");
 
-    JSG_REQUIRE(length != 0 && (length % 8) == 0, DOMOperationError,
-        "HKDF requires a derived key length that is a non-zero multiple of eight (requested ",
-        length, ").");
+    JSG_REQUIRE(length % 8 == 0, DOMOperationError,
+        "HKDF requires a derived key length that is a multiple of eight (requested ", length, ").");
 
     auto derivedLengthBytes = length / 8;
 

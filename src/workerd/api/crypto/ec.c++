@@ -274,9 +274,10 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
     // The pattern seems pretty clearly ~(2^n - 1) where n is the number of bits to mask off. Let's
     // check the last one though (8 is not a possible boundary condition).
     // (2^7 - 1) = 0x7f => ~0x7f = 0x80 (when truncated to a byte)
-    uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
-
-    sharedSecret.back() &= mask;
+    if (numBitsToMaskOff) {
+      uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
+      sharedSecret.back() &= mask;
+    }
 
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sharedSecret.size());
     backing.asArrayPtr().copyFrom(sharedSecret);
@@ -969,8 +970,11 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     sharedSecret.truncate(resultByteLength);
     auto numBitsToMaskOff = resultByteLength * 8 - outputBitLength;
     KJ_DASSERT(numBitsToMaskOff < 8, numBitsToMaskOff);
-    uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
-    sharedSecret.back() &= mask;
+
+    if (numBitsToMaskOff) {
+      uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
+      sharedSecret.back() &= mask;
+    }
 
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, sharedSecret.size());
     backing.asArrayPtr().copyFrom(sharedSecret);

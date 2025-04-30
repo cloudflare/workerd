@@ -49,9 +49,9 @@ class Pbkdf2Key final: public CryptoKey::Impl {
     uint32_t length = JSG_REQUIRE_NONNULL(
         maybeLength, DOMOperationError, "PBKDF2 cannot derive a key with null length.");
 
-    JSG_REQUIRE(length != 0 && (length & 0b111) == 0, DOMOperationError,
-        "PBKDF2 requires a derived key length that is a non-zero multiple of eight (requested ",
-        length, ").");
+    JSG_REQUIRE(length % 8 == 0, DOMOperationError,
+        "PBKDF2 requires a derived key length that is a multiple of eight (requested ", length,
+        ").");
 
     JSG_REQUIRE(iterations > 0, DOMOperationError,
         "PBKDF2 requires a positive iteration count (requested ", iterations, ").");

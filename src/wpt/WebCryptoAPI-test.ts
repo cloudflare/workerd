@@ -34,10 +34,7 @@ export default {
   },
   'derive_bits_keys/derive_key_and_encrypt.https.any.js': {},
   'derive_bits_keys/derive_key_and_encrypt.js': {},
-  'derive_bits_keys/derived_bits_length.https.any.js': {
-    comment: 'To be investigated. Triggers Asan error',
-    skipAllTests: true,
-  },
+  'derive_bits_keys/derived_bits_length.https.any.js': {},
   'derive_bits_keys/derived_bits_length.js': {},
   'derive_bits_keys/derived_bits_length_testcases.js': {
     comment:
@@ -50,15 +47,13 @@ export default {
   'derive_bits_keys/ecdh_keys.https.any.js': {},
   'derive_bits_keys/ecdh_keys.js': {},
   'derive_bits_keys/hkdf.https.any.js': {
-    comment: 'Fixed in PR #4040',
-    expectedFailures: [/0 length/],
+    comment: 'Cannot cope with this many iterations, keeps timing out',
+    skippedTests: [/with 100000 iterations/],
   },
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
   'derive_bits_keys/pbkdf2.https.any.js': {
-    comment:
-      'Expected failures: Fixed in PR #4040, Skipped tests: keeps timing out',
-    expectedFailures: [/0 length/],
+    comment: 'Cannot cope with this many iterations, keeps timing out',
     skippedTests: [/with 100000 iterations/],
   },
   'derive_bits_keys/pbkdf2.js': {},

@@ -95,6 +95,7 @@ wpt_test(
 wpt_test(
     name = "WebCryptoAPI",
     size = "large",
+    timeout = "eternal",  # Give 240s to run
     config = "WebCryptoAPI-test.ts",
     target_compatible_with = select({
         # Too slow on Windows
