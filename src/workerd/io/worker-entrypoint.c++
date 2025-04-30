@@ -4,8 +4,10 @@
 
 #include "worker-entrypoint.h"
 
+#include <workerd/api/basics.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/util.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
@@ -93,6 +95,7 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Maybe<kj::Promise<void>> proxyTask;
   kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
+  kj::Maybe<jsg::Ref<api::AbortController>> abortController;
 
   void init(kj::Own<const Worker> worker,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
@@ -293,10 +296,16 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    auto flags = FeatureFlags::get(lock).getRequestSignalPassthrough()
+        ? api::AbortSignal::Flag::NONE
+        : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
+    jsg::Lock& js = lock;
+    jsg::Ref<api::AbortSignal> signal =
+        abortController.emplace(js.alloc<api::AbortController>(js, flags))->getSignal();
 
     return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock,
-        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
+        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
       .then([this](api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
@@ -328,6 +337,23 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       failOpenService = context.getSubrequestChannelNoChecks(
           IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
     }
+
+    if (proxyTask == kj::none && !loggedExceptionEarlier) {
+      // When the client disconnects, trigger an abort on request.signal, unless the request has
+      // already completed normally, or failed with an exception.
+
+      // TODO(perf): Don't add a task to trigger the abort unless we know it has at least one
+      // listener.
+      KJ_IF_SOME(ctrl, abortController) {
+        context.addWaitUntil(context.run(
+            [ctrl = ctrl.addRef()](Worker::Lock& lock) mutable { ctrl->abort(lock, kj::none); }));
+      }
+    }
+
+    // Release reference to the AbortController.
+    // Either the waitUntilTask holds a reference to it, or it will never be triggered at all.
+    abortController = kj::none;
+
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
   }))
