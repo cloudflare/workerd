@@ -20,6 +20,7 @@ import {
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
+import { reportError } from 'pyodide-internal:util';
 
 // Function to import JavaScript modules from Python
 let doAnImport: (mod: string) => Promise<any>;
@@ -50,8 +51,8 @@ async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
 }
 
 let pyodidePromise: Promise<Pyodide> | undefined;
-function getPyodide(): Promise<Pyodide> {
-  return enterJaegerSpan('get_pyodide', () => {
+async function getPyodide(): Promise<Pyodide> {
+  return await enterJaegerSpan('get_pyodide', () => {
     if (pyodidePromise) {
       return pyodidePromise;
     }
@@ -157,10 +158,16 @@ function getMainModule(): Promise<PyModule> {
 }
 
 async function preparePython(): Promise<PyModule> {
-  const pyodide = await getPyodide();
-  const mainModule = await getMainModule();
-  entropyBeforeRequest(pyodide._module);
-  return mainModule;
+  try {
+    const pyodide = await getPyodide();
+    const mainModule = await getMainModule();
+    entropyBeforeRequest(pyodide._module);
+    return mainModule;
+  } catch (e) {
+    // In edgeworker test suite, without this we get the file name and line number of the exception
+    // but no traceback. This gives us a full traceback.
+    reportError(e as Error);
+  }
 }
 
 function doPyCallHelper(
