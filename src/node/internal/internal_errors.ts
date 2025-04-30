@@ -609,13 +609,13 @@ export class ERR_INVALID_URI extends NodeError {
 // }
 export class DnsError extends NodeError {
   errno = undefined;
+  hostname: string;
+  syscall: string;
 
-  constructor(
-    public hostname: string,
-    code: string,
-    public syscall: string
-  ) {
+  constructor(hostname: string, code: string, syscall: string) {
     super(code, `${syscall} ${code} ${hostname}`);
+    this.hostname = hostname;
+    this.syscall = syscall;
   }
 }
 

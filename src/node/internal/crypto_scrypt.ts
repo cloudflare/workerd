@@ -145,7 +145,7 @@ function validateParameters(
   };
 }
 
-type Callback = (err: Error | null, derivedKey?: ArrayBuffer) => void;
+type Callback = (err: Error | null, derivedKey?: Buffer) => void;
 type OptionsOrCallback = ScryptOptions | Callback;
 
 export function scrypt(
@@ -194,7 +194,7 @@ export function scryptSync(
   salt: ArrayLike,
   keylen: number,
   options: ScryptOptions
-): ArrayBuffer {
+): Buffer {
   let N: number;
   let r: number;
   let p: number;
