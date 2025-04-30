@@ -14,7 +14,6 @@ import {
   LOCKFILE,
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
-  USING_OLDEST_PYODIDE_VERSION,
   DURABLE_OBJECT_CLASSES,
   WORKER_ENTRYPOINT_CLASSES,
   SHOULD_SNAPSHOT_TO_DISK,
@@ -112,7 +111,7 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     //
     // NOTE: setupPatches is called after memorySnapshotDoImports, so any modules injected here
     // shouldn't be part of the snapshot and should filtered out in filterPythonScriptImports.
-    if (USING_OLDEST_PYODIDE_VERSION) {
+    if (pyodide.version === '0.26.0a2') {
       // Inject at cloudflare.workers for backwards compatibility
       pyodide.FS.mkdir(`${sitePackages}/cloudflare`);
       await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
