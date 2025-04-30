@@ -16,7 +16,7 @@ PACKAGES = {
     "cxx": crate.spec(version = "1"),
     "cxxbridge-cmd": crate.spec(version = "1"),
     "flate2": crate.spec(version = "1"),
-    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", tag = "v2.3.0"),
+    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", rev = "41960f9bb073e34c476516b878123076f8aae182"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),
     "proc-macro2": crate.spec(version = "1"),

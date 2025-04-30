@@ -315,19 +315,7 @@ alias(
 )
 
 alias(
-    name = "phf_generator-0.8.0__gen_hash_test",
-    actual = "@crates_vendor__phf_generator-0.8.0//:gen_hash_test__bin",
-    tags = ["manual"],
-)
-
-alias(
-    name = "phf_generator-0.10.0__gen_hash_test",
-    actual = "@crates_vendor__phf_generator-0.10.0//:gen_hash_test__bin",
-    tags = ["manual"],
-)
-
-alias(
-    name = "phf_generator-0.11.3__gen_hash_test",
+    name = "phf_generator__gen_hash_test",
     actual = "@crates_vendor__phf_generator-0.11.3//:gen_hash_test__bin",
     tags = ["manual"],
 )

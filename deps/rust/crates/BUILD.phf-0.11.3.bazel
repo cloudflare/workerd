@@ -28,8 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "macros",
+        "phf_macros",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__phf_macros-0.11.3//:phf_macros",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],

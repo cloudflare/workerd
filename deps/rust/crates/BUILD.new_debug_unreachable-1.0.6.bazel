@@ -6,12 +6,12 @@
 #     bazel run @//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_proc_macro(
-    name = "phf_macros",
+rust_library(
+    name = "debug_unreachable",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,26 +29,16 @@ rust_proc_macro(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2018",
-    proc_macro_deps = [
-        "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:proc_macro_hack",
-    ],
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=phf_macros",
+        "crate-name=new_debug_unreachable",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.10.0",
-    deps = [
-        "@crates_vendor__phf_generator-0.10.0//:phf_generator",
-        "@crates_vendor__phf_shared-0.10.0//:phf_shared",
-        "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
-        "@crates_vendor__quote-1.0.40//:quote",
-        "@crates_vendor__syn-1.0.109//:syn",
-    ],
+    version = "1.0.6",
 )
