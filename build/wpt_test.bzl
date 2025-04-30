@@ -294,6 +294,7 @@ const unitTests :Workerd.Config = (
       disk = ".",
     )
   ],
+  v8Flags = ["--expose-gc"],
   {autogates}
 );"""
 

@@ -96,6 +96,10 @@ wpt_test(
     name = "WebCryptoAPI",
     size = "large",
     config = "WebCryptoAPI-test.ts",
+    target_compatible_with = select({
+        # Too slow on Windows
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     wpt_directory = "@wpt//:WebCryptoAPI@module",
-    # If you are here because this test is timing out on Windows, just disable it for Windows.
 )

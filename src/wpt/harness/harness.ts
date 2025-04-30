@@ -58,8 +58,8 @@ type ErrorOptions = {
   comment: string;
 } & (
   | {
-      expectedFailures?: string[];
-      skippedTests?: string[];
+      expectedFailures?: (string | RegExp)[];
+      skippedTests?: (string | RegExp)[];
       skipAllTests?: false;
     }
   | {
@@ -334,7 +334,7 @@ class RunnerState {
       cleanFn();
     }
 
-    const expectedFailures = new Set(this.options.expectedFailures ?? []);
+    const expectedFailures = new FilterList(this.options.expectedFailures);
     const unexpectedFailures = [];
 
     for (const err of this.errors) {
@@ -351,18 +351,31 @@ class RunnerState {
     if (unexpectedFailures.length > 0) {
       console.info(
         'The following tests unexpectedly failed:',
-        unexpectedFailures
+        JSON.stringify(
+          unexpectedFailures.map((v) => v.toString()),
+          null,
+          2
+        )
       );
     }
 
-    if (expectedFailures.size > 0) {
+    const unexpectedSuccess = expectedFailures.getUnmatched();
+    // TODO(soon): Once we have a list of successful assertions, we should throw an error if a
+    // regex also matches successful tests. This can be done once we implement wpt.fyi report
+    // generation.
+
+    if (unexpectedSuccess.size > 0) {
       console.info(
         'The following tests were expected to fail but instead succeeded:',
-        [...expectedFailures]
+        JSON.stringify(
+          [...unexpectedSuccess].map((v) => v.toString()),
+          null,
+          2
+        )
       );
     }
 
-    if (unexpectedFailures.length > 0 || expectedFailures.size > 0) {
+    if (unexpectedFailures.length > 0 || unexpectedSuccess.size > 0) {
       throw new Error(
         `${this.testFileName} failed. Please update the test config.`
       );
@@ -411,6 +424,11 @@ declare global {
   function done(): undefined;
   function subsetTestByKey(
     _key: string,
+    testType: TestRunnerFn,
+    testCallback: TestFn | PromiseTestFn,
+    testMessage: string
+  ): void;
+  function subsetTest(
     testType: TestRunnerFn,
     testCallback: TestFn | PromiseTestFn,
     testMessage: string
@@ -500,6 +518,13 @@ declare global {
   function token(): string;
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
+  function garbageCollect(): void;
+  function format_value(val: unknown): string;
+  function createBuffer(
+    type: 'ArrayBuffer' | 'SharedArrayBuffer',
+    length: number,
+    opts: { maxByteLength?: number } | undefined
+  ): ArrayBuffer | SharedArrayBuffer;
 }
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
@@ -620,6 +645,15 @@ globalThis.subsetTestByKey = (
   testCallback,
   testMessage
 ): void => {
+  // This function is designed to allow selecting only certain tests when
+  // running in a browser, by changing the query string. We'll always run
+  // all the tests.
+
+  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
+  return testType(testCallback, testMessage);
+};
+
+globalThis.subsetTest = (testType, testCallback, testMessage): void => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
@@ -1119,6 +1153,29 @@ globalThis.add_completion_callback = (func: UnknownFunc): void => {
   globalThis.state.completionCallbacks.push(func);
 };
 
+globalThis.garbageCollect = (): void => {
+  if (typeof gc === 'function') {
+    gc();
+  }
+};
+
+globalThis.format_value = (val): string => {
+  return JSON.stringify(val, null, 2);
+};
+
+globalThis.createBuffer = (
+  type,
+  length,
+  _opts
+): ArrayBuffer | SharedArrayBuffer => {
+  switch (type) {
+    case 'ArrayBuffer':
+      return new ArrayBuffer(length);
+    case 'SharedArrayBuffer':
+      return new SharedArrayBuffer(length);
+  }
+};
+
 class Location {
   public get ancestorOrigins(): DOMStringList {
     return {
@@ -1185,13 +1242,63 @@ class Location {
 
 globalThis.location = new Location();
 
+class FilterList {
+  private strings: Set<string> = new Set();
+  private regexps: RegExp[] = [];
+  private unmatchedRegexps: Set<RegExp> = new Set();
+
+  public constructor(filters: (string | RegExp)[] | undefined) {
+    if (filters === undefined) {
+      return;
+    }
+
+    for (const filter of filters) {
+      if (typeof filter === 'string') {
+        this.strings.add(filter);
+      } else {
+        this.regexps.push(filter);
+      }
+    }
+
+    this.unmatchedRegexps = new Set(this.regexps);
+  }
+
+  public has(input: string): boolean {
+    if (this.strings.has(input)) {
+      return true;
+    }
+
+    return this.regexps.some((r) => r.test(input));
+  }
+
+  public delete(input: string): boolean {
+    if (this.strings.delete(input)) {
+      return true;
+    }
+
+    const maybeMatch = this.regexps.find((r) => r.test(input));
+
+    if (maybeMatch !== undefined) {
+      this.unmatchedRegexps.delete(maybeMatch);
+      return true;
+    }
+
+    return false;
+  }
+
+  public getUnmatched(): Set<string | RegExp> {
+    return this.strings.union(this.unmatchedRegexps);
+  }
+}
 function shouldRunTest(message: string): boolean {
-  if ((globalThis.state.options.skippedTests ?? []).includes(message)) {
+  const skippedTests = new FilterList(globalThis.state.options.skippedTests);
+
+  if (skippedTests.has(message)) {
     return false;
   }
 
   if (globalThis.state.options.verbose) {
-    console.log('run', message);
+    console.info('run', message);
   }
 
   return true;
@@ -1258,9 +1365,12 @@ function getBindingPath(base: string, rawPath: string): string {
 const EXCLUDED_PATHS = new Set([
   // Implemented in harness.ts
   '/common/subset-tests-by-key.js',
+  '/common/subset-tests.js',
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
+  '/common/gc.js',
+  '/common/sab.js',
 ]);
 
 function replaceInterpolation(code: string): string {

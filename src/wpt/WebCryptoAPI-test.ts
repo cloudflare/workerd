@@ -50,14 +50,16 @@ export default {
   'derive_bits_keys/ecdh_keys.https.any.js': {},
   'derive_bits_keys/ecdh_keys.js': {},
   'derive_bits_keys/hkdf.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found.',
-    skipAllTests: true,
+    comment: 'Fixed in PR #4040',
+    expectedFailures: [/0 length/],
   },
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
   'derive_bits_keys/pbkdf2.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found.',
-    skipAllTests: true,
+    comment:
+      'Expected failures: Fixed in PR #4040, Skipped tests: keeps timing out',
+    expectedFailures: [/0 length/],
+    skippedTests: [/with 100000 iterations/],
   },
   'derive_bits_keys/pbkdf2.js': {},
   'derive_bits_keys/pbkdf2_vectors.js': {},
@@ -88,39 +90,32 @@ export default {
 
   'generateKey/failures.js': {},
   'generateKey/failures_AES-CBC.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_AES-CTR.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_AES-GCM.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_AES-KW.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_ECDH.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_ECDSA.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_Ed25519.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_Ed448.https.any.js': {
     comment:
@@ -128,29 +123,24 @@ export default {
     skipAllTests: true,
   },
   'generateKey/failures_HMAC.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_RSA-OAEP.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_RSA-PSS.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_RSASSA-PKCS1-v1_5.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_X25519.https.any.js': {
-    comment:
-      'Wrong type of error returned; too many failures to list individually.',
-    skipAllTests: true,
+    comment: 'Wrong type of error returned',
+    expectedFailures: [/^(Empty|Bad) algorithm:/],
   },
   'generateKey/failures_X448.https.any.js': {
     comment:
@@ -159,32 +149,32 @@ export default {
   },
   'generateKey/successes.js': {},
   'generateKey/successes_AES-CBC.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_AES-CTR.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_AES-GCM.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_AES-KW.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_ECDH.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_ECDSA.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_Ed25519.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_Ed448.https.any.js': {
     comment:
@@ -192,24 +182,24 @@ export default {
     skipAllTests: true,
   },
   'generateKey/successes_HMAC.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_RSA-OAEP.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_RSA-PSS.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_RSASSA-PKCS1-v1_5.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_X25519.https.any.js': {
-    comment: 'Test file /common/subset-tests.js not found',
-    skipAllTests: true,
+    comment: 'TODO investigate this',
+    expectedFailures: [/^undefined: /],
   },
   'generateKey/successes_X448.https.any.js': {
     comment:
@@ -234,18 +224,17 @@ export default {
     skipAllTests: true,
   },
 
-  'import_export/crashtests/importKey-unsettled-promise.https.any.js': {
-    comment: 'Test file /common/gc.js not found',
-    skipAllTests: true,
-  },
+  'import_export/crashtests/importKey-unsettled-promise.https.any.js': {},
   'import_export/ec_importKey.https.any.js': {},
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
-    comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    comment:
+      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+    expectedFailures: [/^Bad key length:/, /^Missing JWK 'crv' parameter:/],
   },
   'import_export/ec_importKey_failures_ECDSA.https.any.js': {
-    comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    comment:
+      'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
+    expectedFailures: [/^Bad key length:/, /^Missing JWK 'crv' parameter:/],
   },
   'import_export/ec_importKey_failures_fixtures.js': {},
   'import_export/importKey_failures.js': {},
