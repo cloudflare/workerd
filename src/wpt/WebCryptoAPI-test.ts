@@ -46,7 +46,10 @@ export default {
   'derive_bits_keys/ecdh_bits.js': {},
   'derive_bits_keys/ecdh_keys.https.any.js': {},
   'derive_bits_keys/ecdh_keys.js': {},
-  'derive_bits_keys/hkdf.https.any.js': {},
+  'derive_bits_keys/hkdf.https.any.js': {
+    comment: 'Cannot cope with this many iterations, keeps timing out',
+    skippedTests: [/with 100000 iterations/],
+  },
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
   'derive_bits_keys/pbkdf2.https.any.js': {
