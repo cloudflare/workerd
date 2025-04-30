@@ -14,7 +14,7 @@ class DurableObjectExample(DurableObject):
         self.state = state
         self.counter = 0
 
-    async def on_fetch(self, req, env, ctx):
+    async def on_fetch(self):
         self.counter += 1
         return Response(f"hello from python {self.counter}")
 

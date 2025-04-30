@@ -243,7 +243,11 @@ function makeEntrypointProxyHandler(
       return async function (...args: any[]): Promise<any> {
         const pyInstance = await pyInstancePromise;
         if (typeof pyInstance[prop] === 'function') {
-          const res = await doPyCall(pyInstance[prop], args);
+          const res = await doPyCallHelper(
+            isKnownHandler,
+            pyInstance[prop],
+            args
+          );
           if (isKnownHandler) {
             return res?.js_object ?? res;
           }
