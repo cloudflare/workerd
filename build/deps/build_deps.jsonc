@@ -25,7 +25,7 @@
     {
       // Previously used to allow building dawn on macOS – while the build should succeed with the
       // default Linux toolchain configuration from rules_cc apple_support is still more tailored to
-      // macOS.
+      // macOS. Note that this needs to be pulled in before rules_cc for this toolchain to be used.
       "name": "build_bazel_apple_support",
       "type": "github_release",
       "owner": "bazelbuild",
