@@ -213,7 +213,17 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   // Span events are transmitted together for now.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& context = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+    // TODO(o11y): Provide correct nested spans
+    // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
+    // invocations as indicated by isTrigger
+    tracing::InvocationSpanContext context = [&]() {
+      auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+      if (topLevelContext.isTrigger()) {
+        return topLevelContext.clone();
+      } else {
+        return topLevelContext.newChild();
+      }
+    }();
     writer->report(context, workerd::tracing::SpanOpen(kj::str(span.operationName)));
     kj::Vector<workerd::tracing::Attribute> attr;
     for (auto& tag: span.tags) {
