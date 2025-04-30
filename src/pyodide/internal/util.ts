@@ -1,3 +1,13 @@
+// Split the stack into lines and print them individually.
+// We do this because edgeworker's test runner will put a multiline log all on one line. This is
+// very hard to read.
+export function reportError(e: Error): never {
+  e.stack?.split('\n').forEach((s: string) => {
+    console.warn(s);
+  });
+  throw e;
+}
+
 /**
  *  Simple as possible runPython function which works with no foreign function
  *  interface. We need to use this rather than the normal easier to use
