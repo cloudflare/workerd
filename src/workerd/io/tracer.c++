@@ -148,28 +148,6 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
-// TODO(cleanup): Needed to convert between span value definitions in LTW/STW. These should be the
-// same really.
-namespace {
-workerd::tracing::Attribute::Value convertSpanTag(const Span::TagValue& tag) {
-  KJ_SWITCH_ONEOF(tag) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return kj::str(str);
-    }
-    KJ_CASE_ONEOF(val, int64_t) {
-      return kj::str(val);
-    }
-    KJ_CASE_ONEOF(val, double) {
-      return val;
-    }
-    KJ_CASE_ONEOF(val, bool) {
-      return val;
-    }
-  }
-  KJ_UNREACHABLE;
-}
-}  // namespace
-
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
@@ -227,7 +205,7 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     writer->report(context, workerd::tracing::SpanOpen(kj::str(span.operationName)));
     kj::Vector<workerd::tracing::Attribute> attr;
     for (auto& tag: span.tags) {
-      attr.add(workerd::tracing::Attribute(kj::str(tag.key), convertSpanTag(tag.value)));
+      attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
     }
     writer->report(context, workerd::tracing::Mark(attr.releaseAsArray()));
     writer->report(context, workerd::tracing::SpanClose());

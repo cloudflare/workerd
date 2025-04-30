@@ -555,14 +555,14 @@ EventInfo cloneEventInfo(const EventInfo& info);
 
 template <typename T>
 concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
-    kj::isSameType<double, T>() || kj::isSameType<int32_t, T>();
+    kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
 // An Attribute mark is used to add detail to a span over its lifetime.
 // The Attribute struct can also be used to provide arbitrary additional
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::String, bool, double, int32_t>;
+  using Value = kj::OneOf<kj::String, bool, double, int64_t>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::String name, Value&& value);
@@ -893,7 +893,7 @@ struct Span {
   // create a `Span`, use a `SpanBuilder`.
 
  public:
-  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
+  using TagValue = tracing::Attribute::Value;
   // TODO(someday): Support binary bytes, too.
   using TagMap = kj::HashMap<kj::ConstString, TagValue>;
   using Tag = TagMap::Entry;

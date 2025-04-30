@@ -595,7 +595,7 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   // An attribute event can have one or more Attributes specified.
   kj::Vector<tracing::Attribute> attrs(2);
   attrs.add(tracing::Attribute(kj::str("foo"), true));
-  attrs.add(tracing::Attribute(kj::str("bar"), 123));
+  attrs.add(tracing::Attribute(kj::str("bar"), (int64_t)123));
 
   tracing::TailEvent info(context, kj::UNIX_EPOCH, 0, tracing::Mark(attrs.releaseAsArray()));
   info.copyTo(infoBuilder);

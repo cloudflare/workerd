@@ -875,7 +875,7 @@ kj::Array<tracing::Attribute::Value> readValues(const rpc::Trace::Attribute::Rea
         return inner.getFloat();
       }
       case rpc::Trace::Attribute::Value::Inner::INT: {
-        return static_cast<int32_t>(inner.getInt());
+        return static_cast<int64_t>(inner.getInt());
       }
     }
     KJ_UNREACHABLE;
@@ -908,7 +908,7 @@ void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) const {
       KJ_CASE_ONEOF(f, double) {
         builder.initInner().setFloat(f);
       }
-      KJ_CASE_ONEOF(i, int32_t) {
+      KJ_CASE_ONEOF(i, int64_t) {
         builder.initInner().setInt(i);
       }
     }
@@ -932,7 +932,7 @@ tracing::Attribute tracing::Attribute::clone() const {
       KJ_CASE_ONEOF(f, double) {
         return f;
       }
-      KJ_CASE_ONEOF(i, int32_t) {
+      KJ_CASE_ONEOF(i, int64_t) {
         return i;
       }
     }
@@ -1641,10 +1641,7 @@ Span::TagValue spanTagClone(const Span::TagValue& tag) {
       return kj::str(str);
     }
     KJ_CASE_ONEOF(val, int64_t) {
-      // TODO(o11y): We can't stringify BigInt, which causes test problems. Export this as hex
-      // instead? Then again OTel assumes that int values can be represented as JS numbers, so
-      // representing this as a double/Number might be fine despite the possible precision loss.
-      return kj::str(val);
+      return val;
     }
     KJ_CASE_ONEOF(val, double) {
       return val;

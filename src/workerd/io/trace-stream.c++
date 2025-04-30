@@ -133,8 +133,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
     KJ_CASE_ONEOF(d, double) {
       return js.num(d);
     }
-    KJ_CASE_ONEOF(i, int32_t) {
-      return js.num(i);
+    KJ_CASE_ONEOF(i, int64_t) {
+      return js.bigInt(i);
     }
   }
   KJ_UNREACHABLE;
