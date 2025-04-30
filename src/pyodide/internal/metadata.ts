@@ -6,9 +6,6 @@ export const IS_TRACING = MetadataReader.isTracing();
 export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();
 export const IS_CREATING_BASELINE_SNAPSHOT =
   MetadataReader.isCreatingBaselineSnapshot();
-export const LOAD_WHEELS_FROM_R2: boolean = IS_WORKERD;
-export const LOAD_WHEELS_FROM_ARTIFACT_BUNDLER =
-  MetadataReader.shouldUsePackagesInArtifactBundler();
 export const PACKAGES_VERSION = MetadataReader.getPackagesVersion();
 export const USING_OLDEST_PACKAGES_VERSION = PACKAGES_VERSION === '20240829.4';
 // TODO: pyodide-packages.runtime-playground.workers.dev points at a worker which redirects requests
@@ -23,7 +20,11 @@ export const WORKERD_INDEX_URL = USING_OLDEST_PACKAGES_VERSION
 export const LOCKFILE = JSON.parse(
   MetadataReader.getPackagesLock()
 ) as PackageLock;
+
 export const REQUIREMENTS = MetadataReader.getRequirements();
+export const TRANSITIVE_REQUIREMENTS =
+  MetadataReader.getTransitiveRequirements();
+
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
   ? MetadataReader

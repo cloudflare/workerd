@@ -4,14 +4,12 @@
 
 import { loadPyodide } from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
-import {
-  TRANSITIVE_REQUIREMENTS,
-  patchLoadPackage,
-} from 'pyodide-internal:setupPackages';
+import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
   IS_TRACING,
   IS_WORKERD,
   LOCKFILE,
+  TRANSITIVE_REQUIREMENTS,
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
   DURABLE_OBJECT_CLASSES,
