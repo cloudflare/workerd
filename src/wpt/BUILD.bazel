@@ -49,7 +49,6 @@ wpt_test(
 
 wpt_test(
     name = "urlpattern-standard",
-    compat_flags = ["urlpattern_standard"],
     config = "urlpattern-standard-test.ts",
     wpt_directory = "@wpt//:urlpattern@module",
 )
