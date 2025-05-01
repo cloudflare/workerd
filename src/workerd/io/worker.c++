@@ -4264,7 +4264,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
       });
     }));
   };
-  typedef decltype(signalResponse) SignalResponse;
+  using SignalResponse = decltype(signalResponse);
 
   class ResponseWrapper final: public kj::HttpService::Response {
    public:

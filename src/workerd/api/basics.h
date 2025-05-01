@@ -320,7 +320,8 @@ class EventTarget: public jsg::Object {
   using AddEventListenerOpts = kj::OneOf<AddEventListenerOptions, bool>;
   using EventListenerOpts = kj::OneOf<EventListenerOptions, bool>;
 
-  typedef jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<Event>)> HandlerFunction;
+  using HandlerFunction = jsg::Function<jsg::Optional<jsg::Value>(jsg::Ref<Event>)>;
+
   struct HandlerObject {
     HandlerFunction handleEvent;
     JSG_STRUCT(handleEvent);
@@ -330,7 +331,7 @@ class EventTarget: public jsg::Object {
       handleEvent: (event: Event) => any | undefined;
     });
   };
-  typedef kj::OneOf<HandlerFunction, HandlerObject> Handler;
+  using Handler = kj::OneOf<HandlerFunction, HandlerObject>;
 
   void addEventListener(jsg::Lock& js,
       kj::String type,

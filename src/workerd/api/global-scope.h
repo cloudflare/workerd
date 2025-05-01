@@ -293,44 +293,44 @@ class AlarmInvocationInfo: public jsg::Object {
 // treat incorrect types as if the field is undefined. Without this, Durable Object class
 // constructors that set a field with one of these names would cause confusing type errors.
 struct ExportedHandler {
-  typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(jsg::Ref<api::Request> request,
+  using FetchHandler = jsg::Promise<jsg::Ref<api::Response>>(jsg::Ref<api::Request> request,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  typedef kj::Promise<void> TailHandler(kj::Array<jsg::Ref<TraceItem>> events,
+  using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
-  typedef kj::Promise<void> TailStreamHandler(
+  using TailStreamHandler = kj::Promise<void>(
       jsg::JsObject obj, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TailStreamHandler>> tailStream;
 
-  typedef kj::Promise<void> ScheduledHandler(jsg::Ref<ScheduledController> controller,
+  using ScheduledHandler = kj::Promise<void>(jsg::Ref<ScheduledController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<ScheduledHandler>> scheduled;
 
-  typedef kj::Promise<void> AlarmHandler(jsg::Ref<AlarmInvocationInfo> alarmInfo);
+  using AlarmHandler = kj::Promise<void>(jsg::Ref<AlarmInvocationInfo> alarmInfo);
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
-  typedef jsg::Promise<void> TestHandler(jsg::Ref<TestController> controller,
+  using TestHandler = jsg::Promise<void>(jsg::Ref<TestController> controller,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<TestHandler>> test;
 
-  typedef kj::Promise<void> HibernatableWebSocketMessageHandler(
+  using HibernatableWebSocketMessageHandler = kj::Promise<void>(
       jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketMessageHandler>> webSocketMessage;
 
-  typedef kj::Promise<void> HibernatableWebSocketCloseHandler(
+  using HibernatableWebSocketCloseHandler = kj::Promise<void>(
       jsg::Ref<WebSocket>, int code, kj::String reason, bool wasClean);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketCloseHandler>> webSocketClose;
 
-  typedef kj::Promise<void> HibernatableWebSocketErrorHandler(jsg::Ref<WebSocket>, jsg::Value);
+  using HibernatableWebSocketErrorHandler = kj::Promise<void>(jsg::Ref<WebSocket>, jsg::Value);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketErrorHandler>> webSocketError;
 
   // Self-ref potentially allows extracting other custom handlers from the object.

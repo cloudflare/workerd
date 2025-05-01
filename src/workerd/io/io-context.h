@@ -1054,7 +1054,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
                                    Worker::AsyncLock lock) mutable {
-    typedef decltype(func(kj::instance<Worker::Lock&>())) Result;
+    using Result = decltype(func(kj::instance<Worker::Lock&>()));
+
     if constexpr (kj::isSameType<Result, void>()) {
       struct RunnableImpl: public Runnable {
         Func func;
@@ -1173,7 +1174,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
   // `T` is the type produced by the input promise. `Result` is the type of the final output
   // promise. `Func` transforms from `T` to `Result`.
-  typedef jsg::ReturnType<Func, T, true> Result;
+  using Result = jsg::ReturnType<Func, T, true>;
 
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
@@ -1412,7 +1413,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto cs = lock.startCriticalSection();
   auto cs2 = kj::addRef(*cs);
 
-  typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
+  using T = jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>>;
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(

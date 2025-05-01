@@ -65,7 +65,7 @@ class V8System {
 
   ~V8System() noexcept(false);
 
-  typedef void FatalErrorCallback(kj::StringPtr location, kj::StringPtr message);
+  using FatalErrorCallback = void(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
  private:

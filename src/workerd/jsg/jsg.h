@@ -31,7 +31,7 @@ using kj::byte;
 using kj::uint;
 
 #if _MSC_VER
-typedef long long ssize_t;
+using ssize_t = long long;
 #endif
 
 namespace workerd::jsg {
@@ -1688,13 +1688,13 @@ constexpr bool isPromise() {
 // Convenience template to strip off `jsg::Promise`.
 template <typename T>
 struct RemovePromise_ {
-  typedef T Type;
+  using Type = T;
 };
 
 // Convenience template to strip off `jsg::Promise`.
 template <typename T>
 struct RemovePromise_<Promise<T>> {
-  typedef T Type;
+  using Type = T;
 };
 
 // Convenience template to strip off `jsg::Promise`.
@@ -1710,28 +1710,28 @@ struct ReturnType_;
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T>
 struct ReturnType_<Func, T, false> {
-  typedef decltype(kj::instance<Func>()(kj::instance<T>())) Type;
+  using Type = decltype(kj::instance<Func>()(kj::instance<T>()));
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T>
 struct ReturnType_<Func, T, true> {
-  typedef decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<T>())) Type;
+  using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<T>()));
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func>
 struct ReturnType_<Func, void, false> {
-  typedef decltype(kj::instance<Func>()()) Type;
+  using Type = decltype(kj::instance<Func>()());
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func>
 struct ReturnType_<Func, void, true> {
-  typedef decltype(kj::instance<Func>()(kj::instance<Lock&>())) Type;
+  using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>()));
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
@@ -2035,7 +2035,7 @@ class PropertyReflection {
  private:
   kj::Maybe<Wrappable&> self;
 
-  typedef kj::Maybe<T> Unwrapper(v8::Isolate*, v8::Local<v8::Object> object, kj::StringPtr name);
+  using Unwrapper = kj::Maybe<T>(v8::Isolate*, v8::Local<v8::Object> object, kj::StringPtr name);
   Unwrapper* unwrapper = nullptr;
 
   template <typename, typename...>

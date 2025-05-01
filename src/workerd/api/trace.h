@@ -128,7 +128,7 @@ class TraceItem final: public jsg::Object {
 
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
 
-  typedef kj::OneOf<jsg::Ref<FetchEventInfo>,
+  using EventInfo = kj::OneOf<jsg::Ref<FetchEventInfo>,
       jsg::Ref<JsRpcEventInfo>,
       jsg::Ref<ScheduledEventInfo>,
       jsg::Ref<AlarmEventInfo>,
@@ -136,8 +136,7 @@ class TraceItem final: public jsg::Object {
       jsg::Ref<EmailEventInfo>,
       jsg::Ref<TailEventInfo>,
       jsg::Ref<CustomEventInfo>,
-      jsg::Ref<HibernatableWebSocketEventInfo>>
-      EventInfo;
+      jsg::Ref<HibernatableWebSocketEventInfo>>;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   kj::Maybe<double> getEventTimestamp();
 

@@ -25,7 +25,7 @@ namespace workerd::jsg {
 
 class Lock;
 
-typedef unsigned int uint;
+using uint = unsigned int;
 
 // When a C++ callback wishes to throw a JavaScript exception, it should first call
 // isolate->ThrowException() to set the JavaScript error value, then it should throw
@@ -269,18 +269,18 @@ template <typename T>
 struct RemoveMaybe_;
 template <typename T>
 struct RemoveMaybe_<kj::Maybe<T>> {
-  typedef T Type;
+  using Type = T;
 };
 template <typename T>
 using RemoveMaybe = typename RemoveMaybe_<T>::Type;
 
 template <typename T>
 struct RemoveRvalueRef_ {
-  typedef T Type;
+  using Type = T;
 };
 template <typename T>
 struct RemoveRvalueRef_<T&&> {
-  typedef T Type;
+  using Type = T;
 };
 template <typename T>
 using RemoveRvalueRef = typename RemoveRvalueRef_<T>::Type;

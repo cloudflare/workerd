@@ -429,7 +429,7 @@ struct RequestInitializerDict;
 class Socket;
 struct SocketOptions;
 struct SocketAddress;
-typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
+using AnySocketAddress = kj::OneOf<SocketAddress, kj::String>;
 
 // Represents a client to a remote "web service".
 //
@@ -831,7 +831,7 @@ public:
   // ---------------------------------------------------------------------------
   // JS API
 
-  typedef RequestInitializerDict InitializerDict;
+  using InitializerDict = RequestInitializerDict;
 
   using Info = kj::OneOf<jsg::Ref<Request>, kj::String>;
   using Initializer = kj::OneOf<InitializerDict, jsg::Ref<Request>>;

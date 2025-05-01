@@ -31,8 +31,8 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
-typedef rpc::Trace::Log::Level LogLevel;
-typedef rpc::Trace::ExecutionModel ExecutionModel;
+using LogLevel = rpc::Trace::Log::Level;
+using ExecutionModel = rpc::Trace::ExecutionModel;
 
 class Trace;
 
