@@ -49,6 +49,7 @@ jobs:
           python3 -u ./tools/cross/internal_build.py \
             ${{github.event.pull_request.number}} \
             ${{steps.get_sha.outputs.sha}} \
+            ${{github.event.pull_request.head.sha}} \
             ${{github.run_attempt}} \
             "${{github.event.pull_request.head.ref}}" \
             $CI_URL \
