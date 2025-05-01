@@ -110,6 +110,7 @@ wd_cc_library(
         ":alarm-scheduler",
         ":bundle-fs",
         ":container-client",
+        ":facet-tree-index",
         ":fallback-service",
         ":workerd_capnp",
         "//deps/rust:runtime",
