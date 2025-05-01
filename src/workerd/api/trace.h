@@ -68,7 +68,7 @@ struct ScriptVersion {
 
 struct OTelSpanTag final: public jsg::Object {
   kj::String key;
-  kj::OneOf<bool, int64_t, double, kj::String> value;
+  Span::TagValue value;
   JSG_STRUCT(key, value);
 };
 

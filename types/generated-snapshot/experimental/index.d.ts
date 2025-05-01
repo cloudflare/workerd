@@ -2637,7 +2637,7 @@ interface OTelSpan {
 }
 interface OTelSpanTag {
   key: string;
-  value: boolean | (number | bigint) | number | string;
+  value: string | boolean | number | (number | bigint);
 }
 interface TraceException {
   readonly timestamp: number;

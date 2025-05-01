@@ -173,7 +173,7 @@ struct Trace @0x8e8d911203762d34 {
       inner :union {
         text @0 :Text;
         bool @1 :Bool;
-        int @2 :Int32;
+        int @2 :Int64;
         float @3 :Float64;
       }
     }
