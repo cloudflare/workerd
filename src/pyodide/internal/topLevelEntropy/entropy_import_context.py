@@ -19,7 +19,7 @@ from contextlib import contextmanager
 
 from .import_patch_manager import block_calls
 
-RUST_PACKAGES = ["pydantic_core", "tiktoken"]
+RUST_PACKAGES = ["pydantic_core", "tiktoken", "cryptography.exceptions"]
 MODULES_TO_PATCH = [
     "random",
     "numpy.random",

@@ -43,7 +43,8 @@ export function simpleRunPython(
   if (status === -1) {
     // PyRun_SimpleString will have written a Python traceback to stderr.
     console.warn('Command failed:', code);
-    throw new Error('Failed to run Python code', { cause });
+    console.warn(cause);
+    throw new Error('Failed to run Python code');
   }
   return cause;
 }
