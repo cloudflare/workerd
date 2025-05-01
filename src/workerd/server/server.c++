@@ -1807,7 +1807,7 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Array<kj::Own<ActorClass>> actorClass;
     kj::Maybe<kj::Own<Service>> cache;
-    kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
+    kj::Maybe<const kj::Directory&> actorStorage;
     AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<Service>> tails;
     kj::Array<kj::Own<Service>> streamingTails;
@@ -2088,9 +2088,16 @@ class Server::WorkerService final: public Service,
           dockerPath(dockerPath) {}
 
     // Called at link time to provide needed resources.
-    void link(
-        kj::Maybe<SqliteDatabase::Vfs&> actorStorage, kj::Maybe<AlarmScheduler&> alarmScheduler) {
-      this->actorStorage = actorStorage;
+    void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
+        kj::Maybe<AlarmScheduler&> alarmScheduler) {
+      KJ_IF_SOME(dir, serviceActorStorage) {
+        KJ_IF_SOME(d, config.tryGet<Durable>()) {
+          // Create a subdirectory for this namespace based on the unique key.
+          this->actorStorage.emplace(dir.openSubdir(
+              kj::Path({d.uniqueKey}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY));
+        }
+      }
+
       this->alarmScheduler = alarmScheduler;
     }
 
@@ -2417,7 +2424,7 @@ class Server::WorkerService final: public Service,
           return ns.config.tryGet<Durable>().map(
               [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
             KJ_IF_SOME(as, ns.actorStorage) {
-              kj::Path path({d.uniqueKey, kj::str(idStr, ".sqlite")});
+              kj::Path path({kj::str(idStr, ".sqlite")});
 
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
               KJ_IF_SOME(a, ns.alarmScheduler) {
@@ -2429,8 +2436,8 @@ class Server::WorkerService final: public Service,
                 sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
               }
 
-              auto db = kj::heap<SqliteDatabase>(as, kj::mv(path),
-                  kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+              auto db = kj::heap<SqliteDatabase>(
+                  as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
@@ -2541,6 +2548,20 @@ class Server::WorkerService final: public Service,
    private:
     kj::Own<ActorClass> actorClass;
     const ActorConfig& config;
+
+    struct ActorStorage {
+      kj::Own<const kj::Directory> directory;
+      SqliteDatabase::Vfs vfs;
+
+      ActorStorage(kj::Own<const kj::Directory> directoryParam)
+          : directory(kj::mv(directoryParam)),
+            vfs(*directory) {}
+    };
+
+    // Note: The Vfs must not be torn down until all actors have been torn down, so we have to
+    //   declare `actorStorage` before `actors`.
+    kj::Maybe<ActorStorage> actorStorage;
+
     // If the actor is broken, we remove it from the map. However, if it's just evicted due to
     // inactivity, we keep the ActorContainer in the map but drop the Own<Worker::Actor>. When a new
     // request comes in, we recreate the Own<Worker::Actor>.
@@ -2550,7 +2571,6 @@ class Server::WorkerService final: public Service,
     capnp::ByteStreamFactory& byteStreamFactory;
     kj::Network& dockerNetwork;
     kj::Maybe<kj::StringPtr> dockerPath;
-    kj::Maybe<SqliteDatabase::Vfs&> actorStorage;
     kj::Maybe<AlarmScheduler&> alarmScheduler;
 
     // Removes actors from `actors` after 70 seconds of last access.
@@ -3649,7 +3669,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
               "to the service \"",
               diskName, "\", but that service is not a local disk service."));
         } else KJ_IF_SOME(dir, diskSvc->getWritable()) {
-          result.actorStorage = kj::heap<SqliteDatabase::Vfs>(dir);
+          result.actorStorage = dir;
         } else {
           reportConfigError(kj::str("service ", name,
               ": durableObjectStorage config refers "
