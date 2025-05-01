@@ -27,6 +27,7 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/server/facet-tree-index.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -2135,6 +2136,8 @@ class Server::WorkerService final: public Service,
             id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             ns(ns),
+            root(parent.map([](ActorContainer& p) -> ActorContainer& { return p.root; })
+                     .orDefault(*this)),
             parent(parent),
             actorClass(kj::mv(actorClass)),
             timer(timer),
@@ -2314,6 +2317,7 @@ class Server::WorkerService final: public Service,
       Worker::Actor::Id id;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& ns;
+      ActorContainer& root;
       kj::Maybe<ActorContainer&> parent;
       kj::Own<ActorClass> actorClass;
       kj::Timer& timer;
@@ -2324,7 +2328,38 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
 
+      // FacetTreeIndex for this actor. Only initialized on the root.
+      kj::Maybe<kj::Own<FacetTreeIndex>> facetTreeIndex;
+
+      // ID of this facet. Initialized when getFacetId() is first called.
+      kj::Maybe<uint> facetId;
+
       ActorMap facets;
+
+      // Get the facet ID for this facet. The root facet always has ID zero, but all other facets
+      // need to be looked up in the index to make sure they are assigned consistent IDs.
+      uint getFacetId() {
+        KJ_IF_SOME(f, facetId) {
+          return f;
+        }
+
+        ActorContainer& parent = KJ_UNWRAP_OR(this->parent, return 0);
+
+        FacetTreeIndex* index;
+        KJ_IF_SOME(i, root.facetTreeIndex) {
+          index = i;
+        } else {
+          // Facet tree index hasn't been initialized yet. Do that now (opening the existing file,
+          // or creating it if it doesn't exist).
+          auto& as = KJ_REQUIRE_NONNULL(
+              ns.actorStorage, "can't call getFacetId() when there's no backing storage");
+          auto indexFile = as.directory->openFile(kj::Path({kj::str(root.key, ".facets")}),
+              kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+          index = root.facetTreeIndex.emplace(kj::heap<FacetTreeIndex>(kj::mv(indexFile)));
+        }
+
+        return index->getId(parent.getFacetId(), key);
+      }
 
       void requireNotBroken() {
         KJ_IF_SOME(e, brokenReason) {
@@ -2417,22 +2452,29 @@ class Server::WorkerService final: public Service,
       void start() {
         KJ_REQUIRE(actor == nullptr);
 
-        // TODO(now): Compute correct name for facet storage.
-        auto makeActorCache = [this, idStr = kj::str(key)](const ActorCache::SharedLru& sharedLru,
-                                  OutputGate& outputGate, ActorCache::Hooks& hooks,
+        auto makeActorCache = [this](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
+                                  ActorCache::Hooks& hooks,
                                   SqliteObserver& sqliteObserver) mutable {
           return ns.config.tryGet<Durable>().map(
               [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
             KJ_IF_SOME(as, ns.actorStorage) {
-              kj::Path path({kj::str(idStr, ".sqlite")});
-
+              kj::Path path = nullptr;
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
-              KJ_IF_SOME(a, ns.alarmScheduler) {
-                sqliteHooks = kj::heap<ActorSqliteHooks>(
-                    a, ActorKey{.uniqueKey = d.uniqueKey, .actorId = idStr})
-                                  .attach(kj::mv(idStr));
+
+              if (parent == kj::none) {
+                path = kj::Path({kj::str(key, ".sqlite")});
+
+                KJ_IF_SOME(a, ns.alarmScheduler) {
+                  sqliteHooks = kj::heap<ActorSqliteHooks>(
+                      a, ActorKey{.uniqueKey = d.uniqueKey, .actorId = key});
+                } else {
+                  // No alarm scheduler available, use default hooks instance.
+                  sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
+                }
               } else {
-                // No alarm scheduler available, use default hooks instance.
+                path = kj::Path({kj::str(root.key, '.', getFacetId(), ".sqlite")});
+
+                // TODO(someday): Support alarms in facets, somehow.
                 sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
               }
 
