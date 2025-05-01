@@ -33,7 +33,7 @@ jobs:
         run: |
           python3 -u ./tools/cross/internal_build.py \
             ${{github.event.pull_request.number}} \
-            ${{github.event.pull_request.head.sha}} \
+            ${{github.event.pull_request.merge_commit_sha}} \
             ${{github.run_attempt}} \
             "${{github.event.pull_request.head.ref}}" \
             $CI_URL \

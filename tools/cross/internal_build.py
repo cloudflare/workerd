@@ -9,7 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("pr_id", help="Pull Request ID")
-    parser.add_argument("sha", help="Commit SHA")
+    parser.add_argument("sha", help="Merge Commit SHA")
     parser.add_argument("run_attempt", help="# of Run Attempt")
     parser.add_argument("branch_name", help="PR's Branch Name")
     parser.add_argument("URL", help="URL to submit build task")
@@ -21,6 +21,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+
+    if args.sha == "null":
+        print("Merge Commit SHA is null. Your PR is probably not mergeable.")
+        sys.exit(1)
 
     # Submit build job
     headers = {
