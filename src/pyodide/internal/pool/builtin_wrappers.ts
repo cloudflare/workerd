@@ -1,6 +1,49 @@
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
 
+if (typeof FinalizationRegistry === 'undefined') {
+  // @ts-expect-error cannot assign to globalThis
+  globalThis.FinalizationRegistry = class FinalizationRegistry {
+    public register(): void {}
+    public unregister(): void {}
+  };
+}
+
+// Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
+// `location = undefined` makes this throw an error if some_url is not an absolute url. Which is what
+// we want here, it doesn't make sense to load a package from a relative URL.
+export const location = undefined;
+
+export function addEventListener(): void {}
+
+export function reportUndefinedSymbolsPatched(Module: Module): void {
+  if (Module.API.version === '0.26.0a2') {
+    return;
+  }
+  Module.reportUndefinedSymbols();
+}
+
+export function patchDynlibLookup(Module: Module, libName: string): Uint8Array {
+  try {
+    return Module.FS.readFile('/usr/lib/' + libName);
+  } catch (e) {
+    console.error('Failed to read ', libName, e);
+    throw e;
+  }
+}
+
+export function patchedApplyFunc(
+  API: API,
+  func: (...params: any[]) => any,
+  this_: object,
+  args: any[]
+): any {
+  return API.config.jsglobals.Function.prototype.apply.apply(func, [
+    this_,
+    args,
+  ]);
+}
+
 let getRandomValuesInner: typeof getRandomValuesType;
 export function setGetRandomValues(func: typeof getRandomValuesType): void {
   getRandomValuesInner = func;

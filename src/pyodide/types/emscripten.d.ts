@@ -5,7 +5,7 @@ interface ENV {
 
 interface PyodideConfig {
   env: ENV;
-  jsglobals: any;
+  jsglobals: typeof globalThis;
   resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
   _makeSnapshot?: boolean;
@@ -105,4 +105,5 @@ interface Module {
     size: number
   ): number;
   promise: Promise<void>;
+  reportUndefinedSymbols: () => void;
 }
