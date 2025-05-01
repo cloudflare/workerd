@@ -248,7 +248,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     false     /* isTracing */,
     snapshotToDisk,
     pythonConfig.createBaselineSnapshot,
-    kj::mv(memorySnapshot),
     kj::mv(durableObjectClasses),
     entrypointClasses.releaseAsArray()
   );

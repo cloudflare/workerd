@@ -101,6 +101,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_date": "dev",
         "id": "dev",
         "flag": "pythonWorkersDevPyodide",
+        # This has a special value for baseline_from_gcs.ew-test-bin.
         "baseline_snapshot_hash": "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae",
     },
 ])

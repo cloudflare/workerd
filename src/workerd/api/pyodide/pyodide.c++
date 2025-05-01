@@ -154,13 +154,6 @@ int PyodideMetadataReader::read(jsg::Lock& js, int index, int offset, kj::Array<
   return readToTarget(data, offset, buf);
 }
 
-int PyodideMetadataReader::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
-  if (state->memorySnapshot == kj::none) {
-    return 0;
-  }
-  return readToTarget(KJ_REQUIRE_NONNULL(state->memorySnapshot), offset, buf);
-}
-
 kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
   auto packages = parseLockFile(state->packagesLock);
   auto depMap = getDepMapFromPackagesLock(*packages);

@@ -131,7 +131,6 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
-        kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
         kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
         kj::Maybe<kj::Array<kj::String>> entrypointClasses)
         : mainModule(kj::mv(mainModule)),
@@ -144,7 +143,6 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
-          memorySnapshot(kj::mv(memorySnapshot)),
           durableObjectClasses(kj::mv(durableObjectClasses)),
           entrypointClasses(kj::mv(entrypointClasses)) {}
   };
@@ -184,21 +182,6 @@ class PyodideMetadataReader: public jsg::Object {
 
   int read(jsg::Lock& js, int index, int offset, kj::Array<kj::byte> buf);
 
-  bool hasMemorySnapshot() {
-    return state->memorySnapshot != kj::none;
-  }
-  int getMemorySnapshotSize() {
-    if (state->memorySnapshot == kj::none) {
-      return 0;
-    }
-    return KJ_REQUIRE_NONNULL(state->memorySnapshot).size();
-  }
-
-  void disposeMemorySnapshot() {
-    state->memorySnapshot = kj::none;
-  }
-  int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
-
   kj::StringPtr getPyodideVersion() {
     return state->pyodideVersion;
   }
@@ -236,10 +219,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getSizes);
     JSG_METHOD(getPackageSnapshotImports);
     JSG_METHOD(read);
-    JSG_METHOD(hasMemorySnapshot);
-    JSG_METHOD(getMemorySnapshotSize);
-    JSG_METHOD(readMemorySnapshot);
-    JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
     JSG_METHOD(getPyodideVersion);
     JSG_METHOD(getPackagesVersion);

@@ -26,10 +26,8 @@ export const TRANSITIVE_REQUIREMENTS =
   MetadataReader.getTransitiveRequirements();
 
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
-export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
-  ? MetadataReader
-  : ArtifactBundler.hasMemorySnapshot()
-    ? ArtifactBundler
-    : undefined;
+export const MEMORY_SNAPSHOT_READER = ArtifactBundler.hasMemorySnapshot()
+  ? ArtifactBundler
+  : undefined;
 export const DURABLE_OBJECT_CLASSES = MetadataReader.getDurableObjectClasses();
 export const WORKER_ENTRYPOINT_CLASSES = MetadataReader.getEntrypointClasses();
