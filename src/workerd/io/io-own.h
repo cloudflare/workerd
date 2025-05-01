@@ -27,12 +27,12 @@ class ReverseIoOwn;
 
 template <typename T>
 struct RemoveIoOwn_ {
-  typedef T Type;
+  using Type = T;
   static constexpr bool is = false;
 };
 template <typename T>
 struct RemoveIoOwn_<IoOwn<T>> {
-  typedef T Type;
+  using Type = T;
   static constexpr bool is = true;
 };
 

@@ -29,7 +29,7 @@ class Blob: public jsg::Object {
     JSG_STRUCT(type, endings);
   };
 
-  typedef kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>> Bits;
+  using Bits = kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>>;
 
   static jsg::Ref<Blob> constructor(
       jsg::Lock& js, jsg::Optional<Bits> bits, jsg::Optional<Options> options);

@@ -592,8 +592,8 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
 // API types.
 #define JSG_DECLARE_ISOLATE_TYPE(Type, ...)                                                        \
   class Type##_TypeWrapper;                                                                        \
-  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>        \
-      Type##_TypeWrapperBase;                                                                      \
+  using Type##_TypeWrapperBase =                                                                   \
+      ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>;           \
   class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
    public:                                                                                         \
     using Type##_TypeWrapperBase::TypeWrapper;                                                     \

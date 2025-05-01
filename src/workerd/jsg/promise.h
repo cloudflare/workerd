@@ -244,11 +244,11 @@ class Promise {
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func, typename ErrorFunc>
   PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
-    typedef ReturnType<Func, T, true> Output;
+    using Output = ReturnType<Func, T, true>;
     static_assert(kj::isSameType<Output, ReturnType<ErrorFunc, Value, true>>(),
         "functions passed to .then() must return exactly the same type");
 
-    typedef ThenCatchPair<Func, ErrorFunc> FuncPair;
+    using FuncPair = ThenCatchPair<Func, ErrorFunc>;
     return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc)},
         &promiseContinuation<FuncPair, false, T, Output>,
         &promiseContinuation<FuncPair, true, Value, Output>);
@@ -259,10 +259,10 @@ class Promise {
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func>
   PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
-    typedef ReturnType<Func, T, true> Output;
+    using Output = ReturnType<Func, T, true>;
 
     // HACK: The error function is never called, so it need not actually be a functor.
-    typedef ThenCatchPair<Func, bool> FuncPair;
+    using FuncPair = ThenCatchPair<Func, bool>;
     return thenImpl<Output>(js, FuncPair{kj::fwd<Func>(func), false},
         &promiseContinuation<FuncPair, false, T, Output>,
         &identityPromiseContinuation<FuncPair, true>);
@@ -274,7 +274,7 @@ class Promise {
         "function passed to .catch_() must return exactly the promise's type");
 
     // HACK: The non-error function is never called, so it need not actually be a functor.
-    typedef ThenCatchPair<bool, ErrorFunc> FuncPair;
+    using FuncPair = ThenCatchPair<bool, ErrorFunc>;
     return thenImpl<T>(js, FuncPair{false, kj::fwd<ErrorFunc>(errorFunc)},
         &identityPromiseContinuation<FuncPair, false>,
         &promiseContinuation<FuncPair, true, Value, T>);
@@ -503,7 +503,7 @@ Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
 
 template <class Func>
 PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
-  typedef RemovePromise<ReturnType<Func, void>> Result;
+  using Result = RemovePromise<ReturnType<Func, void>>;
   v8::TryCatch tryCatch(v8Isolate);
   try {
     if constexpr (isPromise<ReturnType<Func, void>>()) {

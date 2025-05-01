@@ -785,7 +785,7 @@ class NullConfiguration {
 template <typename TypeWrapper>
 class DynamicResourceTypeMap {
  private:
-  typedef void ReflectionInitializer(jsg::Object& object, TypeWrapper& wrapper);
+  using ReflectionInitializer = void(jsg::Object& object, TypeWrapper& wrapper);
   struct DynamicTypeInfo {
     v8::Local<v8::FunctionTemplate> tmpl;
     kj::Maybe<ReflectionInitializer&> reflectionInitializer;
@@ -801,7 +801,7 @@ class DynamicResourceTypeMap {
     }
   }
 
-  typedef DynamicTypeInfo GetTypeInfoFunc(TypeWrapper&, v8::Isolate*);
+  using GetTypeInfoFunc = DynamicTypeInfo(TypeWrapper&, v8::Isolate*);
 
   // Maps type_info values to functions that can be used to get the associated template. Used by
   // ResourceWrapper.
@@ -826,11 +826,11 @@ class DynamicResourceTypeMap {
   // It also just provides nice symmetry with `deserializerMap`.
   //
   // The SerializeFunc() must always start by writing a tag.
-  typedef void SerializeFunc(TypeWrapper&, Lock& js, jsg::Object& instance, Serializer& serializer);
+  using SerializeFunc = void(TypeWrapper&, Lock& js, jsg::Object& instance, Serializer& serializer);
   kj::HashMap<std::type_index, SerializeFunc*> serializerMap;
 
   // Map tag numbers to deserializer functions.
-  typedef v8::Local<v8::Object> DeserializeFunc(
+  using DeserializeFunc = v8::Local<v8::Object>(
       TypeWrapper&, Lock& js, uint tag, Deserializer& deserializer);
   kj::HashMap<uint, DeserializeFunc*> deserializerMap;
 

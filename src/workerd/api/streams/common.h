@@ -11,7 +11,7 @@
 #include <workerd/jsg/jsg.h>
 
 #if _MSC_VER
-typedef long long ssize_t;
+using ssize_t = long long;
 #endif
 
 namespace workerd::api {

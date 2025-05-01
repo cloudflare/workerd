@@ -31,8 +31,8 @@ class SqliteKv: private SqliteDatabase::ResetListener {
  public:
   explicit SqliteKv(SqliteDatabase& db);
 
-  typedef kj::StringPtr KeyPtr;
-  typedef kj::ArrayPtr<const kj::byte> ValuePtr;
+  using KeyPtr = kj::StringPtr;
+  using ValuePtr = kj::ArrayPtr<const kj::byte>;
 
   // Search for a match for the given key. Calls the callback function with the result (a ValuePtr)
   // if found. This is intended to avoid the need to copy the bytes, if the caller would just parse
