@@ -80,6 +80,7 @@ build:ci-macOS --copt=-UDEBUG
 build:ci-macOS-debug --config=debug
 
 build:ci-windows --config=windows_no_dbg
+build:ci-windows-arm --config=windows_no_dbg
 build:ci-windows-debug --config=debug
 
 # Some tests (like Python import tests) take a long time to run, especially when debug is enabled
