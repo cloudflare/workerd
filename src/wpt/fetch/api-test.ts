@@ -774,11 +774,7 @@ export default {
       'We seem to be returning the boundary value as text but WPT expects no value',
     expectedFailures: ['Consume empty FormData response body as text'],
   },
-  'response/response-consume-stream.any.js': {
-    comment:
-      'Triggers UBSan error in BodyBufferInputStream::tryRead. memcpy from a NULL pointer. Yikes',
-    skipAllTests: true,
-  },
+  'response/response-consume-stream.any.js': {},
   'response/response-error-from-stream.any.js': {
     comment:
       'Several issues. Firstly, we require the type field to always be passed to ReadableStream',

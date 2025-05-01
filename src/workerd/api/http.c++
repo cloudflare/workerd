@@ -599,10 +599,14 @@ class BodyBufferInputStream final: public ReadableStreamSource {
         ownBytes(kj::mv(buffer.ownBytes)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t amount = kj::min(maxBytes, unread.size());
-    memcpy(buffer, unread.begin(), amount);
-    unread = unread.slice(amount, unread.size());
-    return amount;
+    if (unread != nullptr) {
+      size_t amount = kj::min(maxBytes, unread.size());
+      memcpy(buffer, unread.begin(), amount);
+      unread = unread.slice(amount, unread.size());
+      return amount;
+    }
+
+    return static_cast<size_t>(0);
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
