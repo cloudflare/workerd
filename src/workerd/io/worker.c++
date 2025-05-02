@@ -3563,24 +3563,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 }
 
 Worker::Actor::~Actor() noexcept(false) {
-  // TODO(someday) Each IoContext contains a strong reference to its Actor, so a IoContext
-  // object must be destroyed before their Actor. However, IoContext has its lifetime extended
-  // by the IoContext::drain() promise which is stored in waitUntilTasks.
-  // IoContext::drain() may hang if Actor::onShutdown() never resolves/rejects, which means the
-  // IoContext and the Actor will not destruct as we'd expect. Ideally, we'd want an object
-  // that represents Actor liveness that does what shutdown() does now. It should be reasonable to
-  // implement that once we have tests that invoke the Actor dtor.
-
-  // Destroy under lock.
-  //
-  // TODO(perf): In principle it could make sense to defer destruction of the actor until an async
-  //   lock can be obtained. But, actor destruction is not terribly common and is not done when
-  //   the actor is idle (so, no one is waiting), so it's not a huge deal. The runtime does
-  //   potentially colocate multiple actors on the same thread, but they are always from the same
-  //   namespace and hence would be locking the same isolate anyway -- it's not like one of the
-  //   other actors could be running while we wait for this lock.
-  worker->runInLockScope(
-      Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) { impl = nullptr; });
+  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
+  // to our thread, or is a handle that can be dropped outside of the lock.
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
