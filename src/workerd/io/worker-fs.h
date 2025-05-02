@@ -465,6 +465,17 @@ class TmpDirStoreScope final {
   bool onStack = false;
 };
 
+class SymbolicLinkRecursionGuardScope final {
+ public:
+  SymbolicLinkRecursionGuardScope();
+  ~SymbolicLinkRecursionGuardScope() noexcept(false);
+
+  static void checkSeen(SymbolicLink* link);
+
+ private:
+  kj::HashSet<SymbolicLink*> linksSeen;
+};
+
 // Every Worker instance has its own virtual filesystem. At a minimum, this
 // filesystem contains the worker's own bundled modules/files and a temporary
 // in-memory directory for the worker to use. The filesystem is not shared

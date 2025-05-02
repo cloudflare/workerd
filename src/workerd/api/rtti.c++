@@ -12,6 +12,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/hyperdrive.h>
@@ -52,6 +53,7 @@
   F("crypto", EW_CRYPTO_ISOLATE_TYPES)                                                             \
   F("encoding", EW_ENCODING_ISOLATE_TYPES)                                                         \
   F("events", EW_EVENTS_ISOLATE_TYPES)                                                             \
+  F("filesystem", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                  \
   F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                                        \
   F("html-rewriter", EW_HTML_REWRITER_ISOLATE_TYPES)                                               \
   F("http", EW_HTTP_ISOLATE_TYPES)                                                                 \

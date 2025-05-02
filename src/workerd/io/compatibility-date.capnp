@@ -750,4 +750,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-05-19")
       $compatDisableFlag("disable_navigator_language");
   # Enables Navigator.language API.
+
+  webFileSystem @87 :Bool
+      $compatEnableFlag("web_file_system")
+      $experimental;
+  # Enables the Web File System API.
 }

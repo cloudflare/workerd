@@ -17,33 +17,7 @@ namespace {
 // Since resolution is always synchronous, we can use thread-local to
 // track the current scope, allowing multiple scopes to be in the stack
 // without needed to pass the guard around or do any other bookkeeping.
-class SymbolicLinkRecursionGuardScope;
 thread_local SymbolicLinkRecursionGuardScope* symbolicLinkGuard = nullptr;
-class SymbolicLinkRecursionGuardScope final {
- public:
-  SymbolicLinkRecursionGuardScope() {
-    if (symbolicLinkGuard == nullptr) {
-      symbolicLinkGuard = this;
-    }
-  }
-  ~SymbolicLinkRecursionGuardScope() noexcept(false) {
-    if (symbolicLinkGuard == this) {
-      symbolicLinkGuard = nullptr;
-    }
-  }
-
-  static void checkSeen(SymbolicLink* link) {
-    if (symbolicLinkGuard == nullptr) {
-      return;
-    }
-    auto& guard = *symbolicLinkGuard;
-    JSG_REQUIRE(guard.linksSeen.find(link) == kj::none, Error, "Recursive symbolic link detected");
-    guard.linksSeen.insert(link);
-  }
-
- private:
-  kj::HashSet<SymbolicLink*> linksSeen;
-};
 
 // Thread-local storage to track the current temp directory storage scope
 // on the stack.
@@ -940,6 +914,26 @@ kj::Rc<SymbolicLink> VirtualFileSystem::newSymbolicLink(jsg::Lock& js, const jsg
   auto path = kj::str(url.getPathname().slice(1));
   kj::Path root{};
   return kj::rc<SymbolicLink>(getRoot(js), root.eval(path));
+}
+
+SymbolicLinkRecursionGuardScope::SymbolicLinkRecursionGuardScope() {
+  if (symbolicLinkGuard == nullptr) {
+    symbolicLinkGuard = this;
+  }
+}
+SymbolicLinkRecursionGuardScope::~SymbolicLinkRecursionGuardScope() noexcept(false) {
+  if (symbolicLinkGuard == this) {
+    symbolicLinkGuard = nullptr;
+  }
+}
+
+void SymbolicLinkRecursionGuardScope::checkSeen(SymbolicLink* link) {
+  if (symbolicLinkGuard == nullptr) {
+    return;
+  }
+  auto& guard = *symbolicLinkGuard;
+  JSG_REQUIRE(guard.linksSeen.find(link) == kj::none, Error, "Recursive symbolic link detected");
+  guard.linksSeen.insert(link);
 }
 
 }  // namespace workerd

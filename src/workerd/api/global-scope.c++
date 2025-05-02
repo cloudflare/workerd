@@ -10,6 +10,7 @@
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/filesystem.h>
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
@@ -919,6 +920,10 @@ double Performance::now() {
   // We define performance.now() for compatibility purposes, but due to Spectre concerns it
   // returns exactly what Date.now() returns.
   return dateNow();
+}
+
+jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
+  return js.alloc<StorageManager>();
 }
 
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
