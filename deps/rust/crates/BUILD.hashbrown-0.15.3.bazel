@@ -48,7 +48,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.15.2",
+    version = "0.15.3",
     deps = [
         "@crates_vendor__allocator-api2-0.2.21//:allocator_api2",
         "@crates_vendor__equivalent-1.0.2//:equivalent",

@@ -29,11 +29,8 @@ rust_library(
         ],
     ),
     crate_features = [
-        "error-context",
         "help",
         "std",
-        "suggestions",
-        "usage",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -51,6 +48,5 @@ rust_library(
     deps = [
         "@crates_vendor__anstyle-1.0.10//:anstyle",
         "@crates_vendor__clap_lex-0.7.4//:clap_lex",
-        "@crates_vendor__strsim-0.11.1//:strsim",
     ],
 )
