@@ -83,11 +83,26 @@ class Navigator: public jsg::Object {
     return 1;
   }
 
-  JSG_RESOURCE_TYPE(Navigator) {
+  kj::StringPtr getLanguage() {
+    return language_;
+  }
+
+  void setLanguage(kj::String language) {
+    language_ = kj::mv(language);
+  }
+
+  JSG_RESOURCE_TYPE(Navigator, CompatibilityFlags::Reader reader) {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
     JSG_READONLY_INSTANCE_PROPERTY(hardwareConcurrency, getHardwareConcurrency);
+
+    if (reader.getEnableNavigatorLanguage()) {
+      JSG_INSTANCE_PROPERTY(language, getLanguage, setLanguage);
+    }
   }
+
+ private:
+  kj::String language_ = kj::str("en");
 };
 
 class Performance: public jsg::Object {
