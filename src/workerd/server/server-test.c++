@@ -4553,6 +4553,19 @@ KJ_TEST("Server: Durable Object facets") {
                 `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER});
                 `      results.push(await foo.increment(true));  // increments foo
                 `
+                `      let foo2 = this.ctx.facets.get("foo", {class: this.env.EXFILTRATOR});
+                `      results.push(await foo2.exfiltrate());
+                `
+                `      try {
+                `        await foo.increment();
+                `        throw new Error("broken stub didn't throw?");
+                `      } catch (err) {
+                `        if (err.message != "The facet is restarting because the parent " +
+                `            "specified different parameters to facets.get().") {
+                `          throw err;
+                `        }
+                `      }
+                `
                 `      // Delete bar, which recursively deletes its children.
                 `      this.ctx.facets.delete("bar");
                 `    } else {
@@ -4580,12 +4593,19 @@ KJ_TEST("Server: Durable Object facets") {
                 `    return facet.increment(first);
                 `  }
                 `}
+                `export class ExfiltrationFacet extends DurableObject {
+                `  exfiltrate() {
+                `    return this.ctx.storage.get("value");
+                `  }
+                `}
             )
           ],
           bindings = [
             (name = "NS", durableObjectNamespace = "MyActorClass"),
             (name = "COUNTER", durableObjectClass = (name = "hello", entrypoint = "CounterFacet")),
-            (name = "NESTED", durableObjectClass = (name = "hello", entrypoint = "NestedFacet"))
+            (name = "NESTED", durableObjectClass = (name = "hello", entrypoint = "NestedFacet")),
+            ( name = "EXFILTRATOR",
+              durableObjectClass = (name = "hello", entrypoint = "ExfiltrationFacet") )
           ],
           durableObjectNamespaces = [
             ( className = "MyActorClass",
@@ -4664,7 +4684,7 @@ KJ_TEST("Server: Durable Object facets") {
     test.server.allowExperimental();
     test.start();
     auto conn = test.connect("test-addr");
-    conn.httpGet200("/part2", "1 2 5");
+    conn.httpGet200("/part2", "1 2 5 6");
   }
 
   // Root and foo still exist, bar does not.

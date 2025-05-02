@@ -2215,15 +2215,36 @@ class Server::WorkerService final: public Service,
 
       kj::Own<ActorContainer> getFacet(
           kj::String childKey, Worker::Actor::Id childId, kj::Own<ActorClass> childActorClass) {
-        // TODO(now): Check for mismatching actor class or childId and restart if needed.
-        return facets
-            .findOrCreate(childKey, [&]() mutable {
-          auto container = kj::refcounted<ActorContainer>(
+        auto makeContainer = [&]() {
+          return kj::refcounted<ActorContainer>(
               kj::mv(childKey), kj::mv(childId), ns, *this, kj::mv(childActorClass), timer);
+        };
 
+        bool isNew = false;
+
+        auto& entry = facets.findOrCreateEntry(childKey, [&]() mutable {
+          isNew = true;
+          auto container = makeContainer();
           return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
             container->getKey(), kj::mv(container)};
-        })->addRef();
+        });
+
+        if (!isNew &&
+            (entry.value->actorClass.get() != childActorClass.get() ||
+                !Worker::Actor::idsEqual(entry.value->id, childId))) {
+          // TODO(facets): Should this be a softer restart?
+          entry.value->abort(JSG_KJ_EXCEPTION(FAILED, Error,
+              "The facet is restarting because the parent specified different parameters to "
+              "facets.get()."));
+
+          auto container = makeContainer();
+
+          // Update the key to point at the copy owned by the new container.
+          entry.key = container->getKey();
+          entry.value = kj::mv(container);
+        }
+
+        return entry.value->addRef();
       }
 
       kj::Own<IoChannelFactory::ActorChannel> getFacet(
