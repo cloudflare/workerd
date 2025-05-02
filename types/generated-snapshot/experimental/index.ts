@@ -77,7 +77,7 @@ export interface Console {
   clear(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static) */
   count(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countreset_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countReset_static) */
   countReset(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static) */
   debug(...data: any[]): void;
@@ -89,9 +89,9 @@ export interface Console {
   error(...data: any[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static) */
   group(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupcollapsed_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupCollapsed_static) */
   groupCollapsed(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupend_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupEnd_static) */
   groupEnd(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static) */
   info(...data: any[]): void;
@@ -101,9 +101,9 @@ export interface Console {
   table(tabularData?: any, properties?: string[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static) */
   time(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeend_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeEnd_static) */
   timeEnd(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timelog_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeLog_static) */
   timeLog(label?: string, ...data: any[]): void;
   timeStamp(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/trace_static) */
@@ -321,42 +321,42 @@ export declare function dispatchEvent(
 export declare function btoa(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 export declare function atob(data: string): string;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 export declare function setTimeout(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 export declare function setTimeout<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/clearTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearTimeout) */
 export declare function clearTimeout(timeoutId: number | null): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 export declare function setInterval(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 export declare function setInterval<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/clearInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearInterval) */
 export declare function clearInterval(timeoutId: number | null): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/queueMicrotask) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 export declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/structuredClone) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
 export declare function structuredClone<T>(
   value: T,
   options?: StructuredSerializeOptions,
 ): T;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/reportError) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 export declare function reportError(error: any): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/fetch) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
 export declare function fetch(
   input: RequestInfo | URL,
   init?: RequestInit<RequestInitCfProperties>,
@@ -980,6 +980,7 @@ export declare class Blob {
   slice(start?: number, end?: number, type?: string): Blob;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/bytes) */
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text) */
   text(): Promise<string>;
@@ -1364,10 +1365,15 @@ export interface TextEncoderEncodeIntoResult {
  */
 export declare class ErrorEvent extends Event {
   constructor(type: string, init?: ErrorEventErrorEventInit);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/filename) */
   get filename(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/message) */
   get message(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/lineno) */
   get lineno(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/colno) */
   get colno(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/error) */
   get error(): any;
 }
 export interface ErrorEventErrorEventInit {
@@ -1586,6 +1592,7 @@ export declare abstract class Body {
   get bodyUsed(): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bytes) */
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/text) */
   text(): Promise<string>;
@@ -1706,7 +1713,11 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
   integrity: string;
-  /* Returns a boolean indicating whether or not request can outlive the global in which it was created. */
+  /**
+   * Returns a boolean indicating whether or not request can outlive the global in which it was created.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
+   */
   keepalive: boolean;
   /**
    * Returns the cache mode associated with request, which is a string indicating how the request will interact with the browser's cache when fetching.

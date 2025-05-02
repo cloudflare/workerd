@@ -85,12 +85,12 @@ const kCustomPromisifyArgsSymbol = Symbol.for(
 );
 
 // Key input contexts.
-export enum KeyContext {
-  kConsumePublic = 'kConsumePublic',
-  kConsumePrivate = 'kConsumePrivate',
-  kCreatePublic = 'kCreatePublic',
-  kCreatePrivate = 'kCreatePrivate',
-}
+export const KeyContext = {
+  kConsumePublic: 'kConsumePublic',
+  kConsumePrivate: 'kConsumePrivate',
+  kCreatePublic: 'kCreatePublic',
+  kCreatePrivate: 'kCreatePrivate',
+};
 
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transferred via postMessage() and
@@ -388,7 +388,7 @@ export function createSecretKey(
 
 export function prepareAsymmetricKey(
   key: CreateAsymmetricKeyOptions | null | undefined,
-  ctx: KeyContext
+  ctx: (typeof KeyContext)[keyof typeof KeyContext]
 ): InnerCreateAsymmetricKeyOptions {
   // Safety check... key should not be undefined or null here.
   if (key == null) {

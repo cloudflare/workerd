@@ -54,7 +54,7 @@ export function getStringOption(options: any, key: string): string {
 }
 
 export function getArrayBufferOrView(
-  buffer: Buffer | ArrayBuffer | ArrayBufferView | string,
+  buffer: CryptoKey | Buffer | ArrayBuffer | ArrayBufferView | string,
   name: string,
   encoding?: string
 ): Buffer | ArrayBuffer | ArrayBufferView {

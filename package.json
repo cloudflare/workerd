@@ -6,19 +6,19 @@
     "format": "prettier"
   },
   "dependencies": {
-    "prettier": "^3.5.1",
-    "typescript": "5.6.2"
+    "prettier": "^3.5.3",
+    "typescript": "5.8.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
+    "@eslint/js": "^9.25.1",
     "@types/debug": "^4.1.12",
-    "@types/node": "^22.14.0",
+    "@types/node": "^22.15.3",
     "capnp-es": "^0.0.9",
     "chrome-remote-interface": "^0.33.3",
-    "esbuild": "^0.25.0",
-    "eslint": "^9.20.1",
-    "expect-type": "^1.1.0",
-    "typescript-eslint": "^8.23.0"
+    "esbuild": "^0.25.3",
+    "eslint": "^9.25.1",
+    "expect-type": "^1.2.1",
+    "typescript-eslint": "^8.31.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [],
@@ -26,5 +26,5 @@
       "capnp-es": "patches/capnp-es.patch"
     }
   },
-  "packageManager": "pnpm@9.7.1+sha512.faf344af2d6ca65c4c5c8c2224ea77a81a5e8859cbc4e06b1511ddce2f0151512431dd19e6aff31f2c6a8f5f2aced9bd2273e1fed7dd4de1868984059d2c4247"
+  "packageManager": "pnpm@10.10.0"
 }
