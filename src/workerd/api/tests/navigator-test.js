@@ -11,3 +11,9 @@ export const testUserAgent = {
     strictEqual(navigator.userAgent, 'Cloudflare-Workers');
   },
 };
+
+export const testLanguage = {
+  async test() {
+    strictEqual(navigator.language, 'en');
+  },
+};
