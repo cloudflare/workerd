@@ -175,40 +175,17 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
     # TODO: all of these should be fixed by linking our own Pyodide or by upstreaming.
 
     PRELUDE = """
-    import { newWasmModule, monotonicDateNow, wasmInstantiate, getRandomValues } from "pyodide-internal:pool/builtin_wrappers";
-
-    // Pyodide uses `new URL(some_url, location)` to resolve the path in `loadPackage`. Setting
-    // `location = undefined` makes this throw an error if some_url is not an absolute url. Which is what
-    // we want here, it doesn't make sense to load a package from a relative URL.
-    const location = undefined;
-
-    function addEventListener(){}
-
-    function reportUndefinedSymbolsPatched(Module) {
-        if (Module.API.version === "0.26.0a2") {
-            return;
-        }
-        Module.reportUndefinedSymbols(undefined);
-    }
-
-    if (typeof FinalizationRegistry === "undefined") {
-        globalThis.FinalizationRegistry = class FinalizationRegistry {
-            register(){}
-            unregister(){}
-        };
-    }
-
-    function patchDynlibLookup(Module, libName) {
-        try {
-            return Module.FS.readFile("/usr/lib/" + libName);
-        } catch(e) {
-            console.error("Failed to read ", libName, e);
-        }
-    }
-
-    function patchedApplyFunc(func, this_, args) {
-        return Function.prototype.apply.apply(func, [this_, args]);
-    }
+    import {
+        addEventListener,
+        getRandomValues,
+        location,
+        monotonicDateNow,
+        newWasmModule,
+        patchedApplyFunc,
+        patchDynlibLookup,
+        reportUndefinedSymbolsPatched,
+        wasmInstantiate,
+    } from "pyodide-internal:pool/builtin_wrappers";
     """
 
     REPLACEMENTS = [
@@ -271,7 +248,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         # to fix RPC, applies https://github.com/pyodide/pyodide/commit/8da1f38f7
         [
             "nullToUndefined(func.apply(",
-            "nullToUndefined(patchedApplyFunc(func, ",
+            "nullToUndefined(patchedApplyFunc(API, func, ",
+        ],
+        [
+            "nullToUndefined(Function.prototype.apply.apply",
+            "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
         ],
     ]
 

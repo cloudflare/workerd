@@ -22,6 +22,7 @@ interface FS {
   mkdir: (dirname: string) => void;
   mkdirTree: (dirname: string) => void;
   writeFile: (fname: string, contents: Uint8Array, options: object) => void;
+  readFile: (fname: string) => Uint8Array;
   mount(fs: object, options: { info?: any }, path: string): void;
   createNode<Info>(
     parent: FSNode<Info> | null,
