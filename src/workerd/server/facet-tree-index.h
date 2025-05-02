@@ -56,6 +56,16 @@ class FacetTreeIndex {
   // Gets the ID for the given facet, assigning it if needed.
   uint getId(uint parent, kj::StringPtr name);
 
+  // For each child of the given parent ID, call the callback.
+  template <typename Func>
+  void forEachChild(uint parentId, Func&& callback) {
+    for (auto& child: entries.range(EntryPtr{parentId, nullptr}, EntryPtr{parentId + 1, nullptr})) {
+      KJ_IASSERT(child.parent == parentId);
+      uint childId = 1 + (&child - entries.begin());
+      callback(childId, child.name);
+    }
+  }
+
  private:
   kj::Own<const kj::File> file;
 
@@ -63,13 +73,22 @@ class FacetTreeIndex {
   // a corrupted tail was detected).
   uint offset;
 
+  struct EntryPtr;
+
   struct Entry {
     uint parent;
     kj::String name;
 
     bool operator==(const Entry& other) const = default;
-    auto hashCode() const {
-      return kj::hashCode(parent, name);
+    bool operator<(const Entry& other) const {
+      if (parent < other.parent) return true;
+      if (parent > other.parent) return false;
+      return name < other.name;
+    }
+    bool operator<(const EntryPtr& other) const {
+      if (parent < other.parent) return true;
+      if (parent > other.parent) return false;
+      return name < other.name;
     }
   };
 
@@ -80,17 +99,14 @@ class FacetTreeIndex {
     bool operator==(const Entry& other) const {
       return parent == other.parent && name == other.name;
     }
-    auto hashCode() const {
-      return kj::hashCode(parent, name);
-    }
   };
 
   // All entries. Note that there's no need to store the ID of each entry since they are strictly
-  // ordered with no erasures. kj::HashSet is based on kj::Table which maintains the original
+  // ordered with no erasures. kj::TreeSet is based on kj::Table which maintains the original
   // insertion order (as long as no erasures occur), so the index of any entry can be computed
   // by subtracting `entries.begin()` from its pointer. (Add 1 to the index to get the ID, since
   // the root is ID zero.)
-  kj::HashSet<Entry> entries;
+  kj::TreeSet<Entry> entries;
 
   // Next ID that will be assigned. Off-by-one due to root not being in the set.
   inline uint nextId() {

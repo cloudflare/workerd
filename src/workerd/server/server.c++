@@ -2306,7 +2306,18 @@ class Server::WorkerService final: public Service,
       }
 
       void deleteFacet(kj::StringPtr name) override {
-        KJ_UNIMPLEMENTED("TODO(now): deleteFacet()");
+        // First, abort any running facets.
+        abortFacet(name, JSG_KJ_EXCEPTION(FAILED, Error, "Facet was deleted."));
+
+        // Then delete the underlying storage.
+        KJ_IF_SOME(as, ns.actorStorage) {
+          // Note that if there's no facet index then there couldn't possibly be any child storage.
+          KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty()) {
+            uint childId = index.getId(getFacetId(), name);
+            deleteDescendantStorage(*as.directory, childId);
+            as.directory->remove(getSqlitePathForId(childId));
+          }
+        }
       }
 
      private:
@@ -2345,20 +2356,68 @@ class Server::WorkerService final: public Service,
 
         ActorContainer& parent = KJ_UNWRAP_OR(this->parent, return 0);
 
-        FacetTreeIndex* index;
-        KJ_IF_SOME(i, root.facetTreeIndex) {
-          index = i;
+        FacetTreeIndex& index = root.ensureFacetTreeIndex();
+        return index.getId(parent.getFacetId(), key);
+      }
+
+      // Get the facet tree index, opening the file if it hasn't been opened yet, and creating it
+      // if it hasn't been created yet.
+      FacetTreeIndex& ensureFacetTreeIndex() {
+        KJ_REQUIRE(parent == kj::none, "only 'root' may ensureFacetTreeIndex()");
+
+        KJ_IF_SOME(i, facetTreeIndex) {
+          return *i;
         } else {
           // Facet tree index hasn't been initialized yet. Do that now (opening the existing file,
           // or creating it if it doesn't exist).
           auto& as = KJ_REQUIRE_NONNULL(
               ns.actorStorage, "can't call getFacetId() when there's no backing storage");
-          auto indexFile = as.directory->openFile(kj::Path({kj::str(root.key, ".facets")}),
-              kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-          index = root.facetTreeIndex.emplace(kj::heap<FacetTreeIndex>(kj::mv(indexFile)));
+          auto indexFile = as.directory->openFile(
+              kj::Path({kj::str(key, ".facets")}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+          return *facetTreeIndex.emplace(kj::heap<FacetTreeIndex>(kj::mv(indexFile)));
         }
+      }
 
-        return index->getId(parent.getFacetId(), key);
+      // Like ensureFacetTreeIndex() but if the index doesn't exist on disk, return kj::none.
+      kj::Maybe<FacetTreeIndex&> getFacetTreeIndexIfNotEmpty() {
+        KJ_REQUIRE(parent == kj::none);
+
+        KJ_IF_SOME(i, facetTreeIndex) {
+          return *i;
+        } else {
+          // Facet tree index hasn't been initialized yet. If the file exists, open it. Otherwise,
+          // assume empty and return none.
+          auto& as = KJ_UNWRAP_OR(ns.actorStorage, return kj::none);
+          auto indexFile = KJ_UNWRAP_OR(
+              as.directory->tryOpenFile(kj::Path({kj::str(key, ".facets")}), kj::WriteMode::MODIFY),
+              return kj::none);
+          return *facetTreeIndex.emplace(kj::heap<FacetTreeIndex>(kj::mv(indexFile)));
+        }
+      }
+
+      // Get the path to the facet's sqlite database, within the actor namespace directory.
+      kj::Path getSqlitePathForId(uint id) {
+        if (id == 0) {
+          return kj::Path({kj::str(root.key, ".sqlite")});
+        } else {
+          return kj::Path({kj::str(root.key, '.', id, ".sqlite")});
+        }
+      }
+
+      void deleteDescendantStorage(const kj::Directory& dir, uint parentId) {
+        KJ_IF_SOME(index, getFacetTreeIndexIfNotEmpty()) {
+          deleteDescendantStorage(dir, index, parentId);
+        } else {
+          // There's no index, so there must be no facets (other than the root).
+          KJ_ASSERT(parentId == 0);
+        }
+      }
+
+      void deleteDescendantStorage(const kj::Directory& dir, FacetTreeIndex& index, uint parentId) {
+        index.forEachChild(parentId, [&](uint childId, kj::StringPtr childName) {
+          deleteDescendantStorage(dir, index, childId);
+          dir.remove(getSqlitePathForId(childId));
+        });
       }
 
       void requireNotBroken() {
@@ -2458,12 +2517,8 @@ class Server::WorkerService final: public Service,
           return ns.config.tryGet<Durable>().map(
               [&](const Durable& d) -> kj::Own<ActorCacheInterface> {
             KJ_IF_SOME(as, ns.actorStorage) {
-              kj::Path path = nullptr;
               kj::Own<ActorSqlite::Hooks> sqliteHooks;
-
               if (parent == kj::none) {
-                path = kj::Path({kj::str(key, ".sqlite")});
-
                 KJ_IF_SOME(a, ns.alarmScheduler) {
                   sqliteHooks = kj::heap<ActorSqliteHooks>(
                       a, ActorKey{.uniqueKey = d.uniqueKey, .actorId = key});
@@ -2472,22 +2527,32 @@ class Server::WorkerService final: public Service,
                   sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
                 }
               } else {
-                path = kj::Path({kj::str(root.key, '.', getFacetId(), ".sqlite")});
-
                 // TODO(someday): Support alarms in facets, somehow.
                 sqliteHooks = fakeOwn(ActorSqlite::Hooks::getDefaultHooks());
               }
 
+              uint selfId = getFacetId();
+              auto path = getSqlitePathForId(selfId);
               auto db = kj::heap<SqliteDatabase>(
                   as.vfs, kj::mv(path), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
               // Before we do anything, make sure the database is in WAL mode. We also need to
               // do this after reset() is used, so register a callback for that.
-              // TODO(now): We should also delete all child facets when a deleteAll() is performed,
-              //   which we can detect via the afterReset callback.
-              auto setWalMode = [](SqliteDatabase& db) { db.run("PRAGMA journal_mode=WAL;"); };
-              setWalMode(*db);
-              db->afterReset(kj::mv(setWalMode));
+              db->run("PRAGMA journal_mode=WAL;");
+
+              db->afterReset([this, &dir = *as.directory, selfId](SqliteDatabase& db) {
+                db.run("PRAGMA journal_mode=WAL;");
+
+                // reset() is used when the app called deleteAll(), in which case we also want to
+                // delete all child facets.
+                // TODO(someday): Arguably this should be transactional somehow so if we fail here
+                //   we don't leave the facets still there after the parent has already been reset.
+                //   But most filesystems do not support transactions, so we'd have to do something
+                //   like store a flag in the parent DB saying "reset pending" so that on a restart
+                //   we retry the deletions. Note that in production on SRS, this is actually
+                //   transactional -- there's only a problem when running locally with workerd.
+                deleteDescendantStorage(dir, selfId);
+              });
 
               return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
                   []() -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)

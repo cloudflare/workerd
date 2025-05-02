@@ -11,6 +11,24 @@ namespace {
 using kj::byte;
 using kj::uint;
 
+struct ExpectedChildInfo {
+  uint id;
+  kj::StringPtr name;
+};
+void expectChildren(
+    FacetTreeIndex& index, uint parentId, kj::ArrayPtr<const ExpectedChildInfo> expected) {
+  index.forEachChild(parentId, [&](uint id, kj::StringPtr name) {
+    if (expected.size() == 0) {
+      KJ_FAIL_EXPECT("unexpected child", id, name);
+    } else {
+      KJ_EXPECT(id == expected.front().id);
+      KJ_EXPECT(name == expected.front().name);
+      expected = expected.slice(1);
+    }
+  });
+  KJ_EXPECT(expected.size() == 0, "missing child", expected.front().id, expected.front().name);
+}
+
 KJ_TEST("FacetTreeIndex basic functionality") {
   auto file = kj::newInMemoryFile(kj::nullClock());
 
@@ -38,6 +56,14 @@ KJ_TEST("FacetTreeIndex basic functionality") {
     KJ_EXPECT(index.getId(id1, "child1") == id3);
     KJ_EXPECT(index.getId(id1, "child2") == id4);
     KJ_EXPECT(index.getId(id2, "child1") == id5);
+
+    // Test forEachChild().
+    expectChildren(index, 0, {{1, "facet1"}, {2, "facet2"}});
+    expectChildren(index, 1, {{3, "child1"}, {4, "child2"}});
+    expectChildren(index, 2, {{5, "child1"}});
+    expectChildren(index, 3, {});
+    expectChildren(index, 4, {});
+    expectChildren(index, 5, {});
   }
 
   {
@@ -57,6 +83,15 @@ KJ_TEST("FacetTreeIndex basic functionality") {
 
     KJ_EXPECT(id6 == 6);
     KJ_EXPECT(id7 == 7);
+
+    expectChildren(index, 0, {{1, "facet1"}, {2, "facet2"}});
+    expectChildren(index, 1, {{3, "child1"}, {4, "child2"}});
+    expectChildren(index, 2, {{5, "child1"}});
+    expectChildren(index, 3, {{6, "grandchild1"}, {7, "grandchild2"}});
+    expectChildren(index, 4, {});
+    expectChildren(index, 5, {});
+    expectChildren(index, 6, {});
+    expectChildren(index, 7, {});
   }
 
   {
@@ -71,6 +106,15 @@ KJ_TEST("FacetTreeIndex basic functionality") {
     KJ_EXPECT(index.getId(2, "child1") == 5);
     KJ_EXPECT(index.getId(3, "grandchild1") == 6);
     KJ_EXPECT(index.getId(3, "grandchild2") == 7);
+
+    expectChildren(index, 0, {{1, "facet1"}, {2, "facet2"}});
+    expectChildren(index, 1, {{3, "child1"}, {4, "child2"}});
+    expectChildren(index, 2, {{5, "child1"}});
+    expectChildren(index, 3, {{6, "grandchild1"}, {7, "grandchild2"}});
+    expectChildren(index, 4, {});
+    expectChildren(index, 5, {});
+    expectChildren(index, 6, {});
+    expectChildren(index, 7, {});
   }
 }
 
