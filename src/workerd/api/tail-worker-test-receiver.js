@@ -7,12 +7,12 @@ let resposeMap = new Map();
 
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-  tailStream(...args) {
+  tailStream(event, env, ctx) {
     // Onset event, must be singleton
-    resposeMap.set(args[0].traceId, JSON.stringify(args[0].event));
-    return (...args) => {
-      let cons = resposeMap.get(args[0].traceId);
-      resposeMap.set(args[0].traceId, cons + JSON.stringify(args[0].event));
+    resposeMap.set(event.traceId, JSON.stringify(event.event));
+    return (event) => {
+      let cons = resposeMap.get(event.traceId);
+      resposeMap.set(event.traceId, cons + JSON.stringify(event.event));
     };
   },
 };

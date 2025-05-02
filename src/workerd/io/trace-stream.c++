@@ -752,12 +752,17 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     // Invoke the tailStream handler function.
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
-    v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, 2);
+    auto maybeCtx = KJ_ASSERT_NONNULL(handler->getCtx()).tryGetHandle(js);
+    v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
     handlerArgs[0] = ToJs(js, event, stringCache);
     handlerArgs[1] = handler->env.getHandle(js);
+    KJ_IF_SOME(ctx, maybeCtx) {
+      handlerArgs[2] = ctx;
+    }
 
     try {
-      auto result = jsg::check(fn->Call(js.v8Context(), target, 2, handlerArgs.data()));
+      auto result =
+          jsg::check(fn->Call(js.v8Context(), target, handlerArgs.size(), handlerArgs.data()));
 
       // We need to be able to access the results builder from both the
       // success and failure branches of the promise we set up below.
