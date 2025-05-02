@@ -752,7 +752,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables Navigator.language API.
 
   webFileSystem @87 :Bool
-      $compatEnableFlag("web_file_system")
+      $compatEnableFlag("enable_web_file_system")
       $experimental;
   # Enables the Web File System API.
 }

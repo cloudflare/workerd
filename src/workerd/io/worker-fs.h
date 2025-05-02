@@ -130,6 +130,10 @@ struct Stat final {
 
   // Indicates if the node is writable.
   bool writable = false;
+
+  // Indicates if the node is a device. Certain operations
+  // may behave differently on devices.
+  bool device = false;
 };
 
 class SymbolicLink;
@@ -380,6 +384,7 @@ class VirtualFileSystem {
 
   virtual const jsg::Url& getBundleRoot() const = 0;
   virtual const jsg::Url& getTmpRoot() const = 0;
+  virtual const jsg::Url& getDevRoot() const = 0;
 
   // Get the current virtual file system for the current isolate lock.
   static kj::Maybe<const VirtualFileSystem&> tryGetCurrent(jsg::Lock&);
@@ -398,7 +403,8 @@ kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap, kj::Rc<Dir
 // will be generated via the template.
 #define KNOWN_VFS_ROOTS(V)                                                                         \
   V(Bundle, "file:///bundle/")                                                                     \
-  V(Temp, "file:///tmp/")
+  V(Temp, "file:///tmp/")                                                                          \
+  V(Dev, "file:///dev/")
 
 class FsMap final {
  public:
@@ -489,4 +495,10 @@ kj::Rc<Directory> getTmpDirectoryImpl();
 
 // Returns a directory that is lazily loaded on first access.
 kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func);
+
+kj::Rc<File> getDevNull();
+kj::Rc<File> getDevZero();
+kj::Rc<File> getDevFull();
+kj::Rc<File> getDevRandom();
+kj::Rc<Directory> getDevDirectory();
 }  // namespace workerd

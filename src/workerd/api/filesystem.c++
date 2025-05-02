@@ -637,7 +637,7 @@ double FileSystemSyncAccessHandle::read(
   auto& inner = JSG_REQUIRE_NONNULL(this->inner, DOMInvalidStateError, "File handle closed");
   auto offset = static_cast<size_t>(options.orDefault({}).at.orDefault(position));
   auto stat = inner->stat(js);
-  if (offset > stat.size) {
+  if (offset > stat.size && !stat.device) {
     position = stat.size;
     return 0;
   }

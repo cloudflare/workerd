@@ -690,6 +690,10 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     return fsMap->getTempRoot();
   }
 
+  const jsg::Url& getDevRoot() const override {
+    return fsMap->getDevRoot();
+  }
+
  private:
   kj::Own<FsMap> fsMap;
   mutable kj::Rc<Directory> root;
@@ -814,6 +818,7 @@ kj::Own<VirtualFileSystem> newWorkerFileSystem(
   Directory::Builder builder;
   builder.addPath(fsMap->getBundlePath(), kj::mv(bundleDirectory));
   builder.addPath(fsMap->getTempPath(), getTmpDirectoryImpl());
+  builder.addPath(fsMap->getDevPath(), getDevDirectory());
   return newVirtualFileSystem(kj::mv(fsMap), builder.finish());
 }
 
@@ -934,6 +939,242 @@ void SymbolicLinkRecursionGuardScope::checkSeen(SymbolicLink* link) {
   auto& guard = *symbolicLinkGuard;
   JSG_REQUIRE(guard.linksSeen.find(link) == kj::none, Error, "Recursive symbolic link detected");
   guard.linksSeen.insert(link);
+}
+
+namespace {
+// Implementations of special "device" files equivalent to special devices typically
+// found on posix systems.
+
+// /dev/null is a special file that discards all data written to it and returns
+// EOF on reads.
+class DevNullFile final: public File {
+ public:
+  DevNullFile() = default;
+
+  Stat stat(jsg::Lock& js) override {
+    return Stat{
+      .type = FsType::FILE,
+      .size = 0,
+      .lastModified = kj::UNIX_EPOCH,
+      .writable = true,
+      .device = true,
+    };
+  }
+
+  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    // No-op.
+  }
+
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+    // No-op.
+  }
+
+  void resize(jsg::Lock& js, size_t size) override {
+    // No-op.
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "/dev/null"_kj;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(DevNullFile);
+  }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    // No-op.
+  }
+
+  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+    return 0;
+  }
+
+  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    return buffer.size();
+  }
+};
+
+// /dev/zero is a special file that returns zeroes when read from and
+// ignores writes.
+class DevZeroFile final: public File {
+ public:
+  DevZeroFile() = default;
+
+  Stat stat(jsg::Lock& js) override {
+    return Stat{
+      .type = FsType::FILE,
+      .size = 0,
+      .lastModified = kj::UNIX_EPOCH,
+      .writable = true,
+      .device = true,
+    };
+  }
+
+  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    // No-op.
+  }
+
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+    // No-op.
+  }
+
+  void resize(jsg::Lock& js, size_t size) override {
+    // No-op.
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "/dev/zero"_kj;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(DevZeroFile);
+  }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    // No-op.
+  }
+
+  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+    buffer.fill(0);
+    return buffer.size();
+  }
+
+  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    return buffer.size();
+  }
+};
+
+// /dev/full is a special file that returns zeroes when read from and
+// returns an error when written to.
+class DevFullFile final: public File {
+ public:
+  DevFullFile() = default;
+
+  Stat stat(jsg::Lock& js) override {
+    return Stat{
+      .type = FsType::FILE,
+      .size = 0,
+      .lastModified = kj::UNIX_EPOCH,
+      .writable = false,
+      .device = true,
+    };
+  }
+
+  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    // No-op.
+  }
+
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
+  }
+
+  void resize(jsg::Lock& js, size_t size) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "/dev/full"_kj;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(DevFullFile);
+  }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    // No-op.
+  }
+
+  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+    buffer.fill(0);
+    return buffer.size();
+  }
+
+  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
+  }
+};
+
+class DevRandomFile final: public File {
+ public:
+  DevRandomFile() = default;
+
+  Stat stat(jsg::Lock& js) override {
+    return Stat{
+      .type = FsType::FILE,
+      .size = 0,
+      .lastModified = kj::UNIX_EPOCH,
+      .writable = false,
+      .device = true,
+    };
+  }
+
+  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  }
+
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  }
+
+  void resize(jsg::Lock& js, size_t size) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "/dev/random"_kj;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(DevRandomFile);
+  }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    // No-op.
+  }
+
+  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  }
+
+  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+    // We can only generate random bytes when we have an active IoContext.
+    // If there is no IoContext, this will return 0 bytes.
+    if (!IoContext::hasCurrent()) return 0;
+    auto& ioContext = IoContext::current();
+    if (isPredictableModeForTest()) {
+      buffer.fill(9);
+    } else {
+      ioContext.getEntropySource().generate(buffer);
+    }
+    return buffer.size();
+  }
+};
+
+}  // namespace
+
+kj::Rc<File> getDevNull() {
+  return kj::rc<DevNullFile>();
+}
+
+kj::Rc<File> getDevZero() {
+  return kj::rc<DevZeroFile>();
+}
+
+kj::Rc<File> getDevFull() {
+  return kj::rc<DevFullFile>();
+}
+
+kj::Rc<File> getDevRandom() {
+  return kj::rc<DevRandomFile>();
+}
+
+kj::Rc<Directory> getDevDirectory() {
+  Directory::Builder builder;
+  builder.add("null", getDevNull());
+  builder.add("zero", getDevZero());
+  builder.add("full", getDevFull());
+  builder.add("random", getDevRandom());
+  return builder.finish();
 }
 
 }  // namespace workerd
