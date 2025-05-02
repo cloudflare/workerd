@@ -1,15 +1,8 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
-import { createTarFS } from 'pyodide-internal:tarfs';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
-import {
-  REQUIREMENTS,
-  LOAD_WHEELS_FROM_R2,
-  LOCKFILE,
-  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
-} from 'pyodide-internal:metadata';
+import { LOCKFILE } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
-import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 const canonicalizeNameRegex = /[-_.]+/g;
 const DYNLIB_PATH = '/usr/lib';
@@ -175,7 +168,7 @@ class VirtualizedDir {
  *
  * TODO(later): This needs to be removed when external package loading is enabled.
  */
-export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
+export function buildVirtualizedDir(): VirtualizedDir {
   if (EmbeddedPackagesTarReader.read === undefined) {
     // Package retrieval is enabled, so the embedded tar reader isn't initialized.
     // All packages, including STDLIB_PACKAGES, are loaded in `loadPackages`.
@@ -185,17 +178,6 @@ export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
   const requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
-
-  // Currently, we include all packages within the big bundle in Edgeworker.
-  // During this transitionary period, we add the option (via autogate)
-  // to load packages from GCS (in which case they are accessible through the ArtifactBundler)
-  // or to simply use the packages within the big bundle. The latter is not ideal
-  // since we're locked to a specific packages version, so we will want to move away
-  // from it eventually.
-  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    requirements.forEach((r) => requirementsInBigBundle.add(r));
-  }
-
   const res = new VirtualizedDir();
   res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
 
@@ -218,24 +200,6 @@ function disabledLoadPackage(): never {
   throw new Error(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
-}
-
-/**
- * This mounts a TarFS representing the site-packages directory (which contains the Python packages)
- * and another TarFS representing the dynlib directory (where dynlibs like libcrypto.so live).
- *
- * This has to work before the runtime is initialized because of memory snapshot
- * details, so even though we want these directories to be on sys.path, we
- * handle that separately in adjustSysPath.
- */
-export function mountSitePackages(Module: Module, pkgs: VirtualizedDir): void {
-  const tarFS = createTarFS(Module);
-  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    // if we are not loading additional wheels, then we're done
-    // with site-packages and we can mount it here. Otherwise, we must mount it in
-    // loadPackages().
-    pkgs.mount(Module, tarFS);
-  }
 }
 
 /**
@@ -263,7 +227,4 @@ export function adjustSysPath(Module: Module): void {
   );
 }
 
-export { REQUIREMENTS };
-export const TRANSITIVE_REQUIREMENTS =
-  MetadataReader.getTransitiveRequirements();
-export const VIRTUALIZED_DIR = buildVirtualizedDir(TRANSITIVE_REQUIREMENTS);
+export const VIRTUALIZED_DIR = buildVirtualizedDir();

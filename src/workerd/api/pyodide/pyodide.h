@@ -116,7 +116,6 @@ class PyodideMetadataReader: public jsg::Object {
     bool isTracingFlag;
     bool snapshotToDisk;
     bool createBaselineSnapshot;
-    bool usePackagesInArtifactBundler;
     kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
     kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
     kj::Maybe<kj::Array<kj::String>> entrypointClasses;
@@ -132,7 +131,6 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
-        bool usePackagesInArtifactBundler,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
         kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
         kj::Maybe<kj::Array<kj::String>> entrypointClasses)
@@ -146,7 +144,6 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
-          usePackagesInArtifactBundler(usePackagesInArtifactBundler),
           memorySnapshot(kj::mv(memorySnapshot)),
           durableObjectClasses(kj::mv(durableObjectClasses)),
           entrypointClasses(kj::mv(entrypointClasses)) {}
@@ -202,10 +199,6 @@ class PyodideMetadataReader: public jsg::Object {
   }
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
 
-  bool shouldUsePackagesInArtifactBundler() {
-    return state->usePackagesInArtifactBundler;
-  }
-
   kj::StringPtr getPyodideVersion() {
     return state->pyodideVersion;
   }
@@ -248,7 +241,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
-    JSG_METHOD(shouldUsePackagesInArtifactBundler);
     JSG_METHOD(getPyodideVersion);
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);

@@ -1,9 +1,6 @@
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import {
-  VIRTUALIZED_DIR,
-  TRANSITIVE_REQUIREMENTS,
   adjustSysPath,
-  mountSitePackages,
   mountWorkerFiles,
 } from 'pyodide-internal:setupPackages';
 import {
@@ -34,6 +31,7 @@ import { simpleRunPython } from 'pyodide-internal:util';
 import { reportError } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
+import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
 
 /**
  * After running `instantiateEmscriptenModule` but before calling into any C
@@ -125,7 +123,6 @@ export async function loadPyodide(
     Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
 
-    mountSitePackages(Module, VIRTUALIZED_DIR);
     entropyMountFiles(Module);
     await enterJaegerSpan('load_packages', () =>
       // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in

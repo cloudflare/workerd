@@ -12,10 +12,9 @@
 import {
   WORKERD_INDEX_URL,
   LOCKFILE,
-  LOAD_WHEELS_FROM_R2,
-  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
   PACKAGES_VERSION,
   USING_OLDEST_PACKAGES_VERSION,
+  IS_WORKERD,
 } from 'pyodide-internal:metadata';
 import {
   VIRTUALIZED_DIR,
@@ -178,11 +177,11 @@ export async function loadPackages(
   if (USING_OLDEST_PACKAGES_VERSION) {
     pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
   }
-  if (LOAD_WHEELS_FROM_R2) {
+  if (IS_WORKERD) {
     await loadPackagesImpl(Module, pkgsToLoad, (req) =>
       loadBundleFromR2WithRetry(req, 0)
     );
-  } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
+  } else {
     await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromArtifactBundler);
   }
 }
