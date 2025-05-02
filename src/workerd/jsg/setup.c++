@@ -11,8 +11,6 @@
 
 #include "libplatform/libplatform.h"
 
-#include <workerd/util/uuid.h>
-
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
 
@@ -219,7 +217,6 @@ void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* gr
 }
 
 void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
-  tracker.trackField("uuid", uuid);
   tracker.trackField("heapTracer", heapTracer);
 }
 
@@ -765,15 +762,5 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   return kj::StringPtr(scratch.begin(), pos - scratch.begin());
 }
 #endif
-
-// TODO(soon): Replace this with Isolate::GetHashSeed() once current v8 release supports it.
-// Ref: https://chromium-review.googlesource.com/c/v8/v8/+/6286748
-kj::StringPtr IsolateBase::getUuid() {
-  // Lazily create a random UUID for this isolate.
-  KJ_IF_SOME(u, uuid) {
-    return u;
-  }
-  return uuid.emplace(randomUUID(kj::none));
-}
 
 }  // namespace workerd::jsg

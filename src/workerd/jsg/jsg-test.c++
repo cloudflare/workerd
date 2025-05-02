@@ -408,19 +408,6 @@ struct IsolateUuidContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
 
-KJ_TEST("jsg::Lock getUuid") {
-  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
-  bool called = false;
-  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
-    // Returns the same value
-    KJ_ASSERT(lock.getUuid() == lock.getUuid());
-    KJ_ASSERT(isolate.getUuid() == lock.getUuid());
-    KJ_ASSERT(lock.getUuid().size() == 36);
-    called = true;
-  });
-  KJ_ASSERT(called);
-}
-
 KJ_TEST("External memory adjustment") {
   IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {

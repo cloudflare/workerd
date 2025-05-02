@@ -434,6 +434,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::Own<const WeakIsolateRef> getWeakRef() const;
 
+  // Get a UUID for this isolate.
+  kj::StringPtr getUuid() const;
+
  private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;

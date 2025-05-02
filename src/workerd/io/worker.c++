@@ -27,6 +27,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
 #include <v8-inspector.h>
@@ -506,6 +507,9 @@ struct Worker::Isolate::Impl {
   InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
+
+  // UUID for this isolate, initialized first time getUuid() is called.
+  kj::Lazy<kj::String> uuid;
 
   // Notification messages to deliver to the next inspector client when it connects.
   kj::Vector<kj::String> queuedNotifications;
@@ -1367,6 +1371,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
 kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() const {
   return weakIsolateRef->addRef();
+}
+
+kj::StringPtr Worker::Isolate::getUuid() const {
+  // As of this writing, getUuid() is only used by actors, for metrics. We don't want to bother
+  // generating it if not used. The call site does not have nor want an isolate lock, so we use a
+  // kj::Lazy to make initialization thread-safe.
+  return impl->uuid.get(
+      [](kj::SpaceFor<kj::String>& space) { return space.construct(randomUUID(kj::none)); });
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {

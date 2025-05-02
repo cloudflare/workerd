@@ -257,10 +257,6 @@ bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
   return check(obj->HasOwnProperty(v8Context(), v8StrIntern(v8Isolate, name)));
 }
 
-kj::StringPtr Lock::getUuid() const {
-  return IsolateBase::from(v8Isolate).getUuid();
-}
-
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
 }
