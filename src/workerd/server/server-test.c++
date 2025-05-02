@@ -4552,6 +4552,9 @@ KJ_TEST("Server: Durable Object facets") {
                 `      results.push(await bar.increment("foo", true));  // increments bar.foo
                 `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER});
                 `      results.push(await foo.increment(true));  // increments foo
+                `
+                `      // Delete bar, which recursively deletes its children.
+                `      this.ctx.facets.delete("bar");
                 `    } else {
                 `      throw new Error(`bad url: ${request.url}`);
                 `    }
@@ -4663,6 +4666,18 @@ KJ_TEST("Server: Durable Object facets") {
     auto conn = test.connect("test-addr");
     conn.httpGet200("/part2", "1 2 5");
   }
+
+  // Root and foo still exist, bar does not.
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.1.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.2.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
 }
 
 }  // namespace
