@@ -744,4 +744,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-05-23");
   # When enabled, the AbortSignal of the incoming request is not passed through to subrequests.
   # As a result, outgoing subrequests will not be cancelled when the incoming request is.
+
+  enableNavigatorLanguage @86 :Bool
+      $compatEnableFlag("enable_navigator_language")
+      $compatEnableDate("2025-05-19")
+      $compatDisableFlag("disable_navigator_language");
+  # Enables Navigator.language API.
 }

@@ -15,5 +15,7 @@ export const testUserAgent = {
 export const testLanguage = {
   async test() {
     strictEqual(navigator.language, 'en');
+    Object.defineProperty(navigator, 'language', { value: 'tr' });
+    strictEqual(navigator.language, 'tr');
   },
 };
