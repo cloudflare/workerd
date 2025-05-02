@@ -2057,20 +2057,13 @@ class Server::WorkerService final: public Service,
 
       // Get the actor, starting it if it's not already running.
       kj::Promise<kj::Own<Worker::Actor>> getActor() {
-        for (;;) {
-          requireNotBroken();
+        requireNotBroken();
 
-          KJ_IF_SOME(a, actor) {
-            // This actor was used recently and hasn't been evicted, let's reuse it.
-            co_return a->addRef();
-          }
-
-          KJ_IF_SOME(s, startTask) {
-            co_await s;
-          } else {
-            co_await startTask.emplace(start().fork());
-          }
+        if (actor == kj::none) {
+          start();
         }
+
+        return KJ_ASSERT_NONNULL(actor)->addRef();
       }
 
       kj::Promise<kj::Own<WorkerInterface>> startRequest(
@@ -2097,7 +2090,6 @@ class Server::WorkerService final: public Service,
 
         onBrokenTask = kj::none;
         shutdownTask = kj::none;
-        startTask = kj::none;
         manager = kj::none;
         tracker->shutdown();
         actor = kj::none;
@@ -2120,7 +2112,6 @@ class Server::WorkerService final: public Service,
       kj::Timer& timer;
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
-      kj::Maybe<kj::ForkedPromise<void>> startTask;
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
@@ -2202,19 +2193,12 @@ class Server::WorkerService final: public Service,
         }
         // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
-        startTask = kj::none;  // so next getActor() will call start() again
       }
 
-      kj::Promise<void> start() {
+      void start() {
         KJ_REQUIRE(actor == nullptr);
 
         WorkerService& service = parent.service;
-
-        // `start()` is often called with the calling isolate's lock held. We need to drop that
-        // lock and take a lock on the target isolate before constructing the actor. Even if these
-        // are the same isolate (as is commonly the case), we really don't want to do this stuff
-        // synchronously, so this has the effect of pushing off to a later turn of the event loop.
-        auto asyncLock = co_await service.worker->takeAsyncLockWithoutRequest(nullptr);
 
         // Just in case abort() was called concurrently...
         requireNotBroken();
@@ -2276,17 +2260,15 @@ class Server::WorkerService final: public Service,
 
         auto loopback = kj::refcounted<Loopback>(*this);
 
-        service.worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
-          // We define this event ID in the internal codebase, but to have WebSocket Hibernation
-          // work for local development we need to pass an event type.
-          static constexpr uint16_t hibernationEventTypeId = 8;
+        // We define this event ID in the internal codebase, but to have WebSocket Hibernation
+        // work for local development we need to pass an event type.
+        static constexpr uint16_t hibernationEventTypeId = 8;
 
-          auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker,
-              getTracker(), Worker::Actor::cloneId(id), true, kj::mv(makeActorCache),
-              parent.className, kj::mv(makeStorage), lock, kj::mv(loopback), timerChannel,
-              kj::refcounted<ActorObserver>(), tryGetManagerRef(), hibernationEventTypeId));
-          onBrokenTask = monitorOnBroken(actorRef);
-        });
+        auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
+            Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
+            kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
+            tryGetManagerRef(), hibernationEventTypeId));
+        onBrokenTask = monitorOnBroken(actorRef);
       }
     };
 

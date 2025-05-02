@@ -3398,7 +3398,6 @@ struct Worker::Actor::Impl {
   kj::ForkedPromise<void> runningAlarmTask = kj::Promise<void>(kj::READY_NOW).fork();
 
   Impl(Worker::Actor& self,
-      Worker::Lock& lock,
       Actor::Id actorId,
       bool hasTransient,
       MakeActorCacheFunc makeActorCache,
@@ -3424,10 +3423,8 @@ struct Worker::Actor::Impl {
         shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
-    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      actorCache = makeActorCache(
-          self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
-    });
+    actorCache =
+        makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
   }
 };
 
@@ -3462,7 +3459,6 @@ Worker::Actor::Actor(const Worker& worker,
     MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className,
     MakeStorageFunc makeStorage,
-    Worker::Lock& lock,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
@@ -3471,13 +3467,14 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<rpc::Container::Client> container)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
-  impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
+  impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container));
 
   KJ_IF_SOME(c, className) {
-    KJ_IF_SOME(cls, lock.getWorker().impl->actorClasses.find(c)) {
-      impl->classInstance = &(cls);
+    KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
+      // const_cast OK because we're just storing the pointer and will only use this under lock.
+      impl->classInstance = const_cast<ActorClassInfo*>(&cls);
     } else {
       kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c));
     }

@@ -785,7 +785,6 @@ class Worker::Actor final: public kj::Refcounted {
       MakeActorCacheFunc makeActorCache,
       kj::Maybe<kj::StringPtr> className,
       MakeStorageFunc makeStorage,
-      Worker::Lock& lock,
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metrics,
