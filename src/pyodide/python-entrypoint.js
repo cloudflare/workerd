@@ -32,10 +32,10 @@ async function doAnImport(name) {
 // Pass the import function to the helper
 setDoAnImport(doAnImport, cloudflareWorkersModule, cloudflareSocketsModule);
 
-function makeEntrypointClassFromNames(names, cls) {
-  return names.map((className) => [
+function makeEntrypointClassFromNames(classes, baseClass) {
+  return classes.map(({ className, methodNames }) => [
     className,
-    makeEntrypointClass(className, cls),
+    makeEntrypointClass(className, baseClass, methodNames),
   ]);
 }
 
@@ -46,9 +46,10 @@ const entrypoints = {
 };
 
 const pythonEntrypoints = Object.fromEntries(
-  Object.entries(entrypoints).flatMap(([key, cls]) =>
-    makeEntrypointClassFromNames(pythonEntrypointClasses[key], cls)
-  )
+  Object.entries(entrypoints).flatMap(([key, baseClass]) => {
+    const classes = pythonEntrypointClasses[key];
+    return makeEntrypointClassFromNames(classes, baseClass);
+  })
 );
 
 export { pythonEntrypoints };

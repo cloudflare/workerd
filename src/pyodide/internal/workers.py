@@ -895,7 +895,9 @@ def handler(func):
 
 
 def _wrap_attr(attr):
-    if not callable(attr):
+    # `isinstance(attr, classmethod)` implies `not callable(attr)`, but we keep the latter for
+    # readability.
+    if not callable(attr) or isinstance(attr, (classmethod, staticmethod)):
         return attr
 
     @functools.wraps(attr)

@@ -259,8 +259,12 @@ function makeEntrypointProxyHandler(
   };
 }
 
-function makeEntrypointClass(className: string, classKind: AnyClass): any {
-  return class EntrypointWrapper extends classKind {
+function makeEntrypointClass(
+  className: string,
+  classKind: AnyClass,
+  methods: string[]
+): any {
+  const result = class EntrypointWrapper extends classKind {
     public constructor(...args: any[]) {
       super(...args);
       // Initialise a Python instance of the class.
@@ -270,6 +274,17 @@ function makeEntrypointClass(className: string, classKind: AnyClass): any {
       return new Proxy(this, makeEntrypointProxyHandler(pyInstancePromise));
     }
   };
+
+  // Add dummy functions to the class so that the validator can detect them. These will never get
+  // accessed because of the proxy at runtime.
+  for (let method of methods) {
+    if (SUPPORTED_HANDLER_NAMES.includes(method.slice(3))) {
+      // Remove the "on_" prefix.
+      method = method.slice(3);
+    }
+    result.prototype[method] = function (): void {};
+  }
+  return result;
 }
 
 type IntrospectionMod = {
@@ -303,10 +318,14 @@ const handlers: {
   [handlerName: string]: Handler;
 } = {};
 
+type ExporterClassInfo = {
+  className: string;
+  methodNames: string[];
+};
 let pythonEntrypointClasses: {
-  durableObjects: string[];
-  workerEntrypoints: string[];
-  workflowEntrypoints: string[];
+  durableObjects: ExporterClassInfo[];
+  workerEntrypoints: ExporterClassInfo[];
+  workflowEntrypoints: ExporterClassInfo[];
 } = { durableObjects: [], workerEntrypoints: [], workflowEntrypoints: [] };
 
 // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
@@ -317,11 +336,21 @@ if (IS_WORKERD || IS_TRACING) {
   //
   // TODO: rewrite package download logic in workerd to fetch the packages in the same way as in
   // edgeworker.
-  pythonEntrypointClasses.durableObjects = DURABLE_OBJECT_CLASSES ?? [];
+  //
+  // Because of the above we have limited info, so we cannot get the method names of the classes
+  // that are exported. But this doesn't matter as it's only useful for the validator.
+  const toClassInfo = (x: string): ExporterClassInfo => {
+    return { className: x, methodNames: [] };
+  };
+  pythonEntrypointClasses.durableObjects = (DURABLE_OBJECT_CLASSES ?? []).map(
+    toClassInfo
+  );
   // We currently have no way to discern between worker entrypoint classes and workflow entrypoint
   // classes in workerd. But workflow entrypoints appear to be just a special case of worker
   // entrypoints, so this should still work just fine.
-  pythonEntrypointClasses.workerEntrypoints = WORKER_ENTRYPOINT_CLASSES ?? [];
+  pythonEntrypointClasses.workerEntrypoints = (
+    WORKER_ENTRYPOINT_CLASSES ?? []
+  ).map(toClassInfo);
 
   for (const handlerName of SUPPORTED_HANDLER_NAMES) {
     const pyHandlerName = 'on_' + handlerName;
