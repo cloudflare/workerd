@@ -3228,7 +3228,10 @@ struct Worker::Actor::Impl {
 
   kj::Own<ActorObserver> metrics;
 
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
+  // When a boolean, indicates whether a `transient` should exist. If true, it will be initialized
+  // on the first `ensureConstructed()`.
+  kj::OneOf<bool, jsg::JsRef<jsg::JsValue>> transient;
+
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
   kj::Maybe<rpc::Container::Client> container;
@@ -3398,6 +3401,7 @@ struct Worker::Actor::Impl {
       : actorId(kj::mv(actorId)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
+        transient(hasTransient),
         container(kj::mv(container)),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
@@ -3409,10 +3413,6 @@ struct Worker::Actor::Impl {
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      if (hasTransient) {
-        transient.emplace(js, js.obj());
-      }
-
       actorCache = makeActorCache(
           self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
     });
@@ -3646,7 +3646,15 @@ Worker::Actor::Id Worker::Actor::cloneId() {
 
 kj::Maybe<jsg::JsRef<jsg::JsValue>> Worker::Actor::getTransient(Worker::Lock& lock) {
   KJ_REQUIRE(&lock.getWorker() == worker.get());
-  return impl->transient.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.addRef(lock); });
+
+  if (impl->transient.tryGet<bool>().orDefault(false)) {
+    // First call and `hasTransient` was true. Initialize it now, since we have the lock.
+    jsg::Lock& js = lock;
+    impl->transient.init<jsg::JsRef<jsg::JsValue>>(js, js.obj());
+  }
+
+  return impl->transient.tryGet<jsg::JsRef<jsg::JsValue>>().map(
+      [&](jsg::JsRef<jsg::JsValue>& val) { return val.addRef(lock); });
 }
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
