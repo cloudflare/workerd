@@ -443,7 +443,7 @@ KJ_TEST("Read/Write SpanOpen works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::SpanOpen>();
 
-  tracing::SpanOpen info(kj::str("foo"), kj::none);
+  tracing::SpanOpen info(0x2a2a2a2a2a2a2a2a, kj::str("foo"), kj::none);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();

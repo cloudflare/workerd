@@ -58,6 +58,7 @@ namespace {
   V(ONSET, "onset")                                                                                \
   V(OP, "op")                                                                                      \
   V(OUTCOME, "outcome")                                                                            \
+  V(PARENTSPANID, "parentSpanId")                                                                  \
   V(QUEUE, "queue")                                                                                \
   V(QUEUENAME, "queueName")                                                                        \
   V(RAWSIZE, "rawSize")                                                                            \
@@ -432,6 +433,14 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
   KJ_IF_SOME(op, spanOpen.operationName) {
     obj.set(js, OP_STR, js.str(op));
   }
+
+  // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
+  if (isPredictableModeForTest()) {
+    obj.set(js, PARENTSPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
+  } else {
+    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(spanOpen.parentSpanId)));
+  }
+
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
       KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
