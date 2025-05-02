@@ -22,6 +22,9 @@ declare namespace MetadataReader {
   const getTransitiveRequirements: () => Set<string>;
   const getDurableObjectClasses: () => string[] | null;
   const getEntrypointClasses: () => string[] | null;
+  const constructor: {
+    getBaselineSnapshotImports(): string[];
+  };
 }
 
 export default MetadataReader;

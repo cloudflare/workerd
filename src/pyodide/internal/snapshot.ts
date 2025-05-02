@@ -1,3 +1,4 @@
+import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
@@ -8,40 +9,72 @@ import {
   IS_CREATING_BASELINE_SNAPSHOT,
   MEMORY_SNAPSHOT_READER,
   REQUIREMENTS,
+  IS_CREATING_SNAPSHOT,
+  IS_EW_VALIDATING,
 } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
-let LOADED_BASELINE_SNAPSHOT: number;
-
-/**
- * This file is a simplified version of the Pyodide loader:
- * https://github.com/pyodide/pyodide/blob/main/src/js/pyodide.ts
- *
- * In particular, it drops the package lock, which disables
- * `pyodide.loadPackage`. In trade we add memory snapshots here.
- */
-
-/**
- * Global variable for the memory snapshot.
- */
-let READ_MEMORY: ((mod: Module) => void) | undefined = undefined;
-let SNAPSHOT_SIZE: number | undefined = undefined;
-export let SHOULD_RESTORE_SNAPSHOT = false;
-
-/**
- * Record the dlopen handles that are needed by the MEMORY.
- */
-let DSO_METADATA: DylinkInfo = {};
-// The state of the JS FFI
-export let HIWIRE_STATE: SnapshotConfig;
-
-type NewSnapshotMeta = {
-  hiwire: SnapshotConfig;
-  dsos: DylinkInfo;
-  version: 1;
+// A handle is the pointer into the linear memory returned by dlopen. Multiple dlopens will return
+// multiple pointers.
+type DsoHandles = {
+  [name: string]: { handles: number[] };
 };
-type SnapshotMeta = DylinkInfo | NewSnapshotMeta;
+
+// This is the info about Dsos that we record in getMemoryPatched. Namely the load order and where
+// their metadata is allocated. It would be natural to also have dsoHandles in here, but we don't
+// need a global variable to calculate dsoHandles since it is calculable from the information that
+// Emscripten stores in Module.LDSO (see recordDsoHandles).
+type DsoLoadInfo = {
+  readonly loadOrder: string[];
+  readonly soMemoryBases: { [name: string]: number };
+};
+
+// This is the old wire format, where "settings" is mixed with the DsoHandles information and
+// DsoLoadInfo is not present because we used to preload all dynamic libraries in a standard order.
+// The "version" field is never present in the old wire format, but at runtime accessing it will
+// give undefined. We need to include it here so that we can use the version field as the
+// descriminator for `OldSnapshotMeta | SnapshotMeta`.
+type OldSnapshotMeta = DsoHandles & {
+  readonly settings?: { readonly baselineSnapshot?: boolean };
+  readonly version?: undefined;
+};
+
+// The new wire format, with additional information about the hiwire state, the order that dsos were
+// loaded in, and their memory bases. We also moved settings out of the dsoHandles.
+type SnapshotMeta = {
+  readonly hiwire: SnapshotConfig | undefined;
+  readonly dsoHandles: DsoHandles;
+  readonly settings: { readonly baselineSnapshot: boolean };
+  readonly version: 1;
+} & DsoLoadInfo;
+
+// MEMORY_SNAPSHOT_READER has type SnapshotReader | undefined
+type SnapshotReader = {
+  readMemorySnapshot: (offset: number, buf: Uint32Array | Uint8Array) => void;
+  getMemorySnapshotSize: () => number;
+  disposeMemorySnapshot: () => void;
+};
+
+// Extra info that isn't stored in the snapshot but is calculated at runtime: snapshotSize and
+// snapshotOffset would be awkward to store in the snapshot. snapshotReader is equal to
+// MEMORY_SNAPSHOT_READER, but typescript knows it is defined.
+type LoadedSnapshotExtras = {
+  snapshotSize: number;
+  snapshotOffset: number;
+  snapshotReader: SnapshotReader;
+};
+
+type LoadedSnapshotMeta = SnapshotMeta & LoadedSnapshotExtras;
+
+/**
+ * Global variables for the memory snapshot.
+ */
+let LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined;
+const CREATED_SNAPSHOT_META: DsoLoadInfo = {
+  soMemoryBases: {},
+  loadOrder: [],
+};
 
 /**
  * Preload a dynamic library.
@@ -80,7 +113,7 @@ function loadDynlib(
   // "handles" are dlopen handles. There will be one entry in the `handles` list
   // for each dlopen handle that has not been dlclosed. We need to keep track of
   // these across
-  const { handles } = DSO_METADATA[path] || { handles: [] };
+  const { handles } = LOADED_SNAPSHOT_META?.dsoHandles[path] || { handles: [] };
   for (const handle of handles) {
     Module.LDSO.loadedLibsByHandle[handle] = dso;
   }
@@ -88,12 +121,12 @@ function loadDynlib(
 }
 
 /**
- * This function is used to ensure the order in which we load SO_FILES stays the same.
+ * This function is used to ensure the order in which we load SO_FILES stays the same. It is only
+ * used for 0.26.0a2, later we look at SNAPSHOT_META.loadOrder to decide what order to load libs.
  *
- * The sort always puts _lzma.so and _ssl.so
- * first, because these SO_FILES are loaded in the baseline snapshot, and if we want to generate
- * a package snapshot while a baseline snapshot is loaded we need them to be first. The rest of the
- * files are sorted alphabetically.
+ * The sort always puts _lzma.so and _ssl.so first, because these SO_FILES are loaded in the
+ * baseline snapshot, and if we want to generate a package snapshot while a baseline snapshot is
+ * loaded we need them to be first. The rest of the files are sorted alphabetically.
  *
  * The `filePaths` list is of the form [["folder", "file.so"], ["file.so"]], so each element in it
  * is effectively a file path.
@@ -130,11 +163,10 @@ function sortSoFiles(filePaths: FilePath[]): FilePath[] {
   return result;
 }
 
-// used for checkLoadedSoFiles a snapshot sanity check
-const SO_LOAD_ORDER: string[] = [];
-const SO_MEMORY_BASES: { [libName: string]: number } = {};
-
-// Used to ensure that the memoryBase of the dynamic library is stable when restoring snapshots.
+/**
+ * Used to ensure that the memoryBase of the dynamic library is stable when restoring snapshots.
+ * If the dynamic library was loaded in a memory snapshot,
+ */
 function getMemoryPatched(
   Module: Module,
   libPath: string,
@@ -143,26 +175,32 @@ function getMemoryPatched(
   if (Module.API.version === '0.26.0a2') {
     return Module.getMemory(size);
   }
-  // If we loaded this library before taking the snapshot, we already allocated the memory and the
-  // allocator remembers because its state is in the linear memory. We just have to look it up.
-  if (DSO_METADATA.soMemoryBases?.[libPath]) {
-    return DSO_METADATA.soMemoryBases[libPath];
-  }
   // Sometimes the module is loaded once by path and once by name, in either order. I'm not really
   // sure why. But let's check if we snapshoted a load of the library by name.
   const libName = libPath.split('/').at(-1)!;
-  if (DSO_METADATA.soMemoryBases?.[libName]) {
-    return DSO_METADATA.soMemoryBases[libName];
+  // 1. Is it loaded in the snapshot? Replay the memory base.
+  {
+    const { soMemoryBases } = LOADED_SNAPSHOT_META ?? {};
+    // If we loaded this library before taking the snapshot, we already allocated the memory and the
+    // allocator remembers because its state is in the linear memory. We just have to look it up.
+    const base = soMemoryBases?.[libPath] ?? soMemoryBases?.[libName];
+    if (base) {
+      return base;
+    }
   }
-  // Okay, we didn't load this before so we need to allocate new memory for it. Also record what we
-  // did in case someone makes a snapshot from this run.
-  SO_LOAD_ORDER.push(libPath);
-  const memoryBase = Module.getMemory(size);
-  // Just to be paranoid, track both by full path and by name. That gives us a chance to resolve
-  // conflicts in name by the full path.
-  SO_MEMORY_BASES[libPath] = memoryBase;
-  SO_MEMORY_BASES[libName] = memoryBase;
-  return memoryBase;
+  // 2. It's not loaded in the snapshot. Record
+  {
+    const { loadOrder, soMemoryBases } = CREATED_SNAPSHOT_META;
+    // Okay, we didn't load this before so we need to allocate new memory for it. Also record what we
+    // did in case someone makes a snapshot from this run.
+    loadOrder.push(libPath);
+    const memoryBase = Module.getMemory(size);
+    // Track both by full path and by name. That gives us a chance to resolve conflicts in name by the
+    // full path.
+    soMemoryBases[libPath] = memoryBase;
+    soMemoryBases[libName] = memoryBase;
+    return memoryBase;
+  }
 }
 
 /**
@@ -177,18 +215,21 @@ function getMemoryPatched(
  * there.
  */
 export function preloadDynamicLibs(Module: Module): void {
+  Module.noInitialRun = isRestoringSnapshot();
   Module.getMemoryPatched = getMemoryPatched;
-  Module.growMemory(SNAPSHOT_SIZE!);
+  Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
   let SO_FILES_TO_LOAD: string[][] = [];
   const sitePackages = Module.FS.sessionSitePackages + '/';
   if (Module.API.version === '0.26.0a2') {
-    if (IS_CREATING_BASELINE_SNAPSHOT || LOADED_BASELINE_SNAPSHOT) {
+    const loadedBaselineSnapshot =
+      LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
+    if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
       SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
     } else {
       SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
     }
-  } else if (DSO_METADATA.loadOrder) {
-    SO_FILES_TO_LOAD = DSO_METADATA.loadOrder.map((x) => {
+  } else if (LOADED_SNAPSHOT_META?.loadOrder) {
+    SO_FILES_TO_LOAD = LOADED_SNAPSHOT_META.loadOrder.map((x) => {
       // We need the path relative to the site-packages directory, not relative to the root of the file
       // system.
       if (x.startsWith(sitePackages)) {
@@ -226,26 +267,16 @@ export function preloadDynamicLibs(Module: Module): void {
   }
 }
 
-type DylinkInfo = {
-  [name: string]: { handles: string[] };
-} & {
-  settings?: { baselineSnapshot?: boolean };
-  loadOrder?: string[];
-  soMemoryBases?: { [name: string]: number };
-  version?: undefined;
-};
-
 /**
  * This records which dynamic libraries have open handles (handed out by dlopen,
  * not yet dlclosed). We'll need to track this information so that we don't
  * crash if we dlsym the handle after restoring from the snapshot
  */
-function recordDsoHandles(Module: Module): DylinkInfo {
-  const dylinkInfo: DylinkInfo = {};
-  for (const [handle, { name }] of Object.entries(
-    Module.LDSO.loadedLibsByHandle
-  )) {
-    if (Number(handle) === 0) {
+function recordDsoHandles(Module: Module): DsoHandles {
+  const dylinkInfo: DsoHandles = {};
+  for (const [h, { name }] of Object.entries(Module.LDSO.loadedLibsByHandle)) {
+    const handle = Number(h);
+    if (handle === 0) {
       continue;
     }
     if (!(name in dylinkInfo)) {
@@ -253,22 +284,8 @@ function recordDsoHandles(Module: Module): DylinkInfo {
     }
     dylinkInfo[name].handles.push(handle);
   }
-  dylinkInfo.settings = {
-    baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
-  };
-  dylinkInfo.loadOrder = SO_LOAD_ORDER;
-  dylinkInfo.soMemoryBases = SO_MEMORY_BASES;
   return dylinkInfo;
 }
-
-// This is the list of all packages imported by the Python bootstrap. We don't
-// want to spend time initializing these packages, so we make sure here that
-// the linear memory snapshot has them already initialized.
-// Can get this list by starting Python and filtering sys.modules for modules
-// whose importer is not FrozenImporter or BuiltinImporter.
-//
-const SNAPSHOT_IMPORTS: string[] =
-  ArtifactBundler.constructor.getSnapshotImports();
 
 /**
  * Python modules do a lot of work the first time they are imported. The memory
@@ -277,7 +294,7 @@ const SNAPSHOT_IMPORTS: string[] =
  * user code will fail.
  *
  * If we are doing a baseline snapshot, just import everything from
- * SNAPSHOT_IMPORTS. These will all succeed.
+ * baselineSnapshotImports. These will all succeed.
  *
  * If doing a more dedicated "package" snap shot, also try to import each
  * user import that is importing non-vendored modules.
@@ -289,9 +306,11 @@ const SNAPSHOT_IMPORTS: string[] =
  * This function returns a list of modules that have been imported.
  */
 function memorySnapshotDoImports(Module: Module): string[] {
-  const toImport = SNAPSHOT_IMPORTS.join(',');
+  const baselineSnapshotImports =
+    MetadataReader.constructor.getBaselineSnapshotImports();
+  const toImport = baselineSnapshotImports.join(',');
   const toDelete = Array.from(
-    new Set(SNAPSHOT_IMPORTS.map((x) => x.split('.', 1)[0]))
+    new Set(baselineSnapshotImports.map((x) => x.split('.', 1)[0]))
   ).join(',');
 
   simpleRunPython(Module, `import ${toImport}`);
@@ -332,27 +351,27 @@ function memorySnapshotDoImports(Module: Module): string[] {
  * linear memory into MEMORY.
  */
 function makeLinearMemorySnapshot(Module: Module): Uint8Array {
-  let meta: SnapshotMeta = recordDsoHandles(Module);
-  if (Module.API.version !== '0.26.0a2') {
-    const hiwire = Module.API.serializeHiwireState(Module);
-    const tmp: NewSnapshotMeta = {
-      version: 1,
-      dsos: meta,
-      hiwire,
-    };
-    meta = tmp;
-  }
-  if (IS_CREATING_BASELINE_SNAPSHOT) {
-    // checkLoadedSoFiles(dsoJSON);
-  }
-  return encodeSnapshot(Module.HEAP8, meta);
+  const dsoHandles = recordDsoHandles(Module);
+  const hiwire =
+    Module.API.version === '0.26.0a2'
+      ? undefined
+      : Module.API.serializeHiwireState(Module);
+  const settings = {
+    baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
+  };
+  return encodeSnapshot(Module.HEAP8, {
+    version: 1,
+    dsoHandles,
+    hiwire,
+    settings,
+    ...CREATED_SNAPSHOT_META,
+  });
 }
 
 // "\x00snp"
 const SNAPSHOT_MAGIC = 0x706e7300;
 const CREATE_SNAPSHOT_VERSION = 2;
 const HEADER_SIZE = 4 * 4;
-export let LOADED_SNAPSHOT_VERSION: number | undefined = undefined;
 
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
@@ -368,64 +387,13 @@ function encodeSnapshot(heap: Uint8Array, meta: SnapshotMeta): Uint8Array {
     json,
     toUpload.subarray(HEADER_SIZE)
   );
-  const uint32View = new Uint32Array(toUpload.buffer);
-  uint32View[0] = SNAPSHOT_MAGIC;
-  uint32View[1] = CREATE_SNAPSHOT_VERSION;
-  uint32View[2] = snapshotOffset;
-  uint32View[3] = jsonByteLength;
+  const header = new Uint32Array(toUpload.buffer);
+  header[0] = SNAPSHOT_MAGIC;
+  header[1] = CREATE_SNAPSHOT_VERSION;
+  header[2] = snapshotOffset;
+  header[3] = jsonByteLength;
   toUpload.subarray(snapshotOffset).set(heap);
   return toUpload;
-}
-
-/**
- * Decode heap and dsoJSON from the memory snapshot artifact we downloaded
- */
-function decodeSnapshot(): void {
-  if (!MEMORY_SNAPSHOT_READER) {
-    throw Error('Memory snapshot reader not available');
-  }
-  const buf = new Uint32Array(2);
-  let offset = 0;
-  MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
-  offset += 8;
-  LOADED_SNAPSHOT_VERSION = 0;
-  if (buf[0] == SNAPSHOT_MAGIC) {
-    LOADED_SNAPSHOT_VERSION = buf[1];
-    MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, buf);
-    offset += 8;
-  }
-  const snapshotOffset = buf[0];
-  SNAPSHOT_SIZE =
-    MEMORY_SNAPSHOT_READER.getMemorySnapshotSize() - snapshotOffset;
-  const jsonByteLength = buf[1];
-  const jsonBuf = new Uint8Array(jsonByteLength);
-  MEMORY_SNAPSHOT_READER.readMemorySnapshot(offset, jsonBuf);
-  const json = new TextDecoder().decode(jsonBuf);
-  const meta = JSON.parse(json) as SnapshotMeta;
-  if (!meta?.version) {
-    DSO_METADATA = meta;
-  } else {
-    ({ dsos: DSO_METADATA, hiwire: HIWIRE_STATE } = meta);
-  }
-
-  LOADED_BASELINE_SNAPSHOT = Number(DSO_METADATA?.settings?.baselineSnapshot);
-  READ_MEMORY = function (Module): void {
-    // restore memory from snapshot
-    if (!MEMORY_SNAPSHOT_READER) {
-      throw Error('Memory snapshot reader not available when reading memory');
-    }
-    MEMORY_SNAPSHOT_READER.readMemorySnapshot(snapshotOffset, Module.HEAP8);
-    MEMORY_SNAPSHOT_READER.disposeMemorySnapshot();
-  };
-  SHOULD_RESTORE_SNAPSHOT = true;
-}
-
-export function restoreSnapshot(Module: Module): void {
-  if (!READ_MEMORY) {
-    throw Error('READ_MEMORY not defined when restoring snapshot');
-  }
-  Module.growMemory(SNAPSHOT_SIZE!);
-  READ_MEMORY(Module);
 }
 
 let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
@@ -446,8 +414,68 @@ let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
     MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
     return;
   }
-  decodeSnapshot();
+  LOADED_SNAPSHOT_META = decodeSnapshot(MEMORY_SNAPSHOT_READER);
 })();
+
+/**
+ * Decode heap and dsoJSON from the memory snapshot reader
+ */
+function decodeSnapshot(reader: SnapshotReader): LoadedSnapshotMeta {
+  const header = new Uint32Array(4);
+  reader.readMemorySnapshot(0, header);
+  if (header[0] !== SNAPSHOT_MAGIC) {
+    throw new Error(
+      `Invalid magic number ${header[0]}, expected ${SNAPSHOT_MAGIC}`
+    );
+  }
+  // buf[1] is SNAPSHOT_VERSION (unused currently)
+  const snapshotOffset = header[2];
+  const jsonByteLength = header[3];
+
+  const snapshotSize = reader.getMemorySnapshotSize() - snapshotOffset;
+  const jsonBuf = new Uint8Array(jsonByteLength);
+  const offset = header.byteLength; // the json starts after the header
+  reader.readMemorySnapshot(offset, jsonBuf);
+  const json = new TextDecoder().decode(jsonBuf);
+  const meta = JSON.parse(json) as OldSnapshotMeta | SnapshotMeta;
+  const extras: LoadedSnapshotExtras = {
+    snapshotSize,
+    snapshotOffset,
+    snapshotReader: reader,
+  };
+  if (!meta?.version) {
+    return {
+      version: 1,
+      dsoHandles: meta,
+      hiwire: undefined,
+      loadOrder: [],
+      soMemoryBases: {},
+      settings: { baselineSnapshot: false, ...meta.settings },
+      ...extras,
+    };
+  }
+  return { ...meta, ...extras };
+}
+
+export function isRestoringSnapshot(): boolean {
+  return !!LOADED_SNAPSHOT_META;
+}
+
+export function maybeRestoreSnapshot(Module: Module): void {
+  if (!LOADED_SNAPSHOT_META) {
+    return;
+  }
+  const { snapshotSize, snapshotOffset, snapshotReader } = LOADED_SNAPSHOT_META;
+  Module.growMemory(snapshotSize);
+  snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
+  snapshotReader.disposeMemorySnapshot();
+  // Invalidate caches if we have a snapshot because the contents of site-packages
+  // may have changed.
+  simpleRunPython(
+    Module,
+    'from importlib import invalidate_caches as f; f(); del f'
+  );
+}
 
 export function finishSnapshotSetup(pyodide: Pyodide): void {
   // This is just here for our test suite. Ugly but just about the only way to test this.
@@ -459,18 +487,14 @@ export function finishSnapshotSetup(pyodide: Pyodide): void {
   }
 }
 
-export function shouldCreateSnapshot(): boolean {
-  return ArtifactBundler.isEwValidating() || SHOULD_SNAPSHOT_TO_DISK;
-}
-
 export function maybeCollectSnapshot(Module: Module): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
   const importedModulesList = memorySnapshotDoImports(Module);
-  if (!shouldCreateSnapshot()) {
+  if (!IS_CREATING_SNAPSHOT) {
     return;
   }
-  if (ArtifactBundler.isEwValidating()) {
+  if (IS_EW_VALIDATING) {
     const snapshot = makeLinearMemorySnapshot(Module);
     ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
@@ -478,4 +502,12 @@ export function maybeCollectSnapshot(Module: Module): void {
     // TODO(soon): Get rid of this type coercion.
     DiskCache.put('snapshot.bin', snapshot as unknown as ArrayBuffer);
   }
+}
+
+export function finalizeBootstrap(Module: Module): void {
+  Module.API.config._makeSnapshot =
+    IS_CREATING_SNAPSHOT && Module.API.version !== '0.26.0a2';
+  enterJaegerSpan('finalize_bootstrap', () => {
+    Module.API.finalizeBootstrap(LOADED_SNAPSHOT_META?.hiwire);
+  });
 }

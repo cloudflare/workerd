@@ -4,13 +4,12 @@ import {
   mountWorkerFiles,
 } from 'pyodide-internal:setupPackages';
 import {
-  SHOULD_RESTORE_SNAPSHOT,
   finishSnapshotSetup,
   maybeCollectSnapshot,
-  restoreSnapshot,
+  maybeRestoreSnapshot,
   preloadDynamicLibs,
-  shouldCreateSnapshot,
-  HIWIRE_STATE,
+  finalizeBootstrap,
+  isRestoringSnapshot,
 } from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
@@ -27,7 +26,6 @@ import {
 import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
-import { simpleRunPython } from 'pyodide-internal:util';
 import { reportError } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
@@ -40,37 +38,23 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  * restore the linear memory from the snapshot.
  */
 function prepareWasmLinearMemory(Module: Module): void {
-  // Note: if we are restoring from a snapshot, runtime is not initialized yet.
-  Module.noInitialRun = !SHOULD_RESTORE_SNAPSHOT;
-
   enterJaegerSpan('preload_dynamic_libs', () => {
     preloadDynamicLibs(Module);
   });
   enterJaegerSpan('remove_run_dependency', () => {
     Module.removeRunDependency('dynlibs');
   });
-  if (SHOULD_RESTORE_SNAPSHOT) {
-    enterJaegerSpan('restore_snapshot', () => {
-      restoreSnapshot(Module);
-    });
-    // Invalidate caches if we have a snapshot because the contents of site-packages
-    // may have changed.
-    simpleRunPython(
-      Module,
-      'from importlib import invalidate_caches as f; f(); del f'
-    );
-  }
+  maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   entropyAfterRuntimeInit(Module);
-  if (!SHOULD_RESTORE_SNAPSHOT) {
+  if (!isRestoringSnapshot()) {
     // The effects of these are purely in Python state so they only need to be run
     // if we didn't restore a snapshot.
     entropyBeforeTopLevel(Module);
     adjustSysPath(Module);
   }
   if (Module.API.version !== '0.26.0a2') {
-    Module.API.config._makeSnapshot = shouldCreateSnapshot();
-    Module.API.finalizeBootstrap(HIWIRE_STATE);
+    finalizeBootstrap(Module);
   }
 }
 
@@ -142,7 +126,7 @@ export async function loadPyodide(
     if (Module.API.version === '0.26.0a2') {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
-      enterJaegerSpan('finalize_bootstrap', Module.API.finalizeBootstrap);
+      finalizeBootstrap(Module);
     }
     const pyodide = Module.API.public_api;
 

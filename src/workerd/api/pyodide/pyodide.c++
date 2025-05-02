@@ -390,7 +390,7 @@ const kj::Array<kj::StringPtr> snapshotImports = kj::arr("_pyodide"_kj,
     "typing"_kj,
     "zipfile"_kj);
 
-kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
+kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
