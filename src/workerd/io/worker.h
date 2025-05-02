@@ -873,6 +873,7 @@ class Worker::Actor final: public kj::Refcounted {
   //   to customize the JS API but only the underlying ActorCacheInterface?
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
+  static bool idsEqual(const Id& a, const Id& b);
 
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
