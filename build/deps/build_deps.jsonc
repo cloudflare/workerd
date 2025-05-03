@@ -112,6 +112,15 @@
       "file_regex": "^rules_nodejs-.*\\.tar\\.gz$"
     },
     {
+      // Needed for aspect_rules_js, build fails on Windows if it is not fetched explicitly.
+      // rules_js 2.1.0 uses a fixed version, once we update to that version this can be dropped.
+      "name": "aspect_bazel_lib",
+      "type": "github_release",
+      "owner": "bazel-contrib",
+      "repo": "bazel-lib",
+      "file_regex": "^bazel-lib-.*\\.tar\\.gz$"
+    },
+    {
       "name": "aspect_rules_js",
       "type": "github_release",
       "owner": "aspect-build",
