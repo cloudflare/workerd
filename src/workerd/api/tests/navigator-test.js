@@ -1,4 +1,4 @@
-import { strictEqual } from 'node:assert';
+import { strictEqual, deepStrictEqual } from 'node:assert';
 
 export const testHardwareConcurrency = {
   async test() {
@@ -17,5 +17,11 @@ export const testLanguage = {
     strictEqual(navigator.language, 'en');
     Object.defineProperty(navigator, 'language', { value: 'tr' });
     strictEqual(navigator.language, 'tr');
+  },
+};
+
+export const testLanguages = {
+  async test() {
+    deepStrictEqual(navigator.languages, ['en']);
   },
 };

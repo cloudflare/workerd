@@ -88,6 +88,12 @@ class Navigator: public jsg::Object {
     return "en"_kj;
   }
 
+  kj::Array<kj::String> getLanguages() {
+    auto builder = kj::heapArrayBuilder<kj::String>(1);
+    builder.add(kj::str("en"));
+    return builder.finish();
+  }
+
   JSG_RESOURCE_TYPE(Navigator, CompatibilityFlags::Reader reader) {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
@@ -95,6 +101,7 @@ class Navigator: public jsg::Object {
 
     if (reader.getEnableNavigatorLanguage()) {
       JSG_READONLY_INSTANCE_PROPERTY(language, getLanguage);
+      JSG_READONLY_INSTANCE_PROPERTY(languages, getLanguages);
     }
   }
 };
