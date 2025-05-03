@@ -42,6 +42,9 @@ rust_library(
     ],
     version = "0.52.6",
     deps = select({
+        "@rules_rust//rust/platform:aarch64-pc-windows-msvc": [
+            "@crates_vendor__windows_aarch64_msvc-0.52.6//:windows_aarch64_msvc",  # cfg(all(target_arch = "aarch64", target_env = "msvc", not(windows_raw_dylib)))
+        ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
             "@crates_vendor__windows_x86_64_msvc-0.52.6//:windows_x86_64_msvc",  # cfg(all(any(target_arch = "x86_64", target_arch = "arm64ec"), target_env = "msvc", not(windows_raw_dylib)))
         ],
