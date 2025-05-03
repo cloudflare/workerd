@@ -13,17 +13,28 @@ namespace workerd::api {
 
 class Blob;
 class File;
+class URL;
+namespace url {
+class URL;
+}  // namespace url
+
+// A path can be specified as either a string, a legacy URL, or a standard URL.
+using FilePath = kj::OneOf<kj::String, jsg::Ref<URL>, jsg::Ref<url::URL>>;
 
 // The JS view of the workerd::Stat metadata struct. The only real difference
 // here is that type is a string instead of an enum.
 struct Stat final {
   kj::StringPtr type;  // One of: "file", "directory", "symlink"
-  size_t size;
-  kj::Date lastModified;
-  kj::Date created;
+  double size;
+  uint64_t lastModifiedNs;
+  uint64_t createdNs;
   bool writable;
-  JSG_STRUCT(type, size, lastModified, created, writable);
+  bool device;
+  JSG_STRUCT(type, size, lastModifiedNs, createdNs, writable, device);
   Stat(const workerd::Stat& stat);
+
+  // The lastModifiedNs and createdNs fields will be mapped to bigints in the
+  // JS view and will be in nanosecond resolution.
 };
 
 class DirectoryHandle;
@@ -162,14 +173,14 @@ class DirectoryHandle final: public jsg::Object {
   size_t getCount(jsg::Lock& js, jsg::Optional<kj::String> typeFilter);
 
   kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> open(
-      jsg::Lock& js, kj::String path, jsg::Optional<kj::String> createAs);
+      jsg::Lock& js, FilePath path, jsg::Optional<kj::String> createAs);
 
   struct RemoveOptions {
     bool recursive = false;
     JSG_STRUCT(recursive);
   };
 
-  bool remove(jsg::Lock& js, kj::String path, jsg::Optional<RemoveOptions> options);
+  bool remove(jsg::Lock& js, FilePath path, jsg::Optional<RemoveOptions> options);
 
   void add(jsg::Lock& js,
       kj::String name,
@@ -222,16 +233,35 @@ class FileSystemModule final: public jsg::Object {
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
-  kj::Maybe<jsg::Ref<SymbolicLinkHandle>> symlink(jsg::Lock& js, kj::String targetPath);
+  kj::Maybe<jsg::Ref<SymbolicLinkHandle>> symlink(jsg::Lock& js, FilePath targetPath);
 
   kj::Maybe<jsg::Ref<DirectoryHandle>> getRoot(jsg::Lock& js);
 
   kj::Maybe<jsg::Ref<DirectoryHandle>> getTmp(jsg::Lock& js);
 
   kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> open(
-      jsg::Lock& js, kj::String path);
+      jsg::Lock& js, FilePath path);
 
-  kj::Maybe<Stat> stat(jsg::Lock& js, kj::String path);
+  kj::Maybe<Stat> stat(jsg::Lock& js, FilePath path);
+
+  struct CopyFileOptions {
+    // Equivalent to Node.js' COPYFILE_EXCL flag indicating that the copy
+    // will fail if the destination file already exists.
+    jsg::Optional<bool> exclusive;
+    JSG_STRUCT(exclusive);
+  };
+
+  // Attempt to copy a file from `from` to `to`. If `from` is a directory, an
+  // error is thrown. If `from` does not exist, an error is thrown. If `to`
+  // identifies a directory (or ends with a `/` indicating a directory) an error
+  // is thrown. If the exclusive option is set and the to file already exists,
+  // an error is thrown. If the exclusive option is not set and the file already
+  // exists, it is overwritten. If the copy fails, the destination file will not
+  // be created. If the `to` indicates a path with multiple components, all
+  // components except the last one must exist and must be directories or an
+  // error is thrown. If the call to copyFile completes without exception then
+  // the copy is presumed to have succeeded.
+  void copyFile(jsg::Lock& js, FilePath from, FilePath to, jsg::Optional<CopyFileOptions> options);
 
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(root, getRoot);
@@ -239,6 +269,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(open);
     JSG_METHOD(stat);
     JSG_METHOD(symlink);
+    JSG_METHOD(copyFile);
   }
 };
 
@@ -567,6 +598,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::DirectoryHandle::RemoveOptions, workerd::api::DirectoryHandle::Entry,          \
       workerd::api::DirectoryHandle::EntryIterator, workerd::api::DirectoryHandle::KeyIterator,    \
       workerd::api::DirectoryHandle::EntryIterator::Next,                                          \
-      workerd::api::DirectoryHandle::KeyIterator::Next
+      workerd::api::DirectoryHandle::KeyIterator::Next,                                            \
+      workerd::api::FileSystemModule::CopyFileOptions
 
 }  // namespace workerd::api

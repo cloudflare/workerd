@@ -3,6 +3,8 @@
 #include "blob.h"
 
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/url-standard.h>
+#include <workerd/api/url.h>
 
 namespace workerd::api {
 
@@ -26,14 +28,40 @@ constexpr FsType getTypeForName(kj::StringPtr name) {
   if (name == "symlink"_kj) return FsType::SYMLINK;
   KJ_UNREACHABLE;
 }
+
+jsg::Url filePathToUrl(FilePath& path) {
+  KJ_SWITCH_ONEOF(path) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      // For a string, we need to try parsing it as a URL first.
+      auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(str, "file:///"_kj), Error, "Invalid path");
+      JSG_REQUIRE(url.getProtocol() == "file:"_kjb, Error, "Only file: URLs are supported");
+      return kj::mv(url);
+    }
+    KJ_CASE_ONEOF(legacyUrl, jsg::Ref<URL>) {
+      // For a legacy URL, we need to convert it to a standard URL by
+      // serializing it then parsing it again. This is unfortunate, but
+      // necessary if we don't want to tie node:fs support to whether the
+      // standard URL is enabled or not.
+      JSG_REQUIRE(legacyUrl->getProtocol() == "file:", Error, "Only file: URLs are supported");
+      auto str = legacyUrl->getHref();
+      return JSG_REQUIRE_NONNULL(jsg::Url::tryParse(str.asPtr(), kj::none), Error, "Invalid path");
+    }
+    KJ_CASE_ONEOF(standardUrl, jsg::Ref<url::URL>) {
+      return standardUrl->getInner().clone();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace
 
 Stat::Stat(const workerd::Stat& stat)
     : type(getNameForFsType(stat.type)),
-      size(stat.size),
-      lastModified(stat.lastModified),
-      created(stat.created),
-      writable(stat.writable) {}
+      size(static_cast<double>(stat.size)),
+      lastModifiedNs((stat.lastModified - kj::UNIX_EPOCH) / kj::NANOSECONDS),
+      createdNs((stat.created - kj::UNIX_EPOCH) / kj::NANOSECONDS),
+      writable(stat.writable),
+      device(stat.device) {}
 
 FileHandle::FileHandle(kj::Rc<workerd::File> inner): inner(kj::mv(inner)) {}
 
@@ -150,8 +178,8 @@ size_t DirectoryHandle::getCount(jsg::Lock& js, jsg::Optional<kj::String> typeFi
 }
 
 kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> DirectoryHandle::open(
-    jsg::Lock& js, kj::String path, jsg::Optional<kj::String> createAs) {
-  auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path, "file:///"_kj), Error, "Invalid path");
+    jsg::Lock& js, FilePath path, jsg::Optional<kj::String> createAs) {
+  auto url = filePathToUrl(path);
   auto str = kj::str(url.getPathname().slice(1));
   kj::Path root{};
   KJ_IF_SOME(node, inner->tryOpen(js, root.eval(str), createAs.map([](kj::StringPtr name) {
@@ -170,8 +198,8 @@ kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> DirectoryH
   return kj::none;
 }
 
-bool DirectoryHandle::remove(jsg::Lock& js, kj::String path, jsg::Optional<RemoveOptions> options) {
-  auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path, "file:///"_kj), Error, "Invalid path");
+bool DirectoryHandle::remove(jsg::Lock& js, FilePath path, jsg::Optional<RemoveOptions> options) {
+  auto url = filePathToUrl(path);
   auto str = kj::str(url.getPathname().slice(1));
   kj::Path root{};
   auto opts = options.orDefault(RemoveOptions());
@@ -310,10 +338,9 @@ kj::Maybe<DirectoryHandle::Entry> DirectoryHandle::entryNext(
 }
 
 kj::Maybe<jsg::Ref<SymbolicLinkHandle>> FileSystemModule::symlink(
-    jsg::Lock& js, kj::String targetPath) {
+    jsg::Lock& js, FilePath targetPath) {
   KJ_IF_SOME(vfs, workerd::VirtualFileSystem::tryGetCurrent(js)) {
-    auto url =
-        JSG_REQUIRE_NONNULL(jsg::Url::tryParse(targetPath, "file:///"_kj), Error, "Invalid path");
+    auto url = filePathToUrl(targetPath);
     return js.alloc<SymbolicLinkHandle>(vfs.newSymbolicLink(js, url));
   }
   return kj::none;
@@ -327,9 +354,9 @@ kj::Maybe<jsg::Ref<DirectoryHandle>> FileSystemModule::getRoot(jsg::Lock& js) {
 }
 
 kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> FileSystemModule::open(
-    jsg::Lock& js, kj::String path) {
+    jsg::Lock& js, FilePath path) {
   KJ_IF_SOME(vfs, workerd::VirtualFileSystem::tryGetCurrent(js)) {
-    auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path, "file:///"_kj), Error, "Invalid path");
+    auto url = filePathToUrl(path);
     KJ_IF_SOME(node, vfs.resolve(js, url)) {
       KJ_SWITCH_ONEOF(node) {
         KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
@@ -345,9 +372,9 @@ kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> FileSystem
   return kj::none;
 }
 
-kj::Maybe<Stat> FileSystemModule::stat(jsg::Lock& js, kj::String path) {
+kj::Maybe<Stat> FileSystemModule::stat(jsg::Lock& js, FilePath path) {
   KJ_IF_SOME(vfs, workerd::VirtualFileSystem::tryGetCurrent(js)) {
-    auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(path, "file:///"_kj), Error, "Invalid path");
+    auto url = filePathToUrl(path);
     return vfs.resolveStat(js, url).map([](const workerd::Stat& stat) { return Stat(stat); });
   }
   return kj::none;
@@ -367,6 +394,77 @@ kj::Maybe<jsg::Ref<DirectoryHandle>> FileSystemModule::getTmp(jsg::Lock& js) {
     }
   }
   return kj::none;
+}
+
+// Attempt to copy a file from `from` to `to`. If `from` is a directory, an
+// error is thrown. If `from` does not exist, an error is thrown. If `to`
+// identifies a directory (or ends with a `/` indicating a directory) an error
+// is thrown. If the exclusive option is set and the to file already exists,
+// an error is thrown. If the exclusive option is not set and the file already
+// exists, it is overwritten. If the copy fails, the destination file will not
+// be created. If the `to` indicates a path with multiple components, all
+// components except the last one must exist and must be directories or an
+// error is thrown. If the call to copyFile completes without exception then
+// the copy is presumed to have succeeded.
+void FileSystemModule::copyFile(
+    jsg::Lock& js, FilePath from, FilePath to, jsg::Optional<CopyFileOptions> options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto fromUrl = filePathToUrl(from);
+  auto toUrl = filePathToUrl(to);
+  auto exclusive = options.orDefault(CopyFileOptions()).exclusive.orDefault(false);
+
+  auto source = JSG_REQUIRE_NONNULL(vfs.resolve(js, fromUrl), Error, "Source does not exist");
+  auto& sourceFile =
+      JSG_REQUIRE_NONNULL(source.tryGet<kj::Rc<workerd::File>>(), Error, "Source is not a file");
+
+  static auto performCopy = [](jsg::Lock& js, kj::Rc<workerd::File>& sourceFile,
+                                kj::Rc<workerd::File>& destFile) {
+    kj::byte buffer[4096];
+    kj::ArrayPtr<kj::byte> bufferPtr(buffer);
+    auto stat = sourceFile->stat(js);
+    destFile->resize(js, stat.size);
+    size_t remaining = stat.size;
+    size_t offset = 0;
+    while (remaining > 0) {
+      size_t read = sourceFile->read(js, offset, bufferPtr);
+      KJ_ASSERT(read <= remaining);
+      KJ_ASSERT(read == destFile->write(js, offset, bufferPtr.slice(0, read)));
+      remaining -= read;
+      offset += read;
+    }
+  };
+
+  JSG_REQUIRE(!toUrl.getPathname().endsWith("/"_kj), Error, "Destination cannot be a directory");
+  KJ_IF_SOME(dest, vfs.resolve(js, toUrl)) {
+    JSG_REQUIRE(!exclusive, Error, "Destination file exists");
+    // The destination exists. Let's make sure it's a file.
+    auto& destFile = JSG_REQUIRE_NONNULL(
+        dest.tryGet<kj::Rc<workerd::File>>(), Error, "Destination is not a file");
+    // The overwrite the contents.
+    performCopy(js, sourceFile, destFile);
+  } else {
+    // The destination does not exist. If the path has multiple components,
+    // then all components except the last one must exist and must be
+    // directories.
+    auto str = kj::str(toUrl.getPathname().slice(1));
+    kj::Path root{};
+    auto toPath = root.eval(str);
+    auto parentPath = toPath.parent();
+    auto name = toPath.basename();
+    auto parent = JSG_REQUIRE_NONNULL(vfs.getRoot(js)->tryOpen(js, parentPath), Error,
+        "Destination parent directory does not exist");
+    // Make sure the parent is a directory.
+    auto& parentDir = JSG_REQUIRE_NONNULL(parent.tryGet<kj::Rc<workerd::Directory>>(), Error,
+        "Destination parent is not a directory");
+    // Now, try to create the destination file.
+    auto dest = JSG_REQUIRE_NONNULL(parentDir->tryOpen(js, name, workerd::FsType::FILE), Error,
+        "Failed to create destination file");
+    // Make sure the destination was created as a file
+    auto& destFile = JSG_REQUIRE_NONNULL(
+        dest.tryGet<kj::Rc<workerd::File>>(), Error, "Destination is not a file");
+    performCopy(js, sourceFile, destFile);
+  }
 }
 
 // =======================================================================================

@@ -5,7 +5,6 @@
 #pragma once
 
 #include <kj/hash.h>
-#include "form-data.h"
 #include <workerd/api/blob.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
@@ -249,6 +248,10 @@ public:
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("inner", inner);
     tracker.trackField("searchParams", maybeSearchParams);
+  }
+
+  const jsg::Url& getInner() const {
+    return inner;
   }
 
 private:
