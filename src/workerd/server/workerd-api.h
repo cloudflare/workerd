@@ -68,7 +68,9 @@ class WorkerdApi final: public Worker::Api {
       config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter);
 
-  void compileModules(jsg::Lock& lock, const Worker::Script::ModulesSource& source) const override;
+  void compileModules(jsg::Lock& lock,
+      const Worker::Script::ModulesSource& source,
+      const Worker::Isolate& isolate) const override;
 
   // A pipeline-level binding.
   struct Global {

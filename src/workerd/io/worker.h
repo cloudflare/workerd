@@ -586,7 +586,9 @@ class Worker::Api {
   // Create the context (global scope) object.
   virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
 
-  virtual void compileModules(jsg::Lock& lock, const Script::ModulesSource& source) const = 0;
+  virtual void compileModules(jsg::Lock& lock,
+      const Script::ModulesSource& source,
+      const Worker::Isolate& isolate) const = 0;
 
   // Given a module's export namespace, return all the top-level exports.
   virtual jsg::Dict<NamedExport> unwrapExports(

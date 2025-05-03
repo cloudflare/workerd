@@ -708,8 +708,9 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
 }
 
 // Part of the original module registry implementation.
-void WorkerdApi::compileModules(
-    jsg::Lock& lockParam, const Worker::Script::ModulesSource& source) const {
+void WorkerdApi::compileModules(jsg::Lock& lockParam,
+    const Worker::Script::ModulesSource& source,
+    const Worker::Isolate& isolate) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
