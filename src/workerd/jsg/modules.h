@@ -157,7 +157,7 @@ class ModuleRegistry {
 
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
-        kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
+        kj::Maybe<kj::ArrayPtr<const kj::StringPtr>> maybeExports,
         SyntheticModuleInfo synthetic);
 
     ModuleInfo(ModuleInfo&&) = default;

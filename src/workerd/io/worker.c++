@@ -1347,7 +1347,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   }
                   auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
                   impl->configureDynamicImports(lock, modules);
-                  modulesSource.compileModules(lock, isolate->getApi());
+                  isolate->getApi().compileModules(lock, modulesSource);
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
               }

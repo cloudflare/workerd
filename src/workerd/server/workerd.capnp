@@ -279,11 +279,17 @@ struct Worker {
       # A Python package that is required by this bundle. The package must be supported by
       # Pyodide (https://pyodide.org/en/stable/usage/packages-in-pyodide.html). All packages listed
       # will be installed prior to the execution of the worker.
+      #
+      # The value of this field is ignored and should always be an empty string. Only the module
+      # name matters. The field should have been declared `Void`, but it's difficult to change now.
     }
 
     namedExports @10 :List(Text);
     # For commonJsModule modules, this is a list of named exports that the
     # module expects to be exported once the evaluation is complete.
+    #
+    # (`commonJsModule` should have been a group containing the body and `namedExports`, but it's
+    # too late to change now.)
   }
 
   compatibilityDate @3 :Text;

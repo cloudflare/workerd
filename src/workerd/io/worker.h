@@ -237,6 +237,48 @@ class Worker::Script: public kj::AtomicRefcounted {
     jsg::V8Ref<v8::Value> value;
   };
 
+  struct EsModule {
+    kj::StringPtr body;
+  };
+  struct CommonJsModule {
+    kj::StringPtr body;
+    kj::Maybe<kj::Array<kj::StringPtr>> namedExports;
+  };
+  struct TextModule {
+    kj::StringPtr body;
+  };
+  struct DataModule {
+    kj::ArrayPtr<const byte> body;
+  };
+  struct WasmModule {
+    kj::ArrayPtr<const byte> body;
+  };
+  struct JsonModule {
+    kj::StringPtr body;
+  };
+  struct PythonModule {
+    kj::StringPtr body;
+  };
+  struct PythonRequirement {};
+  struct CapnpModule {
+    uint64_t typeId;
+  };
+
+  using ModuleContent = kj::OneOf<EsModule,
+      CommonJsModule,
+      TextModule,
+      DataModule,
+      WasmModule,
+      JsonModule,
+      PythonModule,
+      PythonRequirement,
+      CapnpModule>;
+
+  struct Module {
+    kj::StringPtr name;
+    ModuleContent content;
+  };
+
   struct ScriptSource {
     // Content of the script (JavaScript). Pointer is valid only until the Script constructor
     // returns.
@@ -247,6 +289,12 @@ class Worker::Script: public kj::AtomicRefcounted {
     kj::StringPtr mainScriptName;
 
     // Callback which will compile the script-level globals, returning a list of them.
+    // TODO(cleanup): Arguably we should replace this with an intermediate representation like
+    //   `Array<Module>`, but appropriate for bundled globals in Service Workers syntax. Actually,
+    //   `Array<Module>` might be a perfectly fine representation! The names would just represent
+    //   global variable names instead of import names. But I'm punting for now as I dont' have an
+    //   immediate need for this cleanup. (ModuleSoruce previously featured a callback like this as
+    //   well, but was cleaned up to use an intermediate representation instead.)
     kj::Function<kj::Array<CompiledGlobal>(
         jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
         compileGlobals;
@@ -256,9 +304,18 @@ class Worker::Script: public kj::AtomicRefcounted {
     // only until the Script constructor returns.
     kj::StringPtr mainModule;
 
-    // Callback which will construct the module registry and load all the modules into it.
-    kj::Function<void(jsg::Lock& lock, const Api& api)> compileModules;
+    // All the Worker's modules.
+    kj::Array<Module> modules;
+
     bool isPython;
+
+    // Only in workerd (not on the edge), only as a hack for Python, we infer the list of
+    // entrypoint classes based on the declared self-referential bindings and actor namespaces
+    // pointing at the service. This is needed becaues in workerd, the Python runtime is unable
+    // to fully execute at startup in order to discover what the Worker actually exports. This
+    // should be fixed eventually, but for now, we use this work-around.
+    kj::Array<kj::String> inferredEntrypointClassesForPython;
+    kj::Array<kj::String> inferredActorClassesForPython;
   };
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
@@ -528,6 +585,8 @@ class Worker::Api {
 
   // Create the context (global scope) object.
   virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
+
+  virtual void compileModules(jsg::Lock& lock, const Script::ModulesSource& source) const = 0;
 
   // Given a module's export namespace, return all the top-level exports.
   virtual jsg::Dict<NamedExport> unwrapExports(

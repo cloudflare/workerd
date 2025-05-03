@@ -154,55 +154,83 @@ void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>&
 }
 
 kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
-    config::Worker::Reader conf,
+    const Worker::Script::ModulesSource& source,
     const PythonConfig& pythonConfig,
     PythonSnapshotRelease::Reader pythonRelease) {
-  using Worker = config::Worker;
-  auto modules = conf.getModules();
-  auto mainModule = kj::str(modules.begin()->getName());
+  auto modules = source.modules.asPtr();
+  auto mainModule = kj::str(source.mainModule);
   int numFiles = 0;
   int numRequirements = 0;
-  for (auto module: modules) {
-    switch (module.which()) {
-      case Worker::Module::TEXT:
-      case Worker::Module::DATA:
-      case Worker::Module::JSON:
-      case Worker::Module::PYTHON_MODULE:
+  for (auto& module: modules) {
+    KJ_SWITCH_ONEOF(module.content) {
+      KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
         numFiles++;
-        break;
-      case Worker::Module::PYTHON_REQUIREMENT:
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+        numFiles++;
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+        // Not exposeud to Python.
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+        numFiles++;
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
+        // Not exposeud to Python.
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+        // Not exposeud to Python.
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
+        numFiles++;
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
         numRequirements++;
-        break;
-      default:
-        break;
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+        // Not exposeud to Python.
+      }
     }
   }
 
   auto names = kj::heapArrayBuilder<kj::String>(numFiles);
   auto contents = kj::heapArrayBuilder<kj::Array<kj::byte>>(numFiles);
   auto requirements = kj::heapArrayBuilder<kj::String>(numRequirements);
-  for (auto module: modules) {
-    switch (module.which()) {
-      case Worker::Module::TEXT:
-        contents.add(kj::heapArray(module.getText().asBytes()));
-        break;
-      case Worker::Module::DATA:
-        contents.add(kj::heapArray(module.getData().asBytes()));
-        break;
-      case Worker::Module::JSON:
-        contents.add(kj::heapArray(module.getJson().asBytes()));
-        break;
-      case Worker::Module::PYTHON_MODULE:
-        KJ_REQUIRE(module.getName().endsWith(".py"));
-        contents.add(kj::heapArray(module.getPythonModule().asBytes()));
-        break;
-      case Worker::Module::PYTHON_REQUIREMENT:
-        requirements.add(kj::str(module.getName()));
-        continue;
-      default:
-        continue;
+  for (auto& module: modules) {
+    KJ_SWITCH_ONEOF(module.content) {
+      KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+        names.add(kj::str(module.name));
+        contents.add(kj::heapArray(content.body.asBytes()));
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+        names.add(kj::str(module.name));
+        contents.add(kj::heapArray(content.body));
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+        // Not exposeud to Python.
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+        names.add(kj::str(module.name));
+        contents.add(kj::heapArray(content.body.asBytes()));
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
+        // Not exposeud to Python.
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+        // Not exposeud to Python.
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
+        KJ_REQUIRE(module.name.endsWith(".py"));
+        names.add(kj::str(module.name));
+        contents.add(kj::heapArray(content.body.asBytes()));
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        requirements.add(kj::str(module.name));
+      }
+      KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+        // Not exposeud to Python.
+      }
     }
-    names.add(kj::str(module.getName()));
   }
   bool snapshotToDisk = pythonConfig.createSnapshot || pythonConfig.createBaselineSnapshot;
   if (pythonConfig.loadSnapshotFromDisk && snapshotToDisk) {
@@ -221,19 +249,6 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
   }
   auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease),
       kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
-  auto durableObjectClasses = KJ_MAP(objectNamespace, conf.getDurableObjectNamespaces()) {
-    return kj::str(objectNamespace.getClassName());
-  };
-
-  // To get the entrypoint classes, we iterate through bindings looking for services with
-  // entrypoint field set. This doesn't allow us to discern between worker entrypoints and workflow
-  // entrypoints, but is the best we can do until we rewrite how workerd loads packages.
-  auto entrypointClasses = kj::Vector<kj::String>();
-  for (auto binding: conf.getBindings()) {
-    if (binding.isService() && binding.getService().hasEntrypoint()) {
-      entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
-    }
-  }
 
   // clang-format off
   return kj::heap<api::pyodide::PyodideMetadataReader::State>(
@@ -249,20 +264,12 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     snapshotToDisk,
     pythonConfig.createBaselineSnapshot,
     kj::mv(memorySnapshot),
-    kj::mv(durableObjectClasses),
-    entrypointClasses.releaseAsArray()
+    KJ_MAP(c, source.inferredActorClassesForPython) { return kj::str(c); },
+    KJ_MAP(c, source.inferredEntrypointClassesForPython) { return kj::str(c); }
   );
   // clang-format on
 }
 
-bool hasPythonModules(capnp::List<config::Worker::Module>::Reader modules) {
-  for (auto module: modules) {
-    if (module.isPythonModule()) {
-      return true;
-    }
-  }
-  return false;
-}
 }  // namespace
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
@@ -516,11 +523,39 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
         goto invalid;
       }
 
-      bool isPython = hasPythonModules(modules);
-      return Worker::Script::ModulesSource{
-        modules[0].getName(), [conf, &errorReporter](jsg::Lock& lock, const Worker::Api& api) {
-        return WorkerdApi::from(api).compileModules(lock, conf, errorReporter);
-      }, isPython};
+      bool isPython = false;
+      auto moduleArray = KJ_MAP(module, modules) -> Worker::Script::Module {
+        if (module.isPythonModule()) {
+          isPython = true;
+        }
+        return readModuleConf(module, errorReporter);
+      };
+
+      Worker::Script::ModulesSource result{
+        .mainModule = modules[0].getName(), .modules = kj::mv(moduleArray), .isPython = isPython};
+
+      if (isPython) {
+        // Special hack for Python: Infer the set of exported classes based on whan the config
+        // references.
+        result.inferredActorClassesForPython =
+            KJ_MAP(objectNamespace, conf.getDurableObjectNamespaces()) {
+          return kj::str(objectNamespace.getClassName());
+        };
+
+        // To get the entrypoint classes, we iterate through bindings looking for services with
+        // entrypoint field set. This doesn't allow us to discern between worker entrypoints and
+        // workflow entrypoints, but is the best we can do until we rewrite how workerd loads
+        // packages.
+        auto entrypointClasses = kj::Vector<kj::String>();
+        for (auto binding: conf.getBindings()) {
+          if (binding.isService() && binding.getService().hasEntrypoint()) {
+            entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
+          }
+        }
+        result.inferredEntrypointClassesForPython = entrypointClasses.releaseAsArray();
+      }
+
+      return result;
     }
     case config::Worker::SERVICE_WORKER_SCRIPT:
       return Worker::Script::ScriptSource{conf.getServiceWorkerScript(), name,
@@ -572,90 +607,116 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(jsg::
   return compiledGlobals.finish();
 }
 
-namespace {
-kj::Array<kj::StringPtr> compileNamedExports(capnp::List<capnp::Text>::Reader namedExports) {
-  kj::Vector<kj::StringPtr> results;
-  for (auto name: namedExports) {
-    results.add(name);
-  }
-  return results.releaseAsArray();
-}
-}  // namespace
-
 // Part of the original module registry implementation.
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
-    config::Worker::Module::Reader module,
+    config::Worker::Module::Reader conf,
     jsg::CompilationObserver& observer,
     CompatibilityFlags::Reader featureFlags) {
-  TRACE_EVENT("workerd", "WorkerdApi::tryCompileModule()", "name", module.getName());
+  return tryCompileModule(js, readModuleConf(conf), observer, featureFlags);
+}
+
+kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
+    const Worker::Script::Module& module,
+    jsg::CompilationObserver& observer,
+    CompatibilityFlags::Reader featureFlags) {
+  TRACE_EVENT("workerd", "WorkerdApi::tryCompileModule()", "name", module.name);
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(js);
-  switch (module.which()) {
-    case config::Worker::Module::TEXT: {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
-          jsg::ModuleRegistry::TextModuleInfo(
-              lock, Impl::compileTextGlobal(lock, module.getText())));
+  KJ_SWITCH_ONEOF(module.content) {
+    KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
+          jsg::ModuleRegistry::TextModuleInfo(lock, Impl::compileTextGlobal(lock, content.body)));
     }
-    case config::Worker::Module::DATA: {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
+    KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
           jsg::ModuleRegistry::DataModuleInfo(
-              lock, Impl::compileDataGlobal(lock, module.getData()).As<v8::ArrayBuffer>()));
+              lock, Impl::compileDataGlobal(lock, content.body).As<v8::ArrayBuffer>()));
     }
-    case config::Worker::Module::WASM: {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
+    KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
           jsg::ModuleRegistry::WasmModuleInfo(
-              lock, Impl::compileWasmGlobal(lock, module.getWasm(), observer)));
+              lock, Impl::compileWasmGlobal(lock, content.body, observer)));
     }
-    case config::Worker::Module::JSON: {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
-          jsg::ModuleRegistry::JsonModuleInfo(
-              lock, Impl::compileJsonGlobal(lock, module.getJson())));
+    KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
+          jsg::ModuleRegistry::JsonModuleInfo(lock, Impl::compileJsonGlobal(lock, content.body)));
     }
-    case config::Worker::Module::ES_MODULE: {
+    KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
       // TODO(soon): Make sure passing nullptr to compile cache is desired.
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), module.getEsModule(),
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, content.body,
           nullptr /* compile cache */, jsg::ModuleInfoCompileOption::BUNDLE, observer);
     }
-    case config::Worker::Module::COMMON_JS_MODULE: {
-      kj::Maybe<kj::Array<kj::StringPtr>> named = kj::none;
-      if (module.hasNamedExports()) {
-        named = compileNamedExports(module.getNamedExports());
-      }
-
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.getName(),
-          named.map([](kj::Array<kj::StringPtr>& named) { return named.asPtr(); }),
-          jsg::ModuleRegistry::CommonJsModuleInfo(lock, module.getName(),
-              module.getCommonJsModule(),
+    KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, content.namedExports,
+          jsg::ModuleRegistry::CommonJsModuleInfo(lock, module.name, content.body,
               kj::heap<api::CommonJsImpl<JsgWorkerdIsolate::Lock>>(
-                  lock, kj::Path::parse(module.getName()))));
+                  lock, kj::Path::parse(module.name))));
     }
-    case config::Worker::Module::PYTHON_MODULE: {
+    KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
       // Nothing to do. Handled in compileModules.
       return kj::none;
     }
-    case config::Worker::Module::PYTHON_REQUIREMENT: {
+    KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
       // Nothing to do. Handled in compileModules.
       return kj::none;
     }
-    case config::Worker::Module::OBSOLETE: {
-      // A non-supported or obsolete module type was configured
-      KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
+    KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+      KJ_FAIL_REQUIRE("capnp modules are not yet supported in workerd");
     }
   }
   KJ_UNREACHABLE;
 }
 
+Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader conf,
+    kj::Maybe<Worker::ValidationErrorReporter&> errorReporter) {
+  return {.name = conf.getName(), .content = [&]() -> Worker::Script::ModuleContent {
+    switch (conf.which()) {
+      case config::Worker::Module::TEXT:
+        return Worker::Script::TextModule{conf.getText()};
+      case config::Worker::Module::DATA:
+        return Worker::Script::DataModule{conf.getData()};
+      case config::Worker::Module::WASM:
+        return Worker::Script::WasmModule{conf.getWasm()};
+      case config::Worker::Module::JSON:
+        return Worker::Script::JsonModule{conf.getJson()};
+      case config::Worker::Module::ES_MODULE:
+        return Worker::Script::EsModule{conf.getEsModule()};
+      case config::Worker::Module::COMMON_JS_MODULE: {
+        Worker::Script::CommonJsModule result{.body = conf.getCommonJsModule()};
+        if (conf.hasNamedExports()) {
+          result.namedExports = KJ_MAP(name, conf.getNamedExports()) -> kj::StringPtr { return name; };
+        }
+        return result;
+      }
+      case config::Worker::Module::PYTHON_MODULE:
+        return Worker::Script::PythonModule{conf.getPythonModule()};
+      case config::Worker::Module::PYTHON_REQUIREMENT:
+        return Worker::Script::PythonRequirement{};
+      case config::Worker::Module::OBSOLETE: {
+        // A non-supported or obsolete module type was configured
+        KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
+      }
+    }
+
+    KJ_IF_SOME(e, errorReporter) {
+      e.addError(kj::str("Encountered unknown Worker.Module type. Was the "
+                         "config compiled with a newer version of the schema?"));
+      return Worker::Script::TextModule{""};
+    } else {
+      KJ_FAIL_REQUIRE("unknown module type", (uint)conf.which());
+    }
+  }()};
+}
+
 // Part of the original module registry implementation.
-void WorkerdApi::compileModules(jsg::Lock& lockParam,
-    config::Worker::Reader conf,
-    Worker::ValidationErrorReporter& errorReporter) const {
+void WorkerdApi::compileModules(
+    jsg::Lock& lockParam, const Worker::Script::ModulesSource& source) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
-    auto confModules = conf.getModules();
     using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
-    if (hasPythonModules(confModules)) {
+    if (source.isPython) {
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
       // Inject SetupEmscripten module
@@ -672,19 +733,18 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       modules->addBuiltinBundle(bundle, kj::none);
       // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
       {
-        auto mainModule = confModules.begin();
-        capnp::MallocMessageBuilder message;
-        auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(PYTHON_ENTRYPOINT);
+        Worker::Script::Module module{
+          .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
+
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
-        auto path = kj::Path::parse(mainModule->getName());
+        auto path = kj::Path::parse(source.mainModule);
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
 
       // Inject metadata that the entrypoint module will read.
       modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
           lockParam.alloc<PyodideMetadataReader>(
-              makePyodideMetadataReader(conf, impl->pythonConfig, pythonRelease)),
+              makePyodideMetadataReader(source, impl->pythonConfig, pythonRelease)),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
@@ -710,8 +770,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           SimplePythonLimiter::makeDisabled(lockParam), jsg::ModuleRegistry::Type::INTERNAL);
     }
 
-    for (auto module: confModules) {
-      auto path = kj::Path::parse(module.getName());
+    for (auto& module: source.modules) {
+      auto path = kj::Path::parse(module.name);
       auto maybeInfo = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
       KJ_IF_SOME(info, maybeInfo) {
         modules->add(path, kj::mv(info));
@@ -988,7 +1048,7 @@ const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
 
 kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry(
     const jsg::ResolveObserver& observer,
-    const config::Worker::Reader& conf,
+    const Worker::Script::ModulesSource& source,
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase) {
@@ -1016,64 +1076,61 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   bool firstEsm = true;
   bool hasPythonModules = false;
   using namespace workerd::api::pyodide;
-  for (auto def: conf.getModules()) {
-    switch (def.which()) {
-      case config::Worker::Module::ES_MODULE: {
+  for (auto& def: source.modules) {
+    KJ_SWITCH_ONEOF(def.content) {
+      KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
         jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
         if (firstEsm) {
           flags = flags | jsg::modules::Module::Flags::MAIN;
           firstEsm = false;
         }
-        bundleBuilder.addEsmModule(
-            def.getName(), kj::heapArray<const char>(def.getEsModule()), flags);
+        bundleBuilder.addEsmModule(def.name, kj::heapArray<const char>(content.body), flags);
         break;
       }
-      case config::Worker::Module::TEXT: {
-        bundleBuilder.addSyntheticModule(def.getName(),
-            jsg::modules::Module::newTextModuleHandler(kj::heapArray<const char>(def.getText())));
+      KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+        bundleBuilder.addSyntheticModule(def.name,
+            jsg::modules::Module::newTextModuleHandler(kj::heapArray<const char>(content.body)));
         break;
       }
-      case config::Worker::Module::DATA: {
-        bundleBuilder.addSyntheticModule(def.getName(),
-            jsg::modules::Module::newDataModuleHandler(kj::heapArray<kj::byte>(def.getData())));
+      KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+        bundleBuilder.addSyntheticModule(def.name,
+            jsg::modules::Module::newDataModuleHandler(kj::heapArray<kj::byte>(content.body)));
         break;
       }
-      case config::Worker::Module::WASM: {
-        bundleBuilder.addSyntheticModule(def.getName(),
-            jsg::modules::Module::newWasmModuleHandler(kj::heapArray<kj::byte>(def.getWasm())));
+      KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+        bundleBuilder.addSyntheticModule(def.name,
+            jsg::modules::Module::newWasmModuleHandler(kj::heapArray<kj::byte>(content.body)));
         break;
       }
-      case config::Worker::Module::JSON: {
-        bundleBuilder.addSyntheticModule(def.getName(),
-            jsg::modules::Module::newJsonModuleHandler(kj::heapArray<const char>(def.getJson())));
+      KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+        bundleBuilder.addSyntheticModule(def.name,
+            jsg::modules::Module::newJsonModuleHandler(kj::heapArray<const char>(content.body)));
         break;
       }
-      case config::Worker::Module::COMMON_JS_MODULE: {
-        kj::Array<kj::StringPtr> named;
-        if (def.hasNamedExports()) {
-          named = compileNamedExports(def.getNamedExports());
+      KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+        kj::ArrayPtr<const kj::StringPtr> named;
+        KJ_IF_SOME(n, content.namedExports) {
+          named = n;
         }
-        bundleBuilder.addSyntheticModule(def.getName(),
+        bundleBuilder.addSyntheticModule(def.name,
             jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
-                JsgWorkerdIsolate_TypeWrapper>(
-                kj::str(def.getCommonJsModule()), kj::str(def.getName())),
+                JsgWorkerdIsolate_TypeWrapper>(kj::str(content.body), kj::str(def.name)),
             KJ_MAP(name, named) { return kj::str(name); });
         break;
       }
-      case config::Worker::Module::PYTHON_MODULE: {
+      KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
         KJ_REQUIRE(featureFlags.getPythonWorkers(),
             "The python_workers compatibility flag is required to use Python.");
         hasPythonModules = true;
-        bundleBuilder.addEsmModule(def.getName(), kj::str(PYTHON_ENTRYPOINT).releaseArray());
+        bundleBuilder.addEsmModule(def.name, kj::str(PYTHON_ENTRYPOINT).releaseArray());
         break;
       }
-      case config::Worker::Module::PYTHON_REQUIREMENT: {
+      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
         // Handled separately
         break;
       }
-      case config::Worker::Module::OBSOLETE: {
-        // A non-supported or obsolete module type was configured
-        KJ_FAIL_REQUIRE("Worker bundle specified an unsupported module type");
+      KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+        KJ_FAIL_REQUIRE("capnp modules are not yet supported in workerd");
       }
     }
   }
@@ -1092,7 +1149,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     // Inject metadata that the entrypoint module will read.
     auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
     kj::OneOf<kj::Own<PyodideMetadataReader::State>, jsg::Ref<PyodideMetadataReader>>
-        metadataReader = makePyodideMetadataReader(conf, pythonConfig, pythonRelease);
+        metadataReader = makePyodideMetadataReader(source, pythonConfig, pythonRelease);
     pyodideBundleBuilder.addSynthetic(metadataSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
             JsgWorkerdIsolate_TypeWrapper>(
