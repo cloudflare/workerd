@@ -473,6 +473,7 @@ export declare abstract class Navigator {
   readonly userAgent: string;
   readonly hardwareConcurrency: number;
   readonly language: string;
+  readonly languages: string[];
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
