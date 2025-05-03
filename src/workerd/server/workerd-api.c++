@@ -324,6 +324,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
+  capnp::List<config::Extension>::Reader extensions;
   kj::Own<VirtualFileSystem> vfs;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   kj::Own<JsgIsolateObserver> observer;
@@ -354,6 +355,7 @@ struct WorkerdApi::Impl final {
 
   Impl(jsg::V8System& v8System,
       CompatibilityFlags::Reader featuresParam,
+      capnp::List<config::Extension>::Reader extensionsParam,
       v8::Isolate::CreateParams createParams,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
@@ -361,6 +363,7 @@ struct WorkerdApi::Impl final {
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
+        extensions(extensionsParam),
         vfs(kj::mv(vfs)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
         observer(kj::atomicAddRef(*observerParam)),
@@ -429,6 +432,7 @@ struct WorkerdApi::Impl final {
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
+    capnp::List<config::Extension>::Reader extensions,
     v8::Isolate::CreateParams createParams,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
@@ -437,6 +441,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     kj::Own<VirtualFileSystem> vfs)
     : impl(kj::heap<Impl>(v8System,
           features,
+          extensions,
           kj::mv(createParams),
           kj::mv(observer),
           memoryCacheProvider,
@@ -501,8 +506,7 @@ void WorkerdApi::setIsolateObserver(IsolateObserver&) {};
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
-    Worker::ValidationErrorReporter& errorReporter,
-    capnp::List<config::Extension>::Reader extensions) {
+    Worker::ValidationErrorReporter& errorReporter) {
   TRACE_EVENT("workerd", "WorkerdApi::extractSource()");
   switch (conf.which()) {
     case config::Worker::MODULES: {
@@ -513,9 +517,9 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
       }
 
       bool isPython = hasPythonModules(modules);
-      return Worker::Script::ModulesSource{modules[0].getName(),
-        [conf, &errorReporter, extensions](jsg::Lock& lock, const Worker::Api& api) {
-        return WorkerdApi::from(api).compileModules(lock, conf, errorReporter, extensions);
+      return Worker::Script::ModulesSource{
+        modules[0].getName(), [conf, &errorReporter](jsg::Lock& lock, const Worker::Api& api) {
+        return WorkerdApi::from(api).compileModules(lock, conf, errorReporter);
       }, isPython};
     }
     case config::Worker::SERVICE_WORKER_SCRIPT:
@@ -643,8 +647,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
 // Part of the original module registry implementation.
 void WorkerdApi::compileModules(jsg::Lock& lockParam,
     config::Worker::Reader conf,
-    Worker::ValidationErrorReporter& errorReporter,
-    capnp::List<config::Extension>::Reader extensions) const {
+    Worker::ValidationErrorReporter& errorReporter) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
@@ -717,7 +720,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     api::registerModules(*modules, featureFlags);
 
-    for (auto extension: extensions) {
+    for (auto extension: impl->extensions) {
       for (auto module: extension.getModules()) {
         modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
             module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL

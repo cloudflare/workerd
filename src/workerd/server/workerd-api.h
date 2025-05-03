@@ -35,6 +35,7 @@ class WorkerdApi final: public Worker::Api {
  public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
+      capnp::List<config::Extension>::Reader extensions,
       v8::Isolate::CreateParams createParams,
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
@@ -65,8 +66,7 @@ class WorkerdApi final: public Worker::Api {
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions);
+      Worker::ValidationErrorReporter& errorReporter);
 
   // A pipeline-level binding.
   struct Global {
@@ -268,8 +268,7 @@ class WorkerdApi final: public Worker::Api {
 
   void compileModules(jsg::Lock& lock,
       config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions) const;
+      Worker::ValidationErrorReporter& errorReporter) const;
 };
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
