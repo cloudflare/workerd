@@ -342,7 +342,8 @@ TestFixture::TestFixture(SetupParams&& params)
           server::WorkerdApi::extractSource(mainModuleName, config, *errorReporter),
           IsolateObserver::StartType::COLD,
           false,
-          nullptr)),
+          kj::none,
+          kj::none)),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {

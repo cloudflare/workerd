@@ -44,6 +44,10 @@ class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class ExecutionContext;
+namespace pyodide {
+struct ArtifactBundler_State;
+KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
+}  // namespace pyodide
 }  // namespace api
 
 class ThreadContext;
@@ -336,7 +340,8 @@ class Worker::Script: public kj::AtomicRefcounted {
       Source source,
       IsolateObserver::StartType startType,
       bool logNewScript,
-      kj::Maybe<ValidationErrorReporter&> errorReporter);
+      kj::Maybe<ValidationErrorReporter&> errorReporter,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -398,7 +403,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       Script::Source source,
       IsolateObserver::StartType startType,
       bool logNewScript = false,
-      kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
+      kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
 
   inline IsolateLimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
@@ -588,7 +594,8 @@ class Worker::Api {
 
   virtual void compileModules(jsg::Lock& lock,
       const Script::ModulesSource& source,
-      const Worker::Isolate& isolate) const = 0;
+      const Worker::Isolate& isolate,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const = 0;
 
   // Given a module's export namespace, return all the top-level exports.
   virtual jsg::Dict<NamedExport> unwrapExports(

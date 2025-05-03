@@ -70,7 +70,8 @@ class WorkerdApi final: public Worker::Api {
 
   void compileModules(jsg::Lock& lock,
       const Worker::Script::ModulesSource& source,
-      const Worker::Isolate& isolate) const override;
+      const Worker::Isolate& isolate,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const override;
 
   // A pipeline-level binding.
   struct Global {

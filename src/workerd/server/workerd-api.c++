@@ -710,7 +710,8 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
 // Part of the original module registry implementation.
 void WorkerdApi::compileModules(jsg::Lock& lockParam,
     const Worker::Script::ModulesSource& source,
-    const Worker::Isolate& isolate) const {
+    const Worker::Isolate& isolate,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
@@ -751,10 +752,10 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       // Inject packages tar file
       modules->addBuiltinModule("pyodide-internal:packages_tar_reader", "export default { }"_kj,
           workerd::jsg::ModuleRegistry::Type::INTERNAL, {});
-
       // Inject artifact bundler.
       modules->addBuiltinModule("pyodide-internal:artifacts",
-          lockParam.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler()),
+          lockParam.alloc<ArtifactBundler>(kj::mv(artifacts).orDefault(
+              []() { return api::pyodide::ArtifactBundler::makeDisabledBundler(); })),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
