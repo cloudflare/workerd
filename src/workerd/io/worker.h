@@ -228,6 +228,9 @@ class Worker::Script: public kj::AtomicRefcounted {
   inline bool isModular() const {
     return modular;
   }
+  inline bool isPython() const {
+    return python;
+  }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -257,13 +260,13 @@ class Worker::Script: public kj::AtomicRefcounted {
     kj::Function<void(jsg::Lock& lock, const Api& api)> compileModules;
     bool isPython;
   };
-  bool isPython;
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
  private:
   kj::Own<const Isolate> isolate;
   kj::String id;
   bool modular;
+  bool python;
 
   struct Impl;
   kj::Own<Impl> impl;

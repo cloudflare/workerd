@@ -1227,8 +1227,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
       modular(source.is<ModulesSource>()),
+      python(modular && source.get<ModulesSource>().isPython),
       impl(kj::heap<Impl>()) {
-  this->isPython = false;
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -1337,10 +1337,9 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 // This path is used for the new ESM worker syntax.
 
-                this->isPython = modulesSource.isPython;
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
                   kj::Own<void> limitScope;
-                  if (isPython) {
+                  if (modulesSource.isPython) {
                     limitScope =
                         isolate->getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
                   } else {
@@ -1490,7 +1489,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     const Worker::Script& script,
     ExceptionOrDuration& limitErrorOrTime) {
   kj::Own<void> limitScope;
-  if (script.isPython) {
+  if (script.isPython()) {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
   } else {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
