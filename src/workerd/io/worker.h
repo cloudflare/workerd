@@ -24,6 +24,7 @@
 #include <workerd/util/weak-refs.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <capnp/schema.capnp.h>
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
@@ -311,6 +312,9 @@ class Worker::Script: public kj::AtomicRefcounted {
     // All the Worker's modules.
     kj::Array<Module> modules;
 
+    // The worker may have a bundle of capnp schemas attached.
+    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
+
     bool isPython;
 
     // Only in workerd (not on the edge), only as a hack for Python, we infer the list of
@@ -320,6 +324,10 @@ class Worker::Script: public kj::AtomicRefcounted {
     // should be fixed eventually, but for now, we use this work-around.
     kj::Array<kj::String> inferredEntrypointClassesForPython;
     kj::Array<kj::String> inferredActorClassesForPython;
+
+    // Optional Python memory snapshot. The actual capnp type is declared in the internal codebase,
+    // so we use AnyStruct here. This is deprecated anyway.
+    kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
   };
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
