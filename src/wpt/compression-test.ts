@@ -45,14 +45,7 @@ export default {
       'V8 assertion - Cannot construct ArrayBuffer with a BackingStore of SharedArrayBuffer',
     skipAllTests: true,
   },
-  'decompression-buffersource.tentative.any.js': {
-    comment: 'Enable once Float16Array is enabled',
-    expectedFailures: [
-      'chunk of type Float16Array should work for deflate',
-      'chunk of type Float16Array should work for gzip',
-      'chunk of type Float16Array should work for deflate-raw',
-    ],
-  },
+  'decompression-buffersource.tentative.any.js': {},
   'decompression-constructor-error.tentative.any.js': {
     comment: 'TOOD investigate this',
     expectedFailures: [
