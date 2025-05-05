@@ -294,7 +294,6 @@ struct LiftKj_ {
     auto isolate = info.GetIsolate();
     try {
       try {
-        v8::HandleScope scope(isolate);
         if constexpr (isVoid<T>()) {
           func();
           if constexpr (!kj::canConvert<Info&, v8::PropertyCallbackInfo<void>&>()) {
