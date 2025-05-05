@@ -296,12 +296,18 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    auto flags = FeatureFlags::get(lock).getRequestSignalPassthrough()
-        ? api::AbortSignal::Flag::NONE
-        : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
-    jsg::Lock& js = lock;
-    jsg::Ref<api::AbortSignal> signal =
-        abortController.emplace(js.alloc<api::AbortController>(js, flags))->getSignal();
+    auto featureFlags = FeatureFlags::get(lock);
+
+    kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
+
+    if (featureFlags.getEnableRequestSignal()) {
+      auto abortSignalFlag = featureFlags.getRequestSignalPassthrough()
+          ? api::AbortSignal::Flag::NONE
+          : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
+      jsg::Lock& js = lock;
+      signal.emplace(abortController.emplace(js.alloc<api::AbortController>(js, abortSignalFlag))
+                         ->getSignal());
+    }
 
     return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock,

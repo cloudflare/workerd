@@ -1008,7 +1008,7 @@ jsg::Ref<Request> Request::constructor(
       cacheMode = oldRequest->getCacheMode();
       redirect = oldRequest->getRedirectEnum();
       fetcher = oldRequest->getFetcher();
-      signal = oldRequest->getThisSignal(js);
+      signal = oldRequest->getSignalForSubrequest(js);
     }
   }
 
@@ -1118,7 +1118,7 @@ jsg::Ref<Request> Request::constructor(
         cacheMode = otherRequest->cacheMode;
         responseBodyEncoding = otherRequest->responseBodyEncoding;
         fetcher = otherRequest->getFetcher();
-        signal = otherRequest->getThisSignal(js);
+        signal = otherRequest->getSignalForSubrequest(js);
         headers = js.alloc<Headers>(js, *otherRequest->headers);
         cf = otherRequest->cf.deepClone(js);
         KJ_IF_SOME(b, otherRequest->getBody()) {
@@ -1208,6 +1208,18 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
   auto newSignal = js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   thisSignal = newSignal.addRef();
   return newSignal;
+}
+
+kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignalForSubrequest(jsg::Lock& js) {
+  // For subrequests, the Fetch spec specifies that "this signal" should be taken from the original
+  // request, rather than "signal". To be certain backwards compatibility is not broken, this
+  // function preserves the old behaviour unless the 'enableRequestSignal' compat flag is set
+
+  if (FeatureFlags::get(js).getEnableRequestSignal()) {
+    return getThisSignal(js);
+  } else {
+    return getSignal();
+  }
 }
 
 void Request::clearSignalIfIgnoredForSubrequest() {

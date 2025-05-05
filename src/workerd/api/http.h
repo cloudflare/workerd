@@ -866,6 +866,11 @@ public:
   kj::Maybe<jsg::Ref<AbortSignal>> getSignal();
   jsg::Ref<AbortSignal> getThisSignal(jsg::Lock& js);
 
+  // For subrequests, the Fetch spec specifies that "this signal" should be taken from the original
+  // request, rather than "signal". To be certain backwards compatibility is not broken, this
+  // function preserves the old behaviour unless the 'enableRequestSignal' compat flag is set
+  kj::Maybe<jsg::Ref<AbortSignal>> getSignalForSubrequest(jsg::Lock& js);
+
   // Clear the request's signal if the 'ignoreForSubrequests' flag is set. This happens when
   // a request from an incoming fetch is passed-through to another fetch. We want to avoid
   // aborting the subrequest in that case.
