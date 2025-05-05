@@ -341,7 +341,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
       return;
     }
 
-    v8::HandleScope scope(isolate);
+    KJ_DASSERT(v8::HandleScope::NumberOfHandles(isolate) > 0);
     v8::TryCatch tryCatch(isolate);
     try {
       try {
