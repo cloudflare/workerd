@@ -70,7 +70,7 @@
 //   auto& dir = KJ_ASSERT_NONNULL(node.tryGet<kj::Rc<Directory>>());
 //   TmpDirStoreScope temp_dir_scope;
 //   kj::Path path("a/b/c/foo.txt")
-//   auto tmpFile = dir.tryOpen(js, path, FsType::FILE);
+//   auto tmpFile = dir.tryOpen(js, path, { FsType::FILE });
 //   KJ_ASSERT(tmpFile.write(js, 0, "Hello World!"_kjb) == 12);
 //   // The temp dir scope is destructed and the file is deleted
 // }
@@ -100,8 +100,17 @@
 // support python workers, for instance, we can introduce a new root directory
 // that is backed by a tar/zip file containing the python standard library, etc.
 //
-// TODO(node-fs): Implementing "file descriptors" is still currently an open
-// question.
+// To support the implementation of node:fs the virtual file system needs a
+// concept of file descriptors that map somewhat cleanly to the posix notion
+// of file descriptors. This is a bit tricky because fds are a finite resource.
+// The VFS implementation does use a notion of file descriptors that are scoped
+// specifically to the worker... that is, fd 1 in one worker is not the same as
+// fd 1 in another. It will be a requirement that fd's are closed explicitly or
+// they may still "leak" beyond the scope where they are used, but when the
+// worker is torn down, all associated file descriptors will be automatically
+// destroyed/closed rather than leaking for the entire process. We use just a
+// simple in-memory table to track the file descriptors and their associated
+// files/directories.
 
 namespace workerd {
 
@@ -243,6 +252,18 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   virtual const Entry* begin() const = 0;
   virtual const Entry* end() const = 0;
 
+  struct OpenOptions {
+    // When set, if the path does not exist, we will attempt to create the
+    // node as the specified type. Type must be one of either FILE or DIRECTORY.
+    // Specifying SYMBOLICLINK as the type will throw an exception.
+    kj::Maybe<FsType> createAs;
+
+    // If the path points to a symbolic link, by default the link will be followed
+    // such that if the link points to a valid node, that node will be returned.
+    // If followLinks is false, however, the symbolic link itself will be returned.
+    bool followLinks = true;
+  };
+
   // Tries opening the file or directory at the given path. If the node does
   // not exist, and createAs is provided specifying a create mode, the node
   // will be created as the specified type; otherwise kj::none is returned
@@ -263,8 +284,8 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // If the path identifies a symbolic link, the symbolic link will be resolved
   // and the target, if it exists, will be returned. If the target does not exist,
   // kj::none will be returned.
-  virtual kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> tryOpen(
-      jsg::Lock& js, kj::PathPtr path, kj::Maybe<FsType> createAs = kj::none) = 0;
+  virtual kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, kj::Maybe<OpenOptions> options = kj::none) = 0;
 
   // Attempts to move the given file or directory into the path specified. The
   // path must be relative to the current directory. If the path already exists
@@ -363,17 +384,46 @@ class SymbolicLink final: public kj::Refcounted {
   kj::Path targetPath;
 };
 
+using FsNode = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
 class FsMap;
 
 // The virtual file system interface. This is the main entry point for accessing the vfs.
 class VirtualFileSystem {
  public:
+  // The observer interface is used to allow the runtime to observe opening
+  // or closing of file descriptors in order to allow the runtime to keep
+  // an eye on the number of open file descriptors and take action if needed.
+  class Observer {
+   public:
+    virtual ~Observer() = default;
+
+    // openFds is the number of currently open file descriptors, including
+    // the one that was just opened. totalFds is the total number of file
+    // descriptors that have been opened total.
+    virtual void onOpen(size_t openFds, size_t totalFds) const {
+      // By default, do nothing.
+    }
+
+    // openFds is the number of currently open file descriptors, excluding
+    // the one that was just closed. totalFds is the total number of file
+    // descriptors that have been opened total.
+    virtual void onClose(size_t openFdCount, size_t totalFds) const {
+      // By default, do nothing.
+    }
+
+    // Called when the total maximum number of file descriptors the worker
+    // is allowed to open is reached. After this point, the worker will no
+    // longer be allowed to open any new file descriptors.
+    virtual void onMaxFds(size_t openFdCount) const {
+      // By default, do nothing.
+    }
+  };
+
   // The root of the virtual file system.
   virtual kj::Rc<Directory> getRoot(jsg::Lock& js) const = 0;
 
   // Resolves the given file URL into a file or directory.
-  kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> resolve(
-      jsg::Lock& js, const jsg::Url& url) const;
+  kj::Maybe<FsNode> resolve(jsg::Lock& js, const jsg::Url& url) const;
 
   // Resolves the given file URL into metadata for a file or directory.
   kj::Maybe<Stat> resolveStat(jsg::Lock& js, const jsg::Url& url) const;
@@ -388,9 +438,70 @@ class VirtualFileSystem {
 
   // Get the current virtual file system for the current isolate lock.
   static kj::Maybe<const VirtualFileSystem&> tryGetCurrent(jsg::Lock&);
+
+  // ==========================================================================
+  // File Descriptor support
+
+  struct OpenOptions {
+    // Open the file descriptor for reading.
+    bool read = true;
+    // Open the file descriptor for writing.
+    bool write = false;
+    // Open the file descriptor for appending. Ignored if write is false.
+    bool append = false;
+
+    // If true, opening the path will fail if it already exists.
+    // If false, the path will be created if it does not exist.
+    bool exclusive = false;
+
+    // If true, and the destination is a symbolic link, the link will be
+    // followed such that the file descriptor is opened on the target
+    // of the symbolic link. If false, the file descriptor will be opened
+    // on the symbolic link itself.
+    bool followLinks = true;
+  };
+
+  struct OpenedFile {
+    // The file descriptor for the opened file.
+    int fd;
+    // The file descriptor was opened for reading.
+    bool read;
+    // The file descriptor was opened for writing.
+    bool write;
+    // The file descriptor was opened for appending (ignored if write is false).
+    bool append;
+    // The actual file, directory, or symlink that was opened.
+    FsNode node;
+
+    // When reading from or writing to the file, if an offset is not
+    // explicitly given then the offset will be set to the current
+    // position in the file.
+    size_t position = 0;
+  };
+
+  // Attempts to open a file descriptor for the given file URL. It's critical
+  // to understand that the file descriptor table is shared for the entire
+  // worker. This means that if a file descriptor is opened, it will remain
+  // open until it is closed or the worker is terminated. If too many file
+  // descriptors are left open the worker may run out of file descriptors and
+  // fail to open new files. Additionally, opening too many file descriptors
+  // may cause a production worker to be condemned in the system.
+  //
+  // If the file cannot be opened or created, an exception will be thrown.
+  virtual OpenedFile& openFd(
+      jsg::Lock& js, const jsg::Url& url, kj::Maybe<OpenOptions> options) const = 0;
+
+  // Closes the given file descriptor. This is a no-op if the file descriptor is not open.
+  virtual void closeFd(jsg::Lock& js, int fd) const = 0;
+
+  // Attempts to get the opened file, directory, or symlink for the given file descriptor.
+  // Returns kj::none if the fd is not opened/known.
+  virtual kj::Maybe<OpenedFile&> tryGetFd(jsg::Lock& js, int fd) const = 0;
 };
 
-kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root);
+kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap,
+    kj::Rc<Directory>&& root,
+    kj::Own<VirtualFileSystem::Observer> observer = kj::heap<VirtualFileSystem::Observer>());
 
 // The FsMap is a configurable mapping of built-in "known" file system
 // paths to user-configurable locations. It is used to allow user-specified
@@ -487,8 +598,9 @@ class SymbolicLinkRecursionGuardScope final {
 // in-memory directory for the worker to use. The filesystem is not shared
 // between workers. The bundle delegate is a virtual directory delegate that
 // provides the directory structure for the worker's bundle.
-kj::Own<VirtualFileSystem> newWorkerFileSystem(
-    kj::Own<FsMap> fsMap, kj::Rc<Directory> bundleDirectory);
+kj::Own<VirtualFileSystem> newWorkerFileSystem(kj::Own<FsMap> fsMap,
+    kj::Rc<Directory> bundleDirectory,
+    kj::Own<VirtualFileSystem::Observer> observer = kj::heap<VirtualFileSystem::Observer>());
 
 // Exposed only for testing purposes.
 kj::Rc<Directory> getTmpDirectoryImpl();

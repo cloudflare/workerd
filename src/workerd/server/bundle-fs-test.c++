@@ -106,7 +106,10 @@ KJ_TEST("The BundleDirectoryDelegate works") {
 
     // Attempting to create a file should fail.
     try {
-      dir->tryOpen(env.js, kj::Path({"a", "something", "else"}), FsType::FILE);
+      dir->tryOpen(env.js, kj::Path({"a", "something", "else"}),
+          Directory::OpenOptions{
+            .createAs = FsType::FILE,
+          });
       KJ_FAIL_ASSERT("should have failed");
     } catch (...) {
       auto ex = kj::getCaughtExceptionAsKj();

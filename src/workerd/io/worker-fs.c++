@@ -83,10 +83,10 @@ class TmpDirectory final: public Directory {
     return nullptr;
   }
 
-  kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> tryOpen(
-      jsg::Lock& js, kj::PathPtr path, kj::Maybe<FsType> createAs = kj::none) override {
+  kj::Maybe<FsNode> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, kj::Maybe<OpenOptions> options = kj::none) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->tryOpen(js, path, createAs);
+      return dir->tryOpen(js, path, kj::mv(options));
     }
     return kj::none;
   }
@@ -167,9 +167,9 @@ class LazyDirectory final: public Directory {
     return getDirectory()->end();
   }
 
-  kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> tryOpen(
-      jsg::Lock& js, kj::PathPtr path, kj::Maybe<FsType> createAs = kj::none) override {
-    return getDirectory()->tryOpen(js, path, createAs);
+  kj::Maybe<FsNode> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, kj::Maybe<OpenOptions> options = kj::none) override {
+    return getDirectory()->tryOpen(js, path, kj::mv(options));
   }
 
   void add(jsg::Lock& js, kj::StringPtr name, Item item) override {
@@ -329,23 +329,29 @@ class DirectoryBase final: public Directory {
     return entries.end();
   }
 
-  kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> tryOpen(
-      jsg::Lock& js, kj::PathPtr path, kj::Maybe<FsType> createAs) override {
+  kj::Maybe<FsNode> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, kj::Maybe<OpenOptions> options = kj::none) override {
     if (path.size() == 0) {
       // An empty path ends up just returning this directory.
-      return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(addRefToThis());
+      return kj::Maybe<FsNode>(addRefToThis());
     }
+    auto opts = options.orDefault(OpenOptions{});
     KJ_IF_SOME(found, entries.find(path[0])) {
       if (path.size() == 1) {
         // We found the entry, return it.
         KJ_SWITCH_ONEOF(found) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
-            return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(file.addRef());
+            return kj::Maybe<FsNode>(file.addRef());
           }
           KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-            return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(dir.addRef());
+            return kj::Maybe<FsNode>(dir.addRef());
           }
           KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+            if (!opts.followLinks) {
+              // If we're not following links, when we just return the link itself
+              // here.
+              return kj::Maybe<FsNode>(link.addRef());
+            }
             // Resolve the symbolic link and return the target, guarding against
             // recursion while doing so.
             SymbolicLinkRecursionGuardScope guardScope;
@@ -365,12 +371,15 @@ class DirectoryBase final: public Directory {
         }
         KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
           // We found a directory, continue searching.
-          return dir->tryOpen(js, path, createAs);
+          return dir->tryOpen(js, path, kj::mv(options));
         }
         KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
-          // We found a symbolic link. If the symbolic link resolves to
-          // a directory, then we can continue searching, otherwise we
-          // return nothing.
+          // If the symbolic link resolves to a directory, then we can continue
+          // searching, otherwise we return nothing.
+          // Unless we're being asked to not follow links, then just return kj::none.
+          if (!opts.followLinks) {
+            return kj::none;
+          }
           SymbolicLinkRecursionGuardScope guardScope;
           guardScope.checkSeen(link.get());
           KJ_IF_SOME(resolved, link->resolve(js)) {
@@ -379,7 +388,7 @@ class DirectoryBase final: public Directory {
                 return kj::none;
               }
               KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-                return dir->tryOpen(js, path, createAs);
+                return dir->tryOpen(js, path, kj::mv(options));
               }
             }
           } else {
@@ -393,12 +402,12 @@ class DirectoryBase final: public Directory {
     // If we haven't found anything, we can try to create a new file or directory
     // if the directory is writable and the createAs parameter is set.
     if constexpr (Writable) {
-      KJ_IF_SOME(type, createAs) {
+      KJ_IF_SOME(type, opts.createAs) {
         return tryCreate(js, path, type);
       }
     } else {
       // If the directory is not writable, we cannot create a new entry
-      JSG_REQUIRE(createAs == kj::none, Error,
+      JSG_REQUIRE(opts.createAs == kj::none, Error,
           "Cannot create a new file or directory in a read-only directory");
     }
 
@@ -542,11 +551,25 @@ class DirectoryBase final: public Directory {
 
     // Otherwise we need to recursively create a directory and ask it to create the file.
     auto dir = Directory::newWritable();
-    KJ_IF_SOME(ret, dir->tryOpen(js, path.slice(1, path.size()), createAs)) {
+    KJ_IF_SOME(ret,
+        dir->tryOpen(js, path.slice(1, path.size()),
+            OpenOptions{
+              .createAs = createAs,
+            })) {
       // We will only create the new subdirectory in this directory if the
       // child target was successfully created/opened.
       entries.insert(kj::str(path[0]), kj::mv(dir));
-      return kj::mv(ret);
+      KJ_SWITCH_ONEOF(ret) {
+        KJ_CASE_ONEOF(file, kj::Rc<File>) {
+          return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+          return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(dir));
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+          KJ_UNREACHABLE;
+        }
+      }
     }
     return kj::none;
   }
@@ -674,9 +697,11 @@ using WritableDirectory = DirectoryBase<true>;
 
 class VirtualFileSystemImpl final: public VirtualFileSystem {
  public:
-  VirtualFileSystemImpl(kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root)
+  VirtualFileSystemImpl(
+      kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root, kj::Own<VirtualFileSystem::Observer> observer)
       : fsMap(kj::mv(fsMap)),
-        root(kj::mv(root)) {}
+        root(kj::mv(root)),
+        observer(kj::mv(observer)) {}
 
   kj::Rc<Directory> getRoot(jsg::Lock& js) const override {
     return root.addRef();
@@ -694,9 +719,107 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     return fsMap->getDevRoot();
   }
 
+  OpenedFile& openFd(
+      jsg::Lock& js, const jsg::Url& url, kj::Maybe<OpenOptions> options) const override {
+    auto opts = options.orDefault({});
+
+    kj::Maybe<FsType> createAs = opts.exclusive ? kj::none : kj::Maybe(FsType::FILE);
+    kj::Path root{};
+    auto str = kj::str(url.getPathname().slice(1));
+
+    // We will impose an absolute max number of total file descriptors to
+    // max int... in practice, the production system should condemn the
+    // worker far before this limit is reached. Note that this is not *opened*
+    // file descriptors, this is total file descriptors opened. There is no
+    // way to reset this counter.
+    static constexpr int kMax = kj::maxValue;
+    if (nextFd == kMax) {
+      observer->onMaxFds(openedFiles.size());
+      JSG_FAIL_REQUIRE(Error, "Too many open files");
+    }
+
+    // TODO(node-fs): Currently tryOpen will always attempt to follow the
+    // symlinks, which means we cannot correctly handle followLinks = false
+    // just yet.
+    JSG_REQUIRE(opts.followLinks, Error, "Cannot open a file with followLinks yet");
+
+    KJ_IF_SOME(node,
+        getRoot(js)->tryOpen(js, root.eval(str),
+            Directory::OpenOptions{
+              .createAs = createAs,
+              .followLinks = opts.followLinks,
+            })) {
+      // If the exclusive option is set and we got here, then we need to
+      // throw an error because we cannot open a file that already exists.
+      JSG_REQUIRE(!opts.exclusive, Error, "File already exists");
+
+      // If we are opening a node for writing, we need to make sure that the
+      // node is writable.
+      if (opts.write) {
+        KJ_SWITCH_ONEOF(node) {
+          KJ_CASE_ONEOF(file, kj::Rc<File>) {
+            auto stat = file->stat(js);
+            JSG_REQUIRE(stat.writable, Error, "File is not writable");
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+            // Similar to Node.js, we do not allow opening fd's for
+            // directories for writing.
+            JSG_FAIL_REQUIRE(Error, "Directory is not writable");
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+            // Symlinks are never directly writable so the write flag
+            // makes no sense.
+            JSG_FAIL_REQUIRE(Error, "Symbolic link is not writable");
+          }
+        }
+      }
+
+      KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
+      KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
+      return openedFiles.insert(OpenedFile{
+        .fd = nextFd++,
+        .read = opts.read,
+        .write = opts.write,
+        .append = opts.append,
+        .node = kj::mv(node),
+      });
+    }
+
+    // The file does not exist, and apparently was not created. Likely the
+    // directory is not writable or does not exist.
+    JSG_FAIL_REQUIRE(Error, "Cannot open file: ", url);
+  }
+
+  void closeFd(jsg::Lock& js, int fd) const override {
+    openedFiles.eraseMatch(fd);
+    observer->onClose(openedFiles.size(), nextFd);
+  }
+
+  kj::Maybe<OpenedFile&> tryGetFd(jsg::Lock& js, int fd) const override {
+    return openedFiles.find(fd);
+  }
+
  private:
   kj::Own<FsMap> fsMap;
   mutable kj::Rc<Directory> root;
+  kj::Own<VirtualFileSystem::Observer> observer;
+
+  // The next file descriptor to be used for the next file opened.
+  mutable int nextFd = 0;
+
+  struct Callbacks final {
+    int keyForRow(OpenedFile& row) const {
+      return row.fd;
+    }
+    bool matches(OpenedFile& row, int fd) const {
+      return row.fd == fd;
+    }
+    int hashCode(int fd) const {
+      return kj::hashCode(fd);
+    }
+  };
+
+  mutable kj::Table<OpenedFile, kj::HashIndex<Callbacks>> openedFiles;
 };
 }  // namespace
 
@@ -808,18 +931,20 @@ kj::Rc<File> File::newReadable(kj::ArrayPtr<const kj::byte> data) {
   return kj::rc<FileImpl>(data);
 }
 
-kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root) {
-  return kj::heap<VirtualFileSystemImpl>(kj::mv(fsMap), kj::mv(root));
+kj::Own<VirtualFileSystem> newVirtualFileSystem(
+    kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root, kj::Own<VirtualFileSystem::Observer> observer) {
+  return kj::heap<VirtualFileSystemImpl>(kj::mv(fsMap), kj::mv(root), kj::mv(observer));
 }
 
-kj::Own<VirtualFileSystem> newWorkerFileSystem(
-    kj::Own<FsMap> fsMap, kj::Rc<Directory> bundleDirectory) {
+kj::Own<VirtualFileSystem> newWorkerFileSystem(kj::Own<FsMap> fsMap,
+    kj::Rc<Directory> bundleDirectory,
+    kj::Own<VirtualFileSystem::Observer> observer) {
   // Our root directory is a read-only directory
   Directory::Builder builder;
   builder.addPath(fsMap->getBundlePath(), kj::mv(bundleDirectory));
   builder.addPath(fsMap->getTempPath(), getTmpDirectoryImpl());
   builder.addPath(fsMap->getDevPath(), getDevDirectory());
-  return newVirtualFileSystem(kj::mv(fsMap), builder.finish());
+  return newVirtualFileSystem(kj::mv(fsMap), builder.finish(), kj::mv(observer));
 }
 
 kj::Rc<Directory> getTmpDirectoryImpl() {
@@ -873,7 +998,22 @@ jsg::Url SymbolicLink::getTargetUrl() const {
 }
 
 kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::resolve(jsg::Lock& js) {
-  return root->tryOpen(js, getTargetPath());
+  KJ_IF_SOME(ret, root->tryOpen(js, getTargetPath())) {
+    KJ_SWITCH_ONEOF(ret) {
+      KJ_CASE_ONEOF(file, kj::Rc<File>) {
+        return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+        return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(dir));
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+        // A symbolic link won't resolve to another symbolic link.
+        KJ_UNREACHABLE;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return kj::none;
 }
 
 kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
@@ -888,8 +1028,7 @@ kj::Maybe<const VirtualFileSystem&> VirtualFileSystem::tryGetCurrent(jsg::Lock&)
   return Worker::Api::current().getVirtualFileSystem();
 }
 
-kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> VirtualFileSystem::resolve(
-    jsg::Lock& js, const jsg::Url& url) const {
+kj::Maybe<FsNode> VirtualFileSystem::resolve(jsg::Lock& js, const jsg::Url& url) const {
   if (url.getProtocol() != "file:"_kj) {
     // We only accept file URLs.
     return kj::none;

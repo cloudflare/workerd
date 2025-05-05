@@ -242,6 +242,43 @@ class FileSystemModule final: public jsg::Object {
   kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> open(
       jsg::Lock& js, FilePath path);
 
+  struct OpenFdOptions {
+    // If true, the file will be opened for reading. While we always generally
+    // allow files to be read, this option is used to indicate that the file
+    // descriptor should be opened for reading or not. If false, attempts to
+    // peform read operations via the file descriptor will throw an error.
+    jsg::Optional<bool> read;
+
+    // If true, the file will be opened for writing.
+    jsg::Optional<bool> write;
+
+    // If true, writes to the file will be appended to the end. For instance,
+    // if the offset is set to 0, it will be interepreted as the offset from
+    // the end of the file rather than from the start. If write is false, then
+    // the append option is ignored.
+    jsg::Optional<bool> append;
+
+    // If true, an error will be thrown if the file already exists, otherwise
+    // the file will be created if it does not exist.
+    jsg::Optional<bool> exclusive;
+
+    // If false, and the path includes symbolic links, an error will be thrown,
+    // otherwise the links will be resolved and the target will be opened if
+    // it exists. If the target does not exist, an error will be thrown.
+    jsg::Optional<bool> followLinks;
+    JSG_STRUCT(read, write, append, exclusive, followLinks);
+
+    operator VirtualFileSystem::OpenOptions() const {
+      return VirtualFileSystem::OpenOptions{
+        .read = read.orDefault(true),
+        .write = write.orDefault(false),
+        .append = append.orDefault(false),
+        .exclusive = exclusive.orDefault(false),
+        .followLinks = followLinks.orDefault(true),
+      };
+    }
+  };
+
   kj::Maybe<Stat> stat(jsg::Lock& js, FilePath path);
 
   struct CopyFileOptions {
@@ -263,6 +300,39 @@ class FileSystemModule final: public jsg::Object {
   // the copy is presumed to have succeeded.
   void copyFile(jsg::Lock& js, FilePath from, FilePath to, jsg::Optional<CopyFileOptions> options);
 
+  struct MkdirOptions {
+    jsg::Optional<bool> recursive;
+    JSG_STRUCT(recursive);
+  };
+
+  // Attempt to make a new directory at the given path. If the path already exists,
+  // an error is thrown. If the intermediate directories do not exist, and the recursive
+  // option is false, an error is thrown. If the recursive option is true, all intermediate
+  // directories will be created. If any of those fail to be created an error is thrown.
+  kj::Maybe<kj::String> mkdir(jsg::Lock& js, FilePath path, jsg::Optional<MkdirOptions> options);
+
+  // Effectively the same as 'mkdir' except that the given path is a prefix and additional
+  // random characters are appended to the final component to create a unique directory.
+  // We also do not attempt to recursively create the intermediate directories if they
+  // do not exist.
+  kj::String mkdtemp(jsg::Lock& js, FilePath prefix);
+
+  // Opens a file descriptor for the given path. Either succeeds or throws.
+  // See the details in OpenFdOptions for more information.
+  int fopen(jsg::Lock& js, FilePath path, jsg::Optional<OpenFdOptions> options);
+  void fclose(jsg::Lock& js, int fd);
+  Stat fstat(jsg::Lock& js, int fd);
+  void ftruncate(jsg::Lock& js, int fd, double size);
+  void futimes(jsg::Lock& js, int fd, kj::Date mtime);
+  double freadv(jsg::Lock& js,
+      int fd,
+      kj::Array<jsg::BufferSource> buffers,
+      jsg::Optional<double> maybeOffset);
+  double fwritev(jsg::Lock& js,
+      int fd,
+      kj::Array<jsg::BufferSource> buffers,
+      jsg::Optional<double> maybeOffset);
+
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(root, getRoot);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(tmp, getTmp);
@@ -270,7 +340,19 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(stat);
     JSG_METHOD(symlink);
     JSG_METHOD(copyFile);
+    JSG_METHOD(mkdir);
+    JSG_METHOD(mkdtemp);
+    JSG_METHOD(fopen);
+    JSG_METHOD(fclose);
+    JSG_METHOD(fstat);
+    JSG_METHOD(ftruncate);
+    JSG_METHOD(futimes);
+    JSG_METHOD(freadv);
+    JSG_METHOD(fwritev);
   }
+
+ private:
+  uint64_t tempFileCounter = 0;
 };
 
 // ======================================================================================
@@ -599,6 +681,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::DirectoryHandle::EntryIterator, workerd::api::DirectoryHandle::KeyIterator,    \
       workerd::api::DirectoryHandle::EntryIterator::Next,                                          \
       workerd::api::DirectoryHandle::KeyIterator::Next,                                            \
-      workerd::api::FileSystemModule::CopyFileOptions
+      workerd::api::FileSystemModule::CopyFileOptions,                                             \
+      workerd::api::FileSystemModule::OpenFdOptions, workerd::api::FileSystemModule::MkdirOptions
 
 }  // namespace workerd::api

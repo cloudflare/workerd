@@ -6,6 +6,8 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/url.h>
 
+#include <kj/encoding.h>
+
 namespace workerd::api {
 
 namespace {
@@ -182,15 +184,19 @@ kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> DirectoryH
   auto url = filePathToUrl(path);
   auto str = kj::str(url.getPathname().slice(1));
   kj::Path root{};
-  KJ_IF_SOME(node, inner->tryOpen(js, root.eval(str), createAs.map([](kj::StringPtr name) {
-    return getTypeForName(name);
-  }))) {
+  KJ_IF_SOME(node,
+      inner->tryOpen(js, root.eval(str),
+          Directory::OpenOptions{
+            .createAs = createAs.map([](kj::StringPtr name) { return getTypeForName(name); })})) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         return kj::Maybe(js.alloc<FileHandle>(kj::mv(file)));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return kj::Maybe(js.alloc<DirectoryHandle>(kj::mv(dir)));
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        KJ_UNREACHABLE;
       }
     }
     KJ_UNREACHABLE;
@@ -365,11 +371,203 @@ kj::Maybe<kj::OneOf<jsg::Ref<FileHandle>, jsg::Ref<DirectoryHandle>>> FileSystem
         KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
           return kj::Maybe(js.alloc<DirectoryHandle>(kj::mv(dir)));
         }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          KJ_UNREACHABLE;
+        }
       }
       KJ_UNREACHABLE;
     }
   }
   return kj::none;
+}
+
+int FileSystemModule::fopen(jsg::Lock& js, FilePath path, jsg::Optional<OpenFdOptions> options) {
+  VirtualFileSystem::OpenOptions opts = options.orDefault(OpenFdOptions{});
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto& opened = vfs.openFd(js, filePathToUrl(path), opts);
+  return opened.fd;
+}
+
+void FileSystemModule::fclose(jsg::Lock& js, int fd) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  vfs.closeFd(js, fd);
+}
+
+Stat FileSystemModule::fstat(jsg::Lock& js, int fd) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor");
+  KJ_SWITCH_ONEOF(opened.node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      return Stat(file->stat(js));
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      return Stat(dir->stat(js));
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      return Stat(link->stat(js));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void FileSystemModule::ftruncate(jsg::Lock& js, int fd, double size) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor");
+  // We can only truncate files that are opened for writing.
+  JSG_REQUIRE(opened.write, Error, "File descriptor is not opened for writing");
+  KJ_SWITCH_ONEOF(opened.node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      auto stat = file->stat(js);
+      JSG_REQUIRE(stat.writable, Error, "File is not writable");
+      file->resize(js, static_cast<size_t>(size));
+      return;
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a directory");
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a symbolic link");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void FileSystemModule::futimes(jsg::Lock& js, int fd, kj::Date mtime) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor");
+  // We can only set the time on files that are opened for writing.
+  JSG_REQUIRE(opened.write, Error, "File descriptor is not opened for writing");
+  KJ_SWITCH_ONEOF(opened.node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      file->setLastModified(js, mtime);
+      return;
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a directory");
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a symbolic link");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+double FileSystemModule::freadv(jsg::Lock& js,
+    int fd,
+    kj::Array<jsg::BufferSource> buffers,
+    jsg::Optional<double> maybeOffset) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor");
+  // We can only read from files that are opened for reading.
+  JSG_REQUIRE(opened.read, Error, "File descriptor is not opened for reading");
+  size_t offset = opened.position;
+  bool updatePosition = true;
+  KJ_IF_SOME(pos, maybeOffset) {
+    JSG_REQUIRE(offset >= 0, Error, "Offset must be non-negative");
+    offset = static_cast<size_t>(pos);
+    updatePosition = false;
+  }
+  KJ_SWITCH_ONEOF(opened.node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      // Starting from the offset, read the data into the buffers.
+      auto stat = file->stat(js);
+      // The remaining bytes are the total number of bytes we can read from
+      // the file in this call.
+      size_t remaining = stat.size - offset;
+      size_t totalRead = 0;
+      for (auto& buffer: buffers) {
+        auto view = buffer.asArrayPtr();
+        while (view.size() > 0) {
+          if (remaining == 0) {
+            // There's nothing remaining to read, we are done.
+            return totalRead;
+          }
+          auto read = file->read(js, offset, view);
+          if (read == 0) {
+            // No data was read, we should be done.
+            return totalRead;
+          }
+          if (updatePosition) {
+            opened.position += read;
+          }
+          offset += read;
+          totalRead += read;
+          remaining -= read;
+          view = view.slice(read);
+          // If the view is empty, we are done with this buffer and
+          // can move on to the next, if any.
+          if (view == nullptr) break;
+        }
+      }
+      return totalRead;
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a directory");
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a symbolic link");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+double FileSystemModule::fwritev(jsg::Lock& js,
+    int fd,
+    kj::Array<jsg::BufferSource> buffers,
+    jsg::Optional<double> maybeOffset) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor");
+  // We can only read from files that are opened for reading.
+  JSG_REQUIRE(opened.write, Error, "File descriptor is not opened for reading");
+  size_t offset = opened.position;
+  bool updatePosition = true;
+  KJ_IF_SOME(pos, maybeOffset) {
+    JSG_REQUIRE(offset >= 0, Error, "Offset must be non-negative");
+    offset = static_cast<size_t>(pos);
+    updatePosition = false;
+  }
+  KJ_SWITCH_ONEOF(opened.node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      size_t totalWritten = 0;
+      auto stat = file->stat(js);
+      JSG_REQUIRE(stat.writable, Error, "File is not writable");
+
+      // If the file was opened for append, we will ignore the offset and will
+      // always append to the end of the file.
+      if (opened.append) offset = stat.size;
+      JSG_REQUIRE(offset <= stat.size, Error, "Offset is out of bounds");
+
+      for (auto& buffer: buffers) {
+        auto written = file->write(js, offset, buffer);
+        totalWritten += written;
+        offset += written;
+        if (updatePosition) {
+          opened.position = offset;
+        }
+        if (written < buffer.size()) {
+          // If we did not write the entire buffer, we'll assume we are
+          // done. In the typical case, this should never happen as a
+          // write is generally expected to fully succeed.
+          return totalWritten;
+        }
+      }
+      return totalWritten;
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a directory");
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      JSG_FAIL_REQUIRE(Error, "Unsupported operation on a symbolic link");
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Maybe<Stat> FileSystemModule::stat(jsg::Lock& js, FilePath path) {
@@ -388,6 +586,9 @@ kj::Maybe<jsg::Ref<DirectoryHandle>> FileSystemModule::getTmp(jsg::Lock& js) {
           return js.alloc<DirectoryHandle>(kj::mv(dir));
         }
         KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          return kj::none;
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
           return kj::none;
         }
       }
@@ -458,13 +659,123 @@ void FileSystemModule::copyFile(
     auto& parentDir = JSG_REQUIRE_NONNULL(parent.tryGet<kj::Rc<workerd::Directory>>(), Error,
         "Destination parent is not a directory");
     // Now, try to create the destination file.
-    auto dest = JSG_REQUIRE_NONNULL(parentDir->tryOpen(js, name, workerd::FsType::FILE), Error,
-        "Failed to create destination file");
+    auto dest = JSG_REQUIRE_NONNULL(parentDir->tryOpen(js, name,
+                                        Directory::OpenOptions{
+                                          .createAs = workerd::FsType::FILE,
+                                        }),
+        Error, "Failed to create destination file");
     // Make sure the destination was created as a file
     auto& destFile = JSG_REQUIRE_NONNULL(
         dest.tryGet<kj::Rc<workerd::File>>(), Error, "Destination is not a file");
     performCopy(js, sourceFile, destFile);
   }
+}
+
+kj::Maybe<kj::String> FileSystemModule::mkdir(
+    jsg::Lock& js, FilePath path, jsg::Optional<MkdirOptions> options) {
+  auto opts = options.orDefault(MkdirOptions());
+  auto recursive = opts.recursive.orDefault(false);
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system");
+  auto url = filePathToUrl(path);
+  // First, if the path already exists, we'll throw an error.
+  JSG_REQUIRE(vfs.resolve(js, url) == kj::none, Error, "File already exists");
+  // Now we will try to create the directory the easy way...
+  auto str = kj::str(url.getPathname().slice(1));
+  kj::Path root{};
+  auto dirPath = root.eval(str);
+
+  // Let's try to create the directory the easy way. Intermediate directories
+  // must already exist for this to work.
+  KJ_IF_SOME(_,
+      vfs.getRoot(js)->tryOpen(js, dirPath,
+          Directory::OpenOptions{
+            .createAs = workerd::FsType::DIRECTORY,
+          })) {
+    // If we got here, the directory was created! There's nothing more to do.
+    return kj::none;
+  }
+
+  // maybeCreatedPath is only not-null if the recursive option is set and
+  // we were able to create a directory.
+  kj::Maybe<kj::String> maybeCreatedPath;
+
+  // So now we will walk the path and try creating each directory if it does
+  // not exist.
+  auto current = vfs.getRoot(js);
+  auto createdPath = kj::Path{};
+  for (auto& component: dirPath) {
+    // We first try to open the component. If it exists we will verify
+    // that it is a directory. Assuming it is, we will continue to the
+    // next component. If it does not exist, and the recursive option
+    // is set, we will try to create it.
+    KJ_IF_SOME(node, current->tryOpen(js, kj::Path({component}))) {
+      // The component exists
+      KJ_SWITCH_ONEOF(node) {
+        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          // Oops.. we found a file instead. That's not what we wanted.
+          JSG_FAIL_REQUIRE(Error, "Unable to create directory");
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          // Sweet! We found a directory that already exists. Let's update
+          // the current to this one and keep going.
+          current = kj::mv(dir);
+          continue;
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          // We found a symlink. If it resolves to a directory, awesome,
+          // we can keep going. If it resolves to a file, we are done.
+          SymbolicLinkRecursionGuardScope guardScope;
+          auto resolved =
+              JSG_REQUIRE_NONNULL(link->resolve(js), Error, "Unable to create directory");
+          KJ_SWITCH_ONEOF(resolved) {
+            KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+              // Oops.. we found a file instead. That's not what we wanted.
+              JSG_FAIL_REQUIRE(Error, "Unable to create directory");
+            }
+            KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+              // Sweet! We found a directory that already exists. Let's update
+              // the current to this one and keep going.
+              current = kj::mv(dir);
+              continue;
+            }
+          }
+        }
+      }
+    } else {
+      // If we got here we were not able to open the directory. If the recursive
+      // option is set, let's try to create it. If we can create it, awesome,
+      // we'll keep going. If not, we'll throw an error. If the recursive option
+      // is not set, we'll throw an error.
+      JSG_REQUIRE(recursive, Error, "Unable to create directory");
+      auto created = JSG_REQUIRE_NONNULL(current->tryOpen(js, kj::Path({component}),
+                                             Directory::OpenOptions{
+                                               .createAs = workerd::FsType::DIRECTORY,
+                                             }),
+          Error, "Unable to create directory");
+      createdPath = createdPath.eval(component);
+      if (maybeCreatedPath == kj::none) {
+        maybeCreatedPath = createdPath.toString(true);
+      }
+      current = kj::mv(created.get<kj::Rc<workerd::Directory>>());
+    }
+  }
+
+  // Per the definition of the mkdirSync function in Node.js, we either return
+  // nothing or the path of the first directory that was created if the
+  // recursive option was set. Node.js' APIs can be quite weird at times.
+  return kj::mv(maybeCreatedPath);
+}
+
+kj::String FileSystemModule::mkdtemp(jsg::Lock& js, FilePath prefix) {
+  // Ultimately this will just defer to mkdir but we need to process the prefix
+  // path a bit to generate the randomized name.
+  auto url = filePathToUrl(prefix);
+  uint64_t counter = tempFileCounter++;
+  auto ptr = kj::ArrayPtr<kj::byte>(reinterpret_cast<kj::byte*>(&counter), sizeof(counter));
+  url.setPathname(kj::str(url.getPathname(), kj::encodeHex(ptr)));
+  mkdir(js, kj::str(url), kj::none);
+  return kj::str(url.getHref());
 }
 
 // =======================================================================================
@@ -508,7 +819,11 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
   KJ_IF_SOME(opts, options) {
     if (opts.create) createAs = FsType::FILE;
   }
-  KJ_IF_SOME(node, inner->tryOpen(js, kj::Path({name}), createAs)) {
+  KJ_IF_SOME(node,
+      inner->tryOpen(js, kj::Path({name}),
+          Directory::OpenOptions{
+            .createAs = createAs,
+          })) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         return js.resolvedPromise(js.alloc<FileSystemFileHandle>(kj::mv(name), kj::mv(file)));
@@ -517,6 +832,9 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
         auto ex =
             js.domException(kj::str("TypeMismatchError"), kj::str("File name is a directory"));
         return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        KJ_UNREACHABLE;
       }
     }
     KJ_UNREACHABLE;
@@ -536,7 +854,11 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
   KJ_IF_SOME(opts, options) {
     if (opts.create) createAs = FsType::FILE;
   }
-  KJ_IF_SOME(node, inner->tryOpen(js, kj::Path({name}), createAs)) {
+  KJ_IF_SOME(node,
+      inner->tryOpen(js, kj::Path({name}),
+          Directory::OpenOptions{
+            .createAs = createAs,
+          })) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         return js.resolvedPromise(js.alloc<FileSystemDirectoryHandle>(kj::mv(name), kj::mv(dir)));
@@ -545,6 +867,9 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("File name is a file"));
         return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
             exception.wrap(js, kj::mv(ex)));
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        KJ_UNREACHABLE;
       }
     }
     KJ_UNREACHABLE;
