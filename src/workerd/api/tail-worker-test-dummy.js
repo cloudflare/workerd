@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-  tail(...args) {
-    return (...args) => {};
+  tail(event, env, ctx) {
+    return (event) => {};
   },
 };

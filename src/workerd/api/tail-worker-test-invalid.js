@@ -4,7 +4,7 @@
 
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-  tailStream(args) {
+  tailStream(event, env, ctx) {
     // Return an invalid handler
     return 42;
   },

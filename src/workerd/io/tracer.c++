@@ -194,15 +194,16 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     // TODO(o11y): Provide correct nested spans
     // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
     // invocations as indicated by isTrigger
+    auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
     tracing::InvocationSpanContext context = [&]() {
-      auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
       if (topLevelContext.isTrigger()) {
         return topLevelContext.clone();
       } else {
         return topLevelContext.newChild();
       }
     }();
-    writer->report(context, workerd::tracing::SpanOpen(kj::str(span.operationName)));
+    writer->report(context,
+        workerd::tracing::SpanOpen(topLevelContext.getSpanId(), kj::str(span.operationName)));
     kj::Vector<workerd::tracing::Attribute> attr;
     for (auto& tag: span.tags) {
       attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));

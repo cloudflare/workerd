@@ -7,22 +7,21 @@ let resposeMap = new Map();
 
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-  tailStream(...args) {
+  tailStream(event, env, ctx) {
     // Onset event, must be singleton
 
     // For scheduled and alarm tests, override scheduledTime to make this test deterministic.
     if (
-      args[0].event.info.type == 'scheduled' ||
-      args[0].event.info.type == 'alarm'
+      event.event.info.type == 'scheduled' ||
+      event.event.info.type == 'alarm'
     ) {
-      args[0].event.info.scheduledTime = '1970-01-01T00:00:00.000Z';
+      event.event.info.scheduledTime = '1970-01-01T00:00:00.000Z';
     }
 
-    resposeMap.set(args[0].traceId, JSON.stringify(args[0].event));
-    return (...args) => {
-      // TODO(streaming-tail-worker): Support several queued elements
-      let cons = resposeMap.get(args[0].traceId);
-      resposeMap.set(args[0].traceId, cons + JSON.stringify(args[0].event));
+    resposeMap.set(event.traceId, JSON.stringify(event.event));
+    return (event) => {
+      let cons = resposeMap.get(event.traceId);
+      resposeMap.set(event.traceId, cons + JSON.stringify(event.event));
     };
   },
 };
