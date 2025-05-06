@@ -117,7 +117,7 @@ export default {
     let fullResponse = new Map();
     for (let i = 0; i < 100; i++) {
       fullKeysArray.push(`key` + i);
-      fullResponse.set(`key` + i, `{\"example\":\"values-key${i}\"}`);
+      fullResponse.set(`key` + i, `{"example":"values-key${i}"}`);
     }
 
     response = await env.KV.get(fullKeysArray, {});
