@@ -740,8 +740,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   requestSignalPassthrough @85 :Bool
       $compatEnableFlag("request_signal_passthrough")
-      $compatDisableFlag("no_request_signal_passthrough")
-      $compatEnableDate("2025-05-23");
+      $compatDisableFlag("no_request_signal_passthrough");
   # When enabled, the AbortSignal of the incoming request is not passed through to subrequests.
   # As a result, outgoing subrequests will not be cancelled when the incoming request is.
 
