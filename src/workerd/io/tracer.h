@@ -186,6 +186,7 @@ class WorkerTracer: public BaseTracer {
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing
+  // TODO: Do we need this?
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;

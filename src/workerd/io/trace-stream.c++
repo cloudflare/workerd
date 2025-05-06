@@ -636,6 +636,7 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
   // TODO: It is trivial to splice events into multiple traces as needed in the next step.
   // => might not be needed, each tracer only maps to one trace.
   kj::Vector<kj::Own<Trace>> traces;
+  KJ_LOG(WARNING, "assembling trace");
 
   for (auto& event: events) {
     KJ_SWITCH_ONEOF(event.event) {
@@ -662,66 +663,81 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
         trace->eventTimestamp = event.timestamp;
         traces.add(kj::mv(trace));
       }
-      KJ_CASE_ONEOF(mark, tracing::Mark) {
-        KJ_SWITCH_ONEOF(mark) {
-          KJ_CASE_ONEOF(log, tracing::Log) {
+      KJ_CASE_ONEOF(log, tracing::Log) {
 
-            if (traces[0]->exceededLogLimit) {
-              continue;
-            }
-            constexpr kj::LiteralStringConst logSizeExceeded =
-                "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
+        if (traces[0]->exceededLogLimit) {
+          continue;
+        }
+        constexpr kj::LiteralStringConst logSizeExceeded =
+            "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
 
 /*if (pipelineLogLevel == PipelineLogLevel::NONE) {
-              continue;
-            }*/
+          continue;
+        }*/
 #define MAX_TRACE_BYTES (128 * 1024)
-            size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Log) + log.message.size();
-            if (newSize > MAX_TRACE_BYTES) {
-              traces[0]->exceededLogLimit = true;
-              traces[0]->truncated = true;
-              // We use a JSON encoded array/string to match other console.log() recordings:
-              traces[0]->logs.add(log.timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
-              continue;
-            }
-            traces[0]->bytesUsed = newSize;
+        size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Log) + log.message.size();
+        if (newSize > MAX_TRACE_BYTES) {
+          traces[0]->exceededLogLimit = true;
+          traces[0]->truncated = true;
+          // We use a JSON encoded array/string to match other console.log() recordings:
+          traces[0]->logs.add(log.timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
+          continue;
+        }
+        traces[0]->bytesUsed = newSize;
 
-            traces[0]->logs.add(log.clone());
-          }
-          KJ_CASE_ONEOF(exception, tracing::Exception) {
-            if (traces[0]->exceededExceptionLimit) {
-              continue;
+        traces[0]->logs.add(log.clone());
+      }
+      KJ_CASE_ONEOF(exception, tracing::Exception) {
+        if (traces[0]->exceededExceptionLimit) {
+          continue;
+        }
+        size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Exception) + exception.name.size() +
+            exception.message.size();
+        KJ_IF_SOME(s, exception.stack) {
+          newSize += s.size();
+        }
+        if (newSize > MAX_TRACE_BYTES) {
+          traces[0]->exceededExceptionLimit = true;
+          traces[0]->truncated = true;
+          traces[0]->exceptions.add(exception.timestamp, kj::str("Error"),
+              kj::str("Trace resource limit exceeded; subsequent exceptions not recorded."),
+              kj::none);
+          continue;
+        }
+        traces[0]->exceptions.add(exception.clone());
+      }
+      KJ_CASE_ONEOF(diag, tracing::DiagnosticChannelEvent) {
+        traces[0]->diagnosticChannelEvents.add(diag.clone());
+      }
+      KJ_CASE_ONEOF(r, tracing::Return) {
+        KJ_IF_SOME(rr, r.info) {
+          KJ_SWITCH_ONEOF(rr) {
+            KJ_CASE_ONEOF(fetchInfo, tracing::FetchResponseInfo) {
+              traces[0]->fetchResponseInfo = kj::mv(fetchInfo);
             }
-            size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Exception) +
-                exception.name.size() + exception.message.size();
-            KJ_IF_SOME(s, exception.stack) {
-              newSize += s.size();
-            }
-            if (newSize > MAX_TRACE_BYTES) {
-              traces[0]->exceededExceptionLimit = true;
-              traces[0]->truncated = true;
-              traces[0]->exceptions.add(exception.timestamp, kj::str("Error"),
-                  kj::str("Trace resource limit exceeded; subsequent exceptions not recorded."),
-                  kj::none);
-              continue;
-            }
-            traces[0]->exceptions.add(exception.clone());
+            KJ_CASE_ONEOF(custom, tracing::CustomInfo) {}
           }
-          KJ_CASE_ONEOF(diag, tracing::DiagnosticChannelEvent) {
-            traces[0]->diagnosticChannelEvents.add(diag.clone());
-          }
-          KJ_CASE_ONEOF(r, tracing::Return) {
-            KJ_IF_SOME(rr, r.info) {
-              KJ_SWITCH_ONEOF(rr) {
-                KJ_CASE_ONEOF(fetchInfo, tracing::FetchResponseInfo) {
-                  traces[0]->fetchResponseInfo = kj::mv(fetchInfo);
-                }
-                KJ_CASE_ONEOF(custom, tracing::CustomInfo) {}
-              }
-            }
-          }
-          KJ_CASE_ONEOF(r, Link) {}
-          KJ_CASE_ONEOF(r, tracing::CustomInfo) {}
+        }
+      }
+      KJ_CASE_ONEOF(r, Link) {}
+      KJ_CASE_ONEOF(r, tracing::CustomInfo) {
+        // array of span tags
+        // TODO: Apply these to the right span, not whatever the latest span is.
+        auto& trace = traces[0];
+        for (auto& tag: r) {
+          // TODO: Synthesize top-level worker span?
+          auto keyPtr = tag.name.asPtr();
+          trace->spans[trace->spans.size() - 1].tags.upsert(kj::ConstString(kj::str(tag.name)),
+              kj::mv(tag.value[0]),
+              [keyPtr](Span::TagValue& existingValue, Span::TagValue&& newValue) {
+            // This is a programming error, but not a serious one. We could alternatively just emit
+            // duplicate tags and leave the Jaeger UI in charge of warning about them.
+            [[maybe_unused]] static auto logged = [keyPtr]() {
+              KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
+              return true;
+            }();
+            existingValue = kj::mv(newValue);
+          });
         }
       }
       KJ_CASE_ONEOF(outcome, tracing::Outcome) {
@@ -729,8 +745,16 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
       }
       // TODO: Handle remaining event types.
       KJ_CASE_ONEOF(outcome, tracing::Hibernate) {}
-      KJ_CASE_ONEOF(outcome, tracing::SpanOpen) {}
-      KJ_CASE_ONEOF(outcome, tracing::SpanClose) {}
+      KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
+        auto& trace = traces[0];
+        //CompleteSpan a(kj::ConstString(kj::str(spanOpen.operationName)), event.timestamp);
+        CompleteSpan a(kj::ConstString(kj::str(spanOpen.operationName)), kj::UNIX_EPOCH);
+        a.spanId = event.spanId;
+        // TODO: Provide parent span ID.
+        a.parentSpanId = event.spanId;
+        trace->spans.add(kj::mv(a));
+      }
+      KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {}
     }
   }
 
@@ -748,10 +772,13 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         props(kj::mv(props)),
         doneFulfiller(kj::mv(doneFulfiller)),
         isLegacy(isLegacy),
-        pipelineTracer(kj::mv(pipelineTracer)) {}
+        pipelineTracer(kj::mv(pipelineTracer)) {
+    KJ_LOG(WARNING, "TailStreamTarget start");
+  }
 
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
+    KJ_LOG(WARNING, "TailStreamTarget shutdown");
     if (doneFulfiller->isWaiting()) {
       doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
     }
@@ -854,6 +881,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       this->pipelineTracer = kj::none;
       results.setStop(true);
       doneFulfiller->fulfill();
+      KJ_LOG(WARNING, "returning trace fulfillment");
       return kj::READY_NOW;
     }
     // TODO: An alternative approach could try to not create a separate WorkerInterface/custom
@@ -1317,6 +1345,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       // reference while the instance is attached to the kj::Own below.
       [&state = *state, &waitUntilTasks, pipelineTracer = kj::mv(pipelineTracer)](
           tracing::TailEvent&& event) mutable {
+    //KJ_LOG(WARNING, "TailStreamWriter state created");
     KJ_SWITCH_ONEOF(state.inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
         // The tail stream has already been closed because we have received either
@@ -1331,6 +1360,8 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
 
         // Transitions into the active state by grabbing the pending client capability.
+        KJ_LOG(WARNING, "TailStreamWriter state makePending");
+
         state.inner = KJ_MAP(wi, pending) {
           auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>(
               wi.isLegacy, wi.isLegacy ? mapAddRef(pipelineTracer) : kj::none);
@@ -1345,12 +1376,15 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
                                  .ignoreResult());
           return active;
         };
+        // Relinquish copy of pipelineTracer.
+        pipelineTracer = kj::none;
 
         // At this point our writer state is "active", which means the state
         // consists of one or more streaming tail worker client stubs to which
         // the event will be dispatched.
       }
       KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
+        KJ_LOG(WARNING, "TailStreamWriter state continue", event.event.is<tracing::Outcome>());
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
       }
