@@ -632,7 +632,7 @@ struct Link final {
   Link clone() const;
 };
 
-using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, CustomInfo>;
+// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, Link, and CustomInfo events.
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -746,7 +746,17 @@ struct Outcome final {
 // and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
 // the stream was abruptly terminated.
 struct TailEvent final {
-  using Event = kj::OneOf<Onset, Outcome, Hibernate, SpanOpen, SpanClose, Mark>;
+  using Event = kj::OneOf<Onset,
+      Outcome,
+      Hibernate,
+      SpanOpen,
+      SpanClose,
+      DiagnosticChannelEvent,
+      Exception,
+      Log,
+      Return,
+      Link,
+      CustomInfo>;
 
   explicit TailEvent(
       const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);

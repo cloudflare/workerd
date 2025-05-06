@@ -6396,20 +6396,24 @@ export declare namespace TailStream {
       | bigint
       | bigint[];
   }
-  type Mark =
-    | DiagnosticChannelEvent
-    | Exception
-    | Log
-    | Return
-    | Link
-    | Attribute[];
   interface TailEvent {
     readonly traceId: string;
     readonly invocationId: string;
     readonly spanId: string;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | Mark;
+    readonly event:
+      | Onset
+      | Outcome
+      | Hibernate
+      | SpanOpen
+      | SpanClose
+      | DiagnosticChannelEvent
+      | Exception
+      | Log
+      | Return
+      | Link
+      | Attribute[];
   }
   type TailEventHandler = (event: TailEvent) => void | Promise<void>;
   type TailEventHandlerName =

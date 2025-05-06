@@ -1443,22 +1443,22 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
       for (size_t n = 0; n < listReader.size(); n++) {
         attrs.add(tracing::Attribute(listReader[n]));
       }
-      return tracing::Mark(attrs.releaseAsArray());
+      return attrs.releaseAsArray();
     }
     case rpc::Trace::TailEvent::Event::RETURN: {
-      return tracing::Mark(tracing::Return(event.getReturn()));
+      return tracing::Return(event.getReturn());
     }
     case rpc::Trace::TailEvent::Event::DIAGNOSTIC_CHANNEL_EVENT: {
-      return tracing::Mark(tracing::DiagnosticChannelEvent(event.getDiagnosticChannelEvent()));
+      return tracing::DiagnosticChannelEvent(event.getDiagnosticChannelEvent());
     }
     case rpc::Trace::TailEvent::Event::EXCEPTION: {
-      return tracing::Mark(tracing::Exception(event.getException()));
+      return tracing::Exception(event.getException());
     }
     case rpc::Trace::TailEvent::Event::LOG: {
-      return tracing::Mark(tracing::Log(event.getLog()));
+      return tracing::Log(event.getLog());
     }
     case rpc::Trace::TailEvent::Event::LINK: {
-      return tracing::Mark(tracing::Link(event.getLink()));
+      return tracing::Link(event.getLink());
     }
   }
   KJ_UNREACHABLE;
@@ -1497,30 +1497,26 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(close, SpanClose) {
       close.copyTo(eventBuilder.initSpanClose());
     }
-    KJ_CASE_ONEOF(mark, Mark) {
-      KJ_SWITCH_ONEOF(mark) {
-        KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
-          diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
-        }
-        KJ_CASE_ONEOF(ex, Exception) {
-          ex.copyTo(eventBuilder.initException());
-        }
-        KJ_CASE_ONEOF(log, Log) {
-          log.copyTo(eventBuilder.initLog());
-        }
-        KJ_CASE_ONEOF(ret, Return) {
-          ret.copyTo(eventBuilder.initReturn());
-        }
-        KJ_CASE_ONEOF(link, Link) {
-          link.copyTo(eventBuilder.initLink());
-        }
-        KJ_CASE_ONEOF(attrs, CustomInfo) {
-          // Mark is a collection of attributes.
-          auto attrBuilder = eventBuilder.initAttribute(attrs.size());
-          for (size_t n = 0; n < attrs.size(); n++) {
-            attrs[n].copyTo(attrBuilder[n]);
-          }
-        }
+    KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
+      diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
+    }
+    KJ_CASE_ONEOF(ex, Exception) {
+      ex.copyTo(eventBuilder.initException());
+    }
+    KJ_CASE_ONEOF(log, Log) {
+      log.copyTo(eventBuilder.initLog());
+    }
+    KJ_CASE_ONEOF(ret, Return) {
+      ret.copyTo(eventBuilder.initReturn());
+    }
+    KJ_CASE_ONEOF(link, Link) {
+      link.copyTo(eventBuilder.initLink());
+    }
+    KJ_CASE_ONEOF(attrs, CustomInfo) {
+      // Mark is a collection of attributes.
+      auto attrBuilder = eventBuilder.initAttribute(attrs.size());
+      for (size_t n = 0; n < attrs.size(); n++) {
+        attrs[n].copyTo(attrBuilder[n]);
       }
     }
   }
@@ -1544,27 +1540,23 @@ tracing::TailEvent tracing::TailEvent::clone() const {
       KJ_CASE_ONEOF(close, SpanClose) {
         return close.clone();
       }
-      KJ_CASE_ONEOF(mark, Mark) {
-        KJ_SWITCH_ONEOF(mark) {
-          KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
-            return Mark(diag.clone());
-          }
-          KJ_CASE_ONEOF(ex, Exception) {
-            return Mark(ex.clone());
-          }
-          KJ_CASE_ONEOF(log, Log) {
-            return Mark(log.clone());
-          }
-          KJ_CASE_ONEOF(ret, Return) {
-            return Mark(ret.clone());
-          }
-          KJ_CASE_ONEOF(link, Link) {
-            return Mark(link.clone());
-          }
-          KJ_CASE_ONEOF(attrs, tracing::CustomInfo) {
-            return Mark(KJ_MAP(attr, attrs) { return attr.clone(); });
-          }
-        }
+      KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
+        return diag.clone();
+      }
+      KJ_CASE_ONEOF(ex, Exception) {
+        return ex.clone();
+      }
+      KJ_CASE_ONEOF(log, Log) {
+        return log.clone();
+      }
+      KJ_CASE_ONEOF(ret, Return) {
+        return ret.clone();
+      }
+      KJ_CASE_ONEOF(link, Link) {
+        return link.clone();
+      }
+      KJ_CASE_ONEOF(attrs, tracing::CustomInfo) {
+        return KJ_MAP(attr, attrs) { return attr.clone(); };
       }
     }
     KJ_UNREACHABLE;
