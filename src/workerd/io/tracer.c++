@@ -151,10 +151,9 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
-  if (trace->numSpans >= MAX_USER_SPANS) {
+  if (trace->spans.size() >= MAX_USER_SPANS) {
     return;
   }
-  trace->numSpans++;
 
   if (trace->exceededLogLimit) {
     return;
@@ -214,7 +213,6 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   trace->bytesUsed = newSize;
   trace->spans.add(kj::mv(span));
-  trace->numSpans++;
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,

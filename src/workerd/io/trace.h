@@ -640,15 +640,14 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(uint64_t parentSpanId,
-      kj::Maybe<kj::String> operationName = kj::none,
-      kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(
+      uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::Maybe<kj::String> operationName = kj::none;
+  kj::String operationName;
   kj::Maybe<Info> info = kj::none;
   uint64_t parentSpanId;
 
@@ -855,7 +854,6 @@ class Trace final: public kj::Refcounted {
   // Trace data is recorded outside of the JS heap.  To avoid DoS, we keep an estimate of trace
   // data size, and we stop recording if too much is used.
   size_t bytesUsed = 0;
-  size_t numSpans = 0;
 
   // Copy content from this trace into `builder`.
   void copyTo(rpc::Trace::Builder builder) const;

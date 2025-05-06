@@ -448,11 +448,11 @@ KJ_TEST("Read/Write SpanOpen works") {
 
   auto reader = infoBuilder.asReader();
   tracing::SpanOpen info2(reader);
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info2.operationName) == "foo"_kj);
+  KJ_ASSERT(info2.operationName == "foo"_kj);
   KJ_ASSERT(info2.info == kj::none);
 
   tracing::SpanOpen info3 = info.clone();
-  KJ_ASSERT(KJ_ASSERT_NONNULL(info3.operationName) == "foo"_kj);
+  KJ_ASSERT(info3.operationName == "foo"_kj);
   KJ_ASSERT(info3.info == kj::none);
 }
 

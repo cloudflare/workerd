@@ -56,7 +56,6 @@ namespace {
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
-  V(OP, "op")                                                                                      \
   V(OUTCOME, "outcome")                                                                            \
   V(PARENTSPANID, "parentSpanId")                                                                  \
   V(QUEUE, "queue")                                                                                \
@@ -430,9 +429,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
-  KJ_IF_SOME(op, spanOpen.operationName) {
-    obj.set(js, OP_STR, js.str(op));
-  }
+  obj.set(js, NAME_STR, js.str(spanOpen.operationName));
 
   // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
   if (isPredictableModeForTest()) {
@@ -596,7 +593,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
 kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
     KJ_CASE_ONEOF(_, tracing::Onset) {
-      return ONSET_STR;
+      KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
+      // return ONSET_STR;
     }
     KJ_CASE_ONEOF(_, tracing::Outcome) {
       return OUTCOME_STR;

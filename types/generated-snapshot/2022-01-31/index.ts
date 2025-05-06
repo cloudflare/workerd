@@ -6233,7 +6233,7 @@ export declare namespace TailStream {
   }
   interface SpanOpen {
     readonly type: "spanOpen";
-    readonly op?: string;
+    readonly name: string;
     readonly info?: FetchEventInfo | JsRpcEventInfo | Attribute[];
   }
   interface SpanClose {
@@ -6270,7 +6270,15 @@ export declare namespace TailStream {
   interface Attribute {
     readonly type: "attribute";
     readonly name: string;
-    readonly value: string | string[] | boolean | boolean[] | number | number[];
+    readonly value:
+      | string
+      | string[]
+      | boolean
+      | boolean[]
+      | number
+      | number[]
+      | bigint
+      | bigint[];
   }
   type Mark =
     | DiagnosticChannelEvent
@@ -6289,7 +6297,6 @@ export declare namespace TailStream {
   }
   type TailEventHandler = (event: TailEvent) => void | Promise<void>;
   type TailEventHandlerName =
-    | "onset"
     | "outcome"
     | "hibernate"
     | "spanOpen"
