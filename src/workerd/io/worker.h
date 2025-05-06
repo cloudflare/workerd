@@ -14,6 +14,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/async-context.h>
@@ -571,6 +572,11 @@ class Worker::Api {
       kj::Maybe<kj::StringPtr>);
   virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
+  }
+
+  // Return the virtual file system for this worker, if any.
+  virtual kj::Maybe<const VirtualFileSystem&> getVirtualFileSystem() const {
+    return kj::none;
   }
 };
 

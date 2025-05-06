@@ -329,6 +329,7 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
           defaultPythonConfig,
+          kj::none,
           kj::none)),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
