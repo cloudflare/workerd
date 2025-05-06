@@ -54,7 +54,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.44.2",
+    version = "1.45.0",
     deps = [
         "@crates_vendor__mio-1.0.3//:mio",
         "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",

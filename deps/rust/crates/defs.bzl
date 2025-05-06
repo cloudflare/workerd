@@ -306,7 +306,7 @@ _NORMAL_DEPENDENCIES = {
             "flate2": Label("@crates_vendor//:flate2-1.1.1"),
             "foldhash": Label("@crates_vendor//:foldhash-0.1.5"),
             "lol_html_c_api": Label("@crates_vendor//:lol_html_c_api-1.3.0"),
-            "nix": Label("@crates_vendor//:nix-0.30.0"),
+            "nix": Label("@crates_vendor//:nix-0.30.1"),
             "pico-args": Label("@crates_vendor//:pico-args-0.5.0"),
             "proc-macro2": Label("@crates_vendor//:proc-macro2-1.0.95"),
             "quote": Label("@crates_vendor//:quote-1.0.40"),
@@ -317,7 +317,7 @@ _NORMAL_DEPENDENCIES = {
             "serde_json": Label("@crates_vendor//:serde_json-1.0.140"),
             "syn": Label("@crates_vendor//:syn-2.0.101"),
             "thiserror": Label("@crates_vendor//:thiserror-2.0.12"),
-            "tokio": Label("@crates_vendor//:tokio-1.44.2"),
+            "tokio": Label("@crates_vendor//:tokio-1.45.0"),
             "tracing": Label("@crates_vendor//:tracing-0.1.41"),
         },
     },
@@ -945,12 +945,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__nix-0.30.0",
-        sha256 = "537bc3c4a347b87fd52ac6c03a02ab1302962cfd93373c5d7a112cdc337854cc",
+        name = "crates_vendor__nix-0.30.1",
+        sha256 = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/nix/0.30.0/download"],
-        strip_prefix = "nix-0.30.0",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.nix-0.30.0.bazel"),
+        urls = ["https://static.crates.io/crates/nix/0.30.1/download"],
+        strip_prefix = "nix-0.30.1",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.nix-0.30.1.bazel"),
     )
 
     maybe(
@@ -1395,12 +1395,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__tokio-1.44.2",
-        sha256 = "e6b88822cbe49de4185e3a4cbf8321dd487cf5fe0c5c65695fef6346371e9c48",
+        name = "crates_vendor__tokio-1.45.0",
+        sha256 = "2513ca694ef9ede0fb23fe71a4ee4107cb102b9dc1930f6d0fd77aae068ae165",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/tokio/1.44.2/download"],
-        strip_prefix = "tokio-1.44.2",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.tokio-1.44.2.bazel"),
+        urls = ["https://static.crates.io/crates/tokio/1.45.0/download"],
+        strip_prefix = "tokio-1.45.0",
+        build_file = Label("@workerd//deps/rust/crates:BUILD.tokio-1.45.0.bazel"),
     )
 
     maybe(
@@ -1644,7 +1644,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__flate2-1.1.1", is_dev_dep = False),
         struct(repo = "crates_vendor__foldhash-0.1.5", is_dev_dep = False),
         struct(repo = "crates_vendor__lol_html_c_api-1.3.0", is_dev_dep = False),
-        struct(repo = "crates_vendor__nix-0.30.0", is_dev_dep = False),
+        struct(repo = "crates_vendor__nix-0.30.1", is_dev_dep = False),
         struct(repo = "crates_vendor__pico-args-0.5.0", is_dev_dep = False),
         struct(repo = "crates_vendor__proc-macro2-1.0.95", is_dev_dep = False),
         struct(repo = "crates_vendor__quote-1.0.40", is_dev_dep = False),
@@ -1656,6 +1656,6 @@ def crate_repositories():
         struct(repo = "crates_vendor__serde_json-1.0.140", is_dev_dep = False),
         struct(repo = "crates_vendor__syn-2.0.101", is_dev_dep = False),
         struct(repo = "crates_vendor__thiserror-2.0.12", is_dev_dep = False),
-        struct(repo = "crates_vendor__tokio-1.44.2", is_dev_dep = False),
+        struct(repo = "crates_vendor__tokio-1.45.0", is_dev_dep = False),
         struct(repo = "crates_vendor__tracing-0.1.41", is_dev_dep = False),
     ]

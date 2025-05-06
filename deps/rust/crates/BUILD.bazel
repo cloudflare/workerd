@@ -152,14 +152,14 @@ alias(
 )
 
 alias(
-    name = "nix-0.30.0",
-    actual = "@crates_vendor__nix-0.30.0//:nix",
+    name = "nix-0.30.1",
+    actual = "@crates_vendor__nix-0.30.1//:nix",
     tags = ["manual"],
 )
 
 alias(
     name = "nix",
-    actual = "@crates_vendor__nix-0.30.0//:nix",
+    actual = "@crates_vendor__nix-0.30.1//:nix",
     tags = ["manual"],
 )
 
@@ -296,14 +296,14 @@ alias(
 )
 
 alias(
-    name = "tokio-1.44.2",
-    actual = "@crates_vendor__tokio-1.44.2//:tokio",
+    name = "tokio-1.45.0",
+    actual = "@crates_vendor__tokio-1.45.0//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.44.2//:tokio",
+    actual = "@crates_vendor__tokio-1.45.0//:tokio",
     tags = ["manual"],
 )
 
