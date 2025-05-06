@@ -36,6 +36,8 @@ jsg::Url filePathToUrl(FilePath& path) {
     KJ_CASE_ONEOF(str, kj::String) {
       // For a string, we need to try parsing it as a URL first.
       auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(str, "file:///"_kj), Error, "Invalid path");
+      // Note that someone could pass in a URL string like "http://foo", etc, so even tho we
+      // are resolving against `file:///` we will need to check the protocol after parsing.
       JSG_REQUIRE(url.getProtocol() == "file:"_kjb, Error, "Only file: URLs are supported");
       return kj::mv(url);
     }

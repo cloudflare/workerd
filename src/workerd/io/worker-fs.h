@@ -573,12 +573,12 @@ class TmpDirStoreScope final {
 
   static kj::Own<TmpDirStoreScope> create();
 
-  kj::Rc<Directory> getDirectory() {
+  kj::Rc<Directory> getDirectory() const {
     return dir.addRef();
   }
 
  private:
-  kj::Rc<Directory> dir;
+  mutable kj::Rc<Directory> dir;
   bool onStack = false;
 };
 
