@@ -132,7 +132,7 @@ class IoContext_IncomingRequest final {
   // the IoContext.
   //
   // If delivered() is never called, then drain() need not be called.
-  void delivered();
+  void delivered(kj::SourceLocation = kj::SourceLocation());
 
   // Waits until the request is "done". For non-actor requests this means waiting until
   // all "waitUntil" tasks finish, applying the "soft timeout" time limit from WorkerLimits.
@@ -195,6 +195,9 @@ class IoContext_IncomingRequest final {
 
   // Used by IoContext::incomingRequests.
   kj::ListLink<IoContext_IncomingRequest> link;
+
+  // Tracks the location where delivered() was called for debugging.
+  kj::Maybe<kj::SourceLocation> deliveredLocation;
 
   friend class IoContext;
 };
@@ -846,6 +849,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // List of active IncomingRequests, ordered from most-recently-started to least-recently-started.
   kj::List<IncomingRequest, &IncomingRequest::link> incomingRequests;
 
+  kj::Maybe<kj::SourceLocation> lastDeliveredLocation;
+
   capnp::CapabilityServerSet<capnp::DynamicCapability> localCapSet;
 
   bool failOpen = false;
@@ -976,7 +981,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The IoChannelFactory must also be accessed through the currentIncomingRequest because it has
   // some tracing context built in.
   IncomingRequest& getCurrentIncomingRequest() {
-    KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest");
+    KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest",
+        lastDeliveredLocation);
     return incomingRequests.front();
   }
 

@@ -222,7 +222,7 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> context
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
 // context->incomingRequests, which implies taking responsibility for draining on the way out.
-void IoContext::IncomingRequest::delivered() {
+void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
   if (!context->incomingRequests.empty()) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
@@ -239,6 +239,7 @@ void IoContext::IncomingRequest::delivered() {
 
   context->incomingRequests.addFront(*this);
   wasDelivered = true;
+  deliveredLocation = location;
   metrics->delivered();
 
   KJ_IF_SOME(a, context->actor) {
@@ -263,6 +264,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (&context->incomingRequests.front() == this) {
     // We're the current request, make sure to consume CPU time attribution.
     context->limitEnforcer->reportMetrics(*metrics);
+    context->lastDeliveredLocation = deliveredLocation;
 
     if (!waitedForWaitUntil && !context->waitUntilTasks.isEmpty()) {
       KJ_LOG(WARNING, "failed to invoke drain() on IncomingRequest before destroying it",
@@ -427,6 +429,11 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     if (metrics.getSpan().isObserved()) {
       promise = promise.attach(metrics.addedWaitUntilTask());
     }
+  }
+
+  if (incomingRequests.empty()) {
+    KJ_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+        lastDeliveredLocation, kj::getStackTrace());
   }
 
   waitUntilTasks.add(kj::mv(promise));
