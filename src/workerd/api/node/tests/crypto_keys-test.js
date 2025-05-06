@@ -256,16 +256,16 @@ export const create_private_key_test_generic = {
     // TODO(later): These error messages are inconsistent with one another
     // despite performing the same basic validation.
     throws(() => createPrivateKey(1), {
-      message: /The \"options.key\" property must be of type string/,
+      message: /The "options.key" property must be of type string/,
     });
     throws(() => createPrivateKey(true), {
-      message: /The \"options.key\" property must be of type string/,
+      message: /The "options.key" property must be of type string/,
     });
     throws(() => createPrivateKey({ key: 1 }), {
-      message: /The \"key\" argument/,
+      message: /The "key" argument/,
     });
     throws(() => createPrivateKey({ key: true }), {
-      message: /The \"key\" argument/,
+      message: /The "key" argument/,
     });
 
     // The "bad" cases here are just the ones that we expect to fail
@@ -1074,16 +1074,16 @@ export const create_public_key = {
     // TODO(later): These error messages are inconsistent with one another
     // despite performing the same basic validation.
     throws(() => createPublicKey(1), {
-      message: /The \"options.key\" property must be of type string/,
+      message: /The "options.key" property must be of type string/,
     });
     throws(() => createPublicKey(true), {
-      message: /The \"options.key\" property must be of type string/,
+      message: /The "options.key" property must be of type string/,
     });
     throws(() => createPublicKey({ key: 1 }), {
-      message: /The \"key\" argument/,
+      message: /The "key" argument/,
     });
     throws(() => createPublicKey({ key: true }), {
-      message: /The \"key\" argument/,
+      message: /The "key" argument/,
     });
 
     [

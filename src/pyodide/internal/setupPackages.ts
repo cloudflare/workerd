@@ -177,7 +177,7 @@ export function buildVirtualizedDir(): VirtualizedDir {
 
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
-  const requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
+  const requirementsInBigBundle = new Set(STDLIB_PACKAGES);
   const res = new VirtualizedDir();
   res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
 

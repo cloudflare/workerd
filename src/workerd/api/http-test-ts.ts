@@ -14,8 +14,8 @@ export default {
 
 async function assertRequestCacheThrowsError(
   cacheHeader: RequestCache,
-  errorName: String = 'Error',
-  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented."
+  errorName: string = 'Error',
+  errorMessage: string = "The 'cache' field on 'RequestInitializerDict' is not implemented."
 ) {
   assert.throws(
     () => {
@@ -32,8 +32,8 @@ async function assertRequestCacheThrowsError(
 
 async function assertFetchCacheRejectsError(
   cacheHeader: RequestCache,
-  errorName: String = 'Error',
-  errorMessage: String = "The 'cache' field on 'RequestInitializerDict' is not implemented."
+  errorName: string = 'Error',
+  errorMessage: string = "The 'cache' field on 'RequestInitializerDict' is not implemented."
 ) {
   await assert.rejects(
     (async () => {

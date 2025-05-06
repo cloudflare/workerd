@@ -153,8 +153,8 @@ export class Ai {
       method: 'POST',
       body: body,
       headers: {
-        ...(this.options.sessionOptions?.extraHeaders || {}),
-        ...(this.options.extraHeaders || {}),
+        ...this.options.sessionOptions?.extraHeaders,
+        ...this.options.extraHeaders,
         'content-type': 'application/json',
         'cf-consn-sdk-version': '2.0.0',
         'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
@@ -279,7 +279,7 @@ export class Ai {
         options: options,
       }),
       headers: {
-        ...(options?.extraHeaders || {}),
+        ...options?.extraHeaders,
         'content-type': 'application/json',
       },
     };

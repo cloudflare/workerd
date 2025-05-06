@@ -745,7 +745,7 @@ export default <ExportedHandler<Env>>{
           null: null;
           boolean: boolean;
           number: number;
-          bigint: BigInt;
+          bigint: bigint;
           string: string;
           ArrayBuffer: ArrayBuffer;
           DataView: DataView;
@@ -763,7 +763,7 @@ export default <ExportedHandler<Env>>{
             null: null;
             boolean: boolean;
             number: number;
-            bigint: BigInt;
+            bigint: bigint;
             string: string;
             ArrayBuffer: ArrayBuffer;
             DataView: DataView;
