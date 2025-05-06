@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/server/workerd.capnp.h>
@@ -38,10 +39,13 @@ class WorkerdApi final: public Worker::Api {
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
+      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
+      kj::Own<VirtualFileSystem> vfs);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
+
+  const VirtualFileSystem& getVirtualFileSystem() const override;
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;

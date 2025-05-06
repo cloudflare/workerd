@@ -4,6 +4,7 @@
 
 #include "server.h"
 
+#include "bundle-fs.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -20,6 +21,7 @@
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-entrypoint.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 #include <workerd/util/autogate.h>
@@ -3089,18 +3091,29 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
 
+  // Create the FsMap that will be used to map known file system
+  // roots to configurable locations.
+  // TODO(node-fs): This is set up to allow users to configure the "mount"
+  // points for known roots but we currently do not expose that in the
+  // config. So for now this just uses the defaults.
+  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(conf));
+
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (featureFlags.getNewModuleRegistry()) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
+
+    // TODO(node-fs): Get the bundle root from the vfs and pass that on to
+    // the new module registry implementation.
+
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
         *jsgobserver, conf, featureFlags.asReader(), pythonConfig);
   }
 
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
       limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
-      kj::mv(newModuleRegistry));
+      kj::mv(newModuleRegistry), kj::mv(workerFs));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {

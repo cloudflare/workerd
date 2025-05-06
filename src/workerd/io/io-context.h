@@ -14,6 +14,7 @@
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/exception.h>
@@ -626,6 +627,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Access the event loop's current time point. This will remain constant between ticks.
   kj::Date now();
 
+  const TmpDirStoreScope& getTmpDirStoreScope() {
+    return *tmpDirStoreScope;
+  }
+
   // Returns a promise that resolves once `now() >= when`.
   kj::Promise<void> atTime(kj::Date when) {
     return getIoChannelFactory().getTimer().atTime(when);
@@ -841,6 +846,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   ThreadContext& thread;
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
+
+  kj::Own<TmpDirStoreScope> tmpDirStoreScope;
 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
