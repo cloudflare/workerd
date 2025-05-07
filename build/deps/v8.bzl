@@ -52,7 +52,6 @@ def deps_v8():
         patches = ["//:patches/v8/" + p for p in PATCHES],
         strip_prefix = "v8-" + VERSION,
         url = "https://github.com/v8/v8/archive/refs/tags/" + VERSION + ".tar.gz",
-        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
     git_repository(
