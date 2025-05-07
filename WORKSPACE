@@ -16,7 +16,7 @@ deps_gen()
 # Bazel basics
 
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 NODE_VERSION = "22.14.0"
 
@@ -88,7 +88,7 @@ dep_pyodide()
 # tcmalloc requires Abseil.
 #
 git_repository(
-    name = "com_google_absl",
+    name = "abseil-cpp",
     commit = "72093794ac42be8105817ae0b0569fb411a6ca9b",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
 )
@@ -122,6 +122,7 @@ git_repository(
 http_archive(
     name = "com_google_tcmalloc",
     integrity = "sha256-8joG3SxfLYqR2liUznBAcMkHKYMmUtsO1qGr505VBMY=",
+    repo_mapping = {"@com_google_absl": "@abseil-cpp"},
     strip_prefix = "google-tcmalloc-91765c1",
     type = "tgz",
     url = "https://github.com/google/tcmalloc/tarball/91765c11461a01579fcbdddf430a556b818818c4",

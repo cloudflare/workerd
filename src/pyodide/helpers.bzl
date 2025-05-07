@@ -1,7 +1,6 @@
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/js_file.bzl", "js_file")
@@ -19,9 +18,6 @@ def _out_path(name, version):
     if version:
         res = version + "/" + res
     return res
-
-def _out(src, version):
-    return _out_path(_out_name(src), version)
 
 def _ts_bundle_out(prefix, name, version):
     return ":" + _out_path(prefix + name.removeprefix("internal/").replace("/", "_"), version)
