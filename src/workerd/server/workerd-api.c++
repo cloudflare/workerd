@@ -324,6 +324,7 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
+  kj::Own<VirtualFileSystem> vfs;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
@@ -356,9 +357,11 @@ struct WorkerdApi::Impl final {
       v8::Isolate::CreateParams createParams,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
+      kj::Own<VirtualFileSystem> vfs,
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
+        vfs(kj::mv(vfs)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(v8System, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
@@ -430,12 +433,14 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
-    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
+    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
+    kj::Own<VirtualFileSystem> vfs)
     : impl(kj::heap<Impl>(v8System,
           features,
           kj::mv(createParams),
           kj::mv(observer),
           memoryCacheProvider,
+          kj::mv(vfs),
           pythonConfig,
           kj::mv(newModuleRegistry))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
@@ -1138,6 +1143,10 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   }
 
   return builder.finish();
+}
+
+const VirtualFileSystem& WorkerdApi::getVirtualFileSystem() const {
+  return *impl->vfs;
 }
 
 }  // namespace workerd::server

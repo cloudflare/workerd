@@ -14,6 +14,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/async-context.h>
@@ -572,6 +573,9 @@ class Worker::Api {
   virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
   }
+
+  // Return the virtual file system for this worker.
+  virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually

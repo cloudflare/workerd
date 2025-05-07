@@ -812,6 +812,7 @@ struct Worker::Script::Impl {
       auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
 
       co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        TmpDirStoreScope tmpDirStoreScope;
         return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
           jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
 
@@ -1494,7 +1495,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     // call to tryResolveModuleNamespace because I intend to add some additional
     // logging/metrics logic around this call.
     KJ_IF_SOME(ns,
-        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, mainModule.toString(true))) {
+        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, mainModule.toString(false))) {
       return ns;
     }
   } else {
@@ -1628,6 +1629,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
             SpanBuilder currentUserSpan =
                 spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
+
+            // Ensure that our worker top-level bootstrap has a temporary directory
+            // storage scope. This is used to store temporary files created within
+            // the top-level evaluation of the worker. With this instantiated on
+            // the stack, temporary files will be cleaned up when the scope is
+            // destroyed, which means any temporary files created in the top-level
+            // evaluation will *not* be available to the worker after the top-level
+            // evaluation is complete.
+            TmpDirStoreScope tmpDirStoreScope;
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {

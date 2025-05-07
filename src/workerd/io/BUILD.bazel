@@ -52,6 +52,7 @@ wd_cc_library(
         "io-util.c++",
         "tracer.c++",
         "worker.c++",
+        "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "compatibility-date.h",
@@ -64,6 +65,7 @@ wd_cc_library(
         "promise-wrapper.h",
         "tracer.h",
         "worker.h",
+        "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     # global CPU-specific options are inconvenient to specify with bazel – just set the options we
     # need for CRC32C in this target for now.
@@ -366,5 +368,12 @@ kj_test(
     src = "frankenvalue-test.c++",
     deps = [
         ":frankenvalue",
+    ],
+)
+
+kj_test(
+    src = "worker-fs-test.c++",
+    deps = [
+        ":io",
     ],
 )
