@@ -124,7 +124,7 @@ interface Hibernate {
 interface SpanOpen {
   readonly type: "spanOpen";
   readonly name: string;
-  readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
+  readonly info?: FetchEventInfo | JsRpcEventInfo | Attribute[];
 }
 
 interface SpanClose {
@@ -153,7 +153,7 @@ interface Log {
 
 interface Return {
   readonly type: "return";
-  readonly info?: FetchResponseInfo | Attributes;
+  readonly info?: FetchResponseInfo | Attribute[];
 }
 
 interface Link {
@@ -165,13 +165,9 @@ interface Link {
 }
 
 interface Attribute {
+  readonly type: "attribute";
   readonly name: string;
   readonly value: string | string[] | boolean | boolean[] | number | number[] | bigint | bigint[];
-}
-
-interface Attributes {
-  readonly type: "attributes";
-  readonly info: Attribute[];
 }
 
 interface TailEvent {
@@ -180,12 +176,12 @@ interface TailEvent {
   readonly spanId: string;
   readonly timestamp: Date;
   readonly sequence: number;
-  readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | DiagnosticChannelEvent | Exception | Log | Return | Link | Attributes;
+  readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | DiagnosticChannelEvent | Exception | Log | Return | Link | Attribute[];
 }
 
 type TailEventHandler = (event: TailEvent) => void | Promise<void>;
 type TailEventHandlerName = "outcome" | "hibernate" | "spanOpen" | "spanClose" |
-                            "diagnosticChannel" | "exception" | "log" | "return" | "link" | "attributes";
+                            "diagnosticChannel" | "exception" | "log" | "return" | "link" | "attribute";
 type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
 type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 

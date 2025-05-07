@@ -14,7 +14,7 @@ namespace {
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTACHMENT, "attachment")                                                                      \
-  V(ATTRIBUTES, "attributes")                                                                      \
+  V(ATTRIBUTE, "attribute")                                                                        \
   V(BATCHSIZE, "batchSize")                                                                        \
   V(CANCELED, "canceled")                                                                          \
   V(CHANNEL, "channel")                                                                            \
@@ -122,7 +122,6 @@ class StringCache final {
 // these structs to be bidirectional. So, instead, let's just do the simple easy thing
 // and define a set of serializers to these types.
 
-// Serialize attribute value
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(str, kj::String) {
@@ -141,9 +140,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
   KJ_UNREACHABLE;
 }
 
-// Serialize attribute key:value(s) pair object
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCache& cache) {
   auto obj = js.obj();
+  obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTE_STR));
   obj.set(js, NAME_STR, cache.get(js, attribute.name));
 
   if (attribute.value.size() == 1) {
@@ -157,15 +156,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCach
   return obj;
 }
 
-// Serialize "attributes" event
 jsg::JsValue ToJs(
     jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes, StringCache& cache) {
-  auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTES_STR));
-  obj.set(js, INFO_STR, js.arr(attributes, [&cache](jsg::Lock& js, const auto& attr) {
-    return ToJs(js, attr, cache);
-  }));
-  return obj;
+  return js.arr(
+      attributes, [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); });
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info, StringCache& cache) {
@@ -626,7 +620,7 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
       return LINK_STR;
     }
     KJ_CASE_ONEOF(_, tracing::CustomInfo) {
-      return ATTRIBUTES_STR;
+      return ATTRIBUTE_STR;
     }
   }
   return kj::none;
