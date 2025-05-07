@@ -240,22 +240,17 @@ function makeEntrypointProxyHandler(
       if (typeof prop !== 'string') {
         return Reflect.get(target, prop, receiver);
       }
+      // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
       const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
       if (isKnownHandler) {
         prop = 'on_' + prop;
       }
+
       return async function (...args: any[]): Promise<any> {
+        // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
         if (typeof pyInstance[prop] === 'function') {
-          const res = await doPyCallHelper(
-            isKnownHandler,
-            pyInstance[prop],
-            args
-          );
-          if (isKnownHandler) {
-            return res?.js_object ?? res;
-          }
-          return res;
+          return await doPyCallHelper(isKnownHandler, pyInstance[prop], args);
         } else {
           throw new TypeError(`Method ${prop} does not exist`);
         }

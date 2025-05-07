@@ -81,3 +81,5 @@ py_wd_test(
 py_wd_test("js-import")
 
 py_wd_test("importable-env")
+
+py_wd_test("python-rpc")

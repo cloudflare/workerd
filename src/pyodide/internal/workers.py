@@ -1,6 +1,7 @@
 # This module defines a Workers API for Python. It is similar to the API provided by
 # JS Workers, but with changes and additions to be more idiomatic to the Python
 # programming language.
+import datetime
 import functools
 import http.client
 import json
@@ -8,6 +9,8 @@ from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
+from inspect import isawaitable
+from types import LambdaType
 from typing import Any, TypedDict, Unpack
 
 import js
@@ -99,7 +102,7 @@ class RequestInitCfProperties(TypedDict, total=False):
 class FetchKwargs(TypedDict, total=False):
     headers: "Headers | None"
     body: "Body | None"
-    method: HTTPMethod = HTTPMethod.GET
+    method: HTTPMethod | None
     redirect: str | None
     cf: RequestInitCfProperties | None
 
@@ -184,23 +187,36 @@ def _manage_pyproxies():
         destroy_proxies(proxies)
 
 
+def _is_js_instance(val, js_cls_name):
+    return hasattr(val, "constructor") and val.constructor.name == js_cls_name
+
+
 def _to_js_headers(headers: Headers):
     if isinstance(headers, list):
         # We should have a list[tuple[str, str]]
         return js.Headers.new(headers)
     elif isinstance(headers, dict):
         return js.Headers.new(headers.items())
-    elif hasattr(headers, "constructor") and headers.constructor.name == "Headers":
+    elif _is_js_instance(headers, "Headers"):
         return headers
     else:
         raise TypeError("Received unexpected type for headers argument")
 
 
 class Response(FetchResponse):
+    """
+    This class represents the response to an HTTP request, with a similar API to that of the web
+    `Response` API: https://developer.mozilla.org/en-US/docs/Web/API/Response.
+
+    This is a static class to enable defining `FetchResponse` using a constructor more similar to
+    JS. All non-static methods for this class should be defined on the `FetchResponse` class it
+    extends.
+    """
+
     def __init__(
         self,
-        body: Body,
-        status: HTTPStatus | int = HTTPStatus.OK,
+        body: "Body | js.Response | None" = None,
+        status: HTTPStatus | int | None = None,
         status_text="",
         headers: Headers = None,
     ):
@@ -220,12 +236,22 @@ class Response(FetchResponse):
                 "FormData",
                 "ReadableStream",
                 "URLSearchParams",
+                "Response",
             ):
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
         elif not isinstance(body, str | FormData):
             raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
+
+        # Handle constructing a Response from a JS Response.
+        if _is_js_instance(body, "Response"):
+            if status is not None or len(status_text) > 0 or headers is not None:
+                raise ValueError(
+                    "Expected no options when constructing Response from a js.Response"
+                )
+            super().__init__(body.url, body)
+            return
 
         options = self._create_options(status, status_text, headers)
 
@@ -238,13 +264,15 @@ class Response(FetchResponse):
 
     @staticmethod
     def _create_options(
-        status: HTTPStatus | int = HTTPStatus.OK,
+        status: HTTPStatus | int | None = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
     ):
-        options = {
-            "status": status.value if isinstance(status, HTTPStatus) else status,
-        }
+        options = {}
+        if status:
+            options["status"] = (
+                status.value if isinstance(status, HTTPStatus) else status
+            )
         if status_text:
             options["statusText"] = status_text
         if headers:
@@ -313,7 +341,10 @@ def _js_value_to_py(item: FormDataValue) -> "str | Blob | File":
 
 class FormData(MutableMapping[str, FormDataValue]):
     """
-    This API follows that of https://pypi.org/project/multidict/.
+    This class represents a set of key/value pairs for forms.
+
+    The API of this class follows that of https://pypi.org/project/multidict/ and
+    https://developer.mozilla.org/en-US/docs/Web/API/FormData.
     """
 
     def __init__(
@@ -329,10 +360,7 @@ class FormData(MutableMapping[str, FormDataValue]):
                 self._js_form_data.append(k, _py_value_to_js(v))
             return
 
-        if (
-            hasattr(form_data, "constructor")
-            and form_data.constructor.name == "FormData"
-        ):
+        if _is_js_instance(form_data, "FormData"):
             self._js_form_data = form_data
             return
 
@@ -416,6 +444,8 @@ def _make_blob_entry(e):
 
 
 def _is_iterable(obj):
+    if isinstance(obj, (str, bytes)):
+        return False
     try:
         iter(obj)
     except TypeError:
@@ -548,7 +578,17 @@ class File(Blob):
 
 
 class Request:
-    def __init__(self, input: "Request | str", **other_options: Unpack[FetchKwargs]):
+    def __init__(
+        self, input: "Request | str | js.Request", **other_options: Unpack[FetchKwargs]
+    ):
+        if _is_js_instance(input, "Request"):
+            if len(other_options) > 0:
+                raise ValueError(
+                    "Expected no options when constructing Request from a js.Request"
+                )
+            self._js_request = input
+            return
+
         if "method" in other_options and isinstance(
             other_options["method"], HTTPMethod
         ):
@@ -682,6 +722,156 @@ class Request:
         return await self.js_object.text()
 
 
+def _python_from_rpc_default_converter(value, convert, cache):
+    if not hasattr(value, "constructor"):
+        # Assume that the object doesn't need conversion as it's not a JS object.
+        return value
+
+    if value.constructor.name == "Response":
+        return Response(value)
+    elif value.constructor.name == "FormData":
+        return FormData(value)
+    elif value.constructor.name == "Blob":
+        return Blob(value)
+    elif value.constructor.name == "File":
+        return File(value)
+    elif value.constructor.name == "Request":
+        return Request(value)
+    elif value.constructor.name == "Date":
+        # TODO: Pyodide should gain support for this, we should upstream this.
+        return datetime.datetime.fromtimestamp(value.getTime() / 1000)
+    elif value.constructor.name == "Error":
+        return Exception(value.toString())
+    elif value.constructor.name == "Number":
+        return value.valueOf()
+
+    raise TypeError(
+        f"Couldn't convert object to Python type, got {value.constructor.name}"
+    )
+
+
+def python_from_rpc(obj: "JsProxy"):
+    """
+    Converts JS objects like Response, Request, Blob, etc. to equivalent Python objects defined in
+    this module and also other JS objects like Map, Set, etc. to equivalent Python stdlib objects.
+
+    This method is used for Workers RPC in Python to convert JavaScript objects to Python. As such
+    it does not support serializing all JS object types.
+    """
+
+    if not hasattr(obj, "constructor"):
+        return obj
+
+    result = obj.to_py(default_converter=_python_from_rpc_default_converter)
+
+    return result
+
+
+def _raise_on_disabled_type(value):
+    if _is_js_instance(value, "RegExp"):
+        raise TypeError(f"{value.constructor.name} cannot be sent over RPC.")
+
+    if isinstance(value, (tuple, bytearray, LambdaType)):
+        raise TypeError(f"{type(value)} cannot be sent over RPC.")
+
+    if _is_iterable(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                _raise_on_disabled_type(v)
+        else:
+            for v in value:
+                _raise_on_disabled_type(v)
+
+
+def _python_to_rpc_default_converter(obj, convert, cache):
+    if obj is None:
+        return obj
+
+    if hasattr(obj, "js_object"):
+        return obj.js_object
+
+    if isinstance(obj, datetime.datetime):
+        # TODO: Pyodide should gain support for this, we should upstream this.
+        return js.Date.new(obj.timestamp() * 1000)
+
+    if isinstance(obj, Exception):
+        return js.Error.new(str(obj))
+
+    _raise_on_disabled_type(obj)
+
+    return obj
+
+
+def python_to_rpc(value) -> JsProxy:
+    """
+    Converts Python objects defined in this module (Response, Request, etc) and native Python types
+    like Map, Set, datetime to equivalent JavaScript types.
+
+    This method is used for Workers RPC in Python to convert Python objects to JavaScript. As such
+    it does not support serializing all Python object types.
+    """
+
+    # `to_js` won't always call the default_converter, for example when a list of tuples is passed
+    _raise_on_disabled_type(value)
+
+    result = to_js(
+        value,
+        default_converter=_python_to_rpc_default_converter,
+        dict_converter=js.Map.new,
+    )
+
+    return result
+
+
+class _FetcherWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def _getattr_helper(self, name):
+        attr = getattr(self._binding, name)
+        if name == "fetch":
+            # TODO: Implement python native fetch for bindings.
+            return attr
+
+        if not callable(attr):
+            return attr
+
+        # Not using `@functools.wraps(attr)` here because `attr` is a JS proxy.
+        async def wrapper(*args, **kwargs):
+            js_args = [python_to_rpc(arg) for arg in args]
+            js_kwargs = {k: python_to_rpc(v) for k, v in kwargs.items()}
+            result = attr(*js_args, **js_kwargs)
+            if hasattr(result, "then") and callable(result.then):
+                return python_from_rpc(await result)
+            else:
+                return python_from_rpc(result)
+
+        return wrapper
+
+    def __getattr__(self, name):
+        result = self._getattr_helper(name)
+        setattr(self, name, result)
+        return result
+
+
+class _EnvWrapper:
+    def __init__(self, env):
+        self._env = env
+
+    def _getattr_helper(self, name):
+        binding = getattr(self._env, name)
+        if _is_js_instance(binding, "Fetcher"):
+            return _FetcherWrapper(binding)
+
+        # TODO: Implement APIs for bindings.
+        return binding
+
+    def __getattr__(self, name):
+        result = self._getattr_helper(name)
+        setattr(self, name, result)
+        return result
+
+
 def handler(func):
     """
     When applied to handlers such as `on_fetch` it will rewrite arguments passed in to native Python
@@ -691,16 +881,41 @@ def handler(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        # TODO: wrap `env` so that bindings can be used without to_js.
-        if (
-            len(args) > 0
-            and hasattr(args[0], "constructor")
-            and args[0].constructor.name == "Request"
-        ):
+        # TODO: support transforming kwargs
+        if len(args) > 0 and _is_js_instance(args[0], "Request"):
             args = (Request(args[0]),) + args[1:]
+
+        # Wrap `env` so that bindings can be used without to_js.
+        if len(args) > 1:
+            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+
         return func(*args, **kwargs)
 
     return wrapper
+
+
+def _wrap_attr(attr):
+    if not callable(attr):
+        return attr
+
+    @functools.wraps(attr)
+    async def wrapper(*args, **kwargs):
+        py_args = [python_from_rpc(arg) for arg in args]
+        py_kwargs = {k: python_from_rpc(v) for k, v in kwargs.items()}
+        result = attr(*py_args, **py_kwargs)
+        if isawaitable(result):
+            return python_to_rpc(await result)
+        else:
+            return python_to_rpc(result)
+
+    return wrapper
+
+
+def _wrap_subclass(cls):
+    for k, v in cls.__dict__.items():
+        if k.startswith("__"):
+            continue
+        setattr(cls, k, _wrap_attr(v))
 
 
 class DurableObject:
@@ -711,6 +926,9 @@ class DurableObject:
     def __init__(*_args, **_kwds):
         pass
 
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls)
+
 
 class WorkerEntrypoint:
     """
@@ -720,6 +938,9 @@ class WorkerEntrypoint:
     def __init__(*_args, **_kwds):
         pass
 
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls)
+
 
 class WorkflowEntrypoint:
     """
@@ -728,3 +949,6 @@ class WorkflowEntrypoint:
 
     def __init__(*_args, **_kwds):
         pass
+
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls)
