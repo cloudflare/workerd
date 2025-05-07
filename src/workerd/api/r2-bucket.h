@@ -381,6 +381,7 @@ class R2Bucket: public jsg::Object {
     }
 
     jsg::Promise<jsg::BufferSource> arrayBuffer(jsg::Lock& js);
+    jsg::Promise<jsg::BufferSource> bytes(jsg::Lock& js);
     jsg::Promise<kj::String> text(jsg::Lock& js);
     jsg::Promise<jsg::Value> json(jsg::Lock& js);
     jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js);
@@ -390,11 +391,13 @@ class R2Bucket: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(body, getBody);
       JSG_READONLY_PROTOTYPE_PROPERTY(bodyUsed, getBodyUsed);
       JSG_METHOD(arrayBuffer);
+      JSG_METHOD(bytes);
       JSG_METHOD(text);
       JSG_METHOD(json);
       JSG_METHOD(blob);
       JSG_TS_OVERRIDE(R2ObjectBody {
         json<T>(): Promise<T>;
+        bytes(): Promise<Uint8Array>;
         arrayBuffer(): Promise<ArrayBuffer>;
       });
     }
