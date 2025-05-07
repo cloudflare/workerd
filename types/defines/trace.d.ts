@@ -123,7 +123,7 @@ interface Hibernate {
 
 interface SpanOpen {
   readonly type: "spanOpen";
-  readonly op?: string;
+  readonly name: string;
   readonly info?: FetchEventInfo | JsRpcEventInfo | Attribute[];
 }
 
@@ -167,10 +167,8 @@ interface Link {
 interface Attribute {
   readonly type: "attribute";
   readonly name: string;
-  readonly value: string | string[] | boolean | boolean[] | number | number[];
+  readonly value: string | string[] | boolean | boolean[] | number | number[] | bigint | bigint[];
 }
-
-type Mark = DiagnosticChannelEvent | Exception | Log | Return | Link | Attribute[];
 
 interface TailEvent {
   readonly traceId: string;
@@ -178,11 +176,11 @@ interface TailEvent {
   readonly spanId: string;
   readonly timestamp: Date;
   readonly sequence: number;
-  readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | Mark;
+  readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | DiagnosticChannelEvent | Exception | Log | Return | Link | Attribute[];
 }
 
 type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-type TailEventHandlerName = "onset" | "outcome" | "hibernate" | "spanOpen" | "spanClose" |
+type TailEventHandlerName = "outcome" | "hibernate" | "spanOpen" | "spanClose" |
                             "diagnosticChannel" | "exception" | "log" | "return" | "link" | "attribute";
 type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
 type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;

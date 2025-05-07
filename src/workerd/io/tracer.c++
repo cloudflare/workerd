@@ -143,7 +143,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(context, tracing::Mark(tracing::Log(timestamp, logLevel, kj::str(message))));
+    writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))});
   }
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
@@ -151,10 +151,9 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
-  if (trace->numSpans >= MAX_USER_SPANS) {
+  if (trace->spans.size() >= MAX_USER_SPANS) {
     return;
   }
-  trace->numSpans++;
 
   if (trace->exceededLogLimit) {
     return;
@@ -208,13 +207,12 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     for (auto& tag: span.tags) {
       attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
     }
-    writer->report(context, workerd::tracing::Mark(attr.releaseAsArray()));
+    writer->report(context, {(attr.releaseAsArray())});
     writer->report(context, workerd::tracing::SpanClose());
   }
 
   trace->bytesUsed = newSize;
   trace->spans.add(kj::mv(span));
-  trace->numSpans++;
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -245,8 +243,7 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
   trace->bytesUsed = newSize;
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
-        tracing::Mark(
-            tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))));
+        {tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))});
   }
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
@@ -274,8 +271,8 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
-        tracing::Mark(tracing::DiagnosticChannelEvent(
-            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))));
+        {tracing::DiagnosticChannelEvent(
+            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))});
   }
   trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
 }

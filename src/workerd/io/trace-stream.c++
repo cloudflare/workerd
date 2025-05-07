@@ -56,7 +56,6 @@ namespace {
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
-  V(OP, "op")                                                                                      \
   V(OUTCOME, "outcome")                                                                            \
   V(PARENTSPANID, "parentSpanId")                                                                  \
   V(QUEUE, "queue")                                                                                \
@@ -430,9 +429,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
-  KJ_IF_SOME(op, spanOpen.operationName) {
-    obj.set(js, OP_STR, js.str(op));
-  }
+  obj.set(js, NAME_STR, js.str(spanOpen.operationName));
 
   // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
   if (isPredictableModeForTest()) {
@@ -565,27 +562,23 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
     KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
-    KJ_CASE_ONEOF(mark, tracing::Mark) {
-      KJ_SWITCH_ONEOF(mark) {
-        KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
-          obj.set(js, EVENT_STR, ToJs(js, de, cache));
-        }
-        KJ_CASE_ONEOF(ex, tracing::Exception) {
-          obj.set(js, EVENT_STR, ToJs(js, ex, cache));
-        }
-        KJ_CASE_ONEOF(log, tracing::Log) {
-          obj.set(js, EVENT_STR, ToJs(js, log, cache));
-        }
-        KJ_CASE_ONEOF(ret, tracing::Return) {
-          obj.set(js, EVENT_STR, ToJs(js, ret, cache));
-        }
-        KJ_CASE_ONEOF(link, tracing::Link) {
-          obj.set(js, EVENT_STR, ToJs(js, link, cache));
-        }
-        KJ_CASE_ONEOF(attrs, kj::Array<tracing::Attribute>) {
-          obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
-        }
-      }
+    KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
+      obj.set(js, EVENT_STR, ToJs(js, de, cache));
+    }
+    KJ_CASE_ONEOF(ex, tracing::Exception) {
+      obj.set(js, EVENT_STR, ToJs(js, ex, cache));
+    }
+    KJ_CASE_ONEOF(log, tracing::Log) {
+      obj.set(js, EVENT_STR, ToJs(js, log, cache));
+    }
+    KJ_CASE_ONEOF(ret, tracing::Return) {
+      obj.set(js, EVENT_STR, ToJs(js, ret, cache));
+    }
+    KJ_CASE_ONEOF(link, tracing::Link) {
+      obj.set(js, EVENT_STR, ToJs(js, link, cache));
+    }
+    KJ_CASE_ONEOF(attrs, kj::Array<tracing::Attribute>) {
+      obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
     }
   }
 
@@ -596,7 +589,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
 kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
     KJ_CASE_ONEOF(_, tracing::Onset) {
-      return ONSET_STR;
+      KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
+      // return ONSET_STR;
     }
     KJ_CASE_ONEOF(_, tracing::Outcome) {
       return OUTCOME_STR;
@@ -610,27 +604,23 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
     KJ_CASE_ONEOF(_, tracing::SpanClose) {
       return SPANCLOSE_STR;
     }
-    KJ_CASE_ONEOF(mark, tracing::Mark) {
-      KJ_SWITCH_ONEOF(mark) {
-        KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
-          return DIAGNOSTICCHANNEL_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Exception) {
-          return EXCEPTION_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Log) {
-          return LOG_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Return) {
-          return RETURN_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::Link) {
-          return LINK_STR;
-        }
-        KJ_CASE_ONEOF(_, tracing::CustomInfo) {
-          return ATTRIBUTE_STR;
-        }
-      }
+    KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
+      return DIAGNOSTICCHANNEL_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Exception) {
+      return EXCEPTION_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Log) {
+      return LOG_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Return) {
+      return RETURN_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::Link) {
+      return LINK_STR;
+    }
+    KJ_CASE_ONEOF(_, tracing::CustomInfo) {
+      return ATTRIBUTE_STR;
     }
   }
   return kj::none;

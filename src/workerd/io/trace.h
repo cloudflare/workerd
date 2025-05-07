@@ -632,7 +632,7 @@ struct Link final {
   Link clone() const;
 };
 
-using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, CustomInfo>;
+// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, Link, and CustomInfo events.
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -640,15 +640,14 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(uint64_t parentSpanId,
-      kj::Maybe<kj::String> operationName = kj::none,
-      kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(
+      uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::Maybe<kj::String> operationName = kj::none;
+  kj::String operationName;
   kj::Maybe<Info> info = kj::none;
   uint64_t parentSpanId;
 
@@ -747,7 +746,17 @@ struct Outcome final {
 // and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
 // the stream was abruptly terminated.
 struct TailEvent final {
-  using Event = kj::OneOf<Onset, Outcome, Hibernate, SpanOpen, SpanClose, Mark>;
+  using Event = kj::OneOf<Onset,
+      Outcome,
+      Hibernate,
+      SpanOpen,
+      SpanClose,
+      DiagnosticChannelEvent,
+      Exception,
+      Log,
+      Return,
+      Link,
+      CustomInfo>;
 
   explicit TailEvent(
       const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);
@@ -855,7 +864,6 @@ class Trace final: public kj::Refcounted {
   // Trace data is recorded outside of the JS heap.  To avoid DoS, we keep an estimate of trace
   // data size, and we stop recording if too much is used.
   size_t bytesUsed = 0;
-  size_t numSpans = 0;
 
   // Copy content from this trace into `builder`.
   void copyTo(rpc::Trace::Builder builder) const;
