@@ -6257,7 +6257,7 @@ export declare namespace TailStream {
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
-    readonly info?: FetchEventInfo | JsRpcEventInfo | Attribute[];
+    readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
     readonly type: "spanClose";
@@ -6281,7 +6281,7 @@ export declare namespace TailStream {
   }
   interface Return {
     readonly type: "return";
-    readonly info?: FetchResponseInfo | Attribute[];
+    readonly info?: FetchResponseInfo | Attributes;
   }
   interface Link {
     readonly type: "link";
@@ -6291,7 +6291,6 @@ export declare namespace TailStream {
     readonly spanId: string;
   }
   interface Attribute {
-    readonly type: "attribute";
     readonly name: string;
     readonly value:
       | string
@@ -6302,6 +6301,10 @@ export declare namespace TailStream {
       | number[]
       | bigint
       | bigint[];
+  }
+  interface Attributes {
+    readonly type: "attributes";
+    readonly info: Attribute[];
   }
   interface TailEvent {
     readonly traceId: string;
@@ -6320,7 +6323,7 @@ export declare namespace TailStream {
       | Log
       | Return
       | Link
-      | Attribute[];
+      | Attributes;
   }
   type TailEventHandler = (event: TailEvent) => void | Promise<void>;
   type TailEventHandlerName =
@@ -6333,7 +6336,7 @@ export declare namespace TailStream {
     | "log"
     | "return"
     | "link"
-    | "attribute";
+    | "attributes";
   type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
