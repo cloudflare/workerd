@@ -494,6 +494,8 @@ export const rpcAbortSignalAnyOnRemoteEnd = {
 export const rpcRequestSignal = {
   async test(ctrl, env, ctx) {
     // Construct a request holding an AbortSignal, and then send this request to the other side
+    // Note that this signal isn't affected by the request_signal_passthrough compat flag, which
+    // only modifies the behaviour of the signal on the incoming request.
     const req = new Request('http://example.com', {
       signal: AbortSignal.timeout(200),
     });

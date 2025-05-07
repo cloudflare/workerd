@@ -9,14 +9,21 @@ export class AbortTracker extends DurableObject {
     await this.ctx.storage.put(key, value);
   }
 }
+
+let reqSignalReason = null;
+let rpcSignalReason = null;
 export class OtherServer extends WorkerEntrypoint {
-  async fetch() {
+  async fetch(req) {
     await scheduler.wait(300);
     return new Response('completed');
   }
 
-  async rpcEcho(req) {
-    return req;
+  async echo(val) {
+    return val;
+  }
+
+  async saveReqReason(req) {
+    rpcSignalReason = req.signal.reason?.message;
   }
 }
 
@@ -88,12 +95,24 @@ export class Server extends WorkerEntrypoint {
     }
   }
 
-  async cloneIncomingRequest(req) {
-    // 1. Clone the request's signal by itself
-    await this.env.OtherServer.rpcEcho(req.signal);
+  async passIncomingRequestOverRpc(req) {
+    // req.signal is in the "this signal" slot. It's an incoming request signal so it has the
+    // IGNORE_FOR_SUBREQUESTS flag set.
+    req.signal.onabort = () => {
+      // If we're here we know that the reason is filled in on req.signal
+      reqSignalReason = req.signal.reason.message;
 
-    // 2. Clone the entire request
-    return new Response(await this.env.OtherServer.rpcEcho(new Request(req)));
+      // Ensure that the incoming request signal is in the "signal" slot, which is the one we
+      // actually serialize currently.
+      const newReq = req.clone();
+
+      // Since the signal is not included in serialization, OtherServer won't be able to read the
+      // reason.
+      this.ctx.waitUntil(this.env.OtherServer.saveReqReason(newReq));
+    };
+
+    // Just hang and wait for the client to give up
+    await scheduler.wait(86400);
   }
 }
 
@@ -198,9 +217,24 @@ export const abortedRequestDoesNotAbortSubrequest = {
   },
 };
 
-export const incomingRequestSignalCanBeCloned = {
+export const requestPassedOverRpcDoesNotIncludeSignal = {
   async test(ctrl, env, ctx) {
-    const req = env.Server.fetch('http://example.com/cloneIncomingRequest');
-    const res = await req;
+    // This test covers the case when the `request_signal_passthrough` compat flag is not set.
+    // The incoming request's signal is not serialized.
+    // See request-signal-psssthrough.js for the corresponding test when the flag is set.
+
+    await assert.rejects(
+      () =>
+        env.Server.fetch('http://example.com/passIncomingRequestOverRpc', {
+          signal: AbortSignal.timeout(100),
+        }),
+      { message: 'The operation was aborted due to timeout' }
+    );
+
+    // Yield so the workers can write the abort reasons
+    await scheduler.wait(0);
+
+    assert.strictEqual(reqSignalReason, 'The client has disconnected');
+    assert.strictEqual(rpcSignalReason, undefined);
   },
 };

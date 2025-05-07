@@ -351,8 +351,10 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       // TODO(perf): Don't add a task to trigger the abort unless we know it has at least one
       // listener.
       KJ_IF_SOME(ctrl, abortController) {
-        context.addWaitUntil(context.run(
-            [ctrl = ctrl.addRef()](Worker::Lock& lock) mutable { ctrl->abort(lock, kj::none); }));
+        context.addWaitUntil(context.run([ctrl = ctrl.addRef()](Worker::Lock& lock) mutable {
+          ctrl->getSignal()->triggerAbort(
+              lock, JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The client has disconnected"));
+        }));
       }
     }
 

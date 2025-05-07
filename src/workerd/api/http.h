@@ -874,7 +874,7 @@ public:
   // Clear the request's signal if the 'ignoreForSubrequests' flag is set. This happens when
   // a request from an incoming fetch is passed-through to another fetch. We want to avoid
   // aborting the subrequest in that case.
-  void clearSignalIfIgnoredForSubrequest();
+  void clearSignalIfIgnoredForSubrequest(jsg::Lock& js);
 
   // Returns the `cf` field containing Cloudflare feature flags.
   jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);

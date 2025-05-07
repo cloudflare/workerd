@@ -639,9 +639,7 @@ class AbortSignal final: public EventTarget {
   // `requestSignalPassthrough` is set, this flag has no effect. But to ensure backwards
   // compatibility, when this flag is not set, this signal will not be passed through to
   // subrequests derived from the incoming request.
-  bool isIgnoredForSubrequests() const {
-    return flag == Flag::IGNORE_FOR_SUBREQUESTS;
-  }
+  bool isIgnoredForSubrequests(jsg::Lock& js) const;
 
  private:
   IoOwn<RefcountedCanceler> canceler;

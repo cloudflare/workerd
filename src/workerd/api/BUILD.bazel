@@ -724,13 +724,19 @@ wd_test(
 )
 
 wd_test(
-    src = "tests/request-client-disconnect.wd-test",
+    src = "tests/request-signal-enabled.wd-test",
     args = ["--experimental"],
-    data = ["tests/request-client-disconnect.js"],
+    data = ["tests/request-signal-enabled.js"],
 )
 
 wd_test(
     src = "tests/request-signal-disabled.wd-test",
     args = ["--experimental"],
     data = ["tests/request-signal-disabled.js"],
+)
+
+wd_test(
+    src = "tests/request-signal-passthrough.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-passthrough.js"],
 )

@@ -1222,9 +1222,9 @@ kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignalForSubrequest(jsg::Lock& js) 
   }
 }
 
-void Request::clearSignalIfIgnoredForSubrequest() {
+void Request::clearSignalIfIgnoredForSubrequest(jsg::Lock& js) {
   KJ_IF_SOME(s, signal) {
-    if (s->isIgnoredForSubrequests()) {
+    if (s->isIgnoredForSubrequests(js)) {
       signal = kj::none;
     }
   }
@@ -1352,7 +1352,12 @@ void Request::serialize(jsg::Lock& js,
             //
             // Note we have to double-Maybe this, so that if no signal is present, the property is absent
             // instead of `null`.
-            .signal = signal.map([](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
+            .signal =
+                signal.map([&js](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
+    if (s->isIgnoredForSubrequests(js)) {
+      return kj::none;
+    }
+
     return s.addRef();
   }),
 
@@ -2266,7 +2271,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     // Clear the request's signal if the 'ignoreForSubrequests' flag is set. This happens when
     // a request from an incoming fetch is passed-through to another fetch. We want to avoid
     // aborting the subrequest in that case.
-    jsRequest->clearSignalIfIgnoredForSubrequest();
+    jsRequest->clearSignalIfIgnoredForSubrequest(js);
 
     // This URL list keeps track of redirections and becomes a source for Response's URL list. The
     // first URL in the list is the Request's URL (visible to JS via Request::getUrl()). The last URL
