@@ -2143,8 +2143,8 @@ class Server::WorkerService final: public Service,
         KJ_ASSERT_NONNULL(onBrokenTask).detach([](kj::Exception&& e) {});
 
         // Hollow out the object, so that if it still has references, they won't keep these parts
-        // alive. Since any further calls to `tryGetActor()` or `setActor()` will throw, we don't
-        // have to worry about the actor being recreated.
+        // alive. Since any further calls to `getActor()` will throw, we don't have to worry about
+        // the actor being recreated.
         auto actorToDrop = kj::mv(this->actor);
         tracker->shutdown();
         auto managerToDrop = kj::mv(manager);
@@ -2153,7 +2153,8 @@ class Server::WorkerService final: public Service,
         // HibernationManager so any connected hibernatable websockets will be disconnected.
         parent.actors.erase(key);
 
-        // WARNING: `this` MAY HAVE BEEN DELETED
+        // WARNING: `this` MAY HAVE BEEN DELETED as a result of the above `erase()`. Do not access
+        //   it again here.
       }
 
       // Processes the eviction of the Durable Object and hibernates active websockets.
@@ -2197,7 +2198,7 @@ class Server::WorkerService final: public Service,
         }
         // Destroy the last strong Worker::Actor reference.
         actor = kj::none;
-        startTask = kj::none;  // so next tryGetActor() will call start() again
+        startTask = kj::none;  // so next getActor() will call start() again
       }
 
       kj::Promise<void> start() {
