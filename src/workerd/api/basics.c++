@@ -820,6 +820,9 @@ void AbortSignal::triggerAbort(
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "AbortSignal can only be serialized for RPC.");
+
+  LOG_PERIODICALLY(WARNING, "NOSENTRY An AbortSignal was serialized for RPC");
+
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
