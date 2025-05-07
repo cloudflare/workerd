@@ -460,6 +460,10 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
     JSG_FAIL_REQUIRE(TypeError, "The receiver is not an RPC object");
   }
 
+  void failed(const kj::Exception& e) override {
+    capFulfiller->reject(kj::cp(e));
+  }
+
   // Event ID for jsRpcSession.
   //
   // Similar to WebSocket hibernation, we define this event ID in the internal codebase, but since

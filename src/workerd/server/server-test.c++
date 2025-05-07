@@ -1804,6 +1804,10 @@ KJ_TEST("Server: Durable Objects (in memory)") {
                 `  constructor(state, env) {
                 `    this.storage = state.storage;
                 `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;
@@ -1849,6 +1853,121 @@ KJ_TEST("Server: Durable Objects (in memory)") {
       "/bar", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
 }
 
+KJ_TEST("Server: Simultaneous requests to a DO that hasn't started don't cause split brain") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers"
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    let promise1 = actor.increment()
+                `    let promise2 = actor.increment()
+                `    let promise3 = actor.increment()
+                `    return new Response(`${await promise1} ${await promise2} ${await promise3}`)
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async increment() {
+                `    return this.counter++;
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 1 2");
+}
+
+KJ_TEST("Server: Broken DO stays broken until stub replaced") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {DurableObject} from "cloudflare:workers"
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    let i1 = await actor.increment()
+                `    try { await actor.abort() } catch {}
+                `    try {
+                `      let i2 = await actor.increment();
+                `      throw new Error(`expected error from broken stub, got ${i2}`);
+                `    } catch (err) {
+                `      if (!err.message.includes("test abort reason")) {
+                `        throw err
+                `      }
+                `    }
+                `    actor = env.ns.get(id)
+                `    let i3 = await actor.increment()
+                `    return new Response(`${i1} ${i3}`)
+                `  }
+                `}
+                `export class Counter extends DurableObject {
+                `  counter = 0;
+                `  async increment() {
+                `    return this.counter++;
+                `  }
+                `  async abort() {
+                `    this.ctx.abort(new Error("test abort reason"));
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "Counter")],
+          durableObjectNamespaces = [
+            ( className = "Counter",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "0 0");
+}
+
 KJ_TEST("Server: Durable Objects (on disk)") {
   kj::StringPtr config = R"((
     services = [
@@ -1869,6 +1988,10 @@ KJ_TEST("Server: Durable Objects (on disk)") {
                 `  constructor(state, env) {
                 `    this.storage = state.storage;
                 `    this.id = state.id;
+                `    if (this.id.constructor.name != "DurableObjectId") {
+                `      throw new Error("durable ID should be type DurableObjectId, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;
@@ -1992,6 +2115,10 @@ KJ_TEST("Server: Ephemeral Objects") {
                 `  constructor(state, env) {
                 `    if (state.storage) throw new Error("storage shouldn't be present");
                 `    this.id = state.id;
+                `    if (typeof this.id != "string") {
+                `      throw new Error("ephemeral ID should be type string, " +
+                `                      `got: ${this.id.constructor.name}`);
+                `    }
                 `    this.count = 0;
                 `  }
                 `  async fetch(request) {
@@ -2441,7 +2568,16 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
                 `    // 7. Wake actor by using websocket
                 `    //  - This confirms we get back hibernation manager.
                 `    //    8. Use websocket once
-                `    return await obj.fetch(request);
+                `    try {
+                `      return await obj.fetch(request);
+                `    } catch (err) {
+                `      if (request.url.endsWith("/abort")) {
+                `        // expected
+                `        return new Response("OK");
+                `      } else {
+                `        throw err;
+                `      }
+                `    }
                 `  }
                 `}
                 `
@@ -2478,6 +2614,8 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
                 `      }
                 `
                 `      return new Response("OK");
+                `    } else if (request.url.endsWith("/abort")) {
+                `      this.state.abort("test abort message");
                 `    }
                 `    return new Error("Unknown path!");
                 `  }
@@ -2550,8 +2688,10 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   // 2. Hibernate
   test.wait(10);
   // 3. Use normal connection and read from ws.
-  auto conn = test.connect("test-addr");
-  conn.httpGet200("/wakeUpAndCheckWS", "OK"_kj);
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/wakeUpAndCheckWS", "OK"_kj);
+  }
   constexpr kj::StringPtr unpromptedResponse = "Hello! Just woke up from a nap."_kj;
   wsConn.recvWebSocket(unpromptedResponse);
 
@@ -2563,6 +2703,21 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   constexpr kj::StringPtr evicted = "OK"_kj;
   wsConn.send(kj::str("\x81\x1a", confirmEviction));
   wsConn.recvWebSocket(evicted);
+
+  // 6. Hibernate again
+  test.wait(10);
+
+  // 7. Wake up the actor and have it abort itself. This should disconnect the WebSocket, even
+  // though the WebSocket itself is still hibernated.
+  KJ_EXPECT_LOG(INFO, "Error: test abort message");
+  KJ_EXPECT_LOG(INFO, "Error: test abort message");
+  KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
+  {
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/abort", "OK"_kj);
+  }
+
+  KJ_EXPECT(wsConn.isEof());
 }
 
 KJ_TEST("Server: tail workers") {

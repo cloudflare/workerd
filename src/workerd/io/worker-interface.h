@@ -127,6 +127,10 @@ class WorkerInterface: public kj::HttpService {
     // RequestObserver. The RequestObserver implementation will define what numbers correspond to
     // what types.
     virtual uint16_t getType() = 0;
+
+    // If the CustomEvent fails before any of the other methods are called, this may be invoked
+    // to report the failure reason.
+    virtual void failed(const kj::Exception& e) {}
   };
 
   // Allows delivery of a variety of event types by implementing a callback that delivers the

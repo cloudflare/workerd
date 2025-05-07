@@ -1518,6 +1518,14 @@ export default {
       await doReq('sql-test-foreign-keys');
     }, /constraints were violated: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT/);
 
+    // Since the DO was exploded, reusing the stub dosen't work.
+    await assert.rejects(async () => {
+      await doReq('increment');
+    }, /constraints were violated: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT/);
+
+    // Get a new stub.
+    obj = env.ns.get(id);
+
     // Some increments.
     assert.equal(await doReq('increment'), 1);
     assert.equal(await doReq('increment'), 2);
