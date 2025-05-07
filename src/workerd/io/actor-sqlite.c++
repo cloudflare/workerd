@@ -204,9 +204,12 @@ void ActorSqlite::onCriticalError(
   // If we have already experienced a terminal exception, no need to replace it
   if (broken == kj::none) {
     KJ_IF_SOME(e, maybeException) {
+      e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
       broken.emplace(kj::mv(e));
     } else {
-      broken.emplace(JSG_KJ_EXCEPTION(FAILED, Error, errorMessage));
+      kj::Exception exception = JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
+      exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+      broken.emplace(kj::mv(exception));
     }
   }
 }
