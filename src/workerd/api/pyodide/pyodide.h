@@ -280,16 +280,21 @@ struct MemorySnapshotResult {
 // CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
 class ArtifactBundler: public jsg::Object {
  public:
-  struct State: public kj::Refcounted {
+  struct State {
     kj::Maybe<const PyodidePackageManager&> packageManager;
     // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
     // In other words:
     // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
+
+    // The storedSnapshot is only used while isValidating is true.
     kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
     // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
     // up cold starts.
     kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
+
+    // Set only when the validator is running. This is used to determine if it is appropriate
+    // to store a memory snapshot.
     bool isValidating;
 
     State(kj::Maybe<const PyodidePackageManager&> packageManager,
@@ -330,12 +335,12 @@ class ArtifactBundler: public jsg::Object {
   }
 
   static kj::Own<State> makeDisabledBundler() {
-    return kj::refcounted<State>(kj::none, kj::none);
+    return kj::heap<State>(kj::none, kj::none);
   }
 
   // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
   static kj::Own<State> makePackagesOnlyBundler(kj::Maybe<const PyodidePackageManager&> manager) {
-    return kj::refcounted<State>(manager, kj::none);
+    return kj::heap<State>(manager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
