@@ -3070,11 +3070,14 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
 
-    // TODO(node-fs): Get the bundle root from the vfs and pass that on to
-    // the new module registry implementation.
+    // We use the same path for modules that the virtual file system uses.
+    // For instance, if the user specifies a bundle path of "/foo/bar" and
+    // there is a module in the bundle at "/foo/bar/baz.js", then the module's
+    // import specifier url will be "file:///foo/bar/baz.js".
+    const jsg::Url& bundleBase = workerFs->getBundleRoot();
 
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
-        *jsgobserver, conf, featureFlags.asReader(), pythonConfig);
+        *jsgobserver, conf, featureFlags.asReader(), pythonConfig, bundleBase);
   }
 
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
