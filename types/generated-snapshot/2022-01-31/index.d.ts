@@ -6118,7 +6118,7 @@ declare namespace Rpc {
     >]: MethodOrProperty<T[K]>;
   };
 }
-declare namespace Cloudflare {
+declare namespace CF {
   interface Env {}
 }
 declare module "cloudflare:workers" {
@@ -6231,7 +6231,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
-  export const env: Cloudflare.Env;
+  export const env: CF.Env;
 }
 interface SecretsStoreSecret {
   /**

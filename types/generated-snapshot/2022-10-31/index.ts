@@ -6124,7 +6124,7 @@ export declare namespace Rpc {
     >]: MethodOrProperty<T[K]>;
   };
 }
-export declare namespace Cloudflare {
+export declare namespace CF {
   interface Env {}
 }
 export interface SecretsStoreSecret {
