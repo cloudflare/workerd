@@ -156,7 +156,7 @@ declare namespace Rpc {
   };
 }
 
-declare namespace Cloudflare {
+declare namespace CF {
   interface Env {}
 }
 
@@ -292,5 +292,5 @@ declare module 'cloudflare:workers' {
     ): Promise<unknown>;
   }
 
-  export const env: Cloudflare.Env;
+  export const env: CF.Env;
 }
