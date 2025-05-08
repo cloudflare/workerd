@@ -15,6 +15,7 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   RESCHEDULE_DESYNCED_SQLITE_ALARMS,
+  V8_FAST_API,
   NumOfKeys  // Reserved for iteration.
 };
 

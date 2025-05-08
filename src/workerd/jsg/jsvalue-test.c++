@@ -109,6 +109,7 @@ struct JsValueContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(JsValueIsolate, JsValueContext, JsValueContext::Foo);
 
 KJ_TEST("simple") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<JsValueContext, JsValueIsolate> e(v8System);
   e.expectEval("takeJsValue(false)", "boolean", "false");
   e.expectEval("takeJsString(123)", "string", "123");

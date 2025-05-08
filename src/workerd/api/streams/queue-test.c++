@@ -106,6 +106,7 @@ auto getEntry(jsg::Lock& js, auto size) {
 #pragma region ValueQueue Tests
 
 KJ_TEST("ValueQueue basics work") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   preamble([](jsg::Lock& js) {
     ValueQueue queue(2);
 

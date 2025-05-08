@@ -19,6 +19,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "test-workerd"_kj;
     case AutogateKey::RESCHEDULE_DESYNCED_SQLITE_ALARMS:
       return "reschedule-desynced-sqlite-alarms"_kj;
+    case AutogateKey::V8_FAST_API:
+      return "v8-fast-api"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

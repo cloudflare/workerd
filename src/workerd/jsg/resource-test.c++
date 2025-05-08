@@ -21,6 +21,7 @@ struct BoxContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(BoxIsolate, BoxContext, NumberBox, BoxBox);
 
 KJ_TEST("constructors and properties") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<BoxContext, BoxIsolate> e(v8System);
   e.expectEval("new NumberBox(123).value", "number", "123");
   e.expectEval("new NumberBox(123).boxed.value", "number", "123");

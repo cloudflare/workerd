@@ -215,6 +215,7 @@ struct TestResource: public Base {
 };
 
 KJ_TEST("resource reference") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   KJ_EXPECT(tType<TestResource>() ==
       "(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))");
 }

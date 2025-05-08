@@ -21,6 +21,7 @@ struct BoolContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(BoolIsolate, BoolContext);
 
 KJ_TEST("bool") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<BoolContext, BoolIsolate> e(v8System);
   e.expectEval("takeBool(false)", "string", "false");
   e.expectEval("takeBool(true)", "string", "true");

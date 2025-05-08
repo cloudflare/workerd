@@ -78,3 +78,9 @@ wd_cc_benchmark(
         "//src/workerd/util",
     ],
 )
+
+wd_cc_benchmark(
+    name = "bench-fast-api",
+    srcs = ["bench-fast-api.c++"],
+    deps = ["//src/workerd/jsg"],
+)
