@@ -258,27 +258,6 @@ KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
 }
 
 KJ_TEST("isFastMethodCompatible Detection") {
-  static_assert(
-      FastApiWrappedObject<FastMethodIsolate_TypeWrapper, kj::String>, "should be compatible");
-
-  static_assert(FastApiParam<FastMethodIsolate_TypeWrapper, WrappedInt>, "should be compatible");
-
-  static_assert(FastApiParam<FastMethodIsolate_TypeWrapper, kj::OneOf<kj::String, WrappedInt>>,
-      "should be compatible");
-
-  static_assert(!FastApiParam<FastMethodIsolate_TypeWrapper, WrappedInt&>, "should be compatible");
-
-  struct Foo {};
-
-  static_assert(!FastApiWrappedObject<FastMethodIsolate_TypeWrapper, Foo>, "foo is not a jsg type");
-
-  static_assert(!FastApiWrappedObject<FastMethodIsolate_TypeWrapper, jsg::Lock&>,
-      "lock is not a wrapped type");
-
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper,
-                    void (FastMethodContext::*)(bool, jsg::Lock&)>,
-      "lock is accepted only as first argument");
-
   static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper,
                     void (FastMethodContext::*)(jsg::Lock&, bool)>,
       "lock is accepted only as first argument");
@@ -321,9 +300,6 @@ KJ_TEST("isFastMethodCompatible Detection") {
   using KjArrayMethod = kj::Array<int> (FastMethodContext::*)(int32_t);
   using PromiseMethod = jsg::Promise<int> (FastMethodContext::*)(int32_t);
   using MaybeVoidMethod = kj::Maybe<void> (FastMethodContext::*)();
-  using PointerMethod = void(v8::Isolate*);
-  using ReferenceMethod = void(v8::Isolate&);
-  using StaticMethodContainerReferenceMethod = void(StaticMethodContainer&);
   using StaticMethodContainerMethod = void(StaticMethodContainer);
 
   // Static assertions for compatible method types
@@ -361,10 +337,6 @@ KJ_TEST("isFastMethodCompatible Detection") {
   static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, ConstLockFirstMethod>,
       "Const methods with Lock& as first parameter should be fast-method compatible");
 
-  // Complex methods
-  static_assert(FastApiParam<FastMethodIsolate_TypeWrapper, WrappedInt>,
-      "JSG_STRUCT as a parameter is supported");
-
   // Static assertions for incompatible method types
   // ----------------------------------------------
 
@@ -389,15 +361,8 @@ KJ_TEST("isFastMethodCompatible Detection") {
       "Methods returning Promise should not be fast-method compatible");
   static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, MaybeVoidMethod>,
       "Methods returning Maybe<void> should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, PointerMethod>,
-      "Methods that have a parameter of v8::Isolate* should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, ReferenceMethod>,
-      "Methods that have a parameter of a reference should not be fast-method compatible");
   static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, StaticMethodContainerMethod>,
       "This should be compatible");
-  static_assert(
-      !isFastMethodCompatible<FastMethodIsolate_TypeWrapper, StaticMethodContainerReferenceMethod>,
-      "Methods that have a parameter of a reference should not be fast-method compatible");
 
   // jsg::test::Evaluator<FastMethodContext, FastMethodIsolate> e(v8System);
   // auto& wrapper = FastMethodIsolate_TypeWrapper::from(e.getIsolate().ptr);

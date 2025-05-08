@@ -211,8 +211,7 @@ struct NumberBox: public Object {
   }
 
   v8::Local<v8::Value> getBoxedFromTypeHandler(
-      jsg::Lock& js, v8::Isolate*, const TypeHandler<Ref<NumberBox>>& numberBoxTypeHandler) {
-    // This function takes an Isolate just to prove it can take multiple value-less parameters.
+      jsg::Lock& js, const TypeHandler<Ref<NumberBox>>& numberBoxTypeHandler) {
     return numberBoxTypeHandler.wrap(js, js.alloc<NumberBox>(value));
   }
 
