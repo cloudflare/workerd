@@ -297,8 +297,6 @@ function getCountFuncParams(Module: Module): (funcPtr: number) => number {
 let countFuncParams: (funcPtr: number) => number;
 
 export function patched_PyEM_CountFuncParams(Module: Module, funcPtr: any) {
-  if (!countFuncParams) {
-    countFuncParams = getCountFuncParams(Module);
-  }
+  countFuncParams ??= getCountFuncParams(Module);
   return countFuncParams(funcPtr);
 }
