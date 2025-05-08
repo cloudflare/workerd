@@ -892,6 +892,19 @@ def handler(func):
     return wrapper
 
 
+def _wrap_subclass(cls):
+    # Override the class __init__ so that we can wrap the `env` in the constructor.
+    original_init = cls.__init__
+
+    def wrapped_init(self, *args, **kwargs):
+        if len(args) > 1:
+            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+
+        original_init(self, *args, **kwargs)
+
+    cls.__init__ = wrapped_init
+
+
 class DurableObject:
     """
     Base class used to define a Durable Object.
@@ -899,6 +912,9 @@ class DurableObject:
 
     def __init__(*_args, **_kwds):
         pass
+
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls)
 
 
 class WorkerEntrypoint:
@@ -909,6 +925,9 @@ class WorkerEntrypoint:
     def __init__(*_args, **_kwds):
         pass
 
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls)
+
 
 class WorkflowEntrypoint:
     """
@@ -917,3 +936,6 @@ class WorkflowEntrypoint:
 
     def __init__(*_args, **_kwds):
         pass
+
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls)
