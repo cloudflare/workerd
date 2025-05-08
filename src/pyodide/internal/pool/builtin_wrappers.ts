@@ -198,3 +198,105 @@ function prepareStackTrace(
     return [false, ''];
   }
 }
+
+/**
+ * This is a fix for a problem with package snapshots in 0.26.0a2. 0.26.0a2 tests if
+ * wasm-type-reflection is supported by the runtime and if so uses it to avoid function pointer
+ * casting instead of a JS trampoline. We cannot stack switch through the JS trampoline so we need
+ * to make sure that when stack switching is available, we don't use JS trampolines. When 0.26.0a2
+ * was released, wasm-stack-switching implied wasm-type-reflection.
+ *
+ * Unfortunately there is a bug (fixed in 0.26.0a3...) that made the assumption that if the runtime
+ * that we use to make a snapshot supports wasm-type-reflection, the runtime we use it in will too.
+ *
+ * Later, JSPI was rewritten not to depend on wasm-type-reflection, but the implication was left in
+ * the v8 codebase until a few weeks ago. So our snapshots expect to be able to use an implementation
+ * of `patched_PyEM_CountFuncParams` based on wasm-type-reflection, but it's not on anymore.
+ *
+ * Luckily, in the meantime there is a way to count the arguments of a webassembly function using
+ * wasm-gc. It's not exactly pretty though.
+ * This is copied from https://github.com/python/cpython/blob/main/Python/emscripten_trampoline.c
+ */
+// prettier-ignore
+function getCountFuncParams(Module: Module): (funcPtr: number) => number {
+  const code = new Uint8Array([
+    0x00, 0x61, 0x73, 0x6d, // \0asm magic number
+    0x01, 0x00, 0x00, 0x00, // version 1
+    0x01, 0x1b, // Type section, body is 0x1b bytes
+        0x05, // 6 entries
+        0x60, 0x00, 0x01, 0x7f,                         // (type $type0 (func (param) (result i32)))
+        0x60, 0x01, 0x7f, 0x01, 0x7f,                   // (type $type1 (func (param i32) (result i32)))
+        0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,             // (type $type2 (func (param i32 i32) (result i32)))
+        0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,       // (type $type3 (func (param i32 i32 i32) (result i32)))
+        0x60, 0x01, 0x7f, 0x00,                         // (type $blocktype (func (param i32) (result)))
+    0x02, 0x09, // Import section, 0x9 byte body
+        0x01, // 1 import (table $funcs (import "e" "t") 0 funcref)
+        0x01, 0x65, // "e"
+        0x01, 0x74, // "t"
+        0x01,       // importing a table
+        0x70,       // of entry type funcref
+        0x00, 0x00, // table limits: no max, min of 0
+    0x03, 0x02,   // Function section
+        0x01, 0x01, // We're going to define one function of type 1 (func (param i32) (result i32))
+    0x07, 0x05, // export section
+        0x01, // 1 export
+        0x01, 0x66, // called "f"
+        0x00, // a function
+        0x00, // at index 0
+
+    0x0a, 0x44,  // Code section,
+        0x01, 0x42, // one entry of length 50
+        0x01, 0x01, 0x70, // one local of type funcref
+        // Body of the function
+        0x20, 0x00,       // local.get $fptr
+        0x25, 0x00,       // table.get $funcs
+        0x22, 0x01,       // local.tee $fref
+        0xfb, 0x14, 0x03, // ref.test $type3
+        0x02, 0x04,       // block $b (type $blocktype)
+            0x45,         //   i32.eqz
+            0x0d, 0x00,   //   br_if $b
+            0x41, 0x03,   //   i32.const 3
+            0x0f,         //   return
+        0x0b,             // end block
+
+        0x20, 0x01,       // local.get $fref
+        0xfb, 0x14, 0x02, // ref.test $type2
+        0x02, 0x04,       // block $b (type $blocktype)
+            0x45,         //   i32.eqz
+            0x0d, 0x00,   //   br_if $b
+            0x41, 0x02,   //   i32.const 2
+            0x0f,         //   return
+        0x0b,             // end block
+
+        0x20, 0x01,       // local.get $fref
+        0xfb, 0x14, 0x01, // ref.test $type1
+        0x02, 0x04,       // block $b (type $blocktype)
+            0x45,         //   i32.eqz
+            0x0d, 0x00,   //   br_if $b
+            0x41, 0x01,   //   i32.const 1
+            0x0f,         //   return
+        0x0b,             // end block
+
+        0x20, 0x01,       // local.get $fref
+        0xfb, 0x14, 0x00, // ref.test $type0
+        0x02, 0x04,       // block $b (type $blocktype)
+            0x45,         //   i32.eqz
+            0x0d, 0x00,   //   br_if $b
+            0x41, 0x00,   //   i32.const 0
+            0x0f,         //   return
+        0x0b,             // end block
+
+        0x41, 0x7f,       // i32.const -1
+        0x0b // end function
+  ]);
+  const mod = UnsafeEval.newWasmModule(code);
+  const inst = new WebAssembly.Instance(mod, { e: { t: Module.wasmTable } });
+  return inst.exports.f as ReturnType<typeof getCountFuncParams>;
+}
+
+let countFuncParams: (funcPtr: number) => number;
+
+export function patched_PyEM_CountFuncParams(Module: Module, funcPtr: any) {
+  countFuncParams ??= getCountFuncParams(Module);
+  return countFuncParams(funcPtr);
+}

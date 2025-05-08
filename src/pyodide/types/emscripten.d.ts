@@ -106,4 +106,5 @@ interface Module {
   ): number;
   promise: Promise<void>;
   reportUndefinedSymbols: () => void;
+  wasmTable: WebAssembly.Table;
 }

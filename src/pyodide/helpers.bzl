@@ -178,6 +178,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         patchDynlibLookup,
         reportUndefinedSymbolsPatched,
         wasmInstantiate,
+        patched_PyEM_CountFuncParams,
     } from "pyodide-internal:pool/builtin_wrappers";
     """
 
@@ -246,6 +247,10 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         [
             "nullToUndefined(Function.prototype.apply.apply",
             "nullToUndefined(API.config.jsglobals.Function.prototype.apply.apply",
+        ],
+        [
+            "function _PyEM_CountFuncParams(func){",
+            "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
         ],
     ]
 
