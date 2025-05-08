@@ -165,8 +165,8 @@
     {
       "type": "github_release",
       "name": "com_google_benchmark",
-      "owner": "google",
-      "repo": "benchmark"
+      "owner": "CodSpeedHQ",
+      "repo": "codspeed-cpp"
     }
   ]
 }
