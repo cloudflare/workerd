@@ -304,6 +304,12 @@ class ArtifactBundler: public jsg::Object {
           storedSnapshot(kj::none),
           existingSnapshot(kj::mv(existingSnapshot)),
           isValidating(isValidating) {};
+
+    kj::Own<State> clone() {
+      return kj::heap<State>(packageManager,
+          existingSnapshot.map(
+              [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+    }
   };
 
   ArtifactBundler(kj::Own<State> inner): inner(kj::mv(inner)) {};
