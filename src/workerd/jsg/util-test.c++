@@ -23,6 +23,7 @@ struct FreezeContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(FreezeIsolate, FreezeContext);
 
 KJ_TEST("recursive freezing") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<FreezeContext, FreezeIsolate> e(v8System);
   e.expectEval("let obj = { foo: [ { bar: 1 } ] };\n"
                "recursivelyFreeze(obj);\n"

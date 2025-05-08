@@ -41,6 +41,7 @@ jsg::BufferSource toBufferSource(jsg::Lock& js, kj::Array<kj::byte> bytes) {
 // Happy Cases
 
 KJ_TEST("ReadableStream read all text (value readable)") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   preamble([](jsg::Lock& js) {
     uint checked = 0;
     auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());

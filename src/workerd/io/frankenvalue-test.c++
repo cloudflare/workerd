@@ -18,6 +18,7 @@ struct TestContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
 
 KJ_TEST("Frankenvalue") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   jsg::test::Evaluator<TestContext, TestIsolate> e(v8System);
 
   e.run([&](jsg::Lock& js) {

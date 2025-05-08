@@ -31,7 +31,7 @@ test-asan *args="//...":
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
-  bazel test {{args}} --test_output=streamed --cache_test_results=no
+  bazel test {{args}} --test_output=streamed --cache_test_results=no --config=debug
 
 # e.g. just node-test zlib
 node-test test_name *args:
@@ -77,7 +77,7 @@ rustfmt:
 
 # example: just bench mimetype
 bench path:
-  bazel run //src/workerd/tests:bench-{{path}}
+  bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
 
 # example: just clippy dns
 clippy package="...":

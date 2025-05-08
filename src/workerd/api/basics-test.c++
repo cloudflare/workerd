@@ -14,6 +14,7 @@
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 namespace {
@@ -23,7 +24,6 @@ jsg::V8System v8System;
 struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
 
   bool testNativeListenersWork(jsg::Lock& js) {
-
     auto target = js.alloc<api::EventTarget>();
 
     int called = 0;
@@ -87,6 +87,7 @@ JSG_DECLARE_ISOLATE_TYPE(BasicsIsolate,
     jsg::TypeWrapperExtension<PromiseWrapper>);
 
 KJ_TEST("EventTarget native listeners work") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
   e.expectEval("testNativeListenersWork()", "boolean", "true");
 }

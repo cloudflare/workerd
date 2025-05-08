@@ -65,6 +65,7 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(BufferSourceIsolate, BufferSourceContext);
 
 KJ_TEST("BufferSource works") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
 
   // By default, a BufferSource handle is created as a DataView

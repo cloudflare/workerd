@@ -123,6 +123,8 @@ JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 // ======================================================================================
 
 KJ_TEST("An empty registry") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
+
   // We should be able to create an empty registry that returns nothing.
   // Basic resolution of this kind does not require an isolate lock.
 

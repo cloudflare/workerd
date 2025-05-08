@@ -15,6 +15,7 @@ struct EvalContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(EvalIsolate, EvalContext);
 
 KJ_TEST("eval() is blocked") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<EvalContext, EvalIsolate> e(v8System);
   e.expectEval("eval('123')", "throws",
       "EvalError: Code generation from strings disallowed for this context");

@@ -43,6 +43,7 @@ struct TestContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
 
 KJ_TEST("hello world") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<TestContext, TestIsolate> e(v8System);
   e.expectEval("'Hello' + ', World!'", "string", "Hello, World!");
 }

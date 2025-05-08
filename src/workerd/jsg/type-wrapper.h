@@ -19,6 +19,7 @@
 #include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
+#include <workerd/util/autogate.h>
 
 #include <v8-wasm.h>
 
@@ -402,6 +403,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public UnimplementedWrapper,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
+  bool fastApiEnabled = false;
 
  public:
   template <typename MetaConfiguration>
@@ -410,6 +412,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         MaybeWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
+    fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
@@ -419,6 +422,10 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   static TypeWrapper& from(v8::Isolate* isolate) {
     return *reinterpret_cast<TypeWrapper*>(isolate->GetData(SET_DATA_TYPE_WRAPPER));
+  }
+
+  bool isFastApiEnabled() const {
+    return fastApiEnabled;
   }
 
   using TypeWrapperBase<Self, T>::getName...;
@@ -499,6 +506,18 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       throwTypeError(
           context->GetIsolate(), errorContext, TypeWrapper::getName((kj::Decay<U>*)nullptr));
     }
+  }
+
+  template <typename U, FastApiPrimitive A>
+  auto unwrapFastApi(v8::Local<v8::Context> context, A& arg, TypeErrorContext errorContext) -> A {
+    return arg;
+  }
+
+  template <typename U>
+  auto unwrapFastApi(v8::Local<v8::Context> context,
+      v8::Local<v8::Value>& arg,
+      TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
+    return unwrap<U>(context, arg, errorContext);
   }
 
   // Helper for unwrapping function/method arguments correctly. Specifically, we need logic to
@@ -596,6 +615,21 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
       ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>;           \
   class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
    public:                                                                                         \
+    [[maybe_unused]] static constexpr bool trackCallCounts = false;                                \
+    using Type##_TypeWrapperBase::TypeWrapper;                                                     \
+  };                                                                                               \
+  class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \
+   public:                                                                                         \
+    using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate;                                    \
+  }
+
+#define JSG_DECLARE_DEBUG_ISOLATE_TYPE(Type, ...)                                                  \
+  class Type##_TypeWrapper;                                                                        \
+  using Type##_TypeWrapperBase =                                                                   \
+      ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__>;           \
+  class Type##_TypeWrapper final: public Type##_TypeWrapperBase {                                  \
+   public:                                                                                         \
+    [[maybe_unused]] static constexpr bool trackCallCounts = true;                                 \
     using Type##_TypeWrapperBase::TypeWrapper;                                                     \
   };                                                                                               \
   class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> {                           \

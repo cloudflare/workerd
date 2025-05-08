@@ -18,6 +18,7 @@ struct DOMExceptionContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(DOMExceptionIsolate, DOMExceptionContext);
 
 KJ_TEST("DOMException's prototype is ErrorPrototype") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
   e.expectEval(
       "Object.getPrototypeOf(DOMException.prototype) === Error.prototype", "boolean", "true");

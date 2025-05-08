@@ -84,6 +84,7 @@ JSG_DECLARE_ISOLATE_TYPE(
     CaptureThrowIsolate, CaptureThrowContext, jsg::TypeWrapperExtension<workerd::PromiseWrapper>);
 
 KJ_TEST("Async functions capture sync errors with flag") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<CaptureThrowContext, CaptureThrowIsolate> e(v8System);
   e.setCaptureThrowsAsRejections(true);
   e.expectEval("test1()", "object", "[object Promise]");
