@@ -24,6 +24,9 @@ class PythonRpcTester(WorkerEntrypoint):
         assert self.env is not None
         assert self.ctx is not None
 
+        assert not isinstance(env, JsProxy)
+        self.env = env
+
     async def no_args(self):
         return "hello from python"
 
@@ -42,6 +45,14 @@ class PythonRpcTester(WorkerEntrypoint):
     async def handle_request(self, req):
         assert isinstance(req, Request)
         return req
+
+    async def check_env(self):
+        # Verify that the `env` supplied to the entrypoint class is wrapped.
+        curr_date = datetime.now()
+        py_date = await self.env.PythonRpc.identity(curr_date)
+        assert isinstance(py_date, datetime)
+        assert py_date == curr_date
+        return True
 
 
 class CustomType:
@@ -242,3 +253,6 @@ async def test(ctrl, env, ctx):
         await env.PythonRpc.identity(my_func)
     with assertRaises(TypeError):
         await env.PythonRpc.identity({"test": (1, 2, 3)})
+
+    # Verify that the `env` in the DO is correctly wrapped.
+    assert await env.PythonRpc.check_env()
