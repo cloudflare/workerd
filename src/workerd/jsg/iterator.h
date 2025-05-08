@@ -847,7 +847,7 @@ template <typename SelfType, typename Type, typename State>
 class AsyncIteratorBase: public Object {
  public:
   using NextSignature = Promise<kj::Maybe<Type>>(Lock&, State&);
-  using ReturnSignature = Promise<void>(Lock&, State&, Optional<Value>);
+  using ReturnSignature = Promise<void>(Lock&, State&, Optional<Type>&);
   using Next = AsyncIteratorImpl::Next<Type>;
   using Finished = AsyncIteratorImpl::Finished;
 
@@ -959,7 +959,7 @@ class AsyncIteratorBase: public Object {
     KJ_UNREACHABLE;
   }
 
-  Promise<Next> returnImpl(Lock& js, Optional<Value> value, ReturnSignature returnFunc) {
+  Promise<Next> returnImpl(Lock& js, Optional<Type> value, ReturnSignature returnFunc) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(finished, Finished) {
         return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
@@ -983,9 +983,8 @@ class AsyncIteratorBase: public Object {
               return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
             }
             KJ_CASE_ONEOF(inner, InnerState) {
-              return returnFunc(js, inner.state, value.map([&](Value& v) {
-                return v.addRef(js.v8Isolate);
-              })).then(js, [this, self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
+              return returnFunc(js, inner.state, value)
+                  .then(js, [this, self = kj::mv(self), value = kj::mv(value)](Lock& js) mutable {
                 state.template init<Finished>();
                 return js.resolvedPromise(Next{.done = true, .value = kj::mv(value)});
               });
@@ -1075,7 +1074,7 @@ class AsyncIteratorBase: public Object {
     inline jsg::Promise<Next> next(jsg::Lock& js) {                                                \
       return nextImpl(js, NextFunc);                                                               \
     }                                                                                              \
-    inline jsg::Promise<Next> return_(jsg::Lock& js, jsg::Optional<jsg::Value> value) {            \
+    inline jsg::Promise<Next> return_(jsg::Lock& js, jsg::Optional<Type> value) {                  \
       return returnImpl(js, kj::mv(value), ReturnFunc);                                            \
     }                                                                                              \
     JSG_RESOURCE_TYPE(Name) {                                                                      \
