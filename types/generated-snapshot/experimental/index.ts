@@ -567,12 +567,14 @@ export type DurableObjectLocationHint =
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
+export interface DurableObjectClass {}
 export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   exports: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
+  facets: DurableObjectFacets;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
@@ -689,6 +691,15 @@ export declare class WebSocketRequestResponsePair {
   constructor(request: string, response: string);
   get request(): string;
   get response(): string;
+}
+export interface DurableObjectFacets {
+  get(name: string, options: DurableObjectFacetsGetOptions): Fetcher;
+  abort(name: string, reason: any): void;
+  delete(name: string): void;
+}
+export interface DurableObjectFacetsGetOptions {
+  $class: DurableObjectClass;
+  id?: DurableObjectId | string;
 }
 export interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
