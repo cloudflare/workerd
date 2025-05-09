@@ -50,6 +50,7 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/python_entrypoint_js.embed.h>
 
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
@@ -672,7 +673,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
         auto mainModule = confModules.begin();
         capnp::MallocMessageBuilder message;
         auto module = message.getRoot<config::Worker::Module>();
-        module.setEsModule(PYTHON_ENTRYPOINT);
+        module.setEsModule(EMBED_pyodide_python_entrypoint_js.asChars().begin());
         auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
         auto path = kj::Path::parse(mainModule->getName());
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
@@ -1060,7 +1061,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         KJ_REQUIRE(featureFlags.getPythonWorkers(),
             "The python_workers compatibility flag is required to use Python.");
         hasPythonModules = true;
-        bundleBuilder.addEsmModule(def.getName(), kj::str(PYTHON_ENTRYPOINT).releaseArray());
+        bundleBuilder.addEsmModule(def.getName(),
+            kj::Array<const char>(EMBED_pyodide_python_entrypoint_js.asChars().begin(),
+                EMBED_pyodide_python_entrypoint_js_size, kj::NullArrayDisposer::instance));
         break;
       }
       case config::Worker::Module::PYTHON_REQUIREMENT: {

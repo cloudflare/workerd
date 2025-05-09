@@ -129,6 +129,8 @@ jobs:
           sudo ln -s -f $(brew --prefix lld)/bin/ld64.lld /usr/local/bin/ld64.lld
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
+          # Build using Xcode 16.3 (equivalent to Clang 19)
+          sudo xcode-select -s "/Applications/Xcode_16.3.app"
       - name: Setup Windows
         if: runner.os == 'Windows'
         run: |

@@ -6,6 +6,8 @@
 
 #include "time.h"
 
+#include <workerd/io/supported-compatibility-date.embed.h>
+
 #include <capnp/dynamic.h>
 #include <capnp/schema.h>
 #include <kj/debug.h>
@@ -105,12 +107,16 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
 
   switch (dateValidation) {
     case CompatibilityDateValidation::CODE_VERSION:
-      if (KJ_ASSERT_NONNULL(CompatDate::parse(SUPPORTED_COMPATIBILITY_DATE)) < parsedCompatDate) {
+      if (KJ_ASSERT_NONNULL(CompatDate::parse(
+
+              kj::StringPtr(
+                  EMBED_workerd_io_trimmed_supported_compatibility_date_txt.asChars().begin()))) <
+          parsedCompatDate) {
         errorReporter.addError(
             kj::str("This Worker requires compatibility date \"", parsedCompatDate,
                 "\", but the newest "
                 "date supported by this server binary is \"",
-                SUPPORTED_COMPATIBILITY_DATE, "\"."));
+                EMBED_workerd_io_trimmed_supported_compatibility_date_txt, "\"."));
       }
       break;
 
