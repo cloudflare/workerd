@@ -137,7 +137,7 @@ export const env = new Proxy(getInitialEnv(), {
     prop: PropertyKey,
     descriptor: PropertyDescriptor
   ) {
-    validateObject(descriptor, 'descriptor', {});
+    validateObject(descriptor, 'descriptor');
     if (Reflect.has(descriptor, 'get') || Reflect.has(descriptor, 'set')) {
       throw new ERR_INVALID_ARG_VALUE(
         'descriptor',

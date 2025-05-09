@@ -141,7 +141,7 @@ type PathObject = {
 };
 
 function _format(sep: string, pathObject: PathObject): string {
-  validateObject(pathObject, 'pathObject', {});
+  validateObject(pathObject, 'pathObject');
   const dir = pathObject.dir || pathObject.root;
   const base =
     pathObject.base ||
