@@ -232,17 +232,30 @@ async function initPyInstance(
   return res as PyModule;
 }
 
+// https://developers.cloudflare.com/workers/runtime-apis/rpc/reserved-methods/
+const SPECIAL_HANDLER_NAMES = ['fetch', 'connect'];
+const SPECIAL_DO_HANDLER_NAMES = [
+  'alarm',
+  'webSocketMessage',
+  'webSocketClose',
+  'webSocketError',
+];
+
 function makeEntrypointProxyHandler(
-  pyInstancePromise: Promise<PyModule>
+  pyInstancePromise: Promise<PyModule>,
+  isDurableObject: boolean
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
         return Reflect.get(target, prop, receiver);
       }
+
       // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
-      const isKnownHandler = SUPPORTED_HANDLER_NAMES.includes(prop);
-      if (isKnownHandler) {
+      const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
+      const isKnownDoHandler =
+        SPECIAL_DO_HANDLER_NAMES.includes(prop) && isDurableObject;
+      if (isKnownHandler || isKnownDoHandler) {
         prop = 'on_' + prop;
       }
 
@@ -260,6 +273,7 @@ function makeEntrypointProxyHandler(
 }
 
 function makeEntrypointClass(className: string, classKind: AnyClass): any {
+  const isDurableObject = classKind.name === 'DurableObject';
   return class EntrypointWrapper extends classKind {
     public constructor(...args: any[]) {
       super(...args);
@@ -267,7 +281,10 @@ function makeEntrypointClass(className: string, classKind: AnyClass): any {
       const pyInstancePromise = initPyInstance(className, args);
       // We do not know the methods that are defined on the RPC class, so we need a proxy to
       // support any possible method name.
-      return new Proxy(this, makeEntrypointProxyHandler(pyInstancePromise));
+      return new Proxy(
+        this,
+        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject)
+      );
     }
   };
 }
