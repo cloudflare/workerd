@@ -257,6 +257,12 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
+  FileSystemHandle: typeof FileSystemHandle;
+  FileSystemFileHandle: typeof FileSystemFileHandle;
+  FileSystemDirectoryHandle: typeof FileSystemDirectoryHandle;
+  FileSystemWritableFileStream: typeof FileSystemWritableFileStream;
+  FileSystemSyncAccessHandle: typeof FileSystemSyncAccessHandle;
+  StorageManager: typeof StorageManager;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
@@ -474,6 +480,7 @@ export declare abstract class Navigator {
   readonly hardwareConcurrency: number;
   readonly language: string;
   readonly languages: string[];
+  readonly storage: StorageManager;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -3110,6 +3117,148 @@ export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+}
+/**
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle)
+ */
+export declare abstract class FileSystemHandle {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/kind) */
+  get kind(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/name) */
+  get name(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/isSameEntry) */
+  isSameEntry(other: FileSystemHandle): Promise<boolean>;
+}
+/**
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle)
+ */
+export declare abstract class FileSystemFileHandle extends FileSystemHandle {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/getFile) */
+  getFile(): Promise<File>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createWritable) */
+  createWritable(
+    options?: FileSystemFileHandleFileSystemCreateWritableOptions,
+  ): Promise<FileSystemWritableFileStream>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createSyncAccessHandle) */
+  createSyncAccessHandle(): Promise<FileSystemSyncAccessHandle>;
+}
+/**
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle)
+ */
+export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getFileHandle) */
+  getFileHandle(
+    name: string,
+    options?: FileSystemDirectoryHandleFileSystemGetFileOptions,
+  ): Promise<FileSystemFileHandle>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/getDirectoryHandle) */
+  getDirectoryHandle(
+    name: string,
+    options?: FileSystemDirectoryHandleFileSystemGetDirectoryOptions,
+  ): Promise<FileSystemDirectoryHandle>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/removeEntry) */
+  removeEntry(
+    name: string,
+    options?: FileSystemDirectoryHandleFileSystemRemoveOptions,
+  ): Promise<void>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/resolve) */
+  resolve(possibleDescendant: FileSystemHandle): Promise<string[]>;
+  entries(): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  keys(): AsyncIterableIterator<string>;
+  values(): AsyncIterableIterator<FileSystemHandle>;
+  forEach(
+    callback: (
+      param0: string,
+      param1: FileSystemHandle,
+      param2: FileSystemDirectoryHandle,
+    ) => void,
+    thisArg?: any,
+  ): void;
+  [Symbol.asyncIterator](): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+}
+/**
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream)
+ */
+export declare abstract class FileSystemWritableFileStream extends WritableStream {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/write) */
+  write(
+    data:
+      | Blob
+      | (ArrayBuffer | ArrayBufferView)
+      | string
+      | FileSystemWritableFileStreamWriteParams,
+  ): Promise<void>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/seek) */
+  seek(position: number): Promise<void>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/truncate) */
+  truncate(size: number): Promise<void>;
+}
+/**
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle)
+ */
+export declare abstract class FileSystemSyncAccessHandle {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/read) */
+  read(
+    buffer: ArrayBuffer | ArrayBufferView,
+    options?: FileSystemSyncAccessHandleFileSystemReadWriteOptions,
+  ): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/write) */
+  write(
+    buffer: ArrayBuffer | ArrayBufferView,
+    options?: FileSystemSyncAccessHandleFileSystemReadWriteOptions,
+  ): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/truncate) */
+  truncate(newSize: number): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/getSize) */
+  getSize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/flush) */
+  flush(): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/close) */
+  close(): void;
+}
+/**
+ * Available only in secure contexts.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/StorageManager)
+ */
+export declare abstract class StorageManager {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/StorageManager/getDirectory) */
+  getDirectory(): Promise<FileSystemDirectoryHandle>;
+}
+export interface FileSystemFileHandleFileSystemCreateWritableOptions {
+  keepExistingData?: boolean;
+}
+export interface FileSystemDirectoryHandleFileSystemGetFileOptions {
+  create: boolean;
+}
+export interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
+  create: boolean;
+}
+export interface FileSystemDirectoryHandleFileSystemRemoveOptions {
+  recursive: boolean;
+}
+export interface FileSystemSyncAccessHandleFileSystemReadWriteOptions {
+  at?: number;
+}
+export interface FileSystemWritableFileStreamWriteParams {
+  type: string;
+  size?: number;
+  position?: number;
+  data?: Blob | (ArrayBuffer | ArrayBufferView) | string;
+}
+export interface FileSystemDirectoryHandleEntryType {
+  key: string;
+  value: FileSystemHandle;
 }
 export type AiImageClassificationInput = {
   image: number[];

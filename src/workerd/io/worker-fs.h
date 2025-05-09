@@ -142,8 +142,11 @@ struct Stat final {
   FsType type = FsType::FILE;
 
   // The size of the node in bytes. For directories, this value will
-  // always be 0.
-  size_t size = 0;
+  // always be 0. Note that we are intentionally limiting the size of
+  // files to max(uint32_t) or 4GB. This is well above the maximum
+  // isolate heap limit so in-memory files should generally never
+  // get this large.
+  uint32_t size = 0;
 
   // The last modified time of the node.
   kj::Date lastModified = kj::UNIX_EPOCH;
@@ -182,18 +185,18 @@ class File: public kj::Refcounted {
   jsg::BufferSource readAllBytes(jsg::Lock& js);
 
   // Reads data from the file at the given offset into the given buffer.
-  virtual size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const = 0;
+  virtual uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const = 0;
 
   // Replaces the full contents of the file with the given data.
   // Equivalent to resize(js, data.size()) followed by write(js, 0, data).
-  size_t writeAll(jsg::Lock& js, kj::ArrayPtr<const kj::byte> data) {
+  uint32_t writeAll(jsg::Lock& js, kj::ArrayPtr<const kj::byte> data) {
     resize(js, data.size());
     return write(js, 0, data);
   }
 
   // Replaces the full contents of the file with the given data.
   // Equivalent to resize(js, data.size()) followed by write(js, 0, data).
-  size_t writeAll(jsg::Lock& js, kj::StringPtr data) {
+  uint32_t writeAll(jsg::Lock& js, kj::StringPtr data) {
     return writeAll(js, data.asBytes());
   }
 
@@ -202,22 +205,22 @@ class File: public kj::Refcounted {
   // this will throw an exception. If the offset is greater than the current
   // size of the file, the file may be resized to accommodate the new data or
   // an exception may be thrown (depending on the underlying implementation).
-  virtual size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> data) = 0;
+  virtual uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> data) = 0;
 
-  size_t write(jsg::Lock& js, size_t offset, kj::StringPtr data) {
+  uint32_t write(jsg::Lock& js, uint32_t offset, kj::StringPtr data) {
     return write(js, offset, data.asBytes());
   }
 
   // Fill the file with the given value from the given offset. This is more
   // efficient that writing the same value as it does not require any allocations.
-  virtual void fill(jsg::Lock& js, kj::byte val, kj::Maybe<size_t> offset = kj::none) = 0;
+  virtual void fill(jsg::Lock& js, kj::byte val, kj::Maybe<uint32_t> offset = kj::none) = 0;
 
   // Resize the file allocation. Note that this is potentially an expensive
   // operation as it requires allocating a new internal buffer and copying
   // the data. If the size is smaller than the current size, the contents of
   // the fill will be truncated. If the size is larger than the current size,
   // the new contents of the file will be filled with zeroes.
-  virtual void resize(jsg::Lock& js, size_t size) = 0;
+  virtual void resize(jsg::Lock& js, uint32_t size) = 0;
 
   // Creates a new readable/writable in-memory file. This file will not be
   // initially included in a directory. To add it to a directory, use the
@@ -231,7 +234,7 @@ class File: public kj::Refcounted {
   // or to resize the file as appropriate to account for the expected writes.
   // This will avoid each individual write causing a reallocation of the
   // internal buffer to accommodate the new data.
-  static kj::Rc<File> newWritable(jsg::Lock& js, kj::Maybe<size_t> size = kj::none);
+  static kj::Rc<File> newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size = kj::none);
 
   // Creates a new readable in-memory file wrapping the given data. The file
   // does not take ownership of the data and the data must remain valid for the
@@ -243,6 +246,13 @@ class File: public kj::Refcounted {
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;
+
+  // Creates a copy of this file.
+  virtual kj::Rc<File> clone(jsg::Lock& js) = 0;
+
+  // Replaces the contents of this file with the given file if possible.
+  // If this file is read-only, an exception will be thrown.
+  virtual void replace(jsg::Lock& js, kj::Rc<File> file) = 0;
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -494,7 +504,7 @@ class VirtualFileSystem {
     // When reading from or writing to the file, if an offset is not
     // explicitly given then the offset will be set to the current
     // position in the file.
-    size_t position = 0;
+    uint32_t position = 0;
   };
 
   // Attempts to open a file descriptor for the given file URL. It's critical

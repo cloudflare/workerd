@@ -910,6 +910,10 @@ double Performance::now() {
   return dateNow();
 }
 
+jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
+  return js.alloc<StorageManager>();
+}
+
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   if (IoContext::hasCurrent()) {
     auto v8Context = js.v8Context();
