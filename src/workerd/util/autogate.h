@@ -45,6 +45,16 @@ class Autogate {
   // Convenience method for bin-tests to invoke initAutogate() with an appropriate config.
   static void initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames);
 
+  // Initializes all autogates, enabling all features.
+  //
+  // This is used by the --all-autogates flag in the CLI to enable all gates regardless
+  // of what's specified in the config file. This can be useful during development to test
+  // features that are behind autogates.
+  //
+  // CAUTION: Be aware that enabling all gates may expose you to experimental features
+  // that aren't ready for production use. Use with care in production environments.
+  static void initAllAutogates();
+
   // Destroys an initialized global Autogate instance. Used only for testing.
   static void deinitAutogate();
 
