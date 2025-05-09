@@ -3046,6 +3046,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(conf));
 
+  auto source = WorkerdApi::extractSource(name, conf, errorReporter);
+
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (featureFlags.getNewModuleRegistry()) {
     KJ_REQUIRE(experimental,
@@ -3058,11 +3060,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // import specifier url will be "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
 
+    auto& modulesSource = KJ_ASSERT_NONNULL(source.tryGet<Worker::Script::ModulesSource>(),
+        "The new MOduleRegistry only works with ES modules syntax, not Service Workers syntax.");
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
-        *jsgobserver, conf, featureFlags.asReader(), pythonConfig, bundleBase);
+        *jsgobserver, modulesSource, featureFlags.asReader(), pythonConfig, bundleBase);
   }
 
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(),
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), extensions,
       limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
       kj::mv(newModuleRegistry), kj::mv(workerFs));
 
@@ -3243,9 +3247,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     });
   }
 
-  auto script =
-      isolate->newScript(name, WorkerdApi::extractSource(name, conf, errorReporter, extensions),
-          IsolateObserver::StartType::COLD, false, errorReporter);
+  auto script = isolate->newScript(
+      name, kj::mv(source), IsolateObserver::StartType::COLD, false, errorReporter);
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;

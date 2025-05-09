@@ -35,6 +35,7 @@ class WorkerdApi final: public Worker::Api {
  public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
+      capnp::List<config::Extension>::Reader extensions,
       v8::Isolate::CreateParams createParams,
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
@@ -65,8 +66,12 @@ class WorkerdApi final: public Worker::Api {
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions);
+      Worker::ValidationErrorReporter& errorReporter);
+
+  void compileModules(jsg::Lock& lock,
+      const Worker::Script::ModulesSource& source,
+      const Worker::Isolate& isolate,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const override;
 
   // A pipeline-level binding.
   struct Global {
@@ -246,13 +251,22 @@ class WorkerdApi final: public Worker::Api {
       config::Worker::Module::Reader conf,
       jsg::CompilationObserver& observer,
       CompatibilityFlags::Reader featureFlags);
+  static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
+      const Worker::Script::Module& module,
+      jsg::CompilationObserver& observer,
+      CompatibilityFlags::Reader featureFlags);
+
+  // Convert a module definition from workerd config to a Worker::Script::Module (which may contain
+  // string pointers into the config).
+  static Worker::Script::Module readModuleConf(config::Worker::Module::Reader conf,
+      kj::Maybe<Worker::ValidationErrorReporter&> errorReporter = kj::none);
 
   using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;
   void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const override;
 
   static kj::Own<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
       const jsg::ResolveObserver& resolveObserver,
-      const config::Worker::Reader& conf,
+      const Worker::Script::ModulesSource& source,
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase);
@@ -265,11 +279,6 @@ class WorkerdApi final: public Worker::Api {
       config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       const jsg::CompilationObserver& observer) const;
-
-  void compileModules(jsg::Lock& lock,
-      config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions) const;
 };
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(

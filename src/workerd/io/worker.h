@@ -24,6 +24,7 @@
 #include <workerd/util/weak-refs.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <capnp/schema.capnp.h>
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
@@ -44,6 +45,10 @@ class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class ExecutionContext;
+namespace pyodide {
+struct ArtifactBundler_State;
+KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
+}  // namespace pyodide
 }  // namespace api
 
 class ThreadContext;
@@ -228,12 +233,73 @@ class Worker::Script: public kj::AtomicRefcounted {
   inline bool isModular() const {
     return modular;
   }
+  inline bool isPython() const {
+    return python;
+  }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
     jsg::V8Ref<v8::Value> value;
   };
 
+  // These structs are the variants of the `ModuleContent` `OneOf`, defining all the different
+  // module types.
+  struct EsModule {
+    kj::StringPtr body;
+  };
+  struct CommonJsModule {
+    kj::StringPtr body;
+    kj::Maybe<kj::Array<kj::StringPtr>> namedExports;
+  };
+  struct TextModule {
+    kj::StringPtr body;
+  };
+  struct DataModule {
+    kj::ArrayPtr<const byte> body;
+  };
+  struct WasmModule {
+    // Compiled .wasm file content.
+    kj::ArrayPtr<const byte> body;
+  };
+  struct JsonModule {
+    // JSON-encoded content; will be parsed automatically when imported.
+    kj::StringPtr body;
+  };
+  struct PythonModule {
+    kj::StringPtr body;
+  };
+
+  // PythonRequirement is a variant of ModuleContent, but has no body. The module name specifies
+  // a Python package to be provided by the system.
+  struct PythonRequirement {};
+
+  // CapnpModule is a .capnp Cap'n Proto schema file. The original text of the file isn't provided;
+  // instead, `ModulesSource::capnpSchemas` contains all the capnp schemas needed by the Worker,
+  // and the `CapnpModule` only specifies the type ID of a particular file found in there.
+  //
+  // TODO(someday): Support CapnpSchema in workerd. Today, it's only supported in the internal
+  //   codebase.
+  struct CapnpModule {
+    uint64_t typeId;
+  };
+
+  using ModuleContent = kj::OneOf<EsModule,
+      CommonJsModule,
+      TextModule,
+      DataModule,
+      WasmModule,
+      JsonModule,
+      PythonModule,
+      PythonRequirement,
+      CapnpModule>;
+
+  struct Module {
+    kj::StringPtr name;
+    ModuleContent content;
+  };
+
+  // Representation of source code for a worker using Service Workers syntax (deprecated, but will
+  // be supported forever).
   struct ScriptSource {
     // Content of the script (JavaScript). Pointer is valid only until the Script constructor
     // returns.
@@ -244,26 +310,52 @@ class Worker::Script: public kj::AtomicRefcounted {
     kj::StringPtr mainScriptName;
 
     // Callback which will compile the script-level globals, returning a list of them.
+    // TODO(cleanup): Arguably we should replace this with an intermediate representation like
+    //   `Array<Module>`, but appropriate for bundled globals in Service Workers syntax. Actually,
+    //   `Array<Module>` might be a perfectly fine representation! The names would just represent
+    //   global variable names instead of import names. But I'm punting for now as I dont' have an
+    //   immediate need for this cleanup. (ModuleSoruce previously featured a callback like this as
+    //   well, but was cleaned up to use an intermediate representation instead.)
     kj::Function<kj::Array<CompiledGlobal>(
         jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
         compileGlobals;
   };
+
+  // Representation of source code for a worker using ES Modules syntax.
   struct ModulesSource {
     // Path to the main module, which can be looked up in the module registry. Pointer is valid
     // only until the Script constructor returns.
     kj::StringPtr mainModule;
 
-    // Callback which will construct the module registry and load all the modules into it.
-    kj::Function<void(jsg::Lock& lock, const Api& api)> compileModules;
+    // All the Worker's modules.
+    kj::Array<Module> modules;
+
+    // The worker may have a bundle of capnp schemas attached.
+    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
+
     bool isPython;
+
+    // Only in workerd (not on the edge), only as a hack for Python, we infer the list of
+    // entrypoint classes based on the declared self-referential bindings and actor namespaces
+    // pointing at the service. This is needed becaues in workerd, the Python runtime is unable
+    // to fully execute at startup in order to discover what the Worker actually exports. This
+    // should be fixed eventually, but for now, we use this work-around.
+    kj::Array<kj::String> inferredEntrypointClassesForPython;
+    kj::Array<kj::String> inferredActorClassesForPython;
+
+    // Optional Python memory snapshot. The actual capnp type is declared in the internal codebase,
+    // so we use AnyStruct here. This is deprecated anyway.
+    kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
   };
-  bool isPython;
+
+  // Representation of the source code for a worker.
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
  private:
   kj::Own<const Isolate> isolate;
   kj::String id;
   bool modular;
+  bool python;
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -276,7 +368,8 @@ class Worker::Script: public kj::AtomicRefcounted {
       Source source,
       IsolateObserver::StartType startType,
       bool logNewScript,
-      kj::Maybe<ValidationErrorReporter&> errorReporter);
+      kj::Maybe<ValidationErrorReporter&> errorReporter,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -338,7 +431,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       Script::Source source,
       IsolateObserver::StartType startType,
       bool logNewScript = false,
-      kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
+      kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
 
   inline IsolateLimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
@@ -525,6 +619,11 @@ class Worker::Api {
 
   // Create the context (global scope) object.
   virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
+
+  virtual void compileModules(jsg::Lock& lock,
+      const Script::ModulesSource& source,
+      const Worker::Isolate& isolate,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const = 0;
 
   // Given a module's export namespace, return all the top-level exports.
   virtual jsg::Dict<NamedExport> unwrapExports(
