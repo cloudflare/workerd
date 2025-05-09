@@ -242,6 +242,8 @@ class Worker::Script: public kj::AtomicRefcounted {
     jsg::V8Ref<v8::Value> value;
   };
 
+  // These structs are the variants of the `ModuleContent` `OneOf`, defining all the different
+  // module types.
   struct EsModule {
     kj::StringPtr body;
   };
@@ -256,15 +258,27 @@ class Worker::Script: public kj::AtomicRefcounted {
     kj::ArrayPtr<const byte> body;
   };
   struct WasmModule {
+    // Compiled .wasm file content.
     kj::ArrayPtr<const byte> body;
   };
   struct JsonModule {
+    // JSON-encoded content; will be parsed automatically when imported.
     kj::StringPtr body;
   };
   struct PythonModule {
     kj::StringPtr body;
   };
+
+  // PythonRequirement is a variant of ModuleContent, but has no body. The module name specifies
+  // a Python package to be provided by the system.
   struct PythonRequirement {};
+
+  // CapnpModule is a .capnp Cap'n Proto schema file. The original text of the file isn't provided;
+  // instead, `ModulesSource::capnpSchemas` contains all the capnp schemas needed by the Worker,
+  // and the `CapnpModule` only specifies the type ID of a particular file found in there.
+  //
+  // TODO(someday): Support CapnpSchema in workerd. Today, it's only supported in the internal
+  //   codebase.
   struct CapnpModule {
     uint64_t typeId;
   };
@@ -284,6 +298,8 @@ class Worker::Script: public kj::AtomicRefcounted {
     ModuleContent content;
   };
 
+  // Representation of source code for a worker using Service Workers syntax (deprecated, but will
+  // be supported forever).
   struct ScriptSource {
     // Content of the script (JavaScript). Pointer is valid only until the Script constructor
     // returns.
@@ -304,6 +320,8 @@ class Worker::Script: public kj::AtomicRefcounted {
         jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
         compileGlobals;
   };
+
+  // Representation of source code for a worker using ES Modules syntax.
   struct ModulesSource {
     // Path to the main module, which can be looked up in the module registry. Pointer is valid
     // only until the Script constructor returns.
@@ -329,6 +347,8 @@ class Worker::Script: public kj::AtomicRefcounted {
     // so we use AnyStruct here. This is deprecated anyway.
     kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
   };
+
+  // Representation of the source code for a worker.
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
  private:
