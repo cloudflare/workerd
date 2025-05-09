@@ -7,6 +7,7 @@ RUST_STABLE_VERSION = "1.86.0"  # LLVM 19
 
 RUST_NIGHTLY_VERSION = "nightly/2025-02-20"
 
+# List of additional triples to be configured on top of the local platform triple
 RUST_TARGET_TRIPLES = [
     # Add support for macOS cross-compilation
     "x86_64-apple-darwin",
@@ -17,7 +18,7 @@ RUST_TARGET_TRIPLES = [
 def rust_toolchains():
     rules_rust_dependencies()
     rust_register_toolchains(
-        edition = "2021",
+        edition = "2024",
         extra_target_triples = RUST_TARGET_TRIPLES,
         versions = [
             RUST_STABLE_VERSION,
