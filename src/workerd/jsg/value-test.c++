@@ -1197,17 +1197,17 @@ KJ_TEST("MemoizedIdentity Values") {
 // ========================================================================================
 
 struct IdentifiedContext: public ContextGlobalObject {
-  kj::String compare(Identified<kj::Date> a, Identified<kj::Date> b, v8::Isolate* isolate) {
+  kj::String compare(jsg::Lock& js, Identified<kj::Date> a, Identified<kj::Date> b) {
     bool result = a.identity == b.identity;
     KJ_EXPECT(a.identity.hashCode() != 0);
     KJ_EXPECT(b.identity.hashCode() != 0);
     if (result) {
       KJ_EXPECT(a.identity.hashCode() == b.identity.hashCode());
     }
-    KJ_EXPECT(
-        a.identity.hashCode() == kj::hashCode(a.identity.getHandle(isolate)->GetIdentityHash()));
-    KJ_EXPECT(
-        b.identity.hashCode() == kj::hashCode(b.identity.getHandle(isolate)->GetIdentityHash()));
+    KJ_EXPECT(a.identity.hashCode() ==
+        kj::hashCode(a.identity.getHandle(js.v8Isolate)->GetIdentityHash()));
+    KJ_EXPECT(b.identity.hashCode() ==
+        kj::hashCode(b.identity.getHandle(js.v8Isolate)->GetIdentityHash()));
 
     return kj::str(result, ' ', a.unwrapped - b.unwrapped);
   }

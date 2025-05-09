@@ -22,26 +22,21 @@
 
 namespace workerd::jsg {
 
+template <typename T>
+constexpr bool isFunctionCallbackInfo = false;
+
+template <typename T>
+constexpr bool isFunctionCallbackInfo<v8::FunctionCallbackInfo<T>> = true;
+
 // These types are passed by fast api as is and do not require wrapping/unwrapping.
 template <typename T>
 concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>() ||
     kj::isSameType<T, int32_t>() || kj::isSameType<T, int64_t>() || kj::isSameType<T, uint32_t>() ||
     kj::isSameType<T, uint64_t>() || kj::isSameType<T, float>() || kj::isSameType<T, double>();
 
-// These types can be wrapped/unwrapped from v8::Value using given TypeWrapper
-template <typename TypeWrapper, typename T>
-concept WrappedType = requires(
-    TypeWrapper wrapper, v8::Local<v8::Context> context, v8::Local<v8::Value> value, T* ptr) {
-  wrapper.tryUnwrap(context, value, ptr, kj::none);
-};
-
-// these types are passed by fast api as v8::Value and require unwrapping
-template <typename TypeWrapper, typename T>
-concept FastApiWrappedObject = WrappedType<TypeWrapper, T> && !FastApiPrimitive<T>;
-
 // Helper to determine if a type can be used as a parameter in V8 Fast API
 template <typename TypeWrapper, typename T>
-concept FastApiParam = FastApiPrimitive<T> || FastApiWrappedObject<TypeWrapper, T>;
+concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
 template <typename T>
@@ -90,9 +85,9 @@ struct FastApiJSGToV8 {
 };
 
 template <typename TypeWrapper, typename T>
-  requires FastApiPrimitive<T>
+  requires FastApiPrimitive<kj::RemoveConst<kj::Decay<T>>>
 struct FastApiJSGToV8<TypeWrapper, T> {
-  using value = T;
+  using value = kj::RemoveConst<kj::Decay<T>>;
 };
 
 }  // namespace workerd::jsg
