@@ -191,7 +191,6 @@ struct GeneratorContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(GeneratorIsolate, GeneratorContext, GeneratorContext::Test);
 
 KJ_TEST("Generator works") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<GeneratorContext, GeneratorIsolate> e(v8System);
 
   e.expectEval("generatorTest([undefined,2,3])", "number", "2");

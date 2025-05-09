@@ -29,7 +29,6 @@ struct ActorStateContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(ActorStateIsolate, ActorStateContext);
 
 KJ_TEST("v8 serialization version tag hasn't changed") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   e.getIsolate().runInLockScope([&](ActorStateIsolate::Lock& isolateLock) {
     JSG_WITHIN_CONTEXT_SCOPE(isolateLock,

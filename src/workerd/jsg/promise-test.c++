@@ -118,7 +118,6 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext);
 
 KJ_TEST("jsg::Promise<T>") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   e.expectEval("setResult(promise.then(i => i + 1 /* oops, i is a string */));\n"

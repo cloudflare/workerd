@@ -1,3 +1,5 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 def kj_test(
         src,
         data = [],
@@ -6,8 +8,11 @@ def kj_test(
         size = "medium",
         **kwargs):
     test_name = src.removesuffix(".c++")
+    binary_name = test_name + "_binary"
+
     native.cc_test(
-        name = test_name,
+        name = binary_name,
+        testonly = True,
         srcs = [src],
         deps = [
             "@capnp-cpp//src/kj:kj-test",
@@ -18,6 +23,20 @@ def kj_test(
         }),
         data = data,
         tags = tags,
-        size = size,
         **kwargs
+    )
+    sh_test(
+        name = test_name,
+        size = size,
+        srcs = ["//build/fixtures:kj_test.sh"],
+        data = [binary_name],
+        args = ["$(location " + binary_name + ")"],
+    )
+    sh_test(
+        name = test_name + "@all-autogates-enabled",
+        size = size,
+        env = {"WORKERD_ALL_AUTOGATES": "1"},
+        srcs = ["//build/fixtures:kj_test.sh"],
+        data = [binary_name],
+        args = ["$(location " + binary_name + ")"],
     )
