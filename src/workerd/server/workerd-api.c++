@@ -987,9 +987,10 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const jsg::ResolveObserver& observer,
     const config::Worker::Reader& conf,
     const CompatibilityFlags::Reader& featureFlags,
-    const PythonConfig& pythonConfig) {
+    const PythonConfig& pythonConfig,
+    const jsg::Url& bundleBase) {
   jsg::modules::ModuleRegistry::Builder builder(
-      observer, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
+      observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 
   // This callback is used when a module is being loaded to arrange evaluating the
   // module outside of the current IoContext.
@@ -1008,7 +1009,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
   // Add the module bundles that are configured by the worker.
-  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder;
+  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
   bool firstEsm = true;
   bool hasPythonModules = false;
   using namespace workerd::api::pyodide;

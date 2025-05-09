@@ -254,7 +254,8 @@ class WorkerdApi final: public Worker::Api {
       const jsg::ResolveObserver& resolveObserver,
       const config::Worker::Reader& conf,
       const CompatibilityFlags::Reader& featureFlags,
-      const PythonConfig& pythonConfig);
+      const PythonConfig& pythonConfig,
+      const jsg::Url& bundleBase);
 
  private:
   struct Impl;

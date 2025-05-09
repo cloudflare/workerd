@@ -436,9 +436,7 @@ class ModuleBundle {
   // Used to build a ModuleBundle representing modules sourced from a worker bundle.
   class BundleBuilder final: public Builder {
    public:
-    static const Url BASE;
-
-    BundleBuilder();
+    BundleBuilder(const jsg::Url& bundleBase);
     KJ_DISALLOW_COPY_AND_MOVE(BundleBuilder);
 
     using EvaluateCallback = Module::EvaluateCallback;
@@ -452,6 +450,9 @@ class ModuleBundle {
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr specifier) KJ_LIFETIMEBOUND;
+
+   private:
+    const jsg::Url& bundleBase;
   };
 
   // Used to build a ModuleBundle representing modules sources from the runtime.
@@ -551,7 +552,9 @@ class ModuleRegistry final: public ModuleRegistryBase {
       // checked. The fallback service should only be used for local dev.
       ALLOW_FALLBACK = 1 << 0,
     };
-    Builder(const ResolveObserver& observer, Options options = Options::NONE);
+    Builder(const ResolveObserver& observer,
+        const jsg::Url& bundleBase,
+        Options options = Options::NONE);
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
 
     // A ModuleRegistry may have exactly one parent registry. When set, if this
@@ -570,6 +573,7 @@ class ModuleRegistry final: public ModuleRegistryBase {
 
     // One slot for each of ModuleBundle::Type
     const ResolveObserver& observer;
+    const jsg::Url& bundleBase;
     kj::Maybe<ModuleRegistry&> maybeParent;
     const Options options;
     kj::Vector<kj::Own<ModuleBundle>> bundles_[ModuleRegistry::kBundleCount];
@@ -614,8 +618,13 @@ class ModuleRegistry final: public ModuleRegistryBase {
   ModuleRegistry(ModuleRegistry::Builder* builder);
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
 
+  const jsg::Url& getBundleBase() const {
+    return bundleBase;
+  }
+
  private:
   const ResolveObserver& observer;
+  const jsg::Url& bundleBase;
   kj::Maybe<ModuleRegistry&> maybeParent;
   // One slot for each of ModuleBundle::Type
   kj::Array<kj::Own<ModuleBundle>> bundles_[kBundleCount];
