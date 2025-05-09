@@ -245,14 +245,9 @@ struct MethodCallback<TypeWrapper,
     auto& self = extractInternalPointer<T, isContext>(context, receiver);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    return liftKj<Ret>(isolate, [&]() -> Ret {
-      if constexpr (kj::isSameType<Ret, void>()) {
-        (self.*method)(wrapper.template unwrapFastApi<Args>(context, fastArgs,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      } else {
-        return (self.*method)(wrapper.template unwrapFastApi<Args>(context, fastArgs,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      }
+    return liftKj<Ret>(isolate, [&]() {
+      return (self.*method)(wrapper.template unwrapFastApi<Args>(
+          context, fastArgs, TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -312,17 +307,10 @@ struct MethodCallback<TypeWrapper,
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    return liftKj<Ret>(isolate, [&]() -> Ret {
-      if constexpr (kj::isSameType<Ret, void>()) {
-        (self.*method)(lock,
-            wrapper.template unwrapFastApi<Args>(context, fastArgs,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-        return;
-      } else {
-        return (self.*method)(lock,
-            wrapper.template unwrapFastApi<Args>(context, fastArgs,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      }
+    return liftKj<Ret>(isolate, [&]() {
+      return (self.*method)(lock,
+          wrapper.template unwrapFastApi<Args>(context, fastArgs,
+              TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -448,14 +436,9 @@ struct StaticMethodCallback<TypeWrapper,
     auto context = isolate->GetCurrentContext();
     auto& wrapper = TypeWrapper::from(isolate);
 
-    return liftKj<Ret>(isolate, [&]() -> Ret {
-      if constexpr (kj::isSameType<Ret, void>()) {
-        (*method)(wrapper.template unwrapFastApi<Args>(context, fastArgs,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      } else {
-        return (*method)(wrapper.template unwrapFastApi<Args>(context, fastArgs,
-            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      }
+    return liftKj<Ret>(isolate, [&]() {
+      return (*method)(wrapper.template unwrapFastApi<Args>(
+          context, fastArgs, TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -510,17 +493,10 @@ struct StaticMethodCallback<TypeWrapper,
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    return liftKj<Ret>(isolate, [&]() -> Ret {
-      if constexpr (kj::isSameType<Ret, void>()) {
-        (*method)(lock,
-            wrapper.template unwrapFastApi<Args>(context, fastArgs,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-        return;
-      } else {
-        return (*method)(lock,
-            wrapper.template unwrapFastApi<Args>(context, fastArgs,
-                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-      }
+    return liftKj<Ret>(isolate, [&]() {
+      return (*method)(lock,
+          wrapper.template unwrapFastApi<Args>(context, fastArgs,
+              TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -621,14 +597,9 @@ struct GetterCallback;
       auto context = isolate->GetCurrentContext();                                                 \
       auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
-      return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
-        if constexpr (workerd::jsg::isVoid<ReturnType>()) {                                        \
-          (self.*method)(                                                                          \
-              wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);        \
-        } else {                                                                                   \
-          return (self.*method)(                                                                   \
-              wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);        \
-        }                                                                                          \
+      return liftKj<ReturnType>(isolate, [&]() {                                                   \
+        return (self.*method)(                                                                     \
+            wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);          \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
@@ -669,14 +640,9 @@ struct GetterCallback;
       auto context = isolate->GetCurrentContext();                                                 \
       auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
-      return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
-        if constexpr (workerd::jsg::isVoid<ReturnType>()) {                                        \
-          (self.*method)(Lock::from(isolate),                                                      \
-              wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);        \
-        } else {                                                                                   \
-          return (self.*method)(Lock::from(isolate),                                               \
-              wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);        \
-        }                                                                                          \
+      return liftKj<ReturnType>(isolate, [&]() {                                                   \
+        return (self.*method)(Lock::from(isolate),                                                 \
+            wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);          \
       });                                                                                          \
     }                                                                                              \
   };                                                                                               \
