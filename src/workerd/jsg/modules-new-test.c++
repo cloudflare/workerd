@@ -752,8 +752,6 @@ KJ_TEST("Bundle shadows built-in") {
 // ======================================================================================
 
 KJ_TEST("Attaching a module registry works") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
-
   PREAMBLE(([&](Lock& js) {
     ResolveObserver resolveObserver;
     CompilationObserver compilationObserver;

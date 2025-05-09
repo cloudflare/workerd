@@ -44,7 +44,6 @@ struct CallbackContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(CallbackIsolate, CallbackContext, CallbackContext::Frobber, NumberBox);
 
 KJ_TEST("callbacks") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<CallbackContext, CallbackIsolate> e(v8System);
   e.expectEval("callCallback((str, num) => {\n"
                "  return [typeof str, str, typeof num, num.toString(), 'bar'].join(', ');\n"

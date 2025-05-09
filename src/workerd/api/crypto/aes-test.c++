@@ -25,7 +25,6 @@ struct CryptoContext: public jsg::Object, public jsg::ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(CryptoIsolate, CryptoContext);
 
 KJ_TEST("AES-KW key wrap") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   // Basic test that I wrote when I was seeing heap corruption. Found it easier to iterate on with
   // ASAN/valgrind than using our conformance tests with test-runner.
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
