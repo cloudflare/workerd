@@ -434,6 +434,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::Own<const WeakIsolateRef> getWeakRef() const;
 
+  // Get a UUID for this isolate.
+  kj::StringPtr getUuid() const;
+
  private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
@@ -782,7 +785,6 @@ class Worker::Actor final: public kj::Refcounted {
       MakeActorCacheFunc makeActorCache,
       kj::Maybe<kj::StringPtr> className,
       MakeStorageFunc makeStorage,
-      Worker::Lock& lock,
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
       kj::Own<ActorObserver> metrics,

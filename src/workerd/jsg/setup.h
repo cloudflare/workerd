@@ -190,9 +190,6 @@ class IsolateBase {
     }
   }
 
-  // Returns a random UUID for this isolate instance.
-  kj::StringPtr getUuid();
-
   IsolateObserver& getObserver() {
     return *observer;
   }
@@ -275,7 +272,6 @@ class IsolateBase {
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
   v8::Isolate* ptr;
-  kj::Maybe<kj::String> uuid;
   bool evalAllowed = false;
   bool jspiEnabled = false;
 

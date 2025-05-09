@@ -108,13 +108,13 @@ jsg::JsValue UnsafeEval::newWasmModule(jsg::Lock& js, kj::Array<kj::byte> src) {
 
 jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
   auto& context = IoContext::current();
-  // Abort all actors asynchronously to avoid recursively taking isolate lock in actor destructor
-  auto promise = kj::evalLater([&]() {
-    auto exception =
-        JSG_KJ_EXCEPTION(FAILED, Error, "Application called abortAllDurableObjects().");
-    return context.abortAllActors(exception);
-  });
-  return context.awaitIo(js, kj::mv(promise));
+
+  auto exception = JSG_KJ_EXCEPTION(FAILED, Error, "Application called abortAllDurableObjects().");
+  context.abortAllActors(exception);
+
+  // We used to perform the abort asynchronously, but that became no longer necessary when
+  // `Worker::Actor`'s destructor stopped requiring taking the isolate lock.
+  return js.resolvedPromise();
 }
 
 }  // namespace workerd::api

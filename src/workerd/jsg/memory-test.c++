@@ -56,9 +56,6 @@ KJ_TEST("MemoryTracker test") {
       return true;
     });
 
-    IsolateBase& base = IsolateBase::from(js.v8Isolate);
-    base.getUuid();
-
     auto foo = fooHandler.wrap(js, js.alloc<Foo>());
     KJ_ASSERT(foo->IsObject());
 
