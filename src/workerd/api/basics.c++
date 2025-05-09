@@ -7,6 +7,7 @@
 #include "actor-state.h"
 #include "global-scope.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 #include <capnp/message.h>
@@ -957,6 +958,16 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
 
     rpcAbortPromise = kj::none;
   }
+}
+
+bool AbortSignal::isIgnoredForSubrequests(jsg::Lock& js) const {
+  // True if this is a signal on the request of an incoming fetch. When the compat flag
+  // `requestSignalPassthrough` is set, this flag has no effect. But to ensure backwards
+  // compatibility, when this flag is not set, this signal will not be passed through to
+  // subrequests derived from the incoming request.
+
+  return !FeatureFlags::get(js).getRequestSignalPassthrough() &&
+      flag == Flag::IGNORE_FOR_SUBREQUESTS;
 }
 
 void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {

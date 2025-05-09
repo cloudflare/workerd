@@ -749,4 +749,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-05-19")
       $compatDisableFlag("disable_navigator_language");
   # Enables Navigator.language API.
+
+  enableRequestSignal @87 :Bool
+    $compatEnableFlag("enable_request_signal")
+    $compatDisableFlag("disable_request_signal")
+    $experimental;
+  # Enables Request.signal for incoming requests.
+  # This feature is still experimental and the compat flag has no default enable date.
 }
