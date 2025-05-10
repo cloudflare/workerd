@@ -30,3 +30,9 @@ export function connect(
   address: string | SocketAddress,
   options?: SocketOptions
 ): Socket;
+
+interface Fetcher {
+  fetch: typeof fetch;
+}
+
+export function convertSocketToFetcher(socket: Socket): Fetcher;

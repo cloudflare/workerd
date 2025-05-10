@@ -10,3 +10,11 @@ export function connect(
 ): sockets.Socket {
   return sockets.connect(address, options);
 }
+
+interface Fetcher {
+  fetch: typeof fetch;
+}
+
+export function convertSocketToFetcher(socket: sockets.Socket): Fetcher {
+  return sockets.convertSocketToFetcher(socket);
+}
