@@ -1,12 +1,15 @@
 //! Non-production crate to help test various aspects of rust/c++ integration.
 
-use std::{
-    io::{Error, ErrorKind},
-    pin::Pin,
-    time::Duration,
-};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::pin::Pin;
+use std::time::Duration;
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::trace;
+use tracing::warn;
 
 type Result<T> = std::io::Result<T>;
 

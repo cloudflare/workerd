@@ -1,13 +1,14 @@
-use std::{
-    ffi::OsStr,
-    fs::File,
-    io::{BufReader, BufWriter, Write},
-    path::Path,
-};
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::Write;
+use std::path::Path;
 
 use anyhow::Result;
 use flate2::read::GzDecoder;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Contains the declarations we care about
 #[derive(Deserialize, PartialEq, Debug)]

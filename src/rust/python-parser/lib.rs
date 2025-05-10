@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use ruff_python_ast::{Stmt, StmtImportFrom};
+use ruff_python_ast::Stmt;
+use ruff_python_ast::StmtImportFrom;
 use ruff_python_parser::parse_module;
 
 #[cxx::bridge(namespace = "edgeworker::rust::python_parser")]
