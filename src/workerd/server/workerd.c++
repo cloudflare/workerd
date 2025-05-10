@@ -754,6 +754,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         "<const-name>", CLI_METHOD(setConstName));
   }
 
+  bool initAllAutogates() {
+    enableAllAutogates = true;
+    return true;
+  }
+
   kj::MainBuilder& addServeOrTestOptions(kj::MainBuilder& builder) {
     return builder
         .addOptionWithArg({'d', "directory-path"}, CLI_METHOD(overrideDirectory), "<name>=<path>",
@@ -764,6 +769,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
             "Enable the inspector protocol to connect to the address <addr>.")
+        .addOption({"all-autogates"}, CLI_METHOD(initAllAutogates),
+            "Enable all autogates (feature gates) regardless of what's specified in the config.")
 #if defined(WORKERD_USE_PERFETTO)
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
@@ -1077,7 +1084,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     mod.setPythonModule("def test():\n pass");
     config = configBuilder.asReader();
     configOwner = kj::mv(builder);
-    util::Autogate::initAutogate(getConfig().getAutogates());
+    if (enableAllAutogates) {
+      util::Autogate::initAllAutogates();
+    } else {
+      util::Autogate::initAutogate(getConfig().getAutogates());
+    }
   }
 
   void watch() {
@@ -1160,7 +1171,11 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     // We'll fail at getConfig() if there are multiple top level Config objects.
     // The error message says that you have to specify which config to use, but
     // it's not clear that there is any mechanism to do that.
-    util::Autogate::initAutogate(getConfig().getAutogates());
+    if (enableAllAutogates) {
+      util::Autogate::initAllAutogates();
+    } else {
+      util::Autogate::initAutogate(getConfig().getAutogates());
+    }
   }
 
   void setConstName(kj::StringPtr name) {
@@ -1461,6 +1476,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   bool binaryConfig = false;
   bool configOnly = false;
   bool noVerbose = false;
+  bool enableAllAutogates = false;
   bool predictable = false;
   kj::Maybe<FileWatcher> watcher;
 

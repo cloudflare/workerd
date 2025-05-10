@@ -66,6 +66,21 @@ void Autogate::deinitAutogate() {
   globalAutogate = kj::none;
 }
 
+void Autogate::initAllAutogates() {
+  capnp::MallocMessageBuilder message;
+  auto orphanage = message.getOrphanage();
+  auto gatesOrphan =
+      orphanage.newOrphan<capnp::List<capnp::Text>>(static_cast<size_t>(AutogateKey::NumOfKeys));
+  auto gates = gatesOrphan.get();
+
+  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+       i = AutogateKey(static_cast<size_t>(i) + 1)) {
+    gates.set(static_cast<size_t>(i), kj::str("workerd-autogate-", i));
+  }
+
+  Autogate::initAutogate(gates.asReader());
+}
+
 void Autogate::initAutogateNamesForTest(std::initializer_list<kj::StringPtr> gateNames) {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
