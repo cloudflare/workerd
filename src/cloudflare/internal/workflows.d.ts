@@ -60,6 +60,11 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
+  /**
+   * The retention policy for the Workflow instance.
+   * Defaults to the maximum retention period available for the owner's account.
+   */
+  retention?: InstanceRetention;
 }
 
 type InstanceStatus = {
