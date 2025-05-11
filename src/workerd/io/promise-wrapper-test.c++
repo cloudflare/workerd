@@ -56,9 +56,9 @@ struct CaptureThrowContext: public jsg::Object, public ContextGlobal {
     JSG_FAIL_REQUIRE(TypeError, "boom");
   }
 
-  static kj::Promise<void> staticTest3(v8::Isolate* isolate) {
+  static kj::Promise<void> staticTest3(jsg::Lock& js) {
     // Tests that JsExceptionThrown is handled properly.
-    jsg::throwTypeError(isolate, "boom"_kj);
+    jsg::throwTypeError(js.v8Isolate, "boom"_kj);
   }
 
   kj::Promise<void> getTest() {

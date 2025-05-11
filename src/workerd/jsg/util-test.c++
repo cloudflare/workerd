@@ -13,8 +13,8 @@ V8System v8System;
 class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct FreezeContext: public ContextGlobalObject {
-  void recursivelyFreeze(v8::Local<v8::Value> value, v8::Isolate* isolate) {
-    jsg::recursivelyFreeze(isolate->GetCurrentContext(), value);
+  void recursivelyFreeze(jsg::Lock& js, v8::Local<v8::Value> value) {
+    jsg::recursivelyFreeze(js.v8Isolate->GetCurrentContext(), value);
   }
   JSG_RESOURCE_TYPE(FreezeContext) {
     JSG_METHOD(recursivelyFreeze);
@@ -39,8 +39,8 @@ KJ_TEST("recursive freezing") {
 // ========================================================================================
 
 struct CloneContext: public ContextGlobalObject {
-  v8::Local<v8::Value> deepClone(v8::Local<v8::Value> value, v8::Isolate* isolate) {
-    return jsg::deepClone(isolate->GetCurrentContext(), value);
+  v8::Local<v8::Value> deepClone(jsg::Lock& js, v8::Local<v8::Value> value) {
+    return jsg::deepClone(js.v8Isolate->GetCurrentContext(), value);
   }
   JSG_RESOURCE_TYPE(CloneContext) {
     JSG_METHOD(deepClone);
@@ -198,14 +198,14 @@ struct TunneledContext: public ContextGlobalObject {
     auto s = kj::str("Hello, world!");
     KJ_REQUIRE(s.startsWith(";"), " jsg.TypeError");
   }
-  void throwRetunneledTypeError(v8::Isolate* isolate) {
+  void throwRetunneledTypeError(jsg::Lock& js) {
     // Not sure what to call this ...
-    v8::TryCatch tryCatch(isolate);
+    v8::TryCatch tryCatch(js.v8Isolate);
     try {
-      jsg::throwTypeError(isolate, "Dummy error message.");
+      jsg::throwTypeError(js.v8Isolate, "Dummy error message.");
       KJ_UNREACHABLE;
     } catch (JsExceptionThrown&) {
-      throwTunneledException(isolate, tryCatch.Exception());
+      throwTunneledException(js.v8Isolate, tryCatch.Exception());
     }
   }
   void throwTunneledMacroTypeError() {

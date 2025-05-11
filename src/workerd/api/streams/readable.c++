@@ -449,7 +449,7 @@ jsg::Promise<kj::Maybe<jsg::Value>> ReadableStream::nextFunction(
 }
 
 jsg::Promise<void> ReadableStream::returnFunction(
-    jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::Value> value) {
+    jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::Value>& value) {
   if (state.reader.get() != nullptr) {
     auto reader = kj::mv(state.reader);
     if (!state.preventCancel) {

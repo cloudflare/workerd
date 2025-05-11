@@ -585,13 +585,13 @@ class FileImpl final: public File {
   Stat stat(jsg::Lock& js) override {
     return Stat{
       .type = FsType::FILE,
-      .size = readableView().size(),
+      .size = static_cast<uint32_t>(readableView().size()),
       .lastModified = lastModified,
       .writable = isWritable(),
     };
   }
 
-  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+  uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
     auto data = readableView();
     if (offset >= data.size() || buffer.size() == 0) return 0;
     auto src = data.slice(offset);
@@ -605,7 +605,9 @@ class FileImpl final: public File {
   }
 
   // Writes data to the file at the given offset.
-  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    static constexpr uint32_t kMax = kj::maxValue;
+    JSG_REQUIRE(buffer.size() <= kMax, Error, "File size exceeds maximum limit");
     auto& owned = writableView();
     size_t end = offset + buffer.size();
     if (end > owned.size()) resize(js, end);
@@ -613,7 +615,7 @@ class FileImpl final: public File {
     return buffer.size();
   }
 
-  void resize(jsg::Lock& js, size_t size) override {
+  void resize(jsg::Lock& js, uint32_t size) override {
     auto& owned = writableView();
     if (size == owned.size()) return;  // Nothing to do.
 
@@ -630,7 +632,7 @@ class FileImpl final: public File {
     ownedOrView = newData.attach(js.getExternalMemoryAdjustment(newData.size()));
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
     auto& owned = JSG_REQUIRE_NONNULL(
         ownedOrView.tryGet<kj::Array<kj::byte>>(), Error, "Cannot modify a read-only file");
     owned.slice(offset.orDefault(0)).fill(value);
@@ -655,6 +657,30 @@ class FileImpl final: public File {
         return;
       }
     }
+  }
+
+  kj::Rc<File> clone(jsg::Lock&) override {
+    KJ_SWITCH_ONEOF(ownedOrView) {
+      KJ_CASE_ONEOF(owned, kj::Array<kj::byte>) {
+        return kj::rc<FileImpl>(kj::heapArray<kj::byte>(owned));
+      }
+      KJ_CASE_ONEOF(view, kj::ArrayPtr<const kj::byte>) {
+        return kj::rc<FileImpl>(kj::heapArray<kj::byte>(view));
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  void replace(jsg::Lock& js, kj::Rc<File> file) override {
+    JSG_REQUIRE_NONNULL(
+        ownedOrView.tryGet<kj::Array<kj::byte>>(), Error, "Cannot replace a read-only file");
+
+    auto stat = file->stat(js);
+    auto buffer =
+        kj::heapArray<kj::byte>(stat.size).attach(js.getExternalMemoryAdjustment(stat.size));
+    file->read(js, 0, buffer.asPtr());
+    ownedOrView = kj::mv(buffer);
+    lastModified = stat.lastModified;
   }
 
  private:
@@ -909,7 +935,7 @@ kj::Rc<Directory> Directory::newWritable() {
   return kj::rc<WritableDirectory>();
 }
 
-kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<size_t> size) {
+kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
   auto actualSize = size.orDefault(0);
   auto data = kj::heapArray<kj::byte>(actualSize);
   if (actualSize > 0) data.asPtr().fill(0);
@@ -1079,7 +1105,7 @@ namespace {
 
 // /dev/null is a special file that discards all data written to it and returns
 // EOF on reads.
-class DevNullFile final: public File {
+class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile> {
  public:
   DevNullFile() = default;
 
@@ -1093,15 +1119,23 @@ class DevNullFile final: public File {
     };
   }
 
+  kj::Rc<File> clone(jsg::Lock&) override {
+    return addRefToThis();
+  }
+
+  void replace(jsg::Lock& js, kj::Rc<File> file) override {
+    // No-op.
+  }
+
   void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
     // No-op.
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
     // No-op.
   }
 
-  void resize(jsg::Lock& js, size_t size) override {
+  void resize(jsg::Lock& js, uint32_t size) override {
     // No-op.
   }
 
@@ -1117,18 +1151,18 @@ class DevNullFile final: public File {
     // No-op.
   }
 
-  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+  uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
     return 0;
   }
 
-  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     return buffer.size();
   }
 };
 
 // /dev/zero is a special file that returns zeroes when read from and
 // ignores writes.
-class DevZeroFile final: public File {
+class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile> {
  public:
   DevZeroFile() = default;
 
@@ -1142,15 +1176,23 @@ class DevZeroFile final: public File {
     };
   }
 
+  kj::Rc<File> clone(jsg::Lock&) override {
+    return addRefToThis();
+  }
+
+  void replace(jsg::Lock& js, kj::Rc<File> file) override {
+    // No-op.
+  }
+
   void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
     // No-op.
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
     // No-op.
   }
 
-  void resize(jsg::Lock& js, size_t size) override {
+  void resize(jsg::Lock& js, uint32_t size) override {
     // No-op.
   }
 
@@ -1166,19 +1208,19 @@ class DevZeroFile final: public File {
     // No-op.
   }
 
-  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+  uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
     buffer.fill(0);
     return buffer.size();
   }
 
-  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     return buffer.size();
   }
 };
 
 // /dev/full is a special file that returns zeroes when read from and
 // returns an error when written to.
-class DevFullFile final: public File {
+class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile> {
  public:
   DevFullFile() = default;
 
@@ -1192,15 +1234,23 @@ class DevFullFile final: public File {
     };
   }
 
+  kj::Rc<File> clone(jsg::Lock&) override {
+    return addRefToThis();
+  }
+
+  void replace(jsg::Lock& js, kj::Rc<File> file) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot replace /dev/full");
+  }
+
   void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
     // No-op.
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
   }
 
-  void resize(jsg::Lock& js, size_t size) override {
+  void resize(jsg::Lock& js, uint32_t size) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
   }
 
@@ -1216,17 +1266,17 @@ class DevFullFile final: public File {
     // No-op.
   }
 
-  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+  uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
     buffer.fill(0);
     return buffer.size();
   }
 
-  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
   }
 };
 
-class DevRandomFile final: public File {
+class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomFile> {
  public:
   DevRandomFile() = default;
 
@@ -1240,15 +1290,23 @@ class DevRandomFile final: public File {
     };
   }
 
+  kj::Rc<File> clone(jsg::Lock&) override {
+    return addRefToThis();
+  }
+
+  void replace(jsg::Lock& js, kj::Rc<File> file) override {
+    JSG_FAIL_REQUIRE(Error, "Cannot replace /dev/random");
+  }
+
   void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<size_t> offset) override {
+  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
   }
 
-  void resize(jsg::Lock& js, size_t size) override {
+  void resize(jsg::Lock& js, uint32_t size) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
   }
 
@@ -1264,11 +1322,11 @@ class DevRandomFile final: public File {
     // No-op.
   }
 
-  size_t write(jsg::Lock& js, size_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
   }
 
-  size_t read(jsg::Lock& js, size_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+  uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
     // We can only generate random bytes when we have an active IoContext.
     // If there is no IoContext, this will return 0 bytes.
     if (!IoContext::hasCurrent()) return 0;

@@ -710,3 +710,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/disable-importable-env-test.js"],
 )
+
+wd_test(
+    src = "tests/webfs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/webfs-test.js"],
+)

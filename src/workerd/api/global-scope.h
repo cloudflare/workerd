@@ -5,6 +5,7 @@
 #pragma once
 
 #include "basics.h"
+#include "filesystem.h"
 #include "hibernation-event-params.h"
 #include "http.h"
 
@@ -94,6 +95,8 @@ class Navigator: public jsg::Object {
     return builder.finish();
   }
 
+  jsg::Ref<StorageManager> getStorage(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Navigator, CompatibilityFlags::Reader reader) {
     JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
@@ -102,6 +105,10 @@ class Navigator: public jsg::Object {
     if (reader.getEnableNavigatorLanguage()) {
       JSG_READONLY_INSTANCE_PROPERTY(language, getLanguage);
       JSG_READONLY_INSTANCE_PROPERTY(languages, getLanguages);
+    }
+
+    if (reader.getWebFileSystem()) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     }
   }
 };
@@ -674,6 +681,15 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
     JSG_NESTED_TYPE(CountQueuingStrategy);
     JSG_NESTED_TYPE(ErrorEvent);
+
+    if (flags.getWebFileSystem()) {
+      JSG_NESTED_TYPE(FileSystemHandle);
+      JSG_NESTED_TYPE(FileSystemFileHandle);
+      JSG_NESTED_TYPE(FileSystemDirectoryHandle);
+      JSG_NESTED_TYPE(FileSystemWritableFileStream);
+      JSG_NESTED_TYPE(FileSystemSyncAccessHandle);
+      JSG_NESTED_TYPE(StorageManager);
+    }
 
     JSG_NESTED_TYPE(EventSource);
 

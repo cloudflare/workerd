@@ -29,13 +29,10 @@ namespace workerd::jsg {
 // parameter type T. This is useful to identify types like TypeHandlers and v8::Isolate* which
 // functions can declare they accept at the end of their parameter list, but which are not created
 // from any particular JS value.
-template <typename TypeWrapper, typename T, typename = void>
-constexpr bool isValueLessParameter = false;
+// A concept that identifies types that can be unwrapped without needing a JS value
 template <typename TypeWrapper, typename T>
-constexpr bool isValueLessParameter<TypeWrapper,
-    T,
-    kj::VoidSfinae<decltype(kj::instance<TypeWrapper>().unwrap(
-        kj::instance<v8::Local<v8::Context>>(), kj::instance<T*>()))>> = true;
+concept ValueLessParameter = requires(
+    TypeWrapper wrapper, v8::Local<v8::Context> context, T* ptr) { wrapper.unwrap(context, ptr); };
 
 // TypeWrapper mixin for V8 handles.
 //
@@ -486,12 +483,13 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     return TYPE_HANDLER_INSTANCE<U>;
   }
 
-  static constexpr const char* getName(v8::Isolate**) {
-    return "Isolate";
-  }
-
-  v8::Isolate* unwrap(v8::Local<v8::Context> context, v8::Isolate**) {
-    return context->GetIsolate();
+  template <typename U>
+  kj::Maybe<const TypeHandler<U>&> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      TypeHandler<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    // TypeHandler is not a value that needs to be unwrapped from JS
+    return TYPE_HANDLER_INSTANCE<U>;
   }
 
   template <typename U>
@@ -539,8 +537,8 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         builder.add(unwrap<E>(context, args[i], errorContext));
       }
       return builder.finish();
-    } else if constexpr (isValueLessParameter<Self, V>) {
-      // C++ parameters which don't unwrap JS values, like v8::Isolate* and TypeHandlers.
+    } else if constexpr (ValueLessParameter<Self, V>) {
+      // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
       return unwrap(context, (V*)nullptr);
     } else {
       if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {

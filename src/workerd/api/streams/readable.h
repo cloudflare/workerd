@@ -203,7 +203,7 @@ private:
   static jsg::Promise<void> returnFunction(
       jsg::Lock& js,
       AsyncIteratorState& state,
-      jsg::Optional<jsg::Value> value);
+      jsg::Optional<jsg::Value>& value);
 
 public:
   explicit ReadableStream(IoContext& ioContext,

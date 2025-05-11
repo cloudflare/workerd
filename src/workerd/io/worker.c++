@@ -1321,7 +1321,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                 // This path is used for the older, service worker syntax workers.
 
                 impl->globals =
-                    script.compileGlobals(lock, isolate->getApi(), isolate->getApi().getObserver());
+                    isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
 
                 {
                   // It's unclear to me if CompileUnboundScript() can get trapped in any
