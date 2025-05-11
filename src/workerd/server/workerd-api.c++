@@ -563,12 +563,26 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
 
       return result;
     }
-    case config::Worker::SERVICE_WORKER_SCRIPT:
-      return Worker::Script::ScriptSource{conf.getServiceWorkerScript(), name,
-        [conf, &errorReporter](
-            jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer) {
-        return WorkerdApi::from(api).compileScriptGlobals(lock, conf, errorReporter, observer);
-      }};
+    case config::Worker::SERVICE_WORKER_SCRIPT: {
+      uint wasmCount = 0;
+      for (auto binding: conf.getBindings()) {
+        if (binding.isWasmModule()) ++wasmCount;
+      }
+
+      auto globals = kj::heapArrayBuilder<Worker::Script::Module>(wasmCount);
+      for (auto binding: conf.getBindings()) {
+        if (binding.isWasmModule()) {
+          globals.add(Worker::Script::Module{.name = binding.getName(),
+            .content = Worker::Script::WasmModule{.body = binding.getWasmModule()}});
+        }
+      }
+
+      return Worker::Script::ScriptSource{
+        .mainScript = conf.getServiceWorkerScript(),
+        .mainScriptName = name,
+        .globals = globals.finish(),
+      };
+    }
     case config::Worker::INHERIT:
       // TODO(beta): Support inherit.
       KJ_FAIL_ASSERT("inherit should have been handled earlier");
@@ -577,36 +591,32 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
   errorReporter.addError(kj::str("Encountered unknown Worker code type. Was the "
                                  "config compiled with a newer version of the schema?"));
 invalid:
-  return Worker::Script::ScriptSource{""_kj, name,
-    [](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer)
-        -> kj::Array<Worker::Script::CompiledGlobal> { return nullptr; }};
+  return Worker::Script::ScriptSource{""_kj, name, nullptr};
 }
 
-kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(jsg::Lock& lockParam,
-    config::Worker::Reader conf,
-    Worker::ValidationErrorReporter& errorReporter,
-    const jsg::CompilationObserver& observer) const {
+kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobals(
+    jsg::Lock& lockParam,
+    const Worker::Script::ScriptSource& source,
+    const Worker::Isolate& isolate) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileScriptGlobals()");
   // For Service Worker scripts, we support Wasm modules as globals, but they need to be loaded
   // at script load time.
 
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
 
-  uint wasmCount = 0;
-  for (auto binding: conf.getBindings()) {
-    if (binding.isWasmModule()) ++wasmCount;
-  }
-
-  auto compiledGlobals = kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(wasmCount);
-  for (auto binding: conf.getBindings()) {
-    if (binding.isWasmModule()) {
-      auto name = lock.str(binding.getName());
-      auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), observer);
+  auto compiledGlobals =
+      kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(source.globals.size());
+  for (auto& global: source.globals) {
+    KJ_IF_SOME(wasm, global.content.tryGet<Worker::Script::WasmModule>()) {
+      auto name = lock.str(global.name);
+      auto value = Impl::compileWasmGlobal(lock, wasm.body, *impl->observer);
 
       compiledGlobals.add(Worker::Script::CompiledGlobal{
         {lock.v8Isolate, name},
         {lock.v8Isolate, value},
       });
+    } else {
+      JSG_FAIL_REQUIRE(Error, "Unsupported module type for Service Worker global: ", global.name);
     }
   }
 

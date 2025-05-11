@@ -74,6 +74,10 @@ class WorkerdApi final: public Worker::Api {
       const Worker::Isolate& isolate,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const override;
 
+  kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
+      const Worker::Script::ScriptSource& source,
+      const Worker::Isolate& isolate) const override;
+
   // A pipeline-level binding.
   struct Global {
     // TODO(cleanup): Get rid of this and just load from config.Worker.bindings capnp structure
@@ -275,11 +279,6 @@ class WorkerdApi final: public Worker::Api {
  private:
   struct Impl;
   kj::Own<Impl> impl;
-
-  kj::Array<Worker::Script::CompiledGlobal> compileScriptGlobals(jsg::Lock& lock,
-      config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      const jsg::CompilationObserver& observer) const;
 };
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
