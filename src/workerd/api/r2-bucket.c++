@@ -1151,7 +1151,11 @@ jsg::Promise<jsg::BufferSource> R2Bucket::GetResult::bytes(jsg::Lock& js) {
         "It can only be used once. Use tee() first if you need to read it twice.");
 
     auto& context = IoContext::current();
-    return body->getController().readAllBytes(js, context.getLimitEnforcer().getBufferingLimit());
+    return body->getController()
+        .readAllBytes(js, context.getLimitEnforcer().getBufferingLimit())
+        .then(js, [](jsg::Lock& js, jsg::BufferSource data) {
+      return data.getTypedView<v8::Uint8Array>(js);
+    });
   });
 }
 
