@@ -7,6 +7,7 @@
 #include "actor-state.h"
 #include "global-scope.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 #include <capnp/message.h>
@@ -818,10 +819,11 @@ void AbortSignal::triggerAbort(
 }
 
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  JSG_REQUIRE(FeatureFlags::get(js).getAbortSignalRpc(), DOMDataCloneError,
+      "AbortSignal serialization is not enabled.");
+
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "AbortSignal can only be serialized for RPC.");
-
-  LOG_PERIODICALLY(WARNING, "NOSENTRY An AbortSignal was serialized for RPC");
 
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(
