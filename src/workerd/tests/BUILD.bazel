@@ -8,7 +8,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
-        "@com_google_benchmark//:benchmark",
+        "@codspeed_cpp//google_benchmark:benchmark",
     ],
 )
 

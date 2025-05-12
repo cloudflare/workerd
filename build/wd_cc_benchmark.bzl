@@ -25,7 +25,7 @@ def wd_cc_benchmark(
         }),
         visibility = visibility,
         deps = deps + [
-            "@com_google_benchmark//:benchmark_main",
+            "@codspeed_cpp//google_benchmark:benchmark_main",
             "//src/workerd/tests:bench-tools",
         ],
         # use the same malloc we use for server
