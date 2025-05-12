@@ -11,6 +11,8 @@ import {
   WorkerEntrypoint,
   WorkflowEntrypoint,
 } from 'cloudflare:workers';
+import * as cloudflareWorkersModule from 'cloudflare:workers';
+import * as cloudflareSocketsModule from 'cloudflare:sockets';
 
 // The creation of `pythonDurableObjects` et al. has to be done here because
 // python-entrypoint-helper is a BUILTIN and so cannot import `DurableObject` et al.
@@ -19,12 +21,21 @@ import {
 import {
   pythonEntrypointClasses,
   makeEntrypointClass,
+  setDoAnImport,
 } from 'pyodide:python-entrypoint-helper';
 
-function makeEntrypointClassFromNames(names, cls) {
-  return names.map((className) => [
+// Function to dynamically import JavaScript modules from Python
+async function doAnImport(name) {
+  return await import(name);
+}
+
+// Pass the import function to the helper
+setDoAnImport(doAnImport, cloudflareWorkersModule, cloudflareSocketsModule);
+
+function makeEntrypointClassFromNames(classes, baseClass) {
+  return classes.map(({ className, methodNames }) => [
     className,
-    makeEntrypointClass(className, cls),
+    makeEntrypointClass(className, baseClass, methodNames),
   ]);
 }
 
@@ -35,9 +46,10 @@ const entrypoints = {
 };
 
 const pythonEntrypoints = Object.fromEntries(
-  Object.entries(entrypoints).flatMap(([key, cls]) =>
-    makeEntrypointClassFromNames(pythonEntrypointClasses[key], cls)
-  )
+  Object.entries(entrypoints).flatMap(([key, baseClass]) => {
+    const classes = pythonEntrypointClasses[key];
+    return makeEntrypointClassFromNames(classes, baseClass);
+  })
 );
 
 export { pythonEntrypoints };

@@ -1,6 +1,7 @@
 # This module defines a Workers API for Python. It is similar to the API provided by
 # JS Workers, but with changes and additions to be more idiomatic to the Python
 # programming language.
+import datetime
 import functools
 import http.client
 import json
@@ -8,13 +9,67 @@ from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
+from inspect import isawaitable
+from types import LambdaType
 from typing import Any, TypedDict, Unpack
 
 import js
 
+# Get globals modules and import function from the entrypoint-helper
+from js import pyodide_entrypoint_helper
+
 import pyodide.http
-from pyodide.ffi import JsException, create_proxy, destroy_proxies, to_js
+from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
+
+
+def import_from_javascript(module_name: str) -> Any:
+    """
+    Import a JavaScript ES module from Python.
+
+    Args:
+        module_name: The name of the module to import. This can be a module name or a path.
+
+    Returns:
+        The imported module object.
+
+    Example:
+        cloudflare_workers = import_from_javascript("cloudflare:workers")
+        env = cloudflare_workers.env
+
+    Note:
+        Behind the scenes import_from_javascript uses JSPI to do imports but that means we need an
+        async context. To enable importing cloudflare:workers and cloudflare:sockets in the global
+        scope we specifically imported them in the global scope and exposed them here.
+    """
+    # Special case for global scope available modules
+    # JSPI won't work in the global scope in 0.26.0a2 so we need modules importable in the global
+    # scope to be imported beforehand.
+    if module_name == "cloudflare:workers":
+        return pyodide_entrypoint_helper.cloudflareWorkersModule
+    elif module_name == "cloudflare:sockets":
+        return pyodide_entrypoint_helper.cloudflareSocketsModule
+
+    try:
+        from pyodide.ffi import run_sync
+
+        # Call the JavaScript import function
+        return run_sync(pyodide_entrypoint_helper.doAnImport(module_name))
+    except JsException as e:
+        raise ImportError(f"Failed to import '{module_name}': {e}") from e
+    except RuntimeError as e:
+        if e.args[0] == "No suspender":
+            raise ImportError(
+                f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available in the global scope."
+            ) from e
+        raise
+    except ImportError as e:
+        if e.args[0].startswith("cannot import name 'run_sync' from 'pyodide.ffi'"):
+            raise ImportError(
+                f"Failed to import '{module_name}': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
+            ) from e
+        raise
+
 
 JSBody = (
     "js.Blob | js.ArrayBuffer | js.TypedArray | js.DataView | js.FormData |"
@@ -47,7 +102,7 @@ class RequestInitCfProperties(TypedDict, total=False):
 class FetchKwargs(TypedDict, total=False):
     headers: "Headers | None"
     body: "Body | None"
-    method: HTTPMethod = HTTPMethod.GET
+    method: HTTPMethod | None
     redirect: str | None
     cf: RequestInitCfProperties | None
 
@@ -132,23 +187,36 @@ def _manage_pyproxies():
         destroy_proxies(proxies)
 
 
+def _is_js_instance(val, js_cls_name):
+    return hasattr(val, "constructor") and val.constructor.name == js_cls_name
+
+
 def _to_js_headers(headers: Headers):
     if isinstance(headers, list):
         # We should have a list[tuple[str, str]]
         return js.Headers.new(headers)
     elif isinstance(headers, dict):
         return js.Headers.new(headers.items())
-    elif hasattr(headers, "constructor") and headers.constructor.name == "Headers":
+    elif _is_js_instance(headers, "Headers"):
         return headers
     else:
         raise TypeError("Received unexpected type for headers argument")
 
 
 class Response(FetchResponse):
+    """
+    This class represents the response to an HTTP request, with a similar API to that of the web
+    `Response` API: https://developer.mozilla.org/en-US/docs/Web/API/Response.
+
+    This is a static class to enable defining `FetchResponse` using a constructor more similar to
+    JS. All non-static methods for this class should be defined on the `FetchResponse` class it
+    extends.
+    """
+
     def __init__(
         self,
-        body: Body,
-        status: HTTPStatus | int = HTTPStatus.OK,
+        body: "Body | js.Response | None" = None,
+        status: HTTPStatus | int | None = None,
         status_text="",
         headers: Headers = None,
     ):
@@ -158,6 +226,33 @@ class Response(FetchResponse):
         Based on the JS API of the same name:
         https://developer.mozilla.org/en-US/docs/Web/API/Response/Response.
         """
+        # Verify passed in types.
+        if hasattr(body, "constructor"):
+            if body.constructor.name not in (
+                "Blob",
+                "ArrayBuffer",
+                "TypedArray",
+                "DataView",
+                "FormData",
+                "ReadableStream",
+                "URLSearchParams",
+                "Response",
+            ):
+                raise TypeError(
+                    f"Unsupported type in Response: {body.constructor.name}"
+                )
+        elif not isinstance(body, str | FormData):
+            raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
+
+        # Handle constructing a Response from a JS Response.
+        if _is_js_instance(body, "Response"):
+            if status is not None or len(status_text) > 0 or headers is not None:
+                raise ValueError(
+                    "Expected no options when constructing Response from a js.Response"
+                )
+            super().__init__(body.url, body)
+            return
+
         options = self._create_options(status, status_text, headers)
 
         # Initialize via the FetchResponse super-class which gives us access to
@@ -169,13 +264,15 @@ class Response(FetchResponse):
 
     @staticmethod
     def _create_options(
-        status: HTTPStatus | int = HTTPStatus.OK,
+        status: HTTPStatus | int | None = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
     ):
-        options = {
-            "status": status.value if isinstance(status, HTTPStatus) else status,
-        }
+        options = {}
+        if status:
+            options["status"] = (
+                status.value if isinstance(status, HTTPStatus) else status
+            )
         if status_text:
             options["statusText"] = status_text
         if headers:
@@ -198,22 +295,28 @@ class Response(FetchResponse):
 
     @staticmethod
     def json(
-        data: str | dict[str, str],
+        data: str | dict[str, Any] | list[Any] | JsProxy,
         status: HTTPStatus | int = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
     ):
         options = Response._create_options(status, status_text, headers)
-        with _manage_pyproxies() as pyproxies:
-            try:
-                return js.Response.json(
-                    to_js(
-                        data, dict_converter=js.Object.fromEntries, pyproxies=pyproxies
-                    ),
-                    **options,
-                )
-            except JsException as exc:
-                raise _to_python_exception(exc) from exc
+        js_resp = None
+        try:
+            if isinstance(data, JsProxy):
+                js_resp = js.Response.json(data, **options)
+            else:
+                if "headers" not in options:
+                    options["headers"] = _to_js_headers(
+                        {"content-type": "application/json"}
+                    )
+                elif not options["headers"].has("content-type"):
+                    options["headers"].set("content-type", "application/json")
+                js_resp = js.Response.new(json.dumps(data), **options)
+        except JsException as exc:
+            raise _to_python_exception(exc) from exc
+
+        return FetchResponse(js_resp.url, js_resp)
 
 
 FormDataValue = "str | js.Blob | Blob"
@@ -238,7 +341,10 @@ def _js_value_to_py(item: FormDataValue) -> "str | Blob | File":
 
 class FormData(MutableMapping[str, FormDataValue]):
     """
-    This API follows that of https://pypi.org/project/multidict/.
+    This class represents a set of key/value pairs for forms.
+
+    The API of this class follows that of https://pypi.org/project/multidict/ and
+    https://developer.mozilla.org/en-US/docs/Web/API/FormData.
     """
 
     def __init__(
@@ -254,10 +360,7 @@ class FormData(MutableMapping[str, FormDataValue]):
                 self._js_form_data.append(k, _py_value_to_js(v))
             return
 
-        if (
-            hasattr(form_data, "constructor")
-            and form_data.constructor.name == "FormData"
-        ):
+        if _is_js_instance(form_data, "FormData"):
             self._js_form_data = form_data
             return
 
@@ -341,6 +444,8 @@ def _make_blob_entry(e):
 
 
 def _is_iterable(obj):
+    if isinstance(obj, (str, bytes)):
+        return False
     try:
         iter(obj)
     except TypeError:
@@ -473,7 +578,17 @@ class File(Blob):
 
 
 class Request:
-    def __init__(self, input: "Request | str", **other_options: Unpack[FetchKwargs]):
+    def __init__(
+        self, input: "Request | str | js.Request", **other_options: Unpack[FetchKwargs]
+    ):
+        if _is_js_instance(input, "Request"):
+            if len(other_options) > 0:
+                raise ValueError(
+                    "Expected no options when constructing Request from a js.Request"
+                )
+            self._js_request = input
+            return
+
         if "method" in other_options and isinstance(
             other_options["method"], HTTPMethod
         ):
@@ -607,6 +722,156 @@ class Request:
         return await self.js_object.text()
 
 
+def _python_from_rpc_default_converter(value, convert, cache):
+    if not hasattr(value, "constructor"):
+        # Assume that the object doesn't need conversion as it's not a JS object.
+        return value
+
+    if value.constructor.name == "Response":
+        return Response(value)
+    elif value.constructor.name == "FormData":
+        return FormData(value)
+    elif value.constructor.name == "Blob":
+        return Blob(value)
+    elif value.constructor.name == "File":
+        return File(value)
+    elif value.constructor.name == "Request":
+        return Request(value)
+    elif value.constructor.name == "Date":
+        # TODO: Pyodide should gain support for this, we should upstream this.
+        return datetime.datetime.fromtimestamp(value.getTime() / 1000)
+    elif value.constructor.name == "Error":
+        return Exception(value.toString())
+    elif value.constructor.name == "Number":
+        return value.valueOf()
+
+    raise TypeError(
+        f"Couldn't convert object to Python type, got {value.constructor.name}"
+    )
+
+
+def python_from_rpc(obj: "JsProxy"):
+    """
+    Converts JS objects like Response, Request, Blob, etc. to equivalent Python objects defined in
+    this module and also other JS objects like Map, Set, etc. to equivalent Python stdlib objects.
+
+    This method is used for Workers RPC in Python to convert JavaScript objects to Python. As such
+    it does not support serializing all JS object types.
+    """
+
+    if not hasattr(obj, "constructor"):
+        return obj
+
+    result = obj.to_py(default_converter=_python_from_rpc_default_converter)
+
+    return result
+
+
+def _raise_on_disabled_type(value):
+    if _is_js_instance(value, "RegExp"):
+        raise TypeError(f"{value.constructor.name} cannot be sent over RPC.")
+
+    if isinstance(value, (tuple, bytearray, LambdaType)):
+        raise TypeError(f"{type(value)} cannot be sent over RPC.")
+
+    if _is_iterable(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                _raise_on_disabled_type(v)
+        else:
+            for v in value:
+                _raise_on_disabled_type(v)
+
+
+def _python_to_rpc_default_converter(obj, convert, cache):
+    if obj is None:
+        return obj
+
+    if hasattr(obj, "js_object"):
+        return obj.js_object
+
+    if isinstance(obj, datetime.datetime):
+        # TODO: Pyodide should gain support for this, we should upstream this.
+        return js.Date.new(obj.timestamp() * 1000)
+
+    if isinstance(obj, Exception):
+        return js.Error.new(str(obj))
+
+    _raise_on_disabled_type(obj)
+
+    return obj
+
+
+def python_to_rpc(value) -> JsProxy:
+    """
+    Converts Python objects defined in this module (Response, Request, etc) and native Python types
+    like Map, Set, datetime to equivalent JavaScript types.
+
+    This method is used for Workers RPC in Python to convert Python objects to JavaScript. As such
+    it does not support serializing all Python object types.
+    """
+
+    # `to_js` won't always call the default_converter, for example when a list of tuples is passed
+    _raise_on_disabled_type(value)
+
+    result = to_js(
+        value,
+        default_converter=_python_to_rpc_default_converter,
+        dict_converter=js.Map.new,
+    )
+
+    return result
+
+
+class _FetcherWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def _getattr_helper(self, name):
+        attr = getattr(self._binding, name)
+        if name == "fetch":
+            # TODO: Implement python native fetch for bindings.
+            return attr
+
+        if not callable(attr):
+            return attr
+
+        # Not using `@functools.wraps(attr)` here because `attr` is a JS proxy.
+        async def wrapper(*args, **kwargs):
+            js_args = [python_to_rpc(arg) for arg in args]
+            js_kwargs = {k: python_to_rpc(v) for k, v in kwargs.items()}
+            result = attr(*js_args, **js_kwargs)
+            if hasattr(result, "then") and callable(result.then):
+                return python_from_rpc(await result)
+            else:
+                return python_from_rpc(result)
+
+        return wrapper
+
+    def __getattr__(self, name):
+        result = self._getattr_helper(name)
+        setattr(self, name, result)
+        return result
+
+
+class _EnvWrapper:
+    def __init__(self, env):
+        self._env = env
+
+    def _getattr_helper(self, name):
+        binding = getattr(self._env, name)
+        if _is_js_instance(binding, "Fetcher"):
+            return _FetcherWrapper(binding)
+
+        # TODO: Implement APIs for bindings.
+        return binding
+
+    def __getattr__(self, name):
+        result = self._getattr_helper(name)
+        setattr(self, name, result)
+        return result
+
+
 def handler(func):
     """
     When applied to handlers such as `on_fetch` it will rewrite arguments passed in to native Python
@@ -616,16 +881,73 @@ def handler(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        # TODO: wrap `env` so that bindings can be used without to_js.
-        if (
-            len(args) > 0
-            and hasattr(args[0], "constructor")
-            and args[0].constructor.name == "Request"
-        ):
+        # TODO: support transforming kwargs
+        if len(args) > 0 and _is_js_instance(args[0], "Request"):
             args = (Request(args[0]),) + args[1:]
+
+        # Wrap `env` so that bindings can be used without to_js.
+        if len(args) > 1:
+            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+
         return func(*args, **kwargs)
 
     return wrapper
+
+
+def _wrap_attr(attr):
+    # `isinstance(attr, classmethod)` implies `not callable(attr)`, but we keep the latter for
+    # readability.
+    if not callable(attr) or isinstance(attr, (classmethod, staticmethod)):
+        return attr
+
+    @functools.wraps(attr)
+    async def wrapper(*args, **kwargs):
+        py_args = [python_from_rpc(arg) for arg in args]
+        py_kwargs = {k: python_from_rpc(v) for k, v in kwargs.items()}
+        result = attr(*py_args, **py_kwargs)
+        if isawaitable(result):
+            return python_to_rpc(await result)
+        else:
+            return python_to_rpc(result)
+
+    return wrapper
+
+
+# With the exception of `fetch`, this is a list of the handlers defined in
+# https://developers.cloudflare.com/workers/runtime-apis/rpc/reserved-methods/. Fetch is not
+# included because we do want it to be wrapped so that the input Request argument and output
+# Response is appropriately converted.
+NON_WRAPPED_HANDLER_NAMES = {"connect"}
+NON_WRAPPED_DO_HANDLER_NAMES = {
+    "alarm",
+    "webSocketMessage",
+    "webSocketClose",
+    "webSocketError",
+}
+
+
+def _is_known_handler(handler, special_handlers):
+    # Trim the `on_` prefix.
+    trimmed = handler.removeprefix("on_")
+    return handler in special_handlers or trimmed in special_handlers
+
+
+def _wrap_subclass(cls, is_durable_object):
+    for k, v in cls.__dict__.items():
+        if k.startswith("__"):
+            continue
+
+        is_special_handler = _is_known_handler(k, NON_WRAPPED_HANDLER_NAMES)
+        if is_special_handler:
+            continue
+
+        is_special_do_handler = is_durable_object and _is_known_handler(
+            k, NON_WRAPPED_DO_HANDLER_NAMES
+        )
+        if is_special_do_handler:
+            continue
+
+        setattr(cls, k, _wrap_attr(v))
 
 
 class DurableObject:
@@ -636,6 +958,9 @@ class DurableObject:
     def __init__(*_args, **_kwds):
         pass
 
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls, True)
+
 
 class WorkerEntrypoint:
     """
@@ -645,6 +970,9 @@ class WorkerEntrypoint:
     def __init__(*_args, **_kwds):
         pass
 
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls, False)
+
 
 class WorkflowEntrypoint:
     """
@@ -653,3 +981,6 @@ class WorkflowEntrypoint:
 
     def __init__(*_args, **_kwds):
         pass
+
+    def __init_subclass__(cls, **_kwargs):
+        _wrap_subclass(cls, False)

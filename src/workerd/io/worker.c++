@@ -27,6 +27,7 @@
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
 #include <v8-inspector.h>
@@ -507,6 +508,9 @@ struct Worker::Isolate::Impl {
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
 
+  // UUID for this isolate, initialized first time getUuid() is called.
+  kj::Lazy<kj::String> uuid;
+
   // Notification messages to deliver to the next inspector client when it connects.
   kj::Vector<kj::String> queuedNotifications;
 
@@ -812,6 +816,7 @@ struct Worker::Script::Impl {
       auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
 
       co_return worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
+        TmpDirStoreScope tmpDirStoreScope;
         return JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
           jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
 
@@ -1218,12 +1223,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     Script::Source source,
     IsolateObserver::StartType startType,
     bool logNewScript,
-    kj::Maybe<ValidationErrorReporter&> errorReporter)
+    kj::Maybe<ValidationErrorReporter&> errorReporter,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
       modular(source.is<ModulesSource>()),
+      python(modular && source.get<ModulesSource>().isPython),
       impl(kj::heap<Impl>()) {
-  this->isPython = false;
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -1332,10 +1338,9 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 // This path is used for the new ESM worker syntax.
 
-                this->isPython = modulesSource.isPython;
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
                   kj::Own<void> limitScope;
-                  if (isPython) {
+                  if (modulesSource.isPython) {
                     limitScope =
                         isolate->getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
                   } else {
@@ -1343,7 +1348,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   }
                   auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
                   impl->configureDynamicImports(lock, modules);
-                  modulesSource.compileModules(lock, isolate->getApi());
+                  isolate->getApi().compileModules(
+                      lock, modulesSource, *isolate, kj::mv(artifacts));
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
               }
@@ -1366,6 +1372,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
 kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() const {
   return weakIsolateRef->addRef();
+}
+
+kj::StringPtr Worker::Isolate::getUuid() const {
+  // As of this writing, getUuid() is only used by actors, for metrics. We don't want to bother
+  // generating it if not used. The call site does not have nor want an isolate lock, so we use a
+  // kj::Lazy to make initialization thread-safe.
+  return impl->uuid.get(
+      [](kj::SpaceFor<kj::String>& space) { return space.construct(randomUUID(kj::none)); });
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {
@@ -1477,7 +1491,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     const Worker::Script& script,
     ExceptionOrDuration& limitErrorOrTime) {
   kj::Own<void> limitScope;
-  if (script.isPython) {
+  if (script.isPython()) {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupPython(js, limitErrorOrTime);
   } else {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
@@ -1494,7 +1508,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
     // call to tryResolveModuleNamespace because I intend to add some additional
     // logging/metrics logic around this call.
     KJ_IF_SOME(ns,
-        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, mainModule.toString(true))) {
+        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, mainModule.toString(false))) {
       return ns;
     }
   } else {
@@ -1628,6 +1642,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
             SpanBuilder currentUserSpan =
                 spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
+
+            // Ensure that our worker top-level bootstrap has a temporary directory
+            // storage scope. This is used to store temporary files created within
+            // the top-level evaluation of the worker. With this instantiated on
+            // the stack, temporary files will be cleaned up when the scope is
+            // destroyed, which means any temporary files created in the top-level
+            // evaluation will *not* be available to the worker after the top-level
+            // evaluation is complete.
+            TmpDirStoreScope tmpDirStoreScope;
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
@@ -3218,7 +3241,10 @@ struct Worker::Actor::Impl {
 
   kj::Own<ActorObserver> metrics;
 
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
+  // When a boolean, indicates whether a `transient` should exist. If true, it will be initialized
+  // on the first `ensureConstructed()`.
+  kj::OneOf<bool, jsg::JsRef<jsg::JsValue>> transient;
+
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
   kj::Maybe<rpc::Container::Client> container;
@@ -3373,7 +3399,6 @@ struct Worker::Actor::Impl {
   kj::ForkedPromise<void> runningAlarmTask = kj::Promise<void>(kj::READY_NOW).fork();
 
   Impl(Worker::Actor& self,
-      Worker::Lock& lock,
       Actor::Id actorId,
       bool hasTransient,
       MakeActorCacheFunc makeActorCache,
@@ -3388,6 +3413,7 @@ struct Worker::Actor::Impl {
       : actorId(kj::mv(actorId)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
+        transient(hasTransient),
         container(kj::mv(container)),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
@@ -3398,14 +3424,8 @@ struct Worker::Actor::Impl {
         shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
         hibernationEventType(kj::mv(hibernationEventType)) {
-    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
-      if (hasTransient) {
-        transient.emplace(js, js.obj());
-      }
-
-      actorCache = makeActorCache(
-          self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
-    });
+    actorCache =
+        makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks, *metrics);
   }
 };
 
@@ -3440,7 +3460,6 @@ Worker::Actor::Actor(const Worker& worker,
     MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className,
     MakeStorageFunc makeStorage,
-    Worker::Lock& lock,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics,
@@ -3449,13 +3468,14 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<rpc::Container::Client> container)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
-  impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
+  impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container));
 
   KJ_IF_SOME(c, className) {
-    KJ_IF_SOME(cls, lock.getWorker().impl->actorClasses.find(c)) {
-      impl->classInstance = &(cls);
+    KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
+      // const_cast OK because we're just storing the pointer and will only use this under lock.
+      impl->classInstance = const_cast<ActorClassInfo*>(&cls);
     } else {
       kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c));
     }
@@ -3544,24 +3564,8 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
 }
 
 Worker::Actor::~Actor() noexcept(false) {
-  // TODO(someday) Each IoContext contains a strong reference to its Actor, so a IoContext
-  // object must be destroyed before their Actor. However, IoContext has its lifetime extended
-  // by the IoContext::drain() promise which is stored in waitUntilTasks.
-  // IoContext::drain() may hang if Actor::onShutdown() never resolves/rejects, which means the
-  // IoContext and the Actor will not destruct as we'd expect. Ideally, we'd want an object
-  // that represents Actor liveness that does what shutdown() does now. It should be reasonable to
-  // implement that once we have tests that invoke the Actor dtor.
-
-  // Destroy under lock.
-  //
-  // TODO(perf): In principle it could make sense to defer destruction of the actor until an async
-  //   lock can be obtained. But, actor destruction is not terribly common and is not done when
-  //   the actor is idle (so, no one is waiting), so it's not a huge deal. The runtime does
-  //   potentially colocate multiple actors on the same thread, but they are always from the same
-  //   namespace and hence would be locking the same isolate anyway -- it's not like one of the
-  //   other actors could be running while we wait for this lock.
-  worker->runInLockScope(
-      Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) { impl = nullptr; });
+  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
+  // to our thread, or is a handle that can be dropped outside of the lock.
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
@@ -3636,7 +3640,15 @@ Worker::Actor::Id Worker::Actor::cloneId() {
 
 kj::Maybe<jsg::JsRef<jsg::JsValue>> Worker::Actor::getTransient(Worker::Lock& lock) {
   KJ_REQUIRE(&lock.getWorker() == worker.get());
-  return impl->transient.map([&](jsg::JsRef<jsg::JsValue>& val) { return val.addRef(lock); });
+
+  if (impl->transient.tryGet<bool>().orDefault(false)) {
+    // First call and `hasTransient` was true. Initialize it now, since we have the lock.
+    jsg::Lock& js = lock;
+    impl->transient.init<jsg::JsRef<jsg::JsValue>>(js, js.obj());
+  }
+
+  return impl->transient.tryGet<jsg::JsRef<jsg::JsValue>>().map(
+      [&](jsg::JsRef<jsg::JsValue>& val) { return val.addRef(lock); });
 }
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
@@ -3894,10 +3906,11 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
     Script::Source source,
     IsolateObserver::StartType startType,
     bool logNewScript,
-    kj::Maybe<ValidationErrorReporter&> errorReporter) const {
+    kj::Maybe<ValidationErrorReporter&> errorReporter,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
   // Script doesn't already exist, so compile it.
-  return kj::atomicRefcounted<Script>(
-      kj::atomicAddRef(*this), scriptId, kj::mv(source), startType, logNewScript, errorReporter);
+  return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, kj::mv(source), startType,
+      logNewScript, errorReporter, kj::mv(artifacts));
 }
 
 void Worker::Isolate::completedRequest() const {
@@ -4264,7 +4277,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
       });
     }));
   };
-  typedef decltype(signalResponse) SignalResponse;
+  using SignalResponse = decltype(signalResponse);
 
   class ResponseWrapper final: public kj::HttpService::Response {
    public:

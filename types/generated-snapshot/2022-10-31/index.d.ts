@@ -77,7 +77,7 @@ interface Console {
   clear(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/count_static) */
   count(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countreset_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/countReset_static) */
   countReset(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/debug_static) */
   debug(...data: any[]): void;
@@ -89,9 +89,9 @@ interface Console {
   error(...data: any[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/group_static) */
   group(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupcollapsed_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupCollapsed_static) */
   groupCollapsed(...data: any[]): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupend_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/groupEnd_static) */
   groupEnd(): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/info_static) */
   info(...data: any[]): void;
@@ -101,9 +101,9 @@ interface Console {
   table(tabularData?: any, properties?: string[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/time_static) */
   time(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeend_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeEnd_static) */
   timeEnd(label?: string): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timelog_static) */
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/timeLog_static) */
   timeLog(label?: string, ...data: any[]): void;
   timeStamp(label?: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/trace_static) */
@@ -314,42 +314,42 @@ declare function dispatchEvent(
 declare function btoa(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 declare function atob(data: string): string;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 declare function setTimeout(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
 declare function setTimeout<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/clearTimeout) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearTimeout) */
 declare function clearTimeout(timeoutId: number | null): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 declare function setInterval(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/setInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
 declare function setInterval<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/clearInterval) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearInterval) */
 declare function clearInterval(timeoutId: number | null): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/queueMicrotask) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
 declare function queueMicrotask(task: Function): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/structuredClone) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
 declare function structuredClone<T>(
   value: T,
   options?: StructuredSerializeOptions,
 ): T;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/reportError) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
 declare function reportError(error: any): void;
-/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/fetch) */
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
 declare function fetch(
   input: RequestInfo | URL,
   init?: RequestInit<RequestInitCfProperties>,
@@ -958,6 +958,7 @@ declare class Blob {
   slice(start?: number, end?: number, type?: string): Blob;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/bytes) */
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text) */
   text(): Promise<string>;
@@ -1342,10 +1343,15 @@ interface TextEncoderEncodeIntoResult {
  */
 declare class ErrorEvent extends Event {
   constructor(type: string, init?: ErrorEventErrorEventInit);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/filename) */
   get filename(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/message) */
   get message(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/lineno) */
   get lineno(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/colno) */
   get colno(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/error) */
   get error(): any;
 }
 interface ErrorEventErrorEventInit {
@@ -1562,6 +1568,7 @@ declare abstract class Body {
   get bodyUsed(): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bytes) */
   bytes(): Promise<Uint8Array>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/text) */
   text(): Promise<string>;
@@ -1679,7 +1686,11 @@ interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
   integrity: string;
-  /* Returns a boolean indicating whether or not request can outlive the global in which it was created. */
+  /**
+   * Returns a boolean indicating whether or not request can outlive the global in which it was created.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
+   */
   keepalive: boolean;
 }
 interface RequestInit<Cf = CfProperties> {
@@ -4409,8 +4420,18 @@ declare abstract class AiGateway {
 interface AutoRAGInternalError extends Error {}
 interface AutoRAGNotFoundError extends Error {}
 interface AutoRAGUnauthorizedError extends Error {}
+type ComparisonFilter = {
+  key: string;
+  type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+  value: string | number | boolean;
+};
+type CompoundFilter = {
+  type: "and" | "or";
+  filters: ComparisonFilter[];
+};
 type AutoRagSearchRequest = {
   query: string;
+  filters?: CompoundFilter | ComparisonFilter;
   max_num_results?: number;
   ranking_options?: {
     ranker?: string;
@@ -6371,8 +6392,8 @@ declare namespace TailStream {
   }
   interface SpanOpen {
     readonly type: "spanOpen";
-    readonly op?: string;
-    readonly info?: FetchEventInfo | JsRpcEventInfo | Attribute[];
+    readonly name: string;
+    readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
     readonly type: "spanClose";
@@ -6396,7 +6417,7 @@ declare namespace TailStream {
   }
   interface Return {
     readonly type: "return";
-    readonly info?: FetchResponseInfo | Attribute[];
+    readonly info?: FetchResponseInfo | Attributes;
   }
   interface Link {
     readonly type: "link";
@@ -6406,28 +6427,42 @@ declare namespace TailStream {
     readonly spanId: string;
   }
   interface Attribute {
-    readonly type: "attribute";
     readonly name: string;
-    readonly value: string | string[] | boolean | boolean[] | number | number[];
+    readonly value:
+      | string
+      | string[]
+      | boolean
+      | boolean[]
+      | number
+      | number[]
+      | bigint
+      | bigint[];
   }
-  type Mark =
-    | DiagnosticChannelEvent
-    | Exception
-    | Log
-    | Return
-    | Link
-    | Attribute[];
+  interface Attributes {
+    readonly type: "attributes";
+    readonly info: Attribute[];
+  }
   interface TailEvent {
     readonly traceId: string;
     readonly invocationId: string;
     readonly spanId: string;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | Mark;
+    readonly event:
+      | Onset
+      | Outcome
+      | Hibernate
+      | SpanOpen
+      | SpanClose
+      | DiagnosticChannelEvent
+      | Exception
+      | Log
+      | Return
+      | Link
+      | Attributes;
   }
   type TailEventHandler = (event: TailEvent) => void | Promise<void>;
   type TailEventHandlerName =
-    | "onset"
     | "outcome"
     | "hibernate"
     | "spanOpen"
@@ -6437,7 +6472,7 @@ declare namespace TailStream {
     | "log"
     | "return"
     | "link"
-    | "attribute";
+    | "attributes";
   type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }

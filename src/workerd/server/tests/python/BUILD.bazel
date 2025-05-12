@@ -18,20 +18,15 @@ py_wd_test("hello")
 
 py_wd_test("env-param")
 
-py_wd_test(
-    "asgi",
-    # TODO: investigate failure!
-    make_snapshot = False,
-    skip_python_flags = ["0.27.5"],
-)
+py_wd_test("asgi")
+
+py_wd_test("asgi-sse")
 
 py_wd_test("random")
 
 py_wd_test("subdirectory")
 
-py_wd_test(
-    "sdk",
-)
+py_wd_test("sdk")
 
 py_wd_test("seek-metadatafs")
 
@@ -48,7 +43,7 @@ py_wd_test("seek-metadatafs")
         # was rebuilt and backport bumped.
         pkg_skip_versions = {
             "0.27.5": [
-                "cryptography",  # top-level entropy
+                "micropip",  # missing lockfile
                 "soupsieve",  # Circular dependency with beautifulsoup4
                 "starlette",  # No module named 'starlette.converters'
                 # requests and dependencies have an ssl problem
@@ -77,3 +72,14 @@ py_wd_test("filter-non-py-files")
 py_wd_test("durable-object")
 
 py_wd_test("worker-entrypoint")
+
+py_wd_test(
+    "jspi",
+    skip_python_flags = ["0.26.0a2"],
+)
+
+py_wd_test("js-import")
+
+py_wd_test("importable-env")
+
+py_wd_test("python-rpc")

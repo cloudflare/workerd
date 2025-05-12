@@ -6,6 +6,10 @@
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules-new.h>
+
+#include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/pyodide_static.capnp.h>
 
 #include <capnp/serialize.h>
 #include <kj/array.h>
@@ -72,7 +76,7 @@ class PythonModuleInfo {
   kj::Array<kj::Array<kj::byte>> contents;
 
   // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports();
+  kj::Array<kj::String> getPackageSnapshotImports(kj::StringPtr version);
   // Takes in a list of Python files (their contents). Parses these files to find the import
   // statements, then returns a list of modules imported via those statements.
   //
@@ -88,8 +92,9 @@ class PythonModuleInfo {
   static kj::Array<kj::String> parsePythonScriptImports(kj::Array<kj::String> files);
   kj::HashSet<kj::String> getWorkerModuleSet();
   kj::Array<kj::String> getPythonFileContents();
-  static kj::Array<kj::String> filterPythonScriptImports(
-      kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports);
+  static kj::Array<kj::String> filterPythonScriptImports(kj::HashSet<kj::String> workerModules,
+      kj::ArrayPtr<kj::String> imports,
+      kj::StringPtr version);
 };
 
 // A class wrapping the information stored in a WorkerBundle, in particular the Python source files
@@ -111,7 +116,6 @@ class PyodideMetadataReader: public jsg::Object {
     bool isTracingFlag;
     bool snapshotToDisk;
     bool createBaselineSnapshot;
-    bool usePackagesInArtifactBundler;
     kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
     kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
     kj::Maybe<kj::Array<kj::String>> entrypointClasses;
@@ -127,7 +131,6 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
-        bool usePackagesInArtifactBundler,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
         kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
         kj::Maybe<kj::Array<kj::String>> entrypointClasses)
@@ -141,7 +144,6 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
-          usePackagesInArtifactBundler(usePackagesInArtifactBundler),
           memorySnapshot(kj::mv(memorySnapshot)),
           durableObjectClasses(kj::mv(durableObjectClasses)),
           entrypointClasses(kj::mv(entrypointClasses)) {}
@@ -176,7 +178,7 @@ class PyodideMetadataReader: public jsg::Object {
   kj::Array<int> getSizes(jsg::Lock& js);
 
   // Return the list of names to import into a package snapshot.
-  kj::Array<kj::String> getPackageSnapshotImports();
+  kj::Array<kj::String> getPackageSnapshotImports(kj::String version);
 
   kj::Array<jsg::JsRef<jsg::JsString>> getRequirements(jsg::Lock& js);
 
@@ -196,10 +198,6 @@ class PyodideMetadataReader: public jsg::Object {
     state->memorySnapshot = kj::none;
   }
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
-
-  bool shouldUsePackagesInArtifactBundler() {
-    return state->usePackagesInArtifactBundler;
-  }
 
   kj::StringPtr getPyodideVersion() {
     return state->pyodideVersion;
@@ -229,6 +227,8 @@ class PyodideMetadataReader: public jsg::Object {
     return kj::none;
   }
 
+  static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -243,7 +243,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(readMemorySnapshot);
     JSG_METHOD(disposeMemorySnapshot);
     JSG_METHOD(shouldSnapshotToDisk);
-    JSG_METHOD(shouldUsePackagesInArtifactBundler);
     JSG_METHOD(getPyodideVersion);
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
@@ -251,6 +250,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getTransitiveRequirements);
     JSG_METHOD(getDurableObjectClasses);
     JSG_METHOD(getEntrypointClasses);
+    JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -276,17 +276,26 @@ struct MemorySnapshotResult {
   JSG_STRUCT(snapshot, importedModulesList);
 };
 
-// A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
-// CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
-class ArtifactBundler: public jsg::Object {
- public:
+// This used to be declared nested as ArtifactBundler::State, but then there was a need to
+// forward-declare it, so here we are.
+struct ArtifactBundler_State {
   kj::Maybe<const PyodidePackageManager&> packageManager;
   // ^ lifetime should be contained by lifetime of ArtifactBundler since there is normally one worker set for the whole process. see worker-set.h
   // In other words:
   // WorkerSet lifetime = PackageManager lifetime and Worker lifetime = ArtifactBundler lifetime and WorkerSet owns and will outlive Worker, so PackageManager outlives ArtifactBundler
+
+  // The storedSnapshot is only used while isValidating is true.
   kj::Maybe<MemorySnapshotResult> storedSnapshot;
 
-  ArtifactBundler(kj::Maybe<const PyodidePackageManager&> packageManager,
+  // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
+  // up cold starts.
+  kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
+
+  // Set only when the validator is running. This is used to determine if it is appropriate
+  // to store a memory snapshot.
+  bool isValidating;
+
+  ArtifactBundler_State(kj::Maybe<const PyodidePackageManager&> packageManager,
       kj::Maybe<kj::Array<const kj::byte>> existingSnapshot,
       bool isValidating = false)
       : packageManager(packageManager),
@@ -294,64 +303,75 @@ class ArtifactBundler: public jsg::Object {
         existingSnapshot(kj::mv(existingSnapshot)),
         isValidating(isValidating) {};
 
+  kj::Own<ArtifactBundler_State> clone() {
+    return kj::heap<ArtifactBundler_State>(packageManager,
+        existingSnapshot.map(
+            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+  }
+};
+
+// A loaded bundle of artifacts for a particular script id. It can also contain V8 version and
+// CPU architecture-specific artifacts. The logic for loading these is in getArtifacts.
+class ArtifactBundler: public jsg::Object {
+ public:
+  using State = ArtifactBundler_State;
+
+  ArtifactBundler(kj::Own<State> inner): inner(kj::mv(inner)) {};
+
   void storeMemorySnapshot(jsg::Lock& js, MemorySnapshotResult snapshot) {
-    KJ_REQUIRE(isValidating);
-    storedSnapshot = kj::mv(snapshot);
+    KJ_REQUIRE(inner->isValidating);
+    inner->storedSnapshot = kj::mv(snapshot);
   }
 
   bool hasMemorySnapshot() {
-    return existingSnapshot != kj::none;
+    return inner->existingSnapshot != kj::none;
   }
 
   int getMemorySnapshotSize() {
-    if (existingSnapshot == kj::none) {
+    if (inner->existingSnapshot == kj::none) {
       return 0;
     }
-    return KJ_REQUIRE_NONNULL(existingSnapshot).size();
+    return KJ_REQUIRE_NONNULL(inner->existingSnapshot).size();
   }
 
   int readMemorySnapshot(int offset, kj::Array<kj::byte> buf);
   void disposeMemorySnapshot() {
-    existingSnapshot = kj::none;
+    inner->existingSnapshot = kj::none;
   }
 
   // Determines whether this ArtifactBundler was created inside the validator.
   bool isEwValidating() {
-    return isValidating;
+    return inner->isValidating;
   }
 
-  static jsg::Ref<ArtifactBundler> makeDisabledBundler() {
-    return jsg::alloc<ArtifactBundler>(kj::none, kj::none);
+  static kj::Own<State> makeDisabledBundler() {
+    return kj::heap<State>(kj::none, kj::none);
   }
 
   // Creates an ArtifactBundler that only grants access to packages, and not a memory snapshot.
-  static jsg::Ref<ArtifactBundler> makePackagesOnlyBundler(
-      kj::Maybe<const PyodidePackageManager&> manager) {
-    return jsg::alloc<ArtifactBundler>(manager, kj::none);
+  static kj::Own<State> makePackagesOnlyBundler(kj::Maybe<const PyodidePackageManager&> manager) {
+    return kj::heap<State>(manager, kj::none);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    if (existingSnapshot == kj::none) {
-      return;
+    KJ_IF_SOME(snap, inner->existingSnapshot) {
+      tracker.trackFieldWithSize("snapshot", snap.size());
     }
-    tracker.trackFieldWithSize("snapshot", KJ_REQUIRE_NONNULL(existingSnapshot).size());
   }
 
   bool isEnabled() {
     return false;  // TODO(later): Remove this function once we regenerate the bundle.
   }
 
-  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(kj::String path) {
-    KJ_IF_SOME(pacman, packageManager) {
+  kj::Maybe<jsg::Ref<ReadOnlyBuffer>> getPackage(jsg::Lock& js, kj::String path) {
+    KJ_IF_SOME(pacman, inner->packageManager) {
       KJ_IF_SOME(ptr, pacman.getPyodidePackage(path)) {
-        return jsg::alloc<ReadOnlyBuffer>(ptr);
+        return js.alloc<ReadOnlyBuffer>(ptr);
       }
     }
 
     return kj::none;
   }
-
-  static kj::Array<kj::StringPtr> getSnapshotImports();
 
   JSG_RESOURCE_TYPE(ArtifactBundler) {
     JSG_METHOD(hasMemorySnapshot);
@@ -362,20 +382,16 @@ class ArtifactBundler: public jsg::Object {
     JSG_METHOD(storeMemorySnapshot);
     JSG_METHOD(isEnabled);
     JSG_METHOD(getPackage);
-    JSG_STATIC_METHOD(getSnapshotImports);
   }
 
  private:
-  // A memory snapshot of the state of the Python interpreter after initialization. Used to speed
-  // up cold starts.
-  kj::Maybe<kj::Array<const kj::byte>> existingSnapshot;
-  bool isValidating;
+  kj::Own<State> inner;
 };
 
 class DisabledInternalJaeger: public jsg::Object {
  public:
-  static jsg::Ref<DisabledInternalJaeger> create() {
-    return jsg::alloc<DisabledInternalJaeger>();
+  static jsg::Ref<DisabledInternalJaeger> create(jsg::Lock& js) {
+    return js.alloc<DisabledInternalJaeger>();
   }
   JSG_RESOURCE_TYPE(DisabledInternalJaeger) {}
 };
@@ -390,10 +406,6 @@ class DiskCache: public jsg::Object {
  public:
   DiskCache(): cacheRoot(NULL_CACHE_ROOT) {};  // Disabled disk cache
   DiskCache(const kj::Maybe<kj::Own<const kj::Directory>>& cacheRoot): cacheRoot(cacheRoot) {};
-
-  static jsg::Ref<DiskCache> makeDisabled() {
-    return jsg::alloc<DiskCache>();
-  }
 
   jsg::Optional<kj::Array<kj::byte>> get(jsg::Lock& js, kj::String key);
   void put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data);
@@ -423,8 +435,8 @@ class SimplePythonLimiter: public jsg::Object {
       : startupLimitMs(startupLimitMs),
         getTimeCb(kj::mv(getTimeCb)) {}
 
-  static jsg::Ref<SimplePythonLimiter> makeDisabled() {
-    return jsg::alloc<SimplePythonLimiter>();
+  static jsg::Ref<SimplePythonLimiter> makeDisabled(jsg::Lock& js) {
+    return js.alloc<SimplePythonLimiter>();
   }
 
   void beginStartup() {
@@ -469,6 +481,26 @@ class SetupEmscripten: public jsg::Object {
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
+template <class Registry>
+void registerPyodideModules(Registry& registry, auto featureFlags) {
+  // We add `pyodide:` packages here including python-entrypoint-helper.js.
+  registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
+}
+
+kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  return builder.finish();
+}
+
+kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
+  jsg::modules::ModuleBundle::BuiltinBuilder builder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
+  return builder.finish();
+}
+
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
   api::pyodide::ReadOnlyBuffer, api::pyodide::PyodideMetadataReader,                               \
       api::pyodide::ArtifactBundler, api::pyodide::DiskCache,                                      \
@@ -476,3 +508,9 @@ kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapsho
       api::pyodide::MemorySnapshotResult, api::pyodide::SetupEmscripten
 
 }  // namespace workerd::api::pyodide
+
+namespace workerd {
+kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
+    CompatibilityFlags::Reader featureFlags);
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease);
+}  // namespace workerd

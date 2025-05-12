@@ -7,7 +7,7 @@ declare namespace MetadataReader {
   const getMainModule: () => string;
   const hasMemorySnapshot: () => boolean;
   const getNames: () => string[];
-  const getPackageSnapshotImports: () => string[];
+  const getPackageSnapshotImports: (version: string) => string[];
   const getSizes: () => number[];
   const readMemorySnapshot: (
     offset: number,
@@ -15,7 +15,6 @@ declare namespace MetadataReader {
   ) => void;
   const getMemorySnapshotSize: () => number;
   const disposeMemorySnapshot: () => void;
-  const shouldUsePackagesInArtifactBundler: () => boolean;
   const getPyodideVersion: () => string;
   const getPackagesVersion: () => string;
   const getPackagesLock: () => string;
@@ -23,6 +22,9 @@ declare namespace MetadataReader {
   const getTransitiveRequirements: () => Set<string>;
   const getDurableObjectClasses: () => string[] | null;
   const getEntrypointClasses: () => string[] | null;
+  const constructor: {
+    getBaselineSnapshotImports(): string[];
+  };
 }
 
 export default MetadataReader;

@@ -18,7 +18,7 @@
 
 #include <kj/encoding.h>
 
-typedef struct bignum_st BIGNUM;
+using BIGNUM = struct bignum_st;
 
 // Wrap calls to OpenSSL's EVP_* interface (and similar APIs) in this macro to
 // deal with errors.

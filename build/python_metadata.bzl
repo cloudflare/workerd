@@ -56,46 +56,51 @@ def make_bundle_version_info(versions):
         name = entry["name"]
         if entry["name"] != "development":
             entry["id"] = _bundle_id(**entry)
+        entry["feature_flags"] = [entry["flag"]]
         result[name] = entry
+    dev = result["development"]
+
+    # Uncomment to test with development = 0.27.5
+    # dev["real_pyodide_version"] = "0.27.5"
+    result["development"] = result[dev["real_pyodide_version"]] | dev
     return result
 
-# NOTE: This data needs to be kept in sync with compatibility-date.capnp.
-# Particularly the packages and backport fields.
 BUNDLE_VERSION_INFO = make_bundle_version_info([
     {
         "name": "0.26.0a2",
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": "20240829.4",
-        "backport": "37",
-        "integrity": "sha256-/VOqGkRJXX3b469D8K02WHJz8eBboiD6F8TwlWrIHVo=",
-        "feature_flags": [],
+        "backport": "59",
+        "integrity": "sha256-WPeyKwddTIsG33hWCVCcb3In3BHd1b9TlQbp2g+Q8Kc=",
+        "flag": "pythonWorkers",
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
         "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
+        "baseline_snapshot_hash": "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5",
     },
     {
         "name": "0.27.5",
         "pyodide_version": "0.27.5",
         "pyodide_date": "2025-01-16",
         "packages": "20250324.1",
-        "backport": "5",
-        "integrity": "sha256-USOw7Zl2sCo7nRP76qR+KTXVECuFaO0ce5ZMAjtRSUM=",
-        "feature_flags": ["pythonWorkers20250116"],
+        "backport": "27",
+        "integrity": "sha256-0DOMRRWGt67ZuvDKINiyfZyDz7yzDoUd2Vcug5Fhv7Y=",
+        "flag": "pythonWorkers20250116",
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-cb0651452.bin",
         "baseline_snapshot_integrity": "sha256-fckrUGeHN443uCivfJC11F924K8g9HAy8RtyaGHmzW8=",
+        "baseline_snapshot_hash": "TODO",
     },
     {
+        "real_pyodide_version": "0.26.0a2",
         "name": "development",
+        "pyodide_version": "dev",
+        "pyodide_date": "dev",
         "id": "dev",
-        "feature_flags": ["pythonWorkersDevPyodide"],
-        "emscripten_version": "3.1.52",
-        "python_version": "3.12.1",
-        "packages": "20240829.4",
-        "baseline_snapshot": "baseline-d13ce2f4a.bin",
-        "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
+        "flag": "pythonWorkersDevPyodide",
+        "baseline_snapshot_hash": "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae",
     },
 ])

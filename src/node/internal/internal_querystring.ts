@@ -228,6 +228,7 @@ function stringifyPrimitive(v: unknown): string {
   if (typeof v === 'string') return v;
   // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
   if (typeof v === 'number' && Number.isFinite(v)) return '' + v;
+  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
   if (typeof v === 'bigint') return '' + v;
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   return '';
@@ -241,6 +242,7 @@ function encodeStringified(v: unknown, encode: EncodeFunction): string {
     // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
     return Math.abs(v) < 1e21 ? '' + v : encode('' + v);
   }
+  // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
   if (typeof v === 'bigint') return '' + v;
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   return '';

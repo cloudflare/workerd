@@ -12,10 +12,9 @@
 import {
   WORKERD_INDEX_URL,
   LOCKFILE,
-  LOAD_WHEELS_FROM_R2,
-  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
   PACKAGES_VERSION,
   USING_OLDEST_PACKAGES_VERSION,
+  IS_WORKERD,
 } from 'pyodide-internal:metadata';
 import {
   VIRTUALIZED_DIR,
@@ -30,13 +29,9 @@ async function decompressArrayBuffer(
   arrBuf: ArrayBuffer
 ): Promise<ArrayBuffer> {
   const resp = new Response(arrBuf);
-  if (resp && resp.body) {
-    return await new Response(
-      resp.body.pipeThrough(new DecompressionStream('gzip'))
-    ).arrayBuffer();
-  } else {
-    throw new Error('Failed to decompress array buffer');
-  }
+  return await new Response(
+    resp.body!.pipeThrough(new DecompressionStream('gzip'))
+  ).arrayBuffer();
 }
 
 function getPackageMetadata(requirement: string): PackageDeclaration {
@@ -60,10 +55,7 @@ async function loadBundleFromR2(requirement: string): Promise<Reader> {
     const response = await fetch(url);
     if (response.status != 200) {
       throw new Error(
-        'Could not fetch package at url ' +
-          url +
-          ' received status ' +
-          response.status
+        `Could not fetch package at url ${url} received status ${response.status}`
       );
     }
 
@@ -99,9 +91,7 @@ async function loadBundleFromR2WithRetry(
   }
 }
 
-async function loadBundleFromArtifactBundler(
-  requirement: string
-): Promise<Reader> {
+function loadBundleFromArtifactBundler(requirement: string): Promise<Reader> {
   const filename = getPackageMetadata(requirement).file_name;
   const fullPath = 'python-package-bucket/' + PACKAGES_VERSION + '/' + filename;
   const reader = ArtifactBundler.getPackage(fullPath);
@@ -110,16 +100,16 @@ async function loadBundleFromArtifactBundler(
       'Failed to get package ' + fullPath + ' from ArtifactBundler'
     );
   }
-  return reader;
+  return Promise.resolve(reader);
 }
 
 /**
  * ArrayBufferReader wraps around an arrayBuffer in a way that tar.js is able to read from
  */
 class ArrayBufferReader {
-  constructor(private arrayBuffer: ArrayBuffer) {}
+  public constructor(private arrayBuffer: ArrayBuffer) {}
 
-  read(offset: number, buf: Uint8Array): number {
+  public read(offset: number, buf: Uint8Array): number {
     const size = this.arrayBuffer.byteLength;
     if (offset >= size || offset < 0) {
       return 0;
@@ -137,9 +127,9 @@ async function loadPackagesImpl(
   Module: Module,
   requirements: Set<string>,
   loadBundle: (req: string) => Promise<Reader>
-) {
-  let loadPromises: Promise<[string, Reader]>[] = [];
-  let loading = [];
+): Promise<void> {
+  const loadPromises: Promise<[string, Reader]>[] = [];
+  const loading = [];
   for (const req of requirements) {
     if (req === 'test') {
       continue; // Skip the test package, it is only useful for internal Python regression testing.
@@ -176,7 +166,10 @@ async function loadPackagesImpl(
  * do any dependency resolution, it just installs the requirements that are specified. See
  * `getTransitiveRequirements` for the code that deals with this.
  */
-export async function loadPackages(Module: Module, requirements: Set<string>) {
+export async function loadPackages(
+  Module: Module,
+  requirements: Set<string>
+): Promise<void> {
   let pkgsToLoad = requirements;
   // TODO: Package snapshot created with '20240829.4' needs the stdlib packages to be added here.
   // We should remove this check once the next Python and packages versions are rolled
@@ -184,11 +177,11 @@ export async function loadPackages(Module: Module, requirements: Set<string>) {
   if (USING_OLDEST_PACKAGES_VERSION) {
     pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
   }
-  if (LOAD_WHEELS_FROM_R2) {
+  if (IS_WORKERD) {
     await loadPackagesImpl(Module, pkgsToLoad, (req) =>
       loadBundleFromR2WithRetry(req, 0)
     );
-  } else if (LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
+  } else {
     await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromArtifactBundler);
   }
 }

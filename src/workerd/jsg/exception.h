@@ -39,6 +39,11 @@ namespace workerd::jsg {
 #define JSG_ASSERT(cond, jsErrorType, ...)                                                         \
   KJ_ASSERT(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 
+// Asserts if the method is compatible with v8 fast api
+#define JSG_ASSERT_FASTAPI(TypeWrapper, Method, jsErrorType, ...)                                  \
+  KJ_ASSERT(isFastMethodCompatible<TypeWrapper, Method>,                                           \
+      kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__));
+
 #define JSG_REQUIRE(cond, jsErrorType, ...)                                                        \
   KJ_REQUIRE(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // Unlike KJ_REQUIRE, JSG_REQUIRE passes all message arguments through kj::str which makes it

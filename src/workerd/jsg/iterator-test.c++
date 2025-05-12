@@ -4,6 +4,8 @@
 
 #include "jsg-test.h"
 
+#include <workerd/util/autogate.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -12,7 +14,6 @@ V8System v8System;
 struct GeneratorContext: public Object, public ContextGlobal {
 
   uint generatorTest(Lock& js, Generator<kj::String> generator) {
-
     KJ_DEFER(generator.forEach(
         js, [](auto& js, auto, auto&) { KJ_FAIL_ASSERT("Should not have been called"); }));
 
@@ -190,6 +191,7 @@ struct GeneratorContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(GeneratorIsolate, GeneratorContext, GeneratorContext::Test);
 
 KJ_TEST("Generator works") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<GeneratorContext, GeneratorIsolate> e(v8System);
 
   e.expectEval("generatorTest([undefined,2,3])", "number", "2");

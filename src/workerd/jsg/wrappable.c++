@@ -248,7 +248,7 @@ v8::Local<v8::Object> Wrappable::getHandle(v8::Isolate* isolate) {
 }
 
 void Wrappable::addStrongRef() {
-  // The `isolate == nullptr` check here ensures that `jsg::alloc<T>()` can be used with no
+  // The `isolate == nullptr` check here ensures that `js.alloc<T>()` can be used with no
   // isolate, simply allocating the object as a normal C++ heap object.
   KJ_DREQUIRE(isolate == nullptr || v8::Isolate::TryGetCurrent() != nullptr,
       "referencing wrapper without isolate lock");

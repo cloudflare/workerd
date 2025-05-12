@@ -58,8 +58,8 @@ type ErrorOptions = {
   comment: string;
 } & (
   | {
-      expectedFailures?: string[];
-      skippedTests?: string[];
+      expectedFailures?: (string | RegExp)[];
+      skippedTests?: (string | RegExp)[];
       skipAllTests?: false;
     }
   | {
@@ -83,7 +83,7 @@ type Env = {
 };
 
 type TestCase = {
-  test(_: unknown, env: Env): Promise<void>;
+  test(_: unknown, env: Env): Promise<void> | void;
 };
 
 type UnknownFunc = (...args: unknown[]) => unknown;
@@ -334,7 +334,7 @@ class RunnerState {
       cleanFn();
     }
 
-    const expectedFailures = new Set(this.options.expectedFailures ?? []);
+    const expectedFailures = new FilterList(this.options.expectedFailures);
     const unexpectedFailures = [];
 
     for (const err of this.errors) {
@@ -351,18 +351,31 @@ class RunnerState {
     if (unexpectedFailures.length > 0) {
       console.info(
         'The following tests unexpectedly failed:',
-        unexpectedFailures
+        JSON.stringify(
+          unexpectedFailures.map((v) => v.toString()),
+          null,
+          2
+        )
       );
     }
 
-    if (expectedFailures.size > 0) {
+    const unexpectedSuccess = expectedFailures.getUnmatched();
+    // TODO(soon): Once we have a list of successful assertions, we should throw an error if a
+    // regex also matches successful tests. This can be done once we implement wpt.fyi report
+    // generation.
+
+    if (unexpectedSuccess.size > 0) {
       console.info(
         'The following tests were expected to fail but instead succeeded:',
-        [...expectedFailures]
+        JSON.stringify(
+          [...unexpectedSuccess].map((v) => v.toString()),
+          null,
+          2
+        )
       );
     }
 
-    if (unexpectedFailures.length > 0 || expectedFailures.size > 0) {
+    if (unexpectedFailures.length > 0 || unexpectedSuccess.size > 0) {
       throw new Error(
         `${this.testFileName} failed. Please update the test config.`
       );
@@ -385,16 +398,37 @@ type HostInfo = {
   HTTP_PORT: string;
   HTTPS_PORT: string;
 };
+
+/**
+ * Exception type that represents a failing assert.
+ * NOTE: This a custom error type defined by WPT - it's not the same as node:assert's AssertionError
+ * @param message - Error message.
+ */
+declare class AssertionError extends Error {}
+
+function AssertionError(this: AssertionError, message: string): void {
+  if (typeof message == 'string') {
+    message = sanitize_unpaired_surrogates(message);
+  }
+  this.message = message;
+}
+
 declare global {
   /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   var state: RunnerState;
   var GLOBAL: { isWindow(): boolean; isWorker(): boolean };
+  var AssertionError: unknown;
   /* eslint-enable no-var */
 
   function test(func: TestFn, name: string, properties?: unknown): void;
   function done(): undefined;
   function subsetTestByKey(
     _key: string,
+    testType: TestRunnerFn,
+    testCallback: TestFn | PromiseTestFn,
+    testMessage: string
+  ): void;
+  function subsetTest(
     testType: TestRunnerFn,
     testCallback: TestFn | PromiseTestFn,
     testMessage: string
@@ -473,27 +507,30 @@ declare global {
     promise: Promise<unknown>,
     description?: string
   ): Promise<void>;
+
+  function assert_in_array(
+    actual: unknown,
+    expected: unknown[],
+    description?: string
+  ): void;
+
   function get_host_info(): HostInfo;
   function token(): string;
   function setup(func: UnknownFunc | Record<string, unknown>): void;
   function add_completion_callback(func: UnknownFunc): void;
-}
-
-/**
- * Exception type that represents a failing assert.
- * NOTE: This a custom error type defined by WPT - it's not the same as node:assert's AssertionError
- * @param message - Error message.
- */
-declare class AssertionError extends Error {}
-function AssertionError(this: AssertionError, message: string): void {
-  if (typeof message == 'string') {
-    message = sanitize_unpaired_surrogates(message);
-  }
-  this.message = message;
+  function garbageCollect(): void;
+  function format_value(val: unknown): string;
+  function createBuffer(
+    type: 'ArrayBuffer' | 'SharedArrayBuffer',
+    length: number,
+    opts: { maxByteLength?: number } | undefined
+  ): ArrayBuffer | SharedArrayBuffer;
 }
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment -- eslint doesn't like "old-style" classes. Code is copied from WPT
 AssertionError.prototype = Object.create(Error.prototype);
+
+globalThis.AssertionError = AssertionError;
 
 declare class OptionalFeatureUnsupportedError extends AssertionError {}
 function OptionalFeatureUnsupportedError(
@@ -608,6 +645,15 @@ globalThis.subsetTestByKey = (
   testCallback,
   testMessage
 ): void => {
+  // This function is designed to allow selecting only certain tests when
+  // running in a browser, by changing the query string. We'll always run
+  // all the tests.
+
+  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -- We are emulating WPT's existing interface which always passes through the returned value
+  return testType(testCallback, testMessage);
+};
+
+globalThis.subsetTest = (testType, testCallback, testMessage): void => {
   // This function is designed to allow selecting only certain tests when
   // running in a browser, by changing the query string. We'll always run
   // all the tests.
@@ -1052,6 +1098,23 @@ globalThis.promise_rejects_exactly = (
     });
 };
 
+/**
+ * Assert that ``expected`` is an array and ``actual`` is one of the members.
+ * This is implemented using ``indexOf``, so doesn't handle NaN or ±0 correctly.
+ *
+ * @param actual - Test value.
+ * @param expected - An array that ``actual`` is expected to
+ * be a member of.
+ * @param [description] - Description of the condition being tested.
+ */
+globalThis.assert_in_array = (actual, expected, description): void => {
+  notStrictEqual(
+    expected.indexOf(actual),
+    -1,
+    `assert_in_array ${description}: value ${actual} not in array ${expected}`
+  );
+};
+
 globalThis.get_host_info = (): HostInfo => {
   const httpUrl = globalThis.state.testUrl;
 
@@ -1088,6 +1151,29 @@ globalThis.setup = (func): void => {
 
 globalThis.add_completion_callback = (func: UnknownFunc): void => {
   globalThis.state.completionCallbacks.push(func);
+};
+
+globalThis.garbageCollect = (): void => {
+  if (typeof gc === 'function') {
+    gc();
+  }
+};
+
+globalThis.format_value = (val): string => {
+  return JSON.stringify(val, null, 2);
+};
+
+globalThis.createBuffer = (
+  type,
+  length,
+  _opts
+): ArrayBuffer | SharedArrayBuffer => {
+  switch (type) {
+    case 'ArrayBuffer':
+      return new ArrayBuffer(length);
+    case 'SharedArrayBuffer':
+      return new SharedArrayBuffer(length);
+  }
 };
 
 class Location {
@@ -1156,13 +1242,63 @@ class Location {
 
 globalThis.location = new Location();
 
+class FilterList {
+  private strings: Set<string> = new Set();
+  private regexps: RegExp[] = [];
+  private unmatchedRegexps: Set<RegExp> = new Set();
+
+  public constructor(filters: (string | RegExp)[] | undefined) {
+    if (filters === undefined) {
+      return;
+    }
+
+    for (const filter of filters) {
+      if (typeof filter === 'string') {
+        this.strings.add(filter);
+      } else {
+        this.regexps.push(filter);
+      }
+    }
+
+    this.unmatchedRegexps = new Set(this.regexps);
+  }
+
+  public has(input: string): boolean {
+    if (this.strings.has(input)) {
+      return true;
+    }
+
+    return this.regexps.some((r) => r.test(input));
+  }
+
+  public delete(input: string): boolean {
+    if (this.strings.delete(input)) {
+      return true;
+    }
+
+    const maybeMatch = this.regexps.find((r) => r.test(input));
+
+    if (maybeMatch !== undefined) {
+      this.unmatchedRegexps.delete(maybeMatch);
+      return true;
+    }
+
+    return false;
+  }
+
+  public getUnmatched(): Set<string | RegExp> {
+    return this.strings.union(this.unmatchedRegexps);
+  }
+}
 function shouldRunTest(message: string): boolean {
-  if ((globalThis.state.options.skippedTests ?? []).includes(message)) {
+  const skippedTests = new FilterList(globalThis.state.options.skippedTests);
+
+  if (skippedTests.has(message)) {
     return false;
   }
 
   if (globalThis.state.options.verbose) {
-    console.log('run', message);
+    console.info('run', message);
   }
 
   return true;
@@ -1229,9 +1365,12 @@ function getBindingPath(base: string, rawPath: string): string {
 const EXCLUDED_PATHS = new Set([
   // Implemented in harness.ts
   '/common/subset-tests-by-key.js',
+  '/common/subset-tests.js',
   '/resources/utils.js',
   '/common/utils.js',
   '/common/get-host-info.sub.js',
+  '/common/gc.js',
+  '/common/sab.js',
 ]);
 
 function replaceInterpolation(code: string): string {
@@ -1277,11 +1416,16 @@ function evalAsBlock(env: Env, files: string[]): void {
   env.unsafe.eval(block);
 }
 
+type Runner = {
+  run: (file: string) => TestCase | Record<string, never>;
+  printResults: () => TestCase;
+};
+
 export function createRunner(
   config: TestRunnerConfig,
   moduleBase: string,
   allTestFiles: string[]
-): (file: string) => TestCase {
+): Runner {
   const testsNotFound = new Set(Object.keys(config)).difference(
     new Set(allTestFiles)
   );
@@ -1294,57 +1438,104 @@ export function createRunner(
 
   const onlyFlagUsed = Object.values(config).some((options) => options.only);
 
-  return (file: string): TestCase => {
-    return {
-      async test(_: unknown, env: Env): Promise<void> {
-        const options = config[file];
+  return {
+    run(file: string): TestCase | Record<string, never> {
+      if (onlyFlagUsed && !config[file]?.only) {
+        // Return an empty object to avoid printing extra output from all the other disabled test cases.
+        return {};
+      }
 
-        if (!options) {
-          throw new Error(
-            `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
-          );
-        }
-
-        if (onlyFlagUsed && !options.only) {
-          return;
-        }
-
-        if (options.skipAllTests) {
-          console.warn(`All tests in ${file} have been skipped.`);
-          return;
-        }
-
-        const testUrl = new URL(
-          path.join(moduleBase, file),
-          'http://localhost'
-        );
-
-        // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
-        // Update the URL's port so we can connect to it
-        testUrl.port = env.HTTP_PORT ?? '';
-
-        globalThis.state = new RunnerState(testUrl, file, env, options);
-        const meta = parseWptMetadata(String(env[file]));
-
-        if (options.before) {
-          options.before();
-        }
-
-        const files = [];
-
-        for (const script of meta.scripts) {
-          files.push(getCodeAtPath(env, path.dirname(file), script));
-        }
-
-        files.push(getCodeAtPath(env, './', file, options.replace));
-        evalAsBlock(env, files);
-
-        if (options.after) {
-          options.after();
-        }
-
-        await globalThis.state.validate();
-      },
-    };
+      return {
+        async test(_: unknown, env: Env): Promise<void> {
+          return runTest(config[file], env, moduleBase, file);
+        },
+      };
+    },
+    printResults(): TestCase {
+      return {
+        test(_: unknown, env: Env): void {
+          printResults(config, allTestFiles, moduleBase, env);
+        },
+      };
+    },
   };
+}
+
+async function runTest(
+  options: TestRunnerOptions | undefined,
+  env: Env,
+  moduleBase: string,
+  file: string
+): Promise<void> {
+  if (!options) {
+    throw new Error(
+      `Missing test configuration for ${file}. Specify '${file}': {} for default options.`
+    );
+  }
+
+  if (options.skipAllTests) {
+    console.warn(`All tests in ${file} have been skipped.`);
+    return;
+  }
+
+  const testUrl = new URL(path.join(moduleBase, file), 'http://localhost');
+
+  // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
+  // Update the URL's port so we can connect to it
+  testUrl.port = env.HTTP_PORT ?? '';
+
+  globalThis.state = new RunnerState(testUrl, file, env, options);
+  const meta = parseWptMetadata(String(env[file]));
+
+  if (options.before) {
+    options.before();
+  }
+
+  const files = [];
+
+  for (const script of meta.scripts) {
+    files.push(getCodeAtPath(env, path.dirname(file), script));
+  }
+
+  files.push(getCodeAtPath(env, './', file, options.replace));
+  evalAsBlock(env, files);
+
+  if (options.after) {
+    options.after();
+  }
+
+  await globalThis.state.validate();
+}
+
+function printResults(
+  config: TestRunnerConfig,
+  allTestFiles: string[],
+  moduleBase: string,
+  env: Env
+): void {
+  if (env.GEN_TEST_CONFIG) {
+    console.log(generateConfig(config, allTestFiles, moduleBase));
+  }
+}
+
+function generateConfig(
+  config: TestRunnerConfig,
+  allTestFiles: string[],
+  moduleBase: string
+): string {
+  const generatedConfig: TestRunnerConfig = {};
+  for (const file of allTestFiles) {
+    // Copy config if the user has created any so far, else initialize to blank
+    generatedConfig[file] = config[file] ?? {};
+  }
+
+  return `\x1b[1;7;35m*** Copy this config to src/wpt/${moduleBase}-test.ts ***\x1b[0m
+
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+import { type TestRunnerConfig } from 'harness/harness';
+
+export default ${JSON.stringify(generatedConfig, null, 2)} satisfies TestRunnerConfig;`;
 }

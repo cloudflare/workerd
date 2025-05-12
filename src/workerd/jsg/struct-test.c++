@@ -42,6 +42,7 @@ struct StructContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(StructIsolate, StructContext, NumberBox, TestStruct, SelfStruct);
 
 KJ_TEST("structs") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<StructContext, StructIsolate> e(v8System);
   e.expectEval(
       "readTestStruct({str: 'foo', num: 123, box: new NumberBox(456)})", "string", "foo, 123, 456");

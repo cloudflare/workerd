@@ -1,8 +1,4 @@
 declare namespace ArtifactBundler {
-  const constructor: {
-    getSnapshotImports(): string[];
-  };
-
   type MemorySnapshotResult = {
     snapshot: Uint8Array;
     importedModulesList: string[];

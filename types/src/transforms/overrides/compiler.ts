@@ -2,12 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import path from "node:path";
-import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
-import ts from "typescript";
-import { getTypeName } from "../../generator";
-import { SourcesMap } from "../../program";
+import assert from 'node:assert';
+import path from 'node:path';
+import { StructureGroups } from '@workerd/jsg/rtti';
+import ts from 'typescript';
+import { getTypeName } from '../../generator';
+import { SourcesMap } from '../../program';
 
 // If an override matches this RegExp, it will replace the existing definition
 const keywordReplace =
@@ -30,14 +30,14 @@ function compileOverride(
   // we convert all overrides to classes, this type classification is ignored
   // when merging. Classes just support all possible forms of override (extends,
   // implements, constructors, (static) properties/methods).
-  if (keywordHeritage.test(override) || override.startsWith("{")) {
+  if (keywordHeritage.test(override) || override.startsWith('{')) {
     // Use existing name and type classification, may merge members
     // Examples:
     // - `extends EventTarget<WorkerGlobalScopeEventMap>`
     // - `extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format: "gzip" | "deflate" | "deflate-raw"); }`
     // - `{ json<T>(): Promise<T>; }`
     override = `class ${name} ${override}`;
-  } else if (override.startsWith("<")) {
+  } else if (override.startsWith('<')) {
     // Use existing name and type classification, may merge members
     // Examples:
     // - `<R = any> { read(): Promise<ReadableStreamReadResult<R>>; }`
@@ -52,15 +52,15 @@ function compileOverride(
   }
   // Purely heritage and rename overrides don't need to define any members, but
   // they still need to be valid classes for parsing.
-  if (!override.endsWith("}")) {
+  if (!override.endsWith('}')) {
     override = `${override} {}`;
   }
 
   return [override, false];
 }
 
-const overridesPath = "/$virtual/overrides";
-const definesPath = "/$virtual/defines";
+const overridesPath = '/$virtual/overrides';
+const definesPath = '/$virtual/defines';
 
 // Converts and collects all overrides and defines as TypeScript source files.
 // Also returns a set of definitions that should be replaced by their override.
@@ -71,19 +71,19 @@ export function compileOverridesDefines(
   // Types that need their definition completely replaced by their override
   const replacements = new Set<string>();
 
-  root.getGroups().forEach((group) => {
-    group.getStructures().forEach((structure) => {
+  root.groups.forEach((group) => {
+    group.structures.forEach((structure) => {
       const name = getTypeName(structure);
-      const override = structure.getTsOverride().trim();
-      const define = structure.getTsDefine().trim();
+      const override = structure.tsOverride.trim();
+      const define = structure.tsDefine.trim();
 
-      if (override !== "") {
+      if (override !== '') {
         const [compiled, isReplacement] = compileOverride(name, override);
-        sources.set(path.join(overridesPath, name + ".ts"), compiled);
+        sources.set(path.join(overridesPath, name + '.ts'), compiled);
         if (isReplacement) replacements.add(name);
       }
-      if (define !== "") {
-        sources.set(path.join(definesPath, name + ".ts"), define);
+      if (define !== '') {
+        sources.set(path.join(definesPath, name + '.ts'), define);
       }
     });
   });
@@ -96,7 +96,7 @@ export function maybeGetOverride(
   program: ts.Program,
   name: string
 ): ts.Statement | undefined {
-  const sourcePath = path.join(overridesPath, name + ".ts");
+  const sourcePath = path.join(overridesPath, name + '.ts');
   const sourceFile = program.getSourceFile(sourcePath);
   if (sourceFile !== undefined) {
     assert.strictEqual(sourceFile.statements.length, 1);
@@ -109,7 +109,7 @@ export function maybeGetDefines(
   program: ts.Program,
   name: string
 ): ts.NodeArray<ts.Statement> | undefined {
-  const sourcePath = path.join(definesPath, name + ".ts");
+  const sourcePath = path.join(definesPath, name + '.ts');
   const sourceFile = program.getSourceFile(sourcePath);
   return sourceFile?.statements;
 }

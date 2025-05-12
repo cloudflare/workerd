@@ -221,7 +221,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       capnp::List<config::Extension>::Reader extensions);
 
   // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
-  void abortAllActors();
+  void abortAllActors(kj::Maybe<const kj::Exception&> reason);
 
   // Can only be called in the link stage.
   //

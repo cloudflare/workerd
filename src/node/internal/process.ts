@@ -69,9 +69,7 @@ function isJsonSerializable(
             isJsonSerializable(prop, seen)
           );
         case Array.prototype:
-          return (<Array<unknown>>value).every((elem) =>
-            isJsonSerializable(elem, seen)
-          );
+          return value.every((elem: unknown) => isJsonSerializable(elem, seen));
         default:
           return false;
       }

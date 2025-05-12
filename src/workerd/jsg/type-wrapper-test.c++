@@ -61,6 +61,7 @@ class TestExtension {
 JSG_DECLARE_ISOLATE_TYPE(ExtensionIsolate, ExtensionContext, TypeWrapperExtension<TestExtension>);
 
 KJ_TEST("extensions") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<ExtensionContext, ExtensionIsolate> e(v8System);
   e.expectEval("fromExtensionType(toExtensionType(12.3))", "number", "12");
 }

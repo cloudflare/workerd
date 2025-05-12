@@ -61,10 +61,7 @@ export default {
       'Stream disconnected prematurely and a dropped promise when faced with intentionally bad chunked encoding from WPT',
     skipAllTests: true,
   },
-  'basic/gc.any.js': {
-    comment: 'Run WPT tests with --expose-gc if we want to run this test',
-    skipAllTests: true,
-  },
+  'basic/gc.any.js': {},
   'basic/header-value-combining.any.js': {
     comment:
       "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
@@ -777,11 +774,7 @@ export default {
       'We seem to be returning the boundary value as text but WPT expects no value',
     expectedFailures: ['Consume empty FormData response body as text'],
   },
-  'response/response-consume-stream.any.js': {
-    comment:
-      'Triggers UBSan error in BodyBufferInputStream::tryRead. memcpy from a NULL pointer. Yikes',
-    skipAllTests: true,
-  },
+  'response/response-consume-stream.any.js': {},
   'response/response-error-from-stream.any.js': {
     comment:
       'Several issues. Firstly, we require the type field to always be passed to ReadableStream',

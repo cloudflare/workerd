@@ -31,8 +31,8 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
-typedef rpc::Trace::Log::Level LogLevel;
-typedef rpc::Trace::ExecutionModel ExecutionModel;
+using LogLevel = rpc::Trace::Log::Level;
+using ExecutionModel = rpc::Trace::ExecutionModel;
 
 class Trace;
 
@@ -555,14 +555,14 @@ EventInfo cloneEventInfo(const EventInfo& info);
 
 template <typename T>
 concept AttributeValue = kj::isSameType<kj::String, T>() || kj::isSameType<bool, T>() ||
-    kj::isSameType<double, T>() || kj::isSameType<int32_t, T>();
+    kj::isSameType<double, T>() || kj::isSameType<int64_t, T>();
 
 // An Attribute mark is used to add detail to a span over its lifetime.
 // The Attribute struct can also be used to provide arbitrary additional
 // properties for some other structs.
 // Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
 struct Attribute final {
-  using Value = kj::OneOf<kj::String, bool, double, int32_t>;
+  using Value = kj::OneOf<kj::String, bool, double, int64_t>;
   using Values = kj::Array<Value>;
 
   explicit Attribute(kj::String name, Value&& value);
@@ -632,7 +632,7 @@ struct Link final {
   Link clone() const;
 };
 
-using Mark = kj::OneOf<DiagnosticChannelEvent, Exception, Log, Return, Link, CustomInfo>;
+// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, Link, and CustomInfo events.
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -641,14 +641,15 @@ struct SpanOpen final {
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
   explicit SpanOpen(
-      kj::Maybe<kj::String> operationName = kj::none, kj::Maybe<Info> info = kj::none);
+      uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
   KJ_DISALLOW_COPY(SpanOpen);
 
-  kj::Maybe<kj::String> operationName = kj::none;
+  kj::String operationName;
   kj::Maybe<Info> info = kj::none;
+  uint64_t parentSpanId;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
@@ -745,7 +746,17 @@ struct Outcome final {
 // and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
 // the stream was abruptly terminated.
 struct TailEvent final {
-  using Event = kj::OneOf<Onset, Outcome, Hibernate, SpanOpen, SpanClose, Mark>;
+  using Event = kj::OneOf<Onset,
+      Outcome,
+      Hibernate,
+      SpanOpen,
+      SpanClose,
+      DiagnosticChannelEvent,
+      Exception,
+      Log,
+      Return,
+      Link,
+      CustomInfo>;
 
   explicit TailEvent(
       const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);
@@ -853,7 +864,6 @@ class Trace final: public kj::Refcounted {
   // Trace data is recorded outside of the JS heap.  To avoid DoS, we keep an estimate of trace
   // data size, and we stop recording if too much is used.
   size_t bytesUsed = 0;
-  size_t numSpans = 0;
 
   // Copy content from this trace into `builder`.
   void copyTo(rpc::Trace::Builder builder) const;
@@ -893,7 +903,7 @@ struct Span {
   // create a `Span`, use a `SpanBuilder`.
 
  public:
-  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
+  using TagValue = tracing::Attribute::Value;
   // TODO(someday): Support binary bytes, too.
   using TagMap = kj::HashMap<kj::ConstString, TagValue>;
   using Tag = TagMap::Entry;

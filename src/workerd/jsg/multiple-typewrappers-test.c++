@@ -137,6 +137,7 @@ void expectEval(
 }
 
 KJ_TEST("Create a context with a configuration then create a default context with another") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   capnp::MallocMessageBuilder flagsArena;
   auto flags = flagsArena.initRoot<::workerd::CompatibilityFlags>();
   auto flagsReader = flags.asReader();

@@ -80,9 +80,7 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
     return any(file.match(glob) for glob in globs)
 
 
-def run_bazel_tool(
-    tool_name: str, args: list[str], is_archive: bool = False
-) -> subprocess.CompletedProcess:
+def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
     # Use the formatter executable from bazel-bin
     bazel_bin = Path("bazel-bin")
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
@@ -96,7 +94,10 @@ def run_bazel_tool(
 
     # Use the new formatter targets in build/deps/formatters
     build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
-    subprocess.run(["bazel", "build", build_target])
+    download_result = subprocess.run(["bazel", "build", build_target])
+    if download_result.returncode != 0:
+        logging.error(f"Failed to download {tool_name}")
+        return download_result
 
     if internal_tool_path.exists():
         return subprocess.run([internal_tool_path, *args])

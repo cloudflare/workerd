@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v6.3.4"
-URL = "https://github.com/bazel-contrib/rules_nodejs/releases/download/v6.3.4/rules_nodejs-v6.3.4.tar.gz"
-STRIP_PREFIX = "rules_nodejs-6.3.4"
-SHA256 = "b361863788b15d9d0cebf6803c22e8d1afa689a0eefef96dec46bcce30527090"
+TAG_NAME = "v6.3.5"
+URL = "https://github.com/bazel-contrib/rules_nodejs/releases/download/v6.3.5/rules_nodejs-v6.3.5.tar.gz"
+STRIP_PREFIX = "rules_nodejs-6.3.5"
+SHA256 = "164f1bd7e2a67ab3f6caf5b49b53c7dd625d293513154fa720e30d39eaa8285f"
 TYPE = "tgz"
 
 def dep_rules_nodejs():

@@ -78,6 +78,11 @@ SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) 
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }
 
+void SqlStorage::setMaxPageCountForTest(jsg::Lock& js, int count) {
+  auto& db = getDb(js);
+  db.run(SqliteDatabase::TRUSTED, kj::str("PRAGMA max_page_count = ", count));
+}
+
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString query) {
   return js.alloc<Statement>(js, JSG_THIS, query);
 }

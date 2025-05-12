@@ -1,5 +1,10 @@
-export function reportError(e: any): never {
-  e.stack?.split('\n').forEach((s: any) => console.warn(s));
+// Split the stack into lines and print them individually.
+// We do this because edgeworker's test runner will put a multiline log all on one line. This is
+// very hard to read.
+export function reportError(e: Error): never {
+  e.stack?.split('\n').forEach((s: string) => {
+    console.warn(s);
+  });
   throw e;
 }
 
@@ -32,17 +37,14 @@ export function simpleRunPython(
   emscriptenModule: Module,
   code: string
 ): string {
-  const [status, err] = emscriptenModule.API.rawRun(code);
+  const [status, cause] = emscriptenModule.API.rawRun(code);
   // status 0: Ok
   // status -1: Error
-  if (status) {
+  if (status === -1) {
     // PyRun_SimpleString will have written a Python traceback to stderr.
     console.warn('Command failed:', code);
-    console.warn('Error was:');
-    for (const line of err.split('\n')) {
-      console.warn(line);
-    }
-    throw new Error('Failed to run Python code: ' + err);
+    console.warn(cause);
+    throw new Error('Failed to run Python code');
   }
-  return err;
+  return cause;
 }

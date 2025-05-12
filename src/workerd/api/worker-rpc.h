@@ -102,17 +102,17 @@ class StreamSinkImpl;
 
 // ExternalHandler used when deserializing RPC messages. Deserialization functions with which to
 // handle RPC specially should use this.
-class RpcDeserializerExternalHander final: public jsg::Deserializer::ExternalHandler {
+class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHandler {
  public:
   // The `streamSink` parameter should be provided if a StreamSink already exists, e.g. when
   // deserializing results. If omitted, it will be constructed on-demand.
-  RpcDeserializerExternalHander(capnp::List<rpc::JsValue::External>::Reader externals,
+  RpcDeserializerExternalHandler(capnp::List<rpc::JsValue::External>::Reader externals,
       RpcStubDisposalGroup& disposalGroup,
       kj::Maybe<StreamSinkImpl&> streamSink)
       : externals(externals),
         disposalGroup(disposalGroup),
         streamSink(streamSink) {}
-  ~RpcDeserializerExternalHander() noexcept(false);
+  ~RpcDeserializerExternalHandler() noexcept(false);
 
   // Read and return the next external.
   rpc::JsValue::External::Reader read();
@@ -458,6 +458,10 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
 
   kj::Promise<Result> notSupported() override {
     JSG_FAIL_REQUIRE(TypeError, "The receiver is not an RPC object");
+  }
+
+  void failed(const kj::Exception& e) override {
+    capFulfiller->reject(kj::cp(e));
   }
 
   // Event ID for jsRpcSession.

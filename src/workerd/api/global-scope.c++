@@ -875,7 +875,6 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
-  KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
   constexpr auto kSpecifier = "node:buffer"_kj;
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     auto def = module.get(js, "default"_kj);
@@ -892,7 +891,6 @@ jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
-  KJ_ASSERT(FeatureFlags::get(js).getNodeJsCompatV2());
   constexpr auto kSpecifier = "node:process"_kj;
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
     auto def = module.get(js, "default"_kj);
@@ -910,6 +908,10 @@ double Performance::now() {
   // We define performance.now() for compatibility purposes, but due to Spectre concerns it
   // returns exactly what Date.now() returns.
   return dateNow();
+}
+
+jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
+  return js.alloc<StorageManager>();
 }
 
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {

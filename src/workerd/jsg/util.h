@@ -25,7 +25,7 @@ namespace workerd::jsg {
 
 class Lock;
 
-typedef unsigned int uint;
+using uint = unsigned int;
 
 // When a C++ callback wishes to throw a JavaScript exception, it should first call
 // isolate->ThrowException() to set the JavaScript error value, then it should throw
@@ -269,18 +269,18 @@ template <typename T>
 struct RemoveMaybe_;
 template <typename T>
 struct RemoveMaybe_<kj::Maybe<T>> {
-  typedef T Type;
+  using Type = T;
 };
 template <typename T>
 using RemoveMaybe = typename RemoveMaybe_<T>::Type;
 
 template <typename T>
 struct RemoveRvalueRef_ {
-  typedef T Type;
+  using Type = T;
 };
 template <typename T>
 struct RemoveRvalueRef_<T&&> {
-  typedef T Type;
+  using Type = T;
 };
 template <typename T>
 using RemoveRvalueRef = typename RemoveRvalueRef_<T>::Type;
@@ -289,19 +289,29 @@ enum class JsgKind { RESOURCE, STRUCT, EXTENSION };
 
 template <typename T>
 struct LiftKj_ {
-  template <typename Info, typename Func>
-  static void apply(const Info& info, Func&& func) {
-    auto isolate = info.GetIsolate();
+  template <typename Info, typename Func, typename Ret = void>
+  static Ret apply(const Info& info, Func&& func) {
+    constexpr bool isFastApi = kj::isSameType<v8::Isolate*, Info>();
+    v8::Isolate* isolate;
+    if constexpr (isFastApi) {
+      isolate = info;
+    } else {
+      isolate = info.GetIsolate();
+    }
+
     try {
       try {
-        v8::HandleScope scope(isolate);
-        if constexpr (isVoid<T>()) {
-          func();
-          if constexpr (!kj::canConvert<Info&, v8::PropertyCallbackInfo<void>&>()) {
-            info.GetReturnValue().SetUndefined();
-          }
+        if constexpr (isFastApi) {
+          return func();
         } else {
-          info.GetReturnValue().Set(func());
+          if constexpr (isVoid<T>()) {
+            func();
+            if constexpr (!kj::canConvert<Info&, v8::PropertyCallbackInfo<void>&>()) {
+              info.GetReturnValue().SetUndefined();
+            }
+          } else {
+            info.GetReturnValue().Set(func());
+          }
         }
       } catch (kj::Exception& exception) {
         // This throwInternalError() overload may decode a tunneled error. While constructing the
@@ -317,6 +327,12 @@ struct LiftKj_ {
     } catch (...) {
       throwInternalError(
           isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType()));
+    }
+
+    if constexpr (isFastApi && !isVoid<Ret>()) {
+      // Since we return early on fast api calls, this should never get executed
+      // unless there is an error thrown from the fast api call itself.
+      return Ret{};
     }
   }
 };
@@ -341,7 +357,6 @@ struct LiftKj_<v8::Local<v8::Promise>> {
       return;
     }
 
-    v8::HandleScope scope(isolate);
     v8::TryCatch tryCatch(isolate);
     try {
       try {
@@ -385,6 +400,13 @@ struct LiftKj_<v8::Local<v8::Promise>> {
 template <typename Info, typename Func>
 void liftKj(const Info& info, Func&& func) {
   LiftKj_<decltype(func())>::apply(info, kj::fwd<Func>(func));
+}
+
+// Direct value version of liftKj for use with Fast API and other contexts where callback info isn't available
+template <typename Ret, typename Func>
+Ret liftKj(v8::Isolate* isolate, Func&& func) {
+  return LiftKj_<decltype(func())>::template apply<v8::Isolate*, Func, Ret>(
+      isolate, kj::fwd<Func>(func));
 }
 
 namespace _ {
@@ -487,5 +509,32 @@ using WontImplement = Unimplemented;
 
 kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
 bool isNodeJsCompatEnabled(jsg::Lock& js);
+
+// The following counter is used to track the number of times a method is called.
+// This is mostly useful for validating/testing v8 fast api methods, but also for
+// tracking the number of times a method is called in general.
+struct CallCounter {
+  // Referring to the slow method triggered at least once for a single method call.
+  uint32_t slow = 0;
+  // Referring to the fast method whenever V8 optimizes the method.
+  // Might or might not be called depending on the method's implementation,
+  // and the current limitations of v8 fast api.
+  uint32_t fast = 0;
+
+  void reset() {
+    slow = 0;
+    fast = 0;
+  }
+
+  bool operator==(const CallCounter& rhs) {
+    return slow == rhs.slow && fast == rhs.fast;
+  }
+};
+
+inline kj::String KJ_STRINGIFY(CallCounter& counter) {
+  return kj::str("(", counter.slow, ", ", counter.fast, ")");
+}
+
+static CallCounter callCounter{};
 
 }  // namespace workerd::jsg

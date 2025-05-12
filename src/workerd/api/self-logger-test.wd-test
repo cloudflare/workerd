@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "self-logger", worker = .selfLoggerWorker),
+  ],
+);
+
+const selfLoggerWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "self-logger-test.js")
+  ],
+  bindings = [
+    ( name = "SERVICE", service = "self-logger" ),
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["nodejs_compat"],
+  tails = ["self-logger"],
+);

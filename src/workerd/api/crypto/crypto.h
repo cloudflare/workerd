@@ -301,7 +301,7 @@ class CryptoKey: public jsg::Object {
   // HACK: Needs to be public so derived classes can inherit from it.
   class Impl;
 
-  // Treat as private -- needs to be public for jsg::alloc<T>()...
+  // Treat as private -- needs to be public for js.alloc<T>()...
   explicit CryptoKey(kj::Own<Impl> impl);
 
   // Compare the contents of this key with the other. Will return false if

@@ -5,6 +5,7 @@
 #include "jsg.h"
 
 #include "setup.h"
+#include "simdutf.h"
 
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/modules.h>
@@ -256,16 +257,16 @@ bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
   return check(obj->HasOwnProperty(v8Context(), v8StrIntern(v8Isolate, name)));
 }
 
-kj::StringPtr Lock::getUuid() const {
-  return IsolateBase::from(v8Isolate).getUuid();
-}
-
 void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
 }
 
 void Lock::terminateExecution() {
   v8Isolate->TerminateExecution();
+}
+
+bool Lock::pumpMsgLoop() {
+  return IsolateBase::from(v8Isolate).pumpMsgLoop();
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {
@@ -497,6 +498,10 @@ kj::String Name::toString(jsg::Lock& js) {
 
 bool isInGcDestructor() {
   return HeapTracer::isInCppgcDestructor();
+}
+
+bool USVString::isValidUtf8() const {
+  return simdutf::validate_utf8(cStr(), size());
 }
 
 }  // namespace workerd::jsg

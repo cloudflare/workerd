@@ -56,9 +56,9 @@ struct CaptureThrowContext: public jsg::Object, public ContextGlobal {
     JSG_FAIL_REQUIRE(TypeError, "boom");
   }
 
-  static kj::Promise<void> staticTest3(v8::Isolate* isolate) {
+  static kj::Promise<void> staticTest3(jsg::Lock& js) {
     // Tests that JsExceptionThrown is handled properly.
-    jsg::throwTypeError(isolate, "boom"_kj);
+    jsg::throwTypeError(js.v8Isolate, "boom"_kj);
   }
 
   kj::Promise<void> getTest() {
@@ -84,6 +84,7 @@ JSG_DECLARE_ISOLATE_TYPE(
     CaptureThrowIsolate, CaptureThrowContext, jsg::TypeWrapperExtension<workerd::PromiseWrapper>);
 
 KJ_TEST("Async functions capture sync errors with flag") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<CaptureThrowContext, CaptureThrowIsolate> e(v8System);
   e.setCaptureThrowsAsRejections(true);
   e.expectEval("test1()", "object", "[object Promise]");

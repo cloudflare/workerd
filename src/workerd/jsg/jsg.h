@@ -31,7 +31,7 @@ using kj::byte;
 using kj::uint;
 
 #if _MSC_VER
-typedef long long ssize_t;
+using ssize_t = long long;
 #endif
 
 namespace workerd::jsg {
@@ -734,8 +734,8 @@ consteval size_t prefixLengthToStrip(const char (&s)[N]) {
       ::workerd::jsg::prefixLengthToStrip(#name)>
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_REGISTER_MEMBER(_, name)                                                        \
-  registry.template registerStructProperty<name##_JSG_NAME_DO_NOT_USE_DIRECTLY,                    \
-      decltype(::kj::instance<Self>().name), &Self::name>()
+  registry.template registerStructProperty<decltype(::kj::instance<Self>().name), &Self::name>(    \
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY)
 
 // Indexes for adding API data to V8's Isolate object.
 enum SetDataIndex {
@@ -1061,7 +1061,13 @@ class USVString: public kj::String {
   // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
   // constructor instead.
   template <typename... Params>
-  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {}
+  explicit USVString(Params&&... params): kj::String(kj::fwd<Params>(params)...) {
+    KJ_DASSERT(isValidUtf8());
+  }
+
+ private:
+  // This is a seperate method to avoid including simdutf8 in the header file.
+  bool isValidUtf8() const;
 };
 
 // A DOMString has the exact same representation as a kj::String, but may contain WTF-8 encoded
@@ -1682,13 +1688,13 @@ constexpr bool isPromise() {
 // Convenience template to strip off `jsg::Promise`.
 template <typename T>
 struct RemovePromise_ {
-  typedef T Type;
+  using Type = T;
 };
 
 // Convenience template to strip off `jsg::Promise`.
 template <typename T>
 struct RemovePromise_<Promise<T>> {
-  typedef T Type;
+  using Type = T;
 };
 
 // Convenience template to strip off `jsg::Promise`.
@@ -1704,28 +1710,28 @@ struct ReturnType_;
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T>
 struct ReturnType_<Func, T, false> {
-  typedef decltype(kj::instance<Func>()(kj::instance<T>())) Type;
+  using Type = decltype(kj::instance<Func>()(kj::instance<T>()));
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T>
 struct ReturnType_<Func, T, true> {
-  typedef decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<T>())) Type;
+  using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<T>()));
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func>
 struct ReturnType_<Func, void, false> {
-  typedef decltype(kj::instance<Func>()()) Type;
+  using Type = decltype(kj::instance<Func>()());
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func>
 struct ReturnType_<Func, void, true> {
-  typedef decltype(kj::instance<Func>()(kj::instance<Lock&>())) Type;
+  using Type = decltype(kj::instance<Func>()(kj::instance<Lock&>()));
 };
 
 // Convenience template to calculate the return type of a function when passed parameter type T.
@@ -2029,7 +2035,7 @@ class PropertyReflection {
  private:
   kj::Maybe<Wrappable&> self;
 
-  typedef kj::Maybe<T> Unwrapper(v8::Isolate*, v8::Local<v8::Object> object, kj::StringPtr name);
+  using Unwrapper = kj::Maybe<T>(v8::Isolate*, v8::Local<v8::Object> object, kj::StringPtr name);
   Unwrapper* unwrapper = nullptr;
 
   template <typename, typename...>
@@ -2377,9 +2383,21 @@ class Lock {
 
   // Returns a DOMString with an external memory adjustment attached.
   DOMString accountedDOMString(kj::Array<char>&& str);
+  DOMString accountedDOMString(kj::String&& str) {
+    return accountedDOMString(str.releaseArray());
+  }
+  DOMString accountedDOMString(kj::StringPtr str) {
+    return accountedDOMString(kj::str(str));
+  }
 
   // Returns a USVString with an external memory adjustment attached.
   USVString accountedUSVString(kj::Array<char>&& str);
+  USVString accountedUSVString(kj::String&& str) {
+    return accountedUSVString(str.releaseArray());
+  }
+  USVString accountedUSVString(kj::StringPtr str) {
+    return accountedUSVString(kj::str(str));
+  }
 
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
@@ -2667,10 +2685,6 @@ class Lock {
   // implementation in setup.c++. Use responsibly.
   void requestGcForTesting() const;
 
-  // Returns a random UUID for this isolate instance. This is largely intended for logging and
-  // diagnostic purposes.
-  kj::StringPtr getUuid() const;
-
   // Runs the given function synchronously with a v8::HandleScope on the stack.
   // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then
   // v8::EscapableHandleScope is used ensuring that the v8::Local<T> return
@@ -2791,6 +2805,7 @@ class Lock {
 
   void runMicrotasks();
   void terminateExecution();
+  bool pumpMsgLoop();
 
   // Logs and reports the error to tail workers (if called within an request),
   // the inspector (if attached), or to KJ_LOG(Info).

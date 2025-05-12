@@ -22,6 +22,10 @@ on:
         type: string
         required: false
         default: ''
+      upload_binary:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -79,6 +83,13 @@ jobs:
       - name: Configure git hooks
         # Configure git to quell an irrelevant warning for runners (they never commit / push).
         run: git config core.hooksPath githooks
+      - name: Bazel build (Windows workaround)
+        if: runner.os == 'Windows'
+        # HACK: Work around Bazel Windows bug: Some targets need to be compiled without symlink
+        # support. Since we still need symlinks to compile C++ code properly, compile these targets
+        # separately.
+        run: |
+          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
@@ -102,11 +113,12 @@ jobs:
           du -ms -t 1 $GITHUB_WORKSPACE
 
       - name: Upload binary
-        if: inputs.os_name == 'linux-arm' && inputs.suffix == ''
+        if: inputs.upload_binary
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}-binary
-          path: bazel-bin/src/workerd/server/workerd
+          path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
 
       - name: Drop large Bazel cache files
         if: always()

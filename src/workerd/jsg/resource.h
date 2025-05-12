@@ -10,8 +10,10 @@
 // can call back to the class's methods. This differs from, say, a struct type, which will be deeply
 // converted into a JS object when passed into JS.
 
+#include "fast-api.h"
 #include "ser.h"
 #include "util.h"
+#include "web-idl.h"
 #include "wrappable.h"
 
 #include <workerd/jsg/memory.h>
@@ -207,7 +209,12 @@ struct MethodCallback<TypeWrapper,
     Ret (U::*)(Args...),
     method,
     kj::_::Indexes<indexes...>> {
+
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
+
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -222,6 +229,25 @@ struct MethodCallback<TypeWrapper,
             (self.*method)(wrapper.template unwrap<Args>(context, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
+    });
+  }
+
+  template <typename ReturnType = Ret>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& self = extractInternalPointer<T, isContext>(context, receiver);
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    return liftKj<Ret>(isolate, [&]() {
+      return (self.*method)(wrapper.template unwrapFastApi<Args>(
+          context, fastArgs, TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -244,6 +270,9 @@ struct MethodCallback<TypeWrapper,
     method,
     kj::_::Indexes<indexes...>> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -261,6 +290,27 @@ struct MethodCallback<TypeWrapper,
                 wrapper.template unwrap<Args>(context, args, indexes,
                     TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
+    });
+  }
+
+  template <typename ReturnType = Ret>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& self = extractInternalPointer<T, isContext>(context, receiver);
+    auto& lock = Lock::from(isolate);
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    return liftKj<Ret>(isolate, [&]() {
+      return (self.*method)(lock,
+          wrapper.template unwrapFastApi<Args>(context, fastArgs,
+              TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -354,7 +404,11 @@ struct StaticMethodCallback<TypeWrapper,
     Ret(Args...),
     method,
     kj::_::Indexes<indexes...>> {
+
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -367,6 +421,24 @@ struct StaticMethodCallback<TypeWrapper,
             (*method)(wrapper.template unwrap<Args>(context, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
+    });
+  }
+
+  template <typename ReturnType = Ret>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    return liftKj<Ret>(isolate, [&]() {
+      return (*method)(wrapper.template unwrapFastApi<Args>(
+          context, fastArgs, TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -386,6 +458,10 @@ struct StaticMethodCallback<TypeWrapper,
     method,
     kj::_::Indexes<indexes...>> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
+
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -401,6 +477,26 @@ struct StaticMethodCallback<TypeWrapper,
                 wrapper.template unwrap<Args>(context, args, indexes,
                     TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
+    });
+  }
+
+  template <typename ReturnType = Ret>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& lock = Lock::from(isolate);
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    return liftKj<Ret>(isolate, [&]() {
+      return (*method)(lock,
+          wrapper.template unwrapFastApi<Args>(context, fastArgs,
+              TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
     });
   }
 };
@@ -420,6 +516,7 @@ struct StaticMethodCallback<TypeWrapper,
     Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...),
     method,
     kj::_::Indexes<indexes...>> {
+
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -451,6 +548,7 @@ struct StaticMethodCallback<TypeWrapper,
     Unimplemented(Args...),
     method,
     kj::_::Indexes<indexes...>> {
+
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     scheduleUnimplementedMethodError(args, typeid(T), methodName);
   }
@@ -471,6 +569,9 @@ struct GetterCallback;
       isContext> {                                                                                 \
     static constexpr bool enumerable = true;                                                       \
     static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {   \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.slow++;                                                                        \
+      }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
@@ -485,6 +586,22 @@ struct GetterCallback;
             context, obj, (self.*method)(wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...));  \
       });                                                                                          \
     }                                                                                              \
+    template <typename ReturnType = Ret>                                                           \
+    static ReturnType fastCallback(                                                                \
+        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.fast++;                                                                        \
+      }                                                                                            \
+      auto isolate = options.isolate;                                                              \
+      v8::HandleScope handleScope(isolate);                                                        \
+      auto context = isolate->GetCurrentContext();                                                 \
+      auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
+      auto& wrapper = TypeWrapper::from(isolate);                                                  \
+      return liftKj<ReturnType>(isolate, [&]() {                                                   \
+        return (self.*method)(                                                                     \
+            wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);          \
+      });                                                                                          \
+    }                                                                                              \
   };                                                                                               \
                                                                                                    \
   /* Specialization for methods that take `Lock&` as their first parameter. */                     \
@@ -494,6 +611,9 @@ struct GetterCallback;
       isContext> {                                                                                 \
     static constexpr bool enumerable = true;                                                       \
     static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {   \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.slow++;                                                                        \
+      }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
@@ -509,6 +629,22 @@ struct GetterCallback;
                 Lock::from(isolate), wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...));      \
       });                                                                                          \
     }                                                                                              \
+    template <typename ReturnType = Ret>                                                           \
+    static ReturnType fastCallback(                                                                \
+        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.fast++;                                                                        \
+      }                                                                                            \
+      auto isolate = options.isolate;                                                              \
+      v8::HandleScope handleScope(isolate);                                                        \
+      auto context = isolate->GetCurrentContext();                                                 \
+      auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
+      auto& wrapper = TypeWrapper::from(isolate);                                                  \
+      return liftKj<ReturnType>(isolate, [&]() {                                                   \
+        return (self.*method)(Lock::from(isolate),                                                 \
+            wrapper.template unwrapFastApi<Args>(context, (kj::Decay<Args>*)nullptr)...);          \
+      });                                                                                          \
+    }                                                                                              \
   };                                                                                               \
                                                                                                    \
   template <typename TypeWrapper, const char* propertyName, typename T,                            \
@@ -519,6 +655,14 @@ struct GetterCallback;
     static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {   \
       scheduleUnimplementedPropertyError(info.GetIsolate(), typeid(T), propertyName);              \
     }                                                                                              \
+    template <typename ReturnType = Unimplemented>                                                 \
+    static ReturnType fastCallback(                                                                \
+        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
+      scheduleUnimplementedPropertyError(options.isolate, typeid(T), propertyName);                \
+      if constexpr (!isVoid<ReturnType>()) {                                                       \
+        return ReturnType{};                                                                       \
+      }                                                                                            \
+    };                                                                                             \
   };
 
 JSG_DEFINE_GETTER_CALLBACK_STRUCTS()
@@ -540,6 +684,9 @@ struct PropertyGetterCallback;
       isContext> {                                                                                 \
     static constexpr bool enumerable = true;                                                       \
     static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {                        \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.slow++;                                                                        \
+      }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
@@ -554,6 +701,22 @@ struct PropertyGetterCallback;
             context, obj, (self.*method)(wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...));  \
       });                                                                                          \
     }                                                                                              \
+    template <typename ReturnType = Ret>                                                           \
+    static ReturnType fastCallback(                                                                \
+        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.fast++;                                                                        \
+      }                                                                                            \
+      auto isolate = options.isolate;                                                              \
+      v8::HandleScope handleScope(isolate);                                                        \
+      auto context = isolate->GetCurrentContext();                                                 \
+      auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
+      auto& wrapper = TypeWrapper::from(isolate);                                                  \
+                                                                                                   \
+      return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
+        return (self.*method)(wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...);              \
+      });                                                                                          \
+    }                                                                                              \
   };                                                                                               \
                                                                                                    \
   /* Specialization for methods that take `Lock&` as their first parameter. */                     \
@@ -563,6 +726,9 @@ struct PropertyGetterCallback;
       method, isContext> {                                                                         \
     static constexpr bool enumerable = true;                                                       \
     static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {                        \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.slow++;                                                                        \
+      }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
         auto context = isolate->GetCurrentContext();                                               \
@@ -578,6 +744,23 @@ struct PropertyGetterCallback;
                 Lock::from(isolate), wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...));      \
       });                                                                                          \
     }                                                                                              \
+    template <typename ReturnType = Ret>                                                           \
+    static ReturnType fastCallback(                                                                \
+        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
+      if constexpr (TypeWrapper::trackCallCounts) {                                                \
+        callCounter.fast++;                                                                        \
+      }                                                                                            \
+      auto isolate = options.isolate;                                                              \
+      v8::HandleScope handleScope(isolate);                                                        \
+      auto context = isolate->GetCurrentContext();                                                 \
+      auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
+      auto& lock = Lock::from(isolate);                                                            \
+      auto& wrapper = TypeWrapper::from(isolate);                                                  \
+                                                                                                   \
+      return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
+        return (self.*method)(lock, wrapper.unwrap(context, (kj::Decay<Args>*)nullptr)...);        \
+      });                                                                                          \
+    }                                                                                              \
   };                                                                                               \
   template <typename TypeWrapper, const char* propertyName, typename T,                            \
       Unimplemented (T::*method)() __VA_ARGS__, bool isContext>                                    \
@@ -586,6 +769,14 @@ struct PropertyGetterCallback;
     static constexpr bool enumerable = false;                                                      \
     static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {                        \
       scheduleUnimplementedPropertyError(info.GetIsolate(), typeid(T), propertyName);              \
+    }                                                                                              \
+    template <typename ReturnType = Unimplemented>                                                 \
+    static ReturnType fastCallback(                                                                \
+        v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {                     \
+      scheduleUnimplementedPropertyError(options.isolate, typeid(T), propertyName);                \
+      if constexpr (!isVoid<ReturnType>()) {                                                       \
+        return ReturnType{};                                                                       \
+      }                                                                                            \
     }                                                                                              \
   };
 
@@ -667,6 +858,9 @@ template <typename TypeWrapper,
     bool isContext>
 struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isContext> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -681,6 +875,25 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method,
           context, info[0], TypeErrorContext::setterArgument(typeid(T), methodName)));
     });
   }
+
+  template <typename ReturnType = void>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<TypeWrapper, Arg>::value fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& self = extractInternalPointer<T, isContext>(context, receiver);
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    liftKj<void>(isolate, [&]() -> void {
+      (self.*method)(wrapper.template unwrapFastApi<Arg>(
+          context, fastArgs, TypeErrorContext::setterArgument(typeid(T), methodName)));
+    });
+  }
 };
 
 // Specialization for methods that take `Lock&` as their first parameter.
@@ -692,6 +905,9 @@ template <typename TypeWrapper,
     bool isContext>
 struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, isContext> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
     liftKj(info, [&]() {
       auto isolate = info.GetIsolate();
       auto context = isolate->GetCurrentContext();
@@ -705,6 +921,27 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), 
       (self.*method)(Lock::from(isolate),
           wrapper.template unwrap<Arg>(
               context, info[0], TypeErrorContext::setterArgument(typeid(T), methodName)));
+    });
+  }
+
+  template <typename ReturnType = void>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<TypeWrapper, Arg>::value fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& self = extractInternalPointer<T, isContext>(context, receiver);
+    auto& lock = Lock::from(isolate);
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    liftKj<void>(isolate, [&]() -> void {
+      (self.*method)(lock,
+          wrapper.template unwrapFastApi<Arg>(
+              context, fastArgs, TypeErrorContext::setterArgument(typeid(T), methodName)));
     });
   }
 };
@@ -785,7 +1022,7 @@ class NullConfiguration {
 template <typename TypeWrapper>
 class DynamicResourceTypeMap {
  private:
-  typedef void ReflectionInitializer(jsg::Object& object, TypeWrapper& wrapper);
+  using ReflectionInitializer = void(jsg::Object& object, TypeWrapper& wrapper);
   struct DynamicTypeInfo {
     v8::Local<v8::FunctionTemplate> tmpl;
     kj::Maybe<ReflectionInitializer&> reflectionInitializer;
@@ -801,7 +1038,7 @@ class DynamicResourceTypeMap {
     }
   }
 
-  typedef DynamicTypeInfo GetTypeInfoFunc(TypeWrapper&, v8::Isolate*);
+  using GetTypeInfoFunc = DynamicTypeInfo(TypeWrapper&, v8::Isolate*);
 
   // Maps type_info values to functions that can be used to get the associated template. Used by
   // ResourceWrapper.
@@ -826,11 +1063,11 @@ class DynamicResourceTypeMap {
   // It also just provides nice symmetry with `deserializerMap`.
   //
   // The SerializeFunc() must always start by writing a tag.
-  typedef void SerializeFunc(TypeWrapper&, Lock& js, jsg::Object& instance, Serializer& serializer);
+  using SerializeFunc = void(TypeWrapper&, Lock& js, jsg::Object& instance, Serializer& serializer);
   kj::HashMap<std::type_index, SerializeFunc*> serializerMap;
 
   // Map tag numbers to deserializer functions.
-  typedef v8::Local<v8::Object> DeserializeFunc(
+  using DeserializeFunc = v8::Local<v8::Object>(
       TypeWrapper&, Lock& js, uint tag, Deserializer& deserializer);
   kj::HashMap<uint, DeserializeFunc*> deserializerMap;
 
@@ -959,6 +1196,21 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Method, Method method>
   inline void registerMethod() {
+    if constexpr (isFastMethodCompatible<TypeWrapper, Method>) {
+      if (typeWrapper.isFastApiEnabled()) {
+        auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
+            Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
+        auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
+            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
+                ArgumentIndexes<Method>>::callback,
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+
+        prototype->Set(isolate, name, functionTemplate);
+        return;
+      }
+    }
+
     prototype->Set(isolate, name,
         v8::FunctionTemplate::New(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
@@ -968,6 +1220,25 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
+    if constexpr (isFastMethodCompatible<TypeWrapper, Method>) {
+      if (typeWrapper.isFastApiEnabled()) {
+        auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
+            method, ArgumentIndexes<Method>>::template fastCallback<>);
+
+        // Create a function template with both slow and fast paths
+        // Notably, we specify an empty signature because a static method invocation will have no holder
+        // object.
+        auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
+            &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
+                ArgumentIndexes<Method>>::callback,
+            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+        functionTemplate->RemovePrototype();
+        constructor->Set(v8StrIntern(isolate, name), functionTemplate);
+        return;
+      }
+    }
+
     // Notably, we specify an empty signature because a static method invocation will have no holder
     // object.
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
@@ -977,7 +1248,6 @@ struct ResourceTypeBuilder {
     functionTemplate->RemovePrototype();
     constructor->Set(v8StrIntern(isolate, name), functionTemplate);
   }
-
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() {
     auto v8Name = v8StrIntern(isolate, name);
@@ -998,19 +1268,41 @@ struct ResourceTypeBuilder {
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerPrototypeProperty() {
     auto v8Name = v8StrIntern(isolate, name);
+    v8::Local<v8::FunctionTemplate> getterFn;
+    v8::Local<v8::FunctionTemplate> setterFn;
 
     using Gcb = PropertyGetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+    using Scb = PropertySetterCallback<TypeWrapper, name, Setter, setter, isContext>;
     if (!Gcb::enumerable) {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
-    // Note that we cannot use `SetNativeDataProperty(...)` here the way we do with other
-    // properties because it will not properly handle the prototype chain when it comes
-    // to using setters... which is annoying. It means we end up having to use FunctionTemplates
-    // instead of the more convenient property callbacks.
-    auto getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
-    auto setterFn = v8::FunctionTemplate::New(
-        isolate, &PropertySetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback);
+    bool useSlowApi = true;
+    if constexpr (isFastMethodCompatible<TypeWrapper, Getter> &&
+        isFastMethodCompatible<TypeWrapper, Setter>) {
+      if (typeWrapper.isFastApiEnabled()) {
+        auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
+        getterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Gcb::callback,
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&getterCFunction, 1});
+
+        auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
+        setterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Scb::callback,
+            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&setterCFunction, 1});
+
+        useSlowApi = false;
+      }
+    }
+
+    if (useSlowApi) {
+      // Note that we cannot use `SetNativeDataProperty(...)` here the way we do with other
+      // properties because it will not properly handle the prototype chain when it comes
+      // to using setters... which is annoying. It means we end up having to use FunctionTemplates
+      // instead of the more convenient property callbacks.
+      getterFn = v8::FunctionTemplate::New(isolate, Gcb::callback);
+      setterFn = v8::FunctionTemplate::New(isolate, &Scb::callback);
+    }
 
     prototype->SetAccessorProperty(v8Name, getterFn, setterFn,
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
@@ -1186,7 +1478,7 @@ struct JsSetup {
     ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
   }
 
-  template <const char* propertyName, const char* moduleName>
+  template <const char* moduleName>
   struct LazyJsInstancePropertyCallback {
     static void callback(
         v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
@@ -1210,7 +1502,7 @@ struct JsSetup {
 
   template <const char* propertyName, const char* moduleName, bool readonly>
   inline void registerLazyJsInstanceProperty() {
-    using Callback = LazyJsInstancePropertyCallback<propertyName, moduleName>;
+    using Callback = LazyJsInstancePropertyCallback<moduleName>;
     check(context->Global()->SetLazyDataProperty(context, v8StrIntern(js.v8Isolate, propertyName),
         Callback::callback, v8::Local<v8::Value>(),
         readonly ? v8::PropertyAttribute::ReadOnly : v8::PropertyAttribute::None));
@@ -1288,6 +1580,7 @@ class ModuleRegistryBase {
 
 struct NewContextOptions {
   kj::Maybe<ModuleRegistryBase&> newModuleRegistry = kj::none;
+  bool enableWeakRef = false;
 };
 
 // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
@@ -1431,10 +1724,10 @@ class ResourceWrapper {
     // "skip callback and just allow".)
     context->AllowCodeGenerationFromStrings(false);
 
-    // We do not allow use of WeakRef or FinalizationRegistry because they introduce
-    // non-deterministic behavior.
-    check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
-    check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+    if (!options.enableWeakRef) {
+      check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
+      check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
+    }
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
     context->SetAlignedPointerInEmbedderData(1, ptr.get());
@@ -1503,7 +1796,63 @@ class ResourceWrapper {
   v8::Local<v8::FunctionTemplate> getTemplate(v8::Isolate* isolate, T*) {
     v8::Global<v8::FunctionTemplate>& slot = isContext ? contextConstructor : memoizedConstructor;
     if (slot.IsEmpty()) {
-      auto result = makeConstructor<isContext>(isolate);
+      // Construct lazily.
+      v8::EscapableHandleScope scope(isolate);
+
+      v8::Local<v8::FunctionTemplate> constructor;
+      if constexpr (!isContext && hasConstructorMethod((T*)nullptr)) {
+        constructor =
+            v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
+      } else {
+        constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+      }
+
+      auto prototype = constructor->PrototypeTemplate();
+
+      // Signatures protect our methods from being invoked with the wrong `this`.
+      auto signature = v8::Signature::New(isolate, constructor);
+
+      auto instance = constructor->InstanceTemplate();
+
+      instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
+
+      auto classname = v8StrIntern(isolate, typeName(typeid(T)));
+
+      if (getShouldSetToStringTag(isolate)) {
+        prototype->Set(
+            v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
+      }
+
+      // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
+      // detect a type that came from the runtime. That's obviously a bit problematic because
+      // Symbol.toStringTag is required for full compliance on standard web platform APIs.
+      // To help use cases where it is necessary to detect if a class is a runtime class, we
+      // will add a special symbol to the prototype of the class to indicate. Note that
+      // because this uses the global symbol registry user code could still mark their own
+      // classes with this symbol but that's unlikely to be a problem in any practical case.
+      auto internalMarker =
+          v8::Symbol::For(isolate, v8StrIntern(isolate, "cloudflare:internal-class"));
+      prototype->Set(internalMarker, internalMarker,
+          static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
+              v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
+
+      constructor->SetClassName(classname);
+
+      static_assert(kj::isSameType<typename T::jsgThis, T>(),
+          "Name passed to JSG_RESOURCE_TYPE() must be the class's own name.");
+
+      auto& typeWrapper = static_cast<TypeWrapper&>(*this);
+
+      ResourceTypeBuilder<TypeWrapper, T, isContext> builder(
+          typeWrapper, isolate, constructor, instance, prototype, signature);
+
+      if constexpr (isDetected<GetConfiguration, T>()) {
+        T::template registerMembers<decltype(builder), T>(builder, configuration);
+      } else {
+        T::template registerMembers<decltype(builder), T>(builder);
+      }
+
+      auto result = scope.Escape(constructor);
       slot.Reset(isolate, result);
       return result;
     } else {
@@ -1515,67 +1864,6 @@ class ResourceWrapper {
   Configuration configuration;
   v8::Global<v8::FunctionTemplate> memoizedConstructor;
   v8::Global<v8::FunctionTemplate> contextConstructor;
-
-  template <bool isContext>
-  v8::Local<v8::FunctionTemplate> makeConstructor(v8::Isolate* isolate) {
-    // Construct lazily.
-    v8::EscapableHandleScope scope(isolate);
-
-    v8::Local<v8::FunctionTemplate> constructor;
-    if constexpr (!isContext && hasConstructorMethod((T*)nullptr)) {
-      constructor =
-          v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
-    } else {
-      constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
-    }
-
-    auto prototype = constructor->PrototypeTemplate();
-
-    // Signatures protect our methods from being invoked with the wrong `this`.
-    auto signature = v8::Signature::New(isolate, constructor);
-
-    auto instance = constructor->InstanceTemplate();
-
-    instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
-
-    auto classname = v8StrIntern(isolate, typeName(typeid(T)));
-
-    if (getShouldSetToStringTag(isolate)) {
-      prototype->Set(
-          v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
-    }
-
-    // Previously, miniflare would use the lack of a Symbol.toStringTag on a class to
-    // detect a type that came from the runtime. That's obviously a bit problematic because
-    // Symbol.toStringTag is required for full compliance on standard web platform APIs.
-    // To help use cases where it is necessary to detect if a class is a runtime class, we
-    // will add a special symbol to the prototype of the class to indicate. Note that
-    // because this uses the global symbol registry user code could still mark their own
-    // classes with this symbol but that's unlikely to be a problem in any practical case.
-    auto internalMarker =
-        v8::Symbol::For(isolate, v8StrIntern(isolate, "cloudflare:internal-class"));
-    prototype->Set(internalMarker, internalMarker,
-        static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
-            v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
-
-    constructor->SetClassName(classname);
-
-    static_assert(kj::isSameType<typename T::jsgThis, T>(),
-        "Name passed to JSG_RESOURCE_TYPE() must be the class's own name.");
-
-    auto& typeWrapper = static_cast<TypeWrapper&>(*this);
-
-    ResourceTypeBuilder<TypeWrapper, T, isContext> builder(
-        typeWrapper, isolate, constructor, instance, prototype, signature);
-
-    if constexpr (isDetected<GetConfiguration, T>()) {
-      T::template registerMembers<decltype(builder), T>(builder, configuration);
-    } else {
-      T::template registerMembers<decltype(builder), T>(builder);
-    }
-
-    return scope.Escape(constructor);
-  }
 
   void setupJavascript(jsg::Lock& js) {
     JsSetup<TypeWrapper, T> setup(js, js.v8Context());

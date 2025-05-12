@@ -118,15 +118,16 @@ kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
   return result;
 }
 
-kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports() {
+kj::Array<kj::String> PythonModuleInfo::getPackageSnapshotImports(kj::StringPtr version) {
   auto workerFiles = this->getPythonFileContents();
   auto importedNames = parsePythonScriptImports(kj::mv(workerFiles));
   auto workerModules = getWorkerModuleSet();
-  return PythonModuleInfo::filterPythonScriptImports(kj::mv(workerModules), kj::mv(importedNames));
+  return PythonModuleInfo::filterPythonScriptImports(
+      kj::mv(workerModules), kj::mv(importedNames), version);
 }
 
-kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports() {
-  return state->moduleInfo.getPackageSnapshotImports();
+kj::Array<kj::String> PyodideMetadataReader::getPackageSnapshotImports(kj::String version) {
+  return state->moduleInfo.getPackageSnapshotImports(version);
 }
 
 kj::Array<jsg::JsRef<jsg::JsString>> PyodideMetadataReader::getRequirements(jsg::Lock& js) {
@@ -168,10 +169,10 @@ kj::HashSet<kj::String> PyodideMetadataReader::getTransitiveRequirements() {
 }
 
 int ArtifactBundler::readMemorySnapshot(int offset, kj::Array<kj::byte> buf) {
-  if (existingSnapshot == kj::none) {
+  if (inner->existingSnapshot == kj::none) {
     return 0;
   }
-  return readToTarget(KJ_REQUIRE_NONNULL(existingSnapshot), offset, buf);
+  return readToTarget(KJ_REQUIRE_NONNULL(inner->existingSnapshot), offset, buf);
 }
 
 kj::Array<kj::String> PythonModuleInfo::parsePythonScriptImports(kj::Array<kj::String> files) {
@@ -389,12 +390,14 @@ const kj::Array<kj::StringPtr> snapshotImports = kj::arr("_pyodide"_kj,
     "typing"_kj,
     "zipfile"_kj);
 
-kj::Array<kj::StringPtr> ArtifactBundler::getSnapshotImports() {
+kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
 kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
-    kj::HashSet<kj::String> workerModules, kj::ArrayPtr<kj::String> imports) {
+    kj::HashSet<kj::String> workerModules,
+    kj::ArrayPtr<kj::String> imports,
+    kj::StringPtr version) {
   auto baselineSnapshotImportsSet = kj::HashSet<kj::StringPtr>();
   for (auto& pkgImport: snapshotImports) {
     baselineSnapshotImportsSet.upsert(kj::mv(pkgImport), [](auto&&, auto&&) {});
@@ -412,11 +415,16 @@ kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
 
     // don't include modules that we provide and that are likely to be imported by most
     // workers.
-    if (firstComponent == "js"_kj.asArray() || firstComponent == "pyodide"_kj.asArray() ||
-        firstComponent == "asgi"_kj.asArray() || firstComponent == "workers"_kj.asArray() ||
-        firstComponent == "httpx"_kj.asArray() || firstComponent == "openai"_kj.asArray() ||
-        firstComponent == "starlette"_kj.asArray() || firstComponent == "urllib3"_kj.asArray()) {
+    if (firstComponent == "js"_kj.asArray() || firstComponent == "asgi"_kj.asArray() ||
+        firstComponent == "workers"_kj.asArray()) {
       continue;
+    }
+    if (version == "0.26.0a2") {
+      if (firstComponent == "pyodide"_kj.asArray() || firstComponent == "httpx"_kj.asArray() ||
+          firstComponent == "openai"_kj.asArray() || firstComponent == "starlette"_kj.asArray() ||
+          firstComponent == "urllib3"_kj.asArray()) {
+        continue;
+      }
     }
 
     // Don't include anything that went into the baseline snapshot
@@ -491,3 +499,86 @@ void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 }  // namespace workerd::api::pyodide
+
+#include "workerd/io/compatibility-date.h"
+
+#include <capnp/dynamic.h>
+#include <capnp/schema.h>
+
+namespace workerd {
+
+struct PythonSnapshotParsedField {
+  PythonSnapshotRelease::Reader pythonSnapshotRelease;
+  capnp::StructSchema::Field field;
+};
+
+kj::Array<const PythonSnapshotParsedField> makePythonSnapshotFieldTable(
+    capnp::StructSchema::FieldList fields) {
+  kj::Vector<PythonSnapshotParsedField> table(fields.size());
+
+  for (auto field: fields) {
+    bool isPythonField = false;
+
+    for (auto annotation: field.getProto().getAnnotations()) {
+      if (annotation.getId() == PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID) {
+        isPythonField = true;
+        break;
+      }
+    }
+    if (!isPythonField) {
+      continue;
+    }
+
+    auto name = field.getProto().getName();
+    kj::Maybe<PythonSnapshotRelease::Reader> pythonSnapshotRelease;
+    for (auto release: *RELEASES) {
+      if (release.getFlagName() == name) {
+        pythonSnapshotRelease = release;
+        break;
+      }
+    }
+    table.add(PythonSnapshotParsedField{
+      .pythonSnapshotRelease = KJ_REQUIRE_NONNULL(pythonSnapshotRelease),
+      .field = field,
+    });
+  }
+
+  return table.releaseAsArray();
+}
+
+kj::Maybe<PythonSnapshotRelease::Reader> getPythonSnapshotRelease(
+    CompatibilityFlags::Reader featureFlags) {
+  uint latestFieldOrdinal = 0;
+  kj::Maybe<PythonSnapshotRelease::Reader> result;
+
+  static const auto fieldTable =
+      makePythonSnapshotFieldTable(capnp::Schema::from<CompatibilityFlags>().getFields());
+
+  for (auto field: fieldTable) {
+    bool isEnabled = capnp::toDynamic(featureFlags).get(field.field).as<bool>();
+    if (!isEnabled) {
+      continue;
+    }
+
+    // We pick the flag with the highest ordinal value that is enabled and has a
+    // pythonSnapshotRelease annotation.
+    //
+    // The fieldTable is probably ordered by the ordinal anyway, but doesn't hurt to be explicit
+    // here.
+    if (latestFieldOrdinal < field.field.getIndex()) {
+      latestFieldOrdinal = field.field.getIndex();
+      result = field.pythonSnapshotRelease;
+    }
+  }
+
+  return result;
+}
+
+kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
+  if (pyodideRelease.getPyodide() == "dev") {
+    return kj::str("dev");
+  }
+  return kj::str(pyodideRelease.getPyodide(), "_", pyodideRelease.getPyodideRevision(), "_",
+      pyodideRelease.getBackport());
+}
+}  // namespace workerd

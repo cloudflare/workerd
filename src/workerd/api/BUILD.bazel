@@ -151,11 +151,13 @@ wd_cc_library(
         "pyodide/requirements.h",
         "pyodide/setup-emscripten.h",
         "//src/pyodide:generated/pyodide_extra.capnp.h",
+        "//src/pyodide:pyodide_static.capnp.h",
     ],
     implementation_deps = ["//src/workerd/io"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
+        "//src/pyodide:pyodide_static",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
     ],
@@ -347,25 +349,24 @@ wd_test(
         "--experimental",
     ],
     data = [
-        # To reduce complexity, tail-worker-test calls into other tests to get traces from them.
+        # To reduce complexity, tail-worker-test calls into other tests to get traces from them and
+        # includes several tail worker implementations.
         "actor-alarms-test.js",
         "http-test.js",
         "queue-test.js",
         "tail-worker-test.js",
         "tail-worker-test-receiver.js",
         "tail-worker-test-dummy.js",
+        "tail-worker-test-invalid.js",
         "tests/websocket-hibernation.js",
     ],
 )
 
+# Test for a worker that can log to itself using the isTracer parameter
 wd_test(
-    src = "tail-worker-test-invalid.wd-test",
-    args = [
-        "--experimental",
-    ],
+    src = "self-logger-test.wd-test",
     data = [
-        "http-test.js",
-        "tail-worker-test-invalid.js",
+        "self-logger-test.js",
     ],
 )
 
@@ -708,4 +709,10 @@ wd_test(
     src = "tests/disable-importable-env-test.wd-test",
     args = ["--experimental"],
     data = ["tests/disable-importable-env-test.js"],
+)
+
+wd_test(
+    src = "tests/webfs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/webfs-test.js"],
 )

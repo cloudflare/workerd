@@ -291,22 +291,17 @@ class IsolateModuleRegistry final {
   // Returns the v8::Module descriptor. If an empty v8::MaybeLocal is returned, then
   // an exception has been scheduled with the isolate.
   v8::MaybeLocal<v8::Module> resolve(Lock& js, const ResolveContext& context) {
-    return js.tryCatch([&]() -> v8::MaybeLocal<v8::Module> {
-      // Do we already have a cached module for this context?
-      KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return found.key.getHandle(js);
-      }
-      // No? That's OK, let's look it up.
-      KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return found.key.getHandle(js);
-      }
+    // Do we already have a cached module for this context?
+    KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
+      return found.key.getHandle(js);
+    }
+    // No? That's OK, let's look it up.
+    KJ_IF_SOME(found, resolveWithCaching(js, context)) {
+      return found.key.getHandle(js);
+    }
 
-      // Nothing found? Aw... fail!
-      JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.specifier.getHref()));
-    }, [&](Value exception) {
-      js.v8Isolate->ThrowException(exception.getHandle(js));
-      return v8::MaybeLocal<v8::Module>();
-    });
+    // Nothing found? Aw... fail!
+    JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.specifier.getHref()));
   }
 
   // Used to implement the async dynamic import of modules (using `await import(...)`)
@@ -462,6 +457,10 @@ class IsolateModuleRegistry final {
     return lookupCache
         .find<kj::HashIndex<EntryCallbacks>>(HashableV8Ref<v8::Module>(js.v8Isolate, module))
         .map([](Entry& entry) -> Entry& { return entry; });
+  }
+
+  const jsg::Url& getBundleBase() const {
+    return inner.getBundleBase();
   }
 
  private:
@@ -657,6 +656,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
   };
 
   auto& js = Lock::from(isolate);
+  auto& registry = IsolateModuleRegistry::from(isolate);
   try {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
       auto spec = js.toString(specifier);
@@ -675,7 +675,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
 
       Url referrer = ([&] {
         if (resource_name.IsEmpty()) {
-          return ModuleBundle::BundleBuilder::BASE.clone();
+          return registry.getBundleBase().clone();
         }
         auto str = js.toString(resource_name);
         return KJ_ASSERT_NONNULL(Url::tryParse(str.asPtr()));
@@ -691,7 +691,6 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
 
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
         auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
-        auto& registry = IsolateModuleRegistry::from(isolate);
         return registry.dynamicResolve(js, kj::mv(normalized), kj::mv(referrer), spec);
       }
 
@@ -769,7 +768,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         }
       }
       return entry.specifier.specifier;
-    }).orDefault(ModuleBundle::BundleBuilder::BASE);
+    }).orDefault(registry.getBundleBase());
 
     // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
     // is a bare node specifier and resolve it to a full node: URL.
@@ -992,11 +991,13 @@ void ModuleBundle::Builder::ensureIsNotBundleSpecifier(const Url& specifier) {
 
 // ======================================================================================
 
-ModuleBundle::BundleBuilder::BundleBuilder(): ModuleBundle::Builder(Type::BUNDLE) {}
+ModuleBundle::BundleBuilder::BundleBuilder(const jsg::Url& bundleBase)
+    : ModuleBundle::Builder(Type::BUNDLE),
+      bundleBase(bundleBase) {}
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
     kj::StringPtr specifier, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
-  auto url = KJ_ASSERT_NONNULL(BundleBuilder::BASE.tryResolve(specifier));
+  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
@@ -1009,7 +1010,7 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
     kj::StringPtr specifier, kj::Array<const char> source, Module::Flags flags) {
-  auto url = KJ_ASSERT_NONNULL(BundleBuilder::BASE.tryResolve(specifier));
+  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
@@ -1022,8 +1023,8 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::alias(
     kj::StringPtr alias, kj::StringPtr specifier) {
-  auto aliasUrl = KJ_ASSERT_NONNULL(BundleBuilder::BASE.tryResolve(alias));
-  auto specifierUrl = KJ_ASSERT_NONNULL(BundleBuilder::BASE.tryResolve(specifier));
+  auto aliasUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(alias));
+  auto specifierUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
   Builder::alias(aliasUrl, specifierUrl);
   return *this;
 }
@@ -1054,8 +1055,10 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
 }
 
 // ======================================================================================
-ModuleRegistry::Builder::Builder(const ResolveObserver& observer, Options options)
+ModuleRegistry::Builder::Builder(
+    const ResolveObserver& observer, const jsg::Url& bundleBase, Options options)
     : observer(observer),
+      bundleBase(bundleBase),
       options(options) {}
 
 bool ModuleRegistry::Builder::allowsFallback() const {
@@ -1087,6 +1090,7 @@ kj::Own<ModuleRegistry> ModuleRegistry::Builder::finish() {
 
 ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
     : observer(builder->observer),
+      bundleBase(builder->bundleBase),
       maybeParent(builder->maybeParent) {
   bundles_[kBundle] = builder->bundles_[kBundle].releaseAsArray();
   bundles_[kBuiltin] = builder->bundles_[kBuiltin].releaseAsArray();
@@ -1188,14 +1192,14 @@ kj::Maybe<JsObject> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
     KJ_IF_SOME(referrer, maybeReferrer) {
       return KJ_ASSERT_NONNULL(referrer.tryResolve(specifier));
     }
-    return KJ_ASSERT_NONNULL(ModuleBundle::BundleBuilder::BASE.tryResolve(specifier));
+    return KJ_ASSERT_NONNULL(bound.getBundleBase().tryResolve(specifier));
   })();
   auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   ResolveContext context{
     .type = type,
     .source = source,
     .specifier = normalized,
-    .referrer = maybeReferrer.orDefault(ModuleBundle::BundleBuilder::BASE),
+    .referrer = maybeReferrer.orDefault(bound.getBundleBase()),
     .rawSpecifier = specifier,
   };
   v8::TryCatch tryCatch(js.v8Isolate);
@@ -1403,7 +1407,5 @@ Function<void()> Module::compileEvalFunction(Lock& js,
     });
   };
 }
-
-const Url ModuleBundle::BundleBuilder::BASE = "file:///"_url;
 
 }  // namespace workerd::jsg::modules

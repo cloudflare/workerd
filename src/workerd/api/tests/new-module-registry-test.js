@@ -1,4 +1,5 @@
 import {
+  default as assert,
   notStrictEqual,
   ok,
   rejects,
@@ -9,9 +10,10 @@ import { foo, default as def } from 'foo';
 import { default as fs } from 'node:fs';
 import { Buffer } from 'buffer';
 import { foo as foo2, default as def2 } from 'bar';
+import { createRequire } from 'module';
 
 // Verify that import.meta.url is correct here.
-strictEqual(import.meta.url, 'file:///worker');
+strictEqual(import.meta.url, 'file:///bundle/worker');
 
 // Verify that import.meta.main is true here.
 ok(import.meta.main);
@@ -42,7 +44,8 @@ console.log(import.meta);
 // Verify that import.meta.resolve provides correct results here.
 // The input should be interpreted as a URL and normalized according
 // to the rules in the WHATWG URL specification.
-strictEqual(import.meta.resolve('./.././test/.././../foo'), 'file:///foo');
+strictEqual(import.meta.resolve('./.././test/.././.%2e/foo'), 'file:///foo');
+strictEqual(import.meta.resolve('foo'), 'file:///bundle/foo');
 
 // There are four tests at this top level... one for the import of the node:assert
 // module without the node: prefix specifier, two for the imports of the foo and
@@ -56,7 +59,7 @@ strictEqual(def2, 2);
 strictEqual(fs, 'abc');
 
 // Equivalent to the above, but using the file: URL scheme.
-import { foo as foo3, default as def3 } from 'file:///foo';
+import { foo as foo3, default as def3 } from 'file:///bundle/foo';
 strictEqual(foo, foo3);
 strictEqual(def, def3);
 
@@ -72,6 +75,34 @@ deepStrictEqual(json.default, { foo: 1 });
 // Synchronously resolved promises can be awaited.
 await Promise.resolve();
 
+import { default as cjs2 } from 'cjs2';
+strictEqual(cjs2.foo, 1);
+strictEqual(cjs2.bar, 2);
+strictEqual(cjs2.filename, 'cjs1');
+strictEqual(cjs2.dirname, '/bundle');
+strictEqual(cjs2.assert, assert);
+
+// CommonJS modules can define named exports.
+import { foo as cjs1foo, bar as cjs1bar } from 'cjs1';
+strictEqual(cjs1foo, 1);
+strictEqual(cjs1bar, 2);
+
+const myRequire = createRequire(import.meta.url);
+const customRequireCjs = myRequire('cjs1');
+strictEqual(customRequireCjs.foo, cjs1foo);
+strictEqual(customRequireCjs.bar, cjs1bar);
+
+await rejects(import('file:///bundle/cjs3'), {
+  message: 'boom',
+});
+
+// The modules cjs4 and cjs5 have a circular dependency on each other.
+// They should both load without error.
+import { default as cjs4 } from 'cjs4';
+import { default as cjs5 } from 'cjs5';
+deepStrictEqual(cjs4, {});
+deepStrictEqual(cjs5, {});
+
 // These dynamics imports can be top-level awaited because they
 // are immediately rejected with errors.
 await rejects(import('invalid-json'), {
@@ -79,7 +110,7 @@ await rejects(import('invalid-json'), {
 });
 
 await rejects(import('module-not-found'), {
-  message: /Module not found: file:\/\/\/module-not-found/,
+  message: /Module not found: file:\/\/\/bundle\/module-not-found/,
 });
 
 // Verify that a module is unable to perform IO operations at the top level, even if
@@ -130,10 +161,10 @@ export const queryAndFragment = {
     notStrictEqual(c, d);
 
     // The import.meta.url for each should match the specifier used to import the instance.
-    strictEqual(a.bar, 'file:///foo?query');
-    strictEqual(b.bar, 'file:///foo#fragment');
-    strictEqual(c.bar, 'file:///foo?query#fragment');
-    strictEqual(d.bar, 'file:///foo');
+    strictEqual(a.bar, 'file:///bundle/foo?query');
+    strictEqual(b.bar, 'file:///bundle/foo#fragment');
+    strictEqual(c.bar, 'file:///bundle/foo?query#fragment');
+    strictEqual(d.bar, 'file:///bundle/foo');
   },
 };
 
@@ -172,7 +203,7 @@ export const evalErrorsInEsmTopLevel = {
 // TODO(now): Tests
 // * [ ] Include tests for all known module types
 //   * [x] ESM
-//   * [ ] CommonJS
+//   * [x] CommonJS
 //   * [x] Text
 //   * [x] Data
 //   * [x] JSON
@@ -192,13 +223,13 @@ export const evalErrorsInEsmTopLevel = {
 //   * [x] URL resolution works correctly
 //   * [x] Invalid URLs are correctly reported as errors
 // * [x] Import assertions should be rejected
-// * [ ] require(...) Works in CommonJs Modules
-// * [ ] require(...) correctly handles node: modules with/without the node: prefix
-// * [ ] Circular dependencies are correctly handled
-// * [ ] Errors during CommonJs evaluation are correctly reported
+// * [x] require(...) Works in CommonJs Modules
+// * [x] require(...) correctly handles node: modules with/without the node: prefix
+// * [x] Circular dependencies are correctly handled
+// * [x] Errors during CommonJs evaluation are correctly reported
+// * [x] CommonJs modules correctly expose named exports
+// * [x] require('module').createRequire API works as expected
 // * [ ] Entry point ESM with no default export is correctly reported as error
-// * [ ] CommonJs modules correctly expose named exports
-// * [ ] require('module').createRequire API works as expected
 // * [ ] Fallback service works as expected
-// * [ ] console.log output correctly uses node-internal:inspect for output
+// * [x] console.log output correctly uses node-internal:inspect for output
 // ...

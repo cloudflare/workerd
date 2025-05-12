@@ -130,7 +130,8 @@ class VectorizeIndexImpl implements Vectorize {
       headers: {
         'content-type': contentType,
         'cf-vector-search-dim-width': String(
-          vectors.length ? vectors[0]?.values?.length : 0
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          vectors.length ? vectors.at(0)?.values?.length : 0
         ),
         'cf-vector-search-dim-height': String(vectors.length),
         accept: 'application/json',
@@ -166,7 +167,8 @@ class VectorizeIndexImpl implements Vectorize {
       headers: {
         'content-type': contentType,
         'cf-vector-search-dim-width': String(
-          vectors.length ? vectors[0]?.values?.length : 0
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          vectors.length ? vectors.at(0)?.values?.length : 0
         ),
         'cf-vector-search-dim-height': String(vectors.length),
         accept: 'application/json',

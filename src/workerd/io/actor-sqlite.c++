@@ -5,8 +5,10 @@
 #include "actor-sqlite.h"
 
 #include "io-gate.h"
+#include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <sqlite3.h>
@@ -37,6 +39,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       metadata(*db),
       commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
+  db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
 
   // Because we preserve an invariant that scheduled alarms are always at or earlier than
@@ -143,6 +146,7 @@ void ActorSqlite::ExplicitTxn::setAlarmDirty() {
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
+  actorSqlite.requireNotBroken();
   KJ_REQUIRE(!hasChild,
       "critical sections should have prevented committing transaction while "
       "nested txn is outstanding");
@@ -192,6 +196,21 @@ void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
     alarmDirty = p->alarmDirty;
   } else {
     alarmDirty = false;
+  }
+}
+
+void ActorSqlite::onCriticalError(
+    kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
+  // If we have already experienced a terminal exception, no need to replace it
+  if (broken == kj::none) {
+    KJ_IF_SOME(e, maybeException) {
+      e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
+      broken.emplace(kj::mv(e));
+    } else {
+      kj::Exception exception = JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
+      exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+      broken.emplace(kj::mv(exception));
+    }
   }
 }
 
@@ -629,9 +648,18 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
             localAlarmState.orDefault(kj::UNIX_EPOCH), actorId);
         return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
       } else {
+        // We have a clean local alarm time that is earlier than the handler's scheduled time,
+        // which suggests that either the alarm manager is working with stale data or that local
+        // alarm time has somehow gotten out of sync with the scheduled alarm time.
         LOG_WARNING_PERIODICALLY("NOSENTRY SQLite alarm handler canceled.", scheduledTime, actorId,
             localAlarmState.orDefault(kj::UNIX_EPOCH));
-        return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+        if (util::Autogate::isEnabled(util::AutogateKey::RESCHEDULE_DESYNCED_SQLITE_ALARMS)) {
+          // Tell the caller to wait for successful rescheduling before cancelling the current
+          // handler invocation.
+          return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
+        } else {
+          return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
+        }
       }
     } else {
       // There's a alarm write that hasn't been set yet pending for a time different than ours --

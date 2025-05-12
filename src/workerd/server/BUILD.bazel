@@ -108,10 +108,12 @@ wd_cc_library(
     deps = [
         ":actor-id-impl",
         ":alarm-scheduler",
+        ":bundle-fs",
         ":workerd_capnp",
         "//deps/rust:runtime",
         "//src/cloudflare",
         "//src/node",
+        "//src/pyodide:pyodide_static",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:memory-cache",
@@ -126,6 +128,21 @@ wd_cc_library(
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "bundle-fs",
+    srcs = [
+        "bundle-fs.c++",
+    ],
+    hdrs = [
+        "bundle-fs.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":workerd_capnp",
+        "//src/workerd/io",
     ],
 )
 
@@ -176,6 +193,14 @@ kj_test(
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
         "@ssl",
+    ],
+)
+
+kj_test(
+    src = "bundle-fs-test.c++",
+    deps = [
+        ":bundle-fs",
+        "//src/workerd/tests:test-fixture",
     ],
 )
 

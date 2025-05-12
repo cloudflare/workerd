@@ -49,16 +49,16 @@ struct ActorCacheWriteOptions {
 // Common interface between ActorCache and ActorCache::Transaction.
 class ActorCacheOps {
  public:
-  typedef kj::String Key;
-  typedef kj::StringPtr KeyPtr;
+  using Key = kj::String;
+  using KeyPtr = kj::StringPtr;
   // Keys are text for now, but we could also change this to `Array<const byte>`.
   static inline Key cloneKey(KeyPtr ptr) {
     return kj::str(ptr);
   }
 
   // Values are raw bytes.
-  typedef kj::Array<const byte> Value;
-  typedef kj::ArrayPtr<const byte> ValuePtr;
+  using Value = kj::Array<const byte>;
+  using ValuePtr = kj::ArrayPtr<const byte>;
 
   struct KeyValuePair {
     Key key;
@@ -108,7 +108,7 @@ class ActorCacheOps {
     ActorCacheWriteOptions options;
   };
 
-  typedef ActorCacheReadOptions ReadOptions;
+  using ReadOptions = ActorCacheReadOptions;
 
   // Get the values for some key, keys, or range of keys.
   //
@@ -132,7 +132,7 @@ class ActorCacheOps {
   virtual kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
       Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) = 0;
 
-  typedef ActorCacheWriteOptions WriteOptions;
+  using WriteOptions = ActorCacheWriteOptions;
 
   // Writes a key/value into cache and schedules it to be flushed to disk later.
   //
@@ -742,7 +742,7 @@ class ActorCache final: public ActorCacheInterface {
   kj::Canceler oomCanceler;
 
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
-  typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
+  using Lock = kj::Locked<kj::List<Entry, &Entry::link>>;
 
   // Add this entry to the clean list and set its status to CLEAN.
   // This doesn't do much, but it makes it easier to track what's going on.

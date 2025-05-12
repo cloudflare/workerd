@@ -31,6 +31,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, jsg::JsString query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
+  void setMaxPageCountForTest(jsg::Lock& js, int count);
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, jsg::JsString query);
 
@@ -46,6 +47,8 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 
       // 'ingest' functionality is still experimental-only
       JSG_METHOD(ingest);
+
+      JSG_METHOD(setMaxPageCountForTest);
     }
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);

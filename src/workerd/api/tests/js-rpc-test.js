@@ -1525,19 +1525,13 @@ export let serializeHttpTypes = {
       });
     }
 
-    // Check that a Request with an AbortSignal can't be sent. (We should fix this someday, by
-    // making AbortSignal itself RPC-compatible.)
-    await assert.rejects(
-      env.MyService.roundTrip(
+    {
+      let req = await env.MyService.roundTrip(
         new Request('http://foo', { signal: AbortSignal.timeout(100) })
-      ),
-      {
-        name: 'DataCloneError',
-        message:
-          'Could not serialize object of type "AbortSignal". This type does not support ' +
-          'serialization.',
-      }
-    );
+      );
+      assert.strictEqual(req.url, 'http://foo');
+      assert.ok(req.signal instanceof AbortSignal);
+    }
 
     {
       let req = await env.MyService.returnResponse();

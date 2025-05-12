@@ -103,7 +103,7 @@ public:
     // Allow URLs which get coerced to strings in either constructor parameter
   }
 
-  // Treat as private -- needs to be public for jsg::alloc<T>()...
+  // Treat as private -- needs to be public for js.alloc<T>()...
   explicit URL(kj::Url&& u);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

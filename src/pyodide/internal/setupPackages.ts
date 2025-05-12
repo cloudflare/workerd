@@ -1,15 +1,8 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
-import { createTarFS } from 'pyodide-internal:tarfs';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
-import {
-  REQUIREMENTS,
-  LOAD_WHEELS_FROM_R2,
-  LOCKFILE,
-  LOAD_WHEELS_FROM_ARTIFACT_BUNDLER,
-} from 'pyodide-internal:metadata';
+import { LOCKFILE } from 'pyodide-internal:metadata';
 import { simpleRunPython } from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
-import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 const canonicalizeNameRegex = /[-_.]+/g;
 const DYNLIB_PATH = '/usr/lib';
@@ -57,7 +50,7 @@ class VirtualizedDir {
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
   private soFiles: FilePath[];
   private loadedRequirements: Set<string>;
-  constructor() {
+  public constructor() {
     this.rootInfo = createTarFsInfo();
     this.dynlibTarFs = createTarFsInfo();
     this.soFiles = [];
@@ -70,7 +63,7 @@ class VirtualizedDir {
    * If a file or directory already exists, an error is thrown.
    * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
    */
-  mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
+  public mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
@@ -92,7 +85,7 @@ class VirtualizedDir {
    * @param {String} requirement The canonicalized package name this small bundle corresponds to
    * @param {InstallDir} installDir The `install_dir` field from the metadata about the package taken from the lockfile
    */
-  addSmallBundle(
+  public addSmallBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirement: string,
@@ -112,7 +105,7 @@ class VirtualizedDir {
    * @param {List<String>} soFiles A list of .so files contained in the big bundle
    * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
    */
-  addBigBundle(
+  public addBigBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirements: Set<string>
@@ -136,23 +129,23 @@ class VirtualizedDir {
     }
   }
 
-  getSitePackagesRoot(): TarFSInfo {
+  public getSitePackagesRoot(): TarFSInfo {
     return this.rootInfo;
   }
 
-  getDynlibRoot(): TarFSInfo {
+  public getDynlibRoot(): TarFSInfo {
     return this.dynlibTarFs;
   }
 
-  getSoFilesToLoad(): FilePath[] {
+  public getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
 
-  hasRequirementLoaded(req: string): boolean {
+  public hasRequirementLoaded(req: string): boolean {
     return this.loadedRequirements.has(req);
   }
 
-  mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>) {
+  public mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
     Module.FS.mkdirTree(Module.FS.sessionSitePackages);
     Module.FS.mount(
       tarFS,
@@ -175,7 +168,7 @@ class VirtualizedDir {
  *
  * TODO(later): This needs to be removed when external package loading is enabled.
  */
-export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
+export function buildVirtualizedDir(): VirtualizedDir {
   if (EmbeddedPackagesTarReader.read === undefined) {
     // Package retrieval is enabled, so the embedded tar reader isn't initialized.
     // All packages, including STDLIB_PACKAGES, are loaded in `loadPackages`.
@@ -184,18 +177,7 @@ export function buildVirtualizedDir(requirements: Set<string>): VirtualizedDir {
 
   const [bigTarInfo, bigTarSoFiles] = parseTarInfo(EmbeddedPackagesTarReader);
 
-  let requirementsInBigBundle = new Set([...STDLIB_PACKAGES]);
-
-  // Currently, we include all packages within the big bundle in Edgeworker.
-  // During this transitionary period, we add the option (via autogate)
-  // to load packages from GCS (in which case they are accessible through the ArtifactBundler)
-  // or to simply use the packages within the big bundle. The latter is not ideal
-  // since we're locked to a specific packages version, so we will want to move away
-  // from it eventually.
-  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    requirements.forEach((r) => requirementsInBigBundle.add(r));
-  }
-
+  const requirementsInBigBundle = new Set(STDLIB_PACKAGES);
   const res = new VirtualizedDir();
   res.addBigBundle(bigTarInfo, bigTarSoFiles, requirementsInBigBundle);
 
@@ -221,27 +203,9 @@ function disabledLoadPackage(): never {
 }
 
 /**
- * This mounts a TarFS representing the site-packages directory (which contains the Python packages)
- * and another TarFS representing the dynlib directory (where dynlibs like libcrypto.so live).
- *
- * This has to work before the runtime is initialized because of memory snapshot
- * details, so even though we want these directories to be on sys.path, we
- * handle that separately in adjustSysPath.
- */
-export function mountSitePackages(Module: Module, pkgs: VirtualizedDir): void {
-  const tarFS = createTarFS(Module);
-  if (!LOAD_WHEELS_FROM_R2 && !LOAD_WHEELS_FROM_ARTIFACT_BUNDLER) {
-    // if we are not loading additional wheels, then we're done
-    // with site-packages and we can mount it here. Otherwise, we must mount it in
-    // loadPackages().
-    pkgs.mount(Module, tarFS);
-  }
-}
-
-/**
  * This mounts the metadataFS (which contains user code).
  */
-export function mountWorkerFiles(Module: Module) {
+export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
@@ -263,7 +227,4 @@ export function adjustSysPath(Module: Module): void {
   );
 }
 
-export { REQUIREMENTS };
-export const TRANSITIVE_REQUIREMENTS =
-  MetadataReader.getTransitiveRequirements();
-export const VIRTUALIZED_DIR = buildVirtualizedDir(TRANSITIVE_REQUIREMENTS);
+export const VIRTUALIZED_DIR = buildVirtualizedDir();

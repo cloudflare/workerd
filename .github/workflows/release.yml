@@ -144,6 +144,13 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
           fi
+      - name: Bazel build (Windows workaround)
+        if: runner.os == 'Windows'
+        # HACK: Work around Bazel Windows bug: Some targets need to be compiled without symlink
+        # support. Since we still need symlinks to compile C++ code properly, compile these targets
+        # separately.
+        run: |
+          bazel --nowindows_enable_symlinks build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=${{ matrix.bazel-config }} //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
         # Strip debug info here – we don't generate debug info but some is pulled in from external
         # static libraries, for example the Rust STL. This is equivalent to the -Wl,-S linker

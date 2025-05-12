@@ -146,7 +146,7 @@ class Function<Ret(Args...)> {
 
   // When holding a JavaScript function, `Wrapper` is a C++ function that will handle converting
   // C++ arguments into JavaScript values and then call the JS function.
-  typedef Ret Wrapper(jsg::Lock& js,
+  using Wrapper = Ret(jsg::Lock& js,
       v8::Local<v8::Value> receiver,  // the `this` value in the function
       v8::Local<v8::Function> fn,
       Args...);

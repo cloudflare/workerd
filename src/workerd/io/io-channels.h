@@ -167,7 +167,7 @@ class IoChannelFactory {
       uint channel, kj::StringPtr id, SpanParent parentSpan) = 0;
 
   // Aborts all actors except those in namespaces marked with `preventEviction`.
-  virtual void abortAllActors() {
+  virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
 };

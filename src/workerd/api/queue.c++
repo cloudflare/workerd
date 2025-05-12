@@ -689,7 +689,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
         // already rejected.
         kj::String abortError;
         co_await ioContext.onAbort()
-            .then([] {}, [&abortError](kj::Exception&& e) {
+            .catch_([&abortError](kj::Exception&& e) {
           abortError = kj::str(e);
         }).exclusiveJoin(ioContext.afterLimitTimeout(1 * kj::MICROSECONDS).then([&abortError]() {
           abortError = kj::str("onAbort() promise has unexpectedly not yet been rejected");

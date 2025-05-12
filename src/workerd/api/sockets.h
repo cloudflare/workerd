@@ -38,7 +38,7 @@ struct SocketInfo {
   JSG_STRUCT(remoteAddress, localAddress);
 };
 
-typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
+using AnySocketAddress = kj::OneOf<SocketAddress, kj::String>;
 
 struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;

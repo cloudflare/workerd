@@ -125,7 +125,7 @@ class DurableObjectStorageOperations {
   jsg::Promise<void> deleteAlarm(jsg::Lock& js, jsg::Optional<SetAlarmOptions> options);
 
  protected:
-  typedef kj::StringPtr OpName;
+  using OpName = kj::StringPtr;
   static constexpr OpName OP_GET = "get()"_kj;
   static constexpr OpName OP_GET_ALARM = "getAlarm()"_kj;
   static constexpr OpName OP_LIST = "list()"_kj;

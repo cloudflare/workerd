@@ -143,38 +143,17 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(context, tracing::Mark(tracing::Log(timestamp, logLevel, kj::str(message))));
+    writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))});
   }
   trace->logs.add(timestamp, logLevel, kj::mv(message));
-}
-
-// TODO(cleanup): Needed to convert between span value definitions in LTW/STW. These should be the
-// same really.
-workerd::tracing::Attribute::Value convertSpanTag(const Span::TagValue& tag) {
-  KJ_SWITCH_ONEOF(tag) {
-    KJ_CASE_ONEOF(str, kj::String) {
-      return kj::str(str);
-    }
-    KJ_CASE_ONEOF(val, int64_t) {
-      return kj::str(val);
-    }
-    KJ_CASE_ONEOF(val, double) {
-      return val;
-    }
-    KJ_CASE_ONEOF(val, bool) {
-      return val;
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 void WorkerTracer::addSpan(CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
-  if (trace->numSpans >= MAX_USER_SPANS) {
+  if (trace->spans.size() >= MAX_USER_SPANS) {
     return;
   }
-  trace->numSpans++;
 
   if (trace->exceededLogLimit) {
     return;
@@ -211,19 +190,29 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   // Span events are transmitted together for now.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& context = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-    writer->report(context, workerd::tracing::SpanOpen(kj::str(span.operationName)));
+    // TODO(o11y): Provide correct nested spans
+    // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
+    // invocations as indicated by isTrigger
+    auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+    tracing::InvocationSpanContext context = [&]() {
+      if (topLevelContext.isTrigger()) {
+        return topLevelContext.clone();
+      } else {
+        return topLevelContext.newChild();
+      }
+    }();
+    writer->report(context,
+        workerd::tracing::SpanOpen(topLevelContext.getSpanId(), kj::str(span.operationName)));
     kj::Vector<workerd::tracing::Attribute> attr;
     for (auto& tag: span.tags) {
-      attr.add(workerd::tracing::Attribute(kj::str(tag.key), convertSpanTag(tag.value)));
+      attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
     }
-    writer->report(context, workerd::tracing::Mark(attr.releaseAsArray()));
+    writer->report(context, {(attr.releaseAsArray())});
     writer->report(context, workerd::tracing::SpanClose());
   }
 
   trace->bytesUsed = newSize;
   trace->spans.add(kj::mv(span));
-  trace->numSpans++;
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -254,8 +243,7 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
   trace->bytesUsed = newSize;
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
-        tracing::Mark(
-            tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))));
+        {tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))});
   }
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
@@ -283,8 +271,8 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
-        tracing::Mark(tracing::DiagnosticChannelEvent(
-            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))));
+        {tracing::DiagnosticChannelEvent(
+            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))});
   }
   trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
 }

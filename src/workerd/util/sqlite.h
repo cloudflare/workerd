@@ -200,6 +200,12 @@ class SqliteDatabase {
     onWriteCallback = kj::mv(callback);
   }
 
+  void onCriticalError(
+      kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>
+          callback) {
+    onCriticalErrorCallback = kj::mv(callback);
+  }
+
   // Invoke the onWrite() callback.
   //
   // This is useful when the caller is about to execute a statement which SQLite considers
@@ -310,6 +316,8 @@ class SqliteDatabase {
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
+  kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
+      onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;
 
   kj::List<ResetListener, &ResetListener::link> resetListeners;
@@ -350,6 +358,10 @@ class SqliteDatabase {
   // Called immediately after a statement executes, to update our understanding of the current
   // state.
   void applyChange(const StateChange& change);
+
+  void handleCriticalError(kj::Maybe<int> errorCode,
+      kj::StringPtr errorMessage,
+      kj::Maybe<const kj::Exception&> exception);
 
   enum Multi { SINGLE, MULTI };
 
@@ -648,6 +660,12 @@ class SqliteDatabase::Query final: private ResetListener {
   void bind(uint column, long long value);
   void bind(uint column, double value);
   void bind(uint column, decltype(nullptr));
+
+  void handleCriticalError(kj::Maybe<int> errorCode,
+      kj::StringPtr errorMessage,
+      kj::Maybe<const kj::Exception&> maybeException) {
+    return db.handleCriticalError(errorCode, errorMessage, maybeException);
+  }
 
   // Some reasonable automatic conversions.
 

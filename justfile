@@ -31,7 +31,7 @@ test-asan *args="//...":
 
 # e.g. just stream-test //src/cloudflare:cloudflare.capnp@eslint
 stream-test *args:
-  bazel test {{args}} --test_output=streamed --cache_test_results=no
+  bazel test {{args}} --test_output=streamed --cache_test_results=no --config=debug
 
 # e.g. just node-test zlib
 node-test test_name *args:
@@ -47,6 +47,17 @@ lldb-wpt-test test_name: build
 asan-wpt-test test_name:
   bazel test //src/workerd/api/wpt:{{test_name}} --config=asan
 
+new-wpt-test test_name:
+  mkdir -p src/wpt/$(dirname {{test_name}})
+  echo "export default {};" > src/wpt/{{test_name}}-test.ts
+  git add src/wpt/{{test_name}}-test.ts
+
+  echo >> src/wpt/BUILD.bazel
+  echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
+
+  ./tools/cross/format.py
+  bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
+
 format: rustfmt
   python3 tools/cross/format.py
 
@@ -61,16 +72,22 @@ update-deps prefix="":
 update-rust package="full":
   bazel run //deps/rust:crates_vendor -- --repin {{package}}
 
-rust-analyzer:
-  bazel run @rules_rust//tools/rust_analyzer:gen_rust_project
-
 rustfmt:
   bazel run @rules_rust//:rustfmt
 
 # example: just bench mimetype
 bench path:
-  bazel run //src/workerd/tests:bench-{{path}}
+  bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
 
 # example: just clippy dns
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
+
+prepare-ubuntu:
+  sudo apt-get install -y --no-install-recommends libc++abi1-18 libc++1-18 libc++-18-dev lld-18 bazelisk python3
+
+# called by rust-analyzer discoverConfig (quiet recipe with no output)
+@_rust-analyzer:
+  rm -rf ./rust-project.json
+  # rust-analyzer doesn't like stderr output, redirect it to /dev/null
+  bazel run @rules_rust//tools/rust_analyzer:discover_bazel_rust_project 2>/dev/null

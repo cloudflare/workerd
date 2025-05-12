@@ -192,7 +192,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
       kj::Own<CacheValue> value;
       kj::Maybe<double> expiration;
     };
-    typedef kj::Function<void(kj::Maybe<FallbackResult>)> FallbackDoneCallback;
+    using FallbackDoneCallback = kj::Function<void(kj::Maybe<FallbackResult>)>;
     using GetWithFallbackOutcome = kj::OneOf<kj::Own<CacheValue>, FallbackDoneCallback>;
 
     // Returns either:

@@ -63,7 +63,10 @@ crates_vendor(
     mode = "remote",
     packages = PACKAGES,
     # Not needed, we have a well-defined set of supported platforms
-    render_config = render_config(generate_target_compatible_with = False),
+    render_config = render_config(
+        generate_cargo_toml_env_vars = False,
+        generate_target_compatible_with = False,
+    ),
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",

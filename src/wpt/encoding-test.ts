@@ -6,15 +6,18 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'api-basics.any.js': {},
-  'api-invalid-label.any.js': {
-    comment: 'Error: Test file /common/subset-tests.js not found',
-    skipAllTests: true,
-  },
+  'api-invalid-label.any.js': {},
   'api-replacement-encodings.any.js': {},
   'api-surrogates-utf8.any.js': {},
   'encodeInto.any.js': {
-    comment: 'Test file /common/sab.js not found',
-    skipAllTests: true,
+    comment: 'See comments on each failure',
+    expectedFailures: [
+      // Enable once Float16Array is available
+      'Invalid encodeInto() destination: Float16Array, backed by: ArrayBuffer',
+      'Invalid encodeInto() destination: Float16Array, backed by: SharedArrayBuffer',
+      // Enable once MessageChannel is implemented
+      'encodeInto() and a detached output buffer',
+    ],
   },
   'idlharness.any.js': {
     comment: 'Test file /resources/WebIDLParser.js not found',
@@ -138,8 +141,23 @@ export default {
     ],
   },
   'streams/decode-utf8.any.js': {
-    comment: 'Test file /common/sab.js not found',
-    skipAllTests: true,
+    comment: 'See comments on each failure',
+    expectedFailures: [
+      // Enable once MessageChannel is implemented
+      'decoding a transferred Uint8Array chunk should give no output',
+      'decoding a transferred ArrayBuffer chunk should give no output',
+      // TODO investigate these
+      'decoding one UTF-8 chunk should give one output string - ArrayBuffer',
+      'decoding an empty chunk should give no output chunks - ArrayBuffer',
+      'UTF-8 EOF handling - ArrayBuffer',
+      'decoding one UTF-8 chunk should give one output string - SharedArrayBuffer',
+      'decoding an empty chunk should give no output chunks - SharedArrayBuffer',
+      'UTF-8 EOF handling - SharedArrayBuffer',
+      'an initial empty chunk should be ignored - ArrayBuffer',
+      'a trailing empty chunk should be ignored - ArrayBuffer',
+      'an initial empty chunk should be ignored - SharedArrayBuffer',
+      'a trailing empty chunk should be ignored - SharedArrayBuffer',
+    ],
   },
   'streams/encode-bad-chunks.any.js': {
     comment: 'TODO investigate this',
@@ -186,14 +204,12 @@ export default {
   'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
   'textdecoder-copy.any.js': {
-    comment: 'Test file /common/sab.js not found',
-    skipAllTests: true,
+    comment:
+      "Failed to execute 'decode' on 'TextDecoder': parameter 1 is not of type 'Array'.",
+    expectedFailures: ['Modify buffer after passing it in (SharedArrayBuffer)'],
   },
   'textdecoder-eof.any.js': {},
-  'textdecoder-fatal-single-byte.any.js': {
-    comment: '/common/subset-tests.js',
-    skipAllTests: true,
-  },
+  'textdecoder-fatal-single-byte.any.js': {},
   'textdecoder-fatal-streaming.any.js': {},
   'textdecoder-fatal.any.js': {},
   'textdecoder-ignorebom.any.js': {},
@@ -215,10 +231,7 @@ export default {
       'x-user-defined => x-user-defined',
     ],
   },
-  'textdecoder-streaming.any.js': {
-    comment: 'Test file /common/sab.js not found',
-    skipAllTests: true,
-  },
+  'textdecoder-streaming.any.js': {},
   'textdecoder-utf16-surrogates.any.js': {
     comment: 'Investigate why we are not blocking invalid surrogates',
     expectedFailures: [

@@ -6,7 +6,7 @@
 -Ibazel-bin/external/perfetto/
 -Iexternal/perfetto-sdk/sdk/
 -Iexternal/ada-url/
--Iexternal/com_google_absl/
+-Iexternal/abseil-cpp/
 -Iexternal/simdutf/
 -Iexternal/nbytes/include/
 -Iexternal/com_google_benchmark/include/

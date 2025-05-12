@@ -927,28 +927,20 @@ void ZlibUtil::brotliWithCallback(
 
 #ifndef CREATE_TEMPLATE
 #define CREATE_TEMPLATE(T)                                                                         \
-  template void ZlibUtil::CompressionStream<T>::reset(jsg::Lock& js);                              \
+  template class ZlibUtil::CompressionStream<T>;                                                   \
   template void ZlibUtil::CompressionStream<T>::write<false>(jsg::Lock & js, int flush,            \
       jsg::Optional<kj::Array<kj::byte>> input, int inputOffset, int inputLength,                  \
       kj::Array<kj::byte> output, int outputOffset, int outputLength);                             \
   template void ZlibUtil::CompressionStream<T>::write<true>(jsg::Lock & js, int flush,             \
       jsg::Optional<kj::Array<kj::byte>> input, int inputOffset, int inputLength,                  \
-      kj::Array<kj::byte> output, int outputOffset, int outputLength);                             \
-  template jsg::Ref<ZlibUtil::CompressionStream<T>> ZlibUtil::CompressionStream<T>::constructor(   \
-      jsg::Lock& js, ZlibModeValue mode);
+      kj::Array<kj::byte> output, int outputOffset, int outputLength);
 
 CREATE_TEMPLATE(ZlibContext)
 CREATE_TEMPLATE(BrotliEncoderContext)
 CREATE_TEMPLATE(BrotliDecoderContext)
 
-template jsg::Ref<ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>> ZlibUtil::
-    BrotliCompressionStream<BrotliEncoderContext>::constructor(jsg::Lock& js, ZlibModeValue mode);
-template jsg::Ref<ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>> ZlibUtil::
-    BrotliCompressionStream<BrotliDecoderContext>::constructor(jsg::Lock& js, ZlibModeValue mode);
-template bool ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>::initialize(
-    jsg::Lock&, jsg::BufferSource, jsg::BufferSource, jsg::Function<void()>);
-template bool ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>::initialize(
-    jsg::Lock&, jsg::BufferSource, jsg::BufferSource, jsg::Function<void()>);
+template class ZlibUtil::BrotliCompressionStream<BrotliEncoderContext>;
+template class ZlibUtil::BrotliCompressionStream<BrotliDecoderContext>;
 
 template kj::Array<kj::byte> ZlibUtil::brotliSync<BrotliEncoderContext>(
     jsg::Lock& js, InputSource data, BrotliContext::Options opts);

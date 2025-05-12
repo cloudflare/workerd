@@ -21,6 +21,7 @@
     "moduleResolution": "node",
     "declaration": true,
     "types": ["@types/node"],
+    "erasableSyntaxOnly": true,
     "paths": {
       "node:*": ["./*"],
       "node:assert/*": ["./*"],

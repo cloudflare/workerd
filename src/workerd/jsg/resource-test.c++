@@ -21,6 +21,7 @@ struct BoxContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(BoxIsolate, BoxContext, NumberBox, BoxBox);
 
 KJ_TEST("constructors and properties") {
+  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<BoxContext, BoxIsolate> e(v8System);
   e.expectEval("new NumberBox(123).value", "number", "123");
   e.expectEval("new NumberBox(123).boxed.value", "number", "123");
@@ -485,11 +486,11 @@ struct ReflectionContext: public ContextGlobalObject {
       return result;
     }
 
-    kj::Maybe<int> getIntReflection(kj::String name, v8::Isolate* isolate) {
-      return intReflector.get(isolate, name);
+    kj::Maybe<int> getIntReflection(jsg::Lock& js, kj::String name) {
+      return intReflector.get(js.v8Isolate, name);
     }
-    kj::Maybe<kj::String> getStringReflection(kj::String name, v8::Isolate* isolate) {
-      return stringReflector.get(isolate, name);
+    kj::Maybe<kj::String> getStringReflection(jsg::Lock& js, kj::String name) {
+      return stringReflector.get(js.v8Isolate, name);
     }
 
     PropertyReflection<int> intReflector;
@@ -538,9 +539,8 @@ struct InjectLockContext: public ContextGlobalObject {
     int val;
     v8::Isolate* v8Isolate;
 
-    static Ref<Thingy> constructor(Lock& js, int val, v8::Isolate* v8Isolate) {
-      KJ_ASSERT(js.v8Isolate == v8Isolate);
-      return js.alloc<Thingy>(val, v8Isolate);
+    static Ref<Thingy> constructor(Lock& js, int val) {
+      return js.alloc<Thingy>(val, js.v8Isolate);
     }
 
     int frob(Lock& js, int val2) {
@@ -558,8 +558,7 @@ struct InjectLockContext: public ContextGlobalObject {
       this->val = val;
     }
 
-    static int borf(Lock& js, int val, v8::Isolate* v8Isolate) {
-      KJ_ASSERT(js.v8Isolate == v8Isolate);
+    static int borf(Lock& js, int val) {
       return val * 2;
     }
 

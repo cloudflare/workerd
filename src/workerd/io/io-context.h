@@ -14,6 +14,7 @@
 #include <workerd/io/io-thread-context.h>
 #include <workerd/io/io-timers.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/exception.h>
@@ -132,7 +133,7 @@ class IoContext_IncomingRequest final {
   // the IoContext.
   //
   // If delivered() is never called, then drain() need not be called.
-  void delivered();
+  void delivered(kj::SourceLocation = kj::SourceLocation());
 
   // Waits until the request is "done". For non-actor requests this means waiting until
   // all "waitUntil" tasks finish, applying the "soft timeout" time limit from WorkerLimits.
@@ -195,6 +196,9 @@ class IoContext_IncomingRequest final {
 
   // Used by IoContext::incomingRequests.
   kj::ListLink<IoContext_IncomingRequest> link;
+
+  // Tracks the location where delivered() was called for debugging.
+  kj::Maybe<kj::SourceLocation> deliveredLocation;
 
   friend class IoContext;
 };
@@ -623,6 +627,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Access the event loop's current time point. This will remain constant between ticks.
   kj::Date now();
 
+  const TmpDirStoreScope& getTmpDirStoreScope() {
+    return *tmpDirStoreScope;
+  }
+
   // Returns a promise that resolves once `now() >= when`.
   kj::Promise<void> atTime(kj::Date when) {
     return getIoChannelFactory().getTimer().atTime(when);
@@ -771,8 +779,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return getIoChannelFactory().getColoLocalActor(channel, id, kj::mv(parentSpan));
   }
 
-  void abortAllActors() {
-    return getIoChannelFactory().abortAllActors();
+  void abortAllActors(kj::Maybe<kj::Exception&> reason) {
+    return getIoChannelFactory().abortAllActors(reason);
   }
 
   // Get an HttpClient to use for Cache API subrequests.
@@ -832,10 +840,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().ioChannelFactory;
   }
 
+  void pumpMessageLoop();
+
  private:
   ThreadContext& thread;
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
+
+  kj::Own<TmpDirStoreScope> tmpDirStoreScope;
 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
@@ -843,6 +855,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // List of active IncomingRequests, ordered from most-recently-started to least-recently-started.
   kj::List<IncomingRequest, &IncomingRequest::link> incomingRequests;
+
+  kj::Maybe<kj::SourceLocation> lastDeliveredLocation;
 
   capnp::CapabilityServerSet<capnp::DynamicCapability> localCapSet;
 
@@ -974,7 +988,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // The IoChannelFactory must also be accessed through the currentIncomingRequest because it has
   // some tracing context built in.
   IncomingRequest& getCurrentIncomingRequest() {
-    KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest");
+    KJ_REQUIRE(!incomingRequests.empty(), "the IoContext has no current IncomingRequest",
+        lastDeliveredLocation);
     return incomingRequests.front();
   }
 
@@ -1033,7 +1048,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
   KJ_IF_SOME(ex, abortException) {
-    kj::throwFatalException(kj::cp(ex));
+    return kj::cp(ex);
   }
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
@@ -1052,7 +1067,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
                                    Worker::AsyncLock lock) mutable {
-    typedef decltype(func(kj::instance<Worker::Lock&>())) Result;
+    using Result = decltype(func(kj::instance<Worker::Lock&>()));
+
     if constexpr (kj::isSameType<Result, void>()) {
       struct RunnableImpl: public Runnable {
         Func func;
@@ -1171,7 +1187,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 
   // `T` is the type produced by the input promise. `Result` is the type of the final output
   // promise. `Func` transforms from `T` to `Result`.
-  typedef jsg::ReturnType<Func, T, true> Result;
+  using Result = jsg::ReturnType<Func, T, true>;
 
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
@@ -1410,7 +1426,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto cs = lock.startCriticalSection();
   auto cs2 = kj::addRef(*cs);
 
-  typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
+  using T = jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>>;
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(

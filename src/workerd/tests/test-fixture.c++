@@ -325,11 +325,13 @@ TestFixture::TestFixture(SetupParams&& params)
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
+          capnp::List<server::config::Extension>::Reader{},
           kj::heap<MockIsolateLimitEnforcer>()->getCreateParams(),
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
           defaultPythonConfig,
-          kj::none)),
+          kj::none /* new module registry */,
+          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()))),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
           scriptId,
@@ -337,13 +339,11 @@ TestFixture::TestFixture(SetupParams&& params)
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,
-          server::WorkerdApi::extractSource(mainModuleName,
-              config,
-              *errorReporter,
-              capnp::List<server::config::Extension>::Reader{}),
+          server::WorkerdApi::extractSource(mainModuleName, config, *errorReporter),
           IsolateObserver::StartType::COLD,
           false,
-          nullptr)),
+          kj::none,
+          kj::none)),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
@@ -356,23 +356,20 @@ TestFixture::TestFixture(SetupParams&& params)
       waitUntilTasks(*errorHandler),
       headerTable(headerTableBuilder.build()) {
   KJ_IF_SOME(id, params.actorId) {
-    worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
-      auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
-                                ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
-        return kj::heap<ActorCache>(
-            server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
-      };
-      auto makeStorage =
-          [](jsg::Lock& js, const Worker::Api& api,
-              ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
-        return js.alloc<api::DurableObjectStorage>(
-            js, IoContext::current().addObject(actorCache), /*enableSql=*/false);
-      };
-      actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
-          /*hasTransient=*/false, makeActorCache,
-          /*classname=*/kj::none, makeStorage, lock, kj::refcounted<MockActorLoopback>(),
-          *timerChannel, kj::refcounted<ActorObserver>(), kj::none, kj::none);
-    });
+    auto makeActorCache = [](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
+                              ActorCache::Hooks& hooks, SqliteObserver& sqliteObserver) {
+      return kj::heap<ActorCache>(
+          server::newEmptyReadOnlyActorStorage(), sharedLru, outputGate, hooks);
+    };
+    auto makeStorage = [](jsg::Lock& js, const Worker::Api& api,
+                           ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
+      return js.alloc<api::DurableObjectStorage>(
+          js, IoContext::current().addObject(actorCache), /*enableSql=*/false);
+    };
+    actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
+        /*hasTransient=*/false, makeActorCache,
+        /*classname=*/kj::none, makeStorage, kj::refcounted<MockActorLoopback>(), *timerChannel,
+        kj::refcounted<ActorObserver>(), kj::none, kj::none);
   }
 }
 
