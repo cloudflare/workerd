@@ -39,15 +39,15 @@ export const nodeJsGetBuiltins = {
 
     // But process.getBuiltinModule should always return the built-in module.
     const builtInPath = process.getBuiltinModule('node:path');
-    const builtInFs = process.getBuiltinModule('node:fs');
+    const builtInVm = process.getBuiltinModule('node:vm');
 
     // These are from the worker bundle....
     assert.strictEqual(fs, 1);
     assert.strictEqual(path, 2);
 
     // But these are from the built-ins...
-    // node:fs is not implemented currently so it should be undefined here.
-    assert.strictEqual(builtInFs, undefined);
+    // node:vm is not implemented currently so it should be undefined here.
+    assert.strictEqual(builtInVm, undefined);
 
     // node:path is implemented tho...
     assert.notStrictEqual(path, builtInPath);

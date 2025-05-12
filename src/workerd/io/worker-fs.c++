@@ -1047,7 +1047,8 @@ kj::Maybe<const VirtualFileSystem&> VirtualFileSystem::tryGetCurrent(jsg::Lock&)
   return Worker::Api::current().getVirtualFileSystem();
 }
 
-kj::Maybe<FsNode> VirtualFileSystem::resolve(jsg::Lock& js, const jsg::Url& url) const {
+kj::Maybe<FsNode> VirtualFileSystem::resolve(
+    jsg::Lock& js, const jsg::Url& url, ResolveOptions options) const {
   if (url.getProtocol() != "file:"_kj) {
     // We only accept file URLs.
     return kj::none;
@@ -1055,7 +1056,10 @@ kj::Maybe<FsNode> VirtualFileSystem::resolve(jsg::Lock& js, const jsg::Url& url)
   // We want to strip the leading slash from the path.
   auto path = kj::str(url.getPathname().slice(1));
   kj::Path root{};
-  return getRoot(js)->tryOpen(js, root.eval(path));
+  return getRoot(js)->tryOpen(js, root.eval(path),
+      Directory::OpenOptions{
+        .followLinks = options.followLinks,
+      });
 }
 
 kj::Maybe<Stat> VirtualFileSystem::resolveStat(jsg::Lock& js, const jsg::Url& url) const {

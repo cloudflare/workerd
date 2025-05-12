@@ -755,4 +755,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables the experimental Web File System API.
   # WARNING: This API is still in development and may change or be removed in the future.
+
+  nodeFileSystem @88 :Bool
+      $compatEnableFlag("enable_node_file_system")
+      $experimental;
+  # Enables the node:fs module when nodejs_compat is enabled.
 }

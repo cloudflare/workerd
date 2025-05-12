@@ -9,6 +9,110 @@ namespace workerd::api {
 
 class Blob;
 class File;
+class URL;
+namespace url {
+class URL;
+}  // namespace url
+
+// =======================================================================================
+// Implementation of cloudflare-internal:filesystem
+
+// Provide a JS-friendly view of the workerd::Stat defined in worker-fs.h.
+struct Stat {
+  kj::StringPtr type;  // One of either "file", "directory", or "symlink"
+  uint32_t size;
+  uint64_t lastModified;
+  uint64_t created;
+  bool writable;
+  bool device;
+  JSG_STRUCT(type, size, lastModified, created, writable, device);
+
+  Stat(const workerd::Stat& stat);
+};
+
+class FileSystemModule final: public jsg::Object {
+ public:
+  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
+
+  FileSystemModule() = default;
+  FileSystemModule(jsg::Lock&, const jsg::Url&) {}
+
+  struct StatOptions {
+    jsg::Optional<bool> followSymlinks;
+    JSG_STRUCT(followSymlinks);
+  };
+
+  struct OpenOptions {
+    // When true, if the file already exists, an error is thrown.
+    bool exclusive;
+    // When true, the file descriptor is opened for reading.
+    bool read;
+    // When true, the file descriptor is opened for writing.
+    bool write;
+    // When true, the file descriptor is opened for appending. Ignored if write is false.
+    bool append;
+    JSG_STRUCT(exclusive, read, write, append);
+  };
+
+  struct ReadOptions {
+    jsg::Optional<uint32_t> position;
+    JSG_STRUCT(position);
+  };
+
+  struct CopyFileOptions {
+    bool exclusive;
+    JSG_STRUCT(exclusive);
+  };
+
+  kj::Maybe<Stat> stat(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, StatOptions options);
+  void setLastModified(
+      jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, kj::Date lastModified, StatOptions options);
+  void resize(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, uint32_t size);
+  void link(jsg::Lock& js, FilePath path, FilePath target);
+  void symlink(jsg::Lock& js, FilePath path, FilePath target);
+  void unlink(jsg::Lock& js, FilePath path);
+  kj::String realpath(jsg::Lock& js, FilePath path);
+  kj::String readlink(jsg::Lock& js, FilePath path);
+  int open(jsg::Lock& js, FilePath path, OpenOptions options);
+  void close(jsg::Lock& js, int fd);
+  void fsync(jsg::Lock& js, int fd);
+  jsg::BufferSource readfile(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
+  void copyFile(jsg::Lock& js, FilePath from, FilePath to, CopyFileOptions options);
+  void rename(jsg::Lock& js, FilePath from, FilePath to);
+
+  struct WriteFileOptions {
+    bool append;
+    JSG_STRUCT(append);
+  };
+
+  void writeFile(jsg::Lock& js,
+      kj::OneOf<int, FilePath> pathOrFd,
+      jsg::BufferSource buffer,
+      WriteFileOptions options);
+
+  uint32_t readv(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> buffer, ReadOptions options);
+  uint32_t writev(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> buffer, ReadOptions options);
+
+  JSG_RESOURCE_TYPE(FileSystemModule) {
+    JSG_METHOD(stat);
+    JSG_METHOD(setLastModified);
+    JSG_METHOD(resize);
+    JSG_METHOD(link);
+    JSG_METHOD(symlink);
+    JSG_METHOD(unlink);
+    JSG_METHOD(realpath);
+    JSG_METHOD(readlink);
+    JSG_METHOD(open);
+    JSG_METHOD(close);
+    JSG_METHOD(fsync);
+    JSG_METHOD(readfile);
+    JSG_METHOD(readv);
+    JSG_METHOD(writeFile);
+    JSG_METHOD(writev);
+    JSG_METHOD(copyFile);
+    JSG_METHOD(rename);
+  }
+};
 
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
@@ -370,4 +474,9 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemDirectoryHandle::KeyIterator::Next,                                  \
       workerd::api::FileSystemDirectoryHandle::ValueIterator::Next
 
+#define EW_FILESYSTEM_ISOLATE_TYPES                                                                \
+  workerd::api::FileSystemModule, workerd::api::FileSystemModule::StatOptions, workerd::api::Stat, \
+      workerd::api::FileSystemModule::OpenOptions, workerd::api::FileSystemModule::ReadOptions,    \
+      workerd::api::FileSystemModule::WriteFileOptions,                                            \
+      workerd::api::FileSystemModule::CopyFileOptions
 }  // namespace workerd::api
