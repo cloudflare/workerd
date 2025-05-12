@@ -255,6 +255,7 @@ function makeEntrypointProxyHandler(
       const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
       const isKnownDoHandler =
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
+      const isFetch = prop == 'fetch';
       if (isKnownHandler || isKnownDoHandler) {
         prop = 'on_' + prop;
       }
@@ -262,11 +263,22 @@ function makeEntrypointProxyHandler(
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        if (typeof pyInstance[prop] === 'function') {
-          return await doPyCallHelper(isKnownHandler, pyInstance[prop], args);
-        } else {
+        if (typeof pyInstance[prop] !== 'function') {
           throw new TypeError(`Method ${prop} does not exist`);
         }
+
+        if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
+          return await doPyCallHelper(true, pyInstance[prop], args);
+        }
+
+        const introspectionMod = await getIntrospectionMod(await getPyodide());
+
+        return await doPyCall(introspectionMod.wrapper_func, [
+          isFetch,
+          pyInstance,
+          prop,
+          ...args,
+        ]);
       };
     },
   };
@@ -307,9 +319,11 @@ function makeEntrypointClass(
 type IntrospectionMod = {
   __dict__: PyDict;
   collect_entrypoint_classes: (mod: PyModule) => typeof pythonEntrypointClasses;
+  wrapper_func: PyCallable;
 };
 
-async function getIntrospectionMod(
+let introspectionModPromise: Promise<IntrospectionMod> | null = null;
+async function loadIntrospectionMod(
   pyodide: Pyodide
 ): Promise<IntrospectionMod> {
   const introspectionSource = await import('pyodide-internal:introspection.py');
@@ -319,8 +333,20 @@ async function getIntrospectionMod(
   const decoder = new TextDecoder();
   pyodide.runPython(decoder.decode(introspectionSource.default), {
     globals: introspectionMod.__dict__,
+    filename: 'introspection.py',
   });
+
   return introspectionMod;
+}
+
+async function getIntrospectionMod(
+  pyodide: Pyodide
+): Promise<IntrospectionMod> {
+  if (introspectionModPromise === null) {
+    introspectionModPromise = loadIntrospectionMod(pyodide);
+  }
+
+  return introspectionModPromise;
 }
 
 const SUPPORTED_HANDLER_NAMES = [

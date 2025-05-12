@@ -6,7 +6,7 @@ from asyncio import sleep
 from urllib.parse import urlparse
 
 from js import Date
-from workers import DurableObject, Response
+from workers import DurableObject, Request, Response
 
 import pyodide
 
@@ -19,6 +19,8 @@ class DurableObjectExample(DurableObject):
         self.alarm_triggered = False
 
     async def on_fetch(self, request):
+        assert isinstance(request, Request)
+
         curr = await self.storage.getAlarm()
         if curr is None:
             self.storage.setAlarm(Date.now() + 100)
@@ -40,6 +42,17 @@ class DurableObjectExample(DurableObject):
 
     async def args_method(self, arg):
         return "value from python " + arg
+
+    def mutate_dict(self, my_dict):
+        my_dict["foo"] = 42
+
+    async def test_self_call(self):
+        test_dict = dict()
+        test_dict["test"] = 1
+        self.mutate_dict(test_dict)
+        assert test_dict["test"] == 1
+        assert test_dict["foo"] == 42
+        return True
 
     def jspi_method(self, arg):
         from pyodide.ffi import run_sync
@@ -65,6 +78,8 @@ async def test(ctrl, env, ctx):
 
     arg_resp = await obj.args_method("test")
     assert arg_resp == "value from python test"
+
+    assert await obj.test_self_call()
 
     if pyodide.__version__ != "0.26.0a2":
         res = await obj.jspi_method(9)
