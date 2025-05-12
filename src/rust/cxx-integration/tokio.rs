@@ -2,7 +2,8 @@ use std::future::Future;
 use std::sync::OnceLock;
 
 use tokio::task::JoinHandle;
-use tracing::{Instrument, info};
+use tracing::Instrument;
+use tracing::info;
 
 static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 

@@ -142,35 +142,9 @@ git_repository(
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 
-load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
+load("//:build/rust_toolchains.bzl", "rust_toolchains")
 
-rules_rust_dependencies()
-
-rust_register_toolchains(
-    edition = "2024",
-    extra_target_triples = [
-        # Add support for macOS cross-compilation
-        "x86_64-apple-darwin",
-        # Add support for macOS rosetta
-        "aarch64-unknown-linux-gnu",
-    ],
-    versions = ["1.86.0"],  # LLVM 19
-)
-
-load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
-
-crate_universe_dependencies()
-
-# Load rust crate dependencies.
-# These could be regenerated from cargo.bzl by using
-# `just update-rust` (consult `just --list` or justfile for more details)
-load("//deps/rust/crates:crates.bzl", "crate_repositories")
-
-crate_repositories()
-
-load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
-
-rust_analyzer_dependencies()
+rust_toolchains()
 
 # Protobuf
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
