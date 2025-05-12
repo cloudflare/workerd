@@ -12,10 +12,9 @@ from http import HTTPMethod, HTTPStatus
 from types import LambdaType
 from typing import Any, TypedDict, Unpack
 
-import js
-
 # Get globals modules and import function from the entrypoint-helper
-from js import pyodide_entrypoint_helper
+import _pyodide_entrypoint_helper
+import js
 
 import pyodide.http
 from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
@@ -45,15 +44,15 @@ def import_from_javascript(module_name: str) -> Any:
     # JSPI won't work in the global scope in 0.26.0a2 so we need modules importable in the global
     # scope to be imported beforehand.
     if module_name == "cloudflare:workers":
-        return pyodide_entrypoint_helper.cloudflareWorkersModule
+        return _pyodide_entrypoint_helper.cloudflareWorkersModule
     elif module_name == "cloudflare:sockets":
-        return pyodide_entrypoint_helper.cloudflareSocketsModule
+        return _pyodide_entrypoint_helper.cloudflareSocketsModule
 
     try:
         from pyodide.ffi import run_sync
 
         # Call the JavaScript import function
-        return run_sync(pyodide_entrypoint_helper.doAnImport(module_name))
+        return run_sync(_pyodide_entrypoint_helper.doAnImport(module_name))
     except JsException as e:
         raise ImportError(f"Failed to import '{module_name}': {e}") from e
     except RuntimeError as e:
