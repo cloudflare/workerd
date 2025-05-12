@@ -674,4 +674,20 @@ class JsMessage final {
   v8::Local<v8::Message> inner;
 };
 
+class Receiver final {
+ public:
+  Receiver(const v8::FunctionCallbackInfo<v8::Value>& args): value(args.This()) {}
+
+  jsg::JsObject& operator*() {
+    return value;
+  }
+
+  operator v8::Local<v8::Object>() const {
+    return value;
+  }
+
+ private:
+  jsg::JsObject value;
+};
+
 }  // namespace workerd::jsg

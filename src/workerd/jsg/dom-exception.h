@@ -48,9 +48,8 @@ class DOMException: public Object {
 
   // JS API
 
-  static Ref<DOMException> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      Optional<kj::String> message,
-      Optional<kj::String> name);
+  static Ref<DOMException> constructor(
+      Lock& js, jsg::Receiver self, Optional<kj::String> message, Optional<kj::String> name);
 
   kj::StringPtr getName() const;
   kj::StringPtr getMessage() const;

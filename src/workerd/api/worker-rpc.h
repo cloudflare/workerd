@@ -498,7 +498,7 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
 class WorkerEntrypoint: public jsg::Object {
  public:
   static jsg::Ref<WorkerEntrypoint> constructor(
-      const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env);
+      jsg::Lock& js, jsg::Receiver self, jsg::JsObject ctx, jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
 };
@@ -515,9 +515,8 @@ class WorkerEntrypoint: public jsg::Object {
 // everyone to be explicit by inheriting this, and we require it if you want to use RPC.
 class DurableObjectBase: public jsg::Object {
  public:
-  static jsg::Ref<DurableObjectBase> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<DurableObjectState> ctx,
-      jsg::JsObject env);
+  static jsg::Ref<DurableObjectBase> constructor(
+      jsg::Lock& js, jsg::Receiver self, jsg::JsObject ctx, jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(DurableObjectBase) {}
 };
@@ -536,9 +535,8 @@ class DurableObjectBase: public jsg::Object {
 // define a constructor.
 class WorkflowEntrypoint: public jsg::Object {
  public:
-  static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<ExecutionContext> ctx,
-      jsg::JsObject env);
+  static jsg::Ref<WorkflowEntrypoint> constructor(
+      jsg::Lock& js, jsg::Receiver self, jsg::JsObject ctx, jsg::JsObject env);
 
   JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
 };

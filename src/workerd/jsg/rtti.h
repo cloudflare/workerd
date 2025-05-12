@@ -493,6 +493,7 @@ FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
 
 #define FOR_EACH_JSG_IMPL_TYPE(F, ...)                                                             \
   F(jsg::Lock, JsgImplType::Type::JSG_LOCK)                                                        \
+  F(jsg::Receiver, JsgImplType::Type::JSG_RECEIVER)                                                \
   F(jsg::Name, JsgImplType::Type::JSG_NAME)                                                        \
   F(jsg::SelfRef, JsgImplType::Type::JSG_SELF_REF)                                                 \
   F(jsg::Unimplemented, JsgImplType::Type::JSG_UNIMPLEMENTED)                                      \

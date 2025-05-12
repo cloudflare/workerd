@@ -31,8 +31,14 @@ namespace workerd::jsg {
 // from any particular JS value.
 // A concept that identifies types that can be unwrapped without needing a JS value
 template <typename TypeWrapper, typename T>
-concept ValueLessParameter = requires(
+concept ContextParameter = requires(
     TypeWrapper wrapper, v8::Local<v8::Context> context, T* ptr) { wrapper.unwrap(context, ptr); };
+
+template <typename TypeWrapper, typename T>
+concept ArgsParameter =
+    requires(TypeWrapper wrapper, const v8::FunctionCallbackInfo<v8::Value>& args, T* ptr) {
+      wrapper.unwrap(args, ptr);
+    };
 
 // TypeWrapper mixin for V8 handles.
 //
@@ -305,6 +311,20 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
   Configuration configuration;
 };
 
+// Specialization of TypeWrapperBase for jsg::Receiver.
+class ReceiverWrapper {
+ public:
+  ReceiverWrapper() {}
+
+  static constexpr const char* getName(jsg::Receiver*) {
+    return "jsg::Receiver";
+  }
+
+  jsg::Receiver unwrap(const v8::FunctionCallbackInfo<v8::Value>& args, jsg::Receiver*) {
+    return jsg::Receiver(args);
+  }
+};
+
 // The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
 // values. It primarily implements two methods:
 //
@@ -398,6 +418,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public ObjectWrapper<Self>,
                    public V8HandleWrapper,
                    public UnimplementedWrapper,
+                   public ReceiverWrapper,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
   bool fastApiEnabled = false;
@@ -483,6 +504,14 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     return TYPE_HANDLER_INSTANCE<U>;
   }
 
+  static constexpr const char* getName(jsg::Receiver*) {
+    return "jsg::Receiver";
+  }
+
+  jsg::Receiver unwrap(const v8::FunctionCallbackInfo<v8::Value>& args, jsg::Receiver*) {
+    return jsg::Receiver(args);
+  }
+
   template <typename U>
   kj::Maybe<const TypeHandler<U>&> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
@@ -537,9 +566,11 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         builder.add(unwrap<E>(context, args[i], errorContext));
       }
       return builder.finish();
-    } else if constexpr (ValueLessParameter<Self, V>) {
+    } else if constexpr (ContextParameter<Self, V>) {
       // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
       return unwrap(context, (V*)nullptr);
+    } else if constexpr (ArgsParameter<Self, V>) {
+      return unwrap(args, (V*)nullptr);
     } else {
       if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {
         // TODO(perf): Better to perform this parameter index check once, at the unwrap<U>() call

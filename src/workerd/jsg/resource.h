@@ -146,36 +146,6 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Lock&, Args...), kj::_::Indexe
   }
 };
 
-// Specialization for constructors that take `const v8::FunctionCallbackInfo<v8::Value>&` as
-// their first parameter.
-template <typename TypeWrapper, typename T, typename... Args, size_t... indexes>
-struct ConstructorCallback<TypeWrapper,
-    T,
-    Ref<T>(const v8::FunctionCallbackInfo<v8::Value>&, Args...),
-    kj::_::Indexes<indexes...>> {
-  static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    liftKj(args, [&]() {
-      auto isolate = args.GetIsolate();
-
-      throwIfConstructorCalledAsFunction(args, typeid(T));
-
-      auto context = isolate->GetCurrentContext();
-      auto obj = args.This();
-      KJ_ASSERT(obj->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-
-      auto& wrapper = TypeWrapper::from(isolate);
-
-      Ref<T> ptr = T::constructor(args,
-          wrapper.template unwrap<Args>(context, args, indexes,
-              TypeErrorContext::constructorArgument(typeid(T), indexes))...);
-      if constexpr (T::jsgHasReflection) {
-        ptr->jsgInitReflection(wrapper);
-      }
-      ptr.attachWrapper(isolate, obj);
-    });
-  }
-};
-
 template <typename TypeWrapper, typename T, typename... Args, size_t... indexes>
 struct ConstructorCallback<TypeWrapper, T, Unimplemented(Args...), kj::_::Indexes<indexes...>> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
