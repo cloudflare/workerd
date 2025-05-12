@@ -526,8 +526,16 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
 // A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
 // the client is destroyed, informing the server that an abort will not be triggered in the future.
 class AbortTriggerRpcClient final {
+  struct Release {
+    rpc::AbortTrigger::Client client;
+    bool skipReleaseForTest;
+  };
+
  public:
-  AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
+  AbortTriggerRpcClient(
+      rpc::AbortTrigger::Client&& client, kj::Own<kj::PromiseFulfiller<Release>> releaseFulfiller)
+      : client(kj::mv(client)),
+        releaseFulfiller(kj::mv(releaseFulfiller)) {}
 
   kj::Promise<void> abort(kj::ArrayPtr<kj::byte> reason) {
     auto req = client.abortRequest(capnp::MessageSize{reason.size() / sizeof(capnp::word) + 8, 0});
@@ -537,27 +545,36 @@ class AbortTriggerRpcClient final {
   }
 
   ~AbortTriggerRpcClient() noexcept(false) {
-    if (skipReleaseForTest) {
-      return;
-    }
-
-    auto req = client.releaseRequest(capnp::MessageSize{4, 0});
-    // We call detach() on the resulting promise so that we can perform RPC in a destructor
-    req.sendIgnoringResult().detach([](kj::Exception exc) {
-      if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
-        // It's possible we can't send the release message because we're already disconnected.
-        return;
-      };
-
-      // Other exceptions could be more interesting
-      LOG_EXCEPTION("abortTriggerReleaseRpc", exc);
-    });
+    releaseFulfiller->fulfill(Release{kj::mv(client), skipReleaseForTest});
   }
 
   bool skipReleaseForTest = false;
 
+  static IoOwn<AbortTriggerRpcClient> create(IoContext& ioctx, rpc::AbortTrigger::Client&& client) {
+    auto [promise, fulfiller] = kj::newPromiseAndFulfiller<Release>();
+    ioctx.addTask(promise.then([](Release release) -> kj::Promise<void> {
+      if (release.skipReleaseForTest) {
+        return kj::READY_NOW;
+      }
+
+      return release.client.releaseRequest(capnp::MessageSize{4, 0})
+          .sendIgnoringResult()
+          .catch_([](kj::Exception exc) {
+        if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
+          // It's possible we can't send the release message because we're already disconnected.
+          return;
+        }
+
+        // Other exceptions could be more interesting
+        LOG_EXCEPTION("abortTriggerReleaseRpc", exc);
+      });
+    }));
+    return ioctx.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(client), kj::mv(fulfiller)));
+  }
+
  private:
   rpc::AbortTrigger::Client client;
+  kj::Own<kj::PromiseFulfiller<Release>> releaseFulfiller;
 };
 
 namespace {
@@ -847,10 +864,9 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
     builder.setAbortTrigger();
   }).castAs<rpc::AbortTrigger>();
 
-  auto& ioContext = IoContext::current();
   // Keep track of every AbortSignal cloned from this one.
   // If this->triggerAbort(...) is called, each rpcClient will be informed.
-  rpcClients.add(ioContext.addObject(kj::heap<AbortTriggerRpcClient>(kj::mv(streamCap))));
+  rpcClients.add(AbortTriggerRpcClient::create(IoContext::current(), kj::mv(streamCap)));
 }
 
 jsg::Ref<AbortSignal> AbortSignal::deserialize(
