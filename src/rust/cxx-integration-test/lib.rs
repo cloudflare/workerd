@@ -132,12 +132,12 @@ fn pass_shared_struct_as_mut_ref(s: &mut ffi::SharedStruct) {
 
 unsafe fn pass_shared_struct_as_const_ptr(s: *const ffi::SharedStruct) -> i32 {
     assert!(!s.is_null());
-    (*s).a + (*s).b
+    unsafe { (*s).a + (*s).b }
 }
 
 unsafe fn pass_shared_struct_as_mut_ptr(s: *mut ffi::SharedStruct) {
-    (*s).a = 0;
-    (*s).b = 0;
+    unsafe { (*s).a = 0 };
+    unsafe { (*s).b = 0 };
 }
 
 #[allow(clippy::boxed_local)] // clippy is right, but we want to test it anyway
