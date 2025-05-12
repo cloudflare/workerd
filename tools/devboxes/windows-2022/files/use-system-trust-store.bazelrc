@@ -1,0 +1,4 @@
+# %ProgramData%\bazel.bazelrc
+
+# Use the Windows trust store instead of the JDK's builtin one.
+startup --host_jvm_args=-Djavax.net.ssl.trustStoreType=Windows-ROOT
