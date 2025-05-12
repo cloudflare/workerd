@@ -913,10 +913,40 @@ def _wrap_attr(attr):
     return wrapper
 
 
-def _wrap_subclass(cls):
+# With the exception of `fetch`, this is a list of the handlers defined in
+# https://developers.cloudflare.com/workers/runtime-apis/rpc/reserved-methods/. Fetch is not
+# included because we do want it to be wrapped so that the input Request argument and output
+# Response is appropriately converted.
+NON_WRAPPED_HANDLER_NAMES = {"connect"}
+NON_WRAPPED_DO_HANDLER_NAMES = {
+    "alarm",
+    "webSocketMessage",
+    "webSocketClose",
+    "webSocketError",
+}
+
+
+def _is_known_handler(handler, special_handlers):
+    # Trim the `on_` prefix.
+    trimmed = handler.removeprefix("on_")
+    return handler in special_handlers or trimmed in special_handlers
+
+
+def _wrap_subclass(cls, is_durable_object):
     for k, v in cls.__dict__.items():
         if k.startswith("__"):
             continue
+
+        is_special_handler = _is_known_handler(k, NON_WRAPPED_HANDLER_NAMES)
+        if is_special_handler:
+            continue
+
+        is_special_do_handler = is_durable_object and _is_known_handler(
+            k, NON_WRAPPED_DO_HANDLER_NAMES
+        )
+        if is_special_do_handler:
+            continue
+
         setattr(cls, k, _wrap_attr(v))
 
 
@@ -929,7 +959,7 @@ class DurableObject:
         pass
 
     def __init_subclass__(cls, **_kwargs):
-        _wrap_subclass(cls)
+        _wrap_subclass(cls, True)
 
 
 class WorkerEntrypoint:
@@ -941,7 +971,7 @@ class WorkerEntrypoint:
         pass
 
     def __init_subclass__(cls, **_kwargs):
-        _wrap_subclass(cls)
+        _wrap_subclass(cls, False)
 
 
 class WorkflowEntrypoint:
@@ -953,4 +983,4 @@ class WorkflowEntrypoint:
         pass
 
     def __init_subclass__(cls, **_kwargs):
-        _wrap_subclass(cls)
+        _wrap_subclass(cls, False)
