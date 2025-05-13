@@ -762,4 +762,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("enable_abortsignal_rpc")
       $experimental;
   # Enables experimental support for passing AbortSignal over RPC.
+
+  allowEvalDuringStartup @89 :Bool
+      $compatEnableFlag("allow_eval_during_startup")
+      $compatEnableDate("2025-06-01")
+      $compatDisableFlag("disallow_eval_during_startup");
+  # Enables eval() and new Function() during startup.
 }

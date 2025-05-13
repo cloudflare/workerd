@@ -716,3 +716,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/webfs-test.js"],
 )
+
+wd_test(
+    src = "tests/worker-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/worker-test.js"],
+)

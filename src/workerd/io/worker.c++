@@ -1652,6 +1652,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             // evaluation is complete.
             TmpDirStoreScope tmpDirStoreScope;
 
+            // We allow eval and new Function() during startup, becaues startup time is entirely
+            // deterministic, so we can easily reproduce the input to eval() by just running the
+            // worker again. We do not allow eval() at runtime because we need to have a record of
+            // all code that executes in production for forensic purposes, and at runtime the input
+            // to eval() could have come from a remote source on which we don't have a record.
+            js.setAllowEval(FeatureFlags::get(js).getAllowEvalDuringStartup());
+            KJ_DEFER(js.setAllowEval(false));
+
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
