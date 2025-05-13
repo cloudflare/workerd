@@ -13,7 +13,7 @@ const unitTests :Workerd.Config = (
           ( name = "CACHE_ENABLED", json = "false" ),
         ],
         compatibilityDate = "2023-08-01",
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled", "streaming_tail_worker"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled"],
         streamingTails = ["log", "log-invalid"],
       ),
     ),
@@ -27,7 +27,7 @@ const unitTests :Workerd.Config = (
           ( name = "SERVICE", service = "queue-test" ),
         ],
         compatibilityDate = "2023-07-24",
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
         streamingTails = ["log"],
       )
     ),
@@ -49,6 +49,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "tail-worker-test-invalid.js")
         ],
         compatibilityDate = "2024-10-14",
+        compatibilityFlags = ["streaming_tail_worker"],
       ),
     ),
   ],
@@ -56,7 +57,7 @@ const unitTests :Workerd.Config = (
 
 const alarmsWorker :Workerd.Worker = (
   compatibilityDate = "2022-09-16",
-  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [
     (name = "worker", esModule = embed "actor-alarms-test.js"),
@@ -78,7 +79,7 @@ const alarmsWorker :Workerd.Worker = (
 
 const hiberWorker :Workerd.Worker = (
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [
     (name = "worker", esModule = embed "tests/websocket-hibernation.js"),
@@ -110,7 +111,7 @@ const logReceiver :Workerd.Worker = (
     (name = "worker", esModule = embed "tail-worker-test-receiver.js")
   ],
   compatibilityDate = "2024-10-14",
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
 );
 
 const logLegacy :Workerd.Worker = (
@@ -118,6 +119,5 @@ const logLegacy :Workerd.Worker = (
     (name = "worker", esModule = embed "tail-worker-test-dummy.js")
   ],
   compatibilityDate = "2024-10-14",
-  compatibilityFlags = ["streaming_tail_worker"],
   streamingTails = ["log"],
 );
