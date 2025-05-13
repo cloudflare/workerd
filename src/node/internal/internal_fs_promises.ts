@@ -28,11 +28,12 @@
 import {
   getOptions,
   copyObject,
-  getValidatedPath,
+  normalizePath,
   kMaxUserId,
   validateCpOptions,
   toUnixTimestamp,
   validateRmdirOptions,
+  type FilePath,
 } from 'node-internal:internal_fs_utils';
 import * as constants from 'node-internal:internal_fs_constants';
 import {
@@ -43,8 +44,6 @@ import {
   validateOneOf,
 } from 'node-internal:validators';
 import type { RmDirOptions, CopyOptions } from 'node:fs';
-
-type FilePath = string | URL;
 
 export async function access(
   _path: FilePath,
@@ -65,7 +64,7 @@ export async function appendFile(
 }
 
 export async function chmod(path: FilePath, mode: number): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   mode = parseFileMode(mode, 'mode');
   throw new Error('Not implemented');
 }
@@ -75,7 +74,7 @@ export async function chown(
   uid: number,
   gid: number
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   validateInteger(uid, 'uid', -1, kMaxUserId);
   validateInteger(gid, 'gid', -1, kMaxUserId);
   throw new Error('Not implemented');
@@ -86,8 +85,8 @@ export async function copyFile(
   dest: FilePath,
   _mode: number
 ): Promise<void> {
-  src = getValidatedPath(src, 'src');
-  dest = getValidatedPath(dest, 'dest');
+  src = normalizePath(src);
+  dest = normalizePath(dest);
   throw new Error('Not implemented');
 }
 
@@ -97,8 +96,8 @@ export async function cp(
   options: CopyOptions
 ): Promise<void> {
   options = validateCpOptions(options);
-  src = getValidatedPath(src, 'src');
-  dest = getValidatedPath(dest, 'dest');
+  src = normalizePath(src);
+  dest = normalizePath(dest);
   throw new Error('Not implemented');
 }
 
@@ -111,7 +110,7 @@ export async function lchown(
   uid: number,
   gid: number
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   validateInteger(uid, 'uid', -1, kMaxUserId);
   validateInteger(gid, 'gid', -1, kMaxUserId);
   throw new Error('Not implemented');
@@ -122,7 +121,7 @@ export async function lutimes(
   atime: string | number | Date,
   mtime: string | number | Date
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   atime = toUnixTimestamp(atime);
   mtime = toUnixTimestamp(mtime);
   throw new Error('Not implemented');
@@ -132,8 +131,8 @@ export async function link(
   existingPath: FilePath,
   newPath: FilePath
 ): Promise<void> {
-  existingPath = getValidatedPath(existingPath, 'existingPath');
-  newPath = getValidatedPath(newPath, 'newPath');
+  existingPath = normalizePath(existingPath);
+  newPath = normalizePath(newPath);
   throw new Error('Not implemented');
 }
 
@@ -141,7 +140,7 @@ export async function lstat(
   path: FilePath,
   _options: Record<string, unknown> = { bigint: false }
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -154,7 +153,7 @@ export async function mkdir(
   }
   const recursive = options?.recursive ?? false;
   let mode = options?.mode ?? 0o777;
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   validateBoolean(recursive, 'options.recursive');
   mode = parseFileMode(mode, 'mode', 0o777);
   throw new Error('Not implemented');
@@ -165,7 +164,7 @@ export async function mkdtemp(
   options: Record<string, unknown>
 ): Promise<void> {
   options = getOptions(options);
-  prefix = getValidatedPath(prefix, 'prefix');
+  prefix = normalizePath(prefix);
   throw new Error('Not implemented');
 }
 
@@ -174,7 +173,7 @@ export async function open(
   _flags: number | string | null,
   mode: number
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   mode = parseFileMode(mode, 'mode', 0o666);
   throw new Error('Not implemented');
 }
@@ -183,7 +182,7 @@ export async function opendir(
   path: FilePath,
   options: Record<string, unknown>
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   options = getOptions(options, {
     encoding: 'utf8',
   });
@@ -195,7 +194,7 @@ export async function readdir(
   options: Record<string, unknown>
 ): Promise<void> {
   options = copyObject(getOptions(options));
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -212,7 +211,7 @@ export async function readlink(
   options: Record<string, unknown>
 ): Promise<void> {
   options = getOptions(options);
-  path = getValidatedPath(path, 'oldPath');
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -220,7 +219,7 @@ export async function realpath(
   path: FilePath,
   options: Record<string, unknown>
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   options = getOptions(options);
   throw new Error('Not implemented');
 }
@@ -229,8 +228,8 @@ export async function rename(
   oldPath: FilePath,
   newPath: FilePath
 ): Promise<void> {
-  oldPath = getValidatedPath(oldPath, 'oldPath');
-  newPath = getValidatedPath(newPath, 'newPath');
+  oldPath = normalizePath(oldPath);
+  newPath = normalizePath(newPath);
   throw new Error('Not implemented');
 }
 
@@ -238,7 +237,7 @@ export async function rmdir(
   path: FilePath,
   options: RmDirOptions
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   options = validateRmdirOptions(options);
   throw new Error('Not implemented');
 }
@@ -247,7 +246,7 @@ export async function rm(
   path: FilePath,
   _options: Record<string, unknown>
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -255,7 +254,7 @@ export async function stat(
   path: FilePath,
   _options: Record<string, unknown> = { bigint: false }
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -272,8 +271,8 @@ export async function symlink(
   type: string | null | undefined
 ): Promise<void> {
   validateOneOf(type, 'type', ['dir', 'file', 'junction', null, undefined]);
-  target = getValidatedPath(target, 'target');
-  path = getValidatedPath(path);
+  target = normalizePath(target);
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -285,7 +284,7 @@ export async function truncate(
 }
 
 export async function unlink(path: FilePath): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   throw new Error('Not implemented');
 }
 
@@ -294,7 +293,7 @@ export async function utimes(
   atime: string | number | Date,
   mtime: string | number | Date
 ): Promise<void> {
-  path = getValidatedPath(path);
+  path = normalizePath(path);
   atime = toUnixTimestamp(atime);
   mtime = toUnixTimestamp(mtime);
   throw new Error('Not implemented');

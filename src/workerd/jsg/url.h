@@ -99,6 +99,12 @@ class Url final {
   // Resolve the input relative to this URL
   kj::Maybe<Url> tryResolve(kj::ArrayPtr<const char> input) const KJ_WARN_UNUSED_RESULT;
 
+  struct Relative;
+  // Given this URL, returns a struct that is a basename and a base Url pair
+  // such that base.tryResolve(basename) is equivalent to this URL. Query
+  // parameters and fragments are not preserved.
+  Relative getRelative() const KJ_LIFETIMEBOUND;
+
   HostType getHostType() const;
   SchemeType getSchemeType() const;
 
@@ -122,6 +128,11 @@ class Url final {
  private:
   Url(kj::Own<void> inner);
   kj::Own<void> inner;
+};
+
+struct Url::Relative {
+  Url base;
+  kj::String name;
 };
 
 constexpr Url::EquivalenceOption operator|(Url::EquivalenceOption a, Url::EquivalenceOption b) {

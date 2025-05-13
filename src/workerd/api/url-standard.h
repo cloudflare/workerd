@@ -251,6 +251,9 @@ public:
     tracker.trackField("searchParams", maybeSearchParams);
   }
 
+  operator const jsg::Url&() const { return inner; }
+  operator jsg::Url() { return inner.clone(); }
+
 private:
   jsg::Url inner;
   kj::Maybe<jsg::Ref<URLSearchParams>> maybeSearchParams;

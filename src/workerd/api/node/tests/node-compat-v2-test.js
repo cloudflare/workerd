@@ -43,7 +43,7 @@ export const nodeJsGetBuiltins = {
 
     // The built-in node:vm module is not available in workers, so this should
     // return undefined.
-    strictEqual(buildInVm, undefined);
+    assert.strictEqual(builtInVm, undefined);
 
     // These are from the worker bundle....
     assert.strictEqual(fs, 1);
