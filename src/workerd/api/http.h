@@ -744,6 +744,7 @@ struct RequestInitializerDict {
   // TODO(conform): Might support later?
 
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
+
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if(flags.getCacheOptionEnabled()) {
       if(flags.getCacheNoCache()) {

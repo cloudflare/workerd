@@ -125,7 +125,7 @@ Frankenvalue Frankenvalue::fromJs(jsg::Lock& js, jsg::JsValue value) {
 
   js.withinHandleScope([&]() {
     jsg::Serializer ser(js, {.treatClassInstancesAsPlainObjects = false});
-    ser.write(js, value);
+    ser.writeDynamic(js, value);
     result.value = V8Serialized{ser.release().data};
   });
 

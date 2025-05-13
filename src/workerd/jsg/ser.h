@@ -151,10 +151,10 @@ class Serializer final: v8::ValueSerializer::Delegate {
 
   template <typename S, typename T>
   void write(Lock& js, const S& serializeTypeHandler, T&& val) {
-    write(js, JsValue(serializeTypeHandler.wrapForSerialize(js, kj::fwd<T>(val))));
+    writeDynamic(js, JsValue(serializeTypeHandler.wrapForSerialize(js, kj::fwd<T>(val))));
   }
 
-  void write(Lock& js, const JsValue& value);
+  void writeDynamic(Lock& js, const JsValue& value);
 
   // Implements the `transfer` option of `structuredClone()`. Pass each item in the transfer array
   // to this method before calling `write()`. This gives the Serializer permission to serialize

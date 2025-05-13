@@ -57,7 +57,7 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
         .version = 15,
         .omitHeader = false,
       });
-  serializer.write(js, jsg::JsValue(body));
+  serializer.writeDynamic(js, jsg::JsValue(body));
   kj::Array<kj::byte> bytes = serializer.release().data;
   Serialized result;
   result.data = bytes;

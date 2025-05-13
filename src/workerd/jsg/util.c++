@@ -387,7 +387,7 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
           // be bumped to match the new version once all of production is updated to understand it.
           .version = 15,
         });
-    ser.write(js, JsValue(handle));
+    ser.writeDynamic(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
   } catch (JsExceptionThrown&) {
     // Either:

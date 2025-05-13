@@ -798,7 +798,7 @@ void AbortSignal::triggerAbort(
     IoContext& ioContext = IoContext::current();
     jsg::Serializer ser(js);
     KJ_IF_SOME(r, reason) {
-      ser.write(js, r.getHandle(js));
+      ser.writeDynamic(js, r.getHandle(js));
     }
 
     auto released = ser.release();
@@ -832,9 +832,9 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   serializer.writeRawUint32(static_cast<uint>(canceler->isCanceled()));
   serializer.writeRawUint32(static_cast<uint>(flag));
   KJ_IF_SOME(r, reason) {
-    serializer.write(js, r.getHandle(js));
+    serializer.writeDynamic(js, r.getHandle(js));
   } else {
-    serializer.write(js, js.undefined());
+    serializer.writeDynamic(js, js.undefined());
   }
 
   if (getAborted(js) || getNeverAborts()) {

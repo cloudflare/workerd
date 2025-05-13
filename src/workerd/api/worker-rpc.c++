@@ -168,7 +168,7 @@ void serializeJsValue(jsg::Lock& js,
         .treatClassInstancesAsPlainObjects = false,
         .externalHandler = externalHandler,
       });
-  serializer.write(js, value);
+  serializer.writeDynamic(js, value);
   kj::Array<const byte> data = serializer.release().data;
   JSG_ASSERT(data.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
       "Serialized RPC arguments or return values are limited to 32MiB, but the size of this value "

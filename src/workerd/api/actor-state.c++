@@ -1028,7 +1028,7 @@ kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
         .version = 15,
         .omitHeader = false,
       });
-  serializer.write(js, value);
+  serializer.writeDynamic(js, value);
   auto released = serializer.release();
   return kj::mv(released.data);
 }

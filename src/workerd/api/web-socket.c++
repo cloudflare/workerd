@@ -726,7 +726,7 @@ void WebSocket::serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) {
         .version = 15,
         .omitHeader = false,
       });
-  serializer.write(js, attachment);
+  serializer.writeDynamic(js, attachment);
   auto released = serializer.release();
   JSG_REQUIRE(released.data.size() <= MAX_ATTACHMENT_SIZE, Error,
       "A WebSocket 'attachment' cannot be larger than ", MAX_ATTACHMENT_SIZE,
