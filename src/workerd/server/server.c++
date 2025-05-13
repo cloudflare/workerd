@@ -1887,34 +1887,33 @@ class Server::WorkerService final: public Service,
         addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
       }
 
-      if (worker->getIsolate().getApi().getFeatureFlags().getStreamingTailWorker()) {
-        for (auto& service: channels.streamingTails) {
-          addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
-        }
+      // Set up a single pseudo STW to accumulate events for any legacy tail workers, using the
+      // first LTW service.
+      // Setting up legacy tail workers support, but only if we actually have tail workers
+      // configured.
+      if (legacyTailWorkers.size()) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *channels.tails[0]);
+      }
+      for (auto& service: channels.streamingTails) {
+        addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
       }
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
     kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
-    if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
-      // Setting up legacy tail workers support, but only if we actually have tail workers
-      // configured.
-      // Set up a single pseudo STW to accumulate events for any legacy tail workers, using the
-      // first LTW service.
-      kj::Array<kj::Own<WorkerInterface>> legacyTailWorkers_sender;
-      if (legacyTailWorkers.size()) {
-        legacyTailWorkers_sender = kj::arr(channels.tails[0]->startRequest({}));
-      }
+    if (streamingTailWorkers.size() > 0) {
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
+      // TODO: Explain what the two new boolean args mean.
       workerTracer =
           tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel, kj::none /* scriptId */,
               kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
               kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */,
-              tracing::initializeTailStreamWriter(kj::mv(legacyTailWorkers_sender),
-                  streamingTailWorkers.releaseAsArray(), waitUntilTasks, tracer.addRef()));
+              tracing::initializeTailStreamWriter(streamingTailWorkers.releaseAsArray(),
+                  legacyTailWorkers.size() == 0, waitUntilTasks, tracer.addRef()),
+              legacyTailWorkers.size() != 0);
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
