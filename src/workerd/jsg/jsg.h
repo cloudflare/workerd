@@ -1012,6 +1012,28 @@ class LenientOptional: public kj::Maybe<T> {
   LenientOptional(Params&&... params): kj::Maybe<T>(kj::fwd<Params>(params)...) {}
 };
 
+// Identical to Optional, but indicates that the value is not present in the serialized form
+// of an object
+template <typename T>
+class OmitFromSerialized: public kj::Maybe<T> {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  OmitFromSerialized(Params&&... params): kj::Maybe<T>(kj::fwd<Params>(params)...) {}
+};
+
+// Claims that a contained type is serializable even if this is not known at compile-time
+// Its use should be avoided, but I created it to help while working on this PR
+template <typename T>
+class FakeSerializable: public T {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  FakeSerializable(Params&&... params): T(kj::fwd<Params>(params)...) {}
+};
+
 // Use this type in a JSG_STRUCT to define a special field that will be filled in with a
 // reference to the original struct's JavaScript representation. This is useful e.g. if you
 // may need to pull additional fields out of the struct.
@@ -1985,6 +2007,20 @@ class TypeHandler {
 
   // Unwrap by value. Returns null if not the right type.
   virtual kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const = 0;
+};
+
+template <typename T>
+class SerializeTypeHandler {
+ public:
+  // ---------------------------------------------------------------------------
+  // Interface for value types (i.e. types not declared using JSG_RESOURCE_TYPE).
+  //
+  // This includes builtin types, e.g. `double` or `kj::String`.
+  //
+  // These methods will fail for resource types.
+
+  // Wrap by value.
+  virtual v8::Local<v8::Value> wrapForSerialize(Lock& js, T value) const = 0;
 };
 
 // Utility that allows C++ code in a resource type to examine properties that have been added to

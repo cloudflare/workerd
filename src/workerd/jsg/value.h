@@ -45,6 +45,11 @@ class PrimitiveWrapper {
     return wrap(context->GetIsolate(), creator, value);
   }
 
+  v8::Local<v8::Number> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, double value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
   v8::Local<v8::Number> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, double value) {
     return v8::Number::New(isolate, value);
@@ -62,6 +67,11 @@ class PrimitiveWrapper {
   }
 
   v8::Local<v8::Number> wrap(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int8_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
+  v8::Local<v8::Number> wrapForSerialize(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int8_t value) {
     return wrap(context->GetIsolate(), creator, value);
   }
@@ -96,6 +106,11 @@ class PrimitiveWrapper {
     return wrap(context->GetIsolate(), creator, value);
   }
 
+  v8::Local<v8::Number> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, uint8_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
   v8::Local<v8::Number> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint8_t value) {
     return v8::Integer::NewFromUnsigned(isolate, value);
@@ -124,6 +139,11 @@ class PrimitiveWrapper {
   }
 
   v8::Local<v8::Number> wrap(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int16_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
+  v8::Local<v8::Number> wrapForSerialize(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int16_t value) {
     return wrap(context->GetIsolate(), creator, value);
   }
@@ -163,6 +183,11 @@ class PrimitiveWrapper {
     return v8::Integer::NewFromUnsigned(isolate, value);
   }
 
+  v8::Local<v8::Number> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, uint16_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
   kj::Maybe<uint16_t> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       uint16_t*,
@@ -186,6 +211,11 @@ class PrimitiveWrapper {
   }
 
   v8::Local<v8::Number> wrap(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
+  v8::Local<v8::Number> wrapForSerialize(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int value) {
     return wrap(context->GetIsolate(), creator, value);
   }
@@ -226,6 +256,11 @@ class PrimitiveWrapper {
     return wrap(context->GetIsolate(), creator, value);
   }
 
+  v8::Local<v8::Number> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, uint32_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
   v8::Local<v8::Number> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, uint32_t value) {
     return v8::Integer::NewFromUnsigned(isolate, value);
@@ -258,6 +293,11 @@ class PrimitiveWrapper {
   }
 
   v8::Local<v8::BigInt> wrap(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
+  v8::Local<v8::BigInt> wrapForSerialize(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
     return wrap(context->GetIsolate(), creator, value);
   }
@@ -304,6 +344,11 @@ class PrimitiveWrapper {
     return wrap(context->GetIsolate(), creator, value);
   }
 
+  v8::Local<v8::BigInt> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, int64_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
   v8::Local<v8::BigInt> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, int64_t value) {
     return v8::BigInt::New(isolate, value);
@@ -343,6 +388,14 @@ class PrimitiveWrapper {
     // The template is needed to prevent this overload from being chosen for arbitrary types that
     // can convert to bool, such as pointers.
     return wrap(context->GetIsolate(), creator, value);
+  }
+
+  template <typename T, typename = kj::EnableIf<kj::isSameType<T, bool>()>>
+  v8::Local<v8::Boolean> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
+    // The template is needed to prevent this overload from being chosen for arbitrary types that
+    // can convert to bool, such as pointers.
+    return wrapForSerialize(context->GetIsolate(), creator, value);
   }
 
   template <typename T, typename = kj::EnableIf<kj::isSameType<T, bool>()>>
@@ -477,6 +530,44 @@ class StringWrapper {
     return wrap(context, creator, value.asPtr());
   }
 
+  // ...
+
+  v8::Local<v8::String> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::ArrayPtr<const char> value) {
+    return v8Str(context->GetIsolate(), value);
+  }
+
+  v8::Local<v8::String> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<const char> value) {
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrapForSerialize(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, kj::StringPtr value) {
+    return v8Str(isolate, value);
+  }
+
+  v8::Local<v8::String> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const ByteString& value) {
+    // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const USVString& value) {
+    return wrap(context, creator, value.asPtr());
+  }
+
+  v8::Local<v8::String> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const DOMString& value) {
+    return wrap(context, creator, value.asPtr());
+  }
+
   kj::Maybe<kj::String> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::String*,
@@ -577,6 +668,16 @@ class OptionalWrapper {
   }
 
   template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, Optional<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::fwd<U>(p));
+    } else {
+      return v8::Undefined(context->GetIsolate());
+    }
+  }
+
+  template <typename U>
   kj::Maybe<Optional<U>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Optional<U>*,
@@ -587,6 +688,86 @@ class OptionalWrapper {
       return static_cast<TypeWrapper*>(this)
           ->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr, parentObject)
           .map([](auto&& value) -> Optional<U> { return kj::fwd<decltype(value)>(value); });
+    }
+  }
+};
+
+// =======================================================================================
+// jsg::FakeSerializable<T>
+template <typename TypeWrapper>
+class FakeSerializableWrapper {
+ public:
+  template <typename U>
+  static constexpr decltype(auto) getName(FakeSerializable<U>*) {
+    return TypeWrapper::getName((kj::Decay<U>*)nullptr);
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      FakeSerializable<U> ptr) {
+    return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(ptr));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      FakeSerializable<U> ptr) {
+    return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(ptr));
+  }
+
+  template <typename U>
+  kj::Maybe<FakeSerializable<U>> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      FakeSerializable<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return static_cast<TypeWrapper*>(this)->tryUnwrap(
+        context, handle, (kj::Decay<U>*)nullptr, parentObject);
+  }
+};
+
+// =======================================================================================
+// jsg::OmitFromSerialized<T>
+
+template <typename TypeWrapper>
+class OmitFromSerializedWrapper {
+ public:
+  template <typename U>
+  static constexpr decltype(auto) getName(OmitFromSerialized<U>*) {
+    return TypeWrapper::getName((kj::Decay<U>*)nullptr);
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      OmitFromSerialized<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(p));
+    } else {
+      return v8::Undefined(context->GetIsolate());
+    }
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      OmitFromSerialized<U> ptr) {
+    return v8::Undefined(context->GetIsolate());
+  }
+
+  template <typename U>
+  kj::Maybe<OmitFromSerialized<U>> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      OmitFromSerialized<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsUndefined()) {
+      return OmitFromSerialized<U>(kj::none);
+    } else {
+      return static_cast<TypeWrapper*>(this)
+          ->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr, parentObject)
+          .map([](auto&& value) -> OmitFromSerialized<U> {
+        return kj::fwd<decltype(value)>(value);
+      });
     }
   }
 };
@@ -651,6 +832,16 @@ class MaybeWrapper {
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, kj::Maybe<U> ptr) {
     KJ_IF_SOME(p, ptr) {
       return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(p));
+    } else {
+      return v8::Null(context->GetIsolate());
+    }
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, kj::Maybe<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::fwd<U>(p));
     } else {
       return v8::Null(context->GetIsolate());
     }
@@ -725,6 +916,31 @@ class OneOfWrapper {
       kj::OneOf<U...> value) {
     v8::Local<v8::Value> result;
     if (!(wrapHelper<U>(context, creator, value, result) || ...)) {
+      result = v8::Undefined(context->GetIsolate());
+    }
+    return result;
+  }
+
+  template <typename U, typename... V>
+  bool wrapForSerializeHelper(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::OneOf<V...>& in,
+      v8::Local<v8::Value>& out) {
+    if (in.template is<U>()) {
+      out = static_cast<TypeWrapper*>(this)->wrapForSerialize(
+          context, creator, kj::mv(in.template get<U>()));
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  template <typename... U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::OneOf<U...> value) {
+    v8::Local<v8::Value> result;
+    if (!(wrapForSerializeHelper<U>(context, creator, value, result) || ...)) {
       result = v8::Undefined(context->GetIsolate());
     }
     return result;
@@ -859,6 +1075,24 @@ class ArrayWrapper {
 
     return handleScope.Escape(out);
   }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<U> array) {
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+
+    v8::LocalVector<v8::Value> items(isolate, array.size());
+    for (auto n = 0; n < items.size(); n++) {
+      items[n] =
+          static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::mv(array[n]));
+    }
+    auto out = v8::Array::New(isolate, items.data(), items.size());
+
+    return handleScope.Escape(out);
+  }
+
   template <typename U>
   v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -874,11 +1108,36 @@ class ArrayWrapper {
 
     return handleScope.Escape(out);
   }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::ArrayPtr<U> array) {
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+
+    v8::LocalVector<v8::Value> items(isolate, array.size());
+    for (auto n = 0; n < items.size(); n++) {
+      items[n] =
+          static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::mv(array[n]));
+    }
+    auto out = v8::Array::New(isolate, items.data(), items.size());
+
+    return handleScope.Escape(out);
+  }
+
   template <typename U>
   v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::Array<U>& array) {
     return static_cast<TypeWrapper*>(this)->wrap(context, creator, array.asPtr());
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<U>& array) {
+    return static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, array.asPtr());
   }
 
   template <typename U>
@@ -1098,6 +1357,25 @@ class DictWrapper {
       KJ_ASSERT(check(out->Set(context,
           static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(field.name)),
           static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(field.value)))));
+    }
+    return handleScope.Escape(out);
+  }
+
+  template <typename K, typename V>
+  v8::Local<v8::Value> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, Dict<V, K> dict) {
+    static_assert(webidl::isStringType<K>, "Dicts must be keyed on a string type.");
+
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+    auto out = v8::Object::New(isolate);
+    for (auto& field: dict.fields) {
+      // Set() returns Maybe<bool>. As usual, if the Maybe is null, then there was an exception,
+      // but I have no idea what it means if the Maybe was filled in with the boolean value false...
+      KJ_ASSERT(check(out->Set(context,
+          static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::mv(field.name)),
+          static_cast<TypeWrapper*>(this)->wrapForSerialize(
+              context, creator, kj::mv(field.value)))));
     }
     return handleScope.Escape(out);
   }

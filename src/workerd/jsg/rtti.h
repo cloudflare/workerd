@@ -344,6 +344,13 @@ struct BuildRtti<Configuration, jsg::NonCoercible<T>> {
   }
 };
 
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::FakeSerializable<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder, rtti);
+  }
+};
+
 // Maybe Types
 
 #define DECLARE_MAYBE_TYPE(T)                                                                      \
@@ -359,7 +366,8 @@ struct BuildRtti<Configuration, jsg::NonCoercible<T>> {
 #define FOR_EACH_MAYBE_TYPE(F)                                                                     \
   F(kj::Maybe)                                                                                     \
   F(jsg::Optional)                                                                                 \
-  F(jsg::LenientOptional)
+  F(jsg::LenientOptional)                                                                          \
+  F(jsg::OmitFromSerialized)
 
 FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
 

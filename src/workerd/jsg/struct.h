@@ -49,6 +49,26 @@ class FieldWrapper {
     }
   }
 
+  void wrapForSerialize(TypeWrapper& wrapper,
+      v8::Isolate* isolate,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Struct& in,
+      v8::Local<v8::Object> out) {
+    if constexpr (kj::isSameType<T, SelfRef>()) {
+      // Ignore SelfRef when converting to JS.
+    } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
+      // Fields with these types are required NOT to be present, so don't try to convert them.
+    } else {
+      if constexpr (webidl::isOptional<Type>) {
+        // Don't even set optional fields that aren't present.
+        if (in.*field == kj::none) return;
+      }
+      auto value = wrapper.wrapForSerialize(context, creator, kj::mv(in.*field));
+      check(out->Set(context, nameHandle.Get(isolate), value));
+    }
+  }
+
   Type unwrap(TypeWrapper& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
@@ -91,6 +111,18 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     auto& fields = getFields(isolate);
     v8::Local<v8::Object> out = v8::Object::New(isolate);
     (kj::get<indices>(fields).wrap(static_cast<Self&>(*this), isolate, context, creator, in, out),
+        ...);
+    return handleScope.Escape(out);
+  }
+
+  v8::Local<v8::Object> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
+    auto isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+    auto& fields = getFields(isolate);
+    v8::Local<v8::Object> out = v8::Object::New(isolate);
+    (kj::get<indices>(fields).wrapForSerialize(
+         static_cast<Self&>(*this), isolate, context, creator, in, out),
         ...);
     return handleScope.Escape(out);
   }

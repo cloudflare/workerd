@@ -275,6 +275,7 @@ class TypeWrapperBase<Self, TypeWrapperExtension<Extension>, JsgKind::EXTENSION>
   TypeWrapperBase(MetaConfiguration& config, bool = false): Extension<Self>(config) {}
 
   void unwrap() = delete;  // extensions only implement tryUnwrap(), not unwrap()
+  void wrapForSerialize() = delete;
 
   inline void initTypeWrapper() {}
 };
@@ -298,6 +299,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
   void wrap() = delete;
   void newContext() = delete;
   void getTemplate() = delete;
+  void wrapForSerialize() = delete;
 
   inline void initTypeWrapper() {}
 
@@ -398,7 +400,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public ObjectWrapper<Self>,
                    public V8HandleWrapper,
                    public UnimplementedWrapper,
-                   public JsValueWrapper<Self> {
+                   public JsValueWrapper<Self>,
+                   public FakeSerializableWrapper<Self>,
+                   public OmitFromSerializedWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
   bool fastApiEnabled = false;
 
@@ -431,6 +435,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using TypeWrapperBase<Self, T>::unwrap...;
   using TypeWrapperBase<Self, T>::tryUnwrap...;
   using TypeWrapperBase<Self, T>::getTemplate...;
+  using TypeWrapperBase<Self, T>::wrapForSerialize...;
 
 #define USING_WRAPPER(Name)                                                                        \
   using Name::getName;                                                                             \
@@ -438,18 +443,32 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   using Name::tryUnwrap
 
   USING_WRAPPER(PrimitiveWrapper);
+  using PrimitiveWrapper::wrapForSerialize;
   USING_WRAPPER(NameWrapper<Self>);
   USING_WRAPPER(StringWrapper);
+  using StringWrapper::wrapForSerialize;
   USING_WRAPPER(OptionalWrapper<Self>);
+  using OptionalWrapper<Self>::wrapForSerialize;
   USING_WRAPPER(LenientOptionalWrapper<Self>);
   USING_WRAPPER(MaybeWrapper<Self>);
+  using MaybeWrapper<Self>::wrapForSerialize;
+
   USING_WRAPPER(OneOfWrapper<Self>);
+  using OneOfWrapper<Self>::wrapForSerialize;
+
   USING_WRAPPER(ArrayWrapper<Self>);
+  using ArrayWrapper<Self>::wrapForSerialize;
+
   USING_WRAPPER(SetWrapper<Self>);
   USING_WRAPPER(SequenceWrapper<Self>);
+  using SequenceWrapper<Self>::wrapForSerialize;
+
   USING_WRAPPER(GeneratorWrapper<Self>);
   USING_WRAPPER(ArrayBufferWrapper<Self>);
+
   USING_WRAPPER(DictWrapper<Self>);
+  using DictWrapper<Self>::wrapForSerialize;
+
   USING_WRAPPER(DateWrapper<Self>);
   USING_WRAPPER(BufferSourceWrapper<Self>);
   USING_WRAPPER(FunctionWrapper<Self>);
@@ -463,6 +482,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(V8HandleWrapper);
   USING_WRAPPER(UnimplementedWrapper);
   USING_WRAPPER(JsValueWrapper<Self>);
+  USING_WRAPPER(FakeSerializableWrapper<Self>);
+  using FakeSerializableWrapper<Self>::wrapForSerialize;
+
+  USING_WRAPPER(OmitFromSerializedWrapper<Self>);
+  using OmitFromSerializedWrapper<Self>::wrapForSerialize;
+
 #undef USING_WRAPPER
 
   template <typename U>
@@ -470,6 +495,13 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   static constexpr TypeHandlerImpl<U> TYPE_HANDLER_INSTANCE = TypeHandlerImpl<U>();
+
+  template <typename U>
+  class SerializeTypeHandlerImpl;
+
+  template <typename U>
+  static constexpr SerializeTypeHandlerImpl<U> SERIALIZE_TYPE_HANDLER_INSTANCE =
+      SerializeTypeHandlerImpl<U>();
 
   template <typename U>
   static constexpr const char* getName(TypeHandler<U>*) {
@@ -597,6 +629,17 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
     auto isolate = js.v8Isolate;
     auto context = js.v8Context();
     return TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, kj::none);
+  }
+};
+
+template <typename Self, typename... Types>
+template <typename T>
+class TypeWrapper<Self, Types...>::SerializeTypeHandlerImpl final: public SerializeTypeHandler<T> {
+ public:
+  v8::Local<v8::Value> wrapForSerialize(Lock& js, T value) const override {
+    auto isolate = js.v8Isolate;
+    auto context = js.v8Context();
+    return TypeWrapper::from(isolate).wrapForSerialize(context, kj::none, kj::mv(value));
   }
 };
 

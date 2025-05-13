@@ -949,15 +949,19 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), 
 template <typename T>
 class TypeHandler;
 
+template <typename T>
+class SerializeTypeHandler;
+
 // Helper to call T::serialize() and pass along any TypeHandlers it needs.
 template <typename TypeWrapper, typename T, typename Method = decltype(&T::serialize)>
 struct SerializeInvoker;
 template <typename TypeWrapper, typename T, typename... Types>
 struct SerializeInvoker<TypeWrapper,
     T,
-    void (T::*)(Lock&, Serializer&, const TypeHandler<Types>&...)> {
+    void (T::*)(Lock&, Serializer&, const SerializeTypeHandler<Types>&...)> {
   static void call(TypeWrapper& wrapper, T& target, Lock& js, Serializer& serializer) {
-    target.serialize(js, serializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...);
+    target.serialize(
+        js, serializer, TypeWrapper::template SERIALIZE_TYPE_HANDLER_INSTANCE<Types>...);
   }
 };
 
@@ -1655,6 +1659,15 @@ class ResourceWrapper {
   // implementation.
   static constexpr const std::type_info& getName(Ref<T>*) {
     return typeid(T);
+  }
+
+  v8::Local<v8::Object> wrapForSerialize(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, Ref<T>&& value) {
+    static_assert(
+        static_cast<uint>(T::jsgSerializeTag) != static_cast<uint>(T::jsgSuper::jsgSerializeTag),
+        "Resource was not declared JSG_SERIALIZABLE");
+
+    return wrap(context, creator, kj::mv(value));
   }
 
   v8::Local<v8::Object> wrap(
