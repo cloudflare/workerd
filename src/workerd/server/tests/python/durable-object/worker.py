@@ -11,7 +11,12 @@ from workers import DurableObject, Request, Response
 import pyodide
 
 
-class DurableObjectExample(DurableObject):
+class MixinTest:
+    def test_mixin(self):
+        return 1234
+
+
+class DurableObjectExample(DurableObject, MixinTest):
     def __init__(self, state, env):
         self.state = state
         self.counter = 0
@@ -84,6 +89,9 @@ async def test(ctrl, env, ctx):
     if pyodide.__version__ != "0.26.0a2":
         res = await obj.jspi_method(9)
         assert res == 10
+
+    # Verify that a mixin method can be called via RPC.
+    assert await obj.test_mixin() == 1234
 
     # Wait for alarm to get triggered.
     while True:
