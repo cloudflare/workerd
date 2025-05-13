@@ -1229,8 +1229,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
-      modular(source.is<ModulesSource>()),
-      python(modular && source.get<ModulesSource>().isPython),
+      modular(source.variant.is<ModulesSource>()),
+      python(modular && source.variant.get<ModulesSource>().isPython),
       impl(kj::heap<Impl>()) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
@@ -1318,7 +1318,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
         try {
           try {
-            KJ_SWITCH_ONEOF(source) {
+            KJ_SWITCH_ONEOF(source.variant) {
               KJ_CASE_ONEOF(script, ScriptSource) {
                 // This path is used for the older, service worker syntax workers.
 

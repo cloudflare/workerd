@@ -67,6 +67,7 @@ wd_cc_library(
         "tracer.h",
         "worker.h",
         "worker-fs.h",
+        "worker-source.h",
     ] + ["//src/workerd/api:hdrs"],
     # global CPU-specific options are inconvenient to specify with bazel – just set the options we
     # need for CRC32C in this target for now.
