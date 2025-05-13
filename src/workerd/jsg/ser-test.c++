@@ -115,10 +115,11 @@ struct SerTestContext: public ContextGlobalObject {
       JSG_READONLY_PROTOTYPE_PROPERTY(text, getText);
     }
 
-    void serialize(
-        jsg::Lock& js, jsg::Serializer& serializer, const TypeHandler<kj::String>& stringHandler) {
+    void serialize(jsg::Lock& js,
+        jsg::Serializer& serializer,
+        const SerializeTypeHandler<kj::String>& stringHandler) {
       // V2 prefers to serialize the string as a JS value.
-      serializer.write(js, JsValue(stringHandler.wrap(js, kj::str(text, '?'))));
+      serializer.write(js, stringHandler, kj::str(text, '?'));
     }
     static jsg::Ref<Qux> deserialize(Lock& js,
         SerializationTag tag,
@@ -135,7 +136,7 @@ struct SerTestContext: public ContextGlobalObject {
   JsValue roundTrip(Lock& js, JsValue in) {
     auto content = ({
       Serializer ser(js);
-      ser.write(js, in);
+      ser.writeDynamic(js, in);
       ser.release();
     });
 
@@ -188,7 +189,7 @@ struct SerTestContextV2: public ContextGlobalObject {
 
     void serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       // V2 just writes a value!
-      serializer.write(js, JsValue(val.getHandle(js)));
+      serializer.writeDynamic(js, JsValue(val.getHandle(js)));
     }
     static jsg::Ref<Bar> deserialize(Lock& js, SerializationTag tag, Deserializer& deserializer) {
       if (tag == SerializationTag::BAR_OLD) {
@@ -209,7 +210,7 @@ struct SerTestContextV2: public ContextGlobalObject {
   JsValue roundTrip(Lock& js, JsValue in) {
     auto content = ({
       Serializer ser(js);
-      ser.write(js, in);
+      ser.writeDynamic(js, in);
       ser.release();
     });
 
