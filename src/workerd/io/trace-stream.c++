@@ -755,6 +755,7 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
         trace->spans.add(kj::mv(a));
       }
       KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {}
+      KJ_CASE_ONEOF(span, CompleteSpan) {}
     }
   }
 
@@ -765,14 +766,14 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
   TailStreamTarget(IoContext& ioContext,
       Frankenvalue props,
+      bool isFirst,
       kj::Own<kj::PromiseFulfiller<void>> doneFulfiller,
-      bool isLegacy,
       kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer)
       : weakIoContext(ioContext.getWeakRef()),
         props(kj::mv(props)),
         doneFulfiller(kj::mv(doneFulfiller)),
-        isLegacy(isLegacy),
-        pipelineTracer(kj::mv(pipelineTracer)) {
+        pipelineTracer(kj::mv(pipelineTracer)),
+        isFirst(isFirst) {
     KJ_LOG(WARNING, "TailStreamTarget start");
   }
 
@@ -796,6 +797,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         ioContext
             .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
                      Worker::Lock& lock) mutable -> kj::Promise<void> {
+      bool isLegacy =
+          !lock.getWorker().getIsolate().getApi().getFeatureFlags().getStreamingTailWorker();
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
@@ -807,6 +810,19 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // implementation will be more work, incl. addressing potential spectre concerns.
       for (auto& event: events) {
         event.timestamp = ioContext.now();
+      }
+
+      // Make tracer no-op if it turns out it is not needed.
+      // Only one pseudo-LTW is needed, move this out
+      if ((isLegacy && (pipelineTracer == kj::none)) ||
+          // First tracer, but using STW
+          // TODO: This really needs to check if all tracers are STW, only then should we actually shut this down.
+          (!isLegacy && isFirst)) {
+        rpc::TailStreamTarget::TailStreamResults::Builder results = reportContext.initResults();
+        this->pipelineTracer = kj::none;
+        results.setStop(true);
+        doneFulfiller->fulfill();
+        return kj::READY_NOW;
       }
 
       // If we have not yet received the onset event, the first event in the
@@ -876,7 +892,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       kj::Array<kj::Own<Trace>> assembledTraces = assembleTraces(this->events);
       auto& pipelineTracer = KJ_ASSERT_NONNULL(this->pipelineTracer);
 
-      //KJ_LOG(WARNING, "received events:", this->events.size());
       pipelineTracer->addTracesFromChild(assembledTraces);
       this->pipelineTracer = kj::none;
       results.setStop(true);
@@ -1123,8 +1138,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // onset event.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
 
-  bool isLegacy;
   kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer;
+  bool isFirst;
   kj::Vector<tracing::TailEvent> events;
 };
 }  // namespace
@@ -1137,6 +1152,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
 
+  bool isLegacy =
+      !ioContext.getWorker().getIsolate().getApi().getFeatureFlags().getStreamingTailWorker();
   // Do not trace when only using the streaming tail event to transmit events to the legacy handler
   // instead of as a handler on its own.
   if (!isLegacy) {
@@ -1148,7 +1165,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(kj::heap<TailStreamTarget>(
-      ioContext, kj::mv(props), kj::mv(doneFulfiller), isLegacy, kj::mv(pipelineTracer)));
+      ioContext, kj::mv(props), isFirst, kj::mv(doneFulfiller), kj::mv(pipelineTracer)));
 
   // What is happening here? I'm glad you asked! When this method is called we are
   // starting a tail stream session. Our TailStreamTarget created above is an RPC
@@ -1326,23 +1343,15 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> legacyTailWorkers,
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::Array<kj::Own<WorkerInterface>> tailWorkers,
+    bool isProcessSandbox,
     kj::TaskSet& waitUntilTasks,
     kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer) {
-  if (legacyTailWorkers.size() == 0 && streamingTailWorkers.size() == 0) {
+  if (tailWorkers.size() == 0) {
     return kj::none;
   }
 
-  kj::Vector<WorkerInterfaceIsLegacy> tailWorkers;
-  for (auto& worker: legacyTailWorkers) {
-    tailWorkers.add(WorkerInterfaceIsLegacy{kj::mv(worker), true});
-  }
-  for (auto& worker: streamingTailWorkers) {
-    tailWorkers.add(WorkerInterfaceIsLegacy{kj::mv(worker), false});
-  }
-
-  auto state = kj::heap<TailStreamWriterState>(tailWorkers.releaseAsArray(), waitUntilTasks);
+  auto state = kj::heap<TailStreamWriterState>(kj::mv(tailWorkers), waitUntilTasks);
 
   KJ_LOG(WARNING, "returning TailStreamWriter state");
   return kj::refcounted<tracing::TailStreamWriter>(
@@ -1350,9 +1359,8 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lambda holds a bare
       // reference while the instance is attached to the kj::Own below.
-      [&state = *state, &waitUntilTasks, pipelineTracer = kj::mv(pipelineTracer)](
+      [&state = *state, &waitUntilTasks, isProcessSandbox, pipelineTracer = kj::mv(pipelineTracer)](
           tracing::TailEvent&& event) mutable {
-    //KJ_LOG(WARNING, "TailStreamWriter state created");
     KJ_SWITCH_ONEOF(state.inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
         // The tail stream has already been closed because we have received either
@@ -1369,13 +1377,17 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // Transitions into the active state by grabbing the pending client capability.
         KJ_LOG(WARNING, "TailStreamWriter state makePending");
 
+        // The first tail worker is special: If there are LTWs, it acts as the pseudo-STW for all of them.
+        // To play that role, it gets the pipelineTracer.
+        int isFirst = !isProcessSandbox;
         state.inner = KJ_MAP(wi, pending) {
           auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>(
-              wi.isLegacy, wi.isLegacy ? mapAddRef(pipelineTracer) : kj::none);
+              isFirst, isFirst ? mapAddRef(pipelineTracer) : kj::none);
+          isFirst = 0;
           auto result = customEvent->getCap();
           waitUntilTasks.add(
-              wi.interface->customEvent(kj::mv(customEvent)).attach(kj::mv(wi)).ignoreResult());
-          return kj::refcounted<TailStreamWriterState::Active>(kj::mv(result), wi.isLegacy);
+              wi->customEvent(kj::mv(customEvent)).attach(kj::mv(wi)).ignoreResult());
+          return kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
         };
         // Relinquish copy of pipelineTracer.
         pipelineTracer = kj::none;

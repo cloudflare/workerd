@@ -658,6 +658,17 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
+  bool isLegacy = !incomingRequest->getContext()
+                       .getWorker()
+                       .getIsolate()
+                       .getApi()
+                       .getFeatureFlags()
+                       .getStreamingTailWorker();
+  if (!isLegacy) {
+    // Do nothing, this should be a no-op based on being based on an STW.
+    co_await incomingRequest->drain();
+  }
+
   // NOTE: It is safe to trace the tail worker, since we only invoke it all the way at the end.
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(
