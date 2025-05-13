@@ -1284,60 +1284,59 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
 
 void Request::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
-    const jsg::TypeHandler<RequestInitializerDict>& initDictHandler) {
+    const jsg::SerializeTypeHandler<RequestInitializerDict>& initDictHandler) {
   serializer.writeLengthDelimited(url);
 
   // Our strategy is to construct an initializer dict object and serialize that as a JS object.
   // This makes the deserialization end really simple (just call the constructor), and it also
   // gives us extensibility: we can add new fields without having to bump the serialization tag.
-  serializer.write(js,
-      jsg::JsValue(initDictHandler.wrap(js,
-          RequestInitializerDict{
-            // GET is the default, so only serialize the method if it's something else.
-            .method = method == kj::HttpMethod::GET ? jsg::Optional<kj::String>() : kj::str(method),
+  serializer.write(js, initDictHandler,
+      RequestInitializerDict{
+        // GET is the default, so only serialize the method if it's something else.
+        .method = method == kj::HttpMethod::GET ? jsg::Optional<kj::String>() : kj::str(method),
 
-            .headers = headers.addRef(),
+        .headers = headers.addRef(),
 
-            .body = getBody().map([](jsg::Ref<ReadableStream> stream) -> Body::Initializer {
+        .body = getBody().map([](jsg::Ref<ReadableStream> stream) -> Body::Initializer {
     // jsg::Ref<ReadableStream> is one of the possible variants of Body::Initializer.
     return kj::mv(stream);
   }),
 
-            // "manual" is the default for `redirect`, so only encode if it's not that.
-            .redirect = redirect == Redirect::MANUAL ? kj::str(getRedirect())
-                                                     : kj::Maybe<kj::String>(kj::none),
+        // "manual" is the default for `redirect`, so only encode if it's not that.
+        .redirect =
+            redirect == Redirect::MANUAL ? kj::str(getRedirect()) : kj::Maybe<kj::String>(kj::none),
 
-            // We have to ignore .fetcher for serialization. We can't simply fail if a fetcher is present
-            // because requests received by the top-level fetch handler actually have .fetcher set to
-            // the hidden "next" binding, which historically could be different from null (although in
-            // practice these days it is always the same). We obviously want to be able to serialize
-            // requests received by the top-level fetch handler so... we have to ignore this. This
-            // property should probably go away in any case.
+        // We have to ignore .fetcher for serialization. We can't simply fail if a fetcher is present
+        // because requests received by the top-level fetch handler actually have .fetcher set to
+        // the hidden "next" binding, which historically could be different from null (although in
+        // practice these days it is always the same). We obviously want to be able to serialize
+        // requests received by the top-level fetch handler so... we have to ignore this. This
+        // property should probably go away in any case.
 
-            .cf = cf.getRef(js),
+        .cf = cf.getRef(js),
 
-            .cache = getCacheModeName(cacheMode).map(
-                [](kj::StringPtr name) -> kj::String { return kj::str(name); }),
+        .cache = getCacheModeName(cacheMode).map(
+            [](kj::StringPtr name) -> kj::String { return kj::str(name); }),
 
-            // .mode is unimplemented
-            // .credentials is unimplemented
-            // .referrer is unimplemented
-            // .referrerPolicy is unimplemented
-            // .integrity is required to be empty
+        // .mode is unimplemented
+        // .credentials is unimplemented
+        // .referrer is unimplemented
+        // .referrerPolicy is unimplemented
+        // .integrity is required to be empty
 
-            // If an AbortSignal is present, we'll try to serialize it. As of this writing, AbortSignal
-            // is not serializable, but we could add support for sending it over RPC in the future.
-            //
-            // Note we have to double-Maybe this, so that if no signal is present, the property is absent
-            // instead of `null`.
-            .signal = signal.map([](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
+        // If an AbortSignal is present, we'll try to serialize it. As of this writing, AbortSignal
+        // is not serializable, but we could add support for sending it over RPC in the future.
+        //
+        // Note we have to double-Maybe this, so that if no signal is present, the property is absent
+        // instead of `null`.
+        .signal = signal.map([](jsg::Ref<AbortSignal>& s) -> kj::Maybe<jsg::Ref<AbortSignal>> {
     return s.addRef();
   }),
 
-            // Only serialize responseBodyEncoding if it's not the default AUTO
-            .encodeResponseBody = responseBodyEncoding == Response_BodyEncoding::AUTO
-                ? jsg::Optional<kj::String>()
-                : kj::str("manual")})));
+        // Only serialize responseBodyEncoding if it's not the default AUTO
+        .encodeResponseBody = responseBodyEncoding == Response_BodyEncoding::AUTO
+            ? jsg::Optional<kj::String>()
+            : kj::str("manual")});
 }
 
 jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
@@ -1740,33 +1739,30 @@ jsg::Optional<jsg::JsObject> Response::getCf(jsg::Lock& js) {
 
 void Response::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
-    const jsg::TypeHandler<InitializerDict>& initDictHandler,
-    const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
-  serializer.write(js, jsg::JsValue(streamHandler.wrap(js, getBody())));
+    const jsg::SerializeTypeHandler<InitializerDict>& initDictHandler,
+    const jsg::SerializeTypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler) {
+  serializer.write(js, streamHandler, getBody());
 
   // As with Request, we serialize the initializer dict as a JS object.
-  serializer.write(js,
-      jsg::JsValue(initDictHandler.wrap(js,
-          InitializerDict{
-            .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
-            .statusText = statusText == defaultStatusText(statusCode) ? jsg::Optional<kj::String>()
-                                                                      : kj::str(statusText),
-            .headers = headers.addRef(),
-            .cf = cf.getRef(js),
+  serializer.write(js, initDictHandler,
+      InitializerDict{
+        .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
+        .statusText = statusText == defaultStatusText(statusCode) ? jsg::Optional<kj::String>()
+                                                                  : kj::str(statusText),
+        .headers = headers.addRef(),
+        .cf = cf.getRef(js),
 
-            // If a WebSocket is present, we'll try to serialize it. As of this writing, WebSocket
-            // is not serializable, but we could add support for sending it over RPC in the future.
-            //
-            // Note we have to double-Maybe this, so that if no signal is present, the property is absent
-            // instead of `null`.
-            .webSocket =
-                webSocket.map([](jsg::Ref<WebSocket>& s) -> kj::Maybe<jsg::Ref<WebSocket>> {
-    return s.addRef();
-  }),
+        // If a WebSocket is present, we'll try to serialize it. As of this writing, WebSocket
+        // is not serializable, but we could add support for sending it over RPC in the future.
+        //
+        // Note we have to double-Maybe this, so that if no signal is present, the property is absent
+        // instead of `null`.
+        .webSocket = webSocket.map(
+            [](jsg::Ref<WebSocket>& s) -> kj::Maybe<jsg::Ref<WebSocket>> { return s.addRef(); }),
 
-            .encodeBody = bodyEncoding == BodyEncoding::AUTO ? jsg::Optional<kj::String>()
-                                                             : kj::str("manual"),
-          })));
+        .encodeBody =
+            bodyEncoding == BodyEncoding::AUTO ? jsg::Optional<kj::String>() : kj::str("manual"),
+      });
 }
 
 jsg::Ref<Response> Response::deserialize(jsg::Lock& js,

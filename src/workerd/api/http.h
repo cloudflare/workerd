@@ -667,15 +667,21 @@ struct RequestInitializerDict {
   // The script author may specify an empty body either implicitly, by allowing this property to
   // be undefined, or explicitly, by setting this property to null. To support both cases, this
   // body initializer must be Optional<Maybe<Body::Initializer>>.
-  jsg::Optional<kj::Maybe<Body::Initializer>> body;
+
+  // FakeSerializable is used because we only serialize body as a ReadableStream, but other types
+  // are accepted as input.
+  jsg::FakeSerializable<jsg::Optional<kj::Maybe<Body::Initializer>>> body;
 
   // follow, error, manual (default follow)
   jsg::Optional<kj::String> redirect;
 
-  jsg::Optional<kj::Maybe<jsg::Ref<Fetcher>>> fetcher;
+  jsg::OmitFromSerialized<kj::Maybe<jsg::Ref<Fetcher>>> fetcher;
 
   // Cloudflare-specific feature flags.
-  jsg::Optional<jsg::V8Ref<v8::Object>> cf;
+  jsg::FakeSerializable<jsg::Optional<jsg::V8Ref<v8::Object>>> cf;
+  // FakeSerializable is used because cf is an arbitrary object (but is supposed to be
+  // JSON-compatible!)
+
   // TODO(someday): We should generalize this concept to sending control information to
   //   downstream workers in the pipeline. That is, when multiple workers apply to the same
   //   request (with the first worker's subrequests being passed to the next worker), then
@@ -981,7 +987,7 @@ public:
 
   void serialize(
       jsg::Lock& js, jsg::Serializer& serializer,
-      const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
+      const jsg::SerializeTypeHandler<RequestInitializerDict>& initDictHandler);
   static jsg::Ref<Request> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
       const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
@@ -1043,9 +1049,12 @@ public:
     jsg::Optional<Headers::Initializer> headers;
 
     // Cloudflare-specific feature flags.
-    jsg::Optional<jsg::V8Ref<v8::Object>> cf;
+    jsg::FakeSerializable<jsg::Optional<jsg::V8Ref<v8::Object>>> cf;
+    // FakeSerializable is used because cf is an arbitrary object (but is supposed to be
+    // JSON-compatible!)
 
-    jsg::Optional<kj::Maybe<jsg::Ref<WebSocket>>> webSocket;
+
+    jsg::OmitFromSerialized<kj::Maybe<jsg::Ref<WebSocket>>> webSocket;
 
     jsg::Optional<kj::String> encodeBody;
 
@@ -1174,8 +1183,8 @@ public:
 
   void serialize(
       jsg::Lock& js, jsg::Serializer& serializer,
-      const jsg::TypeHandler<InitializerDict>& initDictHandler,
-      const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
+      const jsg::SerializeTypeHandler<InitializerDict>& initDictHandler,
+      const jsg::SerializeTypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
   static jsg::Ref<Response> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
       const jsg::TypeHandler<InitializerDict>& initDictHandler,
