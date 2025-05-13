@@ -332,7 +332,7 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // be left intact.
   // The path must be relative to the current directory.
   // Note that this method will only remove the node from this directory. If the
-  // node as references in other directories, those will not be removed.
+  // node has references in other directories, those will not be removed.
   // If the target is a symbolic link, the symbolic link will be removed but
   // the target will not be removed.
   virtual bool remove(jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {false}) = 0;
@@ -449,8 +449,13 @@ class VirtualFileSystem {
   // The root of the virtual file system.
   virtual kj::Rc<Directory> getRoot(jsg::Lock& js) const = 0;
 
+  struct ResolveOptions {
+    bool followLinks = true;
+  };
+
   // Resolves the given file URL into a file or directory.
-  kj::Maybe<FsNode> resolve(jsg::Lock& js, const jsg::Url& url) const;
+  kj::Maybe<FsNode> resolve(
+      jsg::Lock& js, const jsg::Url& url, ResolveOptions options = {true}) const;
 
   // Resolves the given file URL into metadata for a file or directory.
   kj::Maybe<Stat> resolveStat(jsg::Lock& js, const jsg::Url& url) const;

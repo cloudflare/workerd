@@ -1,10 +1,341 @@
 #include "filesystem.h"
 
 #include "blob.h"
+#include "url-standard.h"
+#include "url.h"
 
 #include <workerd/api/streams/standard.h>
 
 namespace workerd::api {
+
+// =======================================================================================
+// Implementation of cloudflare-internal:filesystem in support of node:fs
+
+namespace {
+constexpr kj::StringPtr nameForFsType(FsType type) {
+  switch (type) {
+    case FsType::FILE:
+      return "file"_kj;
+    case FsType::DIRECTORY:
+      return "directory"_kj;
+    case FsType::SYMLINK:
+      return "symlink"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+// A file path is passed to the C++ layer as a URL object. However, we have two different
+// implementations of URL in the system. This class wraps and abstracts over both of them.
+struct NormalizedFilePath {
+  kj::OneOf<jsg::Ref<url::URL>, jsg::Url> url;
+
+  static kj::OneOf<jsg::Ref<url::URL>, jsg::Url> normalize(FileSystemModule::FilePath path) {
+    KJ_SWITCH_ONEOF(path) {
+      KJ_CASE_ONEOF(legacy, jsg::Ref<URL>) {
+        return JSG_REQUIRE_NONNULL(
+            jsg::Url::tryParse(legacy->getHref(), "file:///"_kj), Error, "Invalid URL"_kj);
+      }
+      KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
+        return kj::mv(standard);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  NormalizedFilePath(FileSystemModule::FilePath path): url(normalize(kj::mv(path))) {
+    validate();
+  }
+
+  void validate() {
+    KJ_SWITCH_ONEOF(url) {
+      KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
+        JSG_REQUIRE(standard->getProtocol() == "file:"_kj, Error, "File path must be a file: URL");
+        JSG_REQUIRE(standard->getHost().size() == 0, Error, "File path must not have a host");
+      }
+      KJ_CASE_ONEOF(legacy, jsg::Url) {
+        JSG_REQUIRE(legacy.getProtocol() == "file:"_kj, TypeError, "File path must be a file: URL");
+        JSG_REQUIRE(legacy.getHost().size() == 0, Error, "File path must not have a host");
+      }
+    }
+  }
+
+  operator const jsg::Url&() const {
+    KJ_SWITCH_ONEOF(url) {
+      KJ_CASE_ONEOF(legacy, jsg::Url) {
+        return legacy;
+      }
+      KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
+        return *standard;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  operator const kj::Path() const {
+    const jsg::Url& url = *this;
+    auto path = kj::str(url.getPathname().slice(1));
+    kj::Path root{};
+    return root.eval(path);
+  }
+};
+}  // namespace
+
+Stat::Stat(const workerd::Stat& stat)
+    : type(nameForFsType(stat.type)),
+      size(stat.size),
+      lastModified((stat.lastModified - kj::UNIX_EPOCH) / kj::NANOSECONDS),
+      created((stat.created - kj::UNIX_EPOCH) / kj::NANOSECONDS),
+      writable(stat.writable),
+      device(stat.device) {}
+
+kj::Maybe<Stat> FileSystemModule::stat(
+    jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, StatOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  KJ_SWITCH_ONEOF(pathOrFd) {
+    KJ_CASE_ONEOF(path, FilePath) {
+      NormalizedFilePath normalizedPath(kj::mv(path));
+      KJ_IF_SOME(node,
+          vfs.resolve(
+              js, normalizedPath, {.followLinks = options.followSymlinks.orDefault(true)})) {
+        KJ_SWITCH_ONEOF(node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            return Stat(file->stat(js));
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            return Stat(dir->stat(js));
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            // If a symbolic link is returned here then the options.followSymLinks
+            // must have been set to false.
+            return Stat(link->stat(js));
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+    }
+    KJ_CASE_ONEOF(fd, int) {
+      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
+      KJ_SWITCH_ONEOF(opened.node) {
+        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          return Stat(file->stat(js));
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          return Stat(dir->stat(js));
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          return Stat(link->stat(js));
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+  }
+  return kj::none;
+}
+
+void FileSystemModule::setLastModified(
+    jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, kj::Date lastModified, StatOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  KJ_SWITCH_ONEOF(pathOrFd) {
+    KJ_CASE_ONEOF(path, FilePath) {
+      NormalizedFilePath normalizedPath(kj::mv(path));
+      KJ_IF_SOME(node,
+          vfs.resolve(
+              js, normalizedPath, {.followLinks = options.followSymlinks.orDefault(true)})) {
+        KJ_SWITCH_ONEOF(node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            file->setLastModified(js, lastModified);
+            return;
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            // Do nothing
+            return;
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            // If we got here, then followSymLinks was set to false. We cannot
+            // change the last modified time of a symbolic link in our vfs so
+            // we do nothing.
+            return;
+          }
+        }
+      }
+    }
+    KJ_CASE_ONEOF(fd, int) {
+      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
+      KJ_SWITCH_ONEOF(opened.node) {
+        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          file->setLastModified(js, lastModified);
+          return;
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          // Do nothing
+          return;
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          // Do nothing
+          return;
+        }
+      }
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, uint32_t size) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  KJ_SWITCH_ONEOF(pathOrFd) {
+    KJ_CASE_ONEOF(path, FilePath) {
+      NormalizedFilePath normalizedPath(kj::mv(path));
+      KJ_IF_SOME(node, vfs.resolve(js, normalizedPath)) {
+        KJ_SWITCH_ONEOF(node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            file->resize(js, size);
+            return;
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+            return;
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            // If we got here, then followSymLinks was set to false. We cannot
+            // truncate a symbolic link.
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+          }
+        }
+      }
+    }
+    KJ_CASE_ONEOF(fd, int) {
+      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
+      KJ_SWITCH_ONEOF(opened.node) {
+        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          file->resize(js, size);
+          return;
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+          return;
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+        }
+      }
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedPath(kj::mv(path));
+  auto node = JSG_REQUIRE_NONNULL(
+      vfs.resolve(js, normalizedPath, {.followLinks = false}), Error, "file not found");
+  KJ_SWITCH_ONEOF(node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      JSG_REQUIRE(!options.failIfNotSymlink, Error, "invalid argument");
+      kj::Path path = normalizedPath;
+      return path.toString(true);
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_REQUIRE(!options.failIfNotSymlink, Error, "invalid argument");
+      kj::Path path = normalizedPath;
+      return path.toString(true);
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      return link->getTargetPath().toString(true);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options) {
+  // The from argument is where we are creating the link, while the to is the target.
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedFrom(kj::mv(from));
+  NormalizedFilePath normalizedTo(kj::mv(to));
+
+  // First, let's make sure the destination (from) does not already exist.
+  const jsg::Url& fromUrl = normalizedFrom;
+  const jsg::Url& toUrl = normalizedTo;
+
+  JSG_REQUIRE(vfs.resolve(js, fromUrl) == kj::none, Error, "File already exists"_kj);
+  // Now, let's split the fromUrl into a base directory URL and a file name so
+  // that we can make sure the destination directory exists.
+  jsg::Url::Relative fromRelative = fromUrl.getRelative();
+  JSG_REQUIRE(fromRelative.name.size() > 0, Error, "Invalid filename"_kj);
+
+  auto parent =
+      JSG_REQUIRE_NONNULL(vfs.resolve(js, fromRelative.base), Error, "Directory does not exist"_kj);
+  auto& dir = JSG_REQUIRE_NONNULL(
+      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+
+  // Dir is where the new link will go. fromRelative.name is the name of the new link
+  // in this directory.
+
+  // If we are creating a symbolic link, we do not need to check if the target exists.
+  if (options.symbolic) {
+    dir->add(js, fromRelative.name, vfs.newSymbolicLink(js, toUrl));
+    return;
+  }
+
+  // If we are creating a hard link, however, the target must exist.
+  auto target = JSG_REQUIRE_NONNULL(
+      vfs.resolve(js, toUrl, {.followLinks = false}), Error, "file not found"_kj);
+  KJ_SWITCH_ONEOF(target) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      dir->add(js, fromRelative.name, file.addRef());
+    }
+    KJ_CASE_ONEOF(tdir, kj::Rc<workerd::Directory>) {
+      dir->add(js, fromRelative.name, tdir.addRef());
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      dir->add(js, fromRelative.name, link.addRef());
+    }
+  }
+}
+
+void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedPath(kj::mv(path));
+  const jsg::Url& url = normalizedPath;
+  auto relative = url.getRelative();
+  auto parent =
+      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
+  auto& dir = JSG_REQUIRE_NONNULL(
+      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+  // The unlink method cannot be used to remove directories.
+
+  kj::Path fpath(relative.name);
+  auto stat = JSG_REQUIRE_NONNULL(dir->stat(js, fpath), Error, "file not found");
+  JSG_REQUIRE(stat.type != FsType::DIRECTORY, Error, "Cannot unlink a directory");
+
+  dir->remove(js, fpath);
+}
+
+int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedPath(kj::mv(path));
+  auto& opened = vfs.openFd(js, normalizedPath,
+      workerd::VirtualFileSystem::OpenOptions{
+        .read = options.read,
+        .write = options.write,
+        .append = options.append,
+        .exclusive = options.exclusive,
+        .followLinks = options.followSymlinks,
+      });
+  return opened.fd;
+}
+
+void FileSystemModule::close(jsg::Lock& js, int fd) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  vfs.closeFd(js, fd);
+}
 
 // =======================================================================================
 // Implementation of the Web File System API

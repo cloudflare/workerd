@@ -39,12 +39,7 @@ import {
   validateInt32,
   validateUint32,
 } from 'node-internal:validators';
-import {
-  isUint8Array,
-  isDate,
-  isArrayBufferView,
-} from 'node-internal:internal_types';
-import { toPathIfFileURL } from 'node-internal:internal_url';
+import { isDate, isArrayBufferView } from 'node-internal:internal_types';
 import {
   F_OK,
   W_OK,
@@ -60,11 +55,51 @@ import {
   O_SYNC,
   O_TRUNC,
   O_WRONLY,
+  S_IFCHR,
+  S_IFDIR,
+  S_IFREG,
+  S_IFLNK,
+  S_IFMT,
+  S_IFSOCK,
+  S_IFIFO,
+  S_IFBLK,
   UV_FS_COPYFILE_FICLONE_FORCE,
 } from 'node-internal:internal_fs_constants';
+
 import { strictEqual } from 'node-internal:internal_assert';
 
+import { Buffer } from 'node-internal:internal_buffer';
+export type FilePath = string | URL | Buffer;
+
 import type { CopyOptions, CopySyncOptions, RmDirOptions } from 'node:fs';
+
+import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
+
+// A non-public symbol used to ensure that certain constructors cannot
+// be called from user-code
+export const kBadge = Symbol('kBadge');
+
+export function normalizePath(path: FilePath): URL {
+  // We treat all of our virtual file system paths as file URLs
+  // as a way of normalizing them. Because our file system is
+  // fully virtual, we don't need to worry about a number of the
+  // issues that real file system paths have and don't need to
+  // worry quite as much about strictly checking for null bytes
+  // in the path. The URL parsing will take care of those details.
+  // We do, however, need to be sensitive to the fact that there
+  // are two different URL impls in the runtime that are selected
+  // based on compat flags. A worker that is using the legacy URL
+  // implementation will end up seeing slightly different behavior
+  // here but that's not something we need to worry about for now.
+  if (typeof path === 'string') {
+    return new URL(path, 'file://');
+  } else if (path instanceof URL) {
+    return path;
+  } else if (Buffer.isBuffer(path)) {
+    return new URL(path.toString(), 'file://');
+  }
+  throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
+}
 
 // The access modes can be any of F_OK, R_OK, W_OK or X_OK. Some might not be
 // available on specific systems. They can be used in combination as well
@@ -138,39 +173,6 @@ export function copyObject<T>(source: Record<string, T>): Record<string, T> {
   const target: Record<string, T> = {};
   for (const key in source) target[key] = source[key] as T;
   return target;
-}
-
-export function validatePath(path: string | URL, propName = 'path'): void {
-  if (typeof path !== 'string' && !isUint8Array(path)) {
-    throw new ERR_INVALID_ARG_TYPE(propName, ['string', 'Buffer', 'URL'], path);
-  }
-
-  const pathIsString = typeof path === 'string';
-  const pathIsUint8Array = isUint8Array(path);
-
-  // We can only perform meaningful checks on strings and Uint8Arrays.
-  if (
-    (!pathIsString && !pathIsUint8Array) ||
-    (pathIsString && !path.includes('\u0000')) ||
-    (pathIsUint8Array && !path.includes(0))
-  ) {
-    return;
-  }
-
-  throw new ERR_INVALID_ARG_VALUE(
-    propName,
-    path,
-    'must be a string, Uint8Array, or URL without null bytes'
-  );
-}
-
-export function getValidatedPath(
-  fileURLOrPath: string | URL,
-  propName: string = 'path'
-): string {
-  const path = toPathIfFileURL(fileURLOrPath);
-  validatePath(path, propName);
-  return path;
 }
 
 export function getValidMode(
@@ -340,18 +342,16 @@ export function validateRmdirOptions(
 
 export function validatePosition(
   position: unknown,
-  name: string,
-  length: number
-): asserts position is number {
+  name: string
+): asserts position is number | bigint | null {
   if (typeof position === 'number') {
-    validateInteger(position, name, -1);
-  } else if (typeof position === 'bigint') {
-    const maxPosition = 2n ** 63n - 1n - BigInt(length);
-    if (!(position >= -1n && position <= maxPosition)) {
-      throw new ERR_OUT_OF_RANGE(name, `>= -1 && <= ${maxPosition}`, position);
-    }
-  } else {
-    throw new ERR_INVALID_ARG_TYPE(name, ['integer', 'bigint'], position);
+    validateUint32(position, name);
+  } else if (typeof position !== 'bigint' && position !== null) {
+    throw new ERR_INVALID_ARG_TYPE(
+      name,
+      ['integer', 'bigint', 'null'],
+      position
+    );
   }
 }
 
@@ -427,4 +427,146 @@ export function validateOffsetLengthWrite(
   }
 
   validateInt32(length, 'length', 0);
+}
+
+// Our implementation of the Stats class differs a bit from Node.js' in that
+// the one in Node.js uses the older function-style class. However, use of
+// new fs.Stats(...) has been deprecated in Node.js for quite some time and
+// users really aren't supposed to be trying to create their own Stats objects.
+// Therefore, we intentionally use a class-style object here and make it an
+// error to try to create your own Stats object using the constructor.
+export class Stats {
+  public dev: number | bigint;
+  public ino: number | bigint;
+  public mode: number | bigint;
+  public nlink: number | bigint;
+  public uid: number | bigint;
+  public gid: number | bigint;
+  public rdev: number | bigint;
+  public size: number | bigint;
+  public blksize: number | bigint;
+  public blocks: number | bigint;
+  public atimeMs: number | bigint;
+  public mtimeMs: number | bigint;
+  public ctimeMs: number | bigint;
+  public birthtimeMs: number | bigint;
+  public atimeNs?: bigint;
+  public mtimeNs?: bigint;
+  public ctimeNs?: bigint;
+  public birthtimeNs?: bigint;
+  public atime: Date;
+  public mtime: Date;
+  public ctime: Date;
+  public birthtime: Date;
+
+  public constructor(
+    badge: symbol,
+    stat: InternalStat,
+    options: { bigint: boolean }
+  ) {
+    // The kBadge symbol is never exported for users. We use it as an internal
+    // marker to ensure that only internal code can create a Stats object using
+    // the constructor.
+    if (badge !== kBadge) {
+      throw new TypeError('Illegal constructor');
+    }
+
+    // All nodes are always readable
+    this.mode = 0o444;
+    if (stat.writable) {
+      this.mode |= 0o222; // writable
+    }
+
+    if (stat.device) {
+      this.mode |= S_IFCHR;
+    } else {
+      switch (stat.type) {
+        case 'file':
+          this.mode |= S_IFREG;
+          break;
+        case 'directory':
+          this.mode |= S_IFDIR;
+          break;
+        case 'symlink':
+          this.mode |= S_IFLNK;
+          break;
+      }
+    }
+
+    if (options.bigint) {
+      this.dev = BigInt(stat.device);
+      this.size = BigInt(stat.size);
+
+      this.atimeNs = 0n;
+      this.mtimeNs = stat.lastModified;
+      this.ctimeNs = stat.lastModified;
+      this.birthtimeNs = stat.created;
+      this.atimeMs = this.atimeNs / 1_000_000n;
+      this.mtimeMs = this.mtimeNs / 1_000_000n;
+      this.ctimeMs = this.ctimeNs / 1_000_000n;
+      this.birthtimeMs = this.birthtimeNs / 1_000_000n;
+      this.atime = new Date(Number(this.atimeMs));
+      this.mtime = new Date(Number(this.mtimeMs));
+      this.ctime = new Date(Number(this.ctimeMs));
+      this.birthtime = new Date(Number(this.birthtimeMs));
+
+      // We have no meaningful definition of these values.
+      this.ino = 0n;
+      this.nlink = 1n;
+      this.uid = 0n;
+      this.gid = 0n;
+      this.rdev = 0n;
+      this.blksize = 0n;
+      this.blocks = 0n;
+    } else {
+      this.dev = Number(stat.device);
+      this.size = stat.size;
+
+      this.atimeMs = 0;
+      this.mtimeMs = Number(stat.lastModified) / 1_000_000;
+      this.ctimeMs = Number(stat.lastModified) / 1_000_000;
+      this.birthtimeMs = Number(stat.created) / 1_000_000;
+      this.atime = new Date(this.atimeMs);
+      this.mtime = new Date(this.mtimeMs);
+      this.ctime = new Date(this.ctimeMs);
+      this.birthtime = new Date(this.birthtimeMs);
+
+      // We have no meaningful definition of these values.
+      this.ino = 0;
+      this.nlink = 1;
+      this.uid = 0;
+      this.gid = 0;
+      this.rdev = 0;
+      this.blksize = 0;
+      this.blocks = 0;
+    }
+  }
+
+  public isBlockDevice(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFBLK;
+  }
+
+  public isCharacterDevice(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFCHR;
+  }
+
+  public isDirectory(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFDIR;
+  }
+
+  public isFIFO(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFIFO;
+  }
+
+  public isFile(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFREG;
+  }
+
+  public isSocket(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFSOCK;
+  }
+
+  public isSymbolicLink(): boolean {
+    return (Number(this.mode) & S_IFMT) === S_IFLNK;
+  }
 }
