@@ -774,12 +774,10 @@ struct RequestInitializerDict {
       });
     }
   }
-
   // This method is called within tryUnwrap() when the type is unpacked from v8.
   // See jsg Readme for more details.
   void validate(jsg::Lock&);
 };
-
 class Request final: public Body {
 public:
   enum class Redirect {

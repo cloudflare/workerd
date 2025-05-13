@@ -149,22 +149,42 @@ class Serializer final: v8::ValueSerializer::Delegate {
   // You can call this multiple times to write multiple values, then call `readValue()` the same
   // number of times on the deserialization side.
 
+  // Unboxed types:
+  template <typename T>
+  void write(T val)
+    requires std::is_enum_v<T>
+  {
+    writeRawUint32(static_cast<uint>(val));
+  }
+
+  template <typename T>
+  void write(T val)
+    requires(kj::isSameType<T, bool>())
+  {
+    writeRawUint32(static_cast<uint>(val));
+  }
+
+  // There are no overloads for integer types to avoid any possible mixup between 32-bit and 64-bit
+  // encoding. Use writeRawUint32 or writeRawUint64 as required.
+
+  void write(kj::StringPtr text) {
+    writeLengthDelimited(text);
+  }
+
+  // Types known at compile time:
+  void write(Lock& js, kj::None);
+
   template <typename S, typename T>
   void write(Lock& js, const S& serializeTypeHandler, T&& val) {
     writeDynamic(js, JsValue(serializeTypeHandler.wrapForSerialize(js, kj::fwd<T>(val))));
   }
 
+  // Type known only at runtime:
+  // Avoid using unless you know `value` is serializable, or if it's ok for this method to throw
+  // if `value` is not serializable (e.g. for user-provided data)
   void writeDynamic(Lock& js, const JsValue& value);
 
-  // Implements the `transfer` option of `structuredClone()`. Pass each item in the transfer array
-  // to this method before calling `write()`. This gives the Serializer permission to serialize
-  // these values by detaching them (destroying the caller's handle) rather than make a copy. The
-  // detached content will show up as part of `Released`, where it should then be delivered to the
-  // Deserializer later.
-  void transfer(Lock& js, const JsValue& value);
-
-  Released release();
-
+  // Use a specific encoding for a type:
   void writeRawUint32(uint32_t i) {
     ser.WriteUint32(i);
   }
@@ -184,6 +204,15 @@ class Serializer final: v8::ValueSerializer::Delegate {
   void writeLengthDelimited(kj::StringPtr text) {
     writeLengthDelimited(text.asBytes());
   }
+
+  // Implements the `transfer` option of `structuredClone()`. Pass each item in the transfer array
+  // to this method before calling `write()`. This gives the Serializer permission to serialize
+  // these values by detaching them (destroying the caller's handle) rather than make a copy. The
+  // detached content will show up as part of `Released`, where it should then be delivered to the
+  // Deserializer later.
+  void transfer(Lock& js, const JsValue& value);
+
+  Released release();
 
  private:
   // Throw a DataCloneError, complaining that the given object cannot be serialized. (This is

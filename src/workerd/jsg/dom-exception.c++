@@ -63,20 +63,20 @@ int DOMException::getCode() const {
 }
 
 void DOMException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  serializer.writeLengthDelimited(name);
-  serializer.writeLengthDelimited(message);
+  serializer.write(name);
+  serializer.write(message);
 
   // It's a bit unfortunate that the stack here ends up also including the name and message
   // so we end up duplicating some of the information here, but that's OK. It's better to
   // keep this implementation simple rather than to implement any kind of deduplication.
   KJ_IF_SOME(stack, this->stack.get(js, "stack")) {
-    serializer.writeLengthDelimited(stack);
+    serializer.write(stack);
   } else {
     // This branch shouldn't really be taken in the typical case. It's only here
     // to handle the case where the stack property could not be unwrapped for some
     // reason. We don't need to treat it as an error case, just set the stack to
     // the empty string and move on.
-    serializer.writeLengthDelimited(""_kj);
+    serializer.write(""_kj);
   }
 }
 

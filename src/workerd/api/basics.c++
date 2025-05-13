@@ -829,12 +829,13 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
 
-  serializer.writeRawUint32(static_cast<uint>(canceler->isCanceled()));
-  serializer.writeRawUint32(static_cast<uint>(flag));
+  serializer.write(canceler->isCanceled());
+  serializer.write(flag);
+
   KJ_IF_SOME(r, reason) {
     serializer.writeDynamic(js, r.getHandle(js));
   } else {
-    serializer.writeDynamic(js, js.undefined());
+    serializer.write(js, kj::none);
   }
 
   if (getAborted(js) || getNeverAborts()) {

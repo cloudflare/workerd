@@ -532,7 +532,7 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // is a common header ID, or the value zero to indicate an uncommon header, which is then
   // followed by a length-delimited name.
 
-  serializer.writeRawUint32(static_cast<uint>(guard));
+  serializer.write(guard);
 
   // Write the count of headers.
   uint count = 0;
@@ -551,9 +551,9 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         serializer.writeRawUint32(c);
       } else {
         serializer.writeRawUint32(0);
-        serializer.writeLengthDelimited(header.name);
+        serializer.write(header.name);
       }
-      serializer.writeLengthDelimited(value);
+      serializer.write(value);
     }
   }
 }
@@ -1285,7 +1285,7 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
 void Request::serialize(jsg::Lock& js,
     jsg::Serializer& serializer,
     const jsg::SerializeTypeHandler<RequestInitializerDict>& initDictHandler) {
-  serializer.writeLengthDelimited(url);
+  serializer.write(url);
 
   // Our strategy is to construct an initializer dict object and serialize that as a JS object.
   // This makes the deserialization end really simple (just call the constructor), and it also

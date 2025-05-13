@@ -198,6 +198,10 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   ser.TransferArrayBuffer(n, arrayBuffer);
 }
 
+void Serializer::write(Lock& js, kj::None) {
+  writeDynamic(js, js.undefined());
+}
+
 void Serializer::writeDynamic(Lock& js, const JsValue& value) {
   KJ_ASSERT(!released, "The data has already been released.");
   KJ_ASSERT(check(ser.WriteValue(js.v8Context(), value)));
