@@ -13,12 +13,12 @@ namespace workerd::tracing {
 // events to a tail worker.
 class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
  public:
-  TailStreamCustomEventImpl(bool isLegacy,
+  TailStreamCustomEventImpl(bool isFirst,
       kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer,
       uint16_t typeId = TYPE,
       kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
-      : isLegacy(isLegacy),
+      : isFirst(isFirst),
         pipelineTracer(kj::mv(pipelineTracer)),
         capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
@@ -52,16 +52,11 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
   }
 
  private:
-  bool isLegacy;
+  bool isFirst;
   kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer;
   kj::Own<kj::PromiseFulfiller<workerd::rpc::TailStreamTarget::Client>> capFulfiller;
   kj::Maybe<rpc::TailStreamTarget::Client> clientCap;
   uint16_t typeId;
-};
-
-struct WorkerInterfaceIsLegacy {
-  kj::Own<WorkerInterface> interface;
-  bool isLegacy;
 };
 
 // The TailStreamWriterState holds the current client-side state for a collection
@@ -71,7 +66,7 @@ struct TailStreamWriterState {
   // onset event. During this time we will only have a collection of WorkerInterface
   // instances. When our first event is reported (the onset) we will arrange to acquire
   // tailStream capabilities from each then use those to report the initial onset.
-  using Pending = kj::Array<WorkerInterfaceIsLegacy>;
+  using Pending = kj::Array<kj::Own<WorkerInterface>>;
 
   // Instances of Active are refcounted. The TailStreamWriterState itself
   // holds the initial ref. Whenever events are being dispatched, an additional
@@ -85,11 +80,8 @@ struct TailStreamWriterState {
     bool pumping = false;
     bool onsetSeen = false;
     std::list<tracing::TailEvent> queue;
-    bool isLegacyTail;
 
-    Active(rpc::TailStreamTarget::Client capability, bool isLegacyTail)
-        : capability(kj::mv(capability)),
-          isLegacyTail(isLegacyTail) {}
+    Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
   };
 
   struct Closed {};
@@ -113,8 +105,8 @@ struct TailStreamWriterState {
 };
 
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> legacyTailWorkers,
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::Array<kj::Own<WorkerInterface>> tailWorkers,
+    bool isProcessSandbox,
     kj::TaskSet& waitUntilTasks,
     // TODO: Be careful to surrender pipeline reference in time.
     kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer);
