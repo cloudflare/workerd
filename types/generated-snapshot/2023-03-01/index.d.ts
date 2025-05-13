@@ -14,13 +14,13 @@ and limitations under the License.
 ***************************************************************************** */
 /* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-export declare var onmessage: never;
+declare var onmessage: never;
 /**
  * An abnormal event (called an exception) which occurs as a result of calling a method or accessing a property of a web API.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException)
  */
-export declare class DOMException extends Error {
+declare class DOMException extends Error {
   constructor(message?: string, name?: string);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/DOMException/message) */
   readonly message: string;
@@ -60,18 +60,18 @@ export declare class DOMException extends Error {
   get stack(): any;
   set stack(value: any);
 }
-export type WorkerGlobalScopeEventMap = {
+type WorkerGlobalScopeEventMap = {
   fetch: FetchEvent;
   scheduled: ScheduledEvent;
   queue: QueueEvent;
   unhandledrejection: PromiseRejectionEvent;
   rejectionhandled: PromiseRejectionEvent;
 };
-export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
+declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
   EventTarget: typeof EventTarget;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console) */
-export interface Console {
+interface Console {
   "assert"(condition?: boolean, ...data: any[]): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/clear_static) */
   clear(): void;
@@ -111,9 +111,9 @@ export interface Console {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/console/warn_static) */
   warn(...data: any[]): void;
 }
-export declare const console: Console;
-export type BufferSource = ArrayBufferView | ArrayBuffer;
-export type TypedArray =
+declare const console: Console;
+type BufferSource = ArrayBufferView | ArrayBuffer;
+type TypedArray =
   | Int8Array
   | Uint8Array
   | Uint8ClampedArray
@@ -125,7 +125,7 @@ export type TypedArray =
   | Float64Array
   | BigInt64Array
   | BigUint64Array;
-export declare namespace WebAssembly {
+declare namespace WebAssembly {
   class CompileError extends Error {
     constructor(message?: string);
   }
@@ -205,7 +205,7 @@ export declare namespace WebAssembly {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ServiceWorkerGlobalScope)
  */
-export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   DOMException: typeof DOMException;
   WorkerGlobalScope: typeof WorkerGlobalScope;
   btoa(data: string): string;
@@ -295,14 +295,12 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
 }
-export declare function addEventListener<
-  Type extends keyof WorkerGlobalScopeEventMap,
->(
+declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(
   type: Type,
   handler: EventListenerOrEventListenerObject<WorkerGlobalScopeEventMap[Type]>,
   options?: EventTargetAddEventListenerOptions | boolean,
 ): void;
-export declare function removeEventListener<
+declare function removeEventListener<
   Type extends keyof WorkerGlobalScopeEventMap,
 >(
   type: Type,
@@ -314,54 +312,54 @@ export declare function removeEventListener<
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget/dispatchEvent)
  */
-export declare function dispatchEvent(
+declare function dispatchEvent(
   event: WorkerGlobalScopeEventMap[keyof WorkerGlobalScopeEventMap],
 ): boolean;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/btoa) */
-export declare function btoa(data: string): string;
+declare function btoa(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
-export declare function atob(data: string): string;
+declare function atob(data: string): string;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
-export declare function setTimeout(
+declare function setTimeout(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setTimeout) */
-export declare function setTimeout<Args extends any[]>(
+declare function setTimeout<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearTimeout) */
-export declare function clearTimeout(timeoutId: number | null): void;
+declare function clearTimeout(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
-export declare function setInterval(
+declare function setInterval(
   callback: (...args: any[]) => void,
   msDelay?: number,
 ): number;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/setInterval) */
-export declare function setInterval<Args extends any[]>(
+declare function setInterval<Args extends any[]>(
   callback: (...args: Args) => void,
   msDelay?: number,
   ...args: Args
 ): number;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/clearInterval) */
-export declare function clearInterval(timeoutId: number | null): void;
+declare function clearInterval(timeoutId: number | null): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/queueMicrotask) */
-export declare function queueMicrotask(task: Function): void;
+declare function queueMicrotask(task: Function): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/structuredClone) */
-export declare function structuredClone<T>(
+declare function structuredClone<T>(
   value: T,
   options?: StructuredSerializeOptions,
 ): T;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/reportError) */
-export declare function reportError(error: any): void;
+declare function reportError(error: any): void;
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/fetch) */
-export declare function fetch(
+declare function fetch(
   input: RequestInfo | URL,
   init?: RequestInit<RequestInitCfProperties>,
 ): Promise<Response>;
-export declare const self: ServiceWorkerGlobalScope;
+declare const self: ServiceWorkerGlobalScope;
 /**
  * The Web Crypto API provides a set of low-level functions for common cryptographic tasks.
  * The Workers runtime implements the full surface of this API, but with some differences in
@@ -370,69 +368,66 @@ export declare const self: ServiceWorkerGlobalScope;
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
  */
-export declare const crypto: Crypto;
+declare const crypto: Crypto;
 /**
  * The Cache API allows fine grained control of reading and writing from the Cloudflare global network cache.
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/)
  */
-export declare const caches: CacheStorage;
-export declare const scheduler: Scheduler;
+declare const caches: CacheStorage;
+declare const scheduler: Scheduler;
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
  * as well as timing of subrequests and other operations.
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
  */
-export declare const performance: Performance;
-export declare const Cloudflare: Cloudflare;
-export declare const origin: string;
-export declare const navigator: Navigator;
-export interface TestController {}
-export interface ExecutionContext {
+declare const performance: Performance;
+declare const Cloudflare: Cloudflare;
+declare const origin: string;
+declare const navigator: Navigator;
+interface TestController {}
+interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
   props: any;
 }
-export type ExportedHandlerFetchHandler<
-  Env = unknown,
-  CfHostMetadata = unknown,
-> = (
+type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
   request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>,
   env: Env,
   ctx: ExecutionContext,
 ) => Response | Promise<Response>;
-export type ExportedHandlerTailHandler<Env = unknown> = (
+type ExportedHandlerTailHandler<Env = unknown> = (
   events: TraceItem[],
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-export type ExportedHandlerTraceHandler<Env = unknown> = (
+type ExportedHandlerTraceHandler<Env = unknown> = (
   traces: TraceItem[],
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-export type ExportedHandlerTailStreamHandler<Env = unknown> = (
-  event: TailStream.TailEvent<TailStream.Onset>,
+type ExportedHandlerTailStreamHandler<Env = unknown> = (
+  event: TailStream.TailEvent,
   env: Env,
   ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
-export type ExportedHandlerScheduledHandler<Env = unknown> = (
+type ExportedHandlerScheduledHandler<Env = unknown> = (
   controller: ScheduledController,
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-export type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (
+type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (
   batch: MessageBatch<Message>,
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-export type ExportedHandlerTestHandler<Env = unknown> = (
+type ExportedHandlerTestHandler<Env = unknown> = (
   controller: TestController,
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-export interface ExportedHandler<
+interface ExportedHandler<
   Env = unknown,
   QueueHandlerMessage = unknown,
   CfHostMetadata = unknown,
@@ -446,17 +441,17 @@ export interface ExportedHandler<
   email?: EmailExportedHandler<Env>;
   queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
 }
-export interface StructuredSerializeOptions {
+interface StructuredSerializeOptions {
   transfer?: any[];
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent) */
-export declare abstract class PromiseRejectionEvent extends Event {
+declare abstract class PromiseRejectionEvent extends Event {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise) */
   readonly promise: Promise<any>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason) */
   readonly reason: any;
 }
-export declare abstract class Navigator {
+declare abstract class Navigator {
   sendBeacon(
     url: string,
     body?:
@@ -470,8 +465,6 @@ export declare abstract class Navigator {
   ): boolean;
   readonly userAgent: string;
   readonly hardwareConcurrency: number;
-  readonly language: string;
-  readonly languages: string[];
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -479,20 +472,20 @@ export declare abstract class Navigator {
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
  */
-export interface Performance {
+interface Performance {
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
   readonly timeOrigin: number;
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
   now(): number;
 }
-export interface AlarmInvocationInfo {
+interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
 }
-export interface Cloudflare {
+interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
-export interface DurableObject {
+interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
   webSocketMessage?(
@@ -507,7 +500,7 @@ export interface DurableObject {
   ): void | Promise<void>;
   webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
 }
-export type DurableObjectStub<
+type DurableObjectStub<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > = Fetcher<
   T,
@@ -516,12 +509,12 @@ export type DurableObjectStub<
   readonly id: DurableObjectId;
   readonly name?: string;
 };
-export interface DurableObjectId {
+interface DurableObjectId {
   toString(): string;
   equals(other: DurableObjectId): boolean;
   readonly name?: string;
 }
-export interface DurableObjectNamespace<
+interface DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -537,11 +530,11 @@ export interface DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
-export interface DurableObjectNamespaceNewUniqueIdOptions {
+type DurableObjectJurisdiction = "eu" | "fedramp";
+interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
-export type DurableObjectLocationHint =
+type DurableObjectLocationHint =
   | "wnam"
   | "enam"
   | "sam"
@@ -551,10 +544,10 @@ export type DurableObjectLocationHint =
   | "oc"
   | "afr"
   | "me";
-export interface DurableObjectNamespaceGetDurableObjectOptions {
+interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-export interface DurableObjectState {
+interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
@@ -570,7 +563,7 @@ export interface DurableObjectState {
   getTags(ws: WebSocket): string[];
   abort(reason?: string): void;
 }
-export interface DurableObjectTransaction {
+interface DurableObjectTransaction {
   get<T = unknown>(
     key: string,
     options?: DurableObjectGetOptions,
@@ -601,7 +594,7 @@ export interface DurableObjectTransaction {
   ): Promise<void>;
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
 }
-export interface DurableObjectStorage {
+interface DurableObjectStorage {
   get<T = unknown>(
     key: string,
     options?: DurableObjectGetOptions,
@@ -641,7 +634,7 @@ export interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
 }
-export interface DurableObjectListOptions {
+interface DurableObjectListOptions {
   start?: string;
   startAfter?: string;
   end?: string;
@@ -651,31 +644,31 @@ export interface DurableObjectListOptions {
   allowConcurrency?: boolean;
   noCache?: boolean;
 }
-export interface DurableObjectGetOptions {
+interface DurableObjectGetOptions {
   allowConcurrency?: boolean;
   noCache?: boolean;
 }
-export interface DurableObjectGetAlarmOptions {
+interface DurableObjectGetAlarmOptions {
   allowConcurrency?: boolean;
 }
-export interface DurableObjectPutOptions {
+interface DurableObjectPutOptions {
   allowConcurrency?: boolean;
   allowUnconfirmed?: boolean;
   noCache?: boolean;
 }
-export interface DurableObjectSetAlarmOptions {
+interface DurableObjectSetAlarmOptions {
   allowConcurrency?: boolean;
   allowUnconfirmed?: boolean;
 }
-export declare class WebSocketRequestResponsePair {
+declare class WebSocketRequestResponsePair {
   constructor(request: string, response: string);
   get request(): string;
   get response(): string;
 }
-export interface AnalyticsEngineDataset {
+interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
 }
-export interface AnalyticsEngineDataPoint {
+interface AnalyticsEngineDataPoint {
   indexes?: ((ArrayBuffer | string) | null)[];
   doubles?: number[];
   blobs?: ((ArrayBuffer | string) | null)[];
@@ -685,7 +678,7 @@ export interface AnalyticsEngineDataPoint {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event)
  */
-export declare class Event {
+declare class Event {
   constructor(type: string, init?: EventInit);
   /**
    * Returns the type of event, e.g. "click", "hashchange", or "submit".
@@ -800,26 +793,26 @@ export declare class Event {
   static readonly AT_TARGET: number;
   static readonly BUBBLING_PHASE: number;
 }
-export interface EventInit {
+interface EventInit {
   bubbles?: boolean;
   cancelable?: boolean;
   composed?: boolean;
 }
-export type EventListener<EventType extends Event = Event> = (
+type EventListener<EventType extends Event = Event> = (
   event: EventType,
 ) => void;
-export interface EventListenerObject<EventType extends Event = Event> {
+interface EventListenerObject<EventType extends Event = Event> {
   handleEvent(event: EventType): void;
 }
-export type EventListenerOrEventListenerObject<
-  EventType extends Event = Event,
-> = EventListener<EventType> | EventListenerObject<EventType>;
+type EventListenerOrEventListenerObject<EventType extends Event = Event> =
+  | EventListener<EventType>
+  | EventListenerObject<EventType>;
 /**
  * EventTarget is a DOM interface implemented by objects that can receive events and may have listeners for them.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventTarget)
  */
-export declare class EventTarget<
+declare class EventTarget<
   EventMap extends Record<string, Event> = Record<string, Event>,
 > {
   constructor();
@@ -862,16 +855,16 @@ export declare class EventTarget<
    */
   dispatchEvent(event: EventMap[keyof EventMap]): boolean;
 }
-export interface EventTargetEventListenerOptions {
+interface EventTargetEventListenerOptions {
   capture?: boolean;
 }
-export interface EventTargetAddEventListenerOptions {
+interface EventTargetAddEventListenerOptions {
   capture?: boolean;
   passive?: boolean;
   once?: boolean;
   signal?: AbortSignal;
 }
-export interface EventTargetHandlerObject {
+interface EventTargetHandlerObject {
   handleEvent: (event: Event) => any | undefined;
 }
 /**
@@ -879,7 +872,7 @@ export interface EventTargetHandlerObject {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController)
  */
-export declare class AbortController {
+declare class AbortController {
   constructor();
   /**
    * Returns the AbortSignal object associated with this object.
@@ -899,7 +892,7 @@ export declare class AbortController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal)
  */
-export declare abstract class AbortSignal extends EventTarget {
+declare abstract class AbortSignal extends EventTarget {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_static) */
   static abort(reason?: any): AbortSignal;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/timeout_static) */
@@ -921,10 +914,10 @@ export declare abstract class AbortSignal extends EventTarget {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/throwIfAborted) */
   throwIfAborted(): void;
 }
-export interface Scheduler {
+interface Scheduler {
   wait(delay: number, maybeOptions?: SchedulerWaitOptions): Promise<void>;
 }
-export interface SchedulerWaitOptions {
+interface SchedulerWaitOptions {
   signal?: AbortSignal;
 }
 /**
@@ -932,12 +925,12 @@ export interface SchedulerWaitOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent)
  */
-export declare abstract class ExtendableEvent extends Event {
+declare abstract class ExtendableEvent extends Event {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ExtendableEvent/waitUntil) */
   waitUntil(promise: Promise<any>): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CustomEvent) */
-export declare class CustomEvent<T = any> extends Event {
+declare class CustomEvent<T = any> extends Event {
   constructor(type: string, init?: CustomEventCustomEventInit);
   /**
    * Returns any custom data event was created with. Typically used for synthetic events.
@@ -946,7 +939,7 @@ export declare class CustomEvent<T = any> extends Event {
    */
   get detail(): T;
 }
-export interface CustomEventCustomEventInit {
+interface CustomEventCustomEventInit {
   bubbles?: boolean;
   cancelable?: boolean;
   composed?: boolean;
@@ -957,7 +950,7 @@ export interface CustomEventCustomEventInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob)
  */
-export declare class Blob {
+declare class Blob {
   constructor(
     type?: ((ArrayBuffer | ArrayBufferView) | string | Blob)[],
     options?: BlobOptions,
@@ -977,7 +970,7 @@ export declare class Blob {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/stream) */
   stream(): ReadableStream;
 }
-export interface BlobOptions {
+interface BlobOptions {
   type?: string;
 }
 /**
@@ -985,7 +978,7 @@ export interface BlobOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/File)
  */
-export declare class File extends Blob {
+declare class File extends Blob {
   constructor(
     bits: ((ArrayBuffer | ArrayBufferView) | string | Blob)[] | undefined,
     name: string,
@@ -996,7 +989,7 @@ export declare class File extends Blob {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/lastModified) */
   get lastModified(): number;
 }
-export interface FileOptions {
+interface FileOptions {
   type?: string;
   lastModified?: number;
 }
@@ -1005,7 +998,7 @@ export interface FileOptions {
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/)
  */
-export declare abstract class CacheStorage {
+declare abstract class CacheStorage {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CacheStorage/open) */
   open(cacheName: string): Promise<Cache>;
   readonly default: Cache;
@@ -1015,7 +1008,7 @@ export declare abstract class CacheStorage {
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/)
  */
-export declare abstract class Cache {
+declare abstract class Cache {
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/#delete) */
   delete(
     request: RequestInfo | URL,
@@ -1029,7 +1022,7 @@ export declare abstract class Cache {
   /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/cache/#put) */
   put(request: RequestInfo | URL, response: Response): Promise<void>;
 }
-export interface CacheQueryOptions {
+interface CacheQueryOptions {
   ignoreMethod?: boolean;
 }
 /**
@@ -1040,7 +1033,7 @@ export interface CacheQueryOptions {
  *
  * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
  */
-export declare abstract class Crypto {
+declare abstract class Crypto {
   /**
    * Available only in secure contexts.
    *
@@ -1073,7 +1066,7 @@ export declare abstract class Crypto {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto)
  */
-export declare abstract class SubtleCrypto {
+declare abstract class SubtleCrypto {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/SubtleCrypto/encrypt) */
   encrypt(
     algorithm: string | SubtleCryptoEncryptAlgorithm,
@@ -1162,7 +1155,7 @@ export declare abstract class SubtleCrypto {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey)
  */
-export declare abstract class CryptoKey {
+declare abstract class CryptoKey {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/type) */
   readonly type: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/extractable) */
@@ -1178,11 +1171,11 @@ export declare abstract class CryptoKey {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CryptoKey/usages) */
   readonly usages: string[];
 }
-export interface CryptoKeyPair {
+interface CryptoKeyPair {
   publicKey: CryptoKey;
   privateKey: CryptoKey;
 }
-export interface JsonWebKey {
+interface JsonWebKey {
   kty: string;
   use?: string;
   key_ops?: string[];
@@ -1202,12 +1195,12 @@ export interface JsonWebKey {
   oth?: RsaOtherPrimesInfo[];
   k?: string;
 }
-export interface RsaOtherPrimesInfo {
+interface RsaOtherPrimesInfo {
   r?: string;
   d?: string;
   t?: string;
 }
-export interface SubtleCryptoDeriveKeyAlgorithm {
+interface SubtleCryptoDeriveKeyAlgorithm {
   name: string;
   salt?: ArrayBuffer | ArrayBufferView;
   iterations?: number;
@@ -1215,7 +1208,7 @@ export interface SubtleCryptoDeriveKeyAlgorithm {
   $public?: CryptoKey;
   info?: ArrayBuffer | ArrayBufferView;
 }
-export interface SubtleCryptoEncryptAlgorithm {
+interface SubtleCryptoEncryptAlgorithm {
   name: string;
   iv?: ArrayBuffer | ArrayBufferView;
   additionalData?: ArrayBuffer | ArrayBufferView;
@@ -1224,7 +1217,7 @@ export interface SubtleCryptoEncryptAlgorithm {
   length?: number;
   label?: ArrayBuffer | ArrayBufferView;
 }
-export interface SubtleCryptoGenerateKeyAlgorithm {
+interface SubtleCryptoGenerateKeyAlgorithm {
   name: string;
   hash?: string | SubtleCryptoHashAlgorithm;
   modulusLength?: number;
@@ -1232,51 +1225,51 @@ export interface SubtleCryptoGenerateKeyAlgorithm {
   length?: number;
   namedCurve?: string;
 }
-export interface SubtleCryptoHashAlgorithm {
+interface SubtleCryptoHashAlgorithm {
   name: string;
 }
-export interface SubtleCryptoImportKeyAlgorithm {
+interface SubtleCryptoImportKeyAlgorithm {
   name: string;
   hash?: string | SubtleCryptoHashAlgorithm;
   length?: number;
   namedCurve?: string;
   compressed?: boolean;
 }
-export interface SubtleCryptoSignAlgorithm {
+interface SubtleCryptoSignAlgorithm {
   name: string;
   hash?: string | SubtleCryptoHashAlgorithm;
   dataLength?: number;
   saltLength?: number;
 }
-export interface CryptoKeyKeyAlgorithm {
+interface CryptoKeyKeyAlgorithm {
   name: string;
 }
-export interface CryptoKeyAesKeyAlgorithm {
+interface CryptoKeyAesKeyAlgorithm {
   name: string;
   length: number;
 }
-export interface CryptoKeyHmacKeyAlgorithm {
+interface CryptoKeyHmacKeyAlgorithm {
   name: string;
   hash: CryptoKeyKeyAlgorithm;
   length: number;
 }
-export interface CryptoKeyRsaKeyAlgorithm {
+interface CryptoKeyRsaKeyAlgorithm {
   name: string;
   modulusLength: number;
   publicExponent: ArrayBuffer | ArrayBufferView;
   hash?: CryptoKeyKeyAlgorithm;
 }
-export interface CryptoKeyEllipticKeyAlgorithm {
+interface CryptoKeyEllipticKeyAlgorithm {
   name: string;
   namedCurve: string;
 }
-export interface CryptoKeyArbitraryKeyAlgorithm {
+interface CryptoKeyArbitraryKeyAlgorithm {
   name: string;
   hash?: CryptoKeyKeyAlgorithm;
   namedCurve?: string;
   length?: number;
 }
-export declare class DigestStream extends WritableStream<
+declare class DigestStream extends WritableStream<
   ArrayBuffer | ArrayBufferView
 > {
   constructor(algorithm: string | SubtleCryptoHashAlgorithm);
@@ -1288,7 +1281,7 @@ export declare class DigestStream extends WritableStream<
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoder)
  */
-export declare class TextDecoder {
+declare class TextDecoder {
   constructor(label?: string, options?: TextDecoderConstructorOptions);
   /**
    * Returns the result of running encoding's decoder. The method can be invoked zero or more times with options's stream set to true, and then once without options's stream (or set to false), to process a fragmented input. If the invocation without options's stream (or set to false) has no input, it's clearest to omit both arguments.
@@ -1318,7 +1311,7 @@ export declare class TextDecoder {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder)
  */
-export declare class TextEncoder {
+declare class TextEncoder {
   constructor();
   /**
    * Returns the result of running UTF-8's encoder.
@@ -1337,14 +1330,14 @@ export declare class TextEncoder {
   ): TextEncoderEncodeIntoResult;
   get encoding(): string;
 }
-export interface TextDecoderConstructorOptions {
+interface TextDecoderConstructorOptions {
   fatal: boolean;
   ignoreBOM: boolean;
 }
-export interface TextDecoderDecodeOptions {
+interface TextDecoderDecodeOptions {
   stream: boolean;
 }
-export interface TextEncoderEncodeIntoResult {
+interface TextEncoderEncodeIntoResult {
   read: number;
   written: number;
 }
@@ -1353,7 +1346,7 @@ export interface TextEncoderEncodeIntoResult {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent)
  */
-export declare class ErrorEvent extends Event {
+declare class ErrorEvent extends Event {
   constructor(type: string, init?: ErrorEventErrorEventInit);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/filename) */
   get filename(): string;
@@ -1366,7 +1359,7 @@ export declare class ErrorEvent extends Event {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/error) */
   get error(): any;
 }
-export interface ErrorEventErrorEventInit {
+interface ErrorEventErrorEventInit {
   message?: string;
   filename?: string;
   lineno?: number;
@@ -1378,7 +1371,7 @@ export interface ErrorEventErrorEventInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
  */
-export declare class FormData {
+declare class FormData {
   constructor();
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/append) */
   append(name: string, value: string): void;
@@ -1413,10 +1406,10 @@ export declare class FormData {
   ): void;
   [Symbol.iterator](): IterableIterator<[key: string, value: File | string]>;
 }
-export interface ContentOptions {
+interface ContentOptions {
   html?: boolean;
 }
-export declare class HTMLRewriter {
+declare class HTMLRewriter {
   constructor();
   on(
     selector: string,
@@ -1425,23 +1418,23 @@ export declare class HTMLRewriter {
   onDocument(handlers: HTMLRewriterDocumentContentHandlers): HTMLRewriter;
   transform(response: Response): Response;
 }
-export interface HTMLRewriterElementContentHandlers {
+interface HTMLRewriterElementContentHandlers {
   element?(element: Element): void | Promise<void>;
   comments?(comment: Comment): void | Promise<void>;
   text?(element: Text): void | Promise<void>;
 }
-export interface HTMLRewriterDocumentContentHandlers {
+interface HTMLRewriterDocumentContentHandlers {
   doctype?(doctype: Doctype): void | Promise<void>;
   comments?(comment: Comment): void | Promise<void>;
   text?(text: Text): void | Promise<void>;
   end?(end: DocumentEnd): void | Promise<void>;
 }
-export interface Doctype {
+interface Doctype {
   readonly name: string | null;
   readonly publicId: string | null;
   readonly systemId: string | null;
 }
-export interface Element {
+interface Element {
   tagName: string;
   readonly attributes: IterableIterator<string[]>;
   readonly removed: boolean;
@@ -1478,7 +1471,7 @@ export interface Element {
   ): Element;
   onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
 }
-export interface EndTag {
+interface EndTag {
   name: string;
   before(
     content: string | ReadableStream | Response,
@@ -1490,7 +1483,7 @@ export interface EndTag {
   ): EndTag;
   remove(): EndTag;
 }
-export interface Comment {
+interface Comment {
   text: string;
   readonly removed: boolean;
   before(content: string, options?: ContentOptions): Comment;
@@ -1498,7 +1491,7 @@ export interface Comment {
   replace(content: string, options?: ContentOptions): Comment;
   remove(): Comment;
 }
-export interface Text {
+interface Text {
   readonly text: string;
   readonly lastInTextNode: boolean;
   readonly removed: boolean;
@@ -1516,7 +1509,7 @@ export interface Text {
   ): Text;
   remove(): Text;
 }
-export interface DocumentEnd {
+interface DocumentEnd {
   append(content: string, options?: ContentOptions): DocumentEnd;
 }
 /**
@@ -1524,14 +1517,14 @@ export interface DocumentEnd {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent)
  */
-export declare abstract class FetchEvent extends ExtendableEvent {
+declare abstract class FetchEvent extends ExtendableEvent {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/request) */
   readonly request: Request;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FetchEvent/respondWith) */
   respondWith(promise: Response | Promise<Response>): void;
   passThroughOnException(): void;
 }
-export type HeadersInit =
+type HeadersInit =
   | Headers
   | Iterable<Iterable<string>>
   | Record<string, string>;
@@ -1540,7 +1533,7 @@ export type HeadersInit =
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers)
  */
-export declare class Headers {
+declare class Headers {
   constructor(init?: HeadersInit);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get) */
   get(name: string): string | null;
@@ -1567,7 +1560,7 @@ export declare class Headers {
   values(): IterableIterator<string>;
   [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 }
-export type BodyInit =
+type BodyInit =
   | ReadableStream<Uint8Array>
   | string
   | ArrayBuffer
@@ -1575,7 +1568,7 @@ export type BodyInit =
   | Blob
   | URLSearchParams
   | FormData;
-export declare abstract class Body {
+declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
   get body(): ReadableStream | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bodyUsed) */
@@ -1598,7 +1591,7 @@ export declare abstract class Body {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response)
  */
-export declare var Response: {
+declare var Response: {
   prototype: Response;
   new (body?: BodyInit | null, init?: ResponseInit): Response;
   error(): Response;
@@ -1610,7 +1603,7 @@ export declare var Response: {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response)
  */
-export interface Response extends Body {
+interface Response extends Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/clone) */
   clone(): Response;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/status) */
@@ -1630,7 +1623,7 @@ export interface Response extends Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
   type: "default" | "error";
 }
-export interface ResponseInit {
+interface ResponseInit {
   status?: number;
   statusText?: string;
   headers?: HeadersInit;
@@ -1638,16 +1631,15 @@ export interface ResponseInit {
   webSocket?: WebSocket | null;
   encodeBody?: "automatic" | "manual";
 }
-export type RequestInfo<
-  CfHostMetadata = unknown,
-  Cf = CfProperties<CfHostMetadata>,
-> = Request<CfHostMetadata, Cf> | string;
+type RequestInfo<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> =
+  | Request<CfHostMetadata, Cf>
+  | string;
 /**
  * This Fetch API interface represents a resource request.
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
  */
-export declare var Request: {
+declare var Request: {
   prototype: Request;
   new <CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>(
     input: RequestInfo<CfProperties> | URL,
@@ -1659,10 +1651,8 @@ export declare var Request: {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request)
  */
-export interface Request<
-  CfHostMetadata = unknown,
-  Cf = CfProperties<CfHostMetadata>,
-> extends Body {
+interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
+  extends Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/clone) */
   clone(): Request<CfHostMetadata, Cf>;
   /**
@@ -1709,14 +1699,8 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
   keepalive: boolean;
-  /**
-   * Returns the cache mode associated with request, which is a string indicating how the request will interact with the browser's cache when fetching.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
-   */
-  cache?: "no-store";
 }
-export interface RequestInit<Cf = CfProperties> {
+interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
   method?: string;
   /* A Headers object, an object literal, or an array of two-item arrays to set request's headers. */
@@ -1727,18 +1711,15 @@ export interface RequestInit<Cf = CfProperties> {
   redirect?: string;
   fetcher?: Fetcher | null;
   cf?: Cf;
-  /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
   signal?: AbortSignal | null;
   encodeResponseBody?: "automatic" | "manual";
 }
-export type Service<
-  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
-> = Fetcher<T>;
-export type Fetcher<
+type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> =
+  Fetcher<T>;
+type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
 > = (T extends Rpc.EntrypointBranded
@@ -1747,12 +1728,16 @@ export type Fetcher<
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 };
-export interface KVNamespaceListKey<Metadata, Key extends string = string> {
+interface FetcherPutOptions {
+  expiration?: number;
+  expirationTtl?: number;
+}
+interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
   metadata?: Metadata;
 }
-export type KVNamespaceListResult<Metadata, Key extends string = string> =
+type KVNamespaceListResult<Metadata, Key extends string = string> =
   | {
       list_complete: false;
       keys: KVNamespaceListKey<Metadata, Key>[];
@@ -1764,7 +1749,7 @@ export type KVNamespaceListResult<Metadata, Key extends string = string> =
       keys: KVNamespaceListKey<Metadata, Key>[];
       cacheStatus: string | null;
     };
-export interface KVNamespace<Key extends string = string> {
+interface KVNamespace<Key extends string = string> {
   get(
     key: Key,
     options?: Partial<KVNamespaceGetOptions<undefined>>,
@@ -1879,49 +1864,49 @@ export interface KVNamespace<Key extends string = string> {
   >;
   delete(key: Key): Promise<void>;
 }
-export interface KVNamespaceListOptions {
+interface KVNamespaceListOptions {
   limit?: number;
   prefix?: string | null;
   cursor?: string | null;
 }
-export interface KVNamespaceGetOptions<Type> {
+interface KVNamespaceGetOptions<Type> {
   type: Type;
   cacheTtl?: number;
 }
-export interface KVNamespacePutOptions {
+interface KVNamespacePutOptions {
   expiration?: number;
   expirationTtl?: number;
   metadata?: any | null;
 }
-export interface KVNamespaceGetWithMetadataResult<Value, Metadata> {
+interface KVNamespaceGetWithMetadataResult<Value, Metadata> {
   value: Value | null;
   metadata: Metadata | null;
   cacheStatus: string | null;
 }
-export type QueueContentType = "text" | "bytes" | "json" | "v8";
-export interface Queue<Body = unknown> {
+type QueueContentType = "text" | "bytes" | "json" | "v8";
+interface Queue<Body = unknown> {
   send(message: Body, options?: QueueSendOptions): Promise<void>;
   sendBatch(
     messages: Iterable<MessageSendRequest<Body>>,
     options?: QueueSendBatchOptions,
   ): Promise<void>;
 }
-export interface QueueSendOptions {
+interface QueueSendOptions {
   contentType?: QueueContentType;
   delaySeconds?: number;
 }
-export interface QueueSendBatchOptions {
+interface QueueSendBatchOptions {
   delaySeconds?: number;
 }
-export interface MessageSendRequest<Body = unknown> {
+interface MessageSendRequest<Body = unknown> {
   body: Body;
   contentType?: QueueContentType;
   delaySeconds?: number;
 }
-export interface QueueRetryOptions {
+interface QueueRetryOptions {
   delaySeconds?: number;
 }
-export interface Message<Body = unknown> {
+interface Message<Body = unknown> {
   readonly id: string;
   readonly timestamp: Date;
   readonly body: Body;
@@ -1929,26 +1914,26 @@ export interface Message<Body = unknown> {
   retry(options?: QueueRetryOptions): void;
   ack(): void;
 }
-export interface QueueEvent<Body = unknown> extends ExtendableEvent {
+interface QueueEvent<Body = unknown> extends ExtendableEvent {
   readonly messages: readonly Message<Body>[];
   readonly queue: string;
   retryAll(options?: QueueRetryOptions): void;
   ackAll(): void;
 }
-export interface MessageBatch<Body = unknown> {
+interface MessageBatch<Body = unknown> {
   readonly messages: readonly Message<Body>[];
   readonly queue: string;
   retryAll(options?: QueueRetryOptions): void;
   ackAll(): void;
 }
-export interface R2Error extends Error {
+interface R2Error extends Error {
   readonly name: string;
   readonly code: number;
   readonly message: string;
   readonly action: string;
   readonly stack: any;
 }
-export interface R2ListOptions {
+interface R2ListOptions {
   limit?: number;
   prefix?: string;
   cursor?: string;
@@ -1956,7 +1941,7 @@ export interface R2ListOptions {
   startAfter?: string;
   include?: ("httpMetadata" | "customMetadata")[];
 }
-export declare abstract class R2Bucket {
+declare abstract class R2Bucket {
   head(key: string): Promise<R2Object | null>;
   get(
     key: string,
@@ -1997,7 +1982,7 @@ export declare abstract class R2Bucket {
   delete(keys: string | string[]): Promise<void>;
   list(options?: R2ListOptions): Promise<R2Objects>;
 }
-export interface R2MultipartUpload {
+interface R2MultipartUpload {
   readonly key: string;
   readonly uploadId: string;
   uploadPart(
@@ -2008,11 +1993,11 @@ export interface R2MultipartUpload {
   abort(): Promise<void>;
   complete(uploadedParts: R2UploadedPart[]): Promise<R2Object>;
 }
-export interface R2UploadedPart {
+interface R2UploadedPart {
   partNumber: number;
   etag: string;
 }
-export declare abstract class R2Object {
+declare abstract class R2Object {
   readonly key: string;
   readonly version: string;
   readonly size: number;
@@ -2027,16 +2012,15 @@ export declare abstract class R2Object {
   readonly ssecKeyMd5?: string;
   writeHttpMetadata(headers: Headers): void;
 }
-export interface R2ObjectBody extends R2Object {
+interface R2ObjectBody extends R2Object {
   get body(): ReadableStream;
   get bodyUsed(): boolean;
   arrayBuffer(): Promise<ArrayBuffer>;
-  bytes(): Promise<Uint8Array>;
   text(): Promise<string>;
   json<T>(): Promise<T>;
   blob(): Promise<Blob>;
 }
-export type R2Range =
+type R2Range =
   | {
       offset: number;
       length?: number;
@@ -2048,19 +2032,19 @@ export type R2Range =
   | {
       suffix: number;
     };
-export interface R2Conditional {
+interface R2Conditional {
   etagMatches?: string;
   etagDoesNotMatch?: string;
   uploadedBefore?: Date;
   uploadedAfter?: Date;
   secondsGranularity?: boolean;
 }
-export interface R2GetOptions {
+interface R2GetOptions {
   onlyIf?: R2Conditional | Headers;
   range?: R2Range | Headers;
   ssecKey?: ArrayBuffer | string;
 }
-export interface R2PutOptions {
+interface R2PutOptions {
   onlyIf?: R2Conditional | Headers;
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
@@ -2072,13 +2056,13 @@ export interface R2PutOptions {
   storageClass?: string;
   ssecKey?: ArrayBuffer | string;
 }
-export interface R2MultipartOptions {
+interface R2MultipartOptions {
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
   storageClass?: string;
   ssecKey?: ArrayBuffer | string;
 }
-export interface R2Checksums {
+interface R2Checksums {
   readonly md5?: ArrayBuffer;
   readonly sha1?: ArrayBuffer;
   readonly sha256?: ArrayBuffer;
@@ -2086,14 +2070,14 @@ export interface R2Checksums {
   readonly sha512?: ArrayBuffer;
   toJSON(): R2StringChecksums;
 }
-export interface R2StringChecksums {
+interface R2StringChecksums {
   md5?: string;
   sha1?: string;
   sha256?: string;
   sha384?: string;
   sha512?: string;
 }
-export interface R2HTTPMetadata {
+interface R2HTTPMetadata {
   contentType?: string;
   contentLanguage?: string;
   contentDisposition?: string;
@@ -2101,7 +2085,7 @@ export interface R2HTTPMetadata {
   cacheControl?: string;
   cacheExpiry?: Date;
 }
-export type R2Objects = {
+type R2Objects = {
   objects: R2Object[];
   delimitedPrefixes: string[];
 } & (
@@ -2113,24 +2097,24 @@ export type R2Objects = {
       truncated: false;
     }
 );
-export interface R2UploadPartOptions {
+interface R2UploadPartOptions {
   ssecKey?: ArrayBuffer | string;
 }
-export declare abstract class ScheduledEvent extends ExtendableEvent {
+declare abstract class ScheduledEvent extends ExtendableEvent {
   readonly scheduledTime: number;
   readonly cron: string;
   noRetry(): void;
 }
-export interface ScheduledController {
+interface ScheduledController {
   readonly scheduledTime: number;
   readonly cron: string;
   noRetry(): void;
 }
-export interface QueuingStrategy<T = any> {
+interface QueuingStrategy<T = any> {
   highWaterMark?: number | bigint;
   size?: (chunk: T) => number | bigint;
 }
-export interface UnderlyingSink<W = any> {
+interface UnderlyingSink<W = any> {
   type?: string;
   start?: (controller: WritableStreamDefaultController) => void | Promise<void>;
   write?: (
@@ -2140,14 +2124,14 @@ export interface UnderlyingSink<W = any> {
   abort?: (reason: any) => void | Promise<void>;
   close?: () => void | Promise<void>;
 }
-export interface UnderlyingByteSource {
+interface UnderlyingByteSource {
   type: "bytes";
   autoAllocateChunkSize?: number;
   start?: (controller: ReadableByteStreamController) => void | Promise<void>;
   pull?: (controller: ReadableByteStreamController) => void | Promise<void>;
   cancel?: (reason: any) => void | Promise<void>;
 }
-export interface UnderlyingSource<R = any> {
+interface UnderlyingSource<R = any> {
   type?: "" | undefined;
   start?: (
     controller: ReadableStreamDefaultController<R>,
@@ -2158,7 +2142,7 @@ export interface UnderlyingSource<R = any> {
   cancel?: (reason: any) => void | Promise<void>;
   expectedLength?: number | bigint;
 }
-export interface Transformer<I = any, O = any> {
+interface Transformer<I = any, O = any> {
   readableType?: string;
   writableType?: string;
   start?: (
@@ -2174,7 +2158,7 @@ export interface Transformer<I = any, O = any> {
   cancel?: (reason: any) => void | Promise<void>;
   expectedLength?: number;
 }
-export interface StreamPipeOptions {
+interface StreamPipeOptions {
   /**
    * Pipes this readable stream to a given writable stream destination. The way in which the piping process behaves under various error conditions can be customized with a number of passed options. It returns a promise that fulfills when the piping process completes successfully, or rejects if any errors were encountered.
    *
@@ -2197,7 +2181,7 @@ export interface StreamPipeOptions {
   preventCancel?: boolean;
   signal?: AbortSignal;
 }
-export type ReadableStreamReadResult<R = any> =
+type ReadableStreamReadResult<R = any> =
   | {
       done: false;
       value: R;
@@ -2211,7 +2195,7 @@ export type ReadableStreamReadResult<R = any> =
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
  */
-export interface ReadableStream<R = any> {
+interface ReadableStream<R = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/locked) */
   get locked(): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/cancel) */
@@ -2242,7 +2226,7 @@ export interface ReadableStream<R = any> {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream)
  */
-export declare const ReadableStream: {
+declare const ReadableStream: {
   prototype: ReadableStream;
   new (
     underlyingSource: UnderlyingByteSource,
@@ -2254,7 +2238,7 @@ export declare const ReadableStream: {
   ): ReadableStream<R>;
 };
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader) */
-export declare class ReadableStreamDefaultReader<R = any> {
+declare class ReadableStreamDefaultReader<R = any> {
   constructor(stream: ReadableStream);
   get closed(): Promise<void>;
   cancel(reason?: any): Promise<void>;
@@ -2264,7 +2248,7 @@ export declare class ReadableStreamDefaultReader<R = any> {
   releaseLock(): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader) */
-export declare class ReadableStreamBYOBReader {
+declare class ReadableStreamBYOBReader {
   constructor(stream: ReadableStream);
   get closed(): Promise<void>;
   cancel(reason?: any): Promise<void>;
@@ -2279,10 +2263,10 @@ export declare class ReadableStreamBYOBReader {
     view: T,
   ): Promise<ReadableStreamReadResult<T>>;
 }
-export interface ReadableStreamBYOBReaderReadableStreamBYOBReaderReadOptions {
+interface ReadableStreamBYOBReaderReadableStreamBYOBReaderReadOptions {
   min?: number;
 }
-export interface ReadableStreamGetReaderOptions {
+interface ReadableStreamGetReaderOptions {
   /**
    * Creates a ReadableStreamBYOBReader and locks the stream to the new reader.
    *
@@ -2291,7 +2275,7 @@ export interface ReadableStreamGetReaderOptions {
   mode: "byob";
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest) */
-export declare abstract class ReadableStreamBYOBRequest {
+declare abstract class ReadableStreamBYOBRequest {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/view) */
   get view(): Uint8Array | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respond) */
@@ -2301,7 +2285,7 @@ export declare abstract class ReadableStreamBYOBRequest {
   get atLeast(): number | null;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController) */
-export declare abstract class ReadableStreamDefaultController<R = any> {
+declare abstract class ReadableStreamDefaultController<R = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/desiredSize) */
   get desiredSize(): number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/close) */
@@ -2312,7 +2296,7 @@ export declare abstract class ReadableStreamDefaultController<R = any> {
   error(reason: any): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController) */
-export declare abstract class ReadableByteStreamController {
+declare abstract class ReadableByteStreamController {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/byobRequest) */
   get byobRequest(): ReadableStreamBYOBRequest | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/desiredSize) */
@@ -2329,14 +2313,14 @@ export declare abstract class ReadableByteStreamController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
-export declare abstract class WritableStreamDefaultController {
+declare abstract class WritableStreamDefaultController {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/signal) */
   get signal(): AbortSignal;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error) */
   error(reason?: any): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController) */
-export declare abstract class TransformStreamDefaultController<O = any> {
+declare abstract class TransformStreamDefaultController<O = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/desiredSize) */
   get desiredSize(): number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/enqueue) */
@@ -2346,7 +2330,7 @@ export declare abstract class TransformStreamDefaultController<O = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/terminate) */
   terminate(): void;
 }
-export interface ReadableWritablePair<R = any, W = any> {
+interface ReadableWritablePair<R = any, W = any> {
   /**
    * Provides a convenient, chainable way of piping this readable stream through a transform stream (or any other { writable, readable } pair). It simply pipes the stream into the writable side of the supplied pair, and returns the readable side for further use.
    *
@@ -2360,7 +2344,7 @@ export interface ReadableWritablePair<R = any, W = any> {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream)
  */
-export declare class WritableStream<W = any> {
+declare class WritableStream<W = any> {
   constructor(
     underlyingSink?: UnderlyingSink,
     queuingStrategy?: QueuingStrategy,
@@ -2379,7 +2363,7 @@ export declare class WritableStream<W = any> {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter)
  */
-export declare class WritableStreamDefaultWriter<W = any> {
+declare class WritableStreamDefaultWriter<W = any> {
   constructor(stream: WritableStream);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/closed) */
   get closed(): Promise<void>;
@@ -2397,7 +2381,7 @@ export declare class WritableStreamDefaultWriter<W = any> {
   releaseLock(): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream) */
-export declare class TransformStream<I = any, O = any> {
+declare class TransformStream<I = any, O = any> {
   constructor(
     transformer?: Transformer<I, O>,
     writableStrategy?: QueuingStrategy<I>,
@@ -2408,48 +2392,45 @@ export declare class TransformStream<I = any, O = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable) */
   get writable(): WritableStream<I>;
 }
-export declare class FixedLengthStream extends IdentityTransformStream {
+declare class FixedLengthStream extends IdentityTransformStream {
   constructor(
     expectedLength: number | bigint,
     queuingStrategy?: IdentityTransformStreamQueuingStrategy,
   );
 }
-export declare class IdentityTransformStream extends TransformStream<
+declare class IdentityTransformStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
   constructor(queuingStrategy?: IdentityTransformStreamQueuingStrategy);
 }
-export interface IdentityTransformStreamQueuingStrategy {
+interface IdentityTransformStreamQueuingStrategy {
   highWaterMark?: number | bigint;
 }
-export interface ReadableStreamValuesOptions {
+interface ReadableStreamValuesOptions {
   preventCancel?: boolean;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CompressionStream) */
-export declare class CompressionStream extends TransformStream<
+declare class CompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
   constructor(format: "gzip" | "deflate" | "deflate-raw");
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/DecompressionStream) */
-export declare class DecompressionStream extends TransformStream<
+declare class DecompressionStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   Uint8Array
 > {
   constructor(format: "gzip" | "deflate" | "deflate-raw");
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoderStream) */
-export declare class TextEncoderStream extends TransformStream<
-  string,
-  Uint8Array
-> {
+declare class TextEncoderStream extends TransformStream<string, Uint8Array> {
   constructor();
   get encoding(): string;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextDecoderStream) */
-export declare class TextDecoderStream extends TransformStream<
+declare class TextDecoderStream extends TransformStream<
   ArrayBuffer | ArrayBufferView,
   string
 > {
@@ -2458,7 +2439,7 @@ export declare class TextDecoderStream extends TransformStream<
   get fatal(): boolean;
   get ignoreBOM(): boolean;
 }
-export interface TextDecoderStreamTextDecoderStreamInit {
+interface TextDecoderStreamTextDecoderStreamInit {
   fatal?: boolean;
   ignoreBOM?: boolean;
 }
@@ -2467,7 +2448,7 @@ export interface TextDecoderStreamTextDecoderStreamInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/ByteLengthQueuingStrategy)
  */
-export declare class ByteLengthQueuingStrategy
+declare class ByteLengthQueuingStrategy
   implements QueuingStrategy<ArrayBufferView>
 {
   constructor(init: QueuingStrategyInit);
@@ -2481,14 +2462,14 @@ export declare class ByteLengthQueuingStrategy
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy)
  */
-export declare class CountQueuingStrategy implements QueuingStrategy {
+declare class CountQueuingStrategy implements QueuingStrategy {
   constructor(init: QueuingStrategyInit);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy/highWaterMark) */
   get highWaterMark(): number;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy/size) */
   get size(): (chunk?: any) => number;
 }
-export interface QueuingStrategyInit {
+interface QueuingStrategyInit {
   /**
    * Creates a new ByteLengthQueuingStrategy with the provided high water mark.
    *
@@ -2496,16 +2477,16 @@ export interface QueuingStrategyInit {
    */
   highWaterMark: number;
 }
-export interface ScriptVersion {
+interface ScriptVersion {
   id?: string;
   tag?: string;
   message?: string;
 }
-export declare abstract class TailEvent extends ExtendableEvent {
+declare abstract class TailEvent extends ExtendableEvent {
   readonly events: TraceItem[];
   readonly traces: TraceItem[];
 }
-export interface TraceItem {
+interface TraceItem {
   readonly event:
     | (
         | TraceItemFetchEventInfo
@@ -2534,84 +2515,84 @@ export interface TraceItem {
   readonly cpuTime: number;
   readonly wallTime: number;
 }
-export interface TraceItemAlarmEventInfo {
+interface TraceItemAlarmEventInfo {
   readonly scheduledTime: Date;
 }
-export interface TraceItemCustomEventInfo {}
-export interface TraceItemScheduledEventInfo {
+interface TraceItemCustomEventInfo {}
+interface TraceItemScheduledEventInfo {
   readonly scheduledTime: number;
   readonly cron: string;
 }
-export interface TraceItemQueueEventInfo {
+interface TraceItemQueueEventInfo {
   readonly queue: string;
   readonly batchSize: number;
 }
-export interface TraceItemEmailEventInfo {
+interface TraceItemEmailEventInfo {
   readonly mailFrom: string;
   readonly rcptTo: string;
   readonly rawSize: number;
 }
-export interface TraceItemTailEventInfo {
+interface TraceItemTailEventInfo {
   readonly consumedEvents: TraceItemTailEventInfoTailItem[];
 }
-export interface TraceItemTailEventInfoTailItem {
+interface TraceItemTailEventInfoTailItem {
   readonly scriptName: string | null;
 }
-export interface TraceItemFetchEventInfo {
+interface TraceItemFetchEventInfo {
   readonly response?: TraceItemFetchEventInfoResponse;
   readonly request: TraceItemFetchEventInfoRequest;
 }
-export interface TraceItemFetchEventInfoRequest {
+interface TraceItemFetchEventInfoRequest {
   readonly cf?: any;
   readonly headers: Record<string, string>;
   readonly method: string;
   readonly url: string;
   getUnredacted(): TraceItemFetchEventInfoRequest;
 }
-export interface TraceItemFetchEventInfoResponse {
+interface TraceItemFetchEventInfoResponse {
   readonly status: number;
 }
-export interface TraceItemJsRpcEventInfo {
+interface TraceItemJsRpcEventInfo {
   readonly rpcMethod: string;
 }
-export interface TraceItemHibernatableWebSocketEventInfo {
+interface TraceItemHibernatableWebSocketEventInfo {
   readonly getWebSocketEvent:
     | TraceItemHibernatableWebSocketEventInfoMessage
     | TraceItemHibernatableWebSocketEventInfoClose
     | TraceItemHibernatableWebSocketEventInfoError;
 }
-export interface TraceItemHibernatableWebSocketEventInfoMessage {
+interface TraceItemHibernatableWebSocketEventInfoMessage {
   readonly webSocketEventType: string;
 }
-export interface TraceItemHibernatableWebSocketEventInfoClose {
+interface TraceItemHibernatableWebSocketEventInfoClose {
   readonly webSocketEventType: string;
   readonly code: number;
   readonly wasClean: boolean;
 }
-export interface TraceItemHibernatableWebSocketEventInfoError {
+interface TraceItemHibernatableWebSocketEventInfoError {
   readonly webSocketEventType: string;
 }
-export interface TraceLog {
+interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
 }
-export interface TraceException {
+interface TraceException {
   readonly timestamp: number;
   readonly message: string;
   readonly name: string;
   readonly stack?: string;
 }
-export interface TraceDiagnosticChannelEvent {
+interface TraceDiagnosticChannelEvent {
   readonly timestamp: number;
   readonly channel: string;
   readonly message: any;
 }
-export interface TraceMetrics {
+interface TraceMetrics {
   readonly cpuTime: number;
   readonly wallTime: number;
 }
-export interface UnsafeTraceMetrics {
+interface UnsafeTraceMetrics {
   fromTrace(item: TraceItem): TraceMetrics;
 }
 /**
@@ -2619,7 +2600,7 @@ export interface UnsafeTraceMetrics {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL)
  */
-export declare class URL {
+declare class URL {
   constructor(url: string | URL, base?: string | URL);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin) */
   get origin(): string;
@@ -2679,7 +2660,7 @@ export declare class URL {
   static revokeObjectURL(object_url: string): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams) */
-export declare class URLSearchParams {
+declare class URLSearchParams {
   constructor(
     init?: Iterable<Iterable<string>> | Record<string, string> | string,
   );
@@ -2696,7 +2677,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
-  delete(name: string, value?: string): void;
+  delete(name: string): void;
   /**
    * Returns the first value associated to the given search parameter.
    *
@@ -2714,7 +2695,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
-  has(name: string, value?: string): boolean;
+  has(name: string): boolean;
   /**
    * Sets the value associated to a given search parameter to the given value. If there were several values, delete the others.
    *
@@ -2742,7 +2723,7 @@ export declare class URLSearchParams {
   toString(): string;
   [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 }
-export declare class URLPattern {
+declare class URLPattern {
   constructor(
     input?: string | URLPatternInit,
     baseURL?: string | URLPatternOptions,
@@ -2756,14 +2737,13 @@ export declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  get hasRegExpGroups(): boolean;
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
     input?: string | URLPatternInit,
     baseURL?: string,
   ): URLPatternResult | null;
 }
-export interface URLPatternInit {
+interface URLPatternInit {
   protocol?: string;
   username?: string;
   password?: string;
@@ -2774,11 +2754,11 @@ export interface URLPatternInit {
   hash?: string;
   baseURL?: string;
 }
-export interface URLPatternComponentResult {
+interface URLPatternComponentResult {
   input: string;
   groups: Record<string, string>;
 }
-export interface URLPatternResult {
+interface URLPatternResult {
   inputs: (string | URLPatternInit)[];
   protocol: URLPatternComponentResult;
   username: URLPatternComponentResult;
@@ -2789,7 +2769,7 @@ export interface URLPatternResult {
   search: URLPatternComponentResult;
   hash: URLPatternComponentResult;
 }
-export interface URLPatternOptions {
+interface URLPatternOptions {
   ignoreCase?: boolean;
 }
 /**
@@ -2797,7 +2777,7 @@ export interface URLPatternOptions {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/CloseEvent)
  */
-export declare class CloseEvent extends Event {
+declare class CloseEvent extends Event {
   constructor(type: string, initializer?: CloseEventInit);
   /**
    * Returns the WebSocket connection close code provided by the server.
@@ -2818,7 +2798,7 @@ export declare class CloseEvent extends Event {
    */
   readonly wasClean: boolean;
 }
-export interface CloseEventInit {
+interface CloseEventInit {
   code?: number;
   reason?: string;
   wasClean?: boolean;
@@ -2828,7 +2808,7 @@ export interface CloseEventInit {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
  */
-export declare class MessageEvent extends Event {
+declare class MessageEvent extends Event {
   constructor(type: string, initializer: MessageEventInit);
   /**
    * Returns the data of the message.
@@ -2837,10 +2817,10 @@ export declare class MessageEvent extends Event {
    */
   readonly data: ArrayBuffer | string;
 }
-export interface MessageEventInit {
+interface MessageEventInit {
   data: ArrayBuffer | string;
 }
-export type WebSocketEventMap = {
+type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
   open: Event;
@@ -2851,7 +2831,7 @@ export type WebSocketEventMap = {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
-export declare var WebSocket: {
+declare var WebSocket: {
   prototype: WebSocket;
   new (url: string, protocols?: string[] | string): WebSocket;
   readonly READY_STATE_CONNECTING: number;
@@ -2868,7 +2848,7 @@ export declare var WebSocket: {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket)
  */
-export interface WebSocket extends EventTarget<WebSocketEventMap> {
+interface WebSocket extends EventTarget<WebSocketEventMap> {
   accept(): void;
   /**
    * Transmits data using the WebSocket connection. data can be a string, a Blob, an ArrayBuffer, or an ArrayBufferView.
@@ -2909,13 +2889,13 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    */
   extensions: string | null;
 }
-export declare const WebSocketPair: {
+declare const WebSocketPair: {
   new (): {
     0: WebSocket;
     1: WebSocket;
   };
 };
-export interface SqlStorage {
+interface SqlStorage {
   exec<T extends Record<string, SqlStorageValue>>(
     query: string,
     ...bindings: any[]
@@ -2924,9 +2904,9 @@ export interface SqlStorage {
   Cursor: typeof SqlStorageCursor;
   Statement: typeof SqlStorageStatement;
 }
-export declare abstract class SqlStorageStatement {}
-export type SqlStorageValue = ArrayBuffer | string | number | null;
-export declare abstract class SqlStorageCursor<
+declare abstract class SqlStorageStatement {}
+type SqlStorageValue = ArrayBuffer | string | number | null;
+declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
   next():
@@ -2946,7 +2926,7 @@ export declare abstract class SqlStorageCursor<
   get rowsWritten(): number;
   [Symbol.iterator](): IterableIterator<T>;
 }
-export interface Socket {
+interface Socket {
   get readable(): ReadableStream;
   get writable(): WritableStream;
   get closed(): Promise<void>;
@@ -2956,24 +2936,24 @@ export interface Socket {
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
 }
-export interface SocketOptions {
+interface SocketOptions {
   secureTransport?: string;
   allowHalfOpen: boolean;
   highWaterMark?: number | bigint;
 }
-export interface SocketAddress {
+interface SocketAddress {
   hostname: string;
   port: number;
 }
-export interface TlsOptions {
+interface TlsOptions {
   expectedServerHostname?: string;
 }
-export interface SocketInfo {
+interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/EventSource) */
-export declare class EventSource extends EventTarget {
+declare class EventSource extends EventTarget {
   constructor(url: string, init?: EventSourceEventSourceInit);
   /**
    * Aborts any instances of the fetch algorithm started for this EventSource object, and sets the readyState attribute to CLOSED.
@@ -3016,11 +2996,11 @@ export declare class EventSource extends EventTarget {
   static readonly CLOSED: number;
   static from(stream: ReadableStream): EventSource;
 }
-export interface EventSourceEventSourceInit {
+interface EventSourceEventSourceInit {
   withCredentials?: boolean;
   fetcher?: Fetcher;
 }
-export interface Container {
+interface Container {
   get running(): boolean;
   start(options?: ContainerStartupOptions): void;
   monitor(): Promise<void>;
@@ -3028,23 +3008,23 @@ export interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
 }
-export interface ContainerStartupOptions {
+interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
 }
-export type AiImageClassificationInput = {
+type AiImageClassificationInput = {
   image: number[];
 };
-export type AiImageClassificationOutput = {
+type AiImageClassificationOutput = {
   score?: number;
   label?: string;
 }[];
-export declare abstract class BaseAiImageClassification {
+declare abstract class BaseAiImageClassification {
   inputs: AiImageClassificationInput;
   postProcessedOutputs: AiImageClassificationOutput;
 }
-export type AiImageToTextInput = {
+type AiImageToTextInput = {
   image: number[];
   prompt?: string;
   max_tokens?: number;
@@ -3058,14 +3038,14 @@ export type AiImageToTextInput = {
   raw?: boolean;
   messages?: RoleScopedChatInput[];
 };
-export type AiImageToTextOutput = {
+type AiImageToTextOutput = {
   description: string;
 };
-export declare abstract class BaseAiImageToText {
+declare abstract class BaseAiImageToText {
   inputs: AiImageToTextInput;
   postProcessedOutputs: AiImageToTextOutput;
 }
-export type AiImageTextToTextInput = {
+type AiImageTextToTextInput = {
   image: string;
   prompt?: string;
   max_tokens?: number;
@@ -3080,37 +3060,37 @@ export type AiImageTextToTextInput = {
   raw?: boolean;
   messages?: RoleScopedChatInput[];
 };
-export type AiImageTextToTextOutput = {
+type AiImageTextToTextOutput = {
   description: string;
 };
-export declare abstract class BaseAiImageTextToText {
+declare abstract class BaseAiImageTextToText {
   inputs: AiImageTextToTextInput;
   postProcessedOutputs: AiImageTextToTextOutput;
 }
-export type AiObjectDetectionInput = {
+type AiObjectDetectionInput = {
   image: number[];
 };
-export type AiObjectDetectionOutput = {
+type AiObjectDetectionOutput = {
   score?: number;
   label?: string;
 }[];
-export declare abstract class BaseAiObjectDetection {
+declare abstract class BaseAiObjectDetection {
   inputs: AiObjectDetectionInput;
   postProcessedOutputs: AiObjectDetectionOutput;
 }
-export type AiSentenceSimilarityInput = {
+type AiSentenceSimilarityInput = {
   source: string;
   sentences: string[];
 };
-export type AiSentenceSimilarityOutput = number[];
-export declare abstract class BaseAiSentenceSimilarity {
+type AiSentenceSimilarityOutput = number[];
+declare abstract class BaseAiSentenceSimilarity {
   inputs: AiSentenceSimilarityInput;
   postProcessedOutputs: AiSentenceSimilarityOutput;
 }
-export type AiAutomaticSpeechRecognitionInput = {
+type AiAutomaticSpeechRecognitionInput = {
   audio: number[];
 };
-export type AiAutomaticSpeechRecognitionOutput = {
+type AiAutomaticSpeechRecognitionOutput = {
   text?: string;
   words?: {
     word: string;
@@ -3119,44 +3099,44 @@ export type AiAutomaticSpeechRecognitionOutput = {
   }[];
   vtt?: string;
 };
-export declare abstract class BaseAiAutomaticSpeechRecognition {
+declare abstract class BaseAiAutomaticSpeechRecognition {
   inputs: AiAutomaticSpeechRecognitionInput;
   postProcessedOutputs: AiAutomaticSpeechRecognitionOutput;
 }
-export type AiSummarizationInput = {
+type AiSummarizationInput = {
   input_text: string;
   max_length?: number;
 };
-export type AiSummarizationOutput = {
+type AiSummarizationOutput = {
   summary: string;
 };
-export declare abstract class BaseAiSummarization {
+declare abstract class BaseAiSummarization {
   inputs: AiSummarizationInput;
   postProcessedOutputs: AiSummarizationOutput;
 }
-export type AiTextClassificationInput = {
+type AiTextClassificationInput = {
   text: string;
 };
-export type AiTextClassificationOutput = {
+type AiTextClassificationOutput = {
   score?: number;
   label?: string;
 }[];
-export declare abstract class BaseAiTextClassification {
+declare abstract class BaseAiTextClassification {
   inputs: AiTextClassificationInput;
   postProcessedOutputs: AiTextClassificationOutput;
 }
-export type AiTextEmbeddingsInput = {
+type AiTextEmbeddingsInput = {
   text: string | string[];
 };
-export type AiTextEmbeddingsOutput = {
+type AiTextEmbeddingsOutput = {
   shape: number[];
   data: number[][];
 };
-export declare abstract class BaseAiTextEmbeddings {
+declare abstract class BaseAiTextEmbeddings {
   inputs: AiTextEmbeddingsInput;
   postProcessedOutputs: AiTextEmbeddingsOutput;
 }
-export type RoleScopedChatInput = {
+type RoleScopedChatInput = {
   role:
     | "user"
     | "assistant"
@@ -3166,7 +3146,7 @@ export type RoleScopedChatInput = {
   content: string;
   name?: string;
 };
-export type AiTextGenerationToolLegacyInput = {
+type AiTextGenerationToolLegacyInput = {
   name: string;
   description: string;
   parameters?: {
@@ -3180,7 +3160,7 @@ export type AiTextGenerationToolLegacyInput = {
     required: string[];
   };
 };
-export type AiTextGenerationToolInput = {
+type AiTextGenerationToolInput = {
   type: "function" | (string & NonNullable<unknown>);
   function: {
     name: string;
@@ -3197,15 +3177,15 @@ export type AiTextGenerationToolInput = {
     };
   };
 };
-export type AiTextGenerationFunctionsInput = {
+type AiTextGenerationFunctionsInput = {
   name: string;
   code: string;
 };
-export type AiTextGenerationResponseFormat = {
+type AiTextGenerationResponseFormat = {
   type: string;
   json_schema?: any;
 };
-export type AiTextGenerationInput = {
+type AiTextGenerationInput = {
   prompt?: string;
   raw?: boolean;
   stream?: boolean;
@@ -3225,31 +3205,33 @@ export type AiTextGenerationInput = {
     | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
-export type AiTextGenerationOutput = {
-  response?: string;
-  tool_calls?: {
-    name: string;
-    arguments: unknown;
-  }[];
-};
-export declare abstract class BaseAiTextGeneration {
+type AiTextGenerationOutput =
+  | {
+      response?: string;
+      tool_calls?: {
+        name: string;
+        arguments: unknown;
+      }[];
+    }
+  | ReadableStream;
+declare abstract class BaseAiTextGeneration {
   inputs: AiTextGenerationInput;
   postProcessedOutputs: AiTextGenerationOutput;
 }
-export type AiTextToSpeechInput = {
+type AiTextToSpeechInput = {
   prompt: string;
   lang?: string;
 };
-export type AiTextToSpeechOutput =
+type AiTextToSpeechOutput =
   | Uint8Array
   | {
       audio: string;
     };
-export declare abstract class BaseAiTextToSpeech {
+declare abstract class BaseAiTextToSpeech {
   inputs: AiTextToSpeechInput;
   postProcessedOutputs: AiTextToSpeechOutput;
 }
-export type AiTextToImageInput = {
+type AiTextToImageInput = {
   prompt: string;
   negative_prompt?: string;
   height?: number;
@@ -3262,67 +3244,24 @@ export type AiTextToImageInput = {
   guidance?: number;
   seed?: number;
 };
-export type AiTextToImageOutput = ReadableStream<Uint8Array>;
-export declare abstract class BaseAiTextToImage {
+type AiTextToImageOutput = ReadableStream<Uint8Array>;
+declare abstract class BaseAiTextToImage {
   inputs: AiTextToImageInput;
   postProcessedOutputs: AiTextToImageOutput;
 }
-export type AiTranslationInput = {
+type AiTranslationInput = {
   text: string;
   target_lang: string;
   source_lang?: string;
 };
-export type AiTranslationOutput = {
+type AiTranslationOutput = {
   translated_text?: string;
 };
-export declare abstract class BaseAiTranslation {
+declare abstract class BaseAiTranslation {
   inputs: AiTranslationInput;
   postProcessedOutputs: AiTranslationOutput;
 }
-export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
-  | {
-      text: string | string[];
-      /**
-       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        text: string | string[];
-        /**
-         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-         */
-        pooling?: "mean" | "cls";
-      }[];
-    };
-export type Ai_Cf_Baai_Bge_Base_En_V1_5_Output =
-  | {
-      shape?: number[];
-      /**
-       * Embeddings of the requested text values
-       */
-      data?: number[][];
-      /**
-       * The pooling method used in the embedding process.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | AsyncResponse;
-export interface AsyncResponse {
-  /**
-   * The async request id that can be used to obtain the results.
-   */
-  request_id?: string;
-}
-export declare abstract class Base_Ai_Cf_Baai_Bge_Base_En_V1_5 {
-  inputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Output;
-}
-export type Ai_Cf_Openai_Whisper_Input =
+type Ai_Cf_Openai_Whisper_Input =
   | string
   | {
       /**
@@ -3330,7 +3269,7 @@ export type Ai_Cf_Openai_Whisper_Input =
        */
       audio: number[];
     };
-export interface Ai_Cf_Openai_Whisper_Output {
+interface Ai_Cf_Openai_Whisper_Output {
   /**
    * The transcription
    */
@@ -3349,131 +3288,11 @@ export interface Ai_Cf_Openai_Whisper_Output {
   }[];
   vtt?: string;
 }
-export declare abstract class Base_Ai_Cf_Openai_Whisper {
+declare abstract class Base_Ai_Cf_Openai_Whisper {
   inputs: Ai_Cf_Openai_Whisper_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Output;
 }
-export type Ai_Cf_Meta_M2M100_1_2B_Input =
-  | {
-      /**
-       * The text to be translated
-       */
-      text: string;
-      /**
-       * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
-       */
-      source_lang?: string;
-      /**
-       * The language code to translate the text into (e.g., 'es' for Spanish)
-       */
-      target_lang: string;
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        /**
-         * The text to be translated
-         */
-        text: string;
-        /**
-         * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
-         */
-        source_lang?: string;
-        /**
-         * The language code to translate the text into (e.g., 'es' for Spanish)
-         */
-        target_lang: string;
-      }[];
-    };
-export type Ai_Cf_Meta_M2M100_1_2B_Output =
-  | {
-      /**
-       * The translated text in the target language
-       */
-      translated_text?: string;
-    }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Meta_M2M100_1_2B {
-  inputs: Ai_Cf_Meta_M2M100_1_2B_Input;
-  postProcessedOutputs: Ai_Cf_Meta_M2M100_1_2B_Output;
-}
-export type Ai_Cf_Baai_Bge_Small_En_V1_5_Input =
-  | {
-      text: string | string[];
-      /**
-       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        text: string | string[];
-        /**
-         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-         */
-        pooling?: "mean" | "cls";
-      }[];
-    };
-export type Ai_Cf_Baai_Bge_Small_En_V1_5_Output =
-  | {
-      shape?: number[];
-      /**
-       * Embeddings of the requested text values
-       */
-      data?: number[][];
-      /**
-       * The pooling method used in the embedding process.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Baai_Bge_Small_En_V1_5 {
-  inputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Output;
-}
-export type Ai_Cf_Baai_Bge_Large_En_V1_5_Input =
-  | {
-      text: string | string[];
-      /**
-       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        text: string | string[];
-        /**
-         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-         */
-        pooling?: "mean" | "cls";
-      }[];
-    };
-export type Ai_Cf_Baai_Bge_Large_En_V1_5_Output =
-  | {
-      shape?: number[];
-      /**
-       * Embeddings of the requested text values
-       */
-      data?: number[][];
-      /**
-       * The pooling method used in the embedding process.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Baai_Bge_Large_En_V1_5 {
-  inputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Output;
-}
-export type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
+type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
   | string
   | {
       /**
@@ -3514,14 +3333,14 @@ export type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
        */
       max_tokens?: number;
     };
-export interface Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Output {
+interface Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Output {
   description?: string;
 }
-export declare abstract class Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M {
+declare abstract class Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M {
   inputs: Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input;
   postProcessedOutputs: Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Output;
 }
-export type Ai_Cf_Openai_Whisper_Tiny_En_Input =
+type Ai_Cf_Openai_Whisper_Tiny_En_Input =
   | string
   | {
       /**
@@ -3529,7 +3348,7 @@ export type Ai_Cf_Openai_Whisper_Tiny_En_Input =
        */
       audio: number[];
     };
-export interface Ai_Cf_Openai_Whisper_Tiny_En_Output {
+interface Ai_Cf_Openai_Whisper_Tiny_En_Output {
   /**
    * The transcription
    */
@@ -3548,11 +3367,11 @@ export interface Ai_Cf_Openai_Whisper_Tiny_En_Output {
   }[];
   vtt?: string;
 }
-export declare abstract class Base_Ai_Cf_Openai_Whisper_Tiny_En {
+declare abstract class Base_Ai_Cf_Openai_Whisper_Tiny_En {
   inputs: Ai_Cf_Openai_Whisper_Tiny_En_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Tiny_En_Output;
 }
-export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
+interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
   /**
    * Base64 encoded value of the audio data.
    */
@@ -3568,7 +3387,7 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
   /**
    * Preprocess the audio with a voice activity detection model.
    */
-  vad_filter?: boolean;
+  vad_filter?: string;
   /**
    * A text prompt to help provide context to the model on the contents of the audio.
    */
@@ -3578,7 +3397,7 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
    */
   prefix?: string;
 }
-export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
+interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
   transcription_info?: {
     /**
      * The language of the audio being transcribed or translated.
@@ -3654,20 +3473,12 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output {
    */
   vtt?: string;
 }
-export declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
+declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
   inputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Large_V3_Turbo_Output;
 }
-export type Ai_Cf_Baai_Bge_M3_Input =
-  | BGEM3InputQueryAndContexts
-  | BGEM3InputEmbedding
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: (BGEM3InputQueryAndContexts1 | BGEM3InputEmbedding1)[];
-    };
-export interface BGEM3InputQueryAndContexts {
+type Ai_Cf_Baai_Bge_M3_Input = BGEM3InputQueryAndContexts | BGEM3InputEmbedding;
+interface BGEM3InputQueryAndContexts {
   /**
    * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
    */
@@ -3686,45 +3497,18 @@ export interface BGEM3InputQueryAndContexts {
    */
   truncate_inputs?: boolean;
 }
-export interface BGEM3InputEmbedding {
+interface BGEM3InputEmbedding {
   text: string | string[];
   /**
    * When provided with too long context should the model error out or truncate the context to fit?
    */
   truncate_inputs?: boolean;
 }
-export interface BGEM3InputQueryAndContexts1 {
-  /**
-   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
-   */
-  query?: string;
-  /**
-   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
-   */
-  contexts: {
-    /**
-     * One of the provided context content
-     */
-    text?: string;
-  }[];
-  /**
-   * When provided with too long context should the model error out or truncate the context to fit?
-   */
-  truncate_inputs?: boolean;
-}
-export interface BGEM3InputEmbedding1 {
-  text: string | string[];
-  /**
-   * When provided with too long context should the model error out or truncate the context to fit?
-   */
-  truncate_inputs?: boolean;
-}
-export type Ai_Cf_Baai_Bge_M3_Output =
+type Ai_Cf_Baai_Bge_M3_Output =
   | BGEM3OuputQuery
   | BGEM3OutputEmbeddingForContexts
-  | BGEM3OuputEmbedding
-  | AsyncResponse;
-export interface BGEM3OuputQuery {
+  | BGEM3OuputEmbedding;
+interface BGEM3OuputQuery {
   response?: {
     /**
      * Index of the context in the request
@@ -3736,7 +3520,7 @@ export interface BGEM3OuputQuery {
     score?: number;
   }[];
 }
-export interface BGEM3OutputEmbeddingForContexts {
+interface BGEM3OutputEmbeddingForContexts {
   response?: number[][];
   shape?: number[];
   /**
@@ -3744,7 +3528,7 @@ export interface BGEM3OutputEmbeddingForContexts {
    */
   pooling?: "mean" | "cls";
 }
-export interface BGEM3OuputEmbedding {
+interface BGEM3OuputEmbedding {
   shape?: number[];
   /**
    * Embeddings of the requested text values
@@ -3755,11 +3539,11 @@ export interface BGEM3OuputEmbedding {
    */
   pooling?: "mean" | "cls";
 }
-export declare abstract class Base_Ai_Cf_Baai_Bge_M3 {
+declare abstract class Base_Ai_Cf_Baai_Bge_M3 {
   inputs: Ai_Cf_Baai_Bge_M3_Input;
   postProcessedOutputs: Ai_Cf_Baai_Bge_M3_Output;
 }
-export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
+interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
   /**
    * A text description of the image you want to generate.
    */
@@ -3769,18 +3553,18 @@ export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input {
    */
   steps?: number;
 }
-export interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Output {
+interface Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Output {
   /**
    * The generated image in Base64 format.
    */
   image?: string;
 }
-export declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell {
+declare abstract class Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell {
   inputs: Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Input;
   postProcessedOutputs: Ai_Cf_Black_Forest_Labs_Flux_1_Schnell_Output;
 }
-export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input = Prompt | Messages;
-export interface Prompt {
+type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input = Prompt | Messages;
+interface Prompt {
   /**
    * The input text prompt for the model to generate a response.
    */
@@ -3831,7 +3615,7 @@ export interface Prompt {
    */
   lora?: string;
 }
-export interface Messages {
+interface Messages {
   /**
    * An array of message objects representing the conversation history.
    */
@@ -3839,41 +3623,13 @@ export interface Messages {
     /**
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
-    role?: string;
+    role: string;
     /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     * The content of the message as a string.
      */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
+    content: string;
   }[];
-  image?: number[] | (string & NonNullable<unknown>);
+  image?: number[] | string;
   functions?: {
     name: string;
     code: string;
@@ -4005,43 +3761,144 @@ export interface Messages {
    */
   presence_penalty?: number;
 }
-export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response?: string;
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
+type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output =
+  | {
+      /**
+       * The generated text response from the model
+       */
+      response?: string;
+      /**
+       * An array of tool calls requests made during the response generation
+       */
+      tool_calls?: {
+        /**
+         * The arguments passed to be passed to the tool call request
+         */
+        arguments?: object;
+        /**
+         * The name of the tool to be called
+         */
+        name?: string;
+      }[];
+    }
+  | ReadableStream;
+declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
   inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
 }
-export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input =
-  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt
-  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages
-  | AsyncBatch;
-export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt {
+interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender must alternate between 'user' and 'assistant'.
+     */
+    role: "user" | "assistant";
+    /**
+     * The content of the message as a string.
+     */
+    content: string;
+  }[];
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Dictate the output format of the generated response.
+   */
+  response_format?: {
+    /**
+     * Set to json_object to process and output generated text as JSON.
+     */
+    type?: string;
+  };
+}
+interface Ai_Cf_Meta_Llama_Guard_3_8B_Output {
+  response?:
+    | string
+    | {
+        /**
+         * Whether the conversation is safe or not.
+         */
+        safe?: boolean;
+        /**
+         * A list of what hazard categories predicted for the conversation, if the conversation is deemed unsafe.
+         */
+        categories?: string[];
+      };
+  /**
+   * Usage statistics for the inference request
+   */
+  usage?: {
+    /**
+     * Total number of tokens in input
+     */
+    prompt_tokens?: number;
+    /**
+     * Total number of tokens in output
+     */
+    completion_tokens?: number;
+    /**
+     * Total number of input and output tokens
+     */
+    total_tokens?: number;
+  };
+}
+declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
+  inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
+}
+interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
+  /**
+   * A query you wish to perform against the provided contexts.
+   */
+  /**
+   * Number of returned results starting with the best score.
+   */
+  top_k?: number;
+  /**
+   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
+   */
+  contexts: {
+    /**
+     * One of the provided context content
+     */
+    text?: string;
+  }[];
+}
+interface Ai_Cf_Baai_Bge_Reranker_Base_Output {
+  response?: {
+    /**
+     * Index of the context in the request
+     */
+    id?: number;
+    /**
+     * Score of the context under the index.
+     */
+    score?: number;
+  }[];
+}
+declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
+  inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
+  postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
+}
+type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
+  | Ai_Cf_Meta_Llama_4_Prompt
+  | Ai_Cf_Meta_Llama_4_Messages;
+interface Ai_Cf_Meta_Llama_4_Prompt {
   /**
    * The input text prompt for the model to generate a response.
    */
   prompt: string;
   /**
-   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
+   * JSON schema that should be fulfilled for the response.
    */
-  lora?: string;
-  response_format?: JSONMode;
+  guided_json?: object;
   /**
    * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
    */
@@ -4083,11 +3940,7 @@ export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt {
    */
   presence_penalty?: number;
 }
-export interface JSONMode {
-  type?: "json_object" | "json_schema";
-  json_schema?: unknown;
-}
-export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
+interface Ai_Cf_Meta_Llama_4_Messages {
   /**
    * An array of message objects representing the conversation history.
    */
@@ -4095,11 +3948,39 @@ export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
     /**
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
-    role: string;
+    role?: string;
     /**
-     * The content of the message as a string.
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
      */
-    content: string;
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
   }[];
   functions?: {
     name: string;
@@ -4195,7 +4076,10 @@ export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
         };
       }
   )[];
-  response_format?: JSONMode;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
   /**
    * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
    */
@@ -4237,52 +4121,7 @@ export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
    */
   presence_penalty?: number;
 }
-export interface AsyncBatch {
-  requests?: {
-    /**
-     * User-supplied reference. This field will be present in the response as well it can be used to reference the request and response. It's NOT validated to be unique.
-     */
-    external_reference?: string;
-    /**
-     * Prompt for the text generation model
-     */
-    prompt?: string;
-    /**
-     * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-     */
-    stream?: boolean;
-    /**
-     * The maximum number of tokens to generate in the response.
-     */
-    max_tokens?: number;
-    /**
-     * Controls the randomness of the output; higher values produce more random results.
-     */
-    temperature?: number;
-    /**
-     * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-     */
-    top_p?: number;
-    /**
-     * Random seed for reproducibility of the generation.
-     */
-    seed?: number;
-    /**
-     * Penalty for repeated tokens; higher values discourage repetition.
-     */
-    repetition_penalty?: number;
-    /**
-     * Decreases the likelihood of the model repeating the same lines verbatim.
-     */
-    frequency_penalty?: number;
-    /**
-     * Increases the likelihood of the model introducing new topics.
-     */
-    presence_penalty?: number;
-    response_format?: JSONMode;
-  }[];
-}
-export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
+type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output =
   | {
       /**
        * The generated text response from the model
@@ -4319,1465 +4158,12 @@ export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
         name?: string;
       }[];
     }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast {
-  inputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input;
-  postProcessedOutputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output;
-}
-export interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender must alternate between 'user' and 'assistant'.
-     */
-    role: "user" | "assistant";
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
-  }[];
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Dictate the output format of the generated response.
-   */
-  response_format?: {
-    /**
-     * Set to json_object to process and output generated text as JSON.
-     */
-    type?: string;
-  };
-}
-export interface Ai_Cf_Meta_Llama_Guard_3_8B_Output {
-  response?:
-    | string
-    | {
-        /**
-         * Whether the conversation is safe or not.
-         */
-        safe?: boolean;
-        /**
-         * A list of what hazard categories predicted for the conversation, if the conversation is deemed unsafe.
-         */
-        categories?: string[];
-      };
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-}
-export declare abstract class Base_Ai_Cf_Meta_Llama_Guard_3_8B {
-  inputs: Ai_Cf_Meta_Llama_Guard_3_8B_Input;
-  postProcessedOutputs: Ai_Cf_Meta_Llama_Guard_3_8B_Output;
-}
-export interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
-  /**
-   * A query you wish to perform against the provided contexts.
-   */
-  query: string;
-  /**
-   * Number of returned results starting with the best score.
-   */
-  top_k?: number;
-  /**
-   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
-   */
-  contexts: {
-    /**
-     * One of the provided context content
-     */
-    text?: string;
-  }[];
-}
-export interface Ai_Cf_Baai_Bge_Reranker_Base_Output {
-  response?: {
-    /**
-     * Index of the context in the request
-     */
-    id?: number;
-    /**
-     * Score of the context under the index.
-     */
-    score?: number;
-  }[];
-}
-export declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
-  inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
-}
-export type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input =
-  | Qwen2_5_Coder_32B_Instruct_Prompt
-  | Qwen2_5_Coder_32B_Instruct_Messages;
-export interface Qwen2_5_Coder_32B_Instruct_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
-   */
-  lora?: string;
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Qwen2_5_Coder_32B_Instruct_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct {
-  inputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output;
-}
-export type Ai_Cf_Qwen_Qwq_32B_Input =
-  | Qwen_Qwq_32B_Prompt
-  | Qwen_Qwq_32B_Messages;
-export interface Qwen_Qwq_32B_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fulfilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Qwen_Qwq_32B_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
-     */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Qwen_Qwq_32B_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Qwen_Qwq_32B {
-  inputs: Ai_Cf_Qwen_Qwq_32B_Input;
-  postProcessedOutputs: Ai_Cf_Qwen_Qwq_32B_Output;
-}
-export type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input =
-  | Mistral_Small_3_1_24B_Instruct_Prompt
-  | Mistral_Small_3_1_24B_Instruct_Messages;
-export interface Mistral_Small_3_1_24B_Instruct_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fulfilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Mistral_Small_3_1_24B_Instruct_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
-     */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct {
-  inputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output;
-}
-export type Ai_Cf_Google_Gemma_3_12B_It_Input =
-  | Google_Gemma_3_12B_It_Prompt
-  | Google_Gemma_3_12B_It_Messages;
-export interface Google_Gemma_3_12B_It_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Google_Gemma_3_12B_It_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Google_Gemma_3_12B_It_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Google_Gemma_3_12B_It {
-  inputs: Ai_Cf_Google_Gemma_3_12B_It_Input;
-  postProcessedOutputs: Ai_Cf_Google_Gemma_3_12B_It_Output;
-}
-export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
-  | Ai_Cf_Meta_Llama_4_Prompt
-  | Ai_Cf_Meta_Llama_4_Messages;
-export interface Ai_Cf_Meta_Llama_4_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fulfilled for the response.
-   */
-  guided_json?: object;
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Ai_Cf_Meta_Llama_4_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    /**
-     * The tool call id. If you don't know what to put here you can fall back to 000000001
-     */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  response_format?: JSONMode;
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The tool call id.
-     */
-    id?: string;
-    /**
-     * Specifies the type of tool (e.g., 'function').
-     */
-    type?: string;
-    /**
-     * Details of the function tool.
-     */
-    function?: {
-      /**
-       * The name of the tool to be called
-       */
-      name?: string;
-      /**
-       * The arguments passed to be passed to the tool call request
-       */
-      arguments?: object;
-    };
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
+  | string;
+declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
   inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
 }
-export interface AiModels {
+interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
   "@cf/runwayml/stable-diffusion-v1-5-inpainting": BaseAiTextToImage;
@@ -5785,6 +4171,9 @@ export interface AiModels {
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
+  "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
+  "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
+  "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
   "@cf/microsoft/resnet-50": BaseAiImageClassification;
   "@cf/facebook/detr-resnet-50": BaseAiObjectDetection;
   "@cf/meta/llama-2-7b-chat-int8": BaseAiTextGeneration;
@@ -5826,48 +4215,36 @@ export interface AiModels {
   "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": BaseAiTextGeneration;
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": BaseAiTextGeneration;
+  "@cf/meta/m2m100-1.2b": BaseAiTranslation;
   "@cf/facebook/bart-large-cnn": BaseAiSummarization;
   "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
-  "@cf/baai/bge-base-en-v1.5": Base_Ai_Cf_Baai_Bge_Base_En_V1_5;
   "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
-  "@cf/meta/m2m100-1.2b": Base_Ai_Cf_Meta_M2M100_1_2B;
-  "@cf/baai/bge-small-en-v1.5": Base_Ai_Cf_Baai_Bge_Small_En_V1_5;
-  "@cf/baai/bge-large-en-v1.5": Base_Ai_Cf_Baai_Bge_Large_En_V1_5;
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
-  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
   "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
-  "@cf/qwen/qwen2.5-coder-32b-instruct": Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct;
-  "@cf/qwen/qwq-32b": Base_Ai_Cf_Qwen_Qwq_32B;
-  "@cf/mistralai/mistral-small-3.1-24b-instruct": Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
-  "@cf/google/gemma-3-12b-it": Base_Ai_Cf_Google_Gemma_3_12B_It;
   "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
 }
-export type AiOptions = {
-  /**
-   * Send requests as an asynchronous batch job, only works for supported models
-   * https://developers.cloudflare.com/workers-ai/features/batch-api
-   */
-  queueRequest?: boolean;
+type AiOptions = {
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
 };
-export type ConversionResponse = {
+type ConversionResponse = {
   name: string;
   mimeType: string;
   format: "markdown";
   tokens: number;
   data: string;
 };
-export type AiModelsSearchParams = {
+type AiModelsSearchParams = {
   author?: string;
   hide_experimental?: boolean;
   page?: number;
@@ -5876,7 +4253,7 @@ export type AiModelsSearchParams = {
   source?: number;
   task?: string;
 };
-export type AiModelsSearchObject = {
+type AiModelsSearchObject = {
   id: string;
   source: number;
   name: string;
@@ -5892,33 +4269,23 @@ export type AiModelsSearchObject = {
     value: string;
   }[];
 };
-export interface InferenceUpstreamError extends Error {}
-export interface AiInternalError extends Error {}
-export type AiModelListType = Record<string, any>;
-export declare abstract class Ai<
-  AiModelList extends AiModelListType = AiModels,
-> {
+interface InferenceUpstreamError extends Error {}
+interface AiInternalError extends Error {}
+type AiModelListType = Record<string, any>;
+declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId?: string): AutoRAG;
-  run<
-    Name extends keyof AiModelList,
-    Options extends AiOptions,
-    InputOptions extends AiModelList[Name]["inputs"],
-  >(
+  autorag(autoragId: string): AutoRAG;
+  run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
-    inputs: InputOptions,
+    inputs: AiModelList[Name]["inputs"],
     options?: Options,
   ): Promise<
     Options extends {
       returnRawResponse: true;
     }
       ? Response
-      : InputOptions extends {
-            stream: true;
-          }
-        ? ReadableStream
-        : AiModelList[Name]["postProcessedOutputs"]
+      : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(
@@ -5942,12 +4309,12 @@ export declare abstract class Ai<
     },
   ): Promise<ConversionResponse>;
 }
-export type GatewayRetries = {
+type GatewayRetries = {
   maxAttempts?: 1 | 2 | 3 | 4 | 5;
   retryDelayMs?: number;
   backoff?: "constant" | "linear" | "exponential";
 };
-export type GatewayOptions = {
+type GatewayOptions = {
   id: string;
   cacheKey?: string;
   cacheTtl?: number;
@@ -5958,12 +4325,12 @@ export type GatewayOptions = {
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
 };
-export type AiGatewayPatchLog = {
+type AiGatewayPatchLog = {
   score?: number | null;
   feedback?: -1 | 1 | null;
   metadata?: Record<string, number | string | boolean | null | bigint> | null;
 };
-export type AiGatewayLog = {
+type AiGatewayLog = {
   id: string;
   provider: string;
   model: string;
@@ -5990,7 +4357,7 @@ export type AiGatewayLog = {
   response_head_complete: boolean;
   created_at: Date;
 };
-export type AIGatewayProviders =
+type AIGatewayProviders =
   | "workers-ai"
   | "anthropic"
   | "aws-bedrock"
@@ -6011,7 +4378,7 @@ export type AIGatewayProviders =
   | "cartesia"
   | "elevenlabs"
   | "adobe-firefly";
-export type AIGatewayHeaders = {
+type AIGatewayHeaders = {
   "cf-aig-metadata":
     | Record<string, number | string | boolean | null | bigint>
     | string;
@@ -6037,15 +4404,15 @@ export type AIGatewayHeaders = {
   "Content-Type": string;
   [key: string]: string | number | boolean | object;
 };
-export type AIGatewayUniversalRequest = {
+type AIGatewayUniversalRequest = {
   provider: AIGatewayProviders | string; // eslint-disable-line
   endpoint: string;
   headers: Partial<AIGatewayHeaders>;
   query: unknown;
 };
-export interface AiGatewayInternalError extends Error {}
-export interface AiGatewayLogNotFound extends Error {}
-export declare abstract class AiGateway {
+interface AiGatewayInternalError extends Error {}
+interface AiGatewayLogNotFound extends Error {}
+declare abstract class AiGateway {
   patchLog(logId: string, data: AiGatewayPatchLog): Promise<void>;
   getLog(logId: string): Promise<AiGatewayLog>;
   run(
@@ -6057,20 +4424,19 @@ export declare abstract class AiGateway {
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
-export interface AutoRAGInternalError extends Error {}
-export interface AutoRAGNotFoundError extends Error {}
-export interface AutoRAGUnauthorizedError extends Error {}
-export interface AutoRAGNameNotSetError extends Error {}
-export type ComparisonFilter = {
+interface AutoRAGInternalError extends Error {}
+interface AutoRAGNotFoundError extends Error {}
+interface AutoRAGUnauthorizedError extends Error {}
+type ComparisonFilter = {
   key: string;
   type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
   value: string | number | boolean;
 };
-export type CompoundFilter = {
+type CompoundFilter = {
   type: "and" | "or";
   filters: ComparisonFilter[];
 };
-export type AutoRagSearchRequest = {
+type AutoRagSearchRequest = {
   query: string;
   filters?: CompoundFilter | ComparisonFilter;
   max_num_results?: number;
@@ -6080,16 +4446,16 @@ export type AutoRagSearchRequest = {
   };
   rewrite_query?: boolean;
 };
-export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
+type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
 };
-export type AutoRagAiSearchRequestStreaming = Omit<
+type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
   "stream"
 > & {
   stream: true;
 };
-export type AutoRagSearchResponse = {
+type AutoRagSearchResponse = {
   object: "vector_store.search_results.page";
   search_query: string;
   data: {
@@ -6105,20 +4471,10 @@ export type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
-export type AutoRagListResponse = {
-  id: string;
-  enable: boolean;
-  type: string;
-  source: string;
-  vectorize_name: string;
-  paused: boolean;
-  status: string;
-}[];
-export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
+type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
-export declare abstract class AutoRAG {
-  list(): Promise<AutoRagListResponse>;
+declare abstract class AutoRAG {
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
@@ -6126,7 +4482,7 @@ export declare abstract class AutoRAG {
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
 }
-export interface BasicImageTransformations {
+interface BasicImageTransformations {
   /**
    * Maximum width in image pixels. The value must be an integer.
    */
@@ -6195,7 +4551,7 @@ export interface BasicImageTransformations {
    */
   rotate?: 0 | 90 | 180 | 270 | 360;
 }
-export interface BasicImageTransformationsGravityCoordinates {
+interface BasicImageTransformationsGravityCoordinates {
   x?: number;
   y?: number;
   mode?: "remainder" | "box-center";
@@ -6209,7 +4565,7 @@ export interface BasicImageTransformationsGravityCoordinates {
  * Note: Currently, these properties cannot be tested in the
  * playground.
  */
-export interface RequestInitCfProperties extends Record<string, unknown> {
+interface RequestInitCfProperties extends Record<string, unknown> {
   cacheEverything?: boolean;
   /**
    * A request's cache key is what determines if two requests are
@@ -6260,8 +4616,7 @@ export interface RequestInitCfProperties extends Record<string, unknown> {
    */
   resolveOverride?: string;
 }
-export interface RequestInitCfPropertiesImageDraw
-  extends BasicImageTransformations {
+interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
   /**
    * Absolute URL of the image file to use for the drawing. It can be any of
    * the supported file formats. For drawing of watermarks or non-rectangular
@@ -6298,8 +4653,7 @@ export interface RequestInitCfPropertiesImageDraw
   bottom?: number;
   right?: number;
 }
-export interface RequestInitCfPropertiesImage
-  extends BasicImageTransformations {
+interface RequestInitCfPropertiesImage extends BasicImageTransformations {
   /**
    * Device Pixel Ratio. Default 1. Multiplier for width/height that makes it
    * easier to specify higher-DPI sizes in <img srcset>.
@@ -6464,12 +4818,12 @@ export interface RequestInitCfPropertiesImage
    */
   compression?: "fast";
 }
-export interface RequestInitCfPropertiesImageMinify {
+interface RequestInitCfPropertiesImageMinify {
   javascript?: boolean;
   css?: boolean;
   html?: boolean;
 }
-export interface RequestInitCfPropertiesR2 {
+interface RequestInitCfPropertiesR2 {
   /**
    * Colo id of bucket that an object is stored in
    */
@@ -6478,14 +4832,13 @@ export interface RequestInitCfPropertiesR2 {
 /**
  * Request metadata provided by Cloudflare's edge.
  */
-export type IncomingRequestCfProperties<HostMetadata = unknown> =
+type IncomingRequestCfProperties<HostMetadata = unknown> =
   IncomingRequestCfPropertiesBase &
     IncomingRequestCfPropertiesBotManagementEnterprise &
     IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> &
     IncomingRequestCfPropertiesGeographicInformation &
     IncomingRequestCfPropertiesCloudflareAccessOrApiShield;
-export interface IncomingRequestCfPropertiesBase
-  extends Record<string, unknown> {
+interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
   /**
    * [ASN](https://www.iana.org/assignments/as-numbers/as-numbers.xhtml) of the incoming request.
    *
@@ -6563,7 +4916,7 @@ export interface IncomingRequestCfPropertiesBase
    */
   tlsExportedAuthenticator?: IncomingRequestCfPropertiesExportedAuthenticatorMetadata;
 }
-export interface IncomingRequestCfPropertiesBotManagementBase {
+interface IncomingRequestCfPropertiesBotManagementBase {
   /**
    * Cloudflare’s [level of certainty](https://developers.cloudflare.com/bots/concepts/bot-score/) that a request comes from a bot,
    * represented as an integer percentage between `1` (almost certainly a bot) and `99` (almost certainly human).
@@ -6590,7 +4943,7 @@ export interface IncomingRequestCfPropertiesBotManagementBase {
    */
   detectionIds: number[];
 }
-export interface IncomingRequestCfPropertiesBotManagement {
+interface IncomingRequestCfPropertiesBotManagement {
   /**
    * Results of Cloudflare's Bot Management analysis
    */
@@ -6602,7 +4955,7 @@ export interface IncomingRequestCfPropertiesBotManagement {
    */
   clientTrustScore: number;
 }
-export interface IncomingRequestCfPropertiesBotManagementEnterprise
+interface IncomingRequestCfPropertiesBotManagementEnterprise
   extends IncomingRequestCfPropertiesBotManagement {
   /**
    * Results of Cloudflare's Bot Management analysis
@@ -6615,9 +4968,7 @@ export interface IncomingRequestCfPropertiesBotManagementEnterprise
     ja3Hash: string;
   };
 }
-export interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<
-  HostMetadata,
-> {
+interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> {
   /**
    * Custom metadata set per-host in [Cloudflare for SaaS](https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/).
    *
@@ -6626,7 +4977,7 @@ export interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<
    */
   hostMetadata: HostMetadata;
 }
-export interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
+interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
   /**
    * Information about the client certificate presented to Cloudflare.
    *
@@ -6648,7 +4999,7 @@ export interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
 /**
  * Metadata about the request's TLS handshake
  */
-export interface IncomingRequestCfPropertiesExportedAuthenticatorMetadata {
+interface IncomingRequestCfPropertiesExportedAuthenticatorMetadata {
   /**
    * The client's [`HELLO` message](https://www.rfc-editor.org/rfc/rfc5246#section-7.4.1.2), encoded in hexadecimal
    *
@@ -6677,7 +5028,7 @@ export interface IncomingRequestCfPropertiesExportedAuthenticatorMetadata {
 /**
  * Geographic data about the request's origin.
  */
-export interface IncomingRequestCfPropertiesGeographicInformation {
+interface IncomingRequestCfPropertiesGeographicInformation {
   /**
    * The [ISO 3166-1 Alpha 2](https://www.iso.org/iso-3166-country-codes.html) country code the request originated from.
    *
@@ -6754,7 +5105,7 @@ export interface IncomingRequestCfPropertiesGeographicInformation {
   metroCode?: string;
 }
 /** Data about the incoming request's TLS certificate */
-export interface IncomingRequestCfPropertiesTLSClientAuth {
+interface IncomingRequestCfPropertiesTLSClientAuth {
   /** Always `"1"`, indicating that the certificate was presented */
   certPresented: "1";
   /**
@@ -6847,7 +5198,7 @@ export interface IncomingRequestCfPropertiesTLSClientAuth {
   certNotAfter: string;
 }
 /** Placeholder values for TLS Client Authorization */
-export interface IncomingRequestCfPropertiesTLSClientAuthPlaceholder {
+interface IncomingRequestCfPropertiesTLSClientAuthPlaceholder {
   certPresented: "0";
   certVerified: "NONE";
   certRevoked: "0";
@@ -6867,7 +5218,7 @@ export interface IncomingRequestCfPropertiesTLSClientAuthPlaceholder {
   certNotAfter: "";
 }
 /** Possible outcomes of TLS verification */
-export declare type CertVerificationStatus =
+declare type CertVerificationStatus =
   /** Authentication succeeded */
   | "SUCCESS"
   /** No certificate was presented */
@@ -6885,7 +5236,7 @@ export declare type CertVerificationStatus =
 /**
  * An upstream endpoint's response to a TCP `keepalive` message from Cloudflare.
  */
-export declare type IncomingRequestCfPropertiesEdgeRequestKeepAliveStatus =
+declare type IncomingRequestCfPropertiesEdgeRequestKeepAliveStatus =
   | 0 /** Unknown */
   | 1 /** no keepalives (not found) */
   | 2 /** no connection re-use, opening keepalive connection failed */
@@ -6893,7 +5244,7 @@ export declare type IncomingRequestCfPropertiesEdgeRequestKeepAliveStatus =
   | 4 /** connection re-use, refused by the origin server (`TCP FIN`) */
   | 5; /** connection re-use, accepted by the origin server */
 /** ISO 3166-1 Alpha-2 codes */
-export declare type Iso3166Alpha2Code =
+declare type Iso3166Alpha2Code =
   | "AD"
   | "AE"
   | "AF"
@@ -7144,18 +5495,11 @@ export declare type Iso3166Alpha2Code =
   | "ZM"
   | "ZW";
 /** The 2-letter continent codes Cloudflare uses */
-export declare type ContinentCode =
-  | "AF"
-  | "AN"
-  | "AS"
-  | "EU"
-  | "NA"
-  | "OC"
-  | "SA";
-export type CfProperties<HostMetadata = unknown> =
+declare type ContinentCode = "AF" | "AN" | "AS" | "EU" | "NA" | "OC" | "SA";
+type CfProperties<HostMetadata = unknown> =
   | IncomingRequestCfProperties<HostMetadata>
   | RequestInitCfProperties;
-export interface D1Meta {
+interface D1Meta {
   duration: number;
   size_after: number;
   rows_read: number;
@@ -7178,19 +5522,19 @@ export interface D1Meta {
     sql_duration_ms: number;
   };
 }
-export interface D1Response {
+interface D1Response {
   success: true;
   meta: D1Meta & Record<string, unknown>;
   error?: never;
 }
-export type D1Result<T = unknown> = D1Response & {
+type D1Result<T = unknown> = D1Response & {
   results: T[];
 };
-export interface D1ExecResult {
+interface D1ExecResult {
   count: number;
   duration: number;
 }
-export type D1SessionConstraint =
+type D1SessionConstraint =
   // Indicates that the first query should go to the primary, and the rest queries
   // using the same D1DatabaseSession will go to any replica that is consistent with
   // the bookmark maintained by the session (returned by the first query).
@@ -7199,8 +5543,8 @@ export type D1SessionConstraint =
   // using the same D1DatabaseSession will go to any replica that is consistent with
   // the bookmark maintained by the session (returned by the first query).
   | "first-unconstrained";
-export type D1SessionBookmark = string;
-export declare abstract class D1Database {
+type D1SessionBookmark = string;
+declare abstract class D1Database {
   prepare(query: string): D1PreparedStatement;
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
   exec(query: string): Promise<D1ExecResult>;
@@ -7219,7 +5563,7 @@ export declare abstract class D1Database {
    */
   dump(): Promise<ArrayBuffer>;
 }
-export declare abstract class D1DatabaseSession {
+declare abstract class D1DatabaseSession {
   prepare(query: string): D1PreparedStatement;
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
   /**
@@ -7228,7 +5572,7 @@ export declare abstract class D1DatabaseSession {
    */
   getBookmark(): D1SessionBookmark | null;
 }
-export declare abstract class D1PreparedStatement {
+declare abstract class D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = unknown>(colName: string): Promise<T | null>;
   first<T = Record<string, unknown>>(): Promise<T | null>;
@@ -7245,11 +5589,11 @@ export declare abstract class D1PreparedStatement {
 // but this will ensure type checking on older versions still passes.
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
-export interface Disposable {}
+interface Disposable {}
 /**
  * An email message that can be sent from a Worker.
  */
-export interface EmailMessage {
+interface EmailMessage {
   /**
    * Envelope From attribute of the email message.
    */
@@ -7262,7 +5606,7 @@ export interface EmailMessage {
 /**
  * An email message that is sent to a consumer Worker and can be rejected/forwarded.
  */
-export interface ForwardableEmailMessage extends EmailMessage {
+interface ForwardableEmailMessage extends EmailMessage {
   /**
    * Stream of the email message content.
    */
@@ -7298,34 +5642,25 @@ export interface ForwardableEmailMessage extends EmailMessage {
 /**
  * A binding that allows a Worker to send email messages.
  */
-export interface SendEmail {
+interface SendEmail {
   send(message: EmailMessage): Promise<void>;
 }
-export declare abstract class EmailEvent extends ExtendableEvent {
+declare abstract class EmailEvent extends ExtendableEvent {
   readonly message: ForwardableEmailMessage;
 }
-export declare type EmailExportedHandler<Env = unknown> = (
+declare type EmailExportedHandler<Env = unknown> = (
   message: ForwardableEmailMessage,
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-/**
- * Hello World binding to serve as an explanatory example. DO NOT USE
- */
-export interface HelloWorldBinding {
-  /**
-   * Retrieve the current stored value
-   */
-  get(): Promise<{
-    value: string;
-    ms?: number;
-  }>;
-  /**
-   * Set a new stored value
-   */
-  set(value: string): Promise<void>;
+declare module "cloudflare:email" {
+  let _EmailMessage: {
+    prototype: EmailMessage;
+    new (from: string, to: string, raw: ReadableStream | string): EmailMessage;
+  };
+  export { _EmailMessage as EmailMessage };
 }
-export interface Hyperdrive {
+interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
    *
@@ -7375,7 +5710,7 @@ export interface Hyperdrive {
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-export type ImageInfoResponse =
+type ImageInfoResponse =
   | {
       format: "image/svg+xml";
     }
@@ -7385,7 +5720,7 @@ export type ImageInfoResponse =
       width: number;
       height: number;
     };
-export type ImageTransform = {
+type ImageTransform = {
   width?: number;
   height?: number;
   background?: string;
@@ -7440,7 +5775,7 @@ export type ImageTransform = {
             };
       };
 };
-export type ImageDrawOptions = {
+type ImageDrawOptions = {
   opacity?: number;
   repeat?: boolean | string;
   top?: number;
@@ -7448,10 +5783,10 @@ export type ImageDrawOptions = {
   bottom?: number;
   right?: number;
 };
-export type ImageInputOptions = {
+type ImageInputOptions = {
   encoding?: "base64";
 };
-export type ImageOutputOptions = {
+type ImageOutputOptions = {
   format:
     | "image/jpeg"
     | "image/png"
@@ -7463,7 +5798,7 @@ export type ImageOutputOptions = {
   quality?: number;
   background?: string;
 };
-export interface ImagesBinding {
+interface ImagesBinding {
   /**
    * Get image metadata (type, width and height)
    * @throws {@link ImagesError} with code 9412 if input is not an image
@@ -7483,7 +5818,7 @@ export interface ImagesBinding {
     options?: ImageInputOptions,
   ): ImageTransformer;
 }
-export interface ImageTransformer {
+interface ImageTransformer {
   /**
    * Apply transform next, returning a transform handle.
    * You can then apply more transformations, draw, or retrieve the output.
@@ -7507,10 +5842,10 @@ export interface ImageTransformer {
    */
   output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
-export type ImageTransformationOutputOptions = {
+type ImageTransformationOutputOptions = {
   encoding?: "base64";
 };
-export interface ImageTransformationResult {
+interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
    */
@@ -7524,13 +5859,13 @@ export interface ImageTransformationResult {
    */
   image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
-export interface ImagesError extends Error {
+interface ImagesError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
 }
-export type Params<P extends string = any> = Record<P, string | string[]>;
-export type EventContext<Env, P extends string, Data> = {
+type Params<P extends string = any> = Record<P, string | string[]>;
+type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
   functionPath: string;
   waitUntil: (promise: Promise<any>) => void;
@@ -7544,12 +5879,12 @@ export type EventContext<Env, P extends string, Data> = {
   params: Params<P>;
   data: Data;
 };
-export type PagesFunction<
+type PagesFunction<
   Env = unknown,
   Params extends string = any,
   Data extends Record<string, unknown> = Record<string, unknown>,
 > = (context: EventContext<Env, Params, Data>) => Response | Promise<Response>;
-export type EventPluginContext<Env, P extends string, Data, PluginArgs> = {
+type EventPluginContext<Env, P extends string, Data, PluginArgs> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
   functionPath: string;
   waitUntil: (promise: Promise<any>) => void;
@@ -7564,7 +5899,7 @@ export type EventPluginContext<Env, P extends string, Data, PluginArgs> = {
   data: Data;
   pluginArgs: PluginArgs;
 };
-export type PagesPluginFunction<
+type PagesPluginFunction<
   Env = unknown,
   Params extends string = any,
   Data extends Record<string, unknown> = Record<string, unknown>,
@@ -7572,11 +5907,49 @@ export type PagesPluginFunction<
 > = (
   context: EventPluginContext<Env, Params, Data, PluginArgs>,
 ) => Response | Promise<Response>;
+declare module "assets:*" {
+  export const onRequest: PagesFunction;
+}
+// Copyright (c) 2022-2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+declare module "cloudflare:pipelines" {
+  export abstract class PipelineTransformationEntrypoint<
+    Env = unknown,
+    I extends PipelineRecord = PipelineRecord,
+    O extends PipelineRecord = PipelineRecord,
+  > {
+    protected env: Env;
+    protected ctx: ExecutionContext;
+    constructor(ctx: ExecutionContext, env: Env);
+    /**
+     * run recieves an array of PipelineRecord which can be
+     * transformed and returned to the pipeline
+     * @param records Incoming records from the pipeline to be transformed
+     * @param metadata Information about the specific pipeline calling the transformation entrypoint
+     * @returns A promise containing the transformed PipelineRecord array
+     */
+    public run(records: I[], metadata: PipelineBatchMetadata): Promise<O[]>;
+  }
+  export type PipelineRecord = Record<string, unknown>;
+  export type PipelineBatchMetadata = {
+    pipelineId: string;
+    pipelineName: string;
+  };
+  export interface Pipeline<T extends PipelineRecord = PipelineRecord> {
+    /**
+     * The Pipeline interface represents the type of a binding to a Pipeline
+     *
+     * @param records The records to send to the pipeline
+     */
+    send(records: T[]): Promise<void>;
+  }
+}
 // PubSubMessage represents an incoming PubSub message.
 // The message includes metadata about the broker, the client, and the payload
 // itself.
 // https://developers.cloudflare.com/pub-sub/
-export interface PubSubMessage {
+interface PubSubMessage {
   // Message ID
   readonly mid: number;
   // MQTT broker FQDN in the form mqtts://BROKER.NAMESPACE.cloudflarepubsub.com:PORT
@@ -7602,17 +5975,17 @@ export interface PubSubMessage {
   payload: string | Uint8Array;
 }
 // JsonWebKey extended by kid parameter
-export interface JsonWebKeyWithKid extends JsonWebKey {
+interface JsonWebKeyWithKid extends JsonWebKey {
   // Key Identifier of the JWK
   readonly kid: string;
 }
-export interface RateLimitOptions {
+interface RateLimitOptions {
   key: string;
 }
-export interface RateLimitOutcome {
+interface RateLimitOutcome {
   success: boolean;
 }
-export interface RateLimit {
+interface RateLimit {
   /**
    * Rate limit a request based on the provided options.
    * @see https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
@@ -7623,7 +5996,7 @@ export interface RateLimit {
 // Namespace for RPC utility types. Unfortunately, we can't use a `module` here as these types need
 // to referenced by `Fetcher`. This is included in the "importable" version of the types which
 // strips all `module` blocks.
-export declare namespace Rpc {
+declare namespace Rpc {
   // Branded types for identifying `WorkerEntrypoint`/`DurableObject`/`Target`s.
   // TypeScript uses *structural* typing meaning anything with the same shape as type `T` is a `T`.
   // For the classes exported by `cloudflare:workers` we want *nominal* typing (i.e. we only want to
@@ -7787,17 +6160,136 @@ export declare namespace Rpc {
     >]: MethodOrProperty<T[K]>;
   };
 }
-export declare namespace Cloudflare {
+declare namespace Cloudflare {
   interface Env {}
 }
-export interface SecretsStoreSecret {
+declare module "cloudflare:workers" {
+  export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
+  export const RpcStub: {
+    new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
+  };
+  export abstract class RpcTarget implements Rpc.RpcTargetBranded {
+    [Rpc.__RPC_TARGET_BRAND]: never;
+  }
+  // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
+  export abstract class WorkerEntrypoint<Env = unknown>
+    implements Rpc.WorkerEntrypointBranded
+  {
+    [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
+    protected ctx: ExecutionContext;
+    protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
+    fetch?(request: Request): Response | Promise<Response>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
+    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    test?(controller: TestController): void | Promise<void>;
+  }
+  export abstract class DurableObject<Env = unknown>
+    implements Rpc.DurableObjectBranded
+  {
+    [Rpc.__DURABLE_OBJECT_BRAND]: never;
+    protected ctx: DurableObjectState;
+    protected env: Env;
+    constructor(ctx: DurableObjectState, env: Env);
+    fetch?(request: Request): Response | Promise<Response>;
+    alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+    webSocketMessage?(
+      ws: WebSocket,
+      message: string | ArrayBuffer,
+    ): void | Promise<void>;
+    webSocketClose?(
+      ws: WebSocket,
+      code: number,
+      reason: string,
+      wasClean: boolean,
+    ): void | Promise<void>;
+    webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+  }
+  export type WorkflowDurationLabel =
+    | "second"
+    | "minute"
+    | "hour"
+    | "day"
+    | "week"
+    | "month"
+    | "year";
+  export type WorkflowSleepDuration =
+    | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+    | number;
+  export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowTimeoutDuration = WorkflowSleepDuration;
+  export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowStepConfig = {
+    retries?: {
+      limit: number;
+      delay: WorkflowDelayDuration | number;
+      backoff?: WorkflowBackoff;
+    };
+    timeout?: WorkflowTimeoutDuration | number;
+  };
+  export type WorkflowEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    instanceId: string;
+  };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
+  export abstract class WorkflowStep {
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      callback: () => Promise<T>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: () => Promise<T>,
+    ): Promise<T>;
+    sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
+    sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
+  }
+  export abstract class WorkflowEntrypoint<
+    Env = unknown,
+    T extends Rpc.Serializable<T> | unknown = unknown,
+  > implements Rpc.WorkflowEntrypointBranded
+  {
+    [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
+    protected ctx: ExecutionContext;
+    protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
+    run(
+      event: Readonly<WorkflowEvent<T>>,
+      step: WorkflowStep,
+    ): Promise<unknown>;
+  }
+  export const env: Cloudflare.Env;
+}
+interface SecretsStoreSecret {
   /**
    * Get a secret from the Secrets Store, returning a string of the secret value
    * if it exists, or throws an error if it does not exist
    */
   get(): Promise<string>;
 }
-export declare namespace TailStream {
+declare module "cloudflare:sockets" {
+  function _connect(
+    address: string | SocketAddress,
+    options?: SocketOptions,
+  ): Socket;
+  export { _connect as connect };
+}
+declare namespace TailStream {
   interface Header {
     readonly name: string;
     readonly value: string;
@@ -7892,7 +6384,6 @@ export declare namespace TailStream {
     readonly type: "onset";
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
-    readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
@@ -7945,7 +6436,7 @@ export declare namespace TailStream {
   }
   interface Return {
     readonly type: "return";
-    readonly info?: FetchResponseInfo;
+    readonly info?: FetchResponseInfo | Attributes;
   }
   interface Link {
     readonly type: "link";
@@ -7970,40 +6461,38 @@ export declare namespace TailStream {
     readonly type: "attributes";
     readonly info: Attribute[];
   }
-  type EventType =
-    | Onset
-    | Outcome
-    | Hibernate
-    | SpanOpen
-    | SpanClose
-    | DiagnosticChannelEvent
-    | Exception
-    | Log
-    | Return
-    | Link
-    | Attributes;
-  interface TailEvent<Event extends EventType> {
+  interface TailEvent {
+    readonly traceId: string;
     readonly invocationId: string;
     readonly spanId: string;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event: Event;
+    readonly event:
+      | Onset
+      | Outcome
+      | Hibernate
+      | SpanOpen
+      | SpanClose
+      | DiagnosticChannelEvent
+      | Exception
+      | Log
+      | Return
+      | Link
+      | Attributes;
   }
-  type TailEventHandler<Event extends EventType = EventType> = (
-    event: TailEvent<Event>,
-  ) => void | Promise<void>;
-  type TailEventHandlerObject = {
-    outcome?: TailEventHandler<Outcome>;
-    hibernate?: TailEventHandler<Hibernate>;
-    spanOpen?: TailEventHandler<SpanOpen>;
-    spanClose?: TailEventHandler<SpanClose>;
-    diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
-    exception?: TailEventHandler<Exception>;
-    log?: TailEventHandler<Log>;
-    return?: TailEventHandler<Return>;
-    link?: TailEventHandler<Link>;
-    attributes?: TailEventHandler<Attributes>;
-  };
+  type TailEventHandler = (event: TailEvent) => void | Promise<void>;
+  type TailEventHandlerName =
+    | "outcome"
+    | "hibernate"
+    | "spanOpen"
+    | "spanClose"
+    | "diagnosticChannel"
+    | "exception"
+    | "log"
+    | "return"
+    | "link"
+    | "attributes";
+  type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
@@ -8012,15 +6501,15 @@ export declare namespace TailStream {
 /**
  * Data types supported for holding vector metadata.
  */
-export type VectorizeVectorMetadataValue = string | number | boolean | string[];
+type VectorizeVectorMetadataValue = string | number | boolean | string[];
 /**
  * Additional information to associate with a vector.
  */
-export type VectorizeVectorMetadata =
+type VectorizeVectorMetadata =
   | VectorizeVectorMetadataValue
   | Record<string, VectorizeVectorMetadataValue>;
-export type VectorFloatArray = Float32Array | Float64Array;
-export interface VectorizeError {
+type VectorFloatArray = Float32Array | Float64Array;
+interface VectorizeError {
   code?: number;
   error: string;
 }
@@ -8029,11 +6518,11 @@ export interface VectorizeError {
  *
  * This list is expected to grow as support for more operations are released.
  */
-export type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
+type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
  */
-export type VectorizeVectorMetadataFilter = {
+type VectorizeVectorMetadataFilter = {
   [field: string]:
     | Exclude<VectorizeVectorMetadataValue, string[]>
     | null
@@ -8048,7 +6537,7 @@ export type VectorizeVectorMetadataFilter = {
  * Supported distance metrics for an index.
  * Distance metrics determine how other "similar" vectors are determined.
  */
-export type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
+type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
 /**
  * Metadata return levels for a Vectorize query.
  *
@@ -8058,8 +6547,8 @@ export type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
  * @property indexed  Return all metadata fields configured for indexing in the vector return set. This level of retrieval is "free" in that no additional overhead is incurred returning this data. However, note that indexed metadata is subject to truncation (especially for larger strings).
  * @property none     No indexed metadata will be returned.
  */
-export type VectorizeMetadataRetrievalLevel = "all" | "indexed" | "none";
-export interface VectorizeQueryOptions {
+type VectorizeMetadataRetrievalLevel = "all" | "indexed" | "none";
+interface VectorizeQueryOptions {
   topK?: number;
   namespace?: string;
   returnValues?: boolean;
@@ -8069,7 +6558,7 @@ export interface VectorizeQueryOptions {
 /**
  * Information about the configuration of an index.
  */
-export type VectorizeIndexConfig =
+type VectorizeIndexConfig =
   | {
       dimensions: number;
       metric: VectorizeDistanceMetric;
@@ -8083,7 +6572,7 @@ export type VectorizeIndexConfig =
  * This type is exclusively for the Vectorize **beta** and will be deprecated once Vectorize RC is released.
  * See {@link VectorizeIndexInfo} for its post-beta equivalent.
  */
-export interface VectorizeIndexDetails {
+interface VectorizeIndexDetails {
   /** The unique ID of the index */
   readonly id: string;
   /** The name of the index. */
@@ -8098,7 +6587,7 @@ export interface VectorizeIndexDetails {
 /**
  * Metadata about an existing index.
  */
-export interface VectorizeIndexInfo {
+interface VectorizeIndexInfo {
   /** The number of records containing vectors within the index. */
   vectorCount: number;
   /** Number of dimensions the index has been configured for. */
@@ -8111,7 +6600,7 @@ export interface VectorizeIndexInfo {
 /**
  * Represents a single vector value set along with its associated metadata.
  */
-export interface VectorizeVector {
+interface VectorizeVector {
   /** The ID for the vector. This can be user-defined, and must be unique. It should uniquely identify the object, and is best set based on the ID of what the vector represents. */
   id: string;
   /** The vector values */
@@ -8124,7 +6613,7 @@ export interface VectorizeVector {
 /**
  * Represents a matched vector for a query along with its score and (if specified) the matching vector information.
  */
-export type VectorizeMatch = Pick<Partial<VectorizeVector>, "values"> &
+type VectorizeMatch = Pick<Partial<VectorizeVector>, "values"> &
   Omit<VectorizeVector, "values"> & {
     /** The score or rank for similarity, when returned as a result */
     score: number;
@@ -8132,7 +6621,7 @@ export type VectorizeMatch = Pick<Partial<VectorizeVector>, "values"> &
 /**
  * A set of matching {@link VectorizeMatch} for a particular query.
  */
-export interface VectorizeMatches {
+interface VectorizeMatches {
   matches: VectorizeMatch[];
   count: number;
 }
@@ -8143,7 +6632,7 @@ export interface VectorizeMatches {
  * This type is exclusively for the Vectorize **beta** and will be deprecated once Vectorize RC is released.
  * See {@link VectorizeAsyncMutation} for its post-beta equivalent.
  */
-export interface VectorizeVectorMutation {
+interface VectorizeVectorMutation {
   /* List of ids of vectors that were successfully processed. */
   ids: string[];
   /* Total count of the number of processed vectors. */
@@ -8153,7 +6642,7 @@ export interface VectorizeVectorMutation {
  * Result type indicating a mutation on the Vectorize Index.
  * Actual mutations are processed async where the `mutationId` is the unique identifier for the operation.
  */
-export interface VectorizeAsyncMutation {
+interface VectorizeAsyncMutation {
   /** The unique identifier for the async mutation operation containing the changeset. */
   mutationId: string;
 }
@@ -8163,7 +6652,7 @@ export interface VectorizeAsyncMutation {
  * This type is exclusively for the Vectorize **beta** and will be deprecated once Vectorize RC is released.
  * See {@link Vectorize} for its new implementation.
  */
-export declare abstract class VectorizeIndex {
+declare abstract class VectorizeIndex {
   /**
    * Get information about the currently bound index.
    * @returns A promise that resolves with information about the current index.
@@ -8209,7 +6698,7 @@ export declare abstract class VectorizeIndex {
  *
  * Mutations in this version are async, returning a mutation id.
  */
-export declare abstract class Vectorize {
+declare abstract class Vectorize {
   /**
    * Get information about the currently bound index.
    * @returns A promise that resolves with information about the current index.
@@ -8264,7 +6753,7 @@ export declare abstract class Vectorize {
  * The interface for "version_metadata" binding
  * providing metadata about the Worker Version using this binding.
  */
-export type WorkerVersionMetadata = {
+type WorkerVersionMetadata = {
   /** The ID of the Worker Version using this binding */
   id: string;
   /** The tag of the Worker Version using this binding */
@@ -8272,7 +6761,7 @@ export type WorkerVersionMetadata = {
   /** The timestamp of when the Worker Version was uploaded */
   timestamp: string;
 };
-export interface DynamicDispatchLimits {
+interface DynamicDispatchLimits {
   /**
    * Limit CPU time in milliseconds.
    */
@@ -8282,7 +6771,7 @@ export interface DynamicDispatchLimits {
    */
   subRequests?: number;
 }
-export interface DynamicDispatchOptions {
+interface DynamicDispatchOptions {
   /**
    * Limit resources of invoked Worker script.
    */
@@ -8294,7 +6783,7 @@ export interface DynamicDispatchOptions {
     [key: string]: any;
   };
 }
-export interface DispatchNamespace {
+interface DispatchNamespace {
   /**
    * @param name Name of the Worker script.
    * @param args Arguments to Worker script.
@@ -8310,7 +6799,16 @@ export interface DispatchNamespace {
     options?: DynamicDispatchOptions,
   ): Fetcher;
 }
-export declare abstract class Workflow<PARAMS = unknown> {
+declare module "cloudflare:workflows" {
+  /**
+   * NonRetryableError allows for a user to throw a fatal error
+   * that makes a Workflow instance fail immediately without triggering a retry
+   */
+  export class NonRetryableError extends Error {
+    public constructor(message: string, name?: string);
+  }
+}
+declare abstract class Workflow<PARAMS = unknown> {
   /**
    * Get a handle to an existing instance of the Workflow.
    * @param id Id for the instance of this Workflow
@@ -8335,19 +6833,7 @@ export declare abstract class Workflow<PARAMS = unknown> {
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
   ): Promise<WorkflowInstance[]>;
 }
-export type WorkflowDurationLabel =
-  | "second"
-  | "minute"
-  | "hour"
-  | "day"
-  | "week"
-  | "month"
-  | "year";
-export type WorkflowSleepDuration =
-  | `${number} ${WorkflowDurationLabel}${"s" | ""}`
-  | number;
-export type WorkflowRetentionDuration = WorkflowSleepDuration;
-export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
+interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
    */
@@ -8356,16 +6842,8 @@ export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
-  /**
-   * The retention policy for Workflow instance.
-   * Defaults to the maximum retention period available for the owner's account.
-   */
-  retention?: {
-    successRetention?: WorkflowRetentionDuration;
-    errorRetention?: WorkflowRetentionDuration;
-  };
 }
-export type InstanceStatus = {
+type InstanceStatus = {
   status:
     | "queued" // means that instance is waiting to be started (see concurrency limits)
     | "running"
@@ -8379,11 +6857,11 @@ export type InstanceStatus = {
   error?: string;
   output?: object;
 };
-export interface WorkflowError {
+interface WorkflowError {
   code?: number;
   message: string;
 }
-export declare abstract class WorkflowInstance {
+declare abstract class WorkflowInstance {
   public id: string;
   /**
    * Pause the instance.

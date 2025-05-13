@@ -40,8 +40,16 @@ class TransformationResultImpl implements ImageTransformationResult {
     return contentType;
   }
 
-  image(): ReadableStream<Uint8Array> {
-    return this.bindingsResponse.body || new ReadableStream();
+  image(
+    options?: ImageTransformationOutputOptions
+  ): ReadableStream<Uint8Array> {
+    let stream = this.bindingsResponse.body || new ReadableStream();
+
+    if (options?.encoding === 'base64') {
+      stream = stream.pipeThrough(createBase64EncoderTransformStream());
+    }
+
+    return stream;
   }
 
   response(): Response {
@@ -202,9 +210,18 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
 class ImagesBindingImpl implements ImagesBinding {
   constructor(private readonly fetcher: Fetcher) {}
 
-  async info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse> {
+  async info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions
+  ): Promise<ImageInfoResponse> {
     const body = new StreamableFormData();
-    body.append('image', stream, { type: 'file' });
+
+    let decodedStream = stream;
+    if (options?.encoding === 'base64') {
+      decodedStream = stream.pipeThrough(createBase64DecoderTransformStream());
+    }
+
+    body.append('image', decodedStream, { type: 'file' });
 
     const response = await this.fetcher.fetch(
       'https://js.images.cloudflare.com/info',
@@ -233,8 +250,17 @@ class ImagesBindingImpl implements ImagesBinding {
     return r;
   }
 
-  input(stream: ReadableStream<Uint8Array>): ImageTransformer {
-    return new ImageTransformerImpl(this.fetcher, stream);
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions
+  ): ImageTransformer {
+    let decodedStream = stream;
+
+    if (options?.encoding === 'base64') {
+      decodedStream = stream.pipeThrough(createBase64DecoderTransformStream());
+    }
+
+    return new ImageTransformerImpl(this.fetcher, decodedStream);
   }
 }
 
@@ -299,6 +325,165 @@ function chainStreams<T>(streams: ReadableStream<T>[]): ReadableStream<T> {
   });
 
   return outputStream;
+}
+
+function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const result = new Uint8Array(a.length + b.length);
+  result.set(a, 0);
+  result.set(b, a.length);
+  return result;
+}
+
+class Base64Error extends Error {
+  public constructor(cause: unknown) {
+    if (cause instanceof Error) {
+      super(`base64 error: ${cause.message}`, { cause });
+    } else {
+      super('unknown base64 error');
+    }
+  }
+}
+
+function createBase64EncoderTransformStream(
+  maxEncodeChunkSize: number = 32 * 1024 + 1
+): TransformStream<Uint8Array, Uint8Array> {
+  if (maxEncodeChunkSize % 3 != 0) {
+    // Ensures that chunks don't require padding
+    throw new Error('maxChunkSize must be a multiple of 3');
+  }
+
+  let buffer: Uint8Array | null = null;
+  const asciiEncoder = new TextEncoder();
+
+  const toBase64: (buf: Uint8Array) => Uint8Array = (buf) => {
+    const binaryString = String.fromCharCode.apply(null, Array.from(buf));
+
+    const base64String = btoa(binaryString);
+    const base64Bytes = asciiEncoder.encode(base64String);
+
+    return base64Bytes;
+  };
+
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller): void {
+      const currentData = buffer ? concatUint8Arrays(buffer, chunk) : chunk;
+      buffer = null;
+
+      let offset = 0;
+
+      while (currentData.length - offset >= maxEncodeChunkSize) {
+        const sliceToEnd = offset + maxEncodeChunkSize;
+        const processChunk = currentData.slice(offset, sliceToEnd);
+        offset = sliceToEnd;
+
+        try {
+          controller.enqueue(toBase64(processChunk));
+        } catch (error) {
+          controller.error(new Base64Error(error));
+          buffer = null;
+          return;
+        }
+      }
+
+      buffer = offset < currentData.length ? currentData.slice(offset) : null;
+    },
+
+    flush(controller): void {
+      if (buffer && buffer.length > 0) {
+        try {
+          controller.enqueue(toBase64(buffer));
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          controller.error(new Error(`base64 encoding error: ${errMsg}`));
+        }
+      }
+      buffer = null;
+    },
+  });
+}
+
+function createBase64DecoderTransformStream(
+  maxChunkSize: number = 32 * 1024
+): TransformStream<Uint8Array, Uint8Array> {
+  if (maxChunkSize % 4 !== 0 || maxChunkSize <= 0) {
+    throw new Error('maxChunkSize must be a positive multiple of 4.');
+  }
+
+  let base64Buffer: Uint8Array | null = null;
+  const asciiDecoder = new TextDecoder('ascii');
+
+  const decodeAndEnqueueSegment = (
+    base64SegmentBytes: Uint8Array,
+    controller: TransformStreamDefaultController<Uint8Array>
+  ): boolean => {
+    try {
+      const base64SegmentString = asciiDecoder.decode(base64SegmentBytes);
+
+      const binaryString = atob(base64SegmentString);
+
+      if (binaryString.length > 0) {
+        const decodedBytes = Uint8Array.from(binaryString, (c) =>
+          c.charCodeAt(0)
+        );
+
+        controller.enqueue(decodedBytes);
+      }
+      return true;
+    } catch (error) {
+      controller.error(new Base64Error(error));
+      return false;
+    }
+  };
+
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller): void {
+      base64Buffer = base64Buffer
+        ? concatUint8Arrays(base64Buffer, chunk)
+        : chunk;
+
+      while (base64Buffer && base64Buffer.length >= maxChunkSize) {
+        const base64SegmentBytes = base64Buffer.slice(0, maxChunkSize);
+        base64Buffer =
+          base64Buffer.length > maxChunkSize
+            ? base64Buffer.slice(maxChunkSize)
+            : null;
+
+        if (!decodeAndEnqueueSegment(base64SegmentBytes, controller)) {
+          base64Buffer = null;
+          return;
+        }
+      }
+
+      const remainingProcessableLength =
+        Math.floor(base64Buffer?.length ?? 0 / 4) * 4;
+      if (remainingProcessableLength > 0) {
+        if (base64Buffer) {
+          const base64SegmentBytes = base64Buffer.slice(
+            0,
+            remainingProcessableLength
+          );
+          base64Buffer =
+            base64Buffer.length > remainingProcessableLength
+              ? base64Buffer.slice(remainingProcessableLength)
+              : null;
+
+          if (!decodeAndEnqueueSegment(base64SegmentBytes, controller)) {
+            base64Buffer = null;
+            return;
+          }
+        }
+      }
+    },
+
+    flush(controller): void {
+      if (base64Buffer && base64Buffer.length > 0) {
+        if (!decodeAndEnqueueSegment(base64Buffer, controller)) {
+          // Error already handled within the helper
+        }
+      }
+      base64Buffer = null;
+    },
+  });
 }
 
 const CRLF = '\r\n';

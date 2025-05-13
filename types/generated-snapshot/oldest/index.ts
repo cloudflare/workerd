@@ -258,11 +258,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
   EventSource: typeof EventSource;
-  ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
-  ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
-  ReadableByteStreamController: typeof ReadableByteStreamController;
-  WritableStreamDefaultController: typeof WritableStreamDefaultController;
-  TransformStreamDefaultController: typeof TransformStreamDefaultController;
   CompressionStream: typeof CompressionStream;
   DecompressionStream: typeof DecompressionStream;
   TextEncoderStream: typeof TextEncoderStream;
@@ -278,8 +273,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   AbortSignal: typeof AbortSignal;
   TextDecoder: typeof TextDecoder;
   TextEncoder: typeof TextEncoder;
-  navigator: Navigator;
-  Navigator: typeof Navigator;
   URL: typeof URL;
   URLSearchParams: typeof URLSearchParams;
   URLPattern: typeof URLPattern;
@@ -387,7 +380,6 @@ export declare const scheduler: Scheduler;
 export declare const performance: Performance;
 export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
-export declare const navigator: Navigator;
 export interface TestController {}
 export interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
@@ -413,7 +405,7 @@ export type ExportedHandlerTraceHandler<Env = unknown> = (
   ctx: ExecutionContext,
 ) => void | Promise<void>;
 export type ExportedHandlerTailStreamHandler<Env = unknown> = (
-  event: TailStream.TailEvent<TailStream.Onset>,
+  event: TailStream.TailEvent,
   env: Env,
   ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -455,23 +447,6 @@ export declare abstract class PromiseRejectionEvent extends Event {
   readonly promise: Promise<any>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason) */
   readonly reason: any;
-}
-export declare abstract class Navigator {
-  sendBeacon(
-    url: string,
-    body?:
-      | ReadableStream
-      | string
-      | (ArrayBuffer | ArrayBufferView)
-      | Blob
-      | FormData
-      | URLSearchParams
-      | URLSearchParams,
-  ): boolean;
-  readonly userAgent: string;
-  readonly hardwareConcurrency: number;
-  readonly language: string;
-  readonly languages: string[];
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -537,7 +512,7 @@ export interface DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
+export type DurableObjectJurisdiction = "eu" | "fedramp";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -692,85 +667,79 @@ export declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/type)
    */
-  get type(): string;
+  readonly type: string;
   /**
    * Returns the event's phase, which is one of NONE, CAPTURING_PHASE, AT_TARGET, and BUBBLING_PHASE.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/eventPhase)
    */
-  get eventPhase(): number;
+  readonly eventPhase: number;
   /**
    * Returns true or false depending on how event was initialized. True if event invokes listeners past a ShadowRoot node that is the root of its target, and false otherwise.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/composed)
    */
-  get composed(): boolean;
+  readonly composed: boolean;
   /**
    * Returns true or false depending on how event was initialized. True if event goes through its target's ancestors in reverse tree order, and false otherwise.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/bubbles)
    */
-  get bubbles(): boolean;
+  readonly bubbles: boolean;
   /**
    * Returns true or false depending on how event was initialized. Its return value does not always carry meaning, but true can indicate that part of the operation during which event was dispatched, can be canceled by invoking the preventDefault() method.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelable)
    */
-  get cancelable(): boolean;
+  readonly cancelable: boolean;
   /**
    * Returns true if preventDefault() was invoked successfully to indicate cancelation, and false otherwise.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/defaultPrevented)
    */
-  get defaultPrevented(): boolean;
+  readonly defaultPrevented: boolean;
   /**
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
    */
-  get returnValue(): boolean;
+  readonly returnValue: boolean;
   /**
    * Returns the object whose event listener's callback is currently being invoked.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
    */
-  get currentTarget(): EventTarget | undefined;
+  readonly currentTarget?: EventTarget;
   /**
    * Returns the object to which event is dispatched (its target).
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/target)
    */
-  get target(): EventTarget | undefined;
+  readonly target?: EventTarget;
   /**
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/srcElement)
    */
-  get srcElement(): EventTarget | undefined;
+  readonly srcElement?: EventTarget;
   /**
    * Returns the event's timestamp as the number of milliseconds measured relative to the time origin.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/timeStamp)
    */
-  get timeStamp(): number;
+  readonly timeStamp: number;
   /**
    * Returns true if event was dispatched by the user agent, and false otherwise.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/isTrusted)
    */
-  get isTrusted(): boolean;
+  readonly isTrusted: boolean;
   /**
    * @deprecated
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
    */
-  get cancelBubble(): boolean;
-  /**
-   * @deprecated
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/cancelBubble)
-   */
-  set cancelBubble(value: boolean);
+  cancelBubble: boolean;
   /**
    * Invoking this method prevents event from reaching any registered event listeners after the current one finishes running and, when dispatched in a tree, also prevents event from reaching any other objects.
    *
@@ -886,7 +855,7 @@ export declare class AbortController {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortController/signal)
    */
-  get signal(): AbortSignal;
+  readonly signal: AbortSignal;
   /**
    * Invoking this method will set this object's AbortSignal's aborted flag and signal to any observers that the associated activity is to be aborted.
    *
@@ -911,9 +880,9 @@ export declare abstract class AbortSignal extends EventTarget {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/aborted)
    */
-  get aborted(): boolean;
+  readonly aborted: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/reason) */
-  get reason(): any;
+  readonly reason: any;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
   get onabort(): any | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_event) */
@@ -963,9 +932,9 @@ export declare class Blob {
     options?: BlobOptions,
   );
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/size) */
-  get size(): number;
+  readonly size: number;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/type) */
-  get type(): string;
+  readonly type: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/slice) */
   slice(start?: number, end?: number, type?: string): Blob;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/arrayBuffer) */
@@ -992,9 +961,9 @@ export declare class File extends Blob {
     options?: FileOptions,
   );
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/name) */
-  get name(): string;
+  readonly name: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/File/lastModified) */
-  get lastModified(): number;
+  readonly lastModified: number;
 }
 export interface FileOptions {
   type?: string;
@@ -1046,7 +1015,7 @@ export declare abstract class Crypto {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/subtle)
    */
-  get subtle(): SubtleCrypto;
+  readonly subtle: SubtleCrypto;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Crypto/getRandomValues) */
   getRandomValues<
     T extends
@@ -1309,9 +1278,9 @@ export declare class TextDecoder {
     input?: ArrayBuffer | ArrayBufferView,
     options?: TextDecoderDecodeOptions,
   ): string;
-  get encoding(): string;
-  get fatal(): boolean;
-  get ignoreBOM(): boolean;
+  readonly encoding: string;
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
 }
 /**
  * TextEncoder takes a stream of code points as input and emits a stream of bytes. For a more scalable, non-native library, see StringView – a C-like representation of strings based on typed arrays.
@@ -1335,7 +1304,7 @@ export declare class TextEncoder {
     input: string,
     buffer: ArrayBuffer | ArrayBufferView,
   ): TextEncoderEncodeIntoResult;
-  get encoding(): string;
+  readonly encoding: string;
 }
 export interface TextDecoderConstructorOptions {
   fatal: boolean;
@@ -1387,9 +1356,9 @@ export declare class FormData {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/delete) */
   delete(name: string): void;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/get) */
-  get(name: string): (File | string) | null;
+  get(name: string): string | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/getAll) */
-  getAll(name: string): (File | string)[];
+  getAll(name: string): string[];
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/has) */
   has(name: string): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set) */
@@ -1397,7 +1366,7 @@ export declare class FormData {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData/set) */
   set(name: string, value: Blob, filename?: string): void;
   /* Returns an array of key, value pairs for every entry in the list. */
-  entries(): IterableIterator<[key: string, value: File | string]>;
+  entries(): IterableIterator<[key: string, value: string]>;
   /* Returns a list of keys in the list. */
   keys(): IterableIterator<string>;
   /* Returns a list of values in the list. */
@@ -1405,13 +1374,13 @@ export declare class FormData {
   forEach<This = unknown>(
     callback: (
       this: This,
-      value: File | string,
+      value: string,
       key: string,
       parent: FormData,
     ) => void,
     thisArg?: This,
   ): void;
-  [Symbol.iterator](): IterableIterator<[key: string, value: File | string]>;
+  [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 }
 export interface ContentOptions {
   html?: boolean;
@@ -1545,8 +1514,6 @@ export declare class Headers {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get) */
   get(name: string): string | null;
   getAll(name: string): string[];
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie) */
-  getSetCookie(): string[];
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has) */
   has(name: string): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set) */
@@ -1577,9 +1544,9 @@ export type BodyInit =
   | FormData;
 export declare abstract class Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
-  get body(): ReadableStream | null;
+  readonly body: ReadableStream | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bodyUsed) */
-  get bodyUsed(): boolean;
+  readonly bodyUsed: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/arrayBuffer) */
   arrayBuffer(): Promise<ArrayBuffer>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/bytes) */
@@ -1614,19 +1581,19 @@ export interface Response extends Body {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/clone) */
   clone(): Response;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/status) */
-  status: number;
+  readonly status: number;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/statusText) */
-  statusText: string;
+  readonly statusText: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/headers) */
-  headers: Headers;
+  readonly headers: Headers;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/ok) */
-  ok: boolean;
+  readonly ok: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/redirected) */
-  redirected: boolean;
+  readonly redirected: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/url) */
-  url: string;
-  webSocket: WebSocket | null;
-  cf: any | undefined;
+  readonly url: string;
+  readonly webSocket: WebSocket | null;
+  readonly cf?: any;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Response/type) */
   type: "default" | "error";
 }
@@ -1670,51 +1637,45 @@ export interface Request<
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/method)
    */
-  method: string;
+  readonly method: string;
   /**
    * Returns the URL of request as a string.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/url)
    */
-  url: string;
+  readonly url: string;
   /**
    * Returns a Headers object consisting of the headers associated with request. Note that headers added in the network layer by the user agent will not be accounted for in this object, e.g., the "Host" header.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/headers)
    */
-  headers: Headers;
+  readonly headers: Headers;
   /**
    * Returns the redirect mode associated with request, which is a string indicating how redirects for the request will be handled during fetching. A request will follow redirects by default.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/redirect)
    */
-  redirect: string;
-  fetcher: Fetcher | null;
+  readonly redirect: string;
+  readonly fetcher: Fetcher | null;
   /**
    * Returns the signal associated with request, which is an AbortSignal object indicating whether or not request has been aborted, and its abort event handler.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/signal)
    */
-  signal: AbortSignal;
-  cf: Cf | undefined;
+  readonly signal: AbortSignal;
+  readonly cf?: Cf;
   /**
    * Returns request's subresource integrity metadata, which is a cryptographic hash of the resource being fetched. Its value consists of multiple hashes separated by whitespace. [SRI]
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/integrity)
    */
-  integrity: string;
+  readonly integrity: string;
   /**
    * Returns a boolean indicating whether or not request can outlive the global in which it was created.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
-  keepalive: boolean;
-  /**
-   * Returns the cache mode associated with request, which is a string indicating how the request will interact with the browser's cache when fetching.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
-   */
-  cache?: "no-store";
+  readonly keepalive: boolean;
 }
 export interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1727,8 +1688,6 @@ export interface RequestInit<Cf = CfProperties> {
   redirect?: string;
   fetcher?: Fetcher | null;
   cf?: Cf;
-  /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -1747,6 +1706,10 @@ export type Fetcher<
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 };
+export interface FetcherPutOptions {
+  expiration?: number;
+  expirationTtl?: number;
+}
 export interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
@@ -1954,7 +1917,6 @@ export interface R2ListOptions {
   cursor?: string;
   delimiter?: string;
   startAfter?: string;
-  include?: ("httpMetadata" | "customMetadata")[];
 }
 export declare abstract class R2Bucket {
   head(key: string): Promise<R2Object | null>;
@@ -2031,7 +1993,6 @@ export interface R2ObjectBody extends R2Object {
   get body(): ReadableStream;
   get bodyUsed(): boolean;
   arrayBuffer(): Promise<ArrayBuffer>;
-  bytes(): Promise<Uint8Array>;
   text(): Promise<string>;
   json<T>(): Promise<T>;
   blob(): Promise<Blob>;
@@ -2213,7 +2174,7 @@ export type ReadableStreamReadResult<R = any> =
  */
 export interface ReadableStream<R = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/locked) */
-  get locked(): boolean;
+  readonly locked: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/cancel) */
   cancel(reason?: any): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStream/getReader) */
@@ -2256,7 +2217,7 @@ export declare const ReadableStream: {
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader) */
 export declare class ReadableStreamDefaultReader<R = any> {
   constructor(stream: ReadableStream);
-  get closed(): Promise<void>;
+  readonly closed: Promise<void>;
   cancel(reason?: any): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader/read) */
   read(): Promise<ReadableStreamReadResult<R>>;
@@ -2266,7 +2227,7 @@ export declare class ReadableStreamDefaultReader<R = any> {
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader) */
 export declare class ReadableStreamBYOBReader {
   constructor(stream: ReadableStream);
-  get closed(): Promise<void>;
+  readonly closed: Promise<void>;
   cancel(reason?: any): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/read) */
   read<T extends ArrayBufferView>(
@@ -2291,7 +2252,7 @@ export interface ReadableStreamGetReaderOptions {
   mode: "byob";
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest) */
-export declare abstract class ReadableStreamBYOBRequest {
+export interface ReadableStreamBYOBRequest {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/view) */
   get view(): Uint8Array | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respond) */
@@ -2301,7 +2262,7 @@ export declare abstract class ReadableStreamBYOBRequest {
   get atLeast(): number | null;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController) */
-export declare abstract class ReadableStreamDefaultController<R = any> {
+export interface ReadableStreamDefaultController<R = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/desiredSize) */
   get desiredSize(): number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/close) */
@@ -2312,7 +2273,7 @@ export declare abstract class ReadableStreamDefaultController<R = any> {
   error(reason: any): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController) */
-export declare abstract class ReadableByteStreamController {
+export interface ReadableByteStreamController {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/byobRequest) */
   get byobRequest(): ReadableStreamBYOBRequest | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/desiredSize) */
@@ -2329,14 +2290,14 @@ export declare abstract class ReadableByteStreamController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
-export declare abstract class WritableStreamDefaultController {
+export interface WritableStreamDefaultController {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/signal) */
   get signal(): AbortSignal;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error) */
   error(reason?: any): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController) */
-export declare abstract class TransformStreamDefaultController<O = any> {
+export interface TransformStreamDefaultController<O = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/desiredSize) */
   get desiredSize(): number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/enqueue) */
@@ -2366,7 +2327,7 @@ export declare class WritableStream<W = any> {
     queuingStrategy?: QueuingStrategy,
   );
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/locked) */
-  get locked(): boolean;
+  readonly locked: boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/abort) */
   abort(reason?: any): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStream/close) */
@@ -2382,11 +2343,11 @@ export declare class WritableStream<W = any> {
 export declare class WritableStreamDefaultWriter<W = any> {
   constructor(stream: WritableStream);
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/closed) */
-  get closed(): Promise<void>;
+  readonly closed: Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/ready) */
-  get ready(): Promise<void>;
+  readonly ready: Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/desiredSize) */
-  get desiredSize(): number | null;
+  readonly desiredSize: number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/abort) */
   abort(reason?: any): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/close) */
@@ -2404,9 +2365,9 @@ export declare class TransformStream<I = any, O = any> {
     readableStrategy?: QueuingStrategy<O>,
   );
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/readable) */
-  get readable(): ReadableStream<O>;
+  readonly readable: ReadableStream<O>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable) */
-  get writable(): WritableStream<I>;
+  readonly writable: WritableStream<I>;
 }
 export declare class FixedLengthStream extends IdentityTransformStream {
   constructor(
@@ -2621,67 +2582,43 @@ export interface UnsafeTraceMetrics {
  */
 export declare class URL {
   constructor(url: string | URL, base?: string | URL);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href) */
+  href: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/origin) */
-  get origin(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href) */
-  get href(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/href) */
-  set href(value: string);
+  readonly origin: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol) */
-  get protocol(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/protocol) */
-  set protocol(value: string);
+  protocol: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username) */
-  get username(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/username) */
-  set username(value: string);
+  username: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password) */
-  get password(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/password) */
-  set password(value: string);
+  password: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host) */
-  get host(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/host) */
-  set host(value: string);
+  host: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname) */
-  get hostname(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hostname) */
-  set hostname(value: string);
+  hostname: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port) */
-  get port(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/port) */
-  set port(value: string);
+  port: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname) */
-  get pathname(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/pathname) */
-  set pathname(value: string);
+  pathname: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search) */
-  get search(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/search) */
-  set search(value: string);
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash) */
-  get hash(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash) */
-  set hash(value: string);
+  search: string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/searchParams) */
-  get searchParams(): URLSearchParams;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON) */
-  toJSON(): string;
+  readonly searchParams: URLSearchParams;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/hash) */
+  hash: string;
   /*function toString() { [native code] }*/
   toString(): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/canParse_static) */
-  static canParse(url: string, base?: string): boolean;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/parse_static) */
-  static parse(url: string, base?: string): URL | null;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/createObjectURL_static) */
-  static createObjectURL(object: File | Blob): string;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/revokeObjectURL_static) */
-  static revokeObjectURL(object_url: string): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URL/toJSON) */
+  toJSON(): string;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams) */
 export declare class URLSearchParams {
   constructor(
-    init?: Iterable<Iterable<string>> | Record<string, string> | string,
+    init?:
+      | URLSearchParams
+      | string
+      | Record<string, string>
+      | [key: string, value: string][],
   );
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/size) */
   get size(): number;
@@ -2696,7 +2633,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
-  delete(name: string, value?: string): void;
+  delete(name: string): void;
   /**
    * Returns the first value associated to the given search parameter.
    *
@@ -2714,7 +2651,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
-  has(name: string, value?: string): boolean;
+  has(name: string): boolean;
   /**
    * Sets the value associated to a given search parameter to the given value. If there were several values, delete the others.
    *
@@ -2756,7 +2693,6 @@ export declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
-  get hasRegExpGroups(): boolean;
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
     input?: string | URLPatternInit,
@@ -2889,25 +2825,25 @@ export interface WebSocket extends EventTarget<WebSocketEventMap> {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/readyState)
    */
-  readyState: number;
+  readonly readyState: number;
   /**
    * Returns the URL that was used to establish the WebSocket connection.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/url)
    */
-  url: string | null;
+  readonly url: string | null;
   /**
    * Returns the subprotocol selected by the server, if any. It can be used in conjunction with the array form of the constructor's second argument to perform subprotocol negotiation.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/protocol)
    */
-  protocol: string | null;
+  readonly protocol: string | null;
   /**
    * Returns the extensions selected by the server, if any.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/extensions)
    */
-  extensions: string | null;
+  readonly extensions: string | null;
 }
 export declare const WebSocketPair: {
   new (): {
@@ -3225,13 +3161,15 @@ export type AiTextGenerationInput = {
     | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
-export type AiTextGenerationOutput = {
-  response?: string;
-  tool_calls?: {
-    name: string;
-    arguments: unknown;
-  }[];
-};
+export type AiTextGenerationOutput =
+  | {
+      response?: string;
+      tool_calls?: {
+        name: string;
+        arguments: unknown;
+      }[];
+    }
+  | ReadableStream;
 export declare abstract class BaseAiTextGeneration {
   inputs: AiTextGenerationInput;
   postProcessedOutputs: AiTextGenerationOutput;
@@ -3279,49 +3217,6 @@ export declare abstract class BaseAiTranslation {
   inputs: AiTranslationInput;
   postProcessedOutputs: AiTranslationOutput;
 }
-export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
-  | {
-      text: string | string[];
-      /**
-       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        text: string | string[];
-        /**
-         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-         */
-        pooling?: "mean" | "cls";
-      }[];
-    };
-export type Ai_Cf_Baai_Bge_Base_En_V1_5_Output =
-  | {
-      shape?: number[];
-      /**
-       * Embeddings of the requested text values
-       */
-      data?: number[][];
-      /**
-       * The pooling method used in the embedding process.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | AsyncResponse;
-export interface AsyncResponse {
-  /**
-   * The async request id that can be used to obtain the results.
-   */
-  request_id?: string;
-}
-export declare abstract class Base_Ai_Cf_Baai_Bge_Base_En_V1_5 {
-  inputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Base_En_V1_5_Output;
-}
 export type Ai_Cf_Openai_Whisper_Input =
   | string
   | {
@@ -3352,126 +3247,6 @@ export interface Ai_Cf_Openai_Whisper_Output {
 export declare abstract class Base_Ai_Cf_Openai_Whisper {
   inputs: Ai_Cf_Openai_Whisper_Input;
   postProcessedOutputs: Ai_Cf_Openai_Whisper_Output;
-}
-export type Ai_Cf_Meta_M2M100_1_2B_Input =
-  | {
-      /**
-       * The text to be translated
-       */
-      text: string;
-      /**
-       * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
-       */
-      source_lang?: string;
-      /**
-       * The language code to translate the text into (e.g., 'es' for Spanish)
-       */
-      target_lang: string;
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        /**
-         * The text to be translated
-         */
-        text: string;
-        /**
-         * The language code of the source text (e.g., 'en' for English). Defaults to 'en' if not specified
-         */
-        source_lang?: string;
-        /**
-         * The language code to translate the text into (e.g., 'es' for Spanish)
-         */
-        target_lang: string;
-      }[];
-    };
-export type Ai_Cf_Meta_M2M100_1_2B_Output =
-  | {
-      /**
-       * The translated text in the target language
-       */
-      translated_text?: string;
-    }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Meta_M2M100_1_2B {
-  inputs: Ai_Cf_Meta_M2M100_1_2B_Input;
-  postProcessedOutputs: Ai_Cf_Meta_M2M100_1_2B_Output;
-}
-export type Ai_Cf_Baai_Bge_Small_En_V1_5_Input =
-  | {
-      text: string | string[];
-      /**
-       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        text: string | string[];
-        /**
-         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-         */
-        pooling?: "mean" | "cls";
-      }[];
-    };
-export type Ai_Cf_Baai_Bge_Small_En_V1_5_Output =
-  | {
-      shape?: number[];
-      /**
-       * Embeddings of the requested text values
-       */
-      data?: number[][];
-      /**
-       * The pooling method used in the embedding process.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Baai_Bge_Small_En_V1_5 {
-  inputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Small_En_V1_5_Output;
-}
-export type Ai_Cf_Baai_Bge_Large_En_V1_5_Input =
-  | {
-      text: string | string[];
-      /**
-       * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: {
-        text: string | string[];
-        /**
-         * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
-         */
-        pooling?: "mean" | "cls";
-      }[];
-    };
-export type Ai_Cf_Baai_Bge_Large_En_V1_5_Output =
-  | {
-      shape?: number[];
-      /**
-       * Embeddings of the requested text values
-       */
-      data?: number[][];
-      /**
-       * The pooling method used in the embedding process.
-       */
-      pooling?: "mean" | "cls";
-    }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Baai_Bge_Large_En_V1_5 {
-  inputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Input;
-  postProcessedOutputs: Ai_Cf_Baai_Bge_Large_En_V1_5_Output;
 }
 export type Ai_Cf_Unum_Uform_Gen2_Qwen_500M_Input =
   | string
@@ -3568,7 +3343,7 @@ export interface Ai_Cf_Openai_Whisper_Large_V3_Turbo_Input {
   /**
    * Preprocess the audio with a voice activity detection model.
    */
-  vad_filter?: boolean;
+  vad_filter?: string;
   /**
    * A text prompt to help provide context to the model on the contents of the audio.
    */
@@ -3660,13 +3435,7 @@ export declare abstract class Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo {
 }
 export type Ai_Cf_Baai_Bge_M3_Input =
   | BGEM3InputQueryAndContexts
-  | BGEM3InputEmbedding
-  | {
-      /**
-       * Batch of the embeddings requests to run using async-queue
-       */
-      requests: (BGEM3InputQueryAndContexts1 | BGEM3InputEmbedding1)[];
-    };
+  | BGEM3InputEmbedding;
 export interface BGEM3InputQueryAndContexts {
   /**
    * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
@@ -3693,37 +3462,10 @@ export interface BGEM3InputEmbedding {
    */
   truncate_inputs?: boolean;
 }
-export interface BGEM3InputQueryAndContexts1 {
-  /**
-   * A query you wish to perform against the provided contexts. If no query is provided the model with respond with embeddings for contexts
-   */
-  query?: string;
-  /**
-   * List of provided contexts. Note that the index in this array is important, as the response will refer to it.
-   */
-  contexts: {
-    /**
-     * One of the provided context content
-     */
-    text?: string;
-  }[];
-  /**
-   * When provided with too long context should the model error out or truncate the context to fit?
-   */
-  truncate_inputs?: boolean;
-}
-export interface BGEM3InputEmbedding1 {
-  text: string | string[];
-  /**
-   * When provided with too long context should the model error out or truncate the context to fit?
-   */
-  truncate_inputs?: boolean;
-}
 export type Ai_Cf_Baai_Bge_M3_Output =
   | BGEM3OuputQuery
   | BGEM3OutputEmbeddingForContexts
-  | BGEM3OuputEmbedding
-  | AsyncResponse;
+  | BGEM3OuputEmbedding;
 export interface BGEM3OuputQuery {
   response?: {
     /**
@@ -3839,41 +3581,13 @@ export interface Messages {
     /**
      * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
      */
-    role?: string;
+    role: string;
     /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
+     * The content of the message as a string.
      */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
+    content: string;
   }[];
-  image?: number[] | (string & NonNullable<unknown>);
+  image?: number[] | string;
   functions?: {
     name: string;
     code: string;
@@ -4005,306 +3719,12 @@ export interface Messages {
    */
   presence_penalty?: number;
 }
-export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response?: string;
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
-  inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
-}
-export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input =
-  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt
-  | Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages
-  | AsyncBatch;
-export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
-   */
-  lora?: string;
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface JSONMode {
-  type?: "json_object" | "json_schema";
-  json_schema?: unknown;
-}
-export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface AsyncBatch {
-  requests?: {
-    /**
-     * User-supplied reference. This field will be present in the response as well it can be used to reference the request and response. It's NOT validated to be unique.
-     */
-    external_reference?: string;
-    /**
-     * Prompt for the text generation model
-     */
-    prompt?: string;
-    /**
-     * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-     */
-    stream?: boolean;
-    /**
-     * The maximum number of tokens to generate in the response.
-     */
-    max_tokens?: number;
-    /**
-     * Controls the randomness of the output; higher values produce more random results.
-     */
-    temperature?: number;
-    /**
-     * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-     */
-    top_p?: number;
-    /**
-     * Random seed for reproducibility of the generation.
-     */
-    seed?: number;
-    /**
-     * Penalty for repeated tokens; higher values discourage repetition.
-     */
-    repetition_penalty?: number;
-    /**
-     * Decreases the likelihood of the model repeating the same lines verbatim.
-     */
-    frequency_penalty?: number;
-    /**
-     * Increases the likelihood of the model introducing new topics.
-     */
-    presence_penalty?: number;
-    response_format?: JSONMode;
-  }[];
-}
-export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
+export type Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output =
   | {
       /**
        * The generated text response from the model
        */
-      response: string;
-      /**
-       * Usage statistics for the inference request
-       */
-      usage?: {
-        /**
-         * Total number of tokens in input
-         */
-        prompt_tokens?: number;
-        /**
-         * Total number of tokens in output
-         */
-        completion_tokens?: number;
-        /**
-         * Total number of input and output tokens
-         */
-        total_tokens?: number;
-      };
+      response?: string;
       /**
        * An array of tool calls requests made during the response generation
        */
@@ -4319,10 +3739,10 @@ export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
         name?: string;
       }[];
     }
-  | AsyncResponse;
-export declare abstract class Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast {
-  inputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input;
-  postProcessedOutputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output;
+  | ReadableStream;
+export declare abstract class Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct {
+  inputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Input;
+  postProcessedOutputs: Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct_Output;
 }
 export interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
   /**
@@ -4395,7 +3815,6 @@ export interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
   /**
    * A query you wish to perform against the provided contexts.
    */
-  query: string;
   /**
    * Number of returned results starting with the best score.
    */
@@ -4426,1068 +3845,6 @@ export declare abstract class Base_Ai_Cf_Baai_Bge_Reranker_Base {
   inputs: Ai_Cf_Baai_Bge_Reranker_Base_Input;
   postProcessedOutputs: Ai_Cf_Baai_Bge_Reranker_Base_Output;
 }
-export type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input =
-  | Qwen2_5_Coder_32B_Instruct_Prompt
-  | Qwen2_5_Coder_32B_Instruct_Messages;
-export interface Qwen2_5_Coder_32B_Instruct_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * Name of the LoRA (Low-Rank Adaptation) model to fine-tune the base model.
-   */
-  lora?: string;
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Qwen2_5_Coder_32B_Instruct_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role: string;
-    /**
-     * The content of the message as a string.
-     */
-    content: string;
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  response_format?: JSONMode;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct {
-  inputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output;
-}
-export type Ai_Cf_Qwen_Qwq_32B_Input =
-  | Qwen_Qwq_32B_Prompt
-  | Qwen_Qwq_32B_Messages;
-export interface Qwen_Qwq_32B_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fulfilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Qwen_Qwq_32B_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
-     */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Qwen_Qwq_32B_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Qwen_Qwq_32B {
-  inputs: Ai_Cf_Qwen_Qwq_32B_Input;
-  postProcessedOutputs: Ai_Cf_Qwen_Qwq_32B_Output;
-}
-export type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input =
-  | Mistral_Small_3_1_24B_Instruct_Prompt
-  | Mistral_Small_3_1_24B_Instruct_Messages;
-export interface Mistral_Small_3_1_24B_Instruct_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fulfilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Mistral_Small_3_1_24B_Instruct_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    /**
-     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
-     */
-    tool_call_id?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct {
-  inputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input;
-  postProcessedOutputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output;
-}
-export type Ai_Cf_Google_Gemma_3_12B_It_Input =
-  | Google_Gemma_3_12B_It_Prompt
-  | Google_Gemma_3_12B_It_Messages;
-export interface Google_Gemma_3_12B_It_Prompt {
-  /**
-   * The input text prompt for the model to generate a response.
-   */
-  prompt: string;
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export interface Google_Gemma_3_12B_It_Messages {
-  /**
-   * An array of message objects representing the conversation history.
-   */
-  messages: {
-    /**
-     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
-     */
-    role?: string;
-    content?:
-      | string
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        }[]
-      | {
-          /**
-           * Type of the content provided
-           */
-          type?: string;
-          text?: string;
-          image_url?: {
-            /**
-             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
-             */
-            url?: string;
-          };
-        };
-  }[];
-  functions?: {
-    name: string;
-    code: string;
-  }[];
-  /**
-   * A list of tools available for the assistant to use.
-   */
-  tools?: (
-    | {
-        /**
-         * The name of the tool. More descriptive the better.
-         */
-        name: string;
-        /**
-         * A brief description of what the tool does.
-         */
-        description: string;
-        /**
-         * Schema defining the parameters accepted by the tool.
-         */
-        parameters: {
-          /**
-           * The type of the parameters object (usually 'object').
-           */
-          type: string;
-          /**
-           * List of required parameter names.
-           */
-          required?: string[];
-          /**
-           * Definitions of each parameter.
-           */
-          properties: {
-            [k: string]: {
-              /**
-               * The data type of the parameter.
-               */
-              type: string;
-              /**
-               * A description of the expected parameter.
-               */
-              description: string;
-            };
-          };
-        };
-      }
-    | {
-        /**
-         * Specifies the type of tool (e.g., 'function').
-         */
-        type: string;
-        /**
-         * Details of the function tool.
-         */
-        function: {
-          /**
-           * The name of the function.
-           */
-          name: string;
-          /**
-           * A brief description of what the function does.
-           */
-          description: string;
-          /**
-           * Schema defining the parameters accepted by the function.
-           */
-          parameters: {
-            /**
-             * The type of the parameters object (usually 'object').
-             */
-            type: string;
-            /**
-             * List of required parameter names.
-             */
-            required?: string[];
-            /**
-             * Definitions of each parameter.
-             */
-            properties: {
-              [k: string]: {
-                /**
-                 * The data type of the parameter.
-                 */
-                type: string;
-                /**
-                 * A description of the expected parameter.
-                 */
-                description: string;
-              };
-            };
-          };
-        };
-      }
-  )[];
-  /**
-   * JSON schema that should be fufilled for the response.
-   */
-  guided_json?: object;
-  /**
-   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
-   */
-  raw?: boolean;
-  /**
-   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
-   */
-  stream?: boolean;
-  /**
-   * The maximum number of tokens to generate in the response.
-   */
-  max_tokens?: number;
-  /**
-   * Controls the randomness of the output; higher values produce more random results.
-   */
-  temperature?: number;
-  /**
-   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
-   */
-  top_p?: number;
-  /**
-   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
-   */
-  top_k?: number;
-  /**
-   * Random seed for reproducibility of the generation.
-   */
-  seed?: number;
-  /**
-   * Penalty for repeated tokens; higher values discourage repetition.
-   */
-  repetition_penalty?: number;
-  /**
-   * Decreases the likelihood of the model repeating the same lines verbatim.
-   */
-  frequency_penalty?: number;
-  /**
-   * Increases the likelihood of the model introducing new topics.
-   */
-  presence_penalty?: number;
-}
-export type Ai_Cf_Google_Gemma_3_12B_It_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The arguments passed to be passed to the tool call request
-     */
-    arguments?: object;
-    /**
-     * The name of the tool to be called
-     */
-    name?: string;
-  }[];
-};
-export declare abstract class Base_Ai_Cf_Google_Gemma_3_12B_It {
-  inputs: Ai_Cf_Google_Gemma_3_12B_It_Input;
-  postProcessedOutputs: Ai_Cf_Google_Gemma_3_12B_It_Output;
-}
 export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
   | Ai_Cf_Meta_Llama_4_Prompt
   | Ai_Cf_Meta_Llama_4_Messages;
@@ -5500,7 +3857,6 @@ export interface Ai_Cf_Meta_Llama_4_Prompt {
    * JSON schema that should be fulfilled for the response.
    */
   guided_json?: object;
-  response_format?: JSONMode;
   /**
    * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
    */
@@ -5552,7 +3908,7 @@ export interface Ai_Cf_Meta_Llama_4_Messages {
      */
     role?: string;
     /**
-     * The tool call id. If you don't know what to put here you can fall back to 000000001
+     * The tool call id. Must be supplied for tool calls for Mistral-3. If you don't know what to put here you can fall back to 000000001
      */
     tool_call_id?: string;
     content?:
@@ -5678,7 +4034,6 @@ export interface Ai_Cf_Meta_Llama_4_Messages {
         };
       }
   )[];
-  response_format?: JSONMode;
   /**
    * JSON schema that should be fufilled for the response.
    */
@@ -5724,55 +4079,44 @@ export interface Ai_Cf_Meta_Llama_4_Messages {
    */
   presence_penalty?: number;
 }
-export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output = {
-  /**
-   * The generated text response from the model
-   */
-  response: string;
-  /**
-   * Usage statistics for the inference request
-   */
-  usage?: {
-    /**
-     * Total number of tokens in input
-     */
-    prompt_tokens?: number;
-    /**
-     * Total number of tokens in output
-     */
-    completion_tokens?: number;
-    /**
-     * Total number of input and output tokens
-     */
-    total_tokens?: number;
-  };
-  /**
-   * An array of tool calls requests made during the response generation
-   */
-  tool_calls?: {
-    /**
-     * The tool call id.
-     */
-    id?: string;
-    /**
-     * Specifies the type of tool (e.g., 'function').
-     */
-    type?: string;
-    /**
-     * Details of the function tool.
-     */
-    function?: {
+export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output =
+  | {
       /**
-       * The name of the tool to be called
+       * The generated text response from the model
        */
-      name?: string;
+      response: string;
       /**
-       * The arguments passed to be passed to the tool call request
+       * Usage statistics for the inference request
        */
-      arguments?: object;
-    };
-  }[];
-};
+      usage?: {
+        /**
+         * Total number of tokens in input
+         */
+        prompt_tokens?: number;
+        /**
+         * Total number of tokens in output
+         */
+        completion_tokens?: number;
+        /**
+         * Total number of input and output tokens
+         */
+        total_tokens?: number;
+      };
+      /**
+       * An array of tool calls requests made during the response generation
+       */
+      tool_calls?: {
+        /**
+         * The arguments passed to be passed to the tool call request
+         */
+        arguments?: object;
+        /**
+         * The name of the tool to be called
+         */
+        name?: string;
+      }[];
+    }
+  | string;
 export declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
   inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
@@ -5785,6 +4129,9 @@ export interface AiModels {
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
+  "@cf/baai/bge-base-en-v1.5": BaseAiTextEmbeddings;
+  "@cf/baai/bge-small-en-v1.5": BaseAiTextEmbeddings;
+  "@cf/baai/bge-large-en-v1.5": BaseAiTextEmbeddings;
   "@cf/microsoft/resnet-50": BaseAiImageClassification;
   "@cf/facebook/detr-resnet-50": BaseAiObjectDetection;
   "@cf/meta/llama-2-7b-chat-int8": BaseAiTextGeneration;
@@ -5826,35 +4173,23 @@ export interface AiModels {
   "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": BaseAiTextGeneration;
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": BaseAiTextGeneration;
+  "@cf/meta/m2m100-1.2b": BaseAiTranslation;
   "@cf/facebook/bart-large-cnn": BaseAiSummarization;
   "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
-  "@cf/baai/bge-base-en-v1.5": Base_Ai_Cf_Baai_Bge_Base_En_V1_5;
   "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
-  "@cf/meta/m2m100-1.2b": Base_Ai_Cf_Meta_M2M100_1_2B;
-  "@cf/baai/bge-small-en-v1.5": Base_Ai_Cf_Baai_Bge_Small_En_V1_5;
-  "@cf/baai/bge-large-en-v1.5": Base_Ai_Cf_Baai_Bge_Large_En_V1_5;
   "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
   "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
   "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
   "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
   "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
   "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
-  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
   "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
   "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
-  "@cf/qwen/qwen2.5-coder-32b-instruct": Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct;
-  "@cf/qwen/qwq-32b": Base_Ai_Cf_Qwen_Qwq_32B;
-  "@cf/mistralai/mistral-small-3.1-24b-instruct": Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
-  "@cf/google/gemma-3-12b-it": Base_Ai_Cf_Google_Gemma_3_12B_It;
   "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
 }
 export type AiOptions = {
-  /**
-   * Send requests as an asynchronous batch job, only works for supported models
-   * https://developers.cloudflare.com/workers-ai/features/batch-api
-   */
-  queueRequest?: boolean;
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
@@ -5900,25 +4235,17 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId?: string): AutoRAG;
-  run<
-    Name extends keyof AiModelList,
-    Options extends AiOptions,
-    InputOptions extends AiModelList[Name]["inputs"],
-  >(
+  autorag(autoragId: string): AutoRAG;
+  run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
-    inputs: InputOptions,
+    inputs: AiModelList[Name]["inputs"],
     options?: Options,
   ): Promise<
     Options extends {
       returnRawResponse: true;
     }
       ? Response
-      : InputOptions extends {
-            stream: true;
-          }
-        ? ReadableStream
-        : AiModelList[Name]["postProcessedOutputs"]
+      : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(
@@ -6060,7 +4387,6 @@ export declare abstract class AiGateway {
 export interface AutoRAGInternalError extends Error {}
 export interface AutoRAGNotFoundError extends Error {}
 export interface AutoRAGUnauthorizedError extends Error {}
-export interface AutoRAGNameNotSetError extends Error {}
 export type ComparisonFilter = {
   key: string;
   type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
@@ -6105,20 +4431,10 @@ export type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
-export type AutoRagListResponse = {
-  id: string;
-  enable: boolean;
-  type: string;
-  source: string;
-  vectorize_name: string;
-  paused: boolean;
-  status: string;
-}[];
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 export declare abstract class AutoRAG {
-  list(): Promise<AutoRagListResponse>;
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
@@ -7309,22 +5625,6 @@ export declare type EmailExportedHandler<Env = unknown> = (
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
-/**
- * Hello World binding to serve as an explanatory example. DO NOT USE
- */
-export interface HelloWorldBinding {
-  /**
-   * Retrieve the current stored value
-   */
-  get(): Promise<{
-    value: string;
-    ms?: number;
-  }>;
-  /**
-   * Set a new stored value
-   */
-  set(value: string): Promise<void>;
-}
 export interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
@@ -7892,7 +6192,6 @@ export declare namespace TailStream {
     readonly type: "onset";
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
-    readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
@@ -7945,7 +6244,7 @@ export declare namespace TailStream {
   }
   interface Return {
     readonly type: "return";
-    readonly info?: FetchResponseInfo;
+    readonly info?: FetchResponseInfo | Attributes;
   }
   interface Link {
     readonly type: "link";
@@ -7970,40 +6269,38 @@ export declare namespace TailStream {
     readonly type: "attributes";
     readonly info: Attribute[];
   }
-  type EventType =
-    | Onset
-    | Outcome
-    | Hibernate
-    | SpanOpen
-    | SpanClose
-    | DiagnosticChannelEvent
-    | Exception
-    | Log
-    | Return
-    | Link
-    | Attributes;
-  interface TailEvent<Event extends EventType> {
+  interface TailEvent {
+    readonly traceId: string;
     readonly invocationId: string;
     readonly spanId: string;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event: Event;
+    readonly event:
+      | Onset
+      | Outcome
+      | Hibernate
+      | SpanOpen
+      | SpanClose
+      | DiagnosticChannelEvent
+      | Exception
+      | Log
+      | Return
+      | Link
+      | Attributes;
   }
-  type TailEventHandler<Event extends EventType = EventType> = (
-    event: TailEvent<Event>,
-  ) => void | Promise<void>;
-  type TailEventHandlerObject = {
-    outcome?: TailEventHandler<Outcome>;
-    hibernate?: TailEventHandler<Hibernate>;
-    spanOpen?: TailEventHandler<SpanOpen>;
-    spanClose?: TailEventHandler<SpanClose>;
-    diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
-    exception?: TailEventHandler<Exception>;
-    log?: TailEventHandler<Log>;
-    return?: TailEventHandler<Return>;
-    link?: TailEventHandler<Link>;
-    attributes?: TailEventHandler<Attributes>;
-  };
+  type TailEventHandler = (event: TailEvent) => void | Promise<void>;
+  type TailEventHandlerName =
+    | "outcome"
+    | "hibernate"
+    | "spanOpen"
+    | "spanClose"
+    | "diagnosticChannel"
+    | "exception"
+    | "log"
+    | "return"
+    | "link"
+    | "attributes";
+  type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
@@ -8335,18 +6632,6 @@ export declare abstract class Workflow<PARAMS = unknown> {
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
   ): Promise<WorkflowInstance[]>;
 }
-export type WorkflowDurationLabel =
-  | "second"
-  | "minute"
-  | "hour"
-  | "day"
-  | "week"
-  | "month"
-  | "year";
-export type WorkflowSleepDuration =
-  | `${number} ${WorkflowDurationLabel}${"s" | ""}`
-  | number;
-export type WorkflowRetentionDuration = WorkflowSleepDuration;
 export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -8356,14 +6641,6 @@ export interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
-  /**
-   * The retention policy for Workflow instance.
-   * Defaults to the maximum retention period available for the owner's account.
-   */
-  retention?: {
-    successRetention?: WorkflowRetentionDuration;
-    errorRetention?: WorkflowRetentionDuration;
-  };
 }
 export type InstanceStatus = {
   status:

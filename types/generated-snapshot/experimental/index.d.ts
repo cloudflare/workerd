@@ -6362,6 +6362,16 @@ declare abstract class AutoRAG {
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
 }
+declare module "cloudflare:base64" {
+  function _encodeArrayBuffer(input: ArrayBufferLike): ArrayBuffer;
+  function _encodeArrayBufferToString(input: ArrayBufferLike): string;
+  function _decodeArrayBuffer(input: ArrayBufferLike): ArrayBuffer | null;
+  export {
+    _encodeArrayBuffer as encodeArrayBuffer,
+    _encodeArrayBufferToString as encodeArrayBufferToString,
+    _decodeArrayBuffer as decodeArrayBuffer,
+  };
+}
 interface BasicImageTransformations {
   /**
    * Maximum width in image pixels. The value must be an integer.
@@ -7679,6 +7689,9 @@ type ImageDrawOptions = {
   bottom?: number;
   right?: number;
 };
+type ImageInputOptions = {
+  encoding?: "base64";
+};
 type ImageOutputOptions = {
   format:
     | "image/jpeg"
@@ -7697,13 +7710,19 @@ interface ImagesBinding {
    * @throws {@link ImagesError} with code 9412 if input is not an image
    * @param stream The image bytes
    */
-  info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse>;
+  info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): Promise<ImageInfoResponse>;
   /**
    * Begin applying a series of transformations to an image
    * @param stream The image bytes
    * @returns A transform handle
    */
-  input(stream: ReadableStream<Uint8Array>): ImageTransformer;
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): ImageTransformer;
 }
 interface ImageTransformer {
   /**
@@ -7729,6 +7748,9 @@ interface ImageTransformer {
    */
   output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
+type ImageTransformationOutputOptions = {
+  encoding?: "base64";
+};
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
@@ -7741,7 +7763,7 @@ interface ImageTransformationResult {
   /**
    * The bytes of the response
    */
-  image(): ReadableStream<Uint8Array>;
+  image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
 interface ImagesError extends Error {
   readonly code: number;
