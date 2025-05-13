@@ -29,6 +29,24 @@ export const test_images_info_bitmap = {
   },
 };
 
+export const test_images_info_bitmap_base64 = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const info = await env.images.info(inputStream(btoa('png')), {
+      encoding: 'base64',
+    });
+    assert.deepStrictEqual(info, {
+      format: 'image/png',
+      fileSize: 123,
+      width: 123,
+      height: 123,
+    });
+  },
+};
+
 export const test_images_info_svg = {
   /**
    * @param {unknown} _
@@ -255,5 +273,81 @@ export const test_images_transform_consumed = {
       e.message,
       'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() or draw a transformer once'
     );
+  },
+};
+
+const ENCODE_BLOCKSIZE = 32 * 1024 + 1;
+const DECODE_BLOCKSIZE = 32 * 1024;
+
+export const test_images_base64_input = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    const inputs = {
+      smallInput: 'QUFB',
+      blockSizeInput: 'QUFB'.repeat(DECODE_BLOCKSIZE / 'QUFB'.length),
+      twoBlockInput: 'QUFB'.repeat(DECODE_BLOCKSIZE / 'QUFB'.length + 1),
+      hugeInput: 'QUFB'.repeat((DECODE_BLOCKSIZE * 20) / 'QUFB'.length),
+    };
+
+    for (let testName in inputs) {
+      const input = inputs[testName];
+
+      const result = await env.images
+        .input(inputStream(input), { encoding: 'base64' })
+        .transform({ rotate: 90 })
+        .output({ format: 'image/avif' });
+
+      // Would be image/avif in real life, but mock always returns JSON
+      assert.equal(result.contentType(), 'application/json');
+      const body = await result.response().json();
+
+      assert.deepStrictEqual(body, {
+        image: atob(input),
+        output_format: 'image/avif',
+        transforms: [{ imageIndex: 0, rotate: 90 }],
+      });
+    }
+  },
+};
+
+export const test_images_base64_output = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+
+  async test(_, env) {
+    // We can't really control the length of the output here as it also has
+    // a JSON body around it
+    const inputs = {
+      smallInput: 'A',
+      twoBlockInput: 'A'.repeat(ENCODE_BLOCKSIZE + 1),
+      hugeInput: 'A'.repeat(ENCODE_BLOCKSIZE * 20),
+    };
+
+    for (const testName in inputs) {
+      const input = inputs[testName];
+
+      const result = await env.images
+        .input(inputStream(input))
+        .transform({ rotate: 90 })
+        .output({ format: 'image/avif' });
+
+      // Would be image/avif in real life, but mock always returns JSON
+      assert.equal(result.contentType(), 'application/json');
+      const bodyBase64 = await new Response(
+        await result.image({ encoding: 'base64' })
+      ).text();
+      const body = JSON.parse(atob(bodyBase64));
+
+      assert.deepStrictEqual(body, {
+        image: input,
+        output_format: 'image/avif',
+        transforms: [{ imageIndex: 0, rotate: 90 }],
+      });
+    }
   },
 };
