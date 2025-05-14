@@ -134,14 +134,16 @@ class KvNamespace: public jsg::Object {
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String name);
   jsg::Ref<JsRpcPromise> deleteBulk(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  JSG_RESOURCE_TYPE(KvNamespace) {
+  JSG_RESOURCE_TYPE(KvNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
     JSG_METHOD(put);
     JSG_METHOD(getWithMetadata);
     JSG_METHOD_NAMED(delete, delete_);
-    // Temporary method for tests
-    JSG_METHOD(deleteBulk);
+    if (flags.getWorkerdExperimental()) {
+      // Temporary method for tests
+      JSG_METHOD(deleteBulk);
+    }
 
     JSG_TS_ROOT();
 
