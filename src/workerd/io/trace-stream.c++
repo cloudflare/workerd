@@ -858,54 +858,39 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
     bool doFulfill = false;
 
-    if (h->IsFunction()) {
-      // If the handler is a function, then we'll just pass all of the events to that
-      // function. If the function returns a promise and there are multiple events we
-      // will not wait for each promise to resolve before calling the next iteration.
-      // But we will wait for all promises to settle before returning the resolved
-      // kj promise.
-      auto fn = h.As<v8::Function>();
-      for (auto& event: events) {
-        // If we already received an outcome event, we will stop processing any
-        // further events.
-        if (finishing) break;
-        if (event.event.is<tracing::Outcome>()) {
-          finishing = true;
-          results.setStop(true);
-          doFulfill = true;
-        };
-        v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
+    for (auto& event: events) {
+      // If we already received an outcome event, we will stop processing any
+      // further events.
+      if (finishing) break;
+      if (event.event.is<tracing::Outcome>()) {
+        finishing = true;
+        results.setStop(true);
+        doFulfill = true;
+      };
+      v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
+      if (h->IsFunction()) {
+        // If the handler is a function, then we'll just pass all of the events to that
+        // function. If the function returns a promise and there are multiple events we
+        // will not wait for each promise to resolve before calling the next iteration.
+        // But we will wait for all promises to settle before returning the resolved
+        // kj promise.
+        auto fn = h.As<v8::Function>();
         returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
-      }
-    } else {
-      // If the handler is an object, then we need to know what kind of events
-      // we have and look for a specific handler function for each.
-      KJ_ASSERT(h->IsObject());
-      jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
-      for (auto& event: events) {
-        // If we already received an outcome event, we will stop processing any
-        // further events.
-        if (finishing) break;
-        if (event.event.is<tracing::Outcome>()) {
-          finishing = true;
-          results.setStop(true);
-          doFulfill = true;
-        };
-        // It is technically an error not to have a handler name here as we shouldn't
-        // be reporting any events we don't know! But, there's no reason to treat it
-        // as an error here.
+      } else {
+        // If the handler is an object, then we need to know what kind of events
+        // we have and look for a specific handler function for each.
+        KJ_ASSERT(h->IsObject());
+        jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
         KJ_IF_SOME(name, getHandlerName(event)) {
           v8::Local<v8::Value> val = obj.get(js, name);
           // If the value is not a function, we'll ignore it entirely.
           if (val->IsFunction()) {
             auto fn = val.As<v8::Function>();
-            v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
             returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
           }
         }
       }
     }
-
     // We want the equivalent behavior to Promise.all([...]) here but v8 does not
     // give us a C++ equivalent of Promise.all([...]) so we need to approximate it.
     // We do so by chaining all of the promises together.
