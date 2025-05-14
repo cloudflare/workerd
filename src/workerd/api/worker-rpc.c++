@@ -168,7 +168,7 @@ void serializeJsValue(jsg::Lock& js,
         .treatClassInstancesAsPlainObjects = false,
         .externalHandler = externalHandler,
       });
-  serializer.write(js, value);
+  serializer.writeDynamic(js, value);
   kj::Array<const byte> data = serializer.release().data;
   JSG_ASSERT(data.size() <= MAX_JS_RPC_MESSAGE_SIZE, Error,
       "Serialized RPC arguments or return values are limited to 32MiB, but the size of this value "
@@ -1694,7 +1694,7 @@ void JsRpcTarget::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
 void RpcSerializerExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
-  serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
+  serializer.write(rpc::SerializationTag::JS_RPC_STUB);
 
   rpc::JsRpcTarget::Client cap =
       kj::heap<TransientJsRpcTarget>(js, IoContext::current(), jsg::JsObject(func), true);
@@ -1753,7 +1753,7 @@ void RpcSerializerExternalHandler::serializeProxy(
     }
 
     // Great, we've concluded we can indeed point a stub at this proxy.
-    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
+    serializer.write(rpc::SerializationTag::JS_RPC_STUB);
 
     rpc::JsRpcTarget::Client cap =
         kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);

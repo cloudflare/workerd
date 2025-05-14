@@ -359,7 +359,7 @@ void SharedMemoryCache::Use::delete_(const kj::String& key) const {
 static kj::Own<CacheValue> hackySerialize(jsg::Lock& js, jsg::JsRef<jsg::JsValue>& value) {
   return js.tryCatch([&]() -> kj::Own<CacheValue> {
     jsg::Serializer serializer(js);
-    serializer.write(js, value.getHandle(js));
+    serializer.writeDynamic(js, value.getHandle(js));
     return kj::atomicRefcounted<CacheValue>(serializer.release().data);
   }, [&](jsg::Value&& exception) -> kj::Own<CacheValue> {
     // We run into big problems with tunneled exceptions here. When

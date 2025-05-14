@@ -798,7 +798,7 @@ void AbortSignal::triggerAbort(
     IoContext& ioContext = IoContext::current();
     jsg::Serializer ser(js);
     KJ_IF_SOME(r, reason) {
-      ser.write(js, r.getHandle(js));
+      ser.writeDynamic(js, r.getHandle(js));
     }
 
     auto released = ser.release();
@@ -829,12 +829,13 @@ void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(
       externalHandler != nullptr, DOMDataCloneError, "AbortSignal can only be serialized for RPC.");
 
-  serializer.writeRawUint32(static_cast<uint>(canceler->isCanceled()));
-  serializer.writeRawUint32(static_cast<uint>(flag));
+  serializer.write(canceler->isCanceled());
+  serializer.write(flag);
+
   KJ_IF_SOME(r, reason) {
-    serializer.write(js, r.getHandle(js));
+    serializer.writeDynamic(js, r.getHandle(js));
   } else {
-    serializer.write(js, js.undefined());
+    serializer.write(js, kj::none);
   }
 
   if (getAborted(js) || getNeverAborts()) {

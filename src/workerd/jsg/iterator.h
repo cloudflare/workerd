@@ -687,6 +687,20 @@ class SequenceWrapper {
   }
 
   template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      jsg::Sequence<U> sequence) {
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+    v8::LocalVector<v8::Value> items(isolate, sequence.size());
+    for (auto i: kj::indices(sequence)) {
+      items[i] =
+          static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::mv(sequence[i]));
+    }
+    return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
+  }
+
+  template <typename U>
   v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       jsg::Sequence<U>& sequence) {
@@ -695,6 +709,20 @@ class SequenceWrapper {
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
       items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
+    }
+    return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrapForSerialize(v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      jsg::Sequence<U>& sequence) {
+    v8::Isolate* isolate = context->GetIsolate();
+    v8::EscapableHandleScope handleScope(isolate);
+    v8::LocalVector<v8::Value> items(isolate, sequence.size());
+    for (auto i: kj::indices(sequence)) {
+      items[i] =
+          static_cast<TypeWrapper*>(this)->wrapForSerialize(context, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
