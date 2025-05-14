@@ -201,14 +201,7 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
         return topLevelContext.newChild();
       }
     }();
-    writer->report(context,
-        workerd::tracing::SpanOpen(topLevelContext.getSpanId(), kj::str(span.operationName)));
-    kj::Vector<workerd::tracing::Attribute> attr;
-    for (auto& tag: span.tags) {
-      attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
-    }
-    writer->report(context, {(attr.releaseAsArray())});
-    writer->report(context, workerd::tracing::SpanClose());
+    writer->report(context, span.clone());
   }
 
   trace->bytesUsed = newSize;

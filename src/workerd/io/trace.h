@@ -189,6 +189,12 @@ class InvocationSpanContext final {
       TraceId invocationId,
       SpanId spanId,
       kj::Maybe<const InvocationSpanContext&> parentSpanContext = kj::none);
+  // Still need a constructor to be available as long as span context is not propagated everywhere
+  // we need it.
+  InvocationSpanContext(TraceId traceId, TraceId invocationId, SpanId spanId)
+      : traceId(traceId),
+        invocationId(invocationId),
+        spanId(spanId) {};
 
   KJ_DISALLOW_COPY(InvocationSpanContext);
 
@@ -591,7 +597,29 @@ struct Attribute final {
   Attribute clone() const;
 };
 using CustomInfo = kj::Array<Attribute>;
+}  // namespace tracing
 
+struct CompleteSpan {
+  // Represents a completed span within user tracing.
+  uint64_t spanId;
+  uint64_t parentSpanId;
+
+  kj::ConstString operationName;
+  kj::Date startTime;
+  kj::Date endTime;
+  // Should be Span::TagMap, but we can't forward-declare that.
+  kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
+
+  CompleteSpan(rpc::UserSpanData::Reader reader);
+  void copyTo(rpc::UserSpanData::Builder builder) const;
+  CompleteSpan clone() const;
+  explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
+      : operationName(kj::mv(operationName)),
+        startTime(startTime),
+        endTime(startTime) {}
+};
+
+namespace tracing {
 // A Return mark is used to mark the point at which a span operation returned
 // a value. For instance, when a fetch subrequest response is received, or when
 // the fetch handler returns a Response. Importantly, it does not signal that the
@@ -751,6 +779,10 @@ struct TailEvent final {
       Hibernate,
       SpanOpen,
       SpanClose,
+      // TODO(o11y): We don't support proper span instrumentation at open/close time yet, provide
+      // completed spans internally for now and only synthesize spanopen/close events in the tail
+      // worker customEvent.
+      CompleteSpan,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -792,9 +824,6 @@ enum class PipelineLogLevel {
   NONE,
   FULL
 };
-
-struct Span;
-struct CompleteSpan;
 
 // TODO(someday): See if we can merge similar code concepts...  Trace fills a role similar to
 // MetricsCollector::Reporter::StageEvent, and Tracer fills a role similar to
@@ -942,24 +971,6 @@ Span::TagValue deserializeTagValue(rpc::TagValue::Reader value);
 // difficult.
 kj::String spanTagStr(const Span::TagValue& tag);
 Span::TagValue spanTagClone(const Span::TagValue& tag);
-
-struct CompleteSpan {
-  // Represents a completed span within user tracing.
-  uint64_t spanId;
-  uint64_t parentSpanId;
-
-  kj::ConstString operationName;
-  kj::Date startTime;
-  kj::Date endTime;
-  Span::TagMap tags;
-
-  CompleteSpan(rpc::UserSpanData::Reader reader);
-  void copyTo(rpc::UserSpanData::Builder builder) const;
-  explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(startTime) {}
-};
 
 // An opaque token which can be used to create child spans of some parent. This is typically
 // passed down from a caller to a callee when the caller wants to allow the callee to create
