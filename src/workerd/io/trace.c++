@@ -1437,6 +1437,9 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
     case rpc::Trace::TailEvent::Event::SPAN_CLOSE: {
       return tracing::SpanClose(event.getSpanClose());
     }
+    case rpc::Trace::TailEvent::Event::COMPLETED_SPAN: {
+      return CompleteSpan(event.getCompletedSpan());
+    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<tracing::Attribute> attrs(listReader.size());
@@ -1497,6 +1500,9 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(close, SpanClose) {
       close.copyTo(eventBuilder.initSpanClose());
     }
+    KJ_CASE_ONEOF(span, CompleteSpan) {
+      span.copyTo(eventBuilder.initCompletedSpan());
+    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1539,6 +1545,9 @@ tracing::TailEvent tracing::TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(close, SpanClose) {
         return close.clone();
+      }
+      KJ_CASE_ONEOF(span, CompleteSpan) {
+        return span.clone();
       }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
@@ -1720,6 +1729,18 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
     tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
         deserializeTagValue(tagParam.getValue()));
   }
+}
+
+CompleteSpan CompleteSpan::clone() const {
+  CompleteSpan copy(kj::ConstString(kj::str(operationName)), startTime);
+  copy.endTime = endTime;
+  copy.tags.reserve(tags.size());
+  for (auto& tag: tags) {
+    copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+  }
+  copy.spanId = spanId;
+  copy.parentSpanId = parentSpanId;
+  return copy;
 }
 
 ScopedDurationTagger::ScopedDurationTagger(

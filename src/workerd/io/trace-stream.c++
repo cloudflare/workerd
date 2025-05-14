@@ -568,6 +568,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
     KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
+    KJ_CASE_ONEOF(span, CompleteSpan) {
+      // Spans are being decomposed into SpanOpen|SpanClose|Attributes for now.
+      KJ_UNREACHABLE;
+    }
     KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
@@ -609,6 +613,10 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, tracing::SpanClose) {
       return SPANCLOSE_STR;
+    }
+    KJ_CASE_ONEOF(_, CompleteSpan) {
+      // Spans are being decomposed into SpanOpen|SpanClose|Attributes for now.
+      KJ_UNREACHABLE;
     }
     KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;
@@ -867,28 +875,53 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         results.setStop(true);
         doFulfill = true;
       };
-      v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
-      if (h->IsFunction()) {
-        // If the handler is a function, then we'll just pass all of the events to that
-        // function. If the function returns a promise and there are multiple events we
-        // will not wait for each promise to resolve before calling the next iteration.
-        // But we will wait for all promises to settle before returning the resolved
-        // kj promise.
-        auto fn = h.As<v8::Function>();
-        returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
-      } else {
-        // If the handler is an object, then we need to know what kind of events
-        // we have and look for a specific handler function for each.
-        KJ_ASSERT(h->IsObject());
-        jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
-        KJ_IF_SOME(name, getHandlerName(event)) {
-          v8::Local<v8::Value> val = obj.get(js, name);
-          // If the value is not a function, we'll ignore it entirely.
-          if (val->IsFunction()) {
-            auto fn = val.As<v8::Function>();
-            returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
+
+      auto processEvent = [&](TailEvent& event) {
+        v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
+        if (h->IsFunction()) {
+          // If the handler is a function, then we'll just pass all of the events to that
+          // function. If the function returns a promise and there are multiple events we
+          // will not wait for each promise to resolve before calling the next iteration.
+          // But we will wait for all promises to settle before returning the resolved
+          // kj promise.
+          auto fn = h.As<v8::Function>();
+          returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
+        } else {
+          // If the handler is an object, then we need to know what kind of events
+          // we have and look for a specific handler function for each.
+          KJ_ASSERT(h->IsObject());
+          KJ_IF_SOME(name, getHandlerName(event)) {
+            jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
+            v8::Local<v8::Value> val = obj.get(js, name);
+            // If the value is not a function, we'll ignore it entirely.
+            if (val->IsFunction()) {
+              auto fn = val.As<v8::Function>();
+              returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
+            }
           }
         }
+      };
+
+      KJ_IF_SOME(span, event.event.tryGet<CompleteSpan>()) {
+        // Synthesize sub-events
+        auto open = SpanOpen(span.parentSpanId, kj::str(span.operationName));
+        auto close = SpanClose();
+        kj::Vector<workerd::tracing::Attribute> attr(span.tags.size());
+        for (auto& tag: span.tags) {
+          attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
+        }
+        InvocationSpanContext context(event.traceId, event.invocationId, event.spanId);
+
+        // TODO(o11y): Replace this with proper instrumentation so that SpanOpen/SpanClose/
+        // Attributes events are created and reported individually. Sequence is not supported here yet.
+        auto openEvent = TailEvent(context, span.startTime, 0, kj::mv(open));
+        auto closeEvent = TailEvent(context, span.endTime, 0, kj::mv(close));
+        auto attrEvent = TailEvent(context, span.startTime, 0, attr.releaseAsArray());
+        processEvent(openEvent);
+        processEvent(attrEvent);
+        processEvent(closeEvent);
+      } else {
+        processEvent(event);
       }
     }
     // We want the equivalent behavior to Promise.all([...]) here but v8 does not
