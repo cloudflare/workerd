@@ -626,4 +626,12 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
   });
 }
 
+jsg::Ref<JsRpcPromise> KvNamespace::deleteBulk(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
+  auto fetcher = js.alloc<Fetcher>(subrequestChannel, Fetcher::RequiresHostAndProtocol::NO, true);
+  auto method = JSG_REQUIRE_NONNULL(
+      fetcher->getRpcMethodInternal(js, kj::str("delete"_kj)), Error, "missing delete method");
+  return method->call(args);
+}
+
 }  // namespace workerd::api
