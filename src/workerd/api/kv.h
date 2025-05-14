@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <workerd/api/http.h>
 #include <workerd/api/streams/readable.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
 
@@ -31,7 +33,7 @@ class KvNamespace: public jsg::Object {
   };
 
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
-  // representing this namespace.
+  // representing this namespace. It is also used to construct fetcher for JSRPC methods.
   // `additionalHeaders` is what gets appended to every outbound request.
   explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
       : additionalHeaders(kj::mv(additionalHeaders)),
@@ -130,6 +132,7 @@ class KvNamespace: public jsg::Object {
       const jsg::TypeHandler<PutSupportedTypes>& putTypeHandler);
 
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String name);
+  jsg::Ref<JsRpcPromise> deleteBulk(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   JSG_RESOURCE_TYPE(KvNamespace) {
     JSG_METHOD(get);
@@ -137,6 +140,8 @@ class KvNamespace: public jsg::Object {
     JSG_METHOD(put);
     JSG_METHOD(getWithMetadata);
     JSG_METHOD_NAMED(delete, delete_);
+    // Temporary method for tests
+    JSG_METHOD(deleteBulk);
 
     JSG_TS_ROOT();
 

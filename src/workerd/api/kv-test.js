@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-export default {
-  // Producer receiver (from `env.NAMESPACE`)
+import { WorkerEntrypoint } from 'cloudflare:workers';
+export default class KVTest extends WorkerEntrypoint {
+  // Request handler (from `env.NAMESPACE`)
   async fetch(request, env, ctx) {
     let result = 'example';
     const { pathname } = new URL(request.url);
@@ -67,8 +68,40 @@ export default {
     );
 
     return response;
-  },
+  }
 
+  async delete(keys) {
+    if (keys === 'error') {
+      // invalid type requested
+      throw new InternalError('failed to delete a single key');
+    }
+    if (Array.isArray(keys) && keys.length > 100) {
+      throw new BadClientRequestError(
+        'You can delete maximum of 100 keys per request'
+      );
+    }
+    if (Array.isArray(keys) && keys.includes('error')) {
+      throw new InternalError('failed to delete a single key from batch');
+    }
+    // Success otherwise
+  }
+}
+
+class BadClientRequestError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'BadClientRequestError';
+  }
+}
+
+class InternalError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InternalError';
+  }
+}
+
+export let getTest = {
   async test(ctrl, env, ctx) {
     // Test .get()
     let response = await env.KV.get('success', {});
@@ -97,9 +130,13 @@ export default {
 
     response = await env.KV.get('success', 'arrayBuffer');
     assert.strictEqual(new TextDecoder().decode(response), 'value-success');
+  },
+};
 
+export let getBulkTest = {
+  async test(ctrl, env, ctx) {
     // // Testing .get bulk
-    response = await env.KV.get(['key1', 'key"2']);
+    let response = await env.KV.get(['key1', 'key"2']);
     let expected = new Map([
       ['key1', '{"example":"values-key1"}'],
       ['key"2', '{"example":"values-key\\"2"}'],
@@ -203,5 +240,36 @@ export default {
       ],
     ]);
     assert.deepStrictEqual(response, expected);
+  },
+};
+
+export let deleteBulkTest = {
+  async test(ctrl, env, ctx) {
+    // Single key
+    await env.KV.deleteBulk('success');
+
+    // Failure
+    await assert.rejects(env.KV.deleteBulk('error'), {
+      message: 'InternalError: failed to delete a single key',
+    });
+
+    // Multiple keys
+    await env.KV.deleteBulk(['key1', 'key2', 'key3']);
+
+    // Too many keys
+    await assert.rejects(
+      env.KV.deleteBulk(
+        Array.from({ length: 101 }, (_, index) => `key${index + 1}`)
+      ),
+      {
+        message:
+          'BadClientRequestError: You can delete maximum of 100 keys per request',
+      }
+    );
+
+    // Multiple keys with failure
+    await assert.rejects(env.KV.deleteBulk(['key1', 'error']), {
+      message: 'InternalError: failed to delete a single key from batch',
+    });
   },
 };
