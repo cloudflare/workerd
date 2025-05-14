@@ -1972,25 +1972,28 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::s
 
 jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
     jsg::Lock& js, jsg::Receiver self, jsg::JsObject ctx, jsg::JsObject env) {
-  jsg::JsObject foo(self);
-  foo.set(js, "ctx", ctx);
-  foo.set(js, "env", env);
+  (*self).set(js, "ctx", ctx);
+  (*self).set(js, "env", env);
   return js.alloc<WorkerEntrypoint>();
 }
 
-jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
-    jsg::Lock& js, jsg::Receiver self, jsg::JsObject ctx, jsg::JsObject env) {
-  jsg::JsObject foo(self);
-  foo.set(js, "ctx", ctx);
-  foo.set(js, "env", env);
+jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(jsg::Lock& js,
+    jsg::Receiver self,
+    jsg::Ref<DurableObjectState> ctx,
+    jsg::JsObject env,
+    const jsg::TypeHandler<jsg::Ref<DurableObjectState>>& handler) {
+  (*self).set(js, "ctx", jsg::JsValue(handler.wrap(js, kj::mv(ctx))));
+  (*self).set(js, "env", env);
   return js.alloc<DurableObjectBase>();
 }
 
-jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
-    jsg::Lock& js, jsg::Receiver self, jsg::JsObject ctx, jsg::JsObject env) {
-  jsg::JsObject foo(self);
-  foo.set(js, "ctx", ctx);
-  foo.set(js, "env", env);
+jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(jsg::Lock& js,
+    jsg::Receiver self,
+    jsg::Ref<ExecutionContext> ctx,
+    jsg::JsObject env,
+    const jsg::TypeHandler<jsg::Ref<ExecutionContext>>& handler) {
+  (*self).set(js, "ctx", jsg::JsValue(handler.wrap(js, kj::mv(ctx))));
+  (*self).set(js, "env", env);
   return js.alloc<WorkflowEntrypoint>();
 }
 

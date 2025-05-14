@@ -505,7 +505,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   static constexpr const char* getName(jsg::Receiver*) {
-    return "jsg::Receiver";
+    return "Receiver";
   }
 
   jsg::Receiver unwrap(const v8::FunctionCallbackInfo<v8::Value>& args, jsg::Receiver*) {

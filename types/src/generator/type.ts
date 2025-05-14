@@ -389,6 +389,7 @@ export function createTypeNode(
       switch (impl) {
         case JsgImplType_Type.CONFIGURATION:
         case JsgImplType_Type.V8ISOLATE:
+        case JsgImplType_Type.JSG_RECEIVER:
         case JsgImplType_Type.JSG_LOCK:
         case JsgImplType_Type.JSG_TYPE_HANDLER:
         case JsgImplType_Type.JSG_UNIMPLEMENTED:
