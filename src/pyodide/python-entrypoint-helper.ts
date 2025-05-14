@@ -53,7 +53,12 @@ async function getPyodide(): Promise<Pyodide> {
     if (pyodidePromise) {
       return pyodidePromise;
     }
-    pyodidePromise = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL);
+    pyodidePromise = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL).then(
+      async (p) => {
+        await setupPatches(p);
+        return p;
+      }
+    );
     return pyodidePromise;
   });
 }
@@ -138,7 +143,6 @@ function getMainModule(): Promise<PyModule> {
     }
     mainModulePromise = (async function (): Promise<PyModule> {
       const pyodide = await getPyodide();
-      await setupPatches(pyodide);
       Limiter.beginStartup();
       try {
         return await enterJaegerSpan('pyimport_main_module', () =>
@@ -268,7 +272,7 @@ function makeEntrypointProxyHandler(
           return await doPyCallHelper(true, pyInstance[prop], args);
         }
 
-        const introspectionMod = await getIntrospectionMod(await getPyodide());
+        const introspectionMod = await getIntrospectionMod();
 
         return await doPyCall(introspectionMod.wrapper_func, [
           isFetch,
@@ -336,11 +340,9 @@ async function loadIntrospectionMod(
   return introspectionMod;
 }
 
-async function getIntrospectionMod(
-  pyodide: Pyodide
-): Promise<IntrospectionMod> {
+async function getIntrospectionMod(): Promise<IntrospectionMod> {
   if (introspectionModPromise === null) {
-    introspectionModPromise = loadIntrospectionMod(pyodide);
+    introspectionModPromise = getPyodide().then(loadIntrospectionMod);
   }
 
   return introspectionModPromise;
@@ -411,8 +413,7 @@ if (IS_WORKERD || IS_TRACING) {
   // to introspect the user's main module. So we are effectively using Python to analyse the
   // classes exported by the user worker here. The class names are then exported from here and
   // used to create the equivalent JS classes via makeEntrypointClass.
-  const pyodide = await getPyodide();
-  const introspectionMod = await getIntrospectionMod(pyodide);
+  const introspectionMod = await getIntrospectionMod();
   pythonEntrypointClasses =
     introspectionMod.collect_entrypoint_classes(mainModule);
 }

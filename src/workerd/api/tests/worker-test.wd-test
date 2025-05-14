@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "worker-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-test.js"),
+          (name = "module-does-eval", esModule = "export default eval('1+1')"),
+          (name = "another-module-does-eval", esModule = "export default eval('2+2')"),
+        ],
+        compatibilityDate = "2025-05-13",
+        compatibilityFlags = [
+          "nodejs_compat",
+          "allow_eval_during_startup",
+        ]
+      )
+    ),
+  ],
+);
