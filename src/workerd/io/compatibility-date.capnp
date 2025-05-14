@@ -768,4 +768,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-06-01")
       $compatDisableFlag("disallow_eval_during_startup");
   # Enables eval() and new Function() during startup.
+
+  enableRequestSignal @90 :Bool
+    $compatEnableFlag("enable_request_signal")
+    $compatDisableFlag("disable_request_signal");
+  # Enables Request.signal for incoming requests.
+  # This feature is still experimental and the compat flag has no default enable date.
 }

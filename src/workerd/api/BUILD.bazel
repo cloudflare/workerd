@@ -722,3 +722,21 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/worker-test.js"],
 )
+
+wd_test(
+    src = "tests/request-signal-enabled.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-enabled.js"],
+)
+
+wd_test(
+    src = "tests/request-signal-disabled.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-disabled.js"],
+)
+
+wd_test(
+    src = "tests/request-signal-passthrough.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-signal-passthrough.js"],
+)
