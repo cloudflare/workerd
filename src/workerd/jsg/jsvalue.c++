@@ -530,7 +530,7 @@ JsValue Lock::rangeError(kj::StringPtr message) {
 }
 
 BufferSource Lock::bytes(kj::Array<kj::byte> data) {
-  return BufferSource(*this, BackingStore::from(kj::mv(data)));
+  return BufferSource(*this, BackingStore::from(*this, kj::mv(data)));
 }
 
 JsSymbol Lock::symbol(kj::StringPtr str) {
