@@ -38,5 +38,5 @@ $ bazel test //types:all
 ## Updates types
 
 ```shell
-bazel build //types:types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot
+just generate-types
 ```
