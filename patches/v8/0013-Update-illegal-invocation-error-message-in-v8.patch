@@ -1,12 +1,17 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 4e88539c49bb1ef2d1653b71aa1244e7bfea5724 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Tue, 9 Jul 2024 08:37:05 -0700
-Subject: Update illegal invocation error message in v8
+Subject: [PATCH 13/22] Update illegal invocation error message in v8
 
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
+---
+ src/common/message-template.h |  6 +++++-
+ test/cctest/test-api.cc       | 25 +++++++++++++------------
+ test/mjsunit/ic-megadom-3.js  |  2 +-
+ 3 files changed, 19 insertions(+), 14 deletions(-)
 
 diff --git a/src/common/message-template.h b/src/common/message-template.h
-index e008b9d9ec287f8fbbe7648dec7039f7904b9fc2..d1e8c8f8c1683e0176b7c55ab49a4285396caf2d 100644
+index 8bc31b0cba1..2849708d17e 100644
 --- a/src/common/message-template.h
 +++ b/src/common/message-template.h
 @@ -113,7 +113,11 @@ namespace internal {
@@ -23,11 +28,11 @@ index e008b9d9ec287f8fbbe7648dec7039f7904b9fc2..d1e8c8f8c1683e0176b7c55ab49a4285
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index b64756086c6c458dc29a40a9e2696ad78e1d1473..2c9f53e9c7ab2ff36bd74a7e9a55748d523d9de6 100644
+index 28ec5cbf330..508c1340207 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
-@@ -213,6 +213,17 @@ THREADED_TEST(IsolateOfContext) {
-   CHECK(env->GetIsolate() == CcTest::isolate());
+@@ -220,6 +220,17 @@ THREADED_TEST(IsolateOfContext) {
+   CHECK(isolate->IsCurrent());
  }
  
 +static bool ExceptionStartsWithIllegalInvocation(v8::Isolate* isolate,
@@ -44,7 +49,7 @@ index b64756086c6c458dc29a40a9e2696ad78e1d1473..2c9f53e9c7ab2ff36bd74a7e9a55748d
  static void TestSignatureLooped(const char* operation, Local<Value> receiver,
                                  v8::Isolate* isolate) {
    v8::base::ScopedVector<char> source(200);
-@@ -230,12 +241,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
+@@ -237,12 +248,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(10, signature_callback_count);
    } else {
@@ -58,7 +63,7 @@ index b64756086c6c458dc29a40a9e2696ad78e1d1473..2c9f53e9c7ab2ff36bd74a7e9a55748d
    }
    signature_expected_receiver_global.Reset();
  }
-@@ -262,12 +268,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
+@@ -269,12 +275,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(3, signature_callback_count);
    } else {
@@ -73,7 +78,7 @@ index b64756086c6c458dc29a40a9e2696ad78e1d1473..2c9f53e9c7ab2ff36bd74a7e9a55748d
    signature_expected_receiver_global.Reset();
  }
 diff --git a/test/mjsunit/ic-megadom-3.js b/test/mjsunit/ic-megadom-3.js
-index f7a7634e7e11845e4b364fcc6942f1170b9ee8da..e811f9e04d60f7a2eaf3a5a48e3c09d23a7c854d 100644
+index f7a7634e7e1..e811f9e04d6 100644
 --- a/test/mjsunit/ic-megadom-3.js
 +++ b/test/mjsunit/ic-megadom-3.js
 @@ -42,7 +42,7 @@ function test() {
@@ -85,3 +90,6 @@ index f7a7634e7e11845e4b364fcc6942f1170b9ee8da..e811f9e04d60f7a2eaf3a5a48e3c09d2
    }
  
    return result;
+-- 
+2.43.0
+

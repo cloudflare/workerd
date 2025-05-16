@@ -1,14 +1,17 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From aeb7ef0b0c7fdd11fa634499ab6e08453a7aa0aa Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Mon, 2 Dec 2024 14:16:37 +0100
-Subject: Add another slot in the isolate for embedder
+Subject: [PATCH 15/22] Add another slot in the isolate for embedder
 
+---
+ include/v8-internal.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index 5487adec2b587416541b04ccdb8fa07e5a394b92..d641b2cd066675802fbecbd002723a67f90fe408 100644
+index 6dbe58e4575..4b7a5f87e69 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
-@@ -865,7 +865,7 @@ class Internals {
+@@ -884,7 +884,7 @@ class Internals {
    static const int kExternalTwoByteRepresentationTag = 0x02;
    static const int kExternalOneByteRepresentationTag = 0x0a;
  
@@ -17,3 +20,6 @@ index 5487adec2b587416541b04ccdb8fa07e5a394b92..d641b2cd066675802fbecbd002723a67
    static const int kStackGuardSize = 8 * kApiSystemPointerSize;
    static const int kNumberOfBooleanFlags = 6;
    static const int kErrorMessageParamSize = 1;
+-- 
+2.43.0
+

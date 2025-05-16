@@ -1,17 +1,22 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 926a21a0207965949c33b10d9fad4238da0a943f Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Thu, 26 Mar 2020 19:15:48 -0500
-Subject: Add methods to get heap and external memory sizes directly.
+Subject: [PATCH 21/22] Add methods to get heap and external memory sizes
+ directly.
 
 `GetHeapStatistics()` exists for this, but also collects a lot of other info and apparently performs non-trivial computation. These new accessors are intended to be very fast.
 
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
+---
+ include/v8-isolate.h | 10 ++++++++++
+ src/api/api.cc       |  8 ++++++++
+ 2 files changed, 18 insertions(+)
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 4f1e03458086d4adcc071a8763e04f47911aa3f3..4e3cad3b99003241480575306fd971f6bfdd5733 100644
+index 09373d56f62..750e67b7726 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1019,6 +1019,16 @@ class V8_EXPORT Isolate {
+@@ -1056,6 +1056,16 @@ class V8_EXPORT Isolate {
    V8_DEPRECATE_SOON("Use ExternalMemoryAccounter instead.")
    int64_t AdjustAmountOfExternalAllocatedMemory(int64_t change_in_bytes);
  
@@ -29,10 +34,10 @@ index 4f1e03458086d4adcc071a8763e04f47911aa3f3..4e3cad3b99003241480575306fd971f6
     * Returns heap profiler for this isolate. Will return NULL until the isolate
     * is initialized.
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 861ae72695279e870b6291cb7e880e3c15f21b25..b8cf3fc6ce105490ae19f569bd45dc85fc5a384d 100644
+index b711f183d72..1378b64fbef 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -10364,6 +10364,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
+@@ -10334,6 +10334,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
  #endif  // V8_ENABLE_WEBASSEMBLY
  }
  
@@ -47,3 +52,6 @@ index 861ae72695279e870b6291cb7e880e3c15f21b25..b8cf3fc6ce105490ae19f569bd45dc85
  size_t Isolate::NumberOfHeapSpaces() {
    return i::LAST_SPACE - i::FIRST_SPACE + 1;
  }
+-- 
+2.43.0
+

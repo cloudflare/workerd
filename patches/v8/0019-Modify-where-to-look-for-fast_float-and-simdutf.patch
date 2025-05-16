@@ -1,31 +1,24 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 69f6c3d15022bb6e230913c005ec8db92c741b74 Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Mon, 3 Mar 2025 22:30:37 +0100
-Subject: Modify where to look for fast_float and simdutf.
+Subject: [PATCH 19/22] Modify where to look for fast_float and simdutf.
 
 Similar to fp16, these dependencies now needs to be downloaded by bazel.
+---
+ BUILD.bazel                          | 4 ++--
+ src/builtins/builtins-typed-array.cc | 2 +-
+ src/objects/string.h                 | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 1f3bb2ab91092e8235f01c1474da63776e6cb13e..37d1a068da6bac22966743f9617d7961df084632 100644
+index 8930baf61ba..f44de2551a4 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4346,12 +4346,6 @@ cc_library(
-     ],
- )
- 
--cc_library(
--  name = "simdutf",
--  srcs = ["third_party/simdutf/simdutf.cpp"],
--  hdrs = ["third_party/simdutf/simdutf.h"],
--)
--
- v8_library(
-     name = "v8_libshared",
-     srcs = [
-@@ -4380,9 +4374,9 @@ v8_library(
-         ":noicu/generated_torque_definitions",
+@@ -4443,9 +4443,9 @@ v8_library(
      ],
      deps = [
+-        ":lib_dragonbox",
++        "@lib_dragonbox//:headers",
 -        "//third_party/fast_float/src:fast_float",
 +        "@fast_float",
          ":lib_fp16",
@@ -35,7 +28,7 @@ index 1f3bb2ab91092e8235f01c1474da63776e6cb13e..37d1a068da6bac22966743f9617d7961
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index f1a46d5b2c4822315b2171a562709f932db81949..5de29e9dd04488a319d8ed92aa7c4860a39cb603 100644
+index e17c0137a8a..9276ef9f456 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -12,7 +12,7 @@
@@ -44,11 +37,11 @@ index f1a46d5b2c4822315b2171a562709f932db81949..5de29e9dd04488a319d8ed92aa7c4860
  #include "src/objects/simd.h"
 -#include "third_party/simdutf/simdutf.h"
 +#include "simdutf.h"
- 
+
  namespace v8 {
  namespace internal {
 diff --git a/src/objects/string.h b/src/objects/string.h
-index 3a4d45102ba312704f54b7b756321e0ac76980c6..0447631a382f55e89941bff80300dc1321c5d8c7 100644
+index 9b7574df4f2..ae7b7167d2f 100644
 --- a/src/objects/string.h
 +++ b/src/objects/string.h
 @@ -21,7 +21,7 @@
@@ -57,6 +50,9 @@ index 3a4d45102ba312704f54b7b756321e0ac76980c6..0447631a382f55e89941bff80300dc13
  #include "src/strings/unicode-decoder.h"
 -#include "third_party/simdutf/simdutf.h"
 +#include "simdutf.h"
- 
+
  // Has to be the last include (doesn't have include guards):
  #include "src/objects/object-macros.h"
+--
+2.43.0
+

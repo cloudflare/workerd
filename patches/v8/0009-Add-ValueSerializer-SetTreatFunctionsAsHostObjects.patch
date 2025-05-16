@@ -1,14 +1,20 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From f93701d57bf4f364250a5facdc36c19f9b463278 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 2 Mar 2024 09:00:18 -0600
-Subject: Add ValueSerializer::SetTreatFunctionsAsHostObjects().
+Subject: [PATCH 09/22] Add ValueSerializer::SetTreatFunctionsAsHostObjects().
 
 Previously, ValueSerializer would always refuse to serialize functions. This commit gives the embedder the option to handle them as host objects.
 
 This is intended for use in an RPC system, where a function can be "serialized" by replacing it with a stub which, when invoked, performs an RPC back to the originating isolate in order to execute the original function there.
+---
+ include/v8-value-serializer.h   |  9 +++++++++
+ src/api/api.cc                  |  4 ++++
+ src/objects/value-serializer.cc | 18 +++++++++++++-----
+ src/objects/value-serializer.h  | 10 ++++++++++
+ 4 files changed, 36 insertions(+), 5 deletions(-)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643b9e40c70 100644
+index 596be18adeb..141f138e08d 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
 @@ -195,6 +195,15 @@ class V8_EXPORT ValueSerializer {
@@ -28,10 +34,10 @@ index 596be18adeb3a5a81794aaa44b1d347dec6c0c7d..141f138e08de849e3e02b3b2b346e643
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 99b1008828aa209caf09982c5f18cb60d57402af..9fef8999b3c5275a2e9674290dd9fce4c0660200 100644
+index 24924c41e9c..f39b239c9a2 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3338,6 +3338,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
+@@ -3347,6 +3347,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
    private_->serializer.SetTreatArrayBufferViewsAsHostObjects(mode);
  }
  
@@ -41,9 +47,9 @@ index 99b1008828aa209caf09982c5f18cb60d57402af..9fef8999b3c5275a2e9674290dd9fce4
 +
  Maybe<bool> ValueSerializer::WriteValue(Local<Context> context,
                                          Local<Value> value) {
-   auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
+   auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 494b9c5a95d3a43118449a8a425eec4332b209b2..436493e879804453b512810ccf8cb89544df85a0 100644
+index 4b08dd27a2e..f8150588e75 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -334,6 +334,10 @@ void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -57,24 +63,31 @@ index 494b9c5a95d3a43118449a8a425eec4332b209b2..436493e879804453b512810ccf8cb895
  void ValueSerializer::WriteTag(SerializationTag tag) {
    uint8_t raw_tag = static_cast<uint8_t>(tag);
    WriteRawBytes(&raw_tag, sizeof(raw_tag));
-@@ -603,8 +607,13 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
+@@ -603,13 +607,17 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
  
    // Eliminate callable and exotic objects, which should not be serialized.
    InstanceType instance_type = receiver->map()->instance_type();
--  if (IsCallable(*receiver) || (IsSpecialReceiverInstanceType(instance_type) &&
--                                instance_type != JS_SPECIAL_API_OBJECT_TYPE)) {
+-  if (IsCallable(*receiver) ||
+-      (IsSpecialReceiverInstanceType(instance_type) &&
+-       instance_type != JS_SPECIAL_API_OBJECT_TYPE
 +  if (IsCallable(*receiver)) {
 +    if (treat_functions_as_host_objects_) {
 +      return WriteHostObject(Cast<JSObject>(receiver));
 +    }
 +    return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
 +  } else if (IsSpecialReceiverInstanceType(instance_type) &&
-+             instance_type != JS_SPECIAL_API_OBJECT_TYPE) {
++             instance_type != JS_SPECIAL_API_OBJECT_TYPE
+ #if V8_ENABLE_WEBASSEMBLY
+-       && instance_type != WASM_STRUCT_TYPE && instance_type != WASM_ARRAY_TYPE
++             && instance_type != WASM_STRUCT_TYPE && instance_type != WASM_ARRAY_TYPE
+ #endif
+-       )) {
++             ) {
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index a463753df6ee29e79768829c7b7d5b3136bd997d..2d0a746c90522500fcf17d73f3024512b1bb5481 100644
+index a463753df6e..2d0a746c905 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -102,6 +102,15 @@ class ValueSerializer {
@@ -101,3 +114,6 @@ index a463753df6ee29e79768829c7b7d5b3136bd997d..2d0a746c90522500fcf17d73f3024512
    bool out_of_memory_ = false;
    Zone zone_;
    uint32_t version_;
+-- 
+2.43.0
+

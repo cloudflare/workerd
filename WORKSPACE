@@ -113,6 +113,27 @@ git_repository(
 )
 
 git_repository(
+    name = "lib_dragonbox",
+    build_file_content = """
+cc_library(
+    name = "lib_dragonbox",
+    hdrs = glob(["include/dragonbox/*.h"]),
+    srcs = glob(["source/*.cpp"]),
+    visibility = ["//visibility:public"],
+    strip_include_prefix = "include",
+)
+cc_library(
+    name = "headers",
+    hdrs = glob(["include/dragonbox/*.h"]),
+    visibility = ["//visibility:public"],
+    include_prefix = "third_party/dragonbox/src",
+)
+""",
+    commit = "6c7c925b571d54486b9ffae8d9d18a822801cbda",
+    remote = "https://github.com/jk-jeon/dragonbox",
+)
+
+git_repository(
     name = "highway",
     commit = "00fe003dac355b979f36157f9407c7c46448958e",
     remote = "https://github.com/google/highway.git",

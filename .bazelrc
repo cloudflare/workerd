@@ -55,6 +55,7 @@ build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-cap
 
 ## simdutf
 build --per_file_copt=external/simdutf@-Wno-unused-const-variable
+build --per_file_copt=external/simdutf@-DSIMDUTF_ATOMIC_REF
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
 # GitHub Actions. This is an optional performance hack intended for CI, although it might also be

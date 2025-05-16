@@ -1,7 +1,8 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 226d0028e652ab1ccfd5972d9b9cd66437d500fc Mon Sep 17 00:00:00 2001
 From: Erik Corry <erikcorry@chromium.org>
 Date: Wed, 26 Feb 2025 18:44:05 +0100
-Subject: Revert "heap: Add masm-specific unwinding annotations to GC
+Subject: [PATCH 12/22] Revert "heap: Add masm-specific unwinding annotations
+ to GC
 
 This reverts commit 42bc7bfdf56cc7a8cd7757d96aa70b83ce82d9ff.
 
@@ -10,12 +11,17 @@ with clang-cl on Windows, and this commit makes it an error to compile that
 file on Windows with any compiler. Maybe clang-cl and masm can be used
 together? I'm not sure. In the meantime, I'm reverting this commit in the hope
 of getting our V8 upgrade unblocked.
+---
+ BUILD.gn                                      |  9 +--
+ src/heap/base/asm/x64/push_registers_asm.cc   | 57 +++++++++++++++++--
+ src/heap/base/asm/x64/push_registers_masm.asm | 15 +----
+ 3 files changed, 55 insertions(+), 26 deletions(-)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 9a2b2cdd94f9b9365b87995617b91ad8b777bf58..ee9c2351b7f8b6f977cf190b90469137c4aa85b6 100644
+index fc80d646d35..d878b6bb387 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4282,8 +4282,8 @@ v8_header_set("v8_internal_headers") {
+@@ -4359,8 +4359,8 @@ v8_header_set("v8_internal_headers") {
      "src/temporal/temporal-parser.h",
      "src/third_party/rapidhash-v8/rapidhash.h",
      "src/torque/runtime-macro-shims.h",
@@ -25,7 +31,7 @@ index 9a2b2cdd94f9b9365b87995617b91ad8b777bf58..ee9c2351b7f8b6f977cf190b90469137
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -6929,12 +6929,7 @@ v8_source_set("v8_heap_base") {
+@@ -7057,12 +7057,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {
@@ -40,7 +46,7 @@ index 9a2b2cdd94f9b9365b87995617b91ad8b777bf58..ee9c2351b7f8b6f977cf190b90469137
      sources += [ "src/heap/base/asm/ia32/push_registers_asm.cc" ]
    } else if (current_cpu == "arm") {
 diff --git a/src/heap/base/asm/x64/push_registers_asm.cc b/src/heap/base/asm/x64/push_registers_asm.cc
-index 554caddfa77ff91c907c377aa95cc6b1eb907e5c..73f8c4c078e091c378868de49b5254cc89a0a688 100644
+index 554caddfa77..73f8c4c078e 100644
 --- a/src/heap/base/asm/x64/push_registers_asm.cc
 +++ b/src/heap/base/asm/x64/push_registers_asm.cc
 @@ -14,16 +14,61 @@
@@ -117,7 +123,7 @@ index 554caddfa77ff91c907c377aa95cc6b1eb907e5c..73f8c4c078e091c378868de49b5254cc
 +
 +#endif  // !_WIN64
 diff --git a/src/heap/base/asm/x64/push_registers_masm.asm b/src/heap/base/asm/x64/push_registers_masm.asm
-index d0d05632d26883316cb7b39f8e7e8143d2b24bc3..a32e193c2f132cdbe1d0730831d8659be996f8e2 100644
+index d0d05632d26..a32e193c2f1 100644
 --- a/src/heap/base/asm/x64/push_registers_masm.asm
 +++ b/src/heap/base/asm/x64/push_registers_masm.asm
 @@ -8,7 +8,7 @@
@@ -165,3 +171,6 @@ index d0d05632d26883316cb7b39f8e7e8143d2b24bc3..a32e193c2f132cdbe1d0730831d8659b
 -    PushAllRegistersAndIterateStack endp
  
  end
+-- 
+2.43.0
+

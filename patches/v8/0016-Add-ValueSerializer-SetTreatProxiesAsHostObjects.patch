@@ -1,14 +1,20 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From b943a7389e6e01e91a61e0615ce8d92dd58df7f5 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Wed, 4 Dec 2024 22:36:05 -0600
-Subject: Add ValueSerializer::SetTreatProxiesAsHostObjects().
+Subject: [PATCH 16/22] Add ValueSerializer::SetTreatProxiesAsHostObjects().
 
 Previously, ValueSerializer would always refuse to serialize Proxy objects. This commit gives the embedder the option to handle them as host objects.
 
 Similar to the previous patch adding `SetTreatFunctionsAsHostObjects()`, this is intended for use in an RPC system, where an arbitrary object can be "serialized" by replacing it with a stub which, when invoked, performs an RPC back to the originating isolate in order to access the original object there.
+---
+ include/v8-value-serializer.h   |  9 +++++++++
+ src/api/api.cc                  |  4 ++++
+ src/objects/value-serializer.cc | 13 +++++++++++--
+ src/objects/value-serializer.h  | 13 +++++++++++--
+ 4 files changed, 35 insertions(+), 4 deletions(-)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a5076871f05a 100644
+index 141f138e08d..bdcb2831c55 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
 @@ -204,6 +204,15 @@ class V8_EXPORT ValueSerializer {
@@ -28,10 +34,10 @@ index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a507
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 740f2a399c75d31eb25053545f22d17706cedeec..861ae72695279e870b6291cb7e880e3c15f21b25 100644
+index e255e18ba79..b711f183d72 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3342,6 +3342,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -3351,6 +3351,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    private_->serializer.SetTreatFunctionsAsHostObjects(mode);
  }
  
@@ -41,9 +47,9 @@ index 740f2a399c75d31eb25053545f22d17706cedeec..861ae72695279e870b6291cb7e880e3c
 +
  Maybe<bool> ValueSerializer::WriteValue(Local<Context> context,
                                          Local<Value> value) {
-   auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
+   auto i_isolate = i::Isolate::Current();
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 436493e879804453b512810ccf8cb89544df85a0..38fca4b1c70d9b44c1356c264abde21daff8da83 100644
+index f8150588e75..096e1d12904 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -338,6 +338,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
@@ -71,7 +77,7 @@ index 436493e879804453b512810ccf8cb89544df85a0..38fca4b1c70d9b44c1356c264abde21d
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
-@@ -1258,7 +1267,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+@@ -1268,7 +1277,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
    return ThrowIfOutOfMemory();
  }
  
@@ -81,7 +87,7 @@ index 436493e879804453b512810ccf8cb89544df85a0..38fca4b1c70d9b44c1356c264abde21d
    if (!delegate_) {
      isolate_->Throw(*isolate_->factory()->NewError(
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 2d0a746c90522500fcf17d73f3024512b1bb5481..7ec442c5e002e8a7e00c7d0ea5dc3e77744bb55d 100644
+index 2d0a746c905..7ec442c5e00 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -111,6 +111,15 @@ class ValueSerializer {
@@ -118,3 +124,6 @@ index 2d0a746c90522500fcf17d73f3024512b1bb5481..7ec442c5e002e8a7e00c7d0ea5dc3e77
    bool out_of_memory_ = false;
    Zone zone_;
    uint32_t version_;
+-- 
+2.43.0
+

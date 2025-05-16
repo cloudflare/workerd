@@ -1,14 +1,19 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 13f7a031021e6e7d04a8c0ba72b407f5d47240b7 Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
-Subject: Allow Windows builds under Bazel
+Subject: [PATCH 03/22] Allow Windows builds under Bazel
 
+---
+ BUILD.bazel              |  2 ++
+ bazel/config/BUILD.bazel | 37 +++++++++++++++++++++++++++++++++++++
+ bazel/defs.bzl           | 28 ++++++++++++++++++++++++++++
+ 3 files changed, 67 insertions(+)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 54be2b945d4d23ad9c8774a60087ad77c18e4424..dc0b10774e71a27ad9ea94438395778c75fd92d6 100644
+index af61173bcd4..4d6507da8a7 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3855,6 +3855,8 @@ filegroup(
+@@ -3900,6 +3900,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
@@ -18,7 +23,7 @@ index 54be2b945d4d23ad9c8774a60087ad77c18e4424..dc0b10774e71a27ad9ea94438395778c
          "@v8//bazel/config:is_inline_asm_riscv64": ["src/heap/base/asm/riscv64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_ppc64le": ["src/heap/base/asm/ppc/push_registers_asm.cc"],
 diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
-index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965ba67de12c 100644
+index c81f2782031..96e0f9cdb61 100644
 --- a/bazel/config/BUILD.bazel
 +++ b/bazel/config/BUILD.bazel
 @@ -270,6 +270,7 @@ selects.config_setting_group(
@@ -87,7 +92,7 @@ index c81f278203126913c3bad74d31348706678ccf06..96e0f9cdb61d0d8f6597d337c2dd965b
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index fbd942ba765fe07f57acaceaf4a126d43b800860..270d982eb55415c59f0659de13fa34cd820a9c83 100644
+index 0539ea176ac..16495e2e63d 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -119,6 +119,24 @@ def _default_args():
@@ -139,3 +144,6 @@ index fbd942ba765fe07f57acaceaf4a126d43b800860..270d982eb55415c59f0659de13fa34cd
              ],
              "@v8//bazel/config:is_macos": ["-pthread"],
              "//conditions:default": ["-Wl,--no-as-needed -ldl -latomic -pthread"],
+-- 
+2.43.0
+

@@ -1,17 +1,20 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 72ff623f9cbf2e0641d6ad19fc1f0f062e4787bb Mon Sep 17 00:00:00 2001
 From: Garrett Gu <garrett@cloudflare.com>
 Date: Mon, 22 Apr 2024 10:10:21 -0500
-Subject: Modify where to look for fp16 dependency. This dependency is normally
- downloaded by gn but we need to fetch it in Bazel. We do so in the workerd
- repo in the WORKSPACE file.
+Subject: [PATCH 10/22] Modify where to look for fp16 dependency. This
+ dependency is normally downloaded by gn but we need to fetch it in Bazel. We
+ do so in the workerd repo in the WORKSPACE file.
 
+---
+ BUILD.bazel | 26 ++++++++++++++++----------
+ 1 file changed, 16 insertions(+), 10 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 723284dfbeb3ff267e28ea42fb73b5ae96a3db77..a2b8f9c827467def323afa62b80be06ad75ee132 100644
+index cf3fc8f0645..28d8993c840 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3867,16 +3867,22 @@ filegroup(
-     }),
+@@ -3923,16 +3923,22 @@ v8_library(
+   ],
  )
  
 -v8_library(
@@ -43,3 +46,6 @@ index 723284dfbeb3ff267e28ea42fb73b5ae96a3db77..a2b8f9c827467def323afa62b80be06a
  )
  
  filegroup(
+-- 
+2.43.0
+
