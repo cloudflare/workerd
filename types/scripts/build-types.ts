@@ -30,6 +30,8 @@ const ENTRYPOINTS = [
   // https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L307-L312 (urlsearchparams_delete_has_value_arg)
   { compatDate: "2023-07-01" },
   // Latest compatibility date with experimental features
+  { compatDate: "2999-12-31", name: "latest" },
+  // Latest compatibility date with experimental features
   { compatDate: "experimental" },
 ];
 

@@ -102,3 +102,9 @@ wpt_test(
     }),
     wpt_directory = "@wpt//:WebCryptoAPI@module",
 )
+
+wpt_test(
+    name = "streams",
+    config = "streams-test.ts",
+    wpt_directory = "@wpt//:streams@module",
+)

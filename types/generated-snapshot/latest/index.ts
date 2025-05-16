@@ -258,6 +258,11 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
   EventSource: typeof EventSource;
+  ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
+  ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
+  ReadableByteStreamController: typeof ReadableByteStreamController;
+  WritableStreamDefaultController: typeof WritableStreamDefaultController;
+  TransformStreamDefaultController: typeof TransformStreamDefaultController;
   CompressionStream: typeof CompressionStream;
   DecompressionStream: typeof DecompressionStream;
   TextEncoderStream: typeof TextEncoderStream;
@@ -465,6 +470,8 @@ export declare abstract class Navigator {
   ): boolean;
   readonly userAgent: string;
   readonly hardwareConcurrency: number;
+  readonly language: string;
+  readonly languages: string[];
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
@@ -1538,6 +1545,8 @@ export declare class Headers {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/get) */
   get(name: string): string | null;
   getAll(name: string): string[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/getSetCookie) */
+  getSetCookie(): string[];
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/has) */
   has(name: string): boolean;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Headers/set) */
@@ -1700,6 +1709,12 @@ export interface Request<
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/keepalive)
    */
   keepalive: boolean;
+  /**
+   * Returns the cache mode associated with request, which is a string indicating how the request will interact with the browser's cache when fetching.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
+   */
+  cache?: "no-store";
 }
 export interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1712,6 +1727,8 @@ export interface RequestInit<Cf = CfProperties> {
   redirect?: string;
   fetcher?: Fetcher | null;
   cf?: Cf;
+  /* A string indicating how the request will interact with the browser's cache to set request's cache. */
+  cache?: "no-store";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -1730,10 +1747,6 @@ export type Fetcher<
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   connect(address: SocketAddress | string, options?: SocketOptions): Socket;
 };
-export interface FetcherPutOptions {
-  expiration?: number;
-  expirationTtl?: number;
-}
 export interface KVNamespaceListKey<Metadata, Key extends string = string> {
   name: Key;
   expiration?: number;
@@ -2277,7 +2290,7 @@ export interface ReadableStreamGetReaderOptions {
   mode: "byob";
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest) */
-export interface ReadableStreamBYOBRequest {
+export declare abstract class ReadableStreamBYOBRequest {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/view) */
   get view(): Uint8Array | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respond) */
@@ -2287,7 +2300,7 @@ export interface ReadableStreamBYOBRequest {
   get atLeast(): number | null;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController) */
-export interface ReadableStreamDefaultController<R = any> {
+export declare abstract class ReadableStreamDefaultController<R = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/desiredSize) */
   get desiredSize(): number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultController/close) */
@@ -2298,7 +2311,7 @@ export interface ReadableStreamDefaultController<R = any> {
   error(reason: any): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController) */
-export interface ReadableByteStreamController {
+export declare abstract class ReadableByteStreamController {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/byobRequest) */
   get byobRequest(): ReadableStreamBYOBRequest | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/desiredSize) */
@@ -2315,14 +2328,14 @@ export interface ReadableByteStreamController {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController)
  */
-export interface WritableStreamDefaultController {
+export declare abstract class WritableStreamDefaultController {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/signal) */
   get signal(): AbortSignal;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error) */
   error(reason?: any): void;
 }
 /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController) */
-export interface TransformStreamDefaultController<O = any> {
+export declare abstract class TransformStreamDefaultController<O = any> {
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/desiredSize) */
   get desiredSize(): number | null;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/enqueue) */
@@ -2682,7 +2695,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/delete)
    */
-  delete(name: string): void;
+  delete(name: string, value?: string): void;
   /**
    * Returns the first value associated to the given search parameter.
    *
@@ -2700,7 +2713,7 @@ export declare class URLSearchParams {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/URLSearchParams/has)
    */
-  has(name: string): boolean;
+  has(name: string, value?: string): boolean;
   /**
    * Sets the value associated to a given search parameter to the given value. If there were several values, delete the others.
    *
@@ -2742,6 +2755,7 @@ export declare class URLPattern {
   get pathname(): string;
   get search(): string;
   get hash(): string;
+  get hasRegExpGroups(): boolean;
   test(input?: string | URLPatternInit, baseURL?: string): boolean;
   exec(
     input?: string | URLPatternInit,

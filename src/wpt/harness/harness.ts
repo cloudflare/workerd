@@ -186,15 +186,11 @@ class Test {
    * value when calling ``func``. Defaults to the :js:class:`Test` object.
    */
   public step_func(func: UnknownFunc, this_obj?: object): UnknownFunc {
-    const test_this = this;
-
     if (arguments.length === 1) {
       this_obj = this;
     }
 
-    return function (...params: unknown[]) {
-      return test_this.step.call(test_this, func, this_obj, ...params);
-    };
+    return (...params: unknown[]) => this.step(func, this_obj, ...params);
   }
 
   /**
@@ -210,18 +206,16 @@ class Test {
    * value when calling `func`. Defaults to the :js:class:`Test` object.
    */
   public step_func_done(func?: UnknownFunc, this_obj?: object): UnknownFunc {
-    const test_this = this;
-
     if (arguments.length === 1) {
-      this_obj = test_this;
+      this_obj = this;
     }
 
-    return function (...params: unknown[]) {
+    return (...params: unknown[]) => {
       if (func) {
-        test_this.step.call(test_this, func, this_obj, ...params);
+        this.step(func, this_obj, ...params);
       }
 
-      test_this.done();
+      this.done();
     };
   }
 
@@ -257,12 +251,8 @@ class Test {
     timeout: number,
     ...rest: unknown[]
   ): ReturnType<typeof setTimeout> {
-    const test_this = this;
-
     return setTimeout(
-      this.step_func(function () {
-        return func.call(test_this, ...rest);
-      }),
+      this.step_func(() => func(...rest)),
       timeout
     );
   }
@@ -439,6 +429,13 @@ declare global {
     properties?: unknown
   ): void;
   function async_test(func: TestFn, name: string, properties?: unknown): void;
+
+  function step_timeout(
+    func: UnknownFunc,
+    timeout: number,
+    ...rest: unknown[]
+  ): ReturnType<typeof setTimeout>;
+
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
   function assert_true(val: unknown, message?: string): void;
@@ -735,6 +732,22 @@ globalThis.test = (func, name, properties): void => {
   if (testCase.error) {
     globalThis.state.errors.push(testCase.error);
   }
+};
+
+/**
+ * Global version of :js:func:`Test.step_timeout` for use in single page tests.
+ *
+ * @param func - Function to run after the timeout
+ * @param timeout - Time in ms to wait before running the
+ * test step. The actual wait time is ``timeout`` x
+ * ``timeout_multiplier``.
+ */
+globalThis.step_timeout = (
+  func: UnknownFunc,
+  timeout: number,
+  ...rest: unknown[]
+): ReturnType<typeof setTimeout> => {
+  return setTimeout(() => func(...rest), timeout);
 };
 
 globalThis.assert_equals = (a, b, message): void => {

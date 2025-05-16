@@ -127,7 +127,8 @@ jobs:
           bazel build --disk_cache=~/bazel-disk-cache --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
       - name: Check snapshot diff
         run: |
-          diff -r types/generated-snapshot bazel-bin/types/definitions/ > types.diff
+          diff -r types/generated-snapshot/latest bazel-bin/types/definitions/latest > types.diff
+          diff -r types/generated-snapshot/experimental bazel-bin/types/definitions/experimental >> types.diff
       - name: 'Put diff on the environment'
         if: failure()
         id: types_diff
@@ -147,7 +148,7 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@52423e01640425a022ef5fd42c6fb5f633a02728
         with:
           message: |
-            The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `bazel build //types && rm -rf types/generated-snapshot && cp -r bazel-bin/types/definitions types/generated-snapshot` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}
+            The generated output of `@cloudflare/workers-types` has been changed by this PR. If this is intentional, run `just generate-types` to update the snapshot. Alternatively, you can download the full generated types: ${{ steps.artifact-upload-step.outputs.artifact-url }}
 
             <details>
             <summary>Full Type Diff</summary>
