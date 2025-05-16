@@ -231,6 +231,60 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
   using JsBase<v8::Array, JsArray>::JsBase;
 };
 
+template <bool coerce = false>
+class StringPtr {
+ public:
+  StringPtr(jsg::Lock& js, const v8::FastOneByteString* input): value(input) {};
+  StringPtr(jsg::Lock& js, v8::Local<v8::String> input): value(input) {};
+  StringPtr(jsg::Lock& js, v8::Local<v8::Value> input) {
+    if constexpr (coerce) {
+      value = check(input->ToString(js.v8Context()));
+    } else {
+      value = input.As<v8::String>();
+    }
+  }
+
+  size_t length(Lock& js) const {
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(v, const v8::FastOneByteString*) {
+        return v->length;
+      }
+      KJ_CASE_ONEOF(v, v8::Local<v8::String>) {
+        if (v->IsOneByte() || v->IsExternalOneByte()) {
+          return v->Length();
+        }
+
+        return v->Utf8LengthV2(js.v8Isolate);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  template <bool replace_invalid_surrogates = false>
+  kj::String asKjString(jsg::Lock& js) {
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(v, const v8::FastOneByteString*) {
+        auto out = kj::heapArray<kj::byte>(v->length);
+        memcpy(out.begin(), v->data, v->length);
+        return kj::str(out);
+      }
+      KJ_CASE_ONEOF(v, v8::Local<v8::String>) {
+        int flags = v8::String::WriteFlags::kNullTerminate;
+        if constexpr (replace_invalid_surrogates) {
+          flags |= v8::String::WriteFlags::kReplaceInvalidUtf8;
+        }
+        auto out = kj::heapArray<kj::byte>(v->Utf8LengthV2(js.v8Isolate) + 1);
+        v->WriteUtf8V2(js.v8Isolate, out.asChars().begin(), out.size(), flags);
+        return kj::str(out);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  kj::OneOf<const v8::FastOneByteString*, v8::Local<v8::String>> value;
+};
+
 class JsString final: public JsBase<v8::String, JsString> {
  public:
   int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
