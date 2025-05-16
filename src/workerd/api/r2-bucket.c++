@@ -1144,6 +1144,21 @@ jsg::Promise<jsg::BufferSource> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) 
   });
 }
 
+jsg::Promise<jsg::BufferSource> R2Bucket::GetResult::bytes(jsg::Lock& js) {
+  return js.evalNow([&] {
+    JSG_REQUIRE(!body->isDisturbed(), TypeError,
+        "Body has already been used. "
+        "It can only be used once. Use tee() first if you need to read it twice.");
+
+    auto& context = IoContext::current();
+    return body->getController()
+        .readAllBytes(js, context.getLimitEnforcer().getBufferingLimit())
+        .then(js, [](jsg::Lock& js, jsg::BufferSource data) {
+      return data.getTypedView<v8::Uint8Array>(js);
+    });
+  });
+}
+
 jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return js.evalNow([&] {
