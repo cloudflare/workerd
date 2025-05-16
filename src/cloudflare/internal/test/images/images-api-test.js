@@ -98,7 +98,7 @@ export const test_images_transform = {
       .output({ format: 'image/avif' });
 
     // Would be image/avif in real life, but mock always returns JSON
-    assert.equal(result.contentType(), 'application/json');
+    assert.strictEqual(result.contentType(), 'application/json');
     const body = await result.response().json();
 
     assert.deepStrictEqual(body, {
@@ -130,7 +130,7 @@ export const test_images_nested_draw = {
       .output({ format: 'image/avif' });
 
     // Would be image/avif in real life, but mock always returns JSON
-    assert.equal(result.contentType(), 'application/json');
+    assert.strictEqual(result.contentType(), 'application/json');
     const body = await result.response().json();
 
     assert.deepStrictEqual(body, {
@@ -301,7 +301,7 @@ export const test_images_base64_input = {
         .output({ format: 'image/avif' });
 
       // Would be image/avif in real life, but mock always returns JSON
-      assert.equal(result.contentType(), 'application/json');
+      assert.strictEqual(result.contentType(), 'application/json');
       const body = await result.response().json();
 
       assert.deepStrictEqual(body, {
@@ -337,7 +337,7 @@ export const test_images_base64_output = {
         .output({ format: 'image/avif' });
 
       // Would be image/avif in real life, but mock always returns JSON
-      assert.equal(result.contentType(), 'application/json');
+      assert.strictEqual(result.contentType(), 'application/json');
       const bodyBase64 = await new Response(
         await result.image({ encoding: 'base64' })
       ).text();
