@@ -441,6 +441,10 @@ class StringWrapper {
     return "DOMString";
   }
 
+  static constexpr const char* getName(jsg::StringPtr*) {
+    return "jsg::StringPtr";
+  }
+
   v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::ArrayPtr<const char> value) {
@@ -475,6 +479,13 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const DOMString& value) {
     return wrap(context, creator, value.asPtr());
+  }
+
+  kj::Maybe<jsg::StringPtr> tryUnwrap(v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      jsg::StringPtr*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    return jsg::StringPtr(Lock::from(context->GetIsolate()), handle);
   }
 
   kj::Maybe<kj::String> tryUnwrap(v8::Local<v8::Context> context,

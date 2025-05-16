@@ -18,13 +18,13 @@ clean:
   rm -f compile_commands.json
 
 build *args="//...":
-  bazel build {{args}}
+  bazel build {{args}} --config=debug
 
 build-asan *args="//...":
   just build {{args}} --config=asan
 
 test *args="//...":
-  bazel test {{args}}
+  bazel test {{args}} --config=debug
 
 test-asan *args="//...":
   just test {{args}} --config=asan

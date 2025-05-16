@@ -87,6 +87,11 @@ struct JsValueContext: public ContextGlobalObject {
     return obj.getPrototype(js);
   }
 
+
+  kj::String getStringPtr(Lock& js, jsg::StringPtr str) {
+    return str.toString(js);
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -104,6 +109,7 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(getDate);
     JSG_METHOD(checkProxyPrototype);
     JSG_NESTED_TYPE(Foo);
+    JSG_METHOD(getStringPtr);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(JsValueIsolate, JsValueContext, JsValueContext::Foo);
@@ -144,6 +150,8 @@ KJ_TEST("simple") {
   e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return String; } } )) "
                "=== Foo",
       "boolean", "false");
+  e.expectEval("getStringPtr('hello world')","string", "hello world");
+  e.expectEval("getStringPtr('Hello Yağız')","string", "Hello Yağız");
 }
 
 }  // namespace

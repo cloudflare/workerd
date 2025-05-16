@@ -231,6 +231,84 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
   using JsBase<v8::Array, JsArray>::JsBase;
 };
 
+class StringPtr {
+ public:
+  StringPtr(jsg::Lock& js, const v8::FastOneByteString* input): value(input), lock(&js) {};
+  StringPtr(jsg::Lock& js, v8::Local<v8::String> input): value(input), lock(&js) {};
+  StringPtr(jsg::Lock& js, v8::Local<v8::Value> input): lock(&js) {
+    value = check(input->ToString(js.v8Context()));
+  }
+  StringPtr(StringPtr&& other) = default;
+  KJ_DISALLOW_COPY(StringPtr);
+
+  size_t length(Lock& js) const {
+    KJ_ASSERT(&js == lock, "StringPtr::length() called with wrong lock");
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(v, const v8::FastOneByteString*) {
+        return v->length;
+      }
+      KJ_CASE_ONEOF(v, v8::Local<v8::String>) {
+        if (v->IsOneByte() || v->IsExternalOneByte()) {
+          return v->Length();
+        }
+
+        return v->Utf8LengthV2(js.v8Isolate);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  template <bool replace_invalid_utf8 = false>
+  kj::String toString(jsg::Lock& js) const {
+    KJ_ASSERT(&js == lock, "StringPtr::asKjString() called with wrong lock");
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(v, const v8::FastOneByteString*) {
+        auto out = kj::heapArray<char>(v->length);
+        out.asPtr().copyFrom(kj::arrayPtr(v->data, v->length));
+        return js.accountedKjString(kj::mv(out));
+      }
+      KJ_CASE_ONEOF(v, v8::Local<v8::String>) {
+        int flags = v8::String::WriteFlags::kNullTerminate;
+        if constexpr (replace_invalid_utf8) {
+          flags |= v8::String::WriteFlags::kReplaceInvalidUtf8;
+        }
+        auto out = kj::heapArray<char>(v->Utf8LengthV2(js.v8Isolate) + 1);
+        v->WriteUtf8V2(js.v8Isolate, out.asChars().begin(), out.size(), flags);
+        return js.accountedKjString(kj::mv(out));
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  template <typename Fn>
+    requires requires(
+        Fn fn, kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const char16_t>> arg) {
+      { fn(arg) } -> std::same_as<void>;
+    }
+  kj::OneOf<kj::ArrayPtr<const char>, kj::ArrayPtr<const char16_t>> apply(
+      jsg::Lock& js, Fn fn) const {
+    KJ_ASSERT(&js == lock, "StringPtr::asKjString() called with wrong lock");
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(v, const v8::FastOneByteString*) {
+        fn(kj::arrayPtr(v->data, v->length));
+      }
+      KJ_CASE_ONEOF(v, v8::Local<v8::String>) {
+        v8::String::ValueView view(js.v8Isolate, v);
+        if (view.is_one_byte()) {
+          fn(kj::arrayPtr(reinterpret_cast<const char*>(view.data8()), view.length()));
+        } else {
+          fn(kj::arrayPtr(reinterpret_cast<const char16_t*>(view.data16()), view.length()));
+        }
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+ private:
+  kj::OneOf<const v8::FastOneByteString*, v8::Local<v8::String>> value;
+  jsg::Lock* lock;
+};
+
 class JsString final: public JsBase<v8::String, JsString> {
  public:
   int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
