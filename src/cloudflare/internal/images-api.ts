@@ -43,13 +43,11 @@ class TransformationResultImpl implements ImageTransformationResult {
   image(
     options?: ImageTransformationOutputOptions
   ): ReadableStream<Uint8Array> {
-    let stream = this.bindingsResponse.body || new ReadableStream();
+    const stream = this.bindingsResponse.body || new Blob().stream();
 
-    if (options?.encoding === 'base64') {
-      stream = stream.pipeThrough(createBase64EncoderTransformStream());
-    }
-
-    return stream;
+    return options?.encoding === 'base64'
+      ? stream.pipeThrough(createBase64EncoderTransformStream())
+      : stream;
   }
 
   response(): Response {
@@ -216,10 +214,10 @@ class ImagesBindingImpl implements ImagesBinding {
   ): Promise<ImageInfoResponse> {
     const body = new StreamableFormData();
 
-    let decodedStream = stream;
-    if (options?.encoding === 'base64') {
-      decodedStream = stream.pipeThrough(createBase64DecoderTransformStream());
-    }
+    const decodedStream =
+      options?.encoding === 'base64'
+        ? stream.pipeThrough(createBase64DecoderTransformStream())
+        : stream;
 
     body.append('image', decodedStream, { type: 'file' });
 
@@ -254,11 +252,10 @@ class ImagesBindingImpl implements ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): ImageTransformer {
-    let decodedStream = stream;
-
-    if (options?.encoding === 'base64') {
-      decodedStream = stream.pipeThrough(createBase64DecoderTransformStream());
-    }
+    const decodedStream =
+      options?.encoding === 'base64'
+        ? stream.pipeThrough(createBase64DecoderTransformStream())
+        : stream;
 
     return new ImageTransformerImpl(this.fetcher, decodedStream);
   }
@@ -334,13 +331,15 @@ function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
   return result;
 }
 
-class Base64Error extends Error {
-  public constructor(cause: unknown) {
-    if (cause instanceof Error) {
-      super(`base64 error: ${cause.message}`, { cause });
-    } else {
-      super('unknown base64 error');
-    }
+function base64Error(cause: unknown): Error {
+  // @ts-expect-error: Error.isError seems to be missing from types?
+  const isError: (_: unknown) => boolean = Error.isError; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+
+  if (isError(cause)) {
+    const e = cause as Error;
+    return new Error(`base64 error: ${e.message}`, { cause });
+  } else {
+    return new Error('unknown base64 error');
   }
 }
 
@@ -359,9 +358,8 @@ function createBase64EncoderTransformStream(
     const binaryString = String.fromCharCode.apply(null, Array.from(buf));
 
     const base64String = btoa(binaryString);
-    const base64Bytes = asciiEncoder.encode(base64String);
 
-    return base64Bytes;
+    return asciiEncoder.encode(base64String);
   };
 
   return new TransformStream<Uint8Array, Uint8Array>({
@@ -373,19 +371,20 @@ function createBase64EncoderTransformStream(
 
       while (currentData.length - offset >= maxEncodeChunkSize) {
         const sliceToEnd = offset + maxEncodeChunkSize;
-        const processChunk = currentData.slice(offset, sliceToEnd);
+        const processChunk = currentData.subarray(offset, sliceToEnd);
         offset = sliceToEnd;
 
         try {
           controller.enqueue(toBase64(processChunk));
         } catch (error) {
-          controller.error(new Base64Error(error));
+          controller.error(base64Error(error));
           buffer = null;
           return;
         }
       }
 
-      buffer = offset < currentData.length ? currentData.slice(offset) : null;
+      buffer =
+        offset < currentData.length ? currentData.subarray(offset) : null;
     },
 
     flush(controller): void {
@@ -393,8 +392,7 @@ function createBase64EncoderTransformStream(
         try {
           controller.enqueue(toBase64(buffer));
         } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          controller.error(new Error(`base64 encoding error: ${errMsg}`));
+          controller.error(base64Error(error));
         }
       }
       buffer = null;
@@ -430,7 +428,7 @@ function createBase64DecoderTransformStream(
       }
       return true;
     } catch (error) {
-      controller.error(new Base64Error(error));
+      controller.error(base64Error(error));
       return false;
     }
   };
@@ -442,10 +440,10 @@ function createBase64DecoderTransformStream(
         : chunk;
 
       while (base64Buffer && base64Buffer.length >= maxChunkSize) {
-        const base64SegmentBytes = base64Buffer.slice(0, maxChunkSize);
+        const base64SegmentBytes = base64Buffer.subarray(0, maxChunkSize);
         base64Buffer =
           base64Buffer.length > maxChunkSize
-            ? base64Buffer.slice(maxChunkSize)
+            ? base64Buffer.subarray(maxChunkSize)
             : null;
 
         if (!decodeAndEnqueueSegment(base64SegmentBytes, controller)) {
@@ -458,13 +456,13 @@ function createBase64DecoderTransformStream(
         Math.floor(base64Buffer?.length ?? 0 / 4) * 4;
       if (remainingProcessableLength > 0) {
         if (base64Buffer) {
-          const base64SegmentBytes = base64Buffer.slice(
+          const base64SegmentBytes = base64Buffer.subarray(
             0,
             remainingProcessableLength
           );
           base64Buffer =
             base64Buffer.length > remainingProcessableLength
-              ? base64Buffer.slice(remainingProcessableLength)
+              ? base64Buffer.subarray(remainingProcessableLength)
               : null;
 
           if (!decodeAndEnqueueSegment(base64SegmentBytes, controller)) {
@@ -477,9 +475,7 @@ function createBase64DecoderTransformStream(
 
     flush(controller): void {
       if (base64Buffer && base64Buffer.length > 0) {
-        if (!decodeAndEnqueueSegment(base64Buffer, controller)) {
-          // Error already handled within the helper
-        }
+        decodeAndEnqueueSegment(base64Buffer, controller);
       }
       base64Buffer = null;
     },
