@@ -1919,7 +1919,7 @@ interface KVNamespace<Key extends string = string> {
     Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
   >;
   delete(key: Key): Promise<void>;
-  deleteBulk(): JsRpcPromise;
+  deleteBulk(keys: Key | Key[]): Promise<void>;
 }
 interface KVNamespaceListOptions {
   limit?: number;

@@ -73,31 +73,33 @@ export default class KVTest extends WorkerEntrypoint {
   async delete(keys) {
     if (keys === 'error') {
       // invalid type requested
-      throw new InternalError('failed to delete a single key');
+      throw new KVInternalError('failed to delete a single key', 'DELETE');
     }
     if (Array.isArray(keys) && keys.length > 100) {
       throw new BadClientRequestError(
-        'You can delete maximum of 100 keys per request'
+        'You can delete maximum of 100 keys per request',
+        'DELETE'
       );
     }
     if (Array.isArray(keys) && keys.includes('error')) {
-      throw new InternalError('failed to delete a single key from batch');
+      throw new KVInternalError(
+        'failed to delete a single key from batch',
+        'DELETE'
+      );
     }
     // Success otherwise
   }
 }
 
 class BadClientRequestError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'BadClientRequestError';
+  constructor(message, operation) {
+    super(`KV ${operation} failed: 400 ${message}`);
   }
 }
 
-class InternalError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'InternalError';
+class KVInternalError extends Error {
+  constructor(message, operation) {
+    super(`KV ${operation} failed: 500 ${message}`);
   }
 }
 
@@ -250,7 +252,7 @@ export let deleteBulkTest = {
 
     // Failure
     await assert.rejects(env.KV.deleteBulk('error'), {
-      message: 'InternalError: failed to delete a single key',
+      message: 'KV DELETE failed: 500 failed to delete a single key',
     });
 
     // Multiple keys
@@ -263,13 +265,13 @@ export let deleteBulkTest = {
       ),
       {
         message:
-          'BadClientRequestError: You can delete maximum of 100 keys per request',
+          'KV DELETE failed: 400 You can delete maximum of 100 keys per request',
       }
     );
 
     // Multiple keys with failure
     await assert.rejects(env.KV.deleteBulk(['key1', 'error']), {
-      message: 'InternalError: failed to delete a single key from batch',
+      message: 'KV DELETE failed: 500 failed to delete a single key from batch',
     });
   },
 };
