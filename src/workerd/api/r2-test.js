@@ -98,7 +98,7 @@ function buildGetResponse({ head, body, isList } = {}) {
     },
   });
 }
-async function compareResponse(res, { head, body } = {}) {
+async function compareResponse(res, { head, body } = {}, bytes) {
   // Destructuring syntax looks ugly, but gets around needing to construct HeadResponse objects(somehow?)
   const { ...obj } = await res;
   obj.checksums = { ...obj.checksums };
@@ -107,6 +107,15 @@ async function compareResponse(res, { head, body } = {}) {
     ...head,
   });
   if (body) {
+    if (bytes) {
+      const expected = new Uint8Array(new TextEncoder().encode(body));
+      const actual = await (await res).bytes();
+      assert.equal(expected.byteLength, actual.byteLength);
+      for (let i = 0; i < expected.byteLength; i++) {
+        assert.equal(expected[i], actual[i]);
+      }
+      return;
+    }
     assert.strictEqual(await (await res).text(), body);
   }
 }
@@ -550,6 +559,8 @@ export default {
       await compareResponse(env.BUCKET.get(key), {
         body,
       });
+      // GetObject(.bytes())
+      await compareResponse(env.BUCKET.get(key), { body }, true);
       // HeadObject
       await compareResponse(env.BUCKET.head(key));
       // MultipartUploads

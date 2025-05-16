@@ -2080,6 +2080,7 @@ interface R2ObjectBody extends R2Object {
   get body(): ReadableStream;
   get bodyUsed(): boolean;
   arrayBuffer(): Promise<ArrayBuffer>;
+  bytes(): Promise<Uint8Array>;
   text(): Promise<string>;
   json<T>(): Promise<T>;
   blob(): Promise<Blob>;
