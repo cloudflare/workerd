@@ -76,7 +76,7 @@ using BufferSourceViewConstructor = v8::Local<v8::Value> (*)(Lock&, BackingStore
 class BackingStore {
  public:
   template <BufferSourceType T = v8::Uint8Array>
-  static BackingStore from(kj::Array<kj::byte> data) {
+  static BackingStore from(Lock& js, kj::Array<kj::byte> data) {
     // Creates a new BackingStore that takes over ownership of the given kj::Array.
     size_t size = data.size();
     auto ptr = new kj::Array<byte>(kj::mv(data));
@@ -473,7 +473,7 @@ class BufferSourceWrapper {
 };
 
 inline BufferSource Lock::arrayBuffer(kj::Array<kj::byte> data) {
-  return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(kj::mv(data)));
+  return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(*this, kj::mv(data)));
 }
 
 }  // namespace workerd::jsg

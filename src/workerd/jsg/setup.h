@@ -334,7 +334,8 @@ class IsolateBase {
 
   explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
-      kj::Own<IsolateObserver> observer);
+      kj::Own<IsolateObserver> observer,
+      kj::Maybe<v8::IsolateGroup> group);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
@@ -448,11 +449,12 @@ class Isolate: public IsolateBase {
   // a jsg::Lock of this Isolate.
   template <typename MetaConfiguration>
   explicit Isolate(V8System& system,
+      kj::Maybe<v8::IsolateGroup> group,
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
-      : IsolateBase(system, kj::mv(createParams), kj::mv(observer)) {
+      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), group) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
@@ -463,7 +465,7 @@ class Isolate: public IsolateBase {
   explicit Isolate(V8System& system,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
-      : Isolate(system, nullptr, kj::mv(observer), kj::mv(createParams)) {}
+      : Isolate(system, kj::none, nullptr, kj::mv(observer), kj::mv(createParams)) {}
 
   template <typename MetaConfiguration>
   void instantiateDefaultWrapper(MetaConfiguration&& configuration) {
