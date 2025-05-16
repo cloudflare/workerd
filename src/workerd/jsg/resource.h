@@ -10,15 +10,13 @@
 // can call back to the class's methods. This differs from, say, a struct type, which will be deeply
 // converted into a JS object when passed into JS.
 
-#include "fast-api.h"
-#include "ser.h"
-#include "util.h"
-#include "web-idl.h"
-#include "wrappable.h"
-
+#include <workerd/jsg/fast-api.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/meta.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/ser.h>
+#include <workerd/jsg/util.h>
+#include <workerd/jsg/wrappable.h>
 
 #include <v8-template.h>
 
