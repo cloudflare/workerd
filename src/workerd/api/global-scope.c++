@@ -83,17 +83,21 @@ void ExecutionContext::passThroughOnException() {
 }
 
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
-  // TODO(someday): Maybe instead of throwing we should TerminateExecution() here? But that
-  //   requires some more extensive changes.
   KJ_IF_SOME(r, reason) {
-    IoContext::current().abort(js.exceptionToKj(r.addRef(js)));
-    js.throwException(kj::mv(r));
+    IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
   } else {
     auto e =
         JSG_KJ_EXCEPTION(FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
-    IoContext::current().abort(kj::cp(e));
-    kj::throwFatalException(kj::mv(e));
+    IoContext::current().abort(kj::mv(e));
   }
+
+  js.terminateExecution();
+
+  // terminateExecution() only sets a flag. In order for V8 to notify it, we have to make it do
+  // some work that causes it to check the flag. This has been observed to do the trick.
+  // TODO(cleanup): This appears in ExecutionContext::abort(), DurableObjectState::abort(), and
+  //     processExitImpl() in node/util.c++. Consolidate?
+  jsg::check(v8::JSON::Stringify(js.v8Context(), js.str()));
 }
 
 namespace {

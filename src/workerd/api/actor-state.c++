@@ -873,7 +873,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectState::blockConcurrencyWhile
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
 }
 
-void DurableObjectState::abort(jsg::Optional<kj::String> reason) {
+void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) {
   kj::String description = kj::mv(reason)
                                .map([](kj::String&& text) {
     return kj::str("broken.outputGateBroken; jsg.Error: ", text);
@@ -891,8 +891,14 @@ void DurableObjectState::abort(jsg::Optional<kj::String> reason) {
     s.get()->getActorCacheInterface().shutdown(error);
   }
 
-  IoContext::current().abort(kj::cp(error));
-  kj::throwFatalException(kj::mv(error));
+  IoContext::current().abort(kj::mv(error));
+  js.terminateExecution();
+
+  // terminateExecution() only sets a flag. In order for V8 to notify it, we have to make it do
+  // some work that causes it to check the flag. This has been observed to do the trick.
+  // TODO(cleanup): This appears in ExecutionContext::abort(), DurableObjectState::abort(), and
+  //     processExitImpl() in node/util.c++. Consolidate?
+  jsg::check(v8::JSON::Stringify(js.v8Context(), js.str()));
 }
 
 Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManager(

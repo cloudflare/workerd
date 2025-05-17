@@ -1179,16 +1179,10 @@ void IoContext::runImpl(Runnable& runnable,
         // Check if we hit a limit.
         limitEnforcer->requireLimitsNotExceeded();
 
-        // If we were terminated because abort() was called, then it's not an unknown
-        // reason...
-        if (!abortFulfiller->isWaiting()) {
-          // The assumption is that we've terminated because the IoContext was aborted and
-          // isolate->TerminateExection() was called (likely because of someone using
-          // process.exit(...) in Node.js compat mode).
-
-          // TODO(later): If this ends up being too spammy in sentry that we'll need to
-          // revisit, but for now... log the assert and move on.
-          KJ_FAIL_ASSERT("request terminated because it was aborted");
+        // Check if we were aborted. TerminateExecution() may be called after abort() in order
+        // to prevent any more JavaScript from executing.
+        KJ_IF_SOME(e, abortException) {
+          kj::throwFatalException(kj::cp(e));
         }
 
         // That should have thrown, so we shouldn't get here.

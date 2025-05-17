@@ -499,7 +499,7 @@ class DurableObjectState: public jsg::Object {
 
   // Reset the object, including breaking the output gate and canceling any writes that haven't
   // been committed yet.
-  void abort(jsg::Optional<kj::String> reason);
+  void abort(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
   // Sets and returns a new hibernation manager in an actor if there's none or returns the existing.
   Worker::Actor::HibernationManager& maybeInitHibernationManager(Worker::Actor& actor);
