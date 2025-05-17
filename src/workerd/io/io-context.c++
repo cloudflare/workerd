@@ -143,13 +143,16 @@ IoContext::IoContext(ThreadContext& thread,
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
-  auto localAbortPromise = kj::mv(paf.promise);
+  abortPromise = paf.promise.fork();
+
+  tasks.emplace(static_cast<kj::TaskSet::ErrorHandler&>(*this));
 
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
     if (isInspectorEnabled()) {
       // Arrange to report the problem to the inspector in addition to aborting.
+      // TODO(cleanup): This is weird. Should it go somewhere else?
       promise = (kj::coCapture([this, promise = kj::mv(promise)]() mutable -> kj::Promise<void> {
         kj::Maybe<kj::Exception> maybeException;
         try {
@@ -174,38 +177,13 @@ IoContext::IoContext(ThreadContext& thread,
     return promise;
   };
 
-  localAbortPromise = localAbortPromise.exclusiveJoin(makeLimitsPromise());
+  // Arrange to abort when limits expire.
+  abortWhen(makeLimitsPromise());
 
   KJ_IF_SOME(a, actor) {
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
     // and the actor can no longer be used.
-    localAbortPromise = localAbortPromise.exclusiveJoin(a.getInputGate().onBroken());
-
-    // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
-    // or unintentional async work
-    localAbortPromise =
-        (kj::coCapture([this, promise = kj::mv(localAbortPromise)]() mutable -> kj::Promise<void> {
-      try {
-        co_await promise;
-      } catch (...) {
-        auto exception = kj::getCaughtExceptionAsKj();
-        KJ_IF_SOME(a, actor) {
-          a.shutdownActorCache(exception);
-        }
-        kj::throwFatalException(kj::mv(exception));
-      }
-    }))();
-  }
-
-  // Abort when the time limit expires, the isolate is terminated, the input gate is broken, or
-  // `abortFulfiller` is fulfilled for some other reason.
-  abortPromise = localAbortPromise.fork();
-
-  // We don't construct `tasks` for actor requests because we put all tasks into `waitUntilTasks`
-  // in that case.
-  if (actor == kj::none) {
-    kj::TaskSet::ErrorHandler& errorHandler = *this;
-    tasks.emplace(errorHandler);
+    abortWhen(a.getInputGate().onBroken());
   }
 }
 
@@ -394,6 +372,29 @@ void IoContext::logUncaughtExceptionAsync(
   kj::Maybe<RequestObserver&> metrics;
   if (!incomingRequests.empty()) metrics = getMetrics();
   runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), kj::none, true);
+}
+
+void IoContext::abort(kj::Exception&& e) {
+  if (abortException != kj::none) {
+    return;
+  }
+  abortException = kj::cp(e);
+  KJ_IF_SOME(a, actor) {
+    // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
+    // or unintentional async work
+    a.shutdownActorCache(kj::cp(e));
+  }
+  abortFulfiller->reject(kj::mv(e));
+}
+
+void IoContext::abortWhen(kj::Promise<void> promise) {
+  // Unlike addTask(), abortWhen() always uses `tasks`, even in actors, because we do not want
+  // these tasks to block hibernation.
+  KJ_IF_SOME(t, tasks) {
+    t.add(promise.catch_([this](kj::Exception&& e) { abort(kj::mv(e)); }));
+  } else {
+    // If `tasks` is null, we're already aborting.
+  }
 }
 
 void IoContext::addTask(kj::Promise<void> promise) {
