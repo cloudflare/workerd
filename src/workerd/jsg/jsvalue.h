@@ -557,7 +557,7 @@ class JsRef final {
   // requires V8Ref types.
   template <typename U>
   operator V8Ref<U>() && {
-    return kj::mv(value).template cast<U>(Lock::from(v8::Isolate::GetCurrent()));
+    return kj::mv(value).template cast<U>(jsg::Lock::current());
   }
 
   JSG_MEMORY_INFO(JsRef) {
@@ -580,7 +580,7 @@ inline JsRef<Self> JsBase<T, Self>::addRef(Lock& js) {
 }
 
 inline kj::String KJ_STRINGIFY(const JsValue& value) {
-  return value.toString(Lock::from(v8::Isolate::GetCurrent()));
+  return value.toString(jsg::Lock::current());
 }
 
 template <typename TypeWrapper>

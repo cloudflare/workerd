@@ -15,11 +15,8 @@
 namespace workerd::jsg {
 
 kj::String stringifyHandle(v8::Local<v8::Value> value) {
-  // This is the only place in the entire codebase where we use v8::Isolate::GetCurrent(). It's
-  // hard to avoid since we want `kj::str(handle)` to work, which doesn't give us a chance to
-  // pass in a `Lock` or whatever.
   // TODO(cleanup): Perhaps we should require you to call `js.toString(handle)`?
-  auto& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   return js.withinHandleScope([&] {
     v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
     v8::String::Utf8Value utf8(js.v8Isolate, str);

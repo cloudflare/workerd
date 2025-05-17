@@ -2413,6 +2413,10 @@ class Lock {
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(SET_DATA_LOCK));
   }
 
+  static Lock& current() {
+    return from(v8::Isolate::GetCurrent());
+  }
+
   // RAII construct that reports amount of external memory to be manually attributed to
   // the isolate. When the returned ExtrernalMemoryAdjuster is dropped, the amount will
   // be subtracted from the isolate's external memory accounting. If the adjuster is
