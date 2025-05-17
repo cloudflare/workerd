@@ -1856,8 +1856,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::MembranePolicy,
                                                                  public kj::Refcounted {
  public:
-  explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
-      : doneFulfiller(kj::mv(doneFulfiller)) {}
+  explicit ServerTopLevelMembrane(
+      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller, kj::Promise<void> revokerPromise)
+      : doneFulfiller(kj::mv(doneFulfiller)),
+        revokerPromise(kj::mv(revokerPromise)) {}
   ~ServerTopLevelMembrane() noexcept(false) {
     KJ_IF_SOME(f, doneFulfiller) {
       f->reject(
@@ -1870,7 +1872,10 @@ class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::M
     auto f = kj::mv(JSG_REQUIRE_NONNULL(
         doneFulfiller, Error, "Only one RPC method call is allowed on this object."));
     doneFulfiller = kj::none;
-    return capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
+    auto completion =
+        capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
+    return capnp::membrane(
+        kj::mv(completion), kj::refcounted<RevokerMembrane>(kj::mv(revokerPromise)));
   }
 
   kj::Maybe<capnp::Capability::Client> outboundCall(
@@ -1884,6 +1889,7 @@ class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::M
 
  private:
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
+  kj::Promise<void> revokerPromise;
 };
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
@@ -1899,7 +1905,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   capFulfiller->fulfill(
       capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName, kj::mv(props),
                           mapAddRef(incomingRequest->getWorkerTracer())),
-          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller), ioctx.onAbort())));
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
