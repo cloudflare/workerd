@@ -9,7 +9,7 @@
 namespace workerd::api::urlpattern {
 std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatternRegexEngine::
     create_instance(std::string_view pattern, bool ignore_case) {
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   jsg::Lock::RegExpFlags flags = jsg::Lock::RegExpFlags::kUNICODE_SETS;
   if (ignore_case) {
     flags = static_cast<jsg::Lock::RegExpFlags>(
@@ -23,13 +23,13 @@ std::optional<URLPattern::URLPatternRegexEngine::regex_type> URLPattern::URLPatt
 
 bool URLPattern::URLPatternRegexEngine::regex_match(
     std::string_view input, const regex_type& pattern) {
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   return pattern.getHandle(js).match(js, kj::StringPtr(input.data(), input.size()));
 }
 
 std::optional<std::vector<std::optional<std::string>>> URLPattern::URLPatternRegexEngine::
     regex_search(std::string_view input, const regex_type& pattern) {
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   KJ_IF_SOME(matches, pattern.getHandle(js)(js, kj::StringPtr(input.data(), input.size()))) {
     std::vector<std::optional<std::string>> results(matches.size() - 1);
     // The first value is always the input of the exec() command. Therefore

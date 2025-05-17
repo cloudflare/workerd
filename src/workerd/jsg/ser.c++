@@ -72,11 +72,10 @@ void Serializer::throwDataCloneErrorForObject(jsg::Lock& js, v8::Local<v8::Objec
 }
 
 void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
-  auto isolate = v8::Isolate::GetCurrent();
+  auto& js = jsg::Lock::current();
   try {
-    Lock& js = Lock::from(isolate);
     auto exception = js.domException(kj::str("DataCloneError"), kj::str(message));
-    isolate->ThrowException(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
+    js.v8Isolate->ThrowException(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
   } catch (JsExceptionThrown&) {
     // Apparently an exception was thrown during the construction of the DOMException. Most likely
     // we were terminated. In any case, we'll let that exception stay scheduled and propagate back
@@ -84,7 +83,7 @@ void Serializer::ThrowDataCloneError(v8::Local<v8::String> message) {
   } catch (...) {
     // A KJ exception was thrown, we'll have to convert it to JavaScript and propagate that
     // exception instead.
-    throwInternalError(isolate, kj::getCaughtExceptionAsKj());
+    throwInternalError(js.v8Isolate, kj::getCaughtExceptionAsKj());
   }
 }
 

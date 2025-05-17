@@ -152,9 +152,7 @@ class Function<Ret(Args...)> {
       Args...);
 
   Function(Wrapper* wrapper, V8Ref<v8::Object> receiver, V8Ref<v8::Function> function)
-      : Function(wrapper,
-            receiver.cast<v8::Value>(Lock::from(v8::Isolate::GetCurrent())),
-            kj::mv(function)) {}
+      : Function(wrapper, receiver.cast<v8::Value>(jsg::Lock::current()), kj::mv(function)) {}
 
   // Construct jsg::Function wrapping a JavaScript function.
   Function(Wrapper* wrapper, Value receiver, V8Ref<v8::Function> function)

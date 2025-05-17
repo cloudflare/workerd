@@ -1866,7 +1866,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(v8::Local<v8::V
   kj::byte* data = reinterpret_cast<kj::byte*>(store->Data()) + byteOffset;
   // TODO(cleanup): Have this method accept a jsg::Lock& from the caller instead of using
   // v8::Isolate::GetCurrent();
-  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = jsg::Lock::current();
   return IoContext::current().awaitIo(js,
       writable->canceler.wrap(writable->sink->write(kj::arrayPtr(data, byteLength)))
           .attach(js.v8Ref(v8::ArrayBuffer::New(js.v8Isolate, store))),
