@@ -165,7 +165,6 @@ JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate,
     ValueBox);
 
 KJ_TEST("GC collects objects when expected") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
 
   // Test that a full GC can collect native objects.

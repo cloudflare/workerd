@@ -5,6 +5,8 @@
 
 #include <workerd/util/sentry.h>
 
+#include <stdlib.h>
+
 #include <capnp/message.h>
 #include <kj/common.h>
 #include <kj/debug.h>
@@ -51,9 +53,9 @@ bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
     return a.gates[(unsigned long)key];
   }
-  LOG_ERROR_PERIODICALLY(
-      kj::str("Autogates not initialised, check for ", key, " will have no effect"));
-  return false;
+
+  static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
+  return defaultResult;
 }
 
 void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {

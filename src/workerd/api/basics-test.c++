@@ -87,7 +87,6 @@ JSG_DECLARE_ISOLATE_TYPE(BasicsIsolate,
     jsg::TypeWrapperExtension<PromiseWrapper>);
 
 KJ_TEST("EventTarget native listeners work") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   jsg::test::Evaluator<BasicsContext, BasicsIsolate, CompatibilityFlags::Reader> e(v8System);
   e.expectEval("testNativeListenersWork()", "boolean", "true");
 }

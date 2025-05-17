@@ -25,7 +25,6 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/actor-id-impl.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/use-perfetto-categories.h>
