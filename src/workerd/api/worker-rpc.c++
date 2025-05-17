@@ -1476,8 +1476,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object, bool allowInstanceProperties = false)
       : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
-        allowInstanceProperties(allowInstanceProperties),
-        pendingEvent(ioCtx.registerPendingEvent()) {
+        allowInstanceProperties(allowInstanceProperties) {
     // Check for the existence of a dispose function now so that the destructor doesn't have to
     // take an isolate lock if there isn't one.
     auto getResult = object.get(js, js.symbolDispose());
@@ -1498,8 +1497,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         disposeFulfiller(addDisposeTask(js, ioCtx, object, kj::mv(dispose), kj::mv(stubDisposers))),
-        allowInstanceProperties(allowInstanceProperties),
-        pendingEvent(ioCtx.registerPendingEvent()) {}
+        allowInstanceProperties(allowInstanceProperties) {}
 
   ~TransientJsRpcTarget() noexcept(false) {
     KJ_IF_SOME(f, kj::mv(disposeFulfiller)) {
@@ -1557,15 +1555,6 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   }
 
   bool allowInstanceProperties;
-
-  // An RpcTarget could receive a new call (in the existing IoContext) at any time, therefore
-  // its existence counts as a PendingEvent. If we don't hold a PendingEvent, then the IoContext
-  // may decide that there's nothing more than can possibly happen in this context, and cancel
-  // itself.
-  //
-  // Note that it's OK if we hold this past the lifetime of the IoContext itself; the PendingEvent
-  // becomes detached in that case and has no effect.
-  kj::Own<void> pendingEvent;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // dup() is reserved to duplicate the stub itself, pointing to the same object.
