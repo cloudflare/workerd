@@ -3369,7 +3369,6 @@ struct Worker::Actor::Impl {
   // in each CustomEvent.
   kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
-  kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
   struct ScheduledAlarm {
     ScheduledAlarm(
@@ -3566,7 +3565,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       e.setDescription(kj::mv(description));
     }
 
-    impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
+    context.abort(kj::cp(e));
     impl->classInstance = kj::mv(e);
   }
 }
@@ -3619,8 +3618,7 @@ kj::Promise<void> Worker::Actor::onBroken() {
     impl->abortFulfiller = kj::mv(paf.fulfiller);
   }
 
-  return abortPromise
-      .exclusiveJoin(kj::mv(impl->constructorFailedPaf.promise));
+  return abortPromise;
 }
 
 const Worker::Actor::Id& Worker::Actor::getId() {
