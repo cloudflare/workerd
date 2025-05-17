@@ -3620,9 +3620,6 @@ kj::Promise<void> Worker::Actor::onBroken() {
   }
 
   return abortPromise
-      // inputGate.onBroken() is covered by IoContext::onAbort(), but outputGate.onBroken() is
-      // not.
-      .exclusiveJoin(impl->outputGate.onBroken())
       .exclusiveJoin(kj::mv(impl->constructorFailedPaf.promise));
 }
 
