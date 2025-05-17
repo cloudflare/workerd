@@ -433,7 +433,7 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   }
 
   if (incomingRequests.empty()) {
-    KJ_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
   }
 
