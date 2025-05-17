@@ -247,9 +247,27 @@ class DurableObjectNamespace: public jsg::Object {
       jsg::Optional<GetDurableObjectOptions> options);
 };
 
+// DurableObjectClass represents a binding to a Durable Object class that can be used
+// as a facet. The only use of this type is to pass to `ctx.facets.get()`.
+class DurableObjectClass: public jsg::Object {
+ public:
+  DurableObjectClass(uint channel): channel(channel) {}
+
+  uint getChannel() const {
+    return channel;
+  }
+
+  JSG_RESOURCE_TYPE(DurableObjectClass) {
+    // No methods - this is just a handle that gets passed to ctx.facets.get()
+  }
+
+ private:
+  uint channel;
+};
+
 #define EW_ACTOR_ISOLATE_TYPES                                                                     \
   api::ColoLocalActorNamespace, api::DurableObject, api::DurableObjectId,                          \
       api::DurableObjectNamespace, api::DurableObjectNamespace::NewUniqueIdOptions,                \
-      api::DurableObjectNamespace::GetDurableObjectOptions
+      api::DurableObjectNamespace::GetDurableObjectOptions, api::DurableObjectClass
 
 }  // namespace workerd::api
