@@ -221,6 +221,10 @@ export class MyService extends WorkerEntrypoint {
     throw new Error('METHOD THREW');
   }
 
+  async neverReturn() {
+    await new Promise((resolve) => {});
+  }
+
   async tryUseGlobalRpcPromise() {
     return await globalRpcPromise;
   }
@@ -468,6 +472,31 @@ export class MyServiceProxy extends WorkerEntrypoint {
   }
 }
 
+class PostAbortCallTester extends RpcTarget {
+  constructor(ctx) {
+    super();
+    this.ctx = ctx;
+  }
+
+  ping() {
+    return 'pong';
+  }
+
+  hang() {
+    return new Promise((resolve) => {});
+  }
+
+  abort() {
+    this.ctx.abort('test aborted by abort()');
+  }
+
+  async failCriticalSection() {
+    await this.ctx.blockConcurrencyWhile(() => {
+      throw new Error('test broken critical section');
+    });
+  }
+}
+
 export class MyActor extends DurableObject {
   #counter = 0;
 
@@ -481,6 +510,22 @@ export class MyActor extends DurableObject {
   async increment(amount) {
     this.#counter += amount;
     return this.#counter;
+  }
+
+  async doCallbackBlockingConcurrency() {
+    // Check that we can receive RPC callbacks during blockConcurrencyWhile(), if they are from
+    // an RPC running inside the block. This verifies that the critical section is captured
+    // correctly in IoContext::makeReentryCallback().
+    return this.ctx.blockConcurrencyWhile(async () => {
+      let func = () => {
+        return 12345;
+      };
+      return await this.env.MyService.getRpcPromise(func);
+    });
+  }
+
+  makePostAbortCallTester() {
+    return new PostAbortCallTester(this.ctx);
   }
 }
 
@@ -758,6 +803,12 @@ export let namedServiceBinding = {
         'serialization.',
     });
 
+    // A stateless entryponit method that never returns should fail due to PendingEvent tracking.
+    await assert.rejects(() => env.MyService.neverReturn(), {
+      name: 'Error',
+      message: 'The script will never generate a response.',
+    });
+
     {
       let map = await env.MyService.getMap();
       assert.strictEqual(map.get('foo'), 123);
@@ -775,6 +826,8 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(5), 5);
     assert.strictEqual(await stub.increment(2), 7);
     assert.strictEqual(await stub.increment(8), 15);
+
+    assert.strictEqual(await stub.doCallbackBlockingConcurrency(), 12345);
   },
 };
 
@@ -1739,5 +1792,82 @@ export let testConstructEntrypoint = {
   async test(controller, env, ctx) {
     const constructed = constructEntrypoint(MyEntrypoint, env);
     assert.strictEqual(await constructed.rpcFunc(), 'hello from entrypoint');
+  },
+};
+
+// Test that calls to an RpcTarget made after the context is aborted don't get delivered.
+export let portAbortCall = {
+  async test(controller, env, ctx) {
+    {
+      let id = env.MyActor.newUniqueId();
+      let actor = env.MyActor.get(id);
+      let stub = await actor.makePostAbortCallTester();
+
+      let hangPromise = stub.hang();
+      assert.strictEqual(await stub.ping(), 'pong');
+      let abortPromise = stub.abort();
+      let pingPromise = stub.ping();
+
+      // TODO(bug): These should all propagate the abort reason.
+      await assert.rejects(abortPromise, {
+        name: 'Error',
+        message: 'test aborted by abort()',
+      });
+      await assert.rejects(pingPromise, {
+        name: 'Error',
+        message: 'The execution context responding to this call was canceled.',
+      });
+      await assert.rejects(hangPromise, {
+        name: 'Error',
+        message: 'The execution context responding to this call was canceled.',
+      });
+      await assert.rejects(stub.ping(), {
+        name: 'Error',
+        message:
+          'The execution context which hosts this callback is no longer running.',
+      });
+      await assert.rejects(actor.increment(2), {
+        name: 'Error',
+        message: 'test aborted by abort()',
+      });
+    }
+
+    // Start over with a new stub, this time use failCriticalSection() to break the actor. As of
+    // this writing, this differs significantly from plain `abort()` in that
+    // `IoContext::abortException` never gets set, since `IoContext::abort()` is not directly
+    // called, but instead the exception is joined into the on-abort promise.
+    {
+      let id = env.MyActor.newUniqueId();
+      let actor = env.MyActor.get(id);
+      let stub = await actor.makePostAbortCallTester();
+
+      let hangPromise = stub.hang();
+      assert.strictEqual(await stub.ping(), 'pong');
+      let failPromise = stub.failCriticalSection();
+      let pingPromise = stub.ping();
+
+      // TODO(bug): These should all propagate the abort reason.
+      await assert.rejects(failPromise, {
+        name: 'Error',
+        message: 'The execution context responding to this call was canceled.',
+      });
+      await assert.rejects(pingPromise, {
+        name: 'Error',
+        message: 'test broken critical section',
+      });
+      await assert.rejects(hangPromise, {
+        name: 'Error',
+        message: 'The execution context responding to this call was canceled.',
+      });
+      await assert.rejects(stub.ping(), {
+        name: 'Error',
+        message:
+          'The execution context which hosts this callback is no longer running.',
+      });
+      await assert.rejects(actor.increment(2), {
+        name: 'Error',
+        message: 'test broken critical section',
+      });
+    }
   },
 };
