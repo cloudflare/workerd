@@ -281,13 +281,6 @@ Name Lock::newApiSymbol(kj::StringPtr symbol) {
   return Name(*this, v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, symbol)));
 }
 
-JsSymbol Lock::symbolDispose() {
-  return JsSymbol(v8::Symbol::GetDispose(v8Isolate));
-}
-JsSymbol Lock::symbolAsyncDispose() {
-  return IsolateBase::from(v8Isolate).getSymbolAsyncDispose();
-}
-
 kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {

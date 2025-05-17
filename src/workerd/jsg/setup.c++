@@ -417,12 +417,6 @@ IsolateBase::IsolateBase(
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
-
-      // Create Symbol.dispose and Symbol.asyncDispose.
-      symbolAsyncDispose.Reset(ptr,
-          v8::Symbol::New(ptr,
-              v8::String::NewFromUtf8(ptr, "asyncDispose", v8::NewStringType::kInternalized)
-                  .ToLocalChecked()));
     }
   });
 }
@@ -460,7 +454,6 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     KJ_DEFER(heapTracer.destroy());
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
-    KJ_DEFER(symbolAsyncDispose.Reset());
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
 
