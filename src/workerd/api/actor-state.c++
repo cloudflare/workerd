@@ -122,7 +122,8 @@ ActorObserver& currentActorMetrics() {
 
 jsg::JsRef<jsg::JsValue> listResultsToMap(
     jsg::Lock& js, ActorCacheOps::GetResultList value, bool completelyCached) {
-  return js.withinHandleScope([&] {
+  return js
+      .withinHandleScope([&] {
     auto map = js.map();
     size_t cachedReadBytes = 0;
     size_t uncachedReadBytes = 0;
@@ -151,14 +152,15 @@ jsg::JsRef<jsg::JsValue> listResultsToMap(
       actorMetrics.addUncachedStorageReadUnits(1);
     }
 
-    return jsg::JsValue(map).addRef(js);
-  });
+    return jsg::JsValue(map);
+  }).addRef(js);
 }
 
 kj::Function<jsg::JsRef<jsg::JsValue>(jsg::Lock&, ActorCacheOps::GetResultList)>
 getMultipleResultsToMap(size_t numInputKeys) {
   return [numInputKeys](jsg::Lock& js, ActorCacheOps::GetResultList value) mutable {
-    return js.withinHandleScope([&] {
+    return js
+        .withinHandleScope([&] {
       auto map = js.map();
       uint32_t cachedUnits = 0;
       uint32_t uncachedUnits = 0;
@@ -187,8 +189,8 @@ getMultipleResultsToMap(size_t numInputKeys) {
       // only for uncached reads, we'll need to address this.
       actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
 
-      return jsg::JsValue(map).addRef(js);
-    });
+      return jsg::JsValue(map);
+    }).addRef(js);
   };
 }
 

@@ -2253,6 +2253,12 @@ class JsMessage;
 JS_TYPE_CLASSES(V)
 #undef V
 
+#define V(Name) || kj::isSameType<T, Js##Name>()
+template <typename T>
+concept IsJsValue =
+    kj::isSameType<T, JsValue>() || kj::isSameType<T, JsMessage>() JS_TYPE_CLASSES(V);
+#undef V
+
 class DOMException;
 class ExternalMemoryAdjustment;
 
@@ -2693,7 +2699,11 @@ class Lock {
   // value is properly handled.
   auto withinHandleScope(auto&& fn) {
     using Ret = decltype(fn());
-    if constexpr (isV8Local<Ret>()) {
+    if constexpr (IsJsValue<Ret>) {
+      v8::EscapableHandleScope scope(v8Isolate);
+      v8::Local<v8::Value> value = fn();
+      return Ret(scope.Escape(value));
+    } else if constexpr (isV8Local<Ret>()) {
       v8::EscapableHandleScope scope(v8Isolate);
       return scope.Escape(fn());
     } else if constexpr (isV8MaybeLocal<Ret>()) {
