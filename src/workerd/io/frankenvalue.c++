@@ -88,8 +88,7 @@ Frankenvalue Frankenvalue::fromCapnp(rpc::Frankenvalue::Reader reader) {
 }
 
 jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
-  // TODO(cleanup): Make `withinHandleScope()` correctly support `jsg::JsValue` and friends.
-  return jsg::JsValue(js.withinHandleScope([&]() -> v8::Local<v8::Value> {
+  return js.withinHandleScope([&]() -> jsg::JsValue {
     jsg::JsValue result = [&]() -> jsg::JsValue {
       KJ_SWITCH_ONEOF(value) {
         KJ_CASE_ONEOF(_, EmptyObject) {
@@ -117,7 +116,7 @@ jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
     }
 
     return result;
-  }));
+  });
 }
 
 Frankenvalue Frankenvalue::fromJs(jsg::Lock& js, jsg::JsValue value) {
