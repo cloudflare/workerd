@@ -533,14 +533,14 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
 
   context.pendingEvent = kj::none;
 
-  // We can't execute finalizers just yet. We need to run the event loop to see if any queued
+  // We can't abort just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
-  context.runFinalizersTask = Worker::AsyncLock::whenThreadIdle()
+  context.abortFromHangTask = Worker::AsyncLock::whenThreadIdle()
                                   .then([&context = context]() noexcept {
-    // We have nothing left to do and no PendingEvent has been registered. Run finalizers now.
+    // We have nothing left to do and no PendingEvent has been registered. Abort now.
     return context.worker->takeAsyncLock(context.getMetrics())
-        .then([&context](Worker::AsyncLock asyncLock) { context.runFinalizers(asyncLock); });
+        .then([&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });
   }).eagerlyEvaluate(nullptr);
 }
 
@@ -554,10 +554,12 @@ kj::Own<void> IoContext::registerPendingEvent() {
   KJ_IF_SOME(pe, pendingEvent) {
     return kj::addRef(pe);
   } else {
-    KJ_REQUIRE(!isFinalized(), "request has already been finalized");
+    KJ_IF_SOME(e, abortException) {
+      kj::throwFatalException(kj::cp(e));
+    }
 
     // Cancel any already-scheduled finalization.
-    runFinalizersTask = kj::none;
+    abortFromHangTask = kj::none;
 
     auto result = kj::refcounted<PendingEvent>(*this);
     pendingEvent = *result;
@@ -1089,7 +1091,9 @@ void IoContext::runImpl(Runnable& runnable,
 
     kj::Own<void> event;
     if (takePendingEvent) {
-      // Prevent finalizers from running while we're still executing JavaScript.
+      // Prevent prematurely detecting a hang while we're still executing JavaScript.
+      // TODO(cleanup): Is this actually still needed or is this vestigial? Seems like it should
+      //   not be necessary.
       event = registerPendingEvent();
     }
 
@@ -1248,46 +1252,20 @@ auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
   }
 }
 
-void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
-  KJ_ASSERT(actor == kj::none);  // we don't finalize actor requests
+void IoContext::abortFromHang(Worker::AsyncLock& asyncLock) {
+  KJ_ASSERT(actor == kj::none);  // we don't perform hang detection on actor requests
 
   tasks = kj::none;
   // Tasks typically have callbacks that dereference IoOwns. Since those callbacks
-  // will throw after request finalization, we should cancel them now.
+  // will throw after we abort, we should cancel them now.
 
-  if (abortFulfiller->isWaiting()) {
-    // Don't bother fulfilling `abortFulfiller` if limits were exceeded because in that case the
-    // abort promise will be fulfilled shortly anyway.
-    if (limitEnforcer->getLimitsExceeded() == kj::none) {
-      abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
-    }
+  // Don't bother aborting if limits were exceeded because in that case the abort promise will be
+  // fulfilled shortly anyway.
+  if (limitEnforcer->getLimitsExceeded() == kj::none) {
+    abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
   }
 
-  if (auto warnings = ownedObjects.finalize(); !warnings.empty()) {
-    // Log all the warnings.
-    //
-    // Logging a warning calls console.log() which could be maliciously overridden, so we must use
-    // run() here (as opposed to just constructing a Scope). But we don't want it to try to create
-    // a new PendingEvent, so we have to call runImpl() directly to pass false for the second
-    // parameter.
-    struct RunnableImpl: public Runnable {
-      IoContext& context;
-      kj::Vector<kj::StringPtr> warnings;
-
-      RunnableImpl(IoContext& context, kj::Vector<kj::StringPtr> warnings)
-          : context(context),
-            warnings(kj::mv(warnings)) {}
-      void run(Worker::Lock& lock) override {
-        for (auto warning: warnings) {
-          context.logWarning(warning);
-        }
-      }
-    };
-
-    RunnableImpl runnable(*this, kj::mv(warnings));
-    runImpl(runnable, false, asyncLock, kj::none, true);
-  }
-
+  // TODO(cleanup): Why is this line here? It seems unnecessary.
   promiseContextTag = kj::none;
 }
 

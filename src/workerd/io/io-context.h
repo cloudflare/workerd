@@ -651,10 +651,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
         js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection(), IdentityFunc<T>());
   }
 
-  bool isFinalized() {
-    return ownedObjects.isFinalized();
-  }
-
   // Called by ScheduledEvent
   void setNoRetryScheduled() {
     retryScheduled = false;
@@ -938,7 +934,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   class PendingEvent;
 
   kj::Maybe<PendingEvent&> pendingEvent;
-  kj::Maybe<kj::Promise<void>> runFinalizersTask;
+  kj::Maybe<kj::Promise<void>> abortFromHangTask;
 
   WarningAggregator::Map warningAggregatorMap;
 
@@ -1008,7 +1004,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       bool allowPermanentException);
 
-  void runFinalizers(Worker::AsyncLock& asyncLock);
+  void abortFromHang(Worker::AsyncLock& asyncLock);
 
   template <typename T>
   struct IdentityFunc {
