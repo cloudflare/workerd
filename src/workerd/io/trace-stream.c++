@@ -1011,22 +1011,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
-  auto revokePaf = kj::newPromiseAndFulfiller<void>();
-
-  // TODO(streaming-tail): Session is currently being reported as canceled when using
-  // TailStreamCustomEventImpl via RPC, investigate.
-  KJ_DEFER({
-    if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
-    }
-  });
-
   auto req = dispatcher.tailStreamSessionRequest();
   auto sent = req.send();
 
   rpc::TailStreamTarget::Client cap = sent.getTopLevel();
-
-  cap = capnp::membrane(kj::mv(cap), kj::refcounted<RevokerMembrane>(kj::mv(revokePaf.promise)));
 
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
   cap = capnp::membrane(
@@ -1037,11 +1025,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   try {
     co_await sent.ignoreResult().exclusiveJoin(kj::mv(completionPaf.promise));
   } catch (...) {
-    auto e = kj::getCaughtExceptionAsKj();
-    if (revokePaf.fulfiller->isWaiting()) {
-      revokePaf.fulfiller->reject(kj::cp(e));
-    }
-    kj::throwFatalException(kj::mv(e));
+    kj::throwFatalException(kj::getCaughtExceptionAsKj());
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
