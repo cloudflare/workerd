@@ -1,0 +1,211 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sat, 3 May 2025 18:39:12 -0400
+Subject: Add Windows arm64 support
+
+
+diff --git a/docs/repo_utils.md b/docs/repo_utils.md
+index 4d61bb21927ae8f39b50958706924fd8f9633b46..4cdcb6622083e491d7a0f83ef259ad70fd8d239a 100644
+--- a/docs/repo_utils.md
++++ b/docs/repo_utils.md
+@@ -194,6 +194,7 @@ Common os & architecture pairs that are returned are,
+ - linux_s390x
+ - linux_ppc64le
+ - windows_amd64
++- windows_arm64
+ 
+ 
+ **PARAMETERS**
+diff --git a/lib/private/copy_directory_toolchain.bzl b/lib/private/copy_directory_toolchain.bzl
+index 82329e4e4b3b7411248a1f170f473363d9c3038c..ebf6541c18e9d8b93c9e5aaa2aa9e109993f0a9e 100644
+--- a/lib/private/copy_directory_toolchain.bzl
++++ b/lib/private/copy_directory_toolchain.bzl
+@@ -48,6 +48,12 @@ COPY_DIRECTORY_PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "windows_arm64": struct(
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:aarch64",
++        ],
++    ),
+ }
+ 
+ CopyToDirectoryInfo = provider(
+diff --git a/lib/private/copy_to_directory_toolchain.bzl b/lib/private/copy_to_directory_toolchain.bzl
+index 42fe1f19d75edbe62c3840bfce86bfcca2cb6839..dad26bfc2f72f6f4d86bc5a7a9b3fd1cc38145cf 100644
+--- a/lib/private/copy_to_directory_toolchain.bzl
++++ b/lib/private/copy_to_directory_toolchain.bzl
+@@ -48,6 +48,12 @@ COPY_TO_DIRECTORY_PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "windows_arm64": struct(
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:aarch64",
++        ],
++    ),
+ }
+ 
+ CopyToDirectoryInfo = provider(
+diff --git a/lib/private/coreutils_toolchain.bzl b/lib/private/coreutils_toolchain.bzl
+index a288464864f91eb21df2476c269bd3d24707f1f5..6b50718fd5d2334d29af64f3224a7ca30927e37e 100644
+--- a/lib/private/coreutils_toolchain.bzl
++++ b/lib/private/coreutils_toolchain.bzl
+@@ -32,6 +32,12 @@ COREUTILS_PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "windows_arm64": struct(
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:aarch64",
++        ],
++    ),
+ }
+ 
+ # https://github.com/uutils/coreutils/releases
+@@ -39,11 +45,41 @@ COREUTILS_PLATFORMS = {
+ # The integrity hashes can be automatically fetched for the coreutils releases by running
+ # `tools/coreutils_mirror_release.sh`.
+ COREUTILS_VERSIONS = {
++      "0.0.30": {
++        "darwin_arm64": {
++            "filename": "coreutils-0.0.30-aarch64-apple-darwin.tar.gz",
++            "sha256": "sha256-Hr8wERvrhvPSa0LFobCaZmBxSwinqvP/IzMh+ohQPW8="
++        },
++        "windows_arm64": {
++            "filename": "coreutils-0.0.30-aarch64-pc-windows-msvc.zip",
++            "sha256": "sha256-MP6aM2P4bvQ/KG4qQD27XO272vn+uZRs903RSlZWqrs="
++        },
++        "linux_arm64": {
++            "filename": "coreutils-0.0.30-aarch64-unknown-linux-musl.tar.gz",
++            "sha256": "sha256-4Gl5zOyO0xd/DblwdkIOyD5UhFAaSAjhEyBran+KqYg="
++        },
++        "darwin_amd64": {
++            "filename": "coreutils-0.0.30-x86_64-apple-darwin.tar.gz",
++            "sha256": "sha256-meue6x/kLNDRJbq8TzahJ/qiLfuoIMhhL8hj52M3qzQ="
++        },
++        "windows_amd64": {
++            "filename": "coreutils-0.0.30-x86_64-pc-windows-msvc.zip",
++            "sha256": "sha256-OTH1cP8mZdsJswYUUhcSzB0xQmeT4Yml23BNLEBZm6k="
++        },
++        "linux_amd64": {
++            "filename": "coreutils-0.0.30-x86_64-unknown-linux-musl.tar.gz",
++            "sha256": "sha256-lI98IeTtCMcFMuPMv6xWPaIzVA2lU6ldTCfiYASay3w="
++        }
++    },
+     "0.0.27": {
+         "darwin_arm64": {
+             "filename": "coreutils-0.0.27-aarch64-apple-darwin.tar.gz",
+             "sha256": "sha256-BjAeGgJ8+sLCIwmokCOkfelCCLtnNRH49QcFnrDq8a4=",
+         },
++        "windows_arm64": {
++            "filename": "coreutils-0.0.27-x86_64-pc-windows-msvc.zip",
++            "sha256": "sha256-DC4H+hQX51aHoFudV39n7u217NDcNL9AiG4o4edboV0=",
++        },
+         "linux_arm64": {
+             "filename": "coreutils-0.0.27-aarch64-unknown-linux-musl.tar.gz",
+             "sha256": "sha256-doU+ZfTyA5I8RSwDAcsOkEI3BZXFuFwBfEbg+diS06g=",
+diff --git a/lib/private/expand_template_toolchain.bzl b/lib/private/expand_template_toolchain.bzl
+index 5c9f9dd4c6301fe32e47e726fec91b11050db12c..89d831ee28f7dcaff641538563c328b63469b35e 100644
+--- a/lib/private/expand_template_toolchain.bzl
++++ b/lib/private/expand_template_toolchain.bzl
+@@ -48,6 +48,12 @@ EXPAND_TEMPLATE_PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "windows_arm64": struct(
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:aarch64",
++        ],
++    ),
+ }
+ 
+ ExpandTemplateInfo = provider(
+diff --git a/lib/private/jq_toolchain.bzl b/lib/private/jq_toolchain.bzl
+index f76eeefc8073e45e16b4ce2d421ba922609d0669..7969b4ec236a0b09faf5d7b33498a1029a2b80b5 100644
+--- a/lib/private/jq_toolchain.bzl
++++ b/lib/private/jq_toolchain.bzl
+@@ -39,6 +39,13 @@ JQ_PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "windows_arm64": struct(
++        release_platform = "win64",
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:x86_64",
++        ],
++    ),
+ }
+ 
+ DEFAULT_JQ_VERSION = "1.7"
+diff --git a/lib/private/repo_utils.bzl b/lib/private/repo_utils.bzl
+index e700c3e91940857978abb7257a7047700d815ac8..001994c9216b1bdf492d7a80e0972e7264669522 100644
+--- a/lib/private/repo_utils.bzl
++++ b/lib/private/repo_utils.bzl
+@@ -78,6 +78,7 @@ def _platform(rctx):
+     - linux_s390x
+     - linux_ppc64le
+     - windows_amd64
++    - windows_arm64
+ 
+     Args:
+         rctx: rctx
+diff --git a/lib/private/yq_toolchain.bzl b/lib/private/yq_toolchain.bzl
+index 4aee1e0c1c8b9359d68cd87798249af490c162b2..87ba7483ce9b8b16e29ee986f64a28bdfaea00ca 100644
+--- a/lib/private/yq_toolchain.bzl
++++ b/lib/private/yq_toolchain.bzl
+@@ -46,11 +46,17 @@ YQ_PLATFORMS = {
+             "@platforms//cpu:x86_64",
+         ],
+     ),
++    "windows_arm64": struct(
++        compatible_with = [
++            "@platforms//os:windows",
++            "@platforms//cpu:aarch64",
++        ],
++    ),
+ }
+ 
+ # Note: this is not the latest release, because it has significant breaking changes.
+ # See https://github.com/bazel-contrib/bazel-lib/pull/421
+-DEFAULT_YQ_VERSION = "4.25.2"
++DEFAULT_YQ_VERSION = "4.45.2"
+ 
+ # https://github.com/mikefarah/yq/releases
+ #
+@@ -61,6 +67,16 @@ DEFAULT_YQ_VERSION = "4.25.2"
+ # Alternatively, you can compute them manually by running
+ # `shasum -b -a 384 [downloaded file] | awk '{ print $1 }' | xxd -r -p | base64`
+ YQ_VERSIONS = {
++    "4.45.2": {
++        "darwin_amd64": "sha384-TBsrUTy6n6qA2hiSlpnEN6iEDDz4Tiy++AxLOpeXU1aUaI6uIuEBx8hgPYWWuD8V",
++        "darwin_arm64": "sha384-bnZ5TqsG5pcWB6gC87QKrBrjcKYmdOcSD7TpFVeCU6Nj7z5egeZzm4BH1FHbqo0e",
++        "linux_amd64": "sha384-jEOdMXHPvRiaFXWRnSA5Mw41VCKkNPv42i35i9BiVxrAnfyl/3/Li/iyQyj16QIr",
++        "linux_arm64": "sha384-4bEWn6fDQhIomb6Smzm8yw26RvqsjHh3PH/SogwWoLC9uJRoyQagY2PJZaYWxUDY",
++        "linux_s390x": "sha384-9uU3CXqjUG/SuPiHPKIUqbOVyqx7JiVOtRzeFta9IBFkJyUB0pBBOYkoDppvrmzz",
++        "linux_ppc64le": "sha384-bB03rZ0ptRt2EuFnA9SvscPMe3gVJecBvxhzPbYe7wsfoHvzzYqWffCchZVxRg+9",
++        "windows_amd64": "sha384-vG8R2+s/sD8DbeCM9H0xCy5JgtAOII7SLRx2g+ALtQZWW/q3XjXlzN2CKW/zU+EH",
++        "windows_arm64": "sha384-XHgi894S4cQ2qgJx47cPu5vtb2MOXA2YZ7QgExODwNoIPhji5wXK2MrgMB+RI7gZ",
++    },
+     "4.33.3": {
+         "darwin_amd64": "sha384-IJhMHD71yq+OR8AHFPfZr3XVpFlG2ZAfcexDKojtSLcCMV1pw0X2jza4qFUZiKEt",
+         "darwin_arm64": "sha384-euQkz1Bu/dFuJoRgG4xIh9BhP2RvOceTDPSY8EzSIM5xykbMkwDNhr1PtCcUF5ye",
+diff --git a/tools/yq_mirror_release.sh b/tools/yq_mirror_release.sh
+index 2b81f2f1a84a819a1e41e7965307221abcd30063..53550b80b9afcbb8bc07dabee16f3dd79208c53b 100755
+--- a/tools/yq_mirror_release.sh
++++ b/tools/yq_mirror_release.sh
+@@ -21,7 +21,7 @@ chmod u+x extract-checksum.sh
+ 
+ # Extract the checksums and output a starlark map entry
+ echo "\"$version\": {"
+-platforms=(darwin_{amd64,arm64} linux_{amd64,arm64,s390x,ppc64le} windows_amd64)
++platforms=(darwin_{amd64,arm64} linux_{amd64,arm64,s390x,ppc64le} windows_{amd64,arm64})
+ for release in ${platforms[@]}; do
+   artifact=$release
+   if [[ $release == windows* ]]; then
