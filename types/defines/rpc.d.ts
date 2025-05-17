@@ -230,6 +230,13 @@ declare module 'cloudflare:workers' {
 
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
 
+  export type WorkflowRetentionDuration = WorkflowSleepDuration;
+
+  export type InstanceRetention = {
+    successRetention?: WorkflowRetentionDuration,
+    errorRetention?: WorkflowRetentionDuration,
+  }
+
   export type WorkflowBackoff = 'constant' | 'linear' | 'exponential';
 
   export type WorkflowStepConfig = {
