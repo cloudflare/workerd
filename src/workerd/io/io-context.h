@@ -513,6 +513,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
 
+  enum TopUpFlag { NO_TOP_UP, TOP_UP };
+
   // Make a kj::Function which, when called, re-enters this IoContext to run some code.
   //
   // `func` is a function with a signature similar to:
@@ -558,7 +560,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // does not keep its input continuation functions live in this way. If you want to pass the
   // callback to `.then()`, you can wrap it in `kj::coCapture()`, but note that this means it can
   // only be called once.
-  template <typename Func>
+  //
+  // Use `makeReentryCallback<IoContext::TOP_UP>(func)` to cause
+  // `ctx.getLimitEnforcer().topUpActor()` to be called each time the callback is invoked. This is
+  // useful because `topUpActor()` must be called before entering the isolate lock, so it can't be
+  // part of the body of the given callback function.
+  template <TopUpFlag topUp = NO_TOP_UP, typename Func>
   auto makeReentryCallback(Func func);
 
   // Returns the number of times addTask() has been called (even if the tasks have completed).
@@ -1442,7 +1449,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   return kj::mv(paf.promise);
 }
 
-template <typename Func>
+template <IoContext::TopUpFlag topUp, typename Func>
 auto IoContext::makeReentryCallback(Func func) {
   // We need to:
   // - Use addTask() to make sure that, if we're in an actor, the IncomingEvent stays alive while
@@ -1462,6 +1469,10 @@ auto IoContext::makeReentryCallback(Func func) {
              func = kj::fwd<Func>(func)](auto&&... params) mutable {
     auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
         "The execution context which hosts this callback is no longer running.");
+
+    if constexpr (topUp == TOP_UP) {
+      ctx.getLimitEnforcer().topUpActor();
+    }
 
     return ctx.canceler.wrap(ctx.run(
         [&ctx, &func, ... params = kj::fwd<decltype(params)>(params)](Worker::Lock& lock) mutable {

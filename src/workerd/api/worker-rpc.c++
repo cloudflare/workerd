@@ -968,7 +968,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  public:
   JsRpcTargetBase(IoContext& ctx)
       : weakIoContext(ctx.getWeakRef()),
-        enterIsolateAndCall(ctx.makeReentryCallback(
+        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](Worker::Lock& lock,
                 CallContext callContext,
                 kj::Own<capnp::CallContextHook> ownCallContext,
@@ -998,11 +998,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
-    IoContext& ctx = JSG_REQUIRE_NONNULL(
-        weakIoContext->tryGet(), Error, "The destination object for this RPC no longer exists.");
-
-    ctx.getLimitEnforcer().topUpActor();
-
     // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the backing
     // object's lifetime is that of the RPC call, but in reality they are refcounted under the
     // hood. Since well be executing the call in the JS microtask queue, we have no ability to
