@@ -966,11 +966,28 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
 // session.
 class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  public:
-  JsRpcTargetBase(IoContext& ctx)
+  struct MayOutliveIncomingRequest {};
+  struct CantOutliveIncomingRequest {};
+
+  // Constructor used by TransientJsRpcTarget, which does not own the context. It needs to use
+  // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
+  // or during a call.
+  JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
       : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](Worker::Lock& lock, CallContext callContext) {
               return callImpl(lock, ctx, callContext);
             })) {}
+
+  // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
+  // can possibly be canceled. It can just use ctx.run().
+  JsRpcTargetBase(IoContext& ctx, CantOutliveIncomingRequest)
+      : enterIsolateAndCall([this, &ctx](CallContext callContext) {
+          // Note: No need to topUpActor() since this is the start of a top-level request, so the
+          // actor will already have been topped up by IncomingRequest::delivered().
+          return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
+            return callImpl(lock, ctx, callContext);
+          });
+        }) {}
 
   struct EnvCtx {
     v8::Local<v8::Value> env;
@@ -1457,7 +1474,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
  public:
   TransientJsRpcTarget(
       jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object, bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx),
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         allowInstanceProperties(allowInstanceProperties),
         pendingEvent(ioCtx.registerPendingEvent()) {
@@ -1478,7 +1495,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<jsg::V8Ref<v8::Function>> dispose,
       kj::Vector<kj::Own<void>> stubDisposers,
       bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx),
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         disposeFulfiller(addDisposeTask(js, ioCtx, object, kj::mv(dispose), kj::mv(stubDisposers))),
         allowInstanceProperties(allowInstanceProperties),
@@ -1760,7 +1777,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
-      : JsRpcTargetBase(ioCtx),
+      : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
@@ -1884,23 +1901,33 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
 
   incomingRequest->delivered();
 
-  auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(
-      capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName, kj::mv(props),
-                          mapAddRef(incomingRequest->getWorkerTracer())),
-          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
-
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  // `donePromise` resolves once there are no longer any capabilities pointing between the client
-  // and server as part of this session.
-  co_await donePromise.exclusiveJoin(ioctx.onAbort());
+  EntrypointJsRpcTarget target(
+      ioctx, entrypointName, kj::mv(props), mapAddRef(incomingRequest->getWorkerTracer()));
+  capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  try {
+    auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
+    capFulfiller->fulfill(capnp::membrane(
+        revcableTarget.getClient(), kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+
+    // `donePromise` resolves once there are no longer any capabilities pointing between the client
+    // and server as part of this session.
+    co_await donePromise.exclusiveJoin(ioctx.onAbort());
+
+    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  } catch (...) {
+    // Make sure the top-level capability is revoked with the same exception that `run()` is
+    // throwing, rather than some generic revocation exception.
+    auto e = kj::getCaughtExceptionAsKj();
+    revcableTarget.revoke(kj::cp(e));
+    kj::throwFatalException(kj::mv(e));
+  }
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(

@@ -221,6 +221,10 @@ export class MyService extends WorkerEntrypoint {
     throw new Error('METHOD THREW');
   }
 
+  async neverReturn() {
+    await new Promise((resolve) => {});
+  }
+
   async tryUseGlobalRpcPromise() {
     return await globalRpcPromise;
   }
@@ -768,6 +772,12 @@ export let namedServiceBinding = {
       message:
         'Could not serialize object of type "Object". This type does not support ' +
         'serialization.',
+    });
+
+    // A stateless entryponit method that never returns should fail due to PendingEvent tracking.
+    await assert.rejects(() => env.MyService.neverReturn(), {
+      name: 'Error',
+      message: 'The script will never generate a response.',
     });
 
     {

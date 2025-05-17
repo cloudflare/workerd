@@ -1451,6 +1451,10 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
 
 template <IoContext::TopUpFlag topUp, typename Func>
 auto IoContext::makeReentryCallback(Func func) {
+  // A reentry callback is meant for *re-*entry, so should only be created while already inside
+  // the IoContext. Initial entry into the IoContext should just use run().
+  requireCurrent();
+
   // We need to:
   // - Use addTask() to make sure that, if we're in an actor, the IncomingEvent stays alive while
   //   the callback exists (and hibernation is blocked).
