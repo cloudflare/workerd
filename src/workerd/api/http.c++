@@ -1475,7 +1475,10 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       }
     }
   } else {
-    statusText = kj::str(defaultStatusText(statusCode));
+    // A response has an associated status message. Unless stated otherwise it is the empty byte sequence.
+    // https://fetch.spec.whatwg.org/#concept-response-status-message
+
+    statusText.emplace(kj::str(""));
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1551,10 +1554,8 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
   kjHeaders.set(kj::HttpHeaderId::LOCATION, kj::mv(parsedUrl));
   auto headers = js.alloc<Headers>(js, kjHeaders, Headers::Guard::IMMUTABLE);
 
-  auto statusText = defaultStatusText(statusCode);
-
-  return js.alloc<Response>(
-      js, statusCode, kj::str(statusText), kj::mv(headers), nullptr, kj::none);
+  return js.alloc<Response>(js, statusCode, kj::str("") /* statusText is not specified to be set */,
+      kj::mv(headers), nullptr, kj::none);
 }
 
 jsg::Ref<Response> Response::json_(
