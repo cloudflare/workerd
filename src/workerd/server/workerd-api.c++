@@ -392,7 +392,7 @@ struct WorkerdApi::Impl final {
         auto bundle = KJ_ASSERT_NONNULL(
             fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
         jsg::NewContextOptions options{.enableWeakRef = features->getJsWeakRef()};
-        auto context = lock.newContext<api::ServiceWorkerGlobalScope>(options, lock.v8Isolate);
+        auto context = lock.newContext<api::ServiceWorkerGlobalScope>(options);
         v8::Context::Scope scope(context.getHandle(lock));
         // Init emscripten synchronously, the python script will import setup-emscripten and
         // call setEmscriptenModele
@@ -471,7 +471,7 @@ jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(jsg::Lock& 
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
-      kj::mv(options), lock.v8Isolate);
+      kj::mv(options));
 }
 jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {

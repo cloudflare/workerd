@@ -464,7 +464,7 @@ class Immediate final: public jsg::Object {
 // Global object API exposed to JavaScript.
 class ServiceWorkerGlobalScope: public WorkerGlobalScope {
  public:
-  ServiceWorkerGlobalScope(v8::Isolate* isolate);
+  ServiceWorkerGlobalScope();
 
   // Drop all references to JavaScript objects so that the context can be garbage-collected. Call
   // this when the context will never be used again and should be disposed.

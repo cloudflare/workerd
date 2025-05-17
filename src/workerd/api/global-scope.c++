@@ -122,7 +122,7 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   };
 }
 
-ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()
     : unhandledRejections([this](jsg::Lock& js,
                               v8::PromiseRejectEvent event,
                               jsg::V8Ref<v8::Promise> promise,
