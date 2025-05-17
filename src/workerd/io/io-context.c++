@@ -184,6 +184,11 @@ IoContext::IoContext(ThreadContext& thread,
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
     // and the actor can no longer be used.
     abortWhen(a.getInputGate().onBroken());
+
+    // Also complain if the output gate is broken, which indicates a critical storage failure that
+    // means we cannot continue execution. (In fact, we need to retroactively pretend that previous
+    // execution didn't happen, but that is taken care of elsewhere.)
+    abortWhen(a.getOutputGate().onBroken());
   }
 }
 
