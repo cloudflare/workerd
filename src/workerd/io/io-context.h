@@ -1358,7 +1358,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 template <typename T>
 kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
-  struct RefcountedFulfiller: public Finalizeable, public kj::Refcounted {
+  struct RefcountedFulfiller: public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
     kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
     bool isDone = false;
@@ -1390,19 +1390,6 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
         // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
         // this promise.
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
-      }
-    }
-
-    kj::Maybe<kj::StringPtr> finalize() override {
-      if (!isDone) {
-        reject();
-        isDone = true;
-        return "A hanging Promise was canceled. This happens when the worker runtime is waiting "
-               "for a Promise from JavaScript to resolve, but has detected that the Promise "
-               "cannot possibly ever resolve because all code and events related to the "
-               "Promise's I/O context have already finished."_kj;
-      } else {
-        return kj::none;
       }
     }
   };
@@ -1449,7 +1436,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     }, kj::mv(errorHandler));
   }
 
-  return kj::mv(paf.promise);
+  return paf.promise.exclusiveJoin(onAbort().then([]() -> RemoveIoOwn<T> { KJ_UNREACHABLE; }));
 }
 
 template <IoContext::TopUpFlag topUp, typename Func>
