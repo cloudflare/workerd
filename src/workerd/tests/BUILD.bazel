@@ -8,7 +8,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
-        "@com_google_benchmark//:benchmark",
+        "@codspeed_cpp//google_benchmark:benchmark",
     ],
 )
 
@@ -83,4 +83,35 @@ wd_cc_benchmark(
     name = "bench-fast-api",
     srcs = ["bench-fast-api.c++"],
     deps = ["//src/workerd/jsg"],
+)
+
+BENCHMARKS = [
+    ":bench-json",
+    ":bench-mimetype",
+    ":bench-kj-headers",
+    ":bench-api-headers",
+    ":bench-global-scope",
+    ":bench-regex",
+    ":bench-fast-api",
+]
+
+filegroup(
+    name = "all_benchmarks",
+    srcs = BENCHMARKS,
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "run_all_benchmarks",
+    outs = ["run_benchmarks.sh"],
+    cmd = """
+        echo '#!/bin/bash' > $@
+        echo 'set -e' >> $@
+        echo 'echo "Running all benchmarks..."' >> $@
+        for bench in %s; do
+            echo "bazel run //src/workerd/tests:$${bench#:}" >> $@
+        done
+        echo 'echo "All benchmarks completed!"' >> $@
+        chmod +x $@
+    """ % " ".join(BENCHMARKS),
 )
