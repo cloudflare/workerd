@@ -206,10 +206,6 @@ class IsolateBase {
     return true;
   }
 
-  JsSymbol getSymbolAsyncDispose() {
-    return JsSymbol(symbolAsyncDispose.Get(ptr));
-  }
-
   // Get an object referencing this isolate that can be used to adjust external memory usage later
   kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
 
@@ -297,9 +293,6 @@ class IsolateBase {
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
-
-  // Polyfilled Symbol.asyncDispose.
-  v8::Global<v8::Symbol> symbolAsyncDispose;
 
   /* *** External Memory accounting *** */
   // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments

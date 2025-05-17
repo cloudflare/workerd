@@ -2226,7 +2226,9 @@ class JsRef;
   V(Split)                                                                                         \
   V(ToPrimitive)                                                                                   \
   V(ToStringTag)                                                                                   \
-  V(Unscopables)
+  V(Unscopables)                                                                                   \
+  V(Dispose)                                                                                       \
+  V(AsyncDispose)
 
 class JsValue;
 class JsMessage;
@@ -2800,8 +2802,6 @@ class Lock {
 #define V(Name) JsSymbol symbol##Name() KJ_WARN_UNUSED_RESULT;
   JS_V8_SYMBOLS(V)
 #undef V
-  JsSymbol symbolDispose() KJ_WARN_UNUSED_RESULT;
-  JsSymbol symbolAsyncDispose() KJ_WARN_UNUSED_RESULT;
 
   void runMicrotasks();
   void terminateExecution();

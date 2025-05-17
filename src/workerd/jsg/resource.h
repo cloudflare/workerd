@@ -1006,7 +1006,6 @@ constexpr bool hasConstructorMethod(...) {
 void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
 v8::Local<v8::Symbol> getSymbolDispose(v8::Isolate* isolate);
-v8::Local<v8::Symbol> getSymbolAsyncDispose(v8::Isolate* isolate);
 
 // A configuration type that can be derived from any input type, because it contains nothing.
 class NullConfiguration {
@@ -1413,7 +1412,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Method, Method method>
   inline void registerDispose() {
-    prototype->Set(getSymbolDispose(isolate),
+    prototype->Set(v8::Symbol::GetDispose(isolate),
         v8::FunctionTemplate::New(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
                 ArgumentIndexes<Method>>::callback,
@@ -1423,7 +1422,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Method, Method method>
   inline void registerAsyncDispose() {
-    prototype->Set(getSymbolAsyncDispose(isolate),
+    prototype->Set(v8::Symbol::GetAsyncDispose(isolate),
         v8::FunctionTemplate::New(isolate,
             &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
                 ArgumentIndexes<Method>>::callback,
