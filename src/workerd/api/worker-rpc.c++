@@ -967,8 +967,7 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
 class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  public:
   JsRpcTargetBase(IoContext& ctx)
-      : weakIoContext(ctx.getWeakRef()),
-        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+      : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](Worker::Lock& lock,
                 CallContext callContext,
                 kj::Own<capnp::CallContextHook> ownCallContext,
@@ -1025,9 +1024,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
-
- protected:
-  kj::Own<IoContext::WeakRef> weakIoContext;
 
  private:
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
@@ -1156,9 +1152,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       })));
 
       if (ctx.hasOutputGate()) {
-        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
-          return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
-        });
+        // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
+        // (makeReentryCallback() ensures this). This does NOT cancel the JavaScript (because JS
+        // promises are not RAII-cancelable), but it will cancel this trailing .then(), which is
+        // why it's safe to capture `&ctx` here.
+        return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); });
       } else {
         return result;
       }
