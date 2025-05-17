@@ -139,13 +139,12 @@ IoContext::IoContext(ThreadContext& thread,
       deleteQueue(kj::arc<DeleteQueue>()),
       cachePutSerializer(kj::READY_NOW),
       waitUntilTasks(*this),
+      tasks(*this),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
   abortPromise = paf.promise.fork();
-
-  tasks.emplace(static_cast<kj::TaskSet::ErrorHandler&>(*this));
 
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
@@ -395,10 +394,8 @@ void IoContext::abort(kj::Exception&& e) {
 void IoContext::abortWhen(kj::Promise<void> promise) {
   // Unlike addTask(), abortWhen() always uses `tasks`, even in actors, because we do not want
   // these tasks to block hibernation.
-  KJ_IF_SOME(t, tasks) {
-    t.add(promise.catch_([this](kj::Exception&& e) { abort(kj::mv(e)); }));
-  } else {
-    // If `tasks` is null, we're already aborting.
+  if (abortException == kj::none) {
+    tasks.add(promise.catch_([this](kj::Exception&& e) { abort(kj::mv(e)); }));
   }
 }
 
@@ -411,8 +408,6 @@ void IoContext::addTask(kj::Promise<void> promise) {
     addWaitUntil(kj::mv(promise));
     return;
   }
-
-  auto& tasks = KJ_ASSERT_NONNULL(this->tasks, "I/O context finalized");
 
   if (actor == kj::none) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
@@ -1255,18 +1250,11 @@ auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
 void IoContext::abortFromHang(Worker::AsyncLock& asyncLock) {
   KJ_ASSERT(actor == kj::none);  // we don't perform hang detection on actor requests
 
-  tasks = kj::none;
-  // Tasks typically have callbacks that dereference IoOwns. Since those callbacks
-  // will throw after we abort, we should cancel them now.
-
   // Don't bother aborting if limits were exceeded because in that case the abort promise will be
   // fulfilled shortly anyway.
   if (limitEnforcer->getLimitsExceeded() == kj::none) {
     abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
   }
-
-  // TODO(cleanup): Why is this line here? It seems unnecessary.
-  promiseContextTag = kj::none;
 }
 
 namespace {
