@@ -12,8 +12,6 @@
 // are compatible with Fast API, handling both primitive types that can be passed directly
 // and wrapped objects that require conversion between JavaScript and C++.
 
-#include <workerd/jsg/web-idl.h>
-
 #include <v8-fast-api-calls.h>
 #include <v8-local-handle.h>
 #include <v8-value.h>
@@ -21,6 +19,8 @@
 #include <kj/common.h>
 
 namespace workerd::jsg {
+
+class Lock;
 
 template <typename T>
 constexpr bool isFunctionCallbackInfo = false;
