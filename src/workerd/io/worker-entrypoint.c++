@@ -318,7 +318,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         PERFETTO_FLOW_FROM_POINTER(this));
     proxyTask = kj::mv(deferredProxy.proxyTask);
   })
-      .exclusiveJoin(context.onAbort())
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
