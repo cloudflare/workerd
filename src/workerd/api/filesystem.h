@@ -10,6 +10,88 @@ namespace workerd::api {
 class Blob;
 class File;
 
+class URL;  // Legacy URL class impl
+namespace url {
+class URL;
+}  // namespace url
+
+// Metadata about a file, directory, or link.
+struct Stat {
+  kj::StringPtr type;  // One of either "file", "directory", or "symlink"
+  uint32_t size;
+  uint64_t lastModified;
+  uint64_t created;
+  bool writable;
+  bool device;
+  JSG_STRUCT(type, size, lastModified, created, writable, device);
+
+  Stat(const workerd::Stat& stat);
+};
+
+class FileSystemModule final: public jsg::Object {
+ public:
+  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
+
+  struct StatOptions {
+    jsg::Optional<bool> followSymlinks;
+    JSG_STRUCT(followSymlinks);
+  };
+
+  kj::Maybe<Stat> stat(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, StatOptions options);
+  void setLastModified(
+      jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, kj::Date lastModified, StatOptions options);
+  void truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, uint32_t size);
+
+  struct ReadLinkOptions {
+    // The readLink method is used for both realpath and readlink. The readlink
+    // API will throw an error if the path is not a symlink. The realpath API
+    // will return the resolved path either way.
+    bool failIfNotSymlink = false;
+    JSG_STRUCT(failIfNotSymlink);
+  };
+  kj::String readLink(jsg::Lock& js, FilePath path, ReadLinkOptions options);
+
+  struct LinkOptions {
+    bool symbolic;
+    JSG_STRUCT(symbolic);
+  };
+
+  void link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options);
+
+  void unlink(jsg::Lock& js, FilePath path);
+
+  struct OpenOptions {
+    // File is opened to supprt reads.
+    bool read;
+    // File is opened to support writes.
+    bool write;
+    // File is opened in append mode. Ignored if write is false.
+    bool append;
+    // If the exclusive option is set, throw if the file already exists.
+    bool exclusive;
+    // If the followSymlinks option is set, follow symbolic links.
+    bool followSymlinks = true;
+    JSG_STRUCT(read, write, append, exclusive, followSymlinks);
+  };
+
+  int open(jsg::Lock& js, FilePath path, OpenOptions options);
+  void close(jsg::Lock& js, int fd);
+
+  FileSystemModule() = default;
+  FileSystemModule(jsg::Lock&, const jsg::Url&) {}
+
+  JSG_RESOURCE_TYPE(FileSystemModule) {
+    JSG_METHOD(stat);
+    JSG_METHOD(setLastModified);
+    JSG_METHOD(truncate);
+    JSG_METHOD(readLink);
+    JSG_METHOD(link);
+    JSG_METHOD(unlink);
+    JSG_METHOD(open);
+    JSG_METHOD(close);
+  }
+};
+
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
 // All of the classes in this part of the impl are defined by the spec.
@@ -369,5 +451,10 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemDirectoryHandle::EntryIterator::Next,                                \
       workerd::api::FileSystemDirectoryHandle::KeyIterator::Next,                                  \
       workerd::api::FileSystemDirectoryHandle::ValueIterator::Next
+
+#define EW_FILESYSTEM_ISOLATE_TYPES                                                                \
+  workerd::api::FileSystemModule, workerd::api::Stat, workerd::api::FileSystemModule::StatOptions, \
+      workerd::api::FileSystemModule::ReadLinkOptions,                                             \
+      workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions
 
 }  // namespace workerd::api

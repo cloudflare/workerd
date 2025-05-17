@@ -1,0 +1,43 @@
+export interface StatOptions {
+  followSymlinks?: boolean;
+}
+
+export interface Stat {
+  type: 'file' | 'directory' | 'symlink';
+  size: number;
+  lastModified: bigint;
+  created: bigint;
+  writable: boolean;
+  device: boolean;
+}
+
+export function stat(pathOrFd: number | URL, options: StatOptions): Stat | null;
+export function setLastModified(
+  pathOrFd: number | URL,
+  mtime: Date,
+  options: StatOptions
+): void;
+
+export function truncate(pathOrFd: number | URL, length: number): void;
+
+export function readLink(
+  path: URL,
+  options: { failIfNotSymlink: boolean }
+): string;
+
+export function link(from: URL, to: URL, options: { symbolic: boolean }): void;
+
+export function unlink(path: URL): void;
+
+export function open(
+  path: URL,
+  options: {
+    read: boolean;
+    write: boolean;
+    append: boolean;
+    exclusive: boolean;
+    followSymlinks: boolean;
+  }
+): number;
+
+export function close(fd: number): void;
