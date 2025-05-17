@@ -505,6 +505,11 @@ class IoContext::PendingEvent: public kj::Refcounted {
 };
 
 IoContext::~IoContext() noexcept(false) {
+  if (!canceler.isEmpty()) {
+    canceler.cancel(JSG_KJ_EXCEPTION(
+        FAILED, Error, "The execution context responding to this call was canceled."));
+  }
+
   // Detach the PendingEvent if it still exists.
   KJ_IF_SOME(pe, pendingEvent) {
     pe.maybeContext = kj::none;

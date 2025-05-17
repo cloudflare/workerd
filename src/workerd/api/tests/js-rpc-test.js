@@ -482,6 +482,18 @@ export class MyActor extends DurableObject {
     this.#counter += amount;
     return this.#counter;
   }
+
+  async doCallbackBlockingConcurrency() {
+    // Check that we can receive RPC callbacks during blockConcurrencyWhile(), if they are from
+    // an RPC running inside the block. This verifies that the critical section is captured
+    // correctly in IoContext::makeReentryCallback().
+    return this.ctx.blockConcurrencyWhile(async () => {
+      let func = () => {
+        return 12345;
+      };
+      return await this.env.MyService.getRpcPromise(func);
+    });
+  }
 }
 
 export class ActorNoExtends {
@@ -775,6 +787,8 @@ export let namedActorBinding = {
     assert.strictEqual(await stub.increment(5), 5);
     assert.strictEqual(await stub.increment(2), 7);
     assert.strictEqual(await stub.increment(8), 15);
+
+    assert.strictEqual(await stub.doCallbackBlockingConcurrency(), 12345);
   },
 };
 

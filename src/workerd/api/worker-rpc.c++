@@ -966,7 +966,15 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
 // session.
 class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  public:
-  JsRpcTargetBase(IoContext& ctx): weakIoContext(ctx.getWeakRef()) {}
+  JsRpcTargetBase(IoContext& ctx)
+      : weakIoContext(ctx.getWeakRef()),
+        enterIsolateAndCall(ctx.makeReentryCallback(
+            [this, &ctx](Worker::Lock& lock,
+                CallContext callContext,
+                kj::Own<capnp::CallContextHook> ownCallContext,
+                rpc::JsRpcTarget::Client thisCap) {
+              return callImpl(lock, ctx, callContext, kj::mv(ownCallContext), kj::mv(thisCap));
+            })) {}
 
   struct EnvCtx {
     v8::Local<v8::Value> env;
@@ -1006,11 +1014,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
 
     // Try to execute the requested method.
-    auto promise =
-        ctx.run([this, &ctx, callContext, ownCallContext = kj::mv(ownCallContext),
-                    ownThis = thisCap()](Worker::Lock& lock) mutable -> kj::Promise<void> {
-      return callImpl(lock, ctx, callContext, kj::mv(ownCallContext), kj::mv(ownThis));
-    }).catch_([](kj::Exception&& e) {
+    return enterIsolateAndCall(callContext, kj::mv(ownCallContext), thisCap())
+        .catch_([](kj::Exception&& e) {
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -1022,23 +1027,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
       kj::throwFatalException(kj::mv(e));
     });
-
-    // We need to make sure this RPC is canceled if the IoContext is destroyed. To accomplish that,
-    // we add the promise as a task on the context itself, and use a separate promise fulfiller to
-    // wait on the result.
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&fulfiller = *paf.fulfiller](kj::Exception&& e) { fulfiller.reject(kj::mv(e)); });
-    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
-      if (fulfiller->isWaiting()) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-            "The destination execution context for this RPC was canceled while the "
-            "call was still running."));
-      }
-    }));
-    ctx.addTask(kj::mv(promise));
-
-    return kj::mv(paf.promise);
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
@@ -1047,6 +1035,13 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   kj::Own<IoContext::WeakRef> weakIoContext;
 
  private:
+  // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
+  // using IoContext::makeReentryCallback().
+  kj::Function<kj::Promise<void>(CallContext callContext,
+      kj::Own<capnp::CallContextHook> ownCallContext,
+      rpc::JsRpcTarget::Client thisCap)>
+      enterIsolateAndCall;
+
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
