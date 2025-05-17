@@ -2413,6 +2413,8 @@ class Lock {
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(SET_DATA_LOCK));
   }
 
+  // TODO(someday): A clang-tidy rule to enforce use of Lock::current over
+  // v8::Isolate::GetCurrent would be helpful.
   static Lock& current() {
     return from(v8::Isolate::GetCurrent());
   }
