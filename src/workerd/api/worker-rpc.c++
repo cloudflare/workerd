@@ -968,11 +968,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  public:
   JsRpcTargetBase(IoContext& ctx)
       : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
-            [this, &ctx](Worker::Lock& lock,
-                CallContext callContext,
-                kj::Own<capnp::CallContextHook> ownCallContext,
-                rpc::JsRpcTarget::Client thisCap) {
-              return callImpl(lock, ctx, callContext, kj::mv(ownCallContext), kj::mv(thisCap));
+            [this, &ctx](Worker::Lock& lock, CallContext callContext) {
+              return callImpl(lock, ctx, callContext);
             })) {}
 
   struct EnvCtx {
@@ -997,19 +994,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
-    // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the backing
-    // object's lifetime is that of the RPC call, but in reality they are refcounted under the
-    // hood. Since well be executing the call in the JS microtask queue, we have no ability to
-    // actually cancel execution if a cancellation arrives over RPC, and at the end of that
-    // execution we're going to access the call context to write the results. We could invent some
-    // complicated way to skip initializing results in the case the call has been canceled, but
-    // it's easier and safer to just grab a refcount on the call context object itself, which
-    // fully protects us. So... do that.
-    auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
-
     // Try to execute the requested method.
-    return enterIsolateAndCall(callContext, kj::mv(ownCallContext), thisCap())
-        .catch_([](kj::Exception&& e) {
+    return enterIsolateAndCall(callContext).catch_([](kj::Exception&& e) {
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -1028,10 +1014,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  private:
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
   // using IoContext::makeReentryCallback().
-  kj::Function<kj::Promise<void>(CallContext callContext,
-      kj::Own<capnp::CallContextHook> ownCallContext,
-      rpc::JsRpcTarget::Client thisCap)>
-      enterIsolateAndCall;
+  kj::Function<kj::Promise<void>(CallContext callContext)> enterIsolateAndCall;
 
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
@@ -1039,11 +1022,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Hook for recording trace information.
   virtual void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) = 0;
 
-  kj::Promise<void> callImpl(Worker::Lock& lock,
-      IoContext& ctx,
-      CallContext callContext,
-      kj::Own<capnp::CallContextHook> ownCallContext,
-      rpc::JsRpcTarget::Client thisCap) {
+  kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
     jsg::Lock& js = lock;
 
     auto targetInfo = getTargetInfo(lock, ctx);
@@ -1083,10 +1062,24 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         callContext.setPipeline(builder.build());
       }
 
+      // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the
+      // backing object's lifetime is that of the RPC call, but in reality they are refcounted
+      // under the hood. Since we'll be executing the call in the JS microtask queue, we have no
+      // ability to actually cancel execution if a cancellation arrives over RPC, and at the end of
+      // that execution we're going to access the call context to write the results. We could
+      // invent some complicated way to skip initializing results in the case the call has been
+      // canceled, but it's easier and safer to just grab a refcount on the call context object
+      // itself, which fully protects us. So... do that.
+      auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
+
       auto result = ctx.awaitJs(js,
           js.toPromise(invocationResult.returnValue)
               .then(js,
                   ctx.addFunctor(
+                      // Warning: Be careful about captures here! If the incoming RPC is canceled,
+                      // this continuation will still execute, sice it's a JS promise continuation.
+                      // But `this` could have been destroyed in the meantime. So all our captures
+                      // must take full ownership.
                       [callContext, ownCallContext = kj::mv(ownCallContext),
                           paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup),
                           paramsStreamSink = kj::mv(invocationResult.streamSink),
