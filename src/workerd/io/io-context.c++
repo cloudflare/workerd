@@ -65,6 +65,12 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
     }
   }
 
+  void cancelAll() override {
+    timerTask = nullptr;
+    timeouts.clear();
+    timeoutTimes.clear();
+  }
+
  private:
   struct IdAndIterator {
     TimeoutId id;
@@ -262,6 +268,27 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   }
   context->worker->getIsolate().completedRequest();
   metrics->jsDone();
+
+  if (context->isShared()) {
+    // This context is not about to be destroyed when we drop it, but if it was aborted, we would
+    // prefer for it to get cleaned up promptly.
+
+    KJ_IF_SOME(e, context->abortException) {
+      // The context was aborted. It's possible that the event ended with background work still
+      // scheduled, because `drain()` ends early on abort. We should cancel that background work
+      // now.
+      //
+      // We couldn't do this in abort() because it can be called from inside a task that could
+      // be canceled, and a self-cancellation would lead to a crash.
+
+      if (!context->canceler.isEmpty()) {
+        context->canceler.cancel(e);
+      }
+      context->timeoutManager->cancelAll();
+      context->tasks.clear();
+      context->waitUntilTasks.clear();
+    }
+  }
 }
 
 InputGate::Lock IoContext::getInputLock() {
@@ -718,8 +745,10 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
-    // canceled anyway.
-    if (context.selfRef->isValid()) {
+    // canceled anyway. Similarly we should skip rescheduling if the context has been aborted since
+    // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
+    // called in ~IoContext_IncomingRequest).
+    if (context.selfRef->isValid() && context.abortException == kj::none) {
       bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
       timeoutTimes.erase(timeoutTimesKey);
       if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
