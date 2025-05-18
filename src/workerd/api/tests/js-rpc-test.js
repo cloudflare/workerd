@@ -1808,19 +1808,19 @@ export let portAbortCall = {
       let abortPromise = stub.abort();
       let pingPromise = stub.ping();
 
-      // TODO(bug): These should all propagate the abort reason.
       await assert.rejects(abortPromise, {
         name: 'Error',
         message: 'test aborted by abort()',
       });
       await assert.rejects(pingPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test aborted by abort()',
       });
       await assert.rejects(hangPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test aborted by abort()',
       });
+      // TODO(bug): This should propagate the abort reason.
       await assert.rejects(stub.ping(), {
         name: 'Error',
         message:
@@ -1846,10 +1846,9 @@ export let portAbortCall = {
       let failPromise = stub.failCriticalSection();
       let pingPromise = stub.ping();
 
-      // TODO(bug): These should all propagate the abort reason.
       await assert.rejects(failPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test broken critical section',
       });
       await assert.rejects(pingPromise, {
         name: 'Error',
@@ -1857,8 +1856,9 @@ export let portAbortCall = {
       });
       await assert.rejects(hangPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test broken critical section',
       });
+      // TODO(bug): This should propagate the abort reason.
       await assert.rejects(stub.ping(), {
         name: 'Error',
         message:
