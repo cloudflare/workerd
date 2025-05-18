@@ -662,7 +662,6 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
         KJ_IF_SOME(sc, workerInfo.scriptTags) {
           scriptTags = kj::mv(sc);
         }
-        // TODO: stableId, entrypoint?
         auto trace = kj::refcounted<Trace>(kj::none, kj::mv(workerInfo.scriptName),
             kj::mv(workerInfo.scriptVersion), kj::mv(workerInfo.dispatchNamespace), kj::none,
             kj::mv(scriptTags), kj::mv(workerInfo.entrypoint), workerInfo.executionModel);
@@ -751,6 +750,7 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
       }
       KJ_CASE_ONEOF(outcome, tracing::Outcome) {
         traces[0]->outcome = outcome.outcome;
+        // TODO: Should we synthesize a worker span or try to make it accessible instead?
       }
       // TODO: Handle remaining event types.
       KJ_CASE_ONEOF(outcome, tracing::Hibernate) {}
@@ -764,7 +764,11 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
         trace->spans.add(kj::mv(a));
       }
       KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {}
-      KJ_CASE_ONEOF(span, CompleteSpan) {}
+      KJ_CASE_ONEOF(span, CompleteSpan) {
+        auto& trace = traces[0];
+        span.spanId = 0x2a2a2a2a2a2a2a2a;
+        trace->spans.add(kj::mv(span));
+      }
     }
   }
 
@@ -789,6 +793,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
     KJ_LOG(WARNING, "TailStreamTarget shutdown");
+    if (doFulfill) {
+      doneFulfiller->fulfill();
+    }
     if (doneFulfiller->isWaiting()) {
       doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
     }
@@ -827,10 +834,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
           // First tracer, but using STW
           // TODO: This really needs to check if all tracers are STW, only then should we actually shut this down.
           (!isLegacy && isFirst)) {
+        KJ_DBG("shutting down 'first' stream");
         rpc::TailStreamTarget::TailStreamResults::Builder results = reportContext.initResults();
         this->pipelineTracer = kj::none;
         results.setStop(true);
-        doneFulfiller->fulfill();
+        doFulfill = true;
         return kj::READY_NOW;
       }
 
@@ -904,7 +912,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       pipelineTracer->addTracesFromChild(assembledTraces);
       this->pipelineTracer = kj::none;
       results.setStop(true);
-      doneFulfiller->fulfill();
+      doFulfill = true;
+      //doneFulfiller->fulfill();
       KJ_LOG(WARNING, "returning trace fulfillment");
       return kj::READY_NOW;
     }
@@ -1048,11 +1057,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // the stream should be stopped and will fulfill the done promise.
     bool finishing = false;
 
-    // When a tail worker receives its outcome event, we need to ensure that the final tail worker
-    // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
-    // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
-    bool doFulfill = false;
-
     for (auto& event: events) {
       // If we already received an outcome event, we will stop processing any
       // further events.
@@ -1125,12 +1129,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
-      if (doFulfill) {
+      /*if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
             [&](jsg::Lock& js, jsg::Value&& value) {
           doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
         });
-      }
+      }*/
       return ioContext.awaitJs(js, kj::mv(p));
     }
     return kj::READY_NOW;
@@ -1150,6 +1154,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer;
   bool isFirst;
   kj::Vector<tracing::TailEvent> events;
+
+  // When a tail worker receives its outcome event, we need to ensure that the final tail worker
+  // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
+  // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
+  bool doFulfill = false;
 };
 }  // namespace
 
