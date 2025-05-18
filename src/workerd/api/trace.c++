@@ -667,6 +667,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   if (!isLegacy) {
     // Do nothing, this should be a no-op based on being based on an STW.
     co_await incomingRequest->drain();
+    co_return;
   }
 
   // NOTE: It is safe to trace the tail worker, since we only invoke it all the way at the end.
