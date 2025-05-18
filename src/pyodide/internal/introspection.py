@@ -1,8 +1,15 @@
-from inspect import isclass
+from inspect import isawaitable, isclass
 
 import js
-from workers import DurableObject, WorkerEntrypoint, WorkflowEntrypoint
+from workers import (
+    DurableObject,
+    WorkerEntrypoint,
+    WorkflowEntrypoint,
+    python_from_rpc,
+    python_to_rpc,
+)
 
+from pyodide.code import relaxed_call
 from pyodide.ffi import to_js
 
 
@@ -53,3 +60,20 @@ def collect_entrypoint_classes(user_mod):
         },
         dict_converter=js.Object.fromEntries,
     )
+
+
+async def wrapper_func(relaxed, inst, prop, *args, **kwargs):
+    method = getattr(inst, prop)
+
+    py_args = [python_from_rpc(arg) for arg in args]
+    py_kwargs = {k: python_from_rpc(v) for k, v in kwargs.items()}
+    result = (
+        relaxed_call(method, *py_args, **py_kwargs)
+        if relaxed
+        else method(*py_args, **py_kwargs)
+    )
+
+    if isawaitable(result):
+        return python_to_rpc(await result)
+    else:
+        return python_to_rpc(result)

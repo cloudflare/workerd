@@ -86,14 +86,20 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   // TODO(someday): Maybe instead of throwing we should TerminateExecution() here? But that
   //   requires some more extensive changes.
   KJ_IF_SOME(r, reason) {
-    IoContext::current().abort(js.exceptionToKj(r.addRef(js)));
-    js.throwException(kj::mv(r));
+    IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
   } else {
     auto e =
         JSG_KJ_EXCEPTION(FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
-    IoContext::current().abort(kj::cp(e));
-    kj::throwFatalException(kj::mv(e));
+    IoContext::current().abort(kj::mv(e));
   }
+
+  js.terminateExecution();
+
+  // terminateExecution() only sets a flag. In order for V8 to notify it, we have to make it do
+  // some work that causes it to check the flag. This has been observed to do the trick.
+  // TODO(cleanup): This appears in ExecutionContext::abort(), DurableObjectState::abort(), and
+  //     processExitImpl() in node/util.c++. Consolidate?
+  jsg::check(v8::JSON::Stringify(js.v8Context(), js.str()));
 }
 
 namespace {
@@ -145,7 +151,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     kj::HttpService::Response& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock,
-    kj::Maybe<ExportedHandler&> exportedHandler) {
+    kj::Maybe<ExportedHandler&> exportedHandler,
+    kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
   // that it can drop the reference whenever it gets GC'ed. But in this case the stream's lifetime
@@ -215,8 +222,18 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   }
 
   auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
-      js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
-      kj::none /** AbortSignal **/, kj::mv(cf), kj::mv(body));
+      jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
+      /* signal */ kj::mv(abortSignal), kj::mv(cf), kj::mv(body),
+      /* thisSignal */ kj::none, Request::CacheMode::NONE);
+
+  // signal vs thisSignal
+  // --------------------
+  // The fetch spec definition of Request has a distinction between the
+  // "signal" (which is an optional AbortSignal passed in with the options), and "this' signal",
+  // which is an AbortSignal that is always available via the request.signal accessor.
+  //
+  // redirect
+  // --------
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.

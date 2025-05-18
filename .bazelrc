@@ -53,6 +53,9 @@ build --host_per_file_copt=external/com_google_protobuf@-Wno-deprecated-this-cap
 ## simdutf
 build --per_file_copt=external/simdutf@-Wno-unused-const-variable
 
+# TODO(cleanup): New LLVM 20 warning, fix and enable again
+build --copt=-Wno-nontrivial-memcall
+
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
 # GitHub Actions. This is an optional performance hack intended for CI, although it might also be
 # useful for local development.
@@ -173,6 +176,7 @@ build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 # Using extra_rustc_flag for non-exec flags so they can be overwritten selectively.
 build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
+build --@rules_rust//:rustfmt.toml=//src/rust:rustfmt.toml
 
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
@@ -282,6 +286,9 @@ build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
 # On Linux, use clang lld.
 build:linux --linkopt="-fuse-ld=lld"
+
+# Disable LLVM 20 warning about unused cli argument "-c".
+build:linux --copt='-Wno-unused-command-line-argument' --copt='-Wno-unknown-warning-option' --host_copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unknown-warning-option'
 
 #
 # Windows

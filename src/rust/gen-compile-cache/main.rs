@@ -1,6 +1,8 @@
-use clap::Parser;
+use std::fs;
 use std::path::Path;
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
+
+use clap::Parser;
 
 /// Generate V8 compile caches
 #[derive(Parser, Debug)]

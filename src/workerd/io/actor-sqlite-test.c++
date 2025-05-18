@@ -5,7 +5,6 @@
 #include "actor-sqlite.h"
 #include "io-gate.h"
 
-#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
 
@@ -412,30 +411,8 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
   }
 }
 
-KJ_TEST("tells alarm handler to cancel when handler alarm is later than committed alarm") {
-  ActorSqliteTest test;
-  util::Autogate::initAutogateNamesForTest({});
-  KJ_DEFER(util::Autogate::deinitAutogate());
-
-  // Initialize alarm state to 1ms.
-  test.setAlarm(oneMs);
-  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  test.pollAndExpectCalls({});
-  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
-
-  // Request handler run at 2ms.  Expect cancellation without rescheduling.
-  auto armResult = test.actor.armAlarmHandler(twoMs, false);
-  KJ_ASSERT(armResult.is<ActorSqlite::CancelAlarmHandler>());
-  auto cancelResult = kj::mv(armResult.get<ActorSqlite::CancelAlarmHandler>());
-  KJ_ASSERT(cancelResult.waitBeforeCancel.poll(test.ws));
-  cancelResult.waitBeforeCancel.wait(test.ws);
-}
-
 KJ_TEST("tells alarm handler to reschedule when handler alarm is later than committed alarm") {
   ActorSqliteTest test;
-  util::Autogate::initAutogateNamesForTest({"reschedule-desynced-sqlite-alarms"_kj});
-  KJ_DEFER(util::Autogate::deinitAutogate());
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);

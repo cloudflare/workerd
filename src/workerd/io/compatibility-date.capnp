@@ -688,6 +688,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   cacheApiRequestCfOverridesCacheRules @77 :Bool
       $compatEnableFlag("cache_api_request_cf_overrides_cache_rules")
+      $compatDisableFlag("no_cache_api_request_cf_overrides_cache_rules")
+      $compatEnableDate("2025-05-19")
       $neededByFl;
   # Enables cache settings specified request in cache api cf object to override cache rules. (only for user owned or grey-clouded sites)
 
@@ -755,4 +757,21 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables the experimental Web File System API.
   # WARNING: This API is still in development and may change or be removed in the future.
+
+  abortSignalRpc @88 :Bool
+      $compatEnableFlag("enable_abortsignal_rpc")
+      $experimental;
+  # Enables experimental support for passing AbortSignal over RPC.
+
+  allowEvalDuringStartup @89 :Bool
+      $compatEnableFlag("allow_eval_during_startup")
+      $compatEnableDate("2025-06-01")
+      $compatDisableFlag("disallow_eval_during_startup");
+  # Enables eval() and new Function() during startup.
+
+  enableRequestSignal @90 :Bool
+    $compatEnableFlag("enable_request_signal")
+    $compatDisableFlag("disable_request_signal");
+  # Enables Request.signal for incoming requests.
+  # This feature is still experimental and the compat flag has no default enable date.
 }

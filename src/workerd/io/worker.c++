@@ -1652,6 +1652,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             // evaluation is complete.
             TmpDirStoreScope tmpDirStoreScope;
 
+            // We allow eval and new Function() during startup, becaues startup time is entirely
+            // deterministic, so we can easily reproduce the input to eval() by just running the
+            // worker again. We do not allow eval() at runtime because we need to have a record of
+            // all code that executes in production for forensic purposes, and at runtime the input
+            // to eval() could have come from a remote source on which we don't have a record.
+            js.setAllowEval(FeatureFlags::get(js).getAllowEvalDuringStartup());
+            KJ_DEFER(js.setAllowEval(false));
+
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
@@ -3362,7 +3370,6 @@ struct Worker::Actor::Impl {
   // in each CustomEvent.
   kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
-  kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
   struct ScheduledAlarm {
     ScheduledAlarm(
@@ -3562,7 +3569,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       e.setDescription(kj::mv(description));
     }
 
-    impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
+    context.abort(kj::cp(e));
     impl->classInstance = kj::mv(e);
   }
 }
@@ -3615,11 +3622,7 @@ kj::Promise<void> Worker::Actor::onBroken() {
     impl->abortFulfiller = kj::mv(paf.fulfiller);
   }
 
-  return abortPromise
-      // inputGate.onBroken() is covered by IoContext::onAbort(), but outputGate.onBroken() is
-      // not.
-      .exclusiveJoin(impl->outputGate.onBroken())
-      .exclusiveJoin(kj::mv(impl->constructorFailedPaf.promise));
+  return abortPromise;
 }
 
 const Worker::Actor::Id& Worker::Actor::getId() {

@@ -7,6 +7,7 @@
 #include "actor-state.h"
 #include "global-scope.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 #include <capnp/message.h>
@@ -818,10 +819,11 @@ void AbortSignal::triggerAbort(
 }
 
 void AbortSignal::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  JSG_REQUIRE(FeatureFlags::get(js).getAbortSignalRpc(), DOMDataCloneError,
+      "AbortSignal serialization is not enabled.");
+
   auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
       "AbortSignal can only be serialized for RPC.");
-
-  LOG_PERIODICALLY(WARNING, "NOSENTRY An AbortSignal was serialized for RPC");
 
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
   JSG_REQUIRE(
@@ -957,6 +959,16 @@ void AbortSignal::subscribeToRpcAbort(jsg::Lock& js) {
 
     rpcAbortPromise = kj::none;
   }
+}
+
+bool AbortSignal::isIgnoredForSubrequests(jsg::Lock& js) const {
+  // True if this is a signal on the request of an incoming fetch. When the compat flag
+  // `requestSignalPassthrough` is set, this flag has no effect. But to ensure backwards
+  // compatibility, when this flag is not set, this signal will not be passed through to
+  // subrequests derived from the incoming request.
+
+  return !FeatureFlags::get(js).getRequestSignalPassthrough() &&
+      flag == Flag::IGNORE_FOR_SUBREQUESTS;
 }
 
 void AbortController::abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {

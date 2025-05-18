@@ -9,14 +9,12 @@ from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
-from inspect import isawaitable
 from types import LambdaType
 from typing import Any, TypedDict, Unpack
 
-import js
-
 # Get globals modules and import function from the entrypoint-helper
-from js import pyodide_entrypoint_helper
+import _pyodide_entrypoint_helper
+import js
 
 import pyodide.http
 from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
@@ -46,15 +44,15 @@ def import_from_javascript(module_name: str) -> Any:
     # JSPI won't work in the global scope in 0.26.0a2 so we need modules importable in the global
     # scope to be imported beforehand.
     if module_name == "cloudflare:workers":
-        return pyodide_entrypoint_helper.cloudflareWorkersModule
+        return _pyodide_entrypoint_helper.cloudflareWorkersModule
     elif module_name == "cloudflare:sockets":
-        return pyodide_entrypoint_helper.cloudflareSocketsModule
+        return _pyodide_entrypoint_helper.cloudflareSocketsModule
 
     try:
         from pyodide.ffi import run_sync
 
         # Call the JavaScript import function
-        return run_sync(pyodide_entrypoint_helper.doAnImport(module_name))
+        return run_sync(_pyodide_entrypoint_helper.doAnImport(module_name))
     except JsException as e:
         raise ImportError(f"Failed to import '{module_name}': {e}") from e
     except RuntimeError as e:
@@ -894,32 +892,6 @@ def handler(func):
     return wrapper
 
 
-def _wrap_attr(attr):
-    # `isinstance(attr, classmethod)` implies `not callable(attr)`, but we keep the latter for
-    # readability.
-    if not callable(attr) or isinstance(attr, (classmethod, staticmethod)):
-        return attr
-
-    @functools.wraps(attr)
-    async def wrapper(*args, **kwargs):
-        py_args = [python_from_rpc(arg) for arg in args]
-        py_kwargs = {k: python_from_rpc(v) for k, v in kwargs.items()}
-        result = attr(*py_args, **py_kwargs)
-        if isawaitable(result):
-            return python_to_rpc(await result)
-        else:
-            return python_to_rpc(result)
-
-    return wrapper
-
-
-def _wrap_subclass(cls):
-    for k, v in cls.__dict__.items():
-        if k.startswith("__"):
-            continue
-        setattr(cls, k, _wrap_attr(v))
-
-
 class DurableObject:
     """
     Base class used to define a Durable Object.
@@ -927,9 +899,6 @@ class DurableObject:
 
     def __init__(*_args, **_kwds):
         pass
-
-    def __init_subclass__(cls, **_kwargs):
-        _wrap_subclass(cls)
 
 
 class WorkerEntrypoint:
@@ -940,9 +909,6 @@ class WorkerEntrypoint:
     def __init__(*_args, **_kwds):
         pass
 
-    def __init_subclass__(cls, **_kwargs):
-        _wrap_subclass(cls)
-
 
 class WorkflowEntrypoint:
     """
@@ -951,6 +917,3 @@ class WorkflowEntrypoint:
 
     def __init__(*_args, **_kwds):
         pass
-
-    def __init_subclass__(cls, **_kwargs):
-        _wrap_subclass(cls)

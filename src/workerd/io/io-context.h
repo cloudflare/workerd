@@ -342,13 +342,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
 
   // Force context abort now.
-  void abort(kj::Exception&& e) {
-    if (abortException != kj::none) {
-      return;
-    }
-    abortException = kj::cp(e);
-    abortFulfiller->reject(kj::mv(e));
-  }
+  //
+  // Note that abort() is safe to call while the IoContext is current. Becaues of this, it cannot
+  // cancel any tasks synchronously, as this might cancel the current promise, leading to a crash.
+  void abort(kj::Exception&& e);
+
+  // Await the given promise and, if it throws, call `abort()` with the exception. The promise
+  // given here should just be a monitoring promise, it should not represent any sort of background
+  // work beyond monitoring. In particular, it must not be a task that attempts to enter the
+  // isolate by calling context.run().
+  void abortWhen(kj::Promise<void> promise);
 
   // Has event.passThroughOnException() been called?
   bool isFailOpen() {
@@ -513,6 +516,61 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
 
+  enum TopUpFlag { NO_TOP_UP, TOP_UP };
+
+  // Make a kj::Function which, when called, re-enters this IoContext to run some code.
+  //
+  // `func` is a function with a signature similar to:
+  //
+  //     template <typename... Params, typename Result>
+  //     jsg::Promise<Result> func(jsg::Lock& js, Params&&... params);
+  //
+  // (Optionally, the `jsg::Promise<Result>` can just be `Result` instead.)
+  //
+  // The returned lambda will a signature like:
+  //
+  //     kj::Promise<Result> func(Params&&...);
+  //
+  // This function can be invoked without holding the isolate lock.
+  //
+  // You might think that all this does is set up a lambda that captures the IoContext and calls
+  // ctx.run(). But, it turns out getting this right is a lot more complicated.
+  // - What if the IoContext has been canceled / destroyed, or is destroyed during the callback?
+  // - What if it still exists, but it's an actor and there's no longer an IncomingRequest?
+  // - How do you prevent "the script will never generate a response" if the callback is the
+  //   only thing being waited for?
+  // - What if the call was made within blockConcurrencyWhile()? The callback will be blocked until
+  //   the critical section ends, which could lead to deadlock if the critical section code is
+  //   waiting on it?
+  //
+  // This solves all that:
+  // - If the IoContext is destroyed, the callback throws an exception.
+  // - However, as long as the callback itself exists, it is treated as if a task were added using
+  //   addTask(). In actors, this blocks hibernation and keeps the IncomingRequest live.
+  // - Additionally, the calback counts as a PendingEvent.
+  // - The callback is allowed to run within the critical section (blockConcurrencyWhile()) from
+  //   which it was called.
+  //
+  // In short, you should almost never use ctx.run() to re-enter an existing context. You almost
+  // always want either awaitIo() (to re-enter the context after some KJ promise completes) or
+  // makeReentryCallback() (to re-enter the context on a callback).
+  //
+  // The returned function can be called multiple times.
+  //
+  // Note that when invoking the returned function, the function object itself must outlive the
+  // Promise it returns -- just like a coroutine lambda that has a capture. This should, of course,
+  // be assumed of all functions that return promises, but classically kj::Promise's own `.then()`
+  // does not keep its input continuation functions live in this way. If you want to pass the
+  // callback to `.then()`, you can wrap it in `kj::coCapture()`, but note that this means it can
+  // only be called once.
+  //
+  // Use `makeReentryCallback<IoContext::TOP_UP>(func)` to cause
+  // `ctx.getLimitEnforcer().topUpActor()` to be called each time the callback is invoked. This is
+  // useful because `topUpActor()` must be called before entering the isolate lock, so it can't be
+  // part of the body of the given callback function.
+  template <TopUpFlag topUp = NO_TOP_UP, typename Func>
+  auto makeReentryCallback(Func func);
+
   // Returns the number of times addTask() has been called (even if the tasks have completed).
   uint taskCount() {
     return addTaskCounter;
@@ -591,10 +649,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::Promise<T> awaitDeferredProxy(jsg::Lock& js, kj::Promise<api::DeferredProxy<T>>&& promise) {
     return awaitIoImpl(
         js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection(), IdentityFunc<T>());
-  }
-
-  bool isFinalized() {
-    return ownedObjects.isFinalized();
   }
 
   // Called by ScheduledEvent
@@ -880,7 +934,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   class PendingEvent;
 
   kj::Maybe<PendingEvent&> pendingEvent;
-  kj::Maybe<kj::Promise<void>> runFinalizersTask;
+  kj::Maybe<kj::Promise<void>> abortFromHangTask;
 
   WarningAggregator::Map warningAggregatorMap;
 
@@ -904,7 +958,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Array<jsg::Value> args);
 
   uint addTaskCounter = 0;
-  kj::Maybe<kj::TaskSet> tasks;
+  kj::TaskSet tasks;
 
   // The timeout manager needs to live below `deleteQueue` because the promises may refer to
   // objects in the queue.
@@ -916,6 +970,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // IoContext (e.g. in the ActorContext) MUST be canceled when the IoContext is
   // destructed.
   kj::Own<TimeoutManager> timeoutManager;
+
+  // This canceler will be canceled when the IoContext is destroyed. Use it to wrap promises that
+  // need to be held externally but which should error if the IoContext is canceled. This is used
+  // for `makeReentryCallback()` in particular.
+  kj::Canceler canceler;
 
   kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
       bool isInHouse,
@@ -945,7 +1004,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       bool allowPermanentException);
 
-  void runFinalizers(Worker::AsyncLock& asyncLock);
+  void abortFromHang(Worker::AsyncLock& asyncLock);
 
   template <typename T>
   struct IdentityFunc {
@@ -1295,7 +1354,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 template <typename T>
 kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
-  struct RefcountedFulfiller: public Finalizeable, public kj::Refcounted {
+  struct RefcountedFulfiller: public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
     kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
     bool isDone = false;
@@ -1327,19 +1386,6 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
         // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
         // this promise.
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
-      }
-    }
-
-    kj::Maybe<kj::StringPtr> finalize() override {
-      if (!isDone) {
-        reject();
-        isDone = true;
-        return "A hanging Promise was canceled. This happens when the worker runtime is waiting "
-               "for a Promise from JavaScript to resolve, but has detected that the Promise "
-               "cannot possibly ever resolve because all code and events related to the "
-               "Promise's I/O context have already finished."_kj;
-      } else {
-        return kj::none;
       }
     }
   };
@@ -1386,7 +1432,53 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     }, kj::mv(errorHandler));
   }
 
-  return kj::mv(paf.promise);
+  return paf.promise.exclusiveJoin(onAbort().then([]() -> RemoveIoOwn<T> { KJ_UNREACHABLE; }));
+}
+
+template <IoContext::TopUpFlag topUp, typename Func>
+auto IoContext::makeReentryCallback(Func func) {
+  // A reentry callback is meant for *re-*entry, so should only be created while already inside
+  // the IoContext. Initial entry into the IoContext should just use run().
+  requireCurrent();
+
+  // We need to:
+  // - Use addTask() to make sure that, if we're in an actor, the IncomingEvent stays alive while
+  //   the callback exists (and hibernation is blocked).
+  // - Call registerPendingEvent() to make sure that, if we're NOT in an actor, we don't conclude
+  //   that there's nothing left to wait for while the callback exists.
+  // TODO(perf): Probably both of these things could be done in simpler ways involving less
+  //   allocation, but it would require some refactoring.
+  auto [promise, fulfiller] = kj::newPromiseAndFulfiller<void>();
+  addTask(kj::mv(promise));
+  auto releaseNotifier =
+      kj::defer([fulfiller = kj::mv(fulfiller), pe = registerPendingEvent()]() mutable {
+    fulfiller->fulfill();
+  });
+
+  return [self = getWeakRef(), cs = getCriticalSection(), releaseNotifier = kj::mv(releaseNotifier),
+             func = kj::fwd<Func>(func)](auto&&... params) mutable {
+    auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
+        "The execution context which hosts this callback is no longer running.");
+
+    if constexpr (topUp == TOP_UP) {
+      ctx.getLimitEnforcer().topUpActor();
+    }
+
+    return ctx.canceler.wrap(ctx.run(
+        [&ctx, &func, ... params = kj::fwd<decltype(params)>(params)](Worker::Lock& lock) mutable {
+      using ResultType = kj::Decay<decltype(func(lock, kj::fwd<decltype(params)>(params)...))>;
+
+      if constexpr (kj::isSameType<ResultType, void>()) {
+        (void)ctx;
+        func(lock, kj::fwd<decltype(params)>(params)...);
+      } else if constexpr (jsg::isPromise<ResultType>()) {
+        return ctx.awaitJs(lock, func(lock, kj::fwd<decltype(params)>(params)...));
+      } else {
+        (void)ctx;
+        return func(lock, kj::fwd<decltype(params)>(params)...);
+      }
+    }, kj::mv(cs)));
+  };
 }
 
 template <typename T>

@@ -8,7 +8,6 @@
 #include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <sqlite3.h>
@@ -653,13 +652,10 @@ kj::OneOf<ActorSqlite::CancelAlarmHandler, ActorSqlite::RunAlarmHandler> ActorSq
         // alarm time has somehow gotten out of sync with the scheduled alarm time.
         LOG_WARNING_PERIODICALLY("NOSENTRY SQLite alarm handler canceled.", scheduledTime, actorId,
             localAlarmState.orDefault(kj::UNIX_EPOCH));
-        if (util::Autogate::isEnabled(util::AutogateKey::RESCHEDULE_DESYNCED_SQLITE_ALARMS)) {
-          // Tell the caller to wait for successful rescheduling before cancelling the current
-          // handler invocation.
-          return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
-        } else {
-          return CancelAlarmHandler{.waitBeforeCancel = kj::READY_NOW};
-        }
+
+        // Tell the caller to wait for successful rescheduling before cancelling the current
+        // handler invocation.
+        return CancelAlarmHandler{.waitBeforeCancel = requestScheduledAlarm(localAlarmState)};
       }
     } else {
       // There's a alarm write that hasn't been set yet pending for a time different than ours --
