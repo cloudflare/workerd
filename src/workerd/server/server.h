@@ -223,6 +223,13 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
+  struct ErrorReporter;
+  struct WorkerDef;
+  kj::Own<Service> makeWorkerImpl(kj::StringPtr name,
+      WorkerDef def,
+      capnp::List<config::Extension>::Reader extensions,
+      ErrorReporter& errorReporter);
+
   // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
   void abortAllActors(kj::Maybe<const kj::Exception&> reason);
 

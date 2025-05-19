@@ -1720,7 +1720,9 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   }
 };
 
-struct ErrorReporter: public Worker::ValidationErrorReporter {
+}  // namespace
+
+struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
   ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
 
   Server& server;
@@ -1751,7 +1753,6 @@ struct ErrorReporter: public Worker::ValidationErrorReporter {
     actorClasses.insert(kj::str(exportName));
   }
 };
-}  // namespace
 
 class Server::WorkerService final: public Service,
                                    private kj::TaskSet::ErrorHandler,
@@ -3390,6 +3391,37 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
   }
 }
 
+// WorkerDef is an intermediate representation of everything from `config::Worker::Reader` that
+// `Server::makeWorkerImpl()` needs. Similar to `WorkerSource`, we factor out this intermediate
+// representation so that we can potentially build it dynamically from input that isn't a
+// workerd config file.
+struct Server::WorkerDef {
+  CompatibilityFlags::Reader featureFlags;
+  kj::Rc<Directory> bundleDirectory;
+  WorkerSource source;
+  kj::Maybe<kj::StringPtr> moduleFallback;
+  kj::HashMap<kj::String, ActorConfig>& localActorConfigs;
+
+  FutureSubrequestChannel globalOutbound;
+  kj::Maybe<FutureSubrequestChannel> cacheApiOutbound;
+  kj::Vector<FutureSubrequestChannel> subrequestChannels;
+  kj::Vector<FutureActorChannel> actorChannels;
+  kj::Vector<FutureActorClassChannel> actorClassChannels;
+  kj::Array<FutureSubrequestChannel> tails;
+  kj::Array<FutureSubrequestChannel> streamingTails;
+
+  // Dynamically-loaded isolates can't directly have storage, so for now I'm using a raw capnp
+  // Reader here. A default-constructed Reader will have type `none` which is appropriate for
+  // dynamic isolates.
+  config::Worker::DurableObjectStorage::Reader actorStorageConf;
+
+  // Similar to the `compileBindings` callback passed into `Worker`'s constructor, except that
+  // `ctx.exports` is taken care of separately. This is provided as a callback since `env` is
+  // constructed in a vastly different way for dynamic isolates.
+  kj::Function<void(jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target)>
+      compileBindings;
+};
+
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -3409,6 +3441,74 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }
 
+  kj::Vector<FutureSubrequestChannel> subrequestChannels;
+  kj::Vector<FutureActorChannel> actorChannels;
+  kj::Vector<FutureActorClassChannel> actorClassChannels;
+
+  auto confBindings = conf.getBindings();
+  kj::Vector<WorkerdApi::Global> globals(confBindings.size());
+  for (auto binding: confBindings) {
+    KJ_IF_SOME(global,
+        createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
+            actorClassChannels, actorConfigs, experimental)) {
+      globals.add(kj::mv(global));
+    }
+  }
+
+  // Construct `WorkerDef` from `conf`.
+  WorkerDef def{
+    .featureFlags = featureFlags.asReader(),
+    .bundleDirectory = getBundleDirectory(conf),
+    .source = WorkerdApi::extractSource(name, conf, errorReporter),
+    .moduleFallback = conf.hasModuleFallback() ? kj::some(conf.getModuleFallback()) : kj::none,
+    .localActorConfigs = localActorConfigs,
+
+    .globalOutbound{
+      .designator = conf.getGlobalOutbound(),
+      .errorContext = kj::str("Worker \"", name, "\"'s globalOutbound"),
+    },
+
+    .cacheApiOutbound = conf.hasCacheApiOutbound()
+        ? kj::some(FutureSubrequestChannel{
+            .designator = conf.getCacheApiOutbound(),
+            .errorContext = kj::str("Worker \"", name, "\"'s cacheApiOutbound"),
+          })
+        : kj::none,
+
+    .subrequestChannels = kj::mv(subrequestChannels),
+    .actorChannels = kj::mv(actorChannels),
+    .actorClassChannels = kj::mv(actorClassChannels),
+
+    .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
+    return {
+      .designator = tail,
+      .errorContext = kj::str("Worker \"", name, "\"'s tails"),
+    };
+  },
+
+    .streamingTails = KJ_MAP(streamingTail, conf.getStreamingTails()) -> FutureSubrequestChannel {
+    return {
+      .designator = streamingTail,
+      .errorContext = kj::str("Worker \"", name, "\"'s streaming tails"),
+    };
+  },
+
+    .actorStorageConf = conf.getDurableObjectStorage(),
+
+    .compileBindings =
+        [globals = kj::mv(globals)](
+            jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
+    return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
+  },
+  };
+
+  return makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
+}
+
+kj::Own<Server::Service> Server::makeWorkerImpl(kj::StringPtr name,
+    WorkerDef def,
+    capnp::List<config::Extension>::Reader extensions,
+    ErrorReporter& errorReporter) {
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
@@ -3418,12 +3518,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   // TODO(node-fs): This is set up to allow users to configure the "mount"
   // points for known roots but we currently do not expose that in the
   // config. So for now this just uses the defaults.
-  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(conf));
-
-  auto source = WorkerdApi::extractSource(name, conf, errorReporter);
+  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), kj::mv(def.bundleDirectory));
 
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  if (featureFlags.getNewModuleRegistry()) {
+  if (def.featureFlags.getNewModuleRegistry()) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
@@ -3434,13 +3532,14 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // import specifier url will be "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
 
-    auto& modulesSource = KJ_ASSERT_NONNULL(source.variant.tryGet<Worker::Script::ModulesSource>(),
+    auto& modulesSource = KJ_ASSERT_NONNULL(
+        def.source.variant.tryGet<Worker::Script::ModulesSource>(),
         "The new MOduleRegistry only works with ES modules syntax, not Service Workers syntax.");
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
-        *jsgobserver, modulesSource, featureFlags.asReader(), pythonConfig, bundleBase);
+        *jsgobserver, modulesSource, def.featureFlags, pythonConfig, bundleBase);
   }
 
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), extensions,
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
       kj::mv(newModuleRegistry), kj::mv(workerFs));
 
@@ -3451,7 +3550,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   }
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
       kj::mv(limitEnforcer), inspectorPolicy,
-      conf.isServiceWorkerScript() ? Worker::ConsoleMode::INSPECTOR_ONLY : consoleMode);
+      def.source.variant.is<WorkerSource::ScriptSource>() ? Worker::ConsoleMode::INSPECTOR_ONLY
+                                                          : consoleMode);
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
@@ -3459,7 +3559,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     isolateRegistrar->registerIsolate(name, isolate.get());
   }
 
-  if (conf.hasModuleFallback()) {
+  KJ_IF_SOME(moduleFallback, def.moduleFallback) {
     KJ_REQUIRE(experimental,
         "The module fallback service is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
@@ -3468,7 +3568,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // dev/testing purposes only.
     auto& apiIsolate = isolate->getApi();
     apiIsolate.setModuleFallbackCallback(
-        [address = kj::str(conf.getModuleFallback()), featureFlags = apiIsolate.getFeatureFlags()](
+        [address = kj::str(moduleFallback), featureFlags = apiIsolate.getFeatureFlags()](
             jsg::Lock& js, kj::StringPtr specifier, kj::Maybe<kj::String> referrer,
             jsg::CompilationObserver& observer, jsg::ModuleRegistry::ResolveMethod method,
             kj::Maybe<kj::StringPtr> rawSpecifier) mutable
@@ -3622,23 +3722,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   }
 
   auto script = isolate->newScript(
-      name, kj::mv(source), IsolateObserver::StartType::COLD, false, errorReporter);
+      name, kj::mv(def.source), IsolateObserver::StartType::COLD, false, errorReporter);
 
-  kj::Vector<FutureSubrequestChannel> subrequestChannels;
-  kj::Vector<FutureActorChannel> actorChannels;
-  kj::Vector<FutureActorClassChannel> actorClassChannels;
-
-  auto confBindings = conf.getBindings();
   using Global = WorkerdApi::Global;
-  kj::Vector<Global> globals(confBindings.size());
-  for (auto binding: confBindings) {
-    KJ_IF_SOME(global,
-        createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorClassChannels, actorConfigs, experimental)) {
-      globals.add(kj::mv(global));
-    }
-  }
-
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
   auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
       [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
@@ -3648,7 +3734,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // permitted to hold a handle until then, though.
     ctxExportsHandle = lock.v8Ref(ctxExports);
 
-    return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
+    return def.compileBindings(lock, api, target);
   },
       IsolateObserver::StartType::COLD,
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
@@ -3658,12 +3744,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     lock.validateHandlers(errorReporter);
 
     // Build `ctx.exports` based on the entrypoints reported by `validateHandlers()`.
-    kj::Vector<Global> ctxExports(errorReporter.namedEntrypoints.size() + localActorConfigs.size());
+    kj::Vector<Global> ctxExports(
+        errorReporter.namedEntrypoints.size() + def.localActorConfigs.size());
 
     // Start numbering loopback channels for stateless entrypoints after the last subrequest
     // channel used by bindings.
     uint nextSubrequestChannel =
-        subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+        def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
     if (errorReporter.defaultEntrypoint != kj::none) {
       ctxExports.add(Global{.name = kj::str("default"),
         .value = Global::Fetcher{
@@ -3677,8 +3764,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
     // Start numbering loopback channels for actor classes after the last actor channel used by
     // bindings.
-    uint nextActorChannel = actorChannels.size();
-    for (auto& ns: localActorConfigs) {
+    uint nextActorChannel = def.actorChannels.size();
+    for (auto& ns: def.localActorConfigs) {
       decltype(Global::value) value;
       KJ_SWITCH_ONEOF(ns.value) {
         KJ_CASE_ONEOF(durable, Durable) {
@@ -3703,20 +3790,17 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     { auto drop = kj::mv(ctxExportsHandle); }
   });
 
-  auto linkCallback = [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
-                          actorChannels = kj::mv(actorChannels),
-                          actorClassChannels = kj::mv(actorClassChannels),
-                          &localActorConfigs](WorkerService& workerService) mutable {
+  auto linkCallback = [this, name, def = kj::mv(def)](WorkerService& workerService) mutable {
     WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
     auto entrypointNames = workerService.getEntrypointNames();
 
-    auto services = kj::heapArrayBuilder<kj::Own<Service>>(subrequestChannels.size() +
+    auto services = kj::heapArrayBuilder<kj::Own<Service>>(def.subrequestChannels.size() +
         IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT + entrypointNames.size() +
         workerService.hasDefaultEntrypoint());
 
     kj::Own<Service> globalService =
-        lookupService(conf.getGlobalOutbound(), kj::str("Worker \"", name, "\"'s globalOutbound"));
+        lookupService(def.globalOutbound.designator, kj::mv(def.globalOutbound.errorContext));
 
     // Bind both "next" and "null" to the global outbound. (The difference between these is a
     // legacy artifact that no one should be depending on.)
@@ -3730,7 +3814,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     services.add(kj::mv(globalService));
     services.add(kj::mv(globalService2));
 
-    for (auto& channel: subrequestChannels) {
+    for (auto& channel: def.subrequestChannels) {
       services.add(lookupService(channel.designator, kj::mv(channel.errorContext)));
     }
 
@@ -3747,9 +3831,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     result.subrequest = services.finish();
 
     // Set up actor class channels
-    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(actorClassChannels.size());
+    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(def.actorClassChannels.size());
 
-    for (auto& channel: actorClassChannels) {
+    for (auto& channel: def.actorClassChannels) {
       actorClasses.add(lookupActorClass(channel.designator, kj::mv(channel.errorContext)));
     }
 
@@ -3760,9 +3844,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     result.actorClass = actorClasses.finish();
 
     auto linkedActorChannels = kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(
-        actorChannels.size() + localActorConfigs.size());
+        def.actorChannels.size() + def.localActorConfigs.size());
 
-    for (auto& channel: actorChannels) {
+    for (auto& channel: def.actorChannels) {
       WorkerService* targetService = &workerService;
       if (channel.designator.hasServiceName()) {
         auto& svc = KJ_UNWRAP_OR(this->services.find(channel.designator.getServiceName()), {
@@ -3788,22 +3872,20 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // `workerService.getActorNamespaces()` iterates in the same order as `localActorConfigs` did
     // earlier.
     auto& selfActorNamespaces = workerService.getActorNamespaces();
-    KJ_ASSERT(selfActorNamespaces.size() == localActorConfigs.size());
+    KJ_ASSERT(selfActorNamespaces.size() == def.localActorConfigs.size());
     for (auto& ns: selfActorNamespaces) {
       linkedActorChannels.add(*ns.value);
     }
 
     result.actor = linkedActorChannels.finish();
 
-    if (conf.hasCacheApiOutbound()) {
-      result.cache = lookupService(
-          conf.getCacheApiOutbound(), kj::str("Worker \"", name, "\"'s cacheApiOutbound"));
+    KJ_IF_SOME(out, def.cacheApiOutbound) {
+      result.cache = lookupService(out.designator, kj::mv(out.errorContext));
     }
 
-    auto actorStorageConf = conf.getDurableObjectStorage();
-    if (actorStorageConf.isLocalDisk()) {
-      kj::StringPtr diskName = actorStorageConf.getLocalDisk();
-      KJ_IF_SOME(svc, this->services.find(actorStorageConf.getLocalDisk())) {
+    if (def.actorStorageConf.isLocalDisk()) {
+      kj::StringPtr diskName = def.actorStorageConf.getLocalDisk();
+      KJ_IF_SOME(svc, this->services.find(def.actorStorageConf.getLocalDisk())) {
         auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc.get());
         if (diskSvc == nullptr) {
           reportConfigError(kj::str("service ", name,
@@ -3844,12 +3926,12 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       }
     }
 
-    result.tails = KJ_MAP(tail, conf.getTails()) {
-      return lookupService(tail, kj::str("Worker \"", name, "\"'s tails"));
+    result.tails = KJ_MAP(tail, def.tails) {
+      return lookupService(tail.designator, kj::mv(tail.errorContext));
     };
 
-    result.streamingTails = KJ_MAP(streamingTails, conf.getStreamingTails()) {
-      return lookupService(streamingTails, kj::str("Worker \"", name, "\"'s streaming tails"));
+    result.streamingTails = KJ_MAP(tail, def.streamingTails) {
+      return lookupService(tail.designator, kj::mv(tail.errorContext));
     };
 
     return result;
@@ -3857,7 +3939,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), localActorConfigs, kj::mv(linkCallback),
+      kj::mv(errorReporter.actorClasses), def.localActorConfigs, kj::mv(linkCallback),
       KJ_BIND_METHOD(*this, abortAllActors));
 }
 
