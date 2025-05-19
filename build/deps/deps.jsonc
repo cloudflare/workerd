@@ -39,19 +39,6 @@
       "strip_prefix": "",
       "build_file": "//:build/BUILD.simdutf"
     },
-    // protobuf for use with perfetto
-    {
-      "type": "github_release",
-      "name": "com_google_protobuf",
-      "owner": "protocolbuffers",
-      "repo": "protobuf",
-      "file_regex": "protobuf-.*\\.tar\\.gz",
-      // Frozen because protobuf version management is difficult. Newer versions currently break build.
-      "freeze_version": "v29.4",
-      "repo_mapping": {
-        "@com_google_absl": "@abseil-cpp"
-      }
-    },
     {
       "type": "github_release",
       "name": "brotli",
