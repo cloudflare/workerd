@@ -248,7 +248,8 @@ export let getBulkTest = {
 export let deleteBulkTest = {
   async test(ctrl, env, ctx) {
     // Single key
-    await env.KV.deleteBulk('success');
+    let result = await env.KV.deleteBulk('success');
+    assert.strictEqual(result, undefined);
 
     // Failure
     await assert.rejects(env.KV.deleteBulk('error'), {
@@ -256,7 +257,8 @@ export let deleteBulkTest = {
     });
 
     // Multiple keys
-    await env.KV.deleteBulk(['key1', 'key2', 'key3']);
+    result = await env.KV.deleteBulk(['key1', 'key2', 'key3']);
+    assert.strictEqual(result, undefined);
 
     // Too many keys
     await assert.rejects(
