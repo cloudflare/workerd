@@ -7,6 +7,8 @@ Previously, ValueSerializer would always refuse to serialize Proxy objects. This
 
 Similar to the previous patch adding `SetTreatFunctionsAsHostObjects()`, this is intended for use in an RPC system, where an arbitrary object can be "serialized" by replacing it with a stub which, when invoked, performs an RPC back to the originating isolate in order to access the original object there.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
 index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a5076871f05a 100644
 --- a/include/v8-value-serializer.h
@@ -28,10 +30,10 @@ index 141f138e08de849e3e02b3b2b346e643b9e40c70..bdcb2831c55e21c6d511f56dfc79a507
     * Write raw data in various common formats to the buffer.
     * Note that integer types are written in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 740f2a399c75d31eb25053545f22d17706cedeec..861ae72695279e870b6291cb7e880e3c15f21b25 100644
+index 6682ce73a813f6e795c442534f6303964e1f9a61..2aaae63b805d221bc92e7b1e56a383ce02a6cd37 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3342,6 +3342,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+@@ -3325,6 +3325,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
    private_->serializer.SetTreatFunctionsAsHostObjects(mode);
  }
  
@@ -43,7 +45,7 @@ index 740f2a399c75d31eb25053545f22d17706cedeec..861ae72695279e870b6291cb7e880e3c
                                          Local<Value> value) {
    auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 436493e879804453b512810ccf8cb89544df85a0..38fca4b1c70d9b44c1356c264abde21daff8da83 100644
+index 5fe04fecb1cc6bc98b8d3571a540c418c3fa85f7..ca0166b2c7fe791034c900fc274c595f7908cc4e 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -338,6 +338,10 @@ void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
@@ -71,7 +73,7 @@ index 436493e879804453b512810ccf8cb89544df85a0..38fca4b1c70d9b44c1356c264abde21d
      }
      return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
    } else if (IsSpecialReceiverInstanceType(instance_type) &&
-@@ -1258,7 +1267,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
+@@ -1268,7 +1277,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
    return ThrowIfOutOfMemory();
  }
  

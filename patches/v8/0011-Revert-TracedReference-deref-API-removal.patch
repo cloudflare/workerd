@@ -5,6 +5,8 @@ Subject: Revert TracedReference deref API removal
 
 This previously-deprecated API was removed in 7cd2b0c434bd5ea7bd253a97958c7348557fd72e, but we don't know how to safely replace our usage of it yet.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/include/v8-traced-handle.h b/include/v8-traced-handle.h
 index 28fe6cf5ae3ad0dadafcc0942bda6d9148d5d58f..0e39bdf79ab0770df0fac97ee95c2ba2effdb874 100644
 --- a/include/v8-traced-handle.h

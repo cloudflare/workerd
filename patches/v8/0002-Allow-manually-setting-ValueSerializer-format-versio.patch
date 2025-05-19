@@ -4,6 +4,7 @@ Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
 
 Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/overview
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
 index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347dec6c0c7d 100644
@@ -22,10 +23,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 11981dc6a5174a101ab9487fd5618213e35bbe45..1f5a6a444eec6aa6e2d15069dbfaa6024a9aef90 100644
+index 93ecb8d846520892035379b8c63804030166ef9c..eb36c3647aae9f428f48fa6c3bb2a2a71c598ca9 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3328,6 +3328,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3311,6 +3311,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -37,7 +38,7 @@ index 11981dc6a5174a101ab9487fd5618213e35bbe45..1f5a6a444eec6aa6e2d15069dbfaa602
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 92429393137c624aa6a35caaa19990e9436069bf..494b9c5a95d3a43118449a8a425eec4332b209b2 100644
+index 72c1e37c0e98ea6b84b8ef3f9c45d0c9280a50f5..11f618a2d7a1aa911f8c9a03202b5ac143c6c7c2 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -297,6 +297,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
@@ -67,7 +68,7 @@ index 92429393137c624aa6a35caaa19990e9436069bf..494b9c5a95d3a43118449a8a425eec43
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1082,10 +1091,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1093,10 +1102,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint8_t>(tag));
    WriteVarint(static_cast<uint32_t>(view->byte_offset()));
    WriteVarint(static_cast<uint32_t>(view->byte_length()));

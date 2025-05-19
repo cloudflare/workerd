@@ -3,12 +3,13 @@ From: Erik Corry <erikcorry@chromium.org>
 Date: Mon, 2 Dec 2024 14:16:37 +0100
 Subject: Add another slot in the isolate for embedder
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-internal.h b/include/v8-internal.h
-index 5487adec2b587416541b04ccdb8fa07e5a394b92..d641b2cd066675802fbecbd002723a67f90fe408 100644
+index d828c286fa4d2e7604d26d2c12b940fd20d0e106..3be34c7a94109f73e977b82c9664188478626581 100644
 --- a/include/v8-internal.h
 +++ b/include/v8-internal.h
-@@ -865,7 +865,7 @@ class Internals {
+@@ -878,7 +878,7 @@ class Internals {
    static const int kExternalTwoByteRepresentationTag = 0x02;
    static const int kExternalOneByteRepresentationTag = 0x0a;
  
