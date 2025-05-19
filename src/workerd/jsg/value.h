@@ -477,6 +477,46 @@ class StringWrapper {
     return wrap(context, creator, value.asPtr());
   }
 
+  kj::String unwrap(v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      kj::String*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto& js = Lock::from(context->GetIsolate());
+    auto buf = kj::heapArray<char>(handle.length * 2);
+    size_t actual_length = simdutf::convert_latin1_to_utf8(handle.data, handle.length, buf.begin());
+    return js.accountedKjString(buf.first(actual_length).attach(kj::mv(buf)));
+  }
+
+  ByteString unwrap(v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      ByteString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto& js = Lock::from(context->GetIsolate());
+    auto buf = kj::heapArray<char>(handle.length * 2);
+    size_t actual_length = simdutf::convert_latin1_to_utf8(handle.data, handle.length, buf.begin());
+    return js.accountedByteString(buf.first(actual_length).attach(kj::mv(buf)));
+  }
+
+  USVString unwrap(v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      USVString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto& js = Lock::from(context->GetIsolate());
+    auto buf = kj::heapArray<char>(handle.length * 2);
+    size_t actual_length = simdutf::convert_latin1_to_utf8(handle.data, handle.length, buf.begin());
+    return js.accountedUSVString(buf.first(actual_length).attach(kj::mv(buf)));
+  }
+
+  DOMString unwrap(v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      DOMString*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    auto& js = Lock::from(context->GetIsolate());
+    auto buf = kj::heapArray<char>(handle.length * 2);
+    size_t actual_length = simdutf::convert_latin1_to_utf8(handle.data, handle.length, buf.begin());
+    return js.accountedDOMString(buf.first(actual_length).attach(kj::mv(buf)));
+  }
+
   kj::Maybe<kj::String> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::String*,

@@ -513,6 +513,13 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   auto unwrapFastApi(v8::Local<v8::Context> context,
+      const v8::FastOneByteString& arg,
+      TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
+    return unwrap<U>(context, arg, errorContext);
+  }
+
+  template <typename U>
+  auto unwrapFastApi(v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
     return unwrap<U>(context, arg, errorContext);

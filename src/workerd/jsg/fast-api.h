@@ -17,10 +17,24 @@
 #include <v8-value.h>
 
 #include <kj/common.h>
+#include <kj/string.h>
 
 namespace workerd::jsg {
 
+class USVString;
+class ByteString;
+class DOMString;
 class Lock;
+
+// Update this list whenever a new string type is added.
+template <typename T>
+concept StringLike =
+    kj::isSameType<kj::String, T>() || kj::isSameType<kj::ArrayPtr<const char>, T>() ||
+    kj::isSameType<kj::Array<const char>, T>() || kj::isSameType<ByteString, T>() ||
+    kj::isSameType<USVString, T>() || kj::isSameType<DOMString, T>();
+
+template <typename... Args>
+concept MethodHasStringLikeParam = (StringLike<Args> && ...);
 
 template <typename T>
 constexpr bool isFunctionCallbackInfo = false;
@@ -43,6 +57,43 @@ template <typename T>
 concept FastApiReturnParam = FastApiPrimitive<T>;
 
 // Helper to determine if a method can be used with V8 fast API
+// Check if a method has any string parameters
+template <typename Method>
+constexpr bool hasStringParams = false;
+
+// Specialization for non-static member functions
+template <typename Class, typename Ret, typename... Args>
+constexpr bool hasStringParams<Ret (Class::*)(Args...)> =
+    MethodHasStringLikeParam<kj::Decay<Args>...>;
+
+// Specialization for const non-static member functions
+template <typename Class, typename Ret, typename... Args>
+constexpr bool hasStringParams<Ret (Class::*)(Args...) const> =
+    MethodHasStringLikeParam<kj::Decay<Args>...>;
+
+// Specialization for member functions with Lock
+template <typename Class, typename Ret, typename... Args>
+constexpr bool hasStringParams<Ret (Class::*)(jsg::Lock&, Args...)> =
+    MethodHasStringLikeParam<kj::Decay<Args>...>;
+
+// Specialization for const member functions with Lock
+template <typename Class, typename Ret, typename... Args>
+constexpr bool hasStringParams<Ret (Class::*)(jsg::Lock&, Args...) const> =
+    MethodHasStringLikeParam<kj::Decay<Args>...>;
+
+// Specialization for static functions
+template <typename Ret, typename... Args>
+constexpr bool hasStringParams<Ret(Args...)> = MethodHasStringLikeParam<kj::Decay<Args>...>;
+
+// Specialization for static functions with Lock
+template <typename Ret, typename... Args>
+constexpr bool hasStringParams<Ret(jsg::Lock&, Args...)> =
+    MethodHasStringLikeParam<kj::Decay<Args>...>;
+
+// Concept that checks if a method from TypeWrapper has any string parameters
+template <typename TypeWrapper, typename Method>
+concept HasStringParam = hasStringParams<Method>;
+
 template <typename TypeWrapper, typename Ret, typename... Args>
 concept FastApiMethod = FastApiReturnParam<Ret> && (FastApiParam<TypeWrapper, Args> && ...);
 
@@ -79,14 +130,29 @@ constexpr bool isFastMethodCompatible<TypeWrapper, Ret(jsg::Lock&, Args...)> =
 
 template <typename TypeWrapper, typename T>
 struct FastApiJSGToV8 {
-  // We allow every type to be passed into v8 fast api using v8::Local<v8::Value>
-  // conversion.
   using value = v8::Local<v8::Value>;
 };
 
 template <typename TypeWrapper, typename T>
   requires FastApiPrimitive<kj::RemoveConst<kj::Decay<T>>>
 struct FastApiJSGToV8<TypeWrapper, T> {
+  using value = kj::RemoveConst<kj::Decay<T>>;
+};
+
+template <typename TypeWrapper, typename T>
+struct FastApiJSGToV8StringOverride {
+  using value = v8::Local<v8::Value>;
+};
+
+template <typename TypeWrapper, typename T>
+  requires StringLike<kj::RemoveConst<kj::Decay<T>>>
+struct FastApiJSGToV8StringOverride<TypeWrapper, T> {
+  using value = const v8::FastOneByteString&;
+};
+
+template <typename TypeWrapper, typename T>
+  requires FastApiPrimitive<kj::RemoveConst<kj::Decay<T>>>
+struct FastApiJSGToV8StringOverride<TypeWrapper, T> {
   using value = kj::RemoveConst<kj::Decay<T>>;
 };
 
