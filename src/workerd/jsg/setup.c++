@@ -324,9 +324,8 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
-    v8::CppHeap* cppHeap,
-    kj::Maybe<v8::IsolateGroup> maybeGroup) {
+static v8::Isolate* newIsolate(
+    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
@@ -347,11 +346,7 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
     }
-    KJ_IF_SOME(group, maybeGroup) {
-      return v8::Isolate::New(group, params);
-    } else {
-      return v8::Isolate::New(params);
-    }
+    return v8::Isolate::New(group, params);
   });
 }
 }  // namespace
@@ -359,7 +354,7 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
 IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
-    kj::Maybe<v8::IsolateGroup> group)
+    v8::IsolateGroup group)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
       ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),

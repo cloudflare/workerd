@@ -323,7 +323,7 @@ TestFixture::TestFixture(SetupParams&& params)
           false),
       errorReporter(kj::heap<MockErrorReporter>()),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(*timer)),
-      isolateGroup(v8::IsolateGroup::Create()),
+      isolateGroup(v8::IsolateGroup::GetDefault()),
       api(kj::heap<server::WorkerdApi>(testV8System,
           params.featureFlags.orDefault(CompatibilityFlags::Reader()),
           capnp::List<server::config::Extension>::Reader{},

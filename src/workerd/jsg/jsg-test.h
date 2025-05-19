@@ -35,7 +35,7 @@ class Evaluator {
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
     static IsolateType isolate(
-        v8System, kj::Maybe<v8::IsolateGroup>(), ConfigurationType(), kj::heap<IsolateObserver>());
+        v8System, v8::IsolateGroup::GetDefault(), ConfigurationType(), kj::heap<IsolateObserver>());
     return isolate;
   }
 
