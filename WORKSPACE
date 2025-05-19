@@ -121,11 +121,11 @@ git_repository(
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    integrity = "sha256-8joG3SxfLYqR2liUznBAcMkHKYMmUtsO1qGr505VBMY=",
+    integrity = "sha256-29cSZUwbEyiW8Y7FneaAzNNYLHeBmAPqBuIciHeE/u0=",
     repo_mapping = {"@com_google_absl": "@abseil-cpp"},
-    strip_prefix = "google-tcmalloc-91765c1",
+    strip_prefix = "google-tcmalloc-cf3dc2d",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/91765c11461a01579fcbdddf430a556b818818c4",
+    url = "https://github.com/google/tcmalloc/tarball/cf3dc2d98bd64cb43f4f98db0acaf5028a7b81eb",
 )
 
 # ========================================================================================

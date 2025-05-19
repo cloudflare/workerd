@@ -1,1 +1,2 @@
-# We don't use bzlmod at this time, but bazel 8 still expects us to have a MODULE.bazel file.
+# We do not use rules_java, but the build fails if it is not provided.
+bazel_dep(name = "rules_java", version = "8.11.0")

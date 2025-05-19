@@ -12,7 +12,7 @@ load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("@rules_rust//crate_universe/private:crates_vendor.bzl", "crates_vendor_remote_repository")
 
 # buildifier: disable=bzl-visibility
-load("@workerd//deps/rust/crates:defs.bzl", _crate_repositories = "crate_repositories")
+load("//deps/rust/crates:defs.bzl", _crate_repositories = "crate_repositories")
 
 def crate_repositories():
     """Generates repositories for vendored crates.
@@ -23,8 +23,8 @@ def crate_repositories():
     maybe(
         crates_vendor_remote_repository,
         name = "crates_vendor",
-        build_file = Label("@workerd//deps/rust/crates:BUILD.bazel"),
-        defs_module = Label("@workerd//deps/rust/crates:defs.bzl"),
+        build_file = Label("//deps/rust/crates:BUILD.bazel"),
+        defs_module = Label("//deps/rust/crates:defs.bzl"),
     )
 
     direct_deps = [struct(repo = "crates_vendor", is_dev_dep = False)]
