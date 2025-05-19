@@ -252,6 +252,13 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class WorkerEntrypointService;
   class HttpListener;
 
+  struct ErrorReporter;
+  struct WorkerDef;
+  kj::Own<WorkerService> makeWorkerImpl(kj::StringPtr name,
+      WorkerDef def,
+      capnp::List<config::Extension>::Reader extensions,
+      ErrorReporter& errorReporter);
+
   void startServices(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
