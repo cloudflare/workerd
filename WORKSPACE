@@ -84,13 +84,13 @@ dep_pyodide()
 
 # ========================================================================================
 # tcmalloc
-
-# tcmalloc requires Abseil.
-#
-git_repository(
-    name = "abseil-cpp",
-    commit = "72093794ac42be8105817ae0b0569fb411a6ca9b",
-    remote = "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
+http_archive(
+    name = "com_google_tcmalloc",
+    integrity = "sha256-29cSZUwbEyiW8Y7FneaAzNNYLHeBmAPqBuIciHeE/u0=",
+    repo_mapping = {"@com_google_absl": "@abseil-cpp"},
+    strip_prefix = "google-tcmalloc-cf3dc2d",
+    type = "tgz",
+    url = "https://github.com/google/tcmalloc/tarball/cf3dc2d98bd64cb43f4f98db0acaf5028a7b81eb",
 )
 
 git_repository(
@@ -118,16 +118,6 @@ git_repository(
     remote = "https://github.com/google/highway.git",
 )
 
-# OK, now we can bring in tcmalloc itself.
-http_archive(
-    name = "com_google_tcmalloc",
-    integrity = "sha256-29cSZUwbEyiW8Y7FneaAzNNYLHeBmAPqBuIciHeE/u0=",
-    repo_mapping = {"@com_google_absl": "@abseil-cpp"},
-    strip_prefix = "google-tcmalloc-cf3dc2d",
-    type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/cf3dc2d98bd64cb43f4f98db0acaf5028a7b81eb",
-)
-
 # ========================================================================================
 # Rust bootstrap
 #
@@ -145,11 +135,6 @@ git_repository(
 load("//:build/rust_toolchains.bzl", "rust_toolchains")
 
 rust_toolchains()
-
-# Protobuf
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-
-protobuf_deps()
 
 # rules_shell
 load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")

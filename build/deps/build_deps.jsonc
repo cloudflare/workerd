@@ -9,13 +9,6 @@
       "file_regex": "^bazel-skylib-[0-9\\.]+\\.tar\\.gz$"
     },
     {
-      "name": "platforms",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "platforms",
-      "file_regex": "^platforms-[0-9\\.]+\\.tar\\.gz$"
-    },
-    {
       "name": "rules_python",
       "type": "github_release",
       "owner": "bazelbuild",
@@ -80,13 +73,6 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
-    },
-    {
-      "name": "rules_cc",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "rules_cc",
-      "file_regex": "^rules_cc-"
     },
     {
       "name": "rules_shell",

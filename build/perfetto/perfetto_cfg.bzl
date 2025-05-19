@@ -78,6 +78,7 @@ PERFETTO_CONFIG = struct(
 
         # no open csd support needed
         open_csd = [],
+        android_test_common = [],
     ),
 
     # This struct allows embedders to customize the cc_opts for Perfetto
