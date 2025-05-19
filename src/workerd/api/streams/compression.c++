@@ -122,12 +122,12 @@ class Context {
     switch (mode) {
       case Mode::COMPRESS:
         result = deflate(&ctx, flush);
-        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, Error,
+        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
             "Compression failed.");
         break;
       case Mode::DECOMPRESS:
         result = inflate(&ctx, flush);
-        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, Error,
+        JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END, TypeError,
             "Decompression failed.");
 
         if (strictCompression == ContextFlags::STRICT) {

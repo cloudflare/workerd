@@ -46,6 +46,7 @@ export default {
     skipAllTests: true,
   },
   'decompression-buffersource.tentative.any.js': {
+    // TODO(soon): This will be available with V8 13.8 (June 2025), enable it at that time.
     comment: 'Enable once Float16Array is enabled',
     expectedFailures: [
       'chunk of type Float16Array should work for deflate',
@@ -54,28 +55,13 @@ export default {
     ],
   },
   'decompression-constructor-error.tentative.any.js': {
-    comment: 'TOOD investigate this',
+    comment: 'TODO investigate this',
     expectedFailures: [
       'non-string input should cause the constructor to throw',
     ],
   },
   'decompression-correct-input.tentative.any.js': {},
-  'decompression-corrupt-input.tentative.any.js': {
-    comment: 'TODO investigate this',
-    expectedFailures: [
-      "format 'deflate' field CMF should be error for 0",
-      "format 'deflate' field FLG should be error for 157",
-      "format 'deflate' field DATA should be error for 5",
-      "format 'deflate' field ADLER should be error for 255",
-      "format 'gzip' field ID should be error for 255",
-      "format 'gzip' field CM should be error for 0",
-      "format 'gzip' field FLG should be error for 2",
-      "format 'gzip' field DATA should be error for 3",
-      "format 'gzip' field CRC should be error for 0",
-      "format 'gzip' field ISIZE should be error for 1",
-      'the deflate input compressed with dictionary should give an error',
-    ],
-  },
+  'decompression-corrupt-input.tentative.any.js': {},
   'decompression-empty-input.tentative.any.js': {},
   'decompression-split-chunk.tentative.any.js': {},
   'decompression-uint8array-output.tentative.any.js': {},
