@@ -432,7 +432,6 @@ class StringWrapper {
   static constexpr const char* getName(ByteString*) {
     return "ByteString";
   }
-  // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
 
   static constexpr const char* getName(USVString*) {
     return "USVString";
@@ -508,7 +507,12 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       kj::String*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context)));
+    // Note that if handle is already a string, calling ToString will just
+    // return handle without any further coercion. For any other type of
+    // value, v8 will try to coerce it into a string. So there is no need
+    // for us to check if handle is a string here or not, ToString does
+    // that for us.
+    JsString str(check(handle->ToString(context)));
     return str.toString(Lock::from(context->GetIsolate()));
   }
 
@@ -516,7 +520,7 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       ByteString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context)));
+    JsString str(check(handle->ToString(context)));
     return str.toByteString(Lock::from(context->GetIsolate()));
   }
 
@@ -524,7 +528,7 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       USVString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context)));
+    JsString str(check(handle->ToString(context)));
     return str.toUSVString(Lock::from(context->GetIsolate()));
   }
 
@@ -532,7 +536,7 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       DOMString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context)));
+    JsString str(check(handle->ToString(context)));
     return str.toDOMString(Lock::from(context->GetIsolate()));
   }
 };
