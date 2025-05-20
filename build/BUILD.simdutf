@@ -3,9 +3,6 @@ cc_library(
     srcs = ["simdutf.cpp"],
     hdrs = ["simdutf.h"],
     copts = select({
-        "@v8//bazel/config:is_clang": ["-std=c++20"],
-        "@v8//bazel/config:is_gcc": ["-std=gnu++2a"],
-        "@v8//bazel/config:is_windows": ["/std:c++20"],
         # Enable SSE4.2 extensions, this reduces code size as the fallback code path for pre-Westmere
         # CPUs is no longer needed.
         "@platforms//cpu:x86_64": ["-msse4.2"],
