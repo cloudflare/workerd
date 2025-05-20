@@ -28,6 +28,7 @@ wd_cc_library(
 kj_test(
     src = "test-fixture-test.c++",
     deps = [":test-fixture"],
+    env = { "QEMU_RESERVED_VA" : "256G" },
 )
 
 # Use `bazel run //src/workerd/tests:bench-json` to benchmark

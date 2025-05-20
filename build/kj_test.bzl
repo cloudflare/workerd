@@ -6,6 +6,7 @@ def kj_test(
         deps = [],
         tags = [],
         size = "medium",
+        env = {},
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"

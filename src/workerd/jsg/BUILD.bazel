@@ -290,8 +290,19 @@ wd_cc_library(
         "rtti-test.c++",
         "url-test.c++",
         "multiple-typewrappers-test.c++",
+        "modules-new-test.c++",
     ],
 )]
+
+# arm64 temporary hack
+kj_test(
+    src = "modules-new-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":jsg",
+    ],
+    env = { "QEMU_RESERVED_VA" : "256G" },
+)
 
 # Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much
 # smaller.
