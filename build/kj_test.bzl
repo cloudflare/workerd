@@ -4,6 +4,7 @@ def kj_test(
         deps = [],
         tags = [],
         size = "medium",
+        env = {},
         **kwargs):
     test_name = src.removesuffix(".c++")
     native.cc_test(
@@ -19,6 +20,6 @@ def kj_test(
         data = data,
         tags = tags,
         size = size,
-        env = {"QEMU_RESERVED_VA": "4096G"},
+        env = env,
         **kwargs
     )
