@@ -447,6 +447,15 @@ class Isolate: public IsolateBase {
   // If `instantiateTypeWrapper` is false, then the default wrapper will not be instantiated
   // and should be instantiated with `instantiateTypeWrapper` before `newContext` is called on
   // a jsg::Lock of this Isolate.
+  //
+  // If using v8 sandboxing, the group argument controls which isolates share a
+  // sandbox, and which are isolated (as much as possible) in the event of a
+  // heap corruption attack. Note: The isolates in a group are limited to at
+  // most 4Gbytes of V8 heap in all.  Groups can be created with
+  // v8::IsolateGroup::Create().  (If using V8 pointer compression, this
+  // requires the enable_pointer_compression_multiple_cages build flag for V8.)
+  // Pass v8::IsolateGroup::Default() as the group to put all isolates in the
+  // same group.
   template <typename MetaConfiguration>
   explicit Isolate(V8System& system,
       v8::IsolateGroup group,
@@ -455,6 +464,21 @@ class Isolate: public IsolateBase {
       v8::Isolate::CreateParams createParams = {},
       bool instantiateTypeWrapper = true)
       : IsolateBase(system, kj::mv(createParams), kj::mv(observer), group) {
+    wrappers.resize(1);
+    if (instantiateTypeWrapper) {
+      instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
+    }
+  }
+
+  // Legacy isolate constructor that creates a new IsolateGroup for the new
+  // Isolate.  Currently used by non-sandboxing edgeworker, but deprecated.
+  template <typename MetaConfiguration>
+  explicit Isolate(V8System& system,
+      MetaConfiguration&& configuration,
+      kj::Own<IsolateObserver> observer,
+      v8::Isolate::CreateParams createParams = {},
+      bool instantiateTypeWrapper = true)
+      : IsolateBase(system, kj::mv(createParams), kj::mv(observer), v8::IsolateGroup::Create()) {
     wrappers.resize(1);
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
