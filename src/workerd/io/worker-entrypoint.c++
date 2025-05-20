@@ -498,7 +498,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {
-  TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled()");
+  TRACE_EVENT("workerd", "WorkerEntrypoint::connect()");
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
   this->incomingRequest = kj::none;
