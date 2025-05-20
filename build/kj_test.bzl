@@ -19,5 +19,6 @@ def kj_test(
         data = data,
         tags = tags,
         size = size,
+        env = {"QEMU_RESERVED_VA": "4096G"},
         **kwargs
     )
