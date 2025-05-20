@@ -966,7 +966,28 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
 // session.
 class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
  public:
-  JsRpcTargetBase(IoContext& ctx): weakIoContext(ctx.getWeakRef()) {}
+  struct MayOutliveIncomingRequest {};
+  struct CantOutliveIncomingRequest {};
+
+  // Constructor used by TransientJsRpcTarget, which does not own the context. It needs to use
+  // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
+  // or during a call.
+  JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
+      : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+            [this, &ctx](Worker::Lock& lock, CallContext callContext) {
+              return callImpl(lock, ctx, callContext);
+            })) {}
+
+  // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
+  // can possibly be canceled. It can just use ctx.run().
+  JsRpcTargetBase(IoContext& ctx, CantOutliveIncomingRequest)
+      : enterIsolateAndCall([this, &ctx](CallContext callContext) {
+          // Note: No need to topUpActor() since this is the start of a top-level request, so the
+          // actor will already have been topped up by IncomingRequest::delivered().
+          return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
+            return callImpl(lock, ctx, callContext);
+          });
+        }) {}
 
   struct EnvCtx {
     v8::Local<v8::Value> env;
@@ -990,178 +1011,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
   // Handles the delivery of JS RPC method calls.
   kj::Promise<void> call(CallContext callContext) override {
-    IoContext& ctx = JSG_REQUIRE_NONNULL(
-        weakIoContext->tryGet(), Error, "The destination object for this RPC no longer exists.");
-
-    ctx.getLimitEnforcer().topUpActor();
-
-    // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the backing
-    // object's lifetime is that of the RPC call, but in reality they are refcounted under the
-    // hood. Since well be executing the call in the JS microtask queue, we have no ability to
-    // actually cancel execution if a cancellation arrives over RPC, and at the end of that
-    // execution we're going to access the call context to write the results. We could invent some
-    // complicated way to skip initializing results in the case the call has been canceled, but
-    // it's easier and safer to just grab a refcount on the call context object itself, which
-    // fully protects us. So... do that.
-    auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
-
     // Try to execute the requested method.
-    auto promise =
-        ctx.run([this, &ctx, callContext, ownCallContext = kj::mv(ownCallContext),
-                    ownThis = thisCap()](Worker::Lock& lock) mutable -> kj::Promise<void> {
-      jsg::Lock& js = lock;
-
-      auto targetInfo = getTargetInfo(lock, ctx);
-
-      auto params = callContext.getParams();
-
-      // We will try to get the function, if we can't we'll throw an error to the client.
-      auto [propHandle, thisArg, methodNameForTrace] =
-          tryGetProperty(lock, targetInfo.target, params, targetInfo.allowInstanceProperties);
-
-      addTrace(js, ctx, methodNameForTrace);
-
-      auto op = params.getOperation();
-
-      auto handleResult = [&](InvocationResult&& invocationResult) {
-        // Given a handle for the result, if it's a promise, await the promise, then serialize the
-        // final result for return.
-
-        kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>> callPipelineFulfiller;
-
-        // We need another ref to this fulfiller for the error callback. It can rely on being
-        // destroyed at the same time as the success callback.
-        kj::Maybe<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>&> callPipelineFulfillerRef;
-
-        KJ_IF_SOME(ss, invocationResult.streamSink) {
-          // Since we have a StreamSink, it's important that we hook up the pipeline for that
-          // immediately. Annoyingly, that also means we need to hook up a pipeline for
-          // callPipeline, which we don't actually have yet, so we need to promise-ify it.
-
-          auto paf = kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>();
-          callPipelineFulfillerRef = *paf.fulfiller;
-          callPipelineFulfiller = kj::mv(paf.fulfiller);
-
-          capnp::PipelineBuilder<rpc::JsRpcTarget::CallResults> builder(16);
-          builder.setCallPipeline(kj::mv(paf.promise));
-          builder.setParamsStreamSink(ss);
-          callContext.setPipeline(builder.build());
-        }
-
-        auto result = ctx.awaitJs(js,
-            js.toPromise(invocationResult.returnValue)
-                .then(js,
-                    ctx.addFunctor(
-                        [callContext, ownCallContext = kj::mv(ownCallContext),
-                            paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup),
-                            paramsStreamSink = kj::mv(invocationResult.streamSink),
-                            resultStreamSink = params.getResultsStreamSink(),
-                            callPipelineFulfiller = kj::mv(callPipelineFulfiller)](
-                            jsg::Lock& js, jsg::Value value) mutable {
-          jsg::JsValue resultValue(value.getHandle(js));
-
-          rpc::JsRpcTarget::CallResults::Builder results = nullptr;
-          auto maybePipeline =
-              serializeJsValueWithPipeline(js, resultValue, [&](capnp::MessageSize hint) {
-            hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
-            hint.capCount += 1;  // for callPipeline
-            results = callContext.initResults(hint);
-            return results.initResult();
-          }, [&]() -> rpc::JsValue::StreamSink::Client {
-            // The results contain streams. We return the resultsStreamSink passed in the request.
-            return kj::mv(resultStreamSink);
-          });
-
-          KJ_SWITCH_ONEOF(maybePipeline) {
-            KJ_CASE_ONEOF(obj, MakeCallPipeline::Object) {
-              results.setCallPipeline(kj::mv(obj.cap));
-
-              // Note that hasDisposer is ONLY meant to indicate the presence of an
-              // application-level disposer. It need not be true if we only have stub disposers.
-              results.setHasDisposer(obj.hasDispose);
-            }
-            KJ_CASE_ONEOF(obj, MakeCallPipeline::SingleStub) {
-              // Serialization should have produced a single stub. We can use that same stub as
-              // the callPipeline.
-              auto externals = results.asReader().getResult().getExternals();
-              KJ_ASSERT(externals.size() == 1);
-              auto external = externals[0];
-              KJ_ASSERT(external.isRpcTarget());
-              results.setCallPipeline(external.getRpcTarget());
-            }
-            KJ_CASE_ONEOF(nonPipelinable, MakeCallPipeline::NonPipelinable) {
-              results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
-              // leave hasDisposer false
-            }
-          }
-
-          KJ_IF_SOME(cpf, callPipelineFulfiller) {
-            cpf->fulfill(results.getCallPipeline());
-          }
-
-          KJ_IF_SOME(ss, paramsStreamSink) {
-            results.setParamsStreamSink(kj::mv(ss));
-          }
-
-          // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed
-          // as a result of the promise being rejected). This will implicitly dispose the param
-          // stubs.
-        }),
-                    ctx.addFunctor([callPipelineFulfillerRef](jsg::Lock& js, jsg::Value&& error) {
-          // If we set up a `callPipeline` early, we have to make sure it propagates the error.
-          // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
-          KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
-            cpf.reject(js.exceptionToKj(error.addRef(js)));
-          }
-          js.throwException(kj::mv(error));
-        })));
-
-        if (ctx.hasOutputGate()) {
-          return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
-            return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
-          });
-        } else {
-          return result;
-        }
-      };
-
-      switch (op.which()) {
-        case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
-          // Note that using isFunctionForRpc(js, propHandle) here would be incorrect, since that
-          // decides whether it is a function *that can be serialized as a stub*. JsRpcProperty
-          // is (at present) considered non-serializable in itself, but when traversing the
-          // pipeline path, we may have descended into a stub and its properties, thus we could
-          // actually be invoking a JsRpcProperty here. As long as it is in fact callable, we will
-          // allow it.
-          JSG_REQUIRE(propHandle->IsFunction(), TypeError,
-              kj::str("\"", methodNameForTrace, "\" is not a function."));
-          auto fn = propHandle.As<v8::Function>();
-
-          kj::Maybe<rpc::JsValue::Reader> args;
-          if (op.hasCallWithArgs()) {
-            args = op.getCallWithArgs();
-          }
-
-          InvocationResult invocationResult;
-          KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-            invocationResult = invokeFnInsertingEnvCtx(
-                js, methodNameForTrace, fn, thisArg, args, envCtx.env, envCtx.ctx);
-          } else {
-            invocationResult = invokeFn(js, fn, thisArg, args);
-          }
-
-          // We have a function, so let's call it and serialize the result for RPC.
-          // If the function returns a promise we will wait for the promise to finish so we can
-          // serialize the result.
-          return handleResult(kj::mv(invocationResult));
-        }
-
-        case rpc::JsRpcTarget::CallParams::Operation::GET_PROPERTY:
-          return handleResult({.returnValue = propHandle});
-      }
-
-      KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
-    }).catch_([](kj::Exception&& e) {
+    return enterIsolateAndCall(callContext).catch_([](kj::Exception&& e) {
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -1173,36 +1024,191 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
       kj::throwFatalException(kj::mv(e));
     });
-
-    // We need to make sure this RPC is canceled if the IoContext is destroyed. To accomplish that,
-    // we add the promise as a task on the context itself, and use a separate promise fulfiller to
-    // wait on the result.
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&fulfiller = *paf.fulfiller](kj::Exception&& e) { fulfiller.reject(kj::mv(e)); });
-    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
-      if (fulfiller->isWaiting()) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-            "The destination execution context for this RPC was canceled while the "
-            "call was still running."));
-      }
-    }));
-    ctx.addTask(kj::mv(promise));
-
-    return kj::mv(paf.promise);
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
- protected:
-  kj::Own<IoContext::WeakRef> weakIoContext;
-
  private:
+  // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
+  // using IoContext::makeReentryCallback().
+  kj::Function<kj::Promise<void>(CallContext callContext)> enterIsolateAndCall;
+
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
   // Hook for recording trace information.
   virtual void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) = 0;
+
+  kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
+    jsg::Lock& js = lock;
+
+    auto targetInfo = getTargetInfo(lock, ctx);
+
+    auto params = callContext.getParams();
+
+    // We will try to get the function, if we can't we'll throw an error to the client.
+    auto [propHandle, thisArg, methodNameForTrace] =
+        tryGetProperty(lock, targetInfo.target, params, targetInfo.allowInstanceProperties);
+
+    addTrace(js, ctx, methodNameForTrace);
+
+    auto op = params.getOperation();
+
+    auto handleResult = [&](InvocationResult&& invocationResult) {
+      // Given a handle for the result, if it's a promise, await the promise, then serialize the
+      // final result for return.
+
+      kj::Maybe<kj::Own<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>>> callPipelineFulfiller;
+
+      // We need another ref to this fulfiller for the error callback. It can rely on being
+      // destroyed at the same time as the success callback.
+      kj::Maybe<kj::PromiseFulfiller<rpc::JsRpcTarget::Client>&> callPipelineFulfillerRef;
+
+      KJ_IF_SOME(ss, invocationResult.streamSink) {
+        // Since we have a StreamSink, it's important that we hook up the pipeline for that
+        // immediately. Annoyingly, that also means we need to hook up a pipeline for
+        // callPipeline, which we don't actually have yet, so we need to promise-ify it.
+
+        auto paf = kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>();
+        callPipelineFulfillerRef = *paf.fulfiller;
+        callPipelineFulfiller = kj::mv(paf.fulfiller);
+
+        capnp::PipelineBuilder<rpc::JsRpcTarget::CallResults> builder(16);
+        builder.setCallPipeline(kj::mv(paf.promise));
+        builder.setParamsStreamSink(ss);
+        callContext.setPipeline(builder.build());
+      }
+
+      // HACK: Cap'n Proto call contexts are documented as being pointer-like types where the
+      // backing object's lifetime is that of the RPC call, but in reality they are refcounted
+      // under the hood. Since we'll be executing the call in the JS microtask queue, we have no
+      // ability to actually cancel execution if a cancellation arrives over RPC, and at the end of
+      // that execution we're going to access the call context to write the results. We could
+      // invent some complicated way to skip initializing results in the case the call has been
+      // canceled, but it's easier and safer to just grab a refcount on the call context object
+      // itself, which fully protects us. So... do that.
+      auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
+
+      auto result = ctx.awaitJs(js,
+          js.toPromise(invocationResult.returnValue)
+              .then(js,
+                  ctx.addFunctor(
+                      // Warning: Be careful about captures here! If the incoming RPC is canceled,
+                      // this continuation will still execute, sice it's a JS promise continuation.
+                      // But `this` could have been destroyed in the meantime. So all our captures
+                      // must take full ownership.
+                      [callContext, ownCallContext = kj::mv(ownCallContext),
+                          paramDisposalGroup = kj::mv(invocationResult.paramDisposalGroup),
+                          paramsStreamSink = kj::mv(invocationResult.streamSink),
+                          resultStreamSink = params.getResultsStreamSink(),
+                          callPipelineFulfiller = kj::mv(callPipelineFulfiller)](
+                          jsg::Lock& js, jsg::Value value) mutable {
+        jsg::JsValue resultValue(value.getHandle(js));
+
+        rpc::JsRpcTarget::CallResults::Builder results = nullptr;
+        auto maybePipeline =
+            serializeJsValueWithPipeline(js, resultValue, [&](capnp::MessageSize hint) {
+          hint.wordCount += capnp::sizeInWords<rpc::JsRpcTarget::CallResults>();
+          hint.capCount += 1;  // for callPipeline
+          results = callContext.initResults(hint);
+          return results.initResult();
+        }, [&]() -> rpc::JsValue::StreamSink::Client {
+          // The results contain streams. We return the resultsStreamSink passed in the request.
+          return kj::mv(resultStreamSink);
+        });
+
+        KJ_SWITCH_ONEOF(maybePipeline) {
+          KJ_CASE_ONEOF(obj, MakeCallPipeline::Object) {
+            results.setCallPipeline(kj::mv(obj.cap));
+
+            // Note that hasDisposer is ONLY meant to indicate the presence of an
+            // application-level disposer. It need not be true if we only have stub disposers.
+            results.setHasDisposer(obj.hasDispose);
+          }
+          KJ_CASE_ONEOF(obj, MakeCallPipeline::SingleStub) {
+            // Serialization should have produced a single stub. We can use that same stub as
+            // the callPipeline.
+            auto externals = results.asReader().getResult().getExternals();
+            KJ_ASSERT(externals.size() == 1);
+            auto external = externals[0];
+            KJ_ASSERT(external.isRpcTarget());
+            results.setCallPipeline(external.getRpcTarget());
+          }
+          KJ_CASE_ONEOF(nonPipelinable, MakeCallPipeline::NonPipelinable) {
+            results.setCallPipeline(kj::mv(nonPipelinable.errorPipeline));
+            // leave hasDisposer false
+          }
+        }
+
+        KJ_IF_SOME(cpf, callPipelineFulfiller) {
+          cpf->fulfill(results.getCallPipeline());
+        }
+
+        KJ_IF_SOME(ss, paramsStreamSink) {
+          results.setParamsStreamSink(kj::mv(ss));
+        }
+
+        // paramDisposalGroup will be destroyed when we return (or when this lambda is destroyed
+        // as a result of the promise being rejected). This will implicitly dispose the param
+        // stubs.
+      }),
+                  ctx.addFunctor([callPipelineFulfillerRef](jsg::Lock& js, jsg::Value&& error) {
+        // If we set up a `callPipeline` early, we have to make sure it propagates the error.
+        // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
+        KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
+          cpf.reject(js.exceptionToKj(error.addRef(js)));
+        }
+        js.throwException(kj::mv(error));
+      })));
+
+      if (ctx.hasOutputGate()) {
+        // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
+        // (makeReentryCallback() ensures this). This does NOT cancel the JavaScript (because JS
+        // promises are not RAII-cancelable), but it will cancel this trailing .then(), which is
+        // why it's safe to capture `&ctx` here.
+        return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); });
+      } else {
+        return result;
+      }
+    };
+
+    switch (op.which()) {
+      case rpc::JsRpcTarget::CallParams::Operation::CALL_WITH_ARGS: {
+        // Note that using isFunctionForRpc(js, propHandle) here would be incorrect, since that
+        // decides whether it is a function *that can be serialized as a stub*. JsRpcProperty
+        // is (at present) considered non-serializable in itself, but when traversing the
+        // pipeline path, we may have descended into a stub and its properties, thus we could
+        // actually be invoking a JsRpcProperty here. As long as it is in fact callable, we will
+        // allow it.
+        JSG_REQUIRE(propHandle->IsFunction(), TypeError,
+            kj::str("\"", methodNameForTrace, "\" is not a function."));
+        auto fn = propHandle.As<v8::Function>();
+
+        kj::Maybe<rpc::JsValue::Reader> args;
+        if (op.hasCallWithArgs()) {
+          args = op.getCallWithArgs();
+        }
+
+        InvocationResult invocationResult;
+        KJ_IF_SOME(envCtx, targetInfo.envCtx) {
+          invocationResult = invokeFnInsertingEnvCtx(
+              js, methodNameForTrace, fn, thisArg, args, envCtx.env, envCtx.ctx);
+        } else {
+          invocationResult = invokeFn(js, fn, thisArg, args);
+        }
+
+        // We have a function, so let's call it and serialize the result for RPC.
+        // If the function returns a promise we will wait for the promise to finish so we can
+        // serialize the result.
+        return handleResult(kj::mv(invocationResult));
+      }
+
+      case rpc::JsRpcTarget::CallParams::Operation::GET_PROPERTY:
+        return handleResult({.returnValue = propHandle});
+    }
+
+    KJ_FAIL_ASSERT("unknown JsRpcTarget::CallParams::Operation", (uint)op.which());
+  }
 
   struct GetPropResult {
     v8::Local<v8::Value> handle;
@@ -1468,10 +1474,9 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
  public:
   TransientJsRpcTarget(
       jsg::Lock& js, IoContext& ioCtx, jsg::JsObject object, bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx),
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
-        allowInstanceProperties(allowInstanceProperties),
-        pendingEvent(ioCtx.registerPendingEvent()) {
+        allowInstanceProperties(allowInstanceProperties) {
     // Check for the existence of a dispose function now so that the destructor doesn't have to
     // take an isolate lock if there isn't one.
     auto getResult = object.get(js, js.symbolDispose());
@@ -1489,11 +1494,10 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<jsg::V8Ref<v8::Function>> dispose,
       kj::Vector<kj::Own<void>> stubDisposers,
       bool allowInstanceProperties = false)
-      : JsRpcTargetBase(ioCtx),
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         disposeFulfiller(addDisposeTask(js, ioCtx, object, kj::mv(dispose), kj::mv(stubDisposers))),
-        allowInstanceProperties(allowInstanceProperties),
-        pendingEvent(ioCtx.registerPendingEvent()) {}
+        allowInstanceProperties(allowInstanceProperties) {}
 
   ~TransientJsRpcTarget() noexcept(false) {
     KJ_IF_SOME(f, kj::mv(disposeFulfiller)) {
@@ -1551,15 +1555,6 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   }
 
   bool allowInstanceProperties;
-
-  // An RpcTarget could receive a new call (in the existing IoContext) at any time, therefore
-  // its existence counts as a PendingEvent. If we don't hold a PendingEvent, then the IoContext
-  // may decide that there's nothing more than can possibly happen in this context, and cancel
-  // itself.
-  //
-  // Note that it's OK if we hold this past the lifetime of the IoContext itself; the PendingEvent
-  // becomes detached in that case and has no effect.
-  kj::Own<void> pendingEvent;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // dup() is reserved to duplicate the stub itself, pointing to the same object.
@@ -1771,7 +1766,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
-      : JsRpcTargetBase(ioCtx),
+      : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
@@ -1895,23 +1890,33 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
 
   incomingRequest->delivered();
 
-  auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(
-      capnp::membrane(kj::heap<EntrypointJsRpcTarget>(ioctx, entrypointName, kj::mv(props),
-                          mapAddRef(incomingRequest->getWorkerTracer())),
-          kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
-
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
     // disconnects.
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  // `donePromise` resolves once there are no longer any capabilities pointing between the client
-  // and server as part of this session.
-  co_await donePromise.exclusiveJoin(ioctx.onAbort());
+  EntrypointJsRpcTarget target(
+      ioctx, entrypointName, kj::mv(props), mapAddRef(incomingRequest->getWorkerTracer()));
+  capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  try {
+    auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
+    capFulfiller->fulfill(capnp::membrane(
+        revcableTarget.getClient(), kj::refcounted<ServerTopLevelMembrane>(kj::mv(doneFulfiller))));
+
+    // `donePromise` resolves once there are no longer any capabilities pointing between the client
+    // and server as part of this session.
+    co_await donePromise.exclusiveJoin(ioctx.onAbort());
+
+    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  } catch (...) {
+    // Make sure the top-level capability is revoked with the same exception that `run()` is
+    // throwing, rather than some generic revocation exception.
+    auto e = kj::getCaughtExceptionAsKj();
+    revcableTarget.revoke(kj::cp(e));
+    kj::throwFatalException(kj::mv(e));
+  }
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(

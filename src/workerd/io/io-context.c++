@@ -433,7 +433,7 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   }
 
   if (incomingRequests.empty()) {
-    KJ_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
+    DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
   }
 
@@ -505,6 +505,11 @@ class IoContext::PendingEvent: public kj::Refcounted {
 };
 
 IoContext::~IoContext() noexcept(false) {
+  if (!canceler.isEmpty()) {
+    canceler.cancel(JSG_KJ_EXCEPTION(
+        FAILED, Error, "The execution context responding to this call was canceled."));
+  }
+
   // Detach the PendingEvent if it still exists.
   KJ_IF_SOME(pe, pendingEvent) {
     pe.maybeContext = kj::none;
