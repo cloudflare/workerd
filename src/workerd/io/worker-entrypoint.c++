@@ -498,6 +498,31 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::connect()");
+  auto incomingRequest =
+      kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
+  this->incomingRequest = kj::none;
+  incomingRequest->delivered();
+  auto& context = incomingRequest->getContext();
+
+  KJ_DEFER({
+    // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
+    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+    waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+  });
+
+  if (context.getWorker().getIsolate().getApi().getFeatureFlags().getConnectPassThrough()) {
+    // connect_pass_through feature flag means we should just forward the connect request on to
+    // the global outbound.
+
+    auto next = context.getSubrequestChannelNoChecks(
+        IoContext::NEXT_CLIENT_CHANNEL, false, kj::mv(cfBlobJson));
+
+    // Note: Intentionally return without co_await so that the `incomingRequest` is destroyed,
+    //   because we don't have any need to keep the context around.
+    return next->connect(host, headers, connection, response, settings);
+  }
+
   JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");
 }
 

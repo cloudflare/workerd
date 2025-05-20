@@ -1138,6 +1138,185 @@ KJ_TEST("Server: override globalOutbound") {
   conn.recvHttp200("OK");
 }
 
+KJ_TEST("Server: connect() to default outbound") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["nodejs_compat"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { connect } from 'cloudflare:sockets';
+          `import assert from 'node:assert';
+          `
+          `export default {
+          `  async fetch(request, env) {
+          `    let sock = connect("subhost:123");
+          `
+          `    let writer = sock.writable.getWriter();
+          `    await writer.write(new TextEncoder().encode("hello"));
+          `    await writer.close();
+          `
+          `    let reader = sock.readable.getReader();
+          `    let chunk = await reader.read();
+          `    assert.strictEqual(chunk.done, false);
+          `    assert.strictEqual(new TextDecoder().decode(chunk.value), "goodbye");
+          `
+          `    await sock.close();
+          `    return new Response("OK");
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost:123");
+  subreq.recv("hello");
+  subreq.send("goodbye");
+
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          globalOutbound = "outbound-worker",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import assert from 'node:assert';
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    // TODO(bug): At present this throws synchronously, which seems like a bug in
+                `    //   the implementation of connect(): errors coming from the destination
+                `    //   service really ought to be async (in prod, they always will be), showing
+                `    //   up on the first read or write. At present, though, I'm not looking to
+                `    //   fix this bug.
+                `    assert.throws(() => connect("subhost:123"), {
+                `      name: "TypeError",
+                `      message: "Incoming CONNECT on a worker not supported",
+                `    });
+                `
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "outbound-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: connect() with Worker as outbound, with connect_pass_though") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["nodejs_compat"],
+          globalOutbound = "outbound-worker",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { connect } from 'cloudflare:sockets';
+                `import assert from 'node:assert';
+                `
+                `export default {
+                `  async fetch(request, env) {
+                `    let sock = connect("subhost:123");
+                `
+                `    let writer = sock.writable.getWriter();
+                `    await writer.write(new TextEncoder().encode("hello"));
+                `    await writer.close();
+                `
+                `    let reader = sock.readable.getReader();
+                `    let chunk = await reader.read();
+                `    assert.strictEqual(chunk.done, false);
+                `    assert.strictEqual(new TextDecoder().decode(chunk.value), "goodbye");
+                `
+                `    await sock.close();
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "outbound-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["connect_pass_through"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  auto subreq = test.receiveInternetSubrequest("subhost:123");
+  subreq.recv("hello");
+  subreq.send("goodbye");
+
+  conn.recvHttp200("OK");
+}
+
 KJ_TEST("Server: capability bindings") {
   TestServer test(R"((
     services = [
