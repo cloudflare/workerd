@@ -15,8 +15,10 @@ from typing import Any, TypedDict, Unpack
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
 import js
+from js import Object
 
 import pyodide.http
+from pyodide import __version__ as pyodide_version
 from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
 
@@ -103,6 +105,7 @@ class FetchKwargs(TypedDict, total=False):
     method: HTTPMethod | None
     redirect: str | None
     cf: RequestInitCfProperties | None
+    fetcher: type[pyfetch] | None
 
 
 # TODO: Pyodide's FetchResponse.headers returns a dict[str, str] which means
@@ -157,13 +160,33 @@ class FetchResponse(pyodide.http.FetchResponse):
         return Blob(await self.js_object.blob())
 
 
+async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
+    # TODO: This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
+
+    if pyodide_version == "0.26.0a2":
+        custom_fetch = kwargs["fetcher"] if "fetcher" in kwargs else js.fetch
+        kwargs["fetcher"] = None
+        try:
+            return FetchResponse(
+                url,
+                await custom_fetch(
+                    url, to_js(kwargs, dict_converter=Object.fromEntries)
+                ),
+            )
+        except JsException as e:
+            raise OSError(e.message) from None
+    else:
+        kwargs["fetcher"] = None
+        return await pyfetch(url, **kwargs)
+
+
 async def fetch(
     resource: str,
     **other_options: Unpack[FetchKwargs],
 ) -> FetchResponse:
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
-    resp = await pyfetch(resource, **other_options)
+    resp = await _pyfetch_patched(resource, **other_options)
     return FetchResponse(resp.url, resp.js_response)
 
 
@@ -828,9 +851,6 @@ class _FetcherWrapper:
 
     def _getattr_helper(self, name):
         attr = getattr(self._binding, name)
-        if name == "fetch":
-            # TODO: Implement python native fetch for bindings.
-            return attr
 
         if not callable(attr):
             return attr
@@ -852,6 +872,20 @@ class _FetcherWrapper:
         setattr(self, name, result)
         return result
 
+    def fetch(self, *args, **kwargs):
+        return fetch(*args, fetcher=self._binding.fetch, **kwargs)
+
+
+class _DurableObjectNamespaceWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    def get(self, *args, **kwargs):
+        return _FetcherWrapper(self._binding.get(*args, **kwargs))
+
 
 class _EnvWrapper:
     def __init__(self, env):
@@ -861,6 +895,9 @@ class _EnvWrapper:
         binding = getattr(self._env, name)
         if _is_js_instance(binding, "Fetcher"):
             return _FetcherWrapper(binding)
+
+        if _is_js_instance(binding, "DurableObjectNamespace"):
+            return _DurableObjectNamespaceWrapper(binding)
 
         # TODO: Implement APIs for bindings.
         return binding
