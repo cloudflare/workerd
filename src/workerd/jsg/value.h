@@ -481,7 +481,8 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       kj::String*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Local<v8::String> str =
+        handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
     str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
@@ -493,7 +494,8 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       ByteString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Local<v8::String> str =
+        handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context));
 
     auto& js = Lock::from(context->GetIsolate());
     auto inner =
@@ -522,7 +524,8 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       USVString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Local<v8::String> str =
+        handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
     auto& js = Lock::from(isolate);
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
@@ -535,7 +538,8 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       DOMString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
+    v8::Local<v8::String> str =
+        handle->IsString() ? handle.As<v8::String>() : check(handle->ToString(context));
     v8::Isolate* isolate = context->GetIsolate();
     auto& js = Lock::from(isolate);
     auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
