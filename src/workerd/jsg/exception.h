@@ -40,9 +40,8 @@ namespace workerd::jsg {
   KJ_ASSERT(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 
 // Asserts if the method is compatible with v8 fast api
-#define JSG_ASSERT_FASTAPI(TypeWrapper, Method, jsErrorType, ...)                                  \
-  KJ_ASSERT(isFastMethodCompatible<TypeWrapper, Method>,                                           \
-      kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__));
+#define JSG_ASSERT_FASTAPI(Method)                                                                 \
+  static_assert(isFastApiCompatible<Method>, "Method is not v8 fast api compatible");
 
 #define JSG_REQUIRE(cond, jsErrorType, ...)                                                        \
   KJ_REQUIRE(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
