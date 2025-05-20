@@ -774,4 +774,25 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("disable_request_signal");
   # Enables Request.signal for incoming requests.
   # This feature is still experimental and the compat flag has no default enable date.
+
+  connectPassThrough @91 :Bool
+    $compatEnableFlag("connect_pass_through")
+    $experimental;
+  # Causes the Worker to handle incoming connect events by simply passing them through to the
+  # Worker's globalOutbound (typically, the internet).
+  #
+  # As of this writing, Workers cannot yet receive raw socket connections, because no API has been
+  # defined for doing so. But a Worker can be configured to be the `globalOutbound` for another
+  # Worker, causing the first Worker to intercept all outbound network requests that the second
+  # Worker makes by calling `fetch()` or `connect()`. Since there's no way for the first Worker
+  # to actually handle the `connect()` requests, this implies the second Worker cannot make any
+  # raw TCP connections in this configuration. This is intended: often, the first Worker
+  # implements some sort of security rules governing what kinds of requests the second Worker can
+  # send to the internet, and if `connect()` requests were allowed to go directly to the internet,
+  # that could be used to bypass said security checks.
+  #
+  # However, sometimes outbound workers are used for reasons other than security, and in fact the
+  # outbound Worker does not really care to block `connect()` requests. Until such a time as we
+  # create an actual API for proxying connections, such outbound workers can set this compat flag
+  # to opt into allowing connect requests to pass through.
 }
