@@ -41,3 +41,11 @@ export function open(
 ): number;
 
 export function close(fd: number): void;
+
+export function write(
+  fd: number,
+  buffers: ArrayBufferView[],
+  options: {
+    position: number | bigint | null;
+  }
+): number;

@@ -77,6 +77,13 @@ class FileSystemModule final: public jsg::Object {
   int open(jsg::Lock& js, FilePath path, OpenOptions options);
   void close(jsg::Lock& js, int fd);
 
+  struct WriteOptions {
+    kj::Maybe<uint64_t> position;
+    JSG_STRUCT(position);
+  };
+
+  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
@@ -89,6 +96,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(unlink);
     JSG_METHOD(open);
     JSG_METHOD(close);
+    JSG_METHOD(write);
   }
 };
 
@@ -455,6 +463,7 @@ class StorageManager final: public jsg::Object {
 #define EW_FILESYSTEM_ISOLATE_TYPES                                                                \
   workerd::api::FileSystemModule, workerd::api::Stat, workerd::api::FileSystemModule::StatOptions, \
       workerd::api::FileSystemModule::ReadLinkOptions,                                             \
-      workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions
+      workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions,    \
+      workerd::api::FileSystemModule::WriteOptions
 
 }  // namespace workerd::api

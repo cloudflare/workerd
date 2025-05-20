@@ -337,6 +337,54 @@ void FileSystemModule::close(jsg::Lock& js, int fd) {
   vfs.closeFd(js, fd);
 }
 
+uint32_t FileSystemModule::write(
+    jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
+  static constexpr uint32_t kMax = kj::maxValue;
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
+
+  static const auto getPosition = [](jsg::Lock& js, auto& opened, auto& file,
+                                      const WriteOptions& options) -> uint32_t {
+    if (opened.append) {
+      // If the file descriptor is opened in append mode, we ignore the position
+      // option and always append to the end of the file.
+      auto stat = file->stat(js);
+      return stat.size;
+    }
+    auto pos = options.position.orDefault(opened.position);
+    JSG_REQUIRE(pos <= kMax, Error, "Position out of range");
+    return static_cast<uint32_t>(pos);
+  };
+
+  KJ_SWITCH_ONEOF(opened.node) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      auto pos = getPosition(js, opened, file, options);
+      uint32_t total = 0;
+      for (auto& buffer: data) {
+        auto written = file->write(js, pos, buffer);
+        pos += written;
+        total += written;
+      }
+      // We only update the position if the options.position is not set and
+      // the file descriptor is not opened in append mode.
+      if (options.position == kj::none && !opened.append) {
+        opened.position += total;
+      }
+      return total;
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      // If we get here, then followSymLinks was set to false when open was called.
+      // We can't write to a symbolic link.
+      JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 // =======================================================================================
 // Implementation of the Web File System API
 

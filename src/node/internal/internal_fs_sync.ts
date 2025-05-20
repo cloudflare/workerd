@@ -7,7 +7,6 @@ import {
   getValidatedFd,
   validateBufferArray,
   validateStringAfterArrayBufferView,
-  validateOffsetLengthWrite,
   normalizePath,
   Stats,
   kBadge,
@@ -49,14 +48,18 @@ function accessSyncImpl(
   mode: number = F_OK,
   followSymlinks: boolean
 ): void {
-  // If the X_OK flag is set we will always throw because we don't
-  // support executable files.
   validateUint32(mode, 'mode');
 
+  // If the X_OK flag is set we will always throw because we don't
+  // support executable files.
   if (mode & X_OK) {
     throw new Error('access denied'); // not executable.
   }
+
   const stat = cffs.stat(normalizePath(path), { followSymlinks });
+
+  // Similar to node.js, we make no differentiation between the file
+  // not existing and the file existing but not being accessible.
   if (stat == null) {
     throw new Error('access denied'); // not found.
   }
@@ -873,10 +876,11 @@ export type WriteSyncOptions = {
   length?: number;
   position?: number | null;
 };
+
 export function writeSync(
   fd: number,
   buffer: ArrayBufferView | string,
-  offsetOrOptions?: number | WriteSyncOptions | null | bigint,
+  offsetOrOptions: number | WriteSyncOptions | null | bigint = null,
   length?: number | string | null,
   position?: number | bigint | null
 ): number {
@@ -891,34 +895,74 @@ export function writeSync(
         position = null,
       } = (offsetOrOptions as WriteSyncOptions | null) || {});
     }
-    if (position === undefined) position = null;
-    if (offset == null) {
-      offset = 0;
-    } else {
-      validateInteger(offset, 'offset', 0);
+    position ??= null;
+    offset ??= buffer.byteOffset;
+
+    validateInteger(offset, 'offset', 0);
+
+    length ??= buffer.byteLength - offset;
+
+    validateInteger(length, 'length', 0);
+
+    // Validate that the offset + length do not exceed the buffer's byte length.
+    if (offset + length > buffer.byteLength) {
+      throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
     }
-    if (typeof length !== 'number') length = buffer.byteLength - offset;
-    validateOffsetLengthWrite(offset, length, buffer.byteLength);
-  } else {
-    validateStringAfterArrayBufferView(buffer, 'buffer');
-    validateEncoding(buffer, length as string);
+
+    return writevSync(
+      fd,
+      [Buffer.from(buffer.buffer, offset, length)],
+      position
+    );
   }
-  throw new Error('Not implemented');
+
+  validateStringAfterArrayBufferView(buffer, 'buffer');
+
+  // In this case, offsetOrOptions must either be a number, bigint, or null.
+  if (
+    offsetOrOptions != null &&
+    typeof offsetOrOptions !== 'number' &&
+    typeof offsetOrOptions !== 'bigint'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'offset',
+      ['null', 'number', 'bigint'],
+      offsetOrOptions
+    );
+  }
+  position = offsetOrOptions;
+
+  validateEncoding(buffer, length as string);
+  buffer = Buffer.from(buffer, length as string /* encoding */);
+
+  return writevSync(fd, [buffer], position);
 }
 
 export function writevSync(
   fd: number,
   buffers: ArrayBufferView[],
-  _position: number | null | bigint = null
+  position: number | null | bigint = null
 ): number {
   fd = getValidatedFd(fd);
   validateBufferArray(buffers);
+
+  if (
+    position != null &&
+    typeof position !== 'number' &&
+    typeof position !== 'bigint'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'position',
+      ['null', 'number', 'bigint'],
+      position
+    );
+  }
 
   if (buffers.length === 0) {
     return 0;
   }
 
-  throw new Error('Not implemented');
+  return cffs.write(fd, buffers, { position });
 }
 
 // An API is considered stubbed if it is not implemented by the function
@@ -931,7 +975,7 @@ export function writevSync(
 // (S == Stubbed, I == Implemented, T == Tested, O == Optimized)
 //  S  I  T  O
 // [x][x][x][ ] fs.accessSync(path[, mode])
-// [x][ ][ ][ ] fs.appendFileSync(path, data[, options])
+// [x][x][ ][ ] fs.appendFileSync(path, data[, options])
 // [x][x][x][ ] fs.chmodSync(path, mode)
 // [x][x][x][ ] fs.chownSync(path, uid, gid)
 // [x][x][x][ ] fs.closeSync(fd)
@@ -973,7 +1017,7 @@ export function writevSync(
 // [x][x][x][ ] fs.unlinkSync(path)
 // [x][x][x][ ] fs.utimesSync(path, atime, mtime)
 // [x][ ][ ][ ] fs.writeFileSync(file, data[, options])
-// [x][ ][ ][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
-// [x][ ][ ][ ] fs.writeSync(fd, buffer[, options])
-// [x][ ][ ][ ] fs.writeSync(fd, string[, position[, encoding]])
-// [x][ ][ ][ ] fs.writevSync(fd, buffers[, position])
+// [x][x][x][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
+// [x][x][x][ ] fs.writeSync(fd, buffer[, options])
+// [x][x][x][ ] fs.writeSync(fd, string[, position[, encoding]])
+// [x][x][x][ ] fs.writevSync(fd, buffers[, position])

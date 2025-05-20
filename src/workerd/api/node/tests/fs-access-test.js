@@ -34,6 +34,8 @@ import {
   futimesSync,
   utimesSync,
   lutimesSync,
+  writeSync,
+  writevSync,
   access,
   stat,
   chmod,
@@ -1147,6 +1149,160 @@ export const utimesTest = {
       });
       await promise;
     }
+
+    closeSync(fd);
+  },
+};
+
+export const writeSyncTest = {
+  test() {
+    const fd = openSync('/tmp/test.txt', 'w+');
+    ok(existsSync('/tmp/test.txt'));
+
+    const stat = fstatSync(fd, { bigint: true });
+    strictEqual(stat.size, 0n);
+
+    writeSync(fd, 'Hello World');
+    writeSync(fd, '!!!!');
+    const stat2 = fstatSync(fd, { bigint: true });
+    strictEqual(stat2.size, 15n);
+
+    closeSync(fd);
+  },
+};
+
+export const writeSyncTest2 = {
+  test() {
+    const fd = openSync('/tmp/test.txt', 'w+');
+    ok(existsSync('/tmp/test.txt'));
+
+    const stat = fstatSync(fd, { bigint: true });
+    strictEqual(stat.size, 0n);
+
+    strictEqual(writeSync(fd, 'Hello World', 2n), 11);
+
+    // Writing to a position beyond max uint32_t is not allowed.
+    throws(() => writeSync(fd, 'Hello World', 2n ** 32n), {
+      message: 'Position out of range',
+    });
+    throws(() => writeSync(fd, 'Hello World', 2 ** 32), {
+      message: 'Position out of range',
+    });
+
+    strictEqual(writeSync(fd, 'a', null, 'ascii'), 1);
+
+    const stat2 = fstatSync(fd, { bigint: true });
+    strictEqual(stat2.size, 13n);
+
+    closeSync(fd);
+  },
+};
+
+export const writeSyncTest3 = {
+  test() {
+    const fd = openSync('/tmp/test.txt', 'w+');
+    ok(existsSync('/tmp/test.txt'));
+
+    const stat = fstatSync(fd, { bigint: true });
+    strictEqual(stat.size, 0n);
+
+    writeSync(fd, Buffer.from('Hello World'));
+    const stat2 = fstatSync(fd, { bigint: true });
+    strictEqual(stat2.size, 11n);
+
+    closeSync(fd);
+  },
+};
+
+export const writeSyncTest4 = {
+  test() {
+    const fd = openSync('/tmp/test.txt', 'w+');
+    ok(existsSync('/tmp/test.txt'));
+
+    const stat = fstatSync(fd, { bigint: true });
+    strictEqual(stat.size, 0n);
+
+    // Writing a partial buffer works
+    writeSync(fd, Buffer.from('Hello World'), 1, 3, 1);
+
+    // Specifying an offset or length beyond the buffer size is not allowed.
+    throws(() => writeSync(fd, Buffer.from('Hello World'), 100, 3), {
+      message: /out of bounds/,
+    });
+    // Specifying an offset or length beyond the buffer size is not allowed.
+    throws(() => writeSync(fd, Buffer.from('Hello World'), 0, 100), {
+      message: /out of bounds/,
+    });
+
+    throws(() => writeSync(fd, Buffer.from('hello world'), 'a'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => writeSync(fd, Buffer.from('hello world'), 1n), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => writeSync(fd, Buffer.from('hello world'), 0, 'a'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => writeSync(fd, Buffer.from('hello world'), 1, 1n), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => writeSync(fd, 123), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    const stat2 = fstatSync(fd, { bigint: true });
+    strictEqual(stat2.size, 4n);
+
+    closeSync(fd);
+  },
+};
+
+export const writeSyncAppend = {
+  test() {
+    const fd = openSync('/tmp/test.txt', 'a');
+    ok(existsSync('/tmp/test.txt'));
+
+    const stat = fstatSync(fd, { bigint: true });
+    strictEqual(stat.size, 0n);
+
+    // In append mode, the position is ignored.
+
+    writeSync(fd, 'Hello World', 1000);
+    const stat2 = fstatSync(fd, { bigint: true });
+    strictEqual(stat2.size, 11n);
+
+    writeSync(fd, '!!!!', 2000);
+    const stat3 = fstatSync(fd, { bigint: true });
+    strictEqual(stat3.size, 15n);
+
+    closeSync(fd);
+  },
+};
+
+export const writevSyncTest = {
+  test() {
+    const fd = openSync('/tmp/test.txt', 'w+');
+    ok(existsSync('/tmp/test.txt'));
+
+    const stat = fstatSync(fd, { bigint: true });
+    strictEqual(stat.size, 0n);
+
+    writevSync(fd, [Buffer.from('Hello World'), Buffer.from('!!!!')]);
+
+    throws(() => writevSync(fd, [1, 2]), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+
+    throws(() => writevSync(100, [Buffer.from('')]), {
+      message: 'Bad file descriptor',
+    });
+
+    const stat2 = fstatSync(fd, { bigint: true });
+    strictEqual(stat2.size, 15n);
 
     closeSync(fd);
   },
