@@ -1287,7 +1287,10 @@ void IoContext::abortFromHang(Worker::AsyncLock& asyncLock) {
   // Don't bother aborting if limits were exceeded because in that case the abort promise will be
   // fulfilled shortly anyway.
   if (limitEnforcer->getLimitsExceeded() == kj::none) {
-    abort(JSG_KJ_EXCEPTION(FAILED, Error, "The script will never generate a response."));
+    abort(JSG_KJ_EXCEPTION(FAILED, Error,
+        "The Workers runtime canceled this request because it detected that your Worker's code "
+        "had hung and would never generate a response. Refer to: "
+        "https://developers.cloudflare.com/workers/observability/errors/"));
   }
 }
 

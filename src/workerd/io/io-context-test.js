@@ -6,7 +6,10 @@ export let testHangingPromise = {
       ctx.exports.testHangingPromise.fetch('http://example.com'),
       {
         name: 'Error',
-        message: 'The script will never generate a response.',
+        message:
+          "The Workers runtime canceled this request because it detected that your Worker's " +
+          'code had hung and would never generate a response. Refer to: ' +
+          'https://developers.cloudflare.com/workers/observability/errors/',
       }
     );
   },
