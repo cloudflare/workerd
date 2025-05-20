@@ -892,13 +892,7 @@ void DurableObjectState::abort(jsg::Lock& js, jsg::Optional<kj::String> reason) 
   }
 
   IoContext::current().abort(kj::mv(error));
-  js.terminateExecution();
-
-  // terminateExecution() only sets a flag. In order for V8 to notify it, we have to make it do
-  // some work that causes it to check the flag. This has been observed to do the trick.
-  // TODO(cleanup): This appears in ExecutionContext::abort(), DurableObjectState::abort(), and
-  //     processExitImpl() in node/util.c++. Consolidate?
-  jsg::check(v8::JSON::Stringify(js.v8Context(), js.str()));
+  js.terminateExecutionNow();
 }
 
 Worker::Actor::HibernationManager& DurableObjectState::maybeInitHibernationManager(

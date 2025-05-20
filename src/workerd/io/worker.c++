@@ -2667,7 +2667,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       lock->runMicrotasks();
     } else {
       // Oops, we already exceeded the limit, so force the microtask queue to be thrown away.
-      lock->terminateExecution();
+      lock->terminateNextExecution();
       lock->runMicrotasks();
     }
 

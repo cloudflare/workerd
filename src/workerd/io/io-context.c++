@@ -1144,10 +1144,10 @@ void IoContext::runImpl(Runnable& runnable,
 
       if (gotTermination) {
         // We already consumed the termination pseudo-exception, so if we call RunMicrotasks() now,
-        // they will run with no limit. But if we call TerminateExecution() again now, it will
+        // they will run with no limit. But if we call terminateNextExecution() again now, it will
         // conveniently cause RunMicrotasks() to terminate _right after_ dequeuing the contents of
         // the task queue, which is perfect, because it effectively cancels them all.
-        js.terminateExecution();
+        js.terminateNextExecution();
       }
 
       // Run microtask checkpoint with an active IoContext

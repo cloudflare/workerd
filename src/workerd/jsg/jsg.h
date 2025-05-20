@@ -2820,7 +2820,16 @@ class Lock {
 #undef V
 
   void runMicrotasks();
-  void terminateExecution();
+
+  // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
+  // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
+  // some code will actually execute before termination kicks in.)
+  void terminateNextExecution();
+
+  // Terminates exution immediately, forcing V8 to see the flag and react to it before returning.
+  // Always throws JsExceptionThrown.
+  [[noreturn]] void terminateExecutionNow();
+
   bool pumpMsgLoop();
 
   // Logs and reports the error to tail workers (if called within an request),
