@@ -3256,6 +3256,7 @@ struct Worker::Actor::Impl {
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
   kj::Maybe<rpc::Container::Client> container;
+  kj::Maybe<FacetManager&> facetManager;
 
   struct NoClass {};
   struct Initializing {};
@@ -3417,12 +3418,14 @@ struct Worker::Actor::Impl {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
+      kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
         transient(hasTransient),
         container(kj::mv(container)),
+        facetManager(facetManager),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
         outputGate(hooks),
@@ -3473,12 +3476,13 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Own<ActorObserver> metrics,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
-    kj::Maybe<rpc::Container::Client> container)
+    kj::Maybe<rpc::Container::Client> container,
+    kj::Maybe<FacetManager&> facetManager)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType, kj::mv(container));
+      hibernationEventType, kj::mv(container), facetManager);
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
@@ -3538,7 +3542,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
           js.alloc<api::DurableObjectState>(js, cloneId(),
               jsg::JsRef<jsg::JsValue>(
                   js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-              kj::mv(storage), kj::mv(impl->container), containerRunning),
+              kj::mv(storage), kj::mv(impl->container), containerRunning, impl->facetManager),
           KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
@@ -3628,6 +3632,20 @@ kj::Promise<void> Worker::Actor::onBroken() {
 
 const Worker::Actor::Id& Worker::Actor::getId() {
   return impl->actorId;
+}
+
+bool Worker::Actor::idsEqual(const Id& a, const Id& b) {
+  if (a.which() != b.which()) return false;
+
+  KJ_SWITCH_ONEOF(a) {
+    KJ_CASE_ONEOF(actorId, kj::Own<ActorIdFactory::ActorId>) {
+      return actorId->equals(*b.get<kj::Own<ActorIdFactory::ActorId>>());
+    }
+    KJ_CASE_ONEOF(str, kj::String) {
+      return str == b.get<kj::String>();
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 Worker::Actor::Id Worker::Actor::cloneId(Worker::Actor::Id& id) {
