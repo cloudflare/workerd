@@ -6,7 +6,7 @@ from asyncio import sleep
 from urllib.parse import urlparse
 
 from js import Date
-from workers import DurableObject, Request, Response
+from workers import DurableObject, FetchResponse, Request, Response, handler
 
 import pyodide
 
@@ -70,6 +70,7 @@ class DurableObjectExample(DurableObject, MixinTest):
         return arg + 1
 
 
+@handler
 async def test(ctrl, env, ctx):
     id = env.ns.idFromName("A")
     obj = env.ns.get(id)
@@ -96,6 +97,12 @@ async def test(ctrl, env, ctx):
 
     # Verify that a mixin method can be called via RPC.
     assert await obj.test_mixin() == 1234
+
+    # Verify that DO fetch is wrapped.
+    third_resp = await obj.fetch("http://foo.com/counter")
+    assert isinstance(third_resp, FetchResponse)
+    third_resp_data = await third_resp.text()
+    assert third_resp_data == "hello from python 3"
 
     # Wait for alarm to get triggered.
     while True:
