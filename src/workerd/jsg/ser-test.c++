@@ -238,7 +238,6 @@ struct SerTestContextV2: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(SerTestIsolateV2, SerTestContextV2, SerTestContextV2::Bar);
 
 KJ_TEST("serialization") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   Evaluator<SerTestContext, SerTestIsolate> e(v8System);
 
   // Test serializing built-in values.
