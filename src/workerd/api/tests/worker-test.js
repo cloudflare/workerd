@@ -1,4 +1,5 @@
 import { throws, rejects, strictEqual } from 'node:assert';
+import { mock } from 'node:test';
 
 // We allow eval and new Function() during startup (global scope evaluation).
 strictEqual(eval('1+1'), 2); // should work
@@ -23,5 +24,34 @@ export const testStartupEval = {
     await rejects(() => import('another-module-does-eval'), {
       message: /Code generation from strings disallowed for this context/,
     });
+  },
+};
+
+// Test verifies that explicit resource management is, in fact, enabled.
+export const disposeTest = {
+  test() {
+    const fn = mock.fn();
+    {
+      using _ = {
+        [Symbol.dispose]() {
+          fn();
+        },
+      };
+    }
+    strictEqual(fn.mock.callCount(), 1);
+  },
+};
+
+export const asyncDisposeTest = {
+  async test() {
+    const fn = mock.fn(async () => {});
+    {
+      await using _ = {
+        async [Symbol.asyncDispose]() {
+          await fn();
+        },
+      };
+    }
+    strictEqual(fn.mock.callCount(), 1);
   },
 };
