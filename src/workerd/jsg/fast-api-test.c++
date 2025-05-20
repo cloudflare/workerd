@@ -257,9 +257,8 @@ KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
   KJ_ASSERT(jsg::callCounter == CallCounter(3, 1));
 }
 
-KJ_TEST("isFastMethodCompatible Detection") {
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper,
-                    void (FastMethodContext::*)(jsg::Lock&, bool)>,
+KJ_TEST("isFastApiCompatible Detection") {
+  static_assert(isFastApiCompatible<void (FastMethodContext::*)(jsg::Lock&, bool)>,
       "lock is accepted only as first argument");
 
   // Method type declarations
@@ -306,63 +305,59 @@ KJ_TEST("isFastMethodCompatible Detection") {
   // --------------------------------------------
 
   // Basic primitives
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, VoidMethod>,
-      "Void methods should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, IntMethod>,
-      "Integer methods should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, BoolMethod>,
-      "Boolean methods should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, FloatMethod>,
-      "Float methods should be fast-method compatible");
+  static_assert(isFastApiCompatible<VoidMethod>, "Void methods should be fast-method compatible");
+  static_assert(isFastApiCompatible<IntMethod>, "Integer methods should be fast-method compatible");
+  static_assert(
+      isFastApiCompatible<BoolMethod>, "Boolean methods should be fast-method compatible");
+  static_assert(isFastApiCompatible<FloatMethod>, "Float methods should be fast-method compatible");
 
   // V8 Local parameters
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, V8ValueParamMethod>,
+  static_assert(isFastApiCompatible<V8ValueParamMethod>,
       "Methods with v8::Local<v8::Value> parameters should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, V8ObjectParamMethod>,
+  static_assert(isFastApiCompatible<V8ObjectParamMethod>,
       "Methods with v8::Local<v8::Object> parameters should be fast-method compatible");
 
   // Const methods
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, ConstIntMethod>,
-      "Const methods should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, ConstFloatMethod>,
+  static_assert(
+      isFastApiCompatible<ConstIntMethod>, "Const methods should be fast-method compatible");
+  static_assert(isFastApiCompatible<ConstFloatMethod>,
       "Const methods with float should be fast-method compatible");
 
   // Lock& as first parameter
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, LockFirstMethod>,
+  static_assert(isFastApiCompatible<LockFirstMethod>,
       "Methods with Lock& as first parameter should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, LockFirstVoidMethod>,
+  static_assert(isFastApiCompatible<LockFirstVoidMethod>,
       "Void methods with Lock& as first parameter should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, LockFirstWithV8Local>,
+  static_assert(isFastApiCompatible<LockFirstWithV8Local>,
       "Methods with Lock& and v8::Local params should be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, ConstLockFirstMethod>,
+  static_assert(isFastApiCompatible<ConstLockFirstMethod>,
       "Const methods with Lock& as first parameter should be fast-method compatible");
 
   // Static assertions for incompatible method types
   // ----------------------------------------------
 
   // Pointer types
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, PointerParamMethod>,
+  static_assert(!isFastApiCompatible<PointerParamMethod>,
       "Methods with pointer parameters should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, PointerReturnMethod>,
+  static_assert(!isFastApiCompatible<PointerReturnMethod>,
       "Methods returning pointers should not be fast-method compatible");
 
   // V8 Local return type
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, V8ReturnMethod>,
+  static_assert(!isFastApiCompatible<V8ReturnMethod>,
       "Methods returning v8::Local<v8::Value> should not be fast-method compatible");
 
   // Complex types
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, StringMethod>,
+  static_assert(!isFastApiCompatible<StringMethod>,
       "Methods with kj::String parameters should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, ComplexMethod>,
+  static_assert(!isFastApiCompatible<ComplexMethod>,
       "Methods with Ref return types should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, KjArrayMethod>,
+  static_assert(!isFastApiCompatible<KjArrayMethod>,
       "Methods returning kj::Array should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, PromiseMethod>,
+  static_assert(!isFastApiCompatible<PromiseMethod>,
       "Methods returning Promise should not be fast-method compatible");
-  static_assert(!isFastMethodCompatible<FastMethodIsolate_TypeWrapper, MaybeVoidMethod>,
+  static_assert(!isFastApiCompatible<MaybeVoidMethod>,
       "Methods returning Maybe<void> should not be fast-method compatible");
-  static_assert(isFastMethodCompatible<FastMethodIsolate_TypeWrapper, StaticMethodContainerMethod>,
-      "This should be compatible");
+  static_assert(isFastApiCompatible<StaticMethodContainerMethod>, "This should be compatible");
 
   // jsg::test::Evaluator<FastMethodContext, FastMethodIsolate> e(v8System);
   // auto& wrapper = FastMethodIsolate_TypeWrapper::from(e.getIsolate().ptr);

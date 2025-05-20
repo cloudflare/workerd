@@ -35,7 +35,7 @@ concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>(
     kj::isSameType<T, uint64_t>() || kj::isSameType<T, float>() || kj::isSameType<T, double>();
 
 // Helper to determine if a type can be used as a parameter in V8 Fast API
-template <typename TypeWrapper, typename T>
+template <typename T>
 concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
@@ -43,50 +43,46 @@ template <typename T>
 concept FastApiReturnParam = FastApiPrimitive<T>;
 
 // Helper to determine if a method can be used with V8 fast API
-template <typename TypeWrapper, typename Ret, typename... Args>
-concept FastApiMethod = FastApiReturnParam<Ret> && (FastApiParam<TypeWrapper, Args> && ...);
+template <typename Ret, typename... Args>
+concept FastApiMethod = FastApiReturnParam<Ret> && (FastApiParam<Args> && ...);
 
 // Helper to determine if a method pointer type is compatible with Fast API
-template <typename TypeWrapper, typename Method>
-constexpr bool isFastMethodCompatible = false;
+template <typename Method>
+constexpr bool isFastApiCompatible = false;
 
 // Specialization for non-static member functions
-template <typename TypeWrapper, typename Class, typename Ret, typename... Args>
-constexpr bool isFastMethodCompatible<TypeWrapper, Ret (Class::*)(Args...)> =
-    FastApiMethod<TypeWrapper, Ret, Args...>;
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiCompatible<Ret (Class::*)(Args...)> = FastApiMethod<Ret, Args...>;
 
 // Specialization for const non-static member functions
-template <typename TypeWrapper, typename Class, typename Ret, typename... Args>
-constexpr bool isFastMethodCompatible<TypeWrapper, Ret (Class::*)(Args...) const> =
-    FastApiMethod<TypeWrapper, Ret, Args...>;
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiCompatible<Ret (Class::*)(Args...) const> = FastApiMethod<Ret, Args...>;
 
-template <typename TypeWrapper, typename Class, typename Ret, typename... Args>
-constexpr bool isFastMethodCompatible<TypeWrapper, Ret (Class::*)(jsg::Lock&, Args...)> =
-    FastApiMethod<TypeWrapper, Ret, Args...>;
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiCompatible<Ret (Class::*)(jsg::Lock&, Args...)> =
+    FastApiMethod<Ret, Args...>;
 
-template <typename TypeWrapper, typename Class, typename Ret, typename... Args>
-constexpr bool isFastMethodCompatible<TypeWrapper, Ret (Class::*)(jsg::Lock&, Args...) const> =
-    FastApiMethod<TypeWrapper, Ret, Args...>;
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiCompatible<Ret (Class::*)(jsg::Lock&, Args...) const> =
+    FastApiMethod<Ret, Args...>;
 
 // Specialization for static functions
-template <typename TypeWrapper, typename Ret, typename... Args>
-constexpr bool isFastMethodCompatible<TypeWrapper, Ret(Args...)> =
-    FastApiMethod<TypeWrapper, Ret, Args...>;
+template <typename Ret, typename... Args>
+constexpr bool isFastApiCompatible<Ret(Args...)> = FastApiMethod<Ret, Args...>;
 
-template <typename TypeWrapper, typename Ret, typename... Args>
-constexpr bool isFastMethodCompatible<TypeWrapper, Ret(jsg::Lock&, Args...)> =
-    FastApiMethod<TypeWrapper, Ret, Args...>;
+template <typename Ret, typename... Args>
+constexpr bool isFastApiCompatible<Ret(jsg::Lock&, Args...)> = FastApiMethod<Ret, Args...>;
 
-template <typename TypeWrapper, typename T>
+template <typename T>
 struct FastApiJSGToV8 {
   // We allow every type to be passed into v8 fast api using v8::Local<v8::Value>
   // conversion.
   using value = v8::Local<v8::Value>;
 };
 
-template <typename TypeWrapper, typename T>
+template <typename T>
   requires FastApiPrimitive<kj::RemoveConst<kj::Decay<T>>>
-struct FastApiJSGToV8<TypeWrapper, T> {
+struct FastApiJSGToV8<T> {
   using value = kj::RemoveConst<kj::Decay<T>>;
 };
 

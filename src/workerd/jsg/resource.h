@@ -232,7 +232,7 @@ struct MethodCallback<TypeWrapper,
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      FastApiJSGToV8<Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
@@ -293,7 +293,7 @@ struct MethodCallback<TypeWrapper,
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      FastApiJSGToV8<Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
@@ -424,7 +424,7 @@ struct StaticMethodCallback<TypeWrapper,
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      FastApiJSGToV8<Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
@@ -480,7 +480,7 @@ struct StaticMethodCallback<TypeWrapper,
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<TypeWrapper, Args>::value... fastArgs,
+      FastApiJSGToV8<Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
@@ -876,7 +876,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method,
 
   template <typename ReturnType = void>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<TypeWrapper, Arg>::value fastArgs,
+      FastApiJSGToV8<Arg>::value fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
@@ -924,7 +924,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), 
 
   template <typename ReturnType = void>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<TypeWrapper, Arg>::value fastArgs,
+      FastApiJSGToV8<Arg>::value fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
@@ -1193,7 +1193,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Method, Method method>
   inline void registerMethod() {
-    if constexpr (isFastMethodCompatible<TypeWrapper, Method>) {
+    if constexpr (isFastApiCompatible<Method>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
             Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
@@ -1217,7 +1217,7 @@ struct ResourceTypeBuilder {
 
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
-    if constexpr (isFastMethodCompatible<TypeWrapper, Method>) {
+    if constexpr (isFastApiCompatible<Method>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
             method, ArgumentIndexes<Method>>::template fastCallback<>);
@@ -1275,8 +1275,7 @@ struct ResourceTypeBuilder {
     }
 
     bool useSlowApi = true;
-    if constexpr (isFastMethodCompatible<TypeWrapper, Getter> &&
-        isFastMethodCompatible<TypeWrapper, Setter>) {
+    if constexpr (isFastApiCompatible<Getter> && isFastApiCompatible<Setter>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
         getterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Gcb::callback,
