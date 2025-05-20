@@ -49,3 +49,11 @@ export function write(
     position: number | bigint | null;
   }
 ): number;
+
+export function read(
+  fd: number,
+  buffers: ArrayBufferView[],
+  options: {
+    position: number | bigint | null;
+  }
+): number;

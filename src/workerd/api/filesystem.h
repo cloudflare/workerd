@@ -83,6 +83,7 @@ class FileSystemModule final: public jsg::Object {
   };
 
   uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
 
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
@@ -97,6 +98,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(open);
     JSG_METHOD(close);
     JSG_METHOD(write);
+    JSG_METHOD(read);
   }
 };
 

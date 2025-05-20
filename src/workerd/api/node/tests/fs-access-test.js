@@ -36,6 +36,8 @@ import {
   lutimesSync,
   writeSync,
   writevSync,
+  readSync,
+  readvSync,
   access,
   stat,
   chmod,
@@ -1167,6 +1169,22 @@ export const writeSyncTest = {
     const stat2 = fstatSync(fd, { bigint: true });
     strictEqual(stat2.size, 15n);
 
+    const dest = Buffer.alloc(15);
+
+    // When we don't specify a position, it reads from the current position,
+    // which currently is the end of the file... so we get nothint here.
+    strictEqual(readSync(fd, dest), 0);
+
+    // But when we do specify a position, we can read from the beginning...
+    strictEqual(readSync(fd, dest, 0, dest.byteLength, 0), 15);
+    strictEqual(dest.toString(), 'Hello World!!!!');
+
+    // Likewise, we can use an options object for the position
+    dest.fill(0);
+    strictEqual(dest.toString(), '\0'.repeat(dest.byteLength));
+    strictEqual(readSync(fd, dest, { position: 0 }), 15);
+    strictEqual(dest.toString(), 'Hello World!!!!');
+
     closeSync(fd);
   },
 };
@@ -1189,10 +1207,14 @@ export const writeSyncTest2 = {
       message: 'Position out of range',
     });
 
-    strictEqual(writeSync(fd, 'a', null, 'ascii'), 1);
+    strictEqual(writeSync(fd, 'aa', 0, 'ascii'), 2);
 
-    const stat2 = fstatSync(fd, { bigint: true });
-    strictEqual(stat2.size, 13n);
+    const stat2 = fstatSync(fd);
+    strictEqual(stat2.size, 13);
+
+    const dest = Buffer.alloc(stat2.size);
+    strictEqual(readSync(fd, dest, 0, dest.byteLength, 0), 13);
+    strictEqual(dest.toString(), 'aaHello World');
 
     closeSync(fd);
   },
@@ -1303,6 +1325,25 @@ export const writevSyncTest = {
 
     const stat2 = fstatSync(fd, { bigint: true });
     strictEqual(stat2.size, 15n);
+
+    const dest1 = Buffer.alloc(5);
+    const dest2 = Buffer.alloc(10);
+    const dest3 = Buffer.alloc(5);
+    let read = readvSync(fd, [dest1, dest2, dest3], 0);
+    strictEqual(read, 15);
+    let dest = Buffer.concat([dest1, dest2, dest3]);
+    strictEqual(dest.toString('utf8', 0, read), 'Hello World!!!!');
+
+    dest1.fill(0);
+    dest2.fill(0);
+    dest3.fill(0);
+    read = readvSync(fd, [dest1, dest2, dest3], 1);
+    strictEqual(read, 14);
+    dest = Buffer.concat([dest1, dest2, dest3]);
+    strictEqual(dest.toString('utf8', 0, read), 'ello World!!!!');
+
+    // Reading from a position beyond the end of the file returns nothing.
+    strictEqual(readvSync(fd, [dest1], 100), 0);
 
     closeSync(fd);
   },

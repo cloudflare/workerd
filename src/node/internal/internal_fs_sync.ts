@@ -625,7 +625,11 @@ export function readSync(
     return 0;
   }
 
-  throw new Error('Not implemented');
+  return readvSync(
+    fd,
+    [Buffer.from(buffer.buffer, actualOffset, actualLength)],
+    actualPosition
+  );
 }
 
 export function readvSync(
@@ -634,15 +638,24 @@ export function readvSync(
   position: number | bigint | null = null
 ): number {
   fd = getValidatedFd(fd);
-
   validateBufferArray(buffers);
-  validatePosition(position, 'position');
+
+  if (
+    position != null &&
+    typeof position !== 'number' &&
+    typeof position !== 'bigint'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'position',
+      ['null', 'number', 'bigint'],
+      position
+    );
+  }
 
   if (buffers.length === 0) {
     return 0;
   }
-
-  throw new Error('Not implemented');
+  return cffs.read(fd, buffers, { position });
 }
 
 // TODO: Implement fs.realpathSync.native
@@ -1002,9 +1015,9 @@ export function writevSync(
 // [x][ ][ ][ ] fs.readdirSync(path[, options])
 // [x][ ][ ][ ] fs.readFileSync(path[, options])
 // [x][x][x][ ] fs.readlinkSync(path[, options])
-// [x][ ][ ][ ] fs.readSync(fd, buffer, offset, length[, position])
-// [x][ ][ ][ ] fs.readSync(fd, buffer[, options])
-// [x][ ][ ][ ] fs.readvSync(fd, buffers[, position])
+// [x][x][x][ ] fs.readSync(fd, buffer, offset, length[, position])
+// [x][x][x][ ] fs.readSync(fd, buffer[, options])
+// [x][x][x][ ] fs.readvSync(fd, buffers[, position])
 // [x][x][x][ ] fs.realpathSync(path[, options])
 // [x][x][x][ ] fs.realpathSync.native(path[, options])
 // [x][ ][ ][ ] fs.renameSync(oldPath, newPath)
