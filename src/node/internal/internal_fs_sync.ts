@@ -498,7 +498,7 @@ export type ReadFileSyncOptions = {
 };
 
 export function readFileSync(
-  path: FilePath,
+  pathOrFd: number | FilePath,
   options: ReadFileSyncOptions = {}
 ): string | Buffer {
   validateObject(options, 'options');
@@ -506,9 +506,21 @@ export function readFileSync(
   validateEncoding(encoding, 'options.encoding');
   stringToFlags(flag);
 
-  path = normalizePath(path);
-  options = getOptions(options, { flag: 'r' });
-  throw new Error('Not implemented');
+  // TODO(node:fs): We are currently ignoring flags on readFileSync.
+
+  const u8 = (() => {
+    if (typeof pathOrFd === 'number') {
+      return cffs.readAll(getValidatedFd(pathOrFd));
+    } else {
+      return cffs.readAll(normalizePath(pathOrFd));
+    }
+  })();
+
+  const buf = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
+  if (typeof encoding === 'string') {
+    return buf.toString(encoding);
+  }
+  return buf;
 }
 
 export type ReadLinkSyncOptions = {
@@ -1013,7 +1025,7 @@ export function writevSync(
 // [x][ ][ ][ ] fs.opendirSync(path[, options])
 // [x][x][x][ ] fs.openSync(path[, flags[, mode]])
 // [x][ ][ ][ ] fs.readdirSync(path[, options])
-// [x][ ][ ][ ] fs.readFileSync(path[, options])
+// [x][x][x][ ] fs.readFileSync(path[, options])
 // [x][x][x][ ] fs.readlinkSync(path[, options])
 // [x][x][x][ ] fs.readSync(fd, buffer, offset, length[, position])
 // [x][x][x][ ] fs.readSync(fd, buffer[, options])

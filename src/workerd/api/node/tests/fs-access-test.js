@@ -38,6 +38,7 @@ import {
   writevSync,
   readSync,
   readvSync,
+  readFileSync,
   access,
   stat,
   chmod,
@@ -1184,6 +1185,13 @@ export const writeSyncTest = {
     strictEqual(dest.toString(), '\0'.repeat(dest.byteLength));
     strictEqual(readSync(fd, dest, { position: 0 }), 15);
     strictEqual(dest.toString(), 'Hello World!!!!');
+
+    const dest2 = readFileSync('/tmp/test.txt');
+    const dest3 = readFileSync(fd);
+    const dest4 = readFileSync(fd, { encoding: 'utf8' });
+    strictEqual(dest2.toString(), 'Hello World!!!!');
+    strictEqual(dest3.toString(), 'Hello World!!!!');
+    strictEqual(dest4, 'Hello World!!!!');
 
     closeSync(fd);
   },

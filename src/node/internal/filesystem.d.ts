@@ -57,3 +57,5 @@ export function read(
     position: number | bigint | null;
   }
 ): number;
+
+export function readAll(pathOrFd: number | URL): Uint8Array;

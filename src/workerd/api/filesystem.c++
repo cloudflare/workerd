@@ -423,6 +423,48 @@ uint32_t FileSystemModule::read(
   KJ_UNREACHABLE;
 }
 
+jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  KJ_SWITCH_ONEOF(pathOrFd) {
+    KJ_CASE_ONEOF(path, FilePath) {
+      NormalizedFilePath normalized(kj::mv(path));
+      KJ_IF_SOME(node, vfs.resolve(js, normalized)) {
+        KJ_SWITCH_ONEOF(node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            return file->readAllBytes(js);
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            // We shouldn't be able to get here since we are following symlinks.
+            KJ_UNREACHABLE;
+          }
+        }
+      }
+    }
+    KJ_CASE_ONEOF(fd, int) {
+      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
+      JSG_REQUIRE(opened.read, Error, "File descriptor not opened for reading"_kj);
+      KJ_SWITCH_ONEOF(opened.node) {
+        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+          return file->readAllBytes(js);
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+          JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+          // If we get here, then followSymLinks was set to false when open was called.
+          // We can't read from a symbolic link.
+          JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+        }
+      }
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 // =======================================================================================
 // Implementation of the Web File System API
 
