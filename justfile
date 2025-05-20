@@ -84,7 +84,7 @@ clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
 
 prepare-ubuntu:
-  sudo apt-get install -y --no-install-recommends libc++abi1-18 libc++1-18 libc++-18-dev lld-18 bazelisk python3
+  sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3
 
 generate-types:
   bazel build //types:types

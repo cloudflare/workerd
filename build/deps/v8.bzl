@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.6.233.6"
+VERSION = "13.7.152.7"
 
-INTEGRITY = "sha256-WC28areti1avcJ7tGFUyUb/wJieSNUw69oqtcFyDg+Q="
+INTEGRITY = "sha256-ijPP9GLRviiG16iKmcgyPUt9nP2GZdPv0KRRSwilnUY="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -16,19 +16,18 @@ PATCHES = [
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0011-Expose-v8-Symbol-GetDispose.patch",
-    "0012-Revert-TracedReference-deref-API-removal.patch",
-    "0013-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-    "0014-Update-illegal-invocation-error-message-in-v8.patch",
-    "0015-Implement-cross-request-context-promise-resolve-hand.patch",
-    "0016-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0017-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0018-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0019-Enable-V8-shared-linkage.patch",
-    "0020-Modify-where-to-look-for-fast_float-and-simdutf.patch",
-    "0021-Remove-unneded-latomic-linker-flag.patch",
-    "0022-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
-    "0023-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
+    "0011-Revert-TracedReference-deref-API-removal.patch",
+    "0012-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+    "0013-Update-illegal-invocation-error-message-in-v8.patch",
+    "0014-Implement-cross-request-context-promise-resolve-hand.patch",
+    "0015-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0016-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0017-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0018-Enable-V8-shared-linkage.patch",
+    "0019-Modify-where-to-look-for-fast_float-and-simdutf.patch",
+    "0020-Remove-unneded-latomic-linker-flag.patch",
+    "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
+    "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
 ]
 
 # V8 and its dependencies
@@ -57,7 +56,7 @@ def deps_v8():
     git_repository(
         name = "com_googlesource_chromium_icu",
         build_file = "@v8//:bazel/BUILD.icu",
-        commit = "c9fb4b3a6fb54aa8c20a03bbcaa0a4a985ffd34b",
+        commit = "4c8cc4b365a505ce35be1e0bd488476c5f79805d",
         patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",

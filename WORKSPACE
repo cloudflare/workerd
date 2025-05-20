@@ -138,7 +138,7 @@ git_repository(
     # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
     # for it to be behind – zlib is very stable and its API has not changed in a long time, most
     # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
-    commit = "788cb3c270e8700b425c7bdca1f9ce6b0c1400a9",
+    commit = "1e85c01b15363d11fab81c46fe2b5c2179113f70",
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
 

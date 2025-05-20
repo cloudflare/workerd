@@ -3,12 +3,13 @@ From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 54be2b945d4d23ad9c8774a60087ad77c18e4424..dc0b10774e71a27ad9ea94438395778c75fd92d6 100644
+index 593939d3350c0d70280bf92432ace1699f867925..e93200f2b12ddcd5be47142c4307459e610470ea 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3855,6 +3855,8 @@ filegroup(
+@@ -3876,6 +3876,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],

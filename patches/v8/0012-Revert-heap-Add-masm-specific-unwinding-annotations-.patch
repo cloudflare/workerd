@@ -11,11 +11,13 @@ file on Windows with any compiler. Maybe clang-cl and masm can be used
 together? I'm not sure. In the meantime, I'm reverting this commit in the hope
 of getting our V8 upgrade unblocked.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/BUILD.gn b/BUILD.gn
-index 9a2b2cdd94f9b9365b87995617b91ad8b777bf58..ee9c2351b7f8b6f977cf190b90469137c4aa85b6 100644
+index 818f13802c66607a676981e064437c87d1fc4e59..2f6301c46bef3a44cf84b766d68ec58d72cb8e1d 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4282,8 +4282,8 @@ v8_header_set("v8_internal_headers") {
+@@ -4292,8 +4292,8 @@ v8_header_set("v8_internal_headers") {
      "src/temporal/temporal-parser.h",
      "src/third_party/rapidhash-v8/rapidhash.h",
      "src/torque/runtime-macro-shims.h",
@@ -25,7 +27,7 @@ index 9a2b2cdd94f9b9365b87995617b91ad8b777bf58..ee9c2351b7f8b6f977cf190b90469137
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -6929,12 +6929,7 @@ v8_source_set("v8_heap_base") {
+@@ -6956,12 +6956,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {

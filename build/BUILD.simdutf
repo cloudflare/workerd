@@ -8,5 +8,6 @@ cc_library(
         "@platforms//cpu:x86_64": ["-msse4.2"],
         "//conditions:default": [],
     }) + ["-Wno-unused-function"],
+    defines = ["SIMDUTF_ATOMIC_REF"],
     visibility = ["//visibility:public"],
 )

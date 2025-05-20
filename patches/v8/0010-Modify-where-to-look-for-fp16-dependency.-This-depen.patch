@@ -5,12 +5,13 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
  downloaded by gn but we need to fetch it in Bazel. We do so in the workerd
  repo in the WORKSPACE file.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 723284dfbeb3ff267e28ea42fb73b5ae96a3db77..a2b8f9c827467def323afa62b80be06ad75ee132 100644
+index e7c4ae12451a2a6a97c643371d433d19f61edb9a..f1d8db40031df49a9aa7307c6fa7b030939e0687 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3867,16 +3867,22 @@ filegroup(
+@@ -3888,16 +3888,22 @@ filegroup(
      }),
  )
  

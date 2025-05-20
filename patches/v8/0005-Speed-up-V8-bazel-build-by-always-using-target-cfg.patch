@@ -7,8 +7,10 @@ See the workerd build cfg changes for rationale. This provides a significant
 speedup for the build: Components like ICU were previously compiled in
 both target and exec configurations as generator tools depend on them.
 
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
 diff --git a/BUILD.bazel b/BUILD.bazel
-index dc0b10774e71a27ad9ea94438395778c75fd92d6..723284dfbeb3ff267e28ea42fb73b5ae96a3db77 100644
+index e93200f2b12ddcd5be47142c4307459e610470ea..e7c4ae12451a2a6a97c643371d433d19f61edb9a 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -19,7 +21,7 @@ index dc0b10774e71a27ad9ea94438395778c75fd92d6..723284dfbeb3ff267e28ea42fb73b5ae
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -4242,22 +4243,20 @@ filegroup(
+@@ -4263,22 +4264,20 @@ filegroup(
      ],
  )
  
@@ -48,7 +50,7 @@ index dc0b10774e71a27ad9ea94438395778c75fd92d6..723284dfbeb3ff267e28ea42fb73b5ae
  )
  
  v8_mksnapshot(
-@@ -4466,7 +4465,6 @@ v8_binary(
+@@ -4493,7 +4492,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
