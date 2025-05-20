@@ -110,7 +110,7 @@ struct TestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                               \
-  TestIsolate isolate(v8System, 123, kj::heap<IsolateObserver>());                                 \
+  TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>()); \
   runInV8Stack([&](auto& stackScope) {                                                             \
     TestIsolate::Lock lock(isolate, stackScope);                                                   \
     lock.withinHandleScope([&] {                                                                   \

@@ -37,6 +37,7 @@ class WorkerdApi final: public Worker::Api {
       CompatibilityFlags::Reader features,
       capnp::List<config::Extension>::Reader extensions,
       v8::Isolate::CreateParams createParams,
+      v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,

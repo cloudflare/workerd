@@ -3069,9 +3069,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
         *jsgobserver, modulesSource, featureFlags.asReader(), pythonConfig, bundleBase);
   }
 
+  auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), extensions,
-      limitEnforcer->getCreateParams(), kj::mv(jsgobserver), *memoryCacheProvider, pythonConfig,
-      kj::mv(newModuleRegistry), kj::mv(workerFs));
+      limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
+      pythonConfig, kj::mv(newModuleRegistry), kj::mv(workerFs));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {

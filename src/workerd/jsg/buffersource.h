@@ -71,12 +71,15 @@ using BufferSourceViewConstructor = v8::Local<v8::Value> (*)(Lock&, BackingStore
 // the byte length, offset, element size, and constructor type allowing the view to be
 // recreated.
 //
-// The BackingStore can be safely used outside of the isolate lock and can even be passed
-// into another isolate if necessary.
+// Once allocated, the BackingStore can be safely used outside of the isolate lock.  If
+// using V8 sandboxing, it cannot be passed to another isolate unless that isolate is
+// part of the same IsolateGroup.
 class BackingStore {
  public:
   template <BufferSourceType T = v8::Uint8Array>
-  static BackingStore from(kj::Array<kj::byte> data) {
+  // This requires the js lock to ensure the backing is allocated in the correct
+  // V8 sandbox for the isolate.
+  static BackingStore from(Lock& js, kj::Array<kj::byte> data) {
     // Creates a new BackingStore that takes over ownership of the given kj::Array.
     size_t size = data.size();
     auto ptr = new kj::Array<byte>(kj::mv(data));
@@ -473,7 +476,7 @@ class BufferSourceWrapper {
 };
 
 inline BufferSource Lock::arrayBuffer(kj::Array<kj::byte> data) {
-  return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(kj::mv(data)));
+  return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(*this, kj::mv(data)));
 }
 
 }  // namespace workerd::jsg
