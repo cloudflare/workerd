@@ -149,6 +149,11 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
 
+  // These features are completed and enabled by default in Chrome, but not
+  // in V8. Follows Node.js: https://github.com/nodejs/node/pull/58154
+  v8::V8::SetFlagsFromString("--js-explicit-resource-management");
+  v8::V8::SetFlagsFromString("--js-float16array");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
