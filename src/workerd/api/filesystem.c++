@@ -709,6 +709,32 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
   return kj::none;
 }
 
+void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
+  // TODO(node:fs): Implement the force option.
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedPath(kj::mv(path));
+  const jsg::Url& url = normalizedPath;
+  auto relative = url.getRelative();
+  auto parent =
+      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
+  // Let's make sure the parent is a directory.
+  auto& dir = JSG_REQUIRE_NONNULL(
+      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+  auto stat = dir->stat(js);
+  JSG_REQUIRE(stat.writable, Error, "access is denied");
+
+  kj::Path name(relative.name);
+
+  if (options.dironly) {
+    // If the dironly option is set, we will only remove the entry if it is a directory.
+    auto stat = JSG_REQUIRE_NONNULL(dir->stat(js, name), Error, "file not found");
+    JSG_REQUIRE(stat.type == workerd::FsType::DIRECTORY, Error, "Not a directory");
+  }
+
+  dir->remove(js, name, {.recursive = options.recursive});
+}
+
 // =======================================================================================
 // Implementation of the Web File System API
 

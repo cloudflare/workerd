@@ -115,6 +115,14 @@ class FileSystemModule final: public jsg::Object {
   };
   jsg::Optional<kj::String> mkdir(jsg::Lock& js, FilePath path, MkdirOptions options);
 
+  struct RmOptions {
+    bool recursive = false;
+    bool force = false;
+    bool dironly = false;
+    JSG_STRUCT(recursive, force, dironly);
+  };
+  void rm(jsg::Lock& js, FilePath path, RmOptions options);
+
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
@@ -133,6 +141,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(writeAll);
     JSG_METHOD(renameOrCopy);
     JSG_METHOD(mkdir);
+    JSG_METHOD(rm);
   }
 
  private:
@@ -510,6 +519,6 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::WriteOptions,                                                \
       workerd::api::FileSystemModule::WriteAllOptions,                                             \
       workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
-      workerd::api::FileSystemModule::MkdirOptions
+      workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions
 
 }  // namespace workerd::api

@@ -45,6 +45,8 @@ import {
   renameSync,
   mkdirSync,
   mkdtempSync,
+  rmSync,
+  rmdirSync,
   access,
   stat,
   chmod,
@@ -1463,5 +1465,85 @@ export const mkdirTest = {
     throws(() => mkdtempSync('/bundle/testdir-'), {
       message: /access is denied/,
     });
+  },
+};
+
+export const rmTest = {
+  test() {
+    ok(!existsSync('/tmp/testdir'));
+    mkdirSync('/tmp/testdir');
+    writeFileSync('/tmp/testdir/a.txt', 'Hello World');
+    throws(() => rmdirSync('/tmp/testdir'), {
+      message: /Directory is not empty/,
+    });
+    rmdirSync('/tmp/testdir', { recursive: true });
+
+    ok(!existsSync('/tmp/testdir'));
+    mkdirSync('/tmp/testdir');
+    writeFileSync('/tmp/testdir/a.txt', 'Hello World');
+    writeFileSync('/tmp/testdir/b.txt', 'Hello World');
+    ok(existsSync('/tmp/testdir/a.txt'));
+
+    // removing a file works
+    rmSync('/tmp/testdir/a.txt');
+
+    ok(!existsSync('/tmp/testdir/a.txt'));
+    throws(() => rmSync('/tmp/testdir'));
+    rmSync('/tmp/testdir', { recursive: true });
+
+    // Passing incorrect types for options throws
+    throws(() => rmSync('/tmp/testdir', { recursive: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmSync('/tmp/testdir', 'abc'), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmSync('/tmp/testdir', { force: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmSync('/tmp/testdir', { maxRetries: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmSync('/tmp/testdir', { retryDelay: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmSync('/tmp/testdir', { maxRetries: 1, retryDelay: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmSync('/tmp/testdir', { maxRetries: 'yes', retryDelay: 1 }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(
+      () =>
+        rmSync('/tmp/testdir', { maxRetries: 1, retryDelay: 1, force: 'yes' }),
+      {
+        code: /ERR_INVALID_ARG_TYPE/,
+      }
+    );
+
+    throws(() => rmdirSync('/tmp/testdir', { recursive: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmdirSync('/tmp/testdir', 'abc'), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmdirSync('/tmp/testdir', { maxRetries: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(() => rmdirSync('/tmp/testdir', { retryDelay: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+    throws(
+      () => rmdirSync('/tmp/testdir', { maxRetries: 1, retryDelay: 'yes' }),
+      {
+        code: /ERR_INVALID_ARG_TYPE/,
+      }
+    );
+    throws(
+      () => rmdirSync('/tmp/testdir', { maxRetries: 'yes', retryDelay: 1 }),
+      {
+        code: /ERR_INVALID_ARG_TYPE/,
+      }
+    );
   },
 };

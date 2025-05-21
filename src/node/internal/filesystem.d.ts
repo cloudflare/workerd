@@ -76,3 +76,8 @@ export function mkdir(
   path: URL,
   options: { recursive: boolean; tmp: boolean }
 ): string | undefined;
+
+export function rm(
+  path: URL,
+  options: { recursive: boolean; force: boolean; dironly: boolean }
+): void;

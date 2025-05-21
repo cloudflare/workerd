@@ -709,9 +709,7 @@ export function rmdirSync(
   validateBoolean(recursive, 'options.recursive');
   validateUint32(retryDelay, 'options.retryDelay');
 
-  path = normalizePath(path);
-  validateObject(options, 'options');
-  throw new Error('Not implemented');
+  cffs.rm(normalizePath(path), { recursive, force: false, dironly: true });
 }
 
 export type RmSyncOptions = {
@@ -736,9 +734,7 @@ export function rmSync(path: FilePath, options: RmSyncOptions = {}): void {
   validateBoolean(recursive, 'options.recursive');
   validateUint32(retryDelay, 'options.retryDelay');
 
-  path = normalizePath(path);
-  validateObject(options, 'options');
-  throw new Error('Not implemented');
+  cffs.rm(normalizePath(path), { recursive, force, dironly: false });
 }
 
 export function statSync(
@@ -994,51 +990,52 @@ export function writevSync(
 // tested and then optimized for performance.
 //
 // (S == Stubbed, I == Implemented, T == Tested, O == Optimized)
+// For T, 1 == basic tests, 2 == node.js tests ported and verified
 //  S  I  T  O
-// [x][x][x][ ] fs.accessSync(path[, mode])
-// [x][x][x][ ] fs.appendFileSync(path, data[, options])
-// [x][x][x][ ] fs.chmodSync(path, mode)
-// [x][x][x][ ] fs.chownSync(path, uid, gid)
-// [x][x][x][ ] fs.closeSync(fd)
-// [x][x][x][ ] fs.copyFileSync(src, dest[, mode])
+// [x][x][1][ ] fs.accessSync(path[, mode])
+// [x][x][1][ ] fs.appendFileSync(path, data[, options])
+// [x][x][1][ ] fs.chmodSync(path, mode)
+// [x][x][1][ ] fs.chownSync(path, uid, gid)
+// [x][x][1][ ] fs.closeSync(fd)
+// [x][x][1][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ] fs.cpSync(src, dest[, options])
-// [x][x][x][ ] fs.existsSync(path)
-// [x][x][x][ ] fs.fchmodSync(fd, mode)
-// [x][x][x][ ] fs.fchownSync(fd, uid, gid)
-// [x][x][x][ ] fs.fdatasyncSync(fd)
-// [x][x][x][ ] fs.fstatSync(fd[, options])
-// [x][x][x][ ] fs.fsyncSync(fd)
-// [x][x][x][ ] fs.ftruncateSync(fd[, len])
-// [x][x][x][ ] fs.futimesSync(fd, atime, mtime)
+// [x][x][1][ ] fs.existsSync(path)
+// [x][x][1][ ] fs.fchmodSync(fd, mode)
+// [x][x][1][ ] fs.fchownSync(fd, uid, gid)
+// [x][x][1][ ] fs.fdatasyncSync(fd)
+// [x][x][1][ ] fs.fstatSync(fd[, options])
+// [x][x][1][ ] fs.fsyncSync(fd)
+// [x][x][1][ ] fs.ftruncateSync(fd[, len])
+// [x][x][1][ ] fs.futimesSync(fd, atime, mtime)
 // [ ][ ][ ][ ] fs.globSync(pattern[, options])
-// [x][x][x][ ] fs.lchmodSync(path, mode)
-// [x][x][x][ ] fs.lchownSync(path, uid, gid)
-// [x][x][x][ ] fs.lutimesSync(path, atime, mtime)
-// [x][x][x][ ] fs.linkSync(existingPath, newPath)
-// [x][x][x][ ] fs.lstatSync(path[, options])
-// [x][x][x][ ] fs.mkdirSync(path[, options])
-// [x][x][x][ ] fs.mkdtempSync(prefix[, options])
+// [x][x][1][ ] fs.lchmodSync(path, mode)
+// [x][x][1][ ] fs.lchownSync(path, uid, gid)
+// [x][x][1][ ] fs.lutimesSync(path, atime, mtime)
+// [x][x][1][ ] fs.linkSync(existingPath, newPath)
+// [x][x][1][ ] fs.lstatSync(path[, options])
+// [x][x][1][ ] fs.mkdirSync(path[, options])
+// [x][x][1][ ] fs.mkdtempSync(prefix[, options])
 // [x][ ][ ][ ] fs.opendirSync(path[, options])
-// [x][x][x][ ] fs.openSync(path[, flags[, mode]])
+// [x][x][1][ ] fs.openSync(path[, flags[, mode]])
 // [x][ ][ ][ ] fs.readdirSync(path[, options])
-// [x][x][x][ ] fs.readFileSync(path[, options])
-// [x][x][x][ ] fs.readlinkSync(path[, options])
-// [x][x][x][ ] fs.readSync(fd, buffer, offset, length[, position])
-// [x][x][x][ ] fs.readSync(fd, buffer[, options])
-// [x][x][x][ ] fs.readvSync(fd, buffers[, position])
-// [x][x][x][ ] fs.realpathSync(path[, options])
-// [x][x][x][ ] fs.realpathSync.native(path[, options])
-// [x][x][x][ ] fs.renameSync(oldPath, newPath)
-// [x][ ][ ][ ] fs.rmdirSync(path[, options])
-// [x][ ][ ][ ] fs.rmSync(path[, options])
-// [x][x][x][ ] fs.statSync(path[, options])
-// [x][x][x][ ] fs.statfsSync(path[, options])
-// [x][x][x][ ] fs.symlinkSync(target, path[, type])
-// [x][x][x][ ] fs.truncateSync(path[, len])
-// [x][x][x][ ] fs.unlinkSync(path)
-// [x][x][x][ ] fs.utimesSync(path, atime, mtime)
-// [x][x][x][ ] fs.writeFileSync(file, data[, options])
-// [x][x][x][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
-// [x][x][x][ ] fs.writeSync(fd, buffer[, options])
-// [x][x][x][ ] fs.writeSync(fd, string[, position[, encoding]])
-// [x][x][x][ ] fs.writevSync(fd, buffers[, position])
+// [x][x][1][ ] fs.readFileSync(path[, options])
+// [x][x][1][ ] fs.readlinkSync(path[, options])
+// [x][x][1][ ] fs.readSync(fd, buffer, offset, length[, position])
+// [x][x][1][ ] fs.readSync(fd, buffer[, options])
+// [x][x][1][ ] fs.readvSync(fd, buffers[, position])
+// [x][x][1][ ] fs.realpathSync(path[, options])
+// [x][x][1][ ] fs.realpathSync.native(path[, options])
+// [x][x][1][ ] fs.renameSync(oldPath, newPath)
+// [x][x][1][ ] fs.rmdirSync(path[, options])
+// [x][x][1][ ] fs.rmSync(path[, options])
+// [x][x][1][ ] fs.statSync(path[, options])
+// [x][x][1][ ] fs.statfsSync(path[, options])
+// [x][x][1][ ] fs.symlinkSync(target, path[, type])
+// [x][x][1][ ] fs.truncateSync(path[, len])
+// [x][x][1][ ] fs.unlinkSync(path)
+// [x][x][1][ ] fs.utimesSync(path, atime, mtime)
+// [x][x][1][ ] fs.writeFileSync(file, data[, options])
+// [x][x][1][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
+// [x][x][1][ ] fs.writeSync(fd, buffer[, options])
+// [x][x][1][ ] fs.writeSync(fd, string[, position[, encoding]])
+// [x][x][1][ ] fs.writevSync(fd, buffers[, position])
