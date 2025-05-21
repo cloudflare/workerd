@@ -276,11 +276,21 @@ export default {
   },
   'readable-streams/bad-underlying-sources.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    expectedFailures: [
+      'Underlying source start: throwing method',
+      'Underlying source: calling error twice should not throw',
+      'Underlying source: calling error after close should not throw',
+    ],
+    skippedTests: [
+      'Underlying source pull: throwing method (second pull)',
+      'read should not error if it dequeues and pull() throws',
+    ],
   },
   'readable-streams/cancel.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    skippedTests: [
+      'ReadableStream cancellation: underlyingSource.cancel() should called, even with pending pull',
+    ],
   },
   'readable-streams/constructor.any.js': {
     comment: 'They want us to validate the args and throw in a different order',
@@ -324,12 +334,52 @@ export default {
     ],
   },
   'readable-streams/from.any.js': {
-    comment: 'Causes a segfault; no trace yet',
-    skipAllTests: true,
+    comment: 'See comments on tests',
+    expectedFailures: [
+      // To be investigated
+      'ReadableStream.from: cancel() rejects when return() is not a method',
+      'ReadableStream.from accepts a string',
+      'ReadableStream.from: cancel() rejects when return() throws synchronously',
+      'ReadableStream.from accepts an array of promises',
+      'ReadableStream.from accepts a sync iterable of promises',
+      'ReadableStream.from accepts an empty iterable',
+      'ReadableStream.from accepts an array of values',
+      'ReadableStream.from accepts an array iterator',
+      'ReadableStream.from accepts a Set',
+      'ReadableStream.from accepts a Set iterator',
+      'ReadableStream.from accepts a sync generator',
+      'ReadableStream.from accepts a sync iterable of values',
+      'ReadableStream.from accepts an async iterable',
+      'ReadableStream.from accepts an async generator',
+      'ReadableStream.from accepts a ReadableStream',
+      'ReadableStream.from accepts a ReadableStream async iterator',
+      'ReadableStream.from ignores a null @@asyncIterator',
+      'ReadableStream.from: return() is not called when iterator completes normally',
+      'ReadableStream.from(array), push() to array while reading',
+      'ReadableStream.from: cancelling the returned stream calls and awaits return()',
+    ],
+    skippedTests: [
+      // A hanging promise was cancelled
+      'ReadableStream.from: cancel() resolves when return() method is missing',
+      'ReadableStream.from: cancel() rejects when return() rejects',
+      'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
+      // Heap use-after-free
+      'ReadableStream.from: reader.cancel() inside return()',
+      'ReadableStream.from: reader.cancel() inside next()',
+    ],
   },
   'readable-streams/garbage-collection.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    comment: 'See comments on individual tests',
+    expectedFailures: [
+      // Failed to execute 'error' on 'ReadableStreamDefaultController': parameter 1 is not of type 'Value'
+      'ReadableStreamController methods should continue working properly when scripts lose their reference to the readable stream',
+    ],
+    skippedTests: [
+      // A hanging promise was cancelled
+      'ReadableStream closed promise should reject even if stream and reader JS references are lost',
+      'Garbage-collecting a ReadableStreamDefaultReader should not unlock its stream',
+      'A ReadableStream and its reader should not be garbage collected while there is a read promise pending',
+    ],
   },
   'readable-streams/general.any.js': {
     comment: 'To be investigated',
