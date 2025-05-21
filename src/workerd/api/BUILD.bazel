@@ -658,7 +658,7 @@ wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
     args = [
         "--experimental",
-        "--no-verbose",
+        # "--no-verbose",
     ],
     data = ["tests/js-rpc-test.js"],
 )
