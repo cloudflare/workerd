@@ -16,6 +16,7 @@
 #include <v8-local-handle.h>
 #include <v8-value.h>
 
+#include <kj/async.h>
 #include <kj/common.h>
 #include <kj/string.h>
 
@@ -40,6 +41,12 @@ constexpr bool isFunctionCallbackInfo = false;
 template <typename T>
 constexpr bool isFunctionCallbackInfo<v8::FunctionCallbackInfo<T>> = true;
 
+template <typename T>
+constexpr bool isKjPromise = false;
+
+template <typename T>
+constexpr bool isKjPromise<kj::Promise<T>> = true;
+
 // These types are passed by fast api as is and do not require wrapping/unwrapping.
 template <typename T>
 concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>() ||
@@ -48,7 +55,8 @@ concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>(
 
 // Helper to determine if a type can be used as a parameter in V8 Fast API
 template <typename T>
-concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>>;
+concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>> &&
+    !isKjPromise<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
 template <typename T>

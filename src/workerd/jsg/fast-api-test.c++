@@ -300,6 +300,7 @@ KJ_TEST("isFastApiCompatible Detection") {
   using PromiseMethod = jsg::Promise<int> (FastMethodContext::*)(int32_t);
   using MaybeVoidMethod = kj::Maybe<void> (FastMethodContext::*)();
   using StaticMethodContainerMethod = void(StaticMethodContainer);
+  using KjPromiseMethod = void (FastMethodContext::*)(kj::Promise<void>);
 
   // Static assertions for compatible method types
   // --------------------------------------------
@@ -358,11 +359,7 @@ KJ_TEST("isFastApiCompatible Detection") {
   static_assert(!isFastApiCompatible<MaybeVoidMethod>,
       "Methods returning Maybe<void> should not be fast-method compatible");
   static_assert(isFastApiCompatible<StaticMethodContainerMethod>, "This should be compatible");
-
-  // jsg::test::Evaluator<FastMethodContext, FastMethodIsolate> e(v8System);
-  // auto& wrapper = FastMethodIsolate_TypeWrapper::from(e.getIsolate().ptr);
-  // Foo foo = wrapper.unwrap<Foo>(
-  //     v8::Local<v8::Context>(), v8::Local<v8::Value>(), TypeErrorContext::arrayElement(1));
+  static_assert(!isFastApiCompatible<KjPromiseMethod>, "Promise is not compatible");
 }
 
 }  // namespace
