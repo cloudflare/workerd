@@ -151,51 +151,127 @@ export default {
   },
 
   'readable-byte-streams/bad-buffers-and-views.any.js': {
-    comment: 'To be investigated',
+    comment: 'See individual comments',
     expectedFailures: [
       "ReadableStream with byte source: respond() throws if the BYOB request's buffer has been detached (in the closed state)",
+      // TODO(conform): The spec expects us to throw here because the supplied view
+      // has a different offset. Instead, we allow it because the view is zero length
+      // and the controller has been closed (we do the close and zero length check)
+      // first.
+      // assert_throws_js(RangeError, () => c.byobRequest.respondWithNewView(view));
       'ReadableStream with byte source: respondWithNewView() throws if the supplied view has a different offset (in the closed state)',
+      // TODO(conform): The spec expects this to be a RangeError
       "ReadableStream with byte source: respondWithNewView() throws if the supplied view's buffer is zero-length (in the closed state)",
+      // TODO(conform): The spec expects this to be a RangeError
       "ReadableStream with byte source: respondWithNewView() throws if the supplied view's buffer has a different length (in the closed state)",
+      // TODO(conform): We currently do not throw here since reading causes the
+      // view here to be zero length, which is allowed when the stream is closed.
+      //assert_throws_js(TypeError, () => c.byobRequest.respondWithNewView(view));
       "ReadableStream with byte source: enqueue() throws if the BYOB request's buffer has been detached (in the closed state)",
     ],
   },
   'readable-byte-streams/construct-byob-request.any.js': {},
   'readable-byte-streams/enqueue-with-detached-buffer.any.js': {},
   'readable-byte-streams/general.any.js': {
-    comment: 'To be investigated',
+    comment: 'See individual comments',
     expectedFailures: [
+      // TODO(conform): The spec expects that errors thrown synchronously in the start
+      // algorithm should cause the ReadableStream constructor to throw. We currently
+      // don't do that but we do error the stream.
+      // assert_throws_js(Error, () => new ReadableStream({ start() { throw new Error(); }, type:'bytes' }),
+      //     'start() can throw an exception with type: bytes');
       'ReadableStream with byte source: start() throws an exception',
+      // TODO(conform): The spec expects pull not to have been called yet, but as an optimization
+      // since start is not provided we treat is synchronously and pull proactively, making this
+      // next check invalid.
+      // assert_equals(pullCount, 0, 'No pull as start() just finished and is not yet reflected to the state of the stream');
       'ReadableStream with byte source: Automatic pull() after start()',
+      // TODO(conform): The spec expects pull not to have been called yet, but as an optimization
+      // since start is not provided we treat is synchronously and pull proactively, making this
+      // next check invalid.
+      //assert_equals(pullCount, 0, 'No pull as start() just finished and is not yet reflected to the state of the stream');
       'ReadableStream with byte source: Automatic pull() after start() and read()',
       'ReadableStream with byte source: autoAllocateChunkSize',
       'ReadableStream with byte source: Automatic pull() after start() and read(view)',
       'ReadableStream with byte source: Respond to pull() by enqueue() asynchronously',
       'ReadableStream with byte source: Respond to multiple pull() by separate enqueue()',
       'ReadableStream with byte source: read() twice, then enqueue() twice',
+      // TODO(conform): The spec would not expect pull to be called because of the close,
+      // but because our implementation calls pull immediately on the first read, we
+      // differ slightly here.
+      // assert_unreached("pull() should not have been called");
+      // TODO(conform): The spec would allow the byobRequest to still be used here, but
+      // our implementation throws when accessed after close.
+      // controller.byobRequest.respond(0);
       'ReadableStream with byte source: Multiple read(view), close() and respond()',
       'ReadableStream constructor should not accept a strategy with a size defined if type is "bytes"',
       'ReadableStream with byte source: enqueue(), getReader(), then read()',
+      // TODO(conform): This is a case where our implementation intentionally
+      // diverges from the spec due to the tee backpressure implementation.
+      // Specifically, the input view is a Uint16Array with one element --
+      // meaning it expects us to provide 2 bytes. The enqueue() only gives
+      // it one byte. Because of how we handle these internally, the read will
+      // not be fulfilled until another byte is provided, but the byobRequest
+      // still is invalidated. In the standard, the byobRequest would still
+      // be valid here.
+      //
+      // Generally speaking, in our implementation, using enqueue() and byobRequest
+      // together is not something that should be done.
       'ReadableStream with byte source: cancel() with partially filled pending pull() request',
       "ReadableStream with byte source: Push source that doesn't understand pull signal",
       'ReadableStream with byte source: enqueue() with Uint16Array, getReader(), then read()',
+      // TODO(conform): Our implementation ends up immediately calling pull
+      // when the read() is called, before the cancel() is able to run. The
+      // spec expects the cancel to happen first.
+      //assert_unreached("pull should not have been called");
+      // TODO(conform): The spec expects the result.value here to be undefined since the read
+      // is canceled. Our impl returns an empty ArrayBuffer...
+      //assert_equals(result.value, undefined, 'result.value');
       'ReadableStream with byte source: getReader(), read(view), then cancel()',
       'ReadableStream with byte source: read(view) with Uint32Array, then fill it by multiple enqueue() calls',
       'ReadableStream with byte source: enqueue(), read(view) partially, then read()',
       'ReadableStream with byte source: read(view), then respond() and close() in pull()',
+      // TODO(conform): The spec expects the read to fail here. Instead, we end up cancelling
+      // it with a zero-length result, with the subsequent read marked as done.
       'ReadableStream with byte source: read(view) with Uint16Array on close()-d stream with 1 byte enqueue()-d must fail',
+      // TODO(conform): Per the spec, desiredSize should be zero here
+      // but since we are handling the backpressure a bit differently
+      // it won't be zero until the actual read is resolved.
+      //desiredSize = controller.desiredSize;
       'ReadableStream with byte source: enqueue() 3 byte, getReader(), then read(view) with 2-element Uint16Array',
       'ReadableStream with byte source: Throwing in pull in response to read() must be ignored if the stream is errored in it',
       'ReadableStream with byte source: Throwing in pull function must error the stream',
+      // TODO(conform): We handle things a bit differently here from the spec. The spec
+      // would have the enqueue() complete replace the byobRequest.view while we use it
+      // and fill it with the data from the enqueue. This means the following check is
+      // not valid in our implementation.
+      // assert_array_equals([...new Uint8Array(view1.buffer)], [1, 2, 3], 'first result.value.buffer');
       'ReadableStream with byte source: enqueue() discards auto-allocated BYOB request',
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: releaseLock() with pending read(view), read(view) on second reader, respond()',
+
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: releaseLock() with pending read(view), read(view) on second reader with 1 element Uint16Array, respond(1)',
+
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: releaseLock() with pending read(view), read(view) on second reader with 2 element Uint8Array, respond(3)',
+
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: releaseLock() with pending read(view), read(view) on second reader, respondWithNewView()',
+
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: autoAllocateChunkSize, releaseLock() with pending read(), read() on second reader, respond()',
+
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: autoAllocateChunkSize, releaseLock() with pending read(), read() on second reader, enqueue()',
+
+      // TODO(conform): Calling releaseLock() should cancel the pending reads. It currently does not.
       'ReadableStream with byte source: autoAllocateChunkSize, releaseLock() with pending read(), read(view) on second reader, respond()',
+      // TODO(conform): The spec allows a byob read to be fulfilled incrementally over multiple
+      // respond calls, we currently do not.
       'ReadableStream with byte source: read(view) with 1 element Uint16Array, respond(1), releaseLock(), read(view) on second reader with 1 element Uint16Array, respond(1)',
+      // TODO(conform): The spec allows a byob read to be fulfilled incrementally over multiple
+      // respond calls, we currently do not.
       'ReadableStream with byte source: read(view) with 1 element Uint16Array, respond(1), releaseLock(), read() on second reader, enqueue()',
     ],
   },
@@ -265,30 +341,54 @@ export default {
     ],
   },
   'readable-streams/bad-strategies.any.js': {
-    comment: 'The value cannot be converted because it is not an integer.',
+    comment: 'See individual comments',
     expectedFailures: [
+      // TODO(conform): While we do error the stream, the spec expects us to throw the error
+      // thrown in the size() function here. We currently do not.
       'Readable stream: strategy.size errors the stream and then throws',
+      // TODO(conform): While we do error the stream, the spec expects us to throw the error
+      // thrown in the size() function here. We currently do not.
       'Readable stream: strategy.size errors the stream and then returns Infinity',
+      // TODO(conform): The spec expects this to be a TypeError, we currently throw
+      // a RangeError instead
       'Readable stream: invalid strategy.highWaterMark',
+      // TODO(conform): We currently do not error when the size function returns the wrong
+      // value. The spec expects us to. We do properly error the strea
       'Readable stream: invalid strategy.size return value',
       'Readable stream: invalid strategy.size return value when pulling',
     ],
   },
   'readable-streams/bad-underlying-sources.any.js': {
-    comment: 'A hanging Promise was canceled.',
+    comment: 'See individual comments',
     expectedFailures: [
+      // TODO(conform): If the start function throws synchronously, the constructor
+      // should throw, per the spec. Currently we only error the stream and do not
+      // throw synchronously here.
       'Underlying source start: throwing method',
+      // TODO(conform): The spec says that a second call to error should be a non-op.
+      // We currently treat it an an error.
       'Underlying source: calling error twice should not throw',
+      // TODO(conform): The spec says that calling error() after close() should be a non-op.
+      // We currently treat it as an error.
       'Underlying source: calling error after close should not throw',
     ],
     skippedTests: [
+      // TODO(conform): The spec expects pull to be called twice when the stream is created and
+      // a single read happens. We currently only call it once in this case, so we have to read
+      // again to trigger the error case.
       'Underlying source pull: throwing method (second pull)',
+      // TODO(conform): The spec expects pull() to be called twice when the stream is
+      // constructed and the first read occurs, we currently only call it once, so to
+      // trigger the error, we perform a read again.
       'read should not error if it dequeues and pull() throws',
     ],
   },
   'readable-streams/cancel.any.js': {
-    comment: 'A hanging Promise was canceled.',
+    comment: 'See detailed explanation in comments',
     skippedTests: [
+      // underlyingSource is converted in prose in the method body, whereas queuingStrategy is done at the IDL layer.
+      // So the queuingStrategy exception should be encountered first.
+      // TODO(conform): We currently handle these differently and end up throwing error1 instead.
       'ReadableStream cancellation: underlyingSource.cancel() should called, even with pending pull',
     ],
   },
@@ -314,13 +414,27 @@ export default {
     ],
   },
   'readable-streams/default-reader.any.js': {
-    comment: 'To be investigated',
+    comment: 'See individual comments',
     expectedFailures: [
+      // TODO(conform): When releaseLock() is called, the spec expects the readers original
+      // closed promise to be replaced. The original one should be resolved, but the new
+      // one should be rejected. We currently do not replace the closed promise in this case.
       'closed is replaced when stream closes and reader releases its lock',
+      // TODO(conform): When releaseLock() is called, the spec expects the readers original
+      // closed promise to be replaced. In this case, the original one should reject with
+      // theError, while the second should reject indicating that it was acquired after
+      // releasing the lock. We currently do not replace the closed promise in this case.
+      // assert_not_equals(promise1, promise2, '.closed should be replaced');
       'closed is replaced when stream errors and reader releases its lock',
+      // TODO(conform): The spec allows error to be called with no argument at all, treating
+      // it as undefined, currently we require that undefined is passed explicitly.
       'ReadableStreamDefaultReader closed promise should be rejected with undefined if that is the error',
+      // TODO(conform): The spec expects this to be a TypeError, not a RangeError
       'getReader() should call ToString() on mode',
+      // In the actual WPT, the result is expected to explicitly contain `value: undefined`,
+      // but we omit that.
       'Reading twice on a stream that gets closed',
+      // TODO: Investigate why this test is failing
       'Reading twice on a closed stream',
     ],
   },
@@ -382,15 +496,29 @@ export default {
     ],
   },
   'readable-streams/general.any.js': {
-    comment: 'To be investigated',
+    comment: 'See individual comments',
     expectedFailures: [
+      // TODO(conform): We currently allow `new ReadableStream(null)`...
       "ReadableStream can't be constructed with garbage",
+      // TODO(conform): We currently allow the empty type value
       "ReadableStream can't be constructed with an invalid type",
+      // TODO(conform): The spec expects a TypeError here, not a RangeError
       'default ReadableStream getReader() should only accept mode:undefined',
+      // TODO(conform): The spec expects us to call pull an extra time here despite. [Despite what? -NP]
       'ReadableStream: should pull after start, and after every read',
+      // TODO(conform): The standard generally anticipates that the closed
+      // promise rejection will happen before the read promise rejection.
+      // We don't follow that ordering currently.
       'ReadableStream: if pull rejects, it should error the stream',
+      // TODO(conform): The read above is fulfilled by the c.enqueue() in the start algorithm.
+      // The spec expects us to call pull() again to prime the queue again for the next read
+      // but we currently do not. We only pull when we get another read
       'ReadableStream: should only call pull once on a non-empty stream read from after start fulfills',
+      // TODO(conform): The spec expects us to call pull twice even tho we've only had a
+      // single read. We currently wait to pull again only when another read occurs.
       'ReadableStream: should call pull in reaction to read()ing the last chunk, if not draining',
+      // TODO(conform): The spec expects us to call pull twice even tho we've only had a single
+      // read. We currently only call it when we have an actual read to fulfill.
       "ReadableStream: should not call pull until the previous pull call's promise fulfills",
     ],
   },
@@ -426,16 +554,31 @@ export default {
     skipAllTests: true,
   },
   'readable-streams/reentrant-strategies.any.js': {
-    comment: 'To be investigated',
+    comment: 'See individual comments',
     expectedFailures: [
       'enqueue() inside size() should work',
+      // TODO(conform): In this edge case, the spec expects the chunk to still be successfully
+      // enqueued even tho the stream gets closed. We currently throw in this case. Whether or
+      // not that ultimately matters is something up for debate since in either case the chunk
+      // cannot be read.
       'close() inside size() should not crash',
+      // TODO(conform): Like the case above, the spec expects us to still successfully enqueue
+      // the chunk here. Unlike the previous case, we should still be able to read this chunk
+      // so this is a case we should definitely support.
       'close request inside size() should work',
+      // TODO(conform): The spec expects us to still enqueue the value but the read() should still
+      // reject.
       'error() inside size() should work',
+      // TODO: Investigate why this was passing in the internal version of the test
       'desiredSize inside size() should work',
+      // TODO(conform): The spec expects the enqueue() to still go through without an error
+      // here but we currently throw an error here.
       'cancel() inside size() should work',
+      // TODO(conform): We currently fail this test. Need to investigate why
       'read() inside of size() should behave as expected',
+      // TODO: Investigate why this was passing in the internal version of the test
       'getReader() inside size() should work',
+      // TODO: Investigate why this was passing in the internal version of the test
       'tee() inside size() should work',
     ],
   },
