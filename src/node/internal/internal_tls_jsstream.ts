@@ -25,7 +25,7 @@
 
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 
-import { strictEqual, notStrictEqual } from 'node-internal:internal_assert';
+import { notStrictEqual } from 'node-internal:internal_assert';
 import { Socket } from 'node-internal:internal_net';
 import { ERR_STREAM_WRAP } from 'node-internal:internal_errors';
 import { Duplex, toBYOBWeb } from 'node-internal:streams_duplex';
@@ -194,94 +194,9 @@ export class JSStreamSocket extends Socket {
 
     queueMicrotask(() => {
       // Ensure that write is dispatched asynchronously.
-      this.stream.end(() => {
-        this.finishShutdown(handle, null);
-      });
+      this.stream.end();
     });
     return 0;
-  }
-
-  // handle === this._handle except when called from doClose().
-  public finishShutdown(
-    _handle: JSStreamSocket['_handle'],
-    _errCode: string | null
-  ): void {
-    // The shutdown request might already have been cancelled.
-    if (this[kCurrentShutdownRequest] === null) return;
-    // const req = this[kCurrentShutdownRequest];
-    this[kCurrentShutdownRequest] = null;
-    // handle.finishShutdown(req, errCode);
-  }
-
-  public doWrite(req: unknown, bufs: Buffer[]): number {
-    strictEqual(this[kCurrentWriteRequest], null);
-    strictEqual(this[kCurrentShutdownRequest], null);
-
-    if (this[kPendingClose]) {
-      // If doClose is pending, the stream & this._handle are gone. We can't do
-      // anything. doClose will call finishWrite with ECANCELED for us shortly.
-      this[kCurrentWriteRequest] = req; // Store req, for doClose to cancel
-      return 0;
-    } else if (this._handle === null) {
-      // If this._handle is already null, there is nothing left to do with a
-      // pending write request, so we discard it.
-      return 0;
-    }
-
-    const handle = this._handle;
-
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-
-    let pending = bufs.length;
-
-    this.stream.cork();
-    // Use `var` over `let` for performance optimization.
-    // eslint-disable-next-line no-var
-    for (var i = 0; i < bufs.length; ++i) this.stream.write(bufs[i], done);
-    this.stream.uncork();
-
-    // Only set the request here, because the `write()` calls could throw.
-    this[kCurrentWriteRequest] = req;
-
-    function done(err: Error | null | undefined): void {
-      if (!err && --pending !== 0) return;
-
-      // Ensure that this is called once in case of error
-      pending = 0;
-
-      let errCode: string | null;
-      if (err) {
-        // @ts-expect-error TS2339 NodeError vs. Error difference.
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        errCode = err.code;
-      }
-
-      // Ensure that write was dispatched
-      queueMicrotask(() => {
-        self.finishWrite(handle, errCode);
-      });
-    }
-
-    return 0;
-  }
-
-  // handle === this._handle except when called from doClose().
-  public finishWrite(
-    _handle: JSStreamSocket['_handle'],
-    _errCode: string | null
-  ): void {
-    // The write request might already have been cancelled.
-    if (this[kCurrentWriteRequest] === null) return;
-    // const req = this[kCurrentWriteRequest];
-    this[kCurrentWriteRequest] = null;
-
-    // handle.finishWrite(req, errCode);
-    if (this[kPendingShutdownRequest]) {
-      const req = this[kPendingShutdownRequest];
-      this[kPendingShutdownRequest] = null;
-      this.doShutdown(req);
-    }
   }
 
   public doClose(): void {
@@ -299,9 +214,6 @@ export class JSStreamSocket extends Socket {
 
     queueMicrotask(() => {
       notStrictEqual(handle, null);
-      this.finishWrite(handle, 'UV_ECANCELED');
-      this.finishShutdown(handle, 'UV_ECANCELED');
-
       this[kPendingClose] = false;
     });
   }

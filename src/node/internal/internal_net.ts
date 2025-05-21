@@ -1203,7 +1203,7 @@ function initializeConnection(
         reader: handle.readable.getReader({ mode: 'byob' }),
         bytesRead: 0,
         bytesWritten: 0,
-        reading: true,
+        reading: false,
         options: {
           host: socket._host,
           port,
