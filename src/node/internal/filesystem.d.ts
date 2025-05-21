@@ -81,3 +81,14 @@ export function rm(
   path: URL,
   options: { recursive: boolean; force: boolean; dironly: boolean }
 ): void;
+
+export interface DirEntryHandle {
+  name: string;
+  parentPath: string;
+  type: number;
+}
+
+export function readdir(
+  path: URL,
+  options: { recursive: boolean }
+): DirEntryHandle[];

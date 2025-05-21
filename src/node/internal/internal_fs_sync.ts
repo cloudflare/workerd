@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars,@typescript-eslint/no-unnecessary-condition */
 
 import {
-  getOptions,
   kMaxUserId,
   stringToFlags,
   getValidatedFd,
@@ -38,7 +37,7 @@ import {
   COPYFILE_EXCL,
   COPYFILE_FICLONE_FORCE,
 } from 'node-internal:internal_fs_constants';
-import { type Dir, type Dirent } from 'node-internal:internal_fs';
+import { type Dir, Dirent } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 
 import { Buffer } from 'node-internal:internal_buffer';
@@ -481,13 +480,27 @@ export function readdirSync(
     recursive: false,
   }
 ): ReadDirResult {
-  options = getOptions(options);
-  path = normalizePath(path);
-  if (options.recursive != null) {
-    validateBoolean(options.recursive, 'options.recursive');
+  validateObject(options, 'options');
+  const {
+    encoding = 'utf8',
+    withFileTypes = false,
+    recursive = false,
+  } = options;
+  validateEncoding(encoding, 'options.encoding');
+  validateBoolean(withFileTypes, 'options.withFileTypes');
+  validateBoolean(recursive, 'options.recursive');
+
+  const handles = cffs.readdir(normalizePath(path), { recursive });
+
+  if (withFileTypes) {
+    return handles.map((handle) => {
+      return new Dirent(handle.name, handle.type, handle.parentPath);
+    });
   }
 
-  throw new Error('Not implemented');
+  return handles.map((handle) => {
+    return handle.name;
+  });
 }
 
 export type ReadFileSyncOptions = {
@@ -1017,7 +1030,7 @@ export function writevSync(
 // [x][x][1][ ] fs.mkdtempSync(prefix[, options])
 // [x][ ][ ][ ] fs.opendirSync(path[, options])
 // [x][x][1][ ] fs.openSync(path[, flags[, mode]])
-// [x][ ][ ][ ] fs.readdirSync(path[, options])
+// [x][x][1][ ] fs.readdirSync(path[, options])
 // [x][x][1][ ] fs.readFileSync(path[, options])
 // [x][x][1][ ] fs.readlinkSync(path[, options])
 // [x][x][1][ ] fs.readSync(fd, buffer, offset, length[, position])

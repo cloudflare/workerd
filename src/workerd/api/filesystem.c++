@@ -735,6 +735,82 @@ void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
   dir->remove(js, name, {.recursive = options.recursive});
 }
 
+namespace {
+static constexpr int UV_DIRENT_FILE = 1;
+static constexpr int UV_DIRENT_DIR = 2;
+static constexpr int UV_DIRENT_LINK = 3;
+static constexpr int UV_DIRENT_CHAR = 6;
+void readdirImpl(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    kj::Rc<workerd::Directory>& dir,
+    const kj::Path& path,
+    const FileSystemModule::ReadDirOptions& options,
+    kj::Vector<FileSystemModule::DirEntHandle>& entries) {
+  for (auto& entry: *dir.get()) {
+    auto name = options.recursive ? path.append(entry.key).toString(false) : kj::str(entry.key);
+    KJ_SWITCH_ONEOF(entry.value) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        auto stat = file->stat(js);
+        entries.add(FileSystemModule::DirEntHandle{
+          .name = kj::mv(name),
+          .parentPath = path.toString(true),
+          .type = stat.device ? UV_DIRENT_CHAR : UV_DIRENT_FILE,
+        });
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        entries.add(FileSystemModule::DirEntHandle{
+          .name = kj::mv(name),
+          .parentPath = path.toString(true),
+          .type = UV_DIRENT_DIR,
+        });
+
+        if (options.recursive) {
+          readdirImpl(js, vfs, dir, path.append(entry.key), options, entries);
+        }
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        entries.add(FileSystemModule::DirEntHandle{
+          .name = kj::mv(name),
+          .parentPath = path.toString(true),
+          .type = UV_DIRENT_LINK,
+        });
+
+        if (options.recursive) {
+          workerd::SymbolicLinkRecursionGuardScope guard;
+          guard.checkSeen(link.get());
+          KJ_IF_SOME(target, link->resolve(js)) {
+            KJ_SWITCH_ONEOF(target) {
+              KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+                // Do nothing
+              }
+              KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+                readdirImpl(js, vfs, dir, path.append(entry.key), options, entries);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+}  // namespace
+
+kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
+    jsg::Lock& js, FilePath path, ReadDirOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedPath(kj::mv(path));
+
+  auto node = JSG_REQUIRE_NONNULL(
+      vfs.resolve(js, normalizedPath, {.followLinks = false}), Error, "file not found"_kj);
+  auto& dir =
+      JSG_REQUIRE_NONNULL(node.tryGet<kj::Rc<workerd::Directory>>(), Error, "not a directory"_kj);
+
+  kj::Vector<DirEntHandle> entries;
+  readdirImpl(js, vfs, dir, normalizedPath, options, entries);
+  return entries.releaseAsArray();
+}
+
 // =======================================================================================
 // Implementation of the Web File System API
 

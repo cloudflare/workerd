@@ -47,6 +47,7 @@ import {
   mkdtempSync,
   rmSync,
   rmdirSync,
+  readdirSync,
   access,
   stat,
   chmod,
@@ -1545,5 +1546,61 @@ export const rmTest = {
         code: /ERR_INVALID_ARG_TYPE/,
       }
     );
+  },
+};
+
+export const readdirTest = {
+  test() {
+    deepStrictEqual(readdirSync('/'), ['bundle', 'tmp', 'dev']);
+
+    {
+      const ents = readdirSync('/', { withFileTypes: true });
+      strictEqual(ents.length, 3);
+
+      strictEqual(ents[0].name, 'bundle');
+      strictEqual(ents[0].isDirectory(), true);
+      strictEqual(ents[0].isFile(), false);
+      strictEqual(ents[0].isBlockDevice(), false);
+      strictEqual(ents[0].isCharacterDevice(), false);
+      strictEqual(ents[0].isFIFO(), false);
+      strictEqual(ents[0].isSocket(), false);
+      strictEqual(ents[0].isSymbolicLink(), false);
+      strictEqual(ents[0].parentPath, '/');
+    }
+
+    {
+      const ents = readdirSync('/', { withFileTypes: true, recursive: true });
+      strictEqual(ents.length, 8);
+
+      strictEqual(ents[0].name, 'bundle');
+      strictEqual(ents[0].isDirectory(), true);
+      strictEqual(ents[0].isFile(), false);
+      strictEqual(ents[0].isBlockDevice(), false);
+      strictEqual(ents[0].isCharacterDevice(), false);
+      strictEqual(ents[0].isFIFO(), false);
+      strictEqual(ents[0].isSocket(), false);
+      strictEqual(ents[0].isSymbolicLink(), false);
+      strictEqual(ents[0].parentPath, '/');
+
+      strictEqual(ents[1].name, 'bundle/worker');
+      strictEqual(ents[1].isDirectory(), false);
+      strictEqual(ents[1].isFile(), true);
+      strictEqual(ents[1].isBlockDevice(), false);
+      strictEqual(ents[1].isCharacterDevice(), false);
+      strictEqual(ents[1].isFIFO(), false);
+      strictEqual(ents[1].isSocket(), false);
+      strictEqual(ents[1].isSymbolicLink(), false);
+      strictEqual(ents[1].parentPath, '/bundle');
+
+      strictEqual(ents[4].name, 'dev/null');
+      strictEqual(ents[4].isDirectory(), false);
+      strictEqual(ents[4].isFile(), false);
+      strictEqual(ents[4].isBlockDevice(), false);
+      strictEqual(ents[4].isCharacterDevice(), true);
+      strictEqual(ents[4].isFIFO(), false);
+      strictEqual(ents[4].isSocket(), false);
+      strictEqual(ents[4].isSymbolicLink(), false);
+      strictEqual(ents[4].parentPath, '/dev');
+    }
   },
 };
