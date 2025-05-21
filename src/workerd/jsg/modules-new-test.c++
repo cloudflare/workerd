@@ -134,7 +134,7 @@ KJ_TEST("An empty registry") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "file:///foo"_url,
     .referrer = BASE,
   };
@@ -159,7 +159,7 @@ KJ_TEST("A empty fallback bundle") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "file:///foo"_url,
     .referrer = BASE,
   };
@@ -179,7 +179,7 @@ KJ_TEST("An empty user bundle") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "file:///foo"_url,
     .referrer = BASE,
   };
@@ -198,7 +198,7 @@ KJ_TEST("An empty built-in bundle") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "file:///foo"_url,
     .referrer = BASE,
   };
@@ -229,7 +229,7 @@ KJ_TEST("A registry with empty bundles") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "file:///foo"_url,
     .referrer = BASE,
   };
@@ -244,8 +244,8 @@ KJ_TEST("A registry with empty bundles") {
 KJ_TEST("A user bundle with a single ESM module") {
   ModuleBundle::BundleBuilder builder(BASE);
 
-  kj::String source = kj::str("export const foo = 123;");
-  builder.addEsmModule("foo", source.releaseArray(), Module::Flags::MAIN);
+  auto source = kj::str("export const foo = 123;");
+  builder.addEsmModule("foo", source, Module::Flags::MAIN);
 
   auto bundle = builder.finish();
 
@@ -253,7 +253,7 @@ KJ_TEST("A user bundle with a single ESM module") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = specifier,
     .referrer = BASE,
   };
@@ -271,8 +271,8 @@ KJ_TEST("A user bundle with a single ESM module") {
 KJ_TEST("A registry with a parent") {
   ModuleBundle::BundleBuilder builder(BASE);
 
-  kj::String source = kj::str("export const foo = 123;");
-  builder.addEsmModule("foo", source.releaseArray(), Module::Flags::MAIN);
+  auto source = kj::str("export const foo = 123;");
+  builder.addEsmModule("foo", source, Module::Flags::MAIN);
 
   const auto specifier = "file:///foo"_url;
 
@@ -282,7 +282,7 @@ KJ_TEST("A registry with a parent") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = specifier,
     .referrer = BASE,
   };
@@ -300,8 +300,8 @@ KJ_TEST("A registry with a parent") {
 KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
   ModuleBundle::BundleBuilder builder(BASE);
 
-  kj::String source = kj::str("export const foo = 123;");
-  builder.addEsmModule("foo", source.releaseArray(), Module::Flags::MAIN);
+  auto source = kj::str("export const foo = 123;");
+  builder.addEsmModule("foo", source, Module::Flags::MAIN);
   builder.addSyntheticModule(
       "foo/bar", [](Lock&, const Url&, const Module::ModuleNamespace&, const CompilationObserver&) {
     return true;
@@ -315,7 +315,7 @@ KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = foo,
       .referrer = BASE,
     };
@@ -331,7 +331,7 @@ KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = bar,
       .referrer = BASE,
     };
@@ -375,7 +375,7 @@ KJ_TEST("A built-in bundle with two modules") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = foo,
       .referrer = foo,
     };
@@ -391,7 +391,7 @@ KJ_TEST("A built-in bundle with two modules") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = bar,
       .referrer = bar,
     };
@@ -431,7 +431,7 @@ KJ_TEST("Built-in and Built-in only bundles") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = foo,
       .referrer = foo,
     };
@@ -447,7 +447,7 @@ KJ_TEST("Built-in and Built-in only bundles") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = bar,
       .referrer = bar,
     };
@@ -459,7 +459,7 @@ KJ_TEST("Built-in and Built-in only bundles") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUILTIN,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = bar,
       .referrer = bar,
     };
@@ -475,7 +475,7 @@ KJ_TEST("Built-in and Built-in only bundles") {
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUILTIN_ONLY,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = bar,
       .referrer = bar,
     };
@@ -525,7 +525,7 @@ KJ_TEST("Fallback bundle that returns something") {
   {
     ResolveContext context{
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = specifier,
       .referrer = BASE,
     };
@@ -540,7 +540,7 @@ KJ_TEST("Fallback bundle that returns something") {
   {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = specifier,
       .referrer = BASE,
     };
@@ -551,7 +551,7 @@ KJ_TEST("Fallback bundle that returns something") {
   {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN_ONLY,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = specifier,
       .referrer = BASE,
     };
@@ -628,8 +628,8 @@ KJ_TEST("Compound Registry") {
   registryBuilder.add(builtinOnlyBuilder.finish());
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  kj::String quxSource = kj::str("export const foo = 123;");
-  bundleBuilder.addEsmModule("qux", quxSource.releaseArray(), Module::Flags::MAIN);
+  auto quxSource = kj::str("export const foo = 123;");
+  bundleBuilder.addEsmModule("qux", quxSource, Module::Flags::MAIN);
   registryBuilder.add(bundleBuilder.finish());
 
   auto registry = registryBuilder.finish();
@@ -638,7 +638,7 @@ KJ_TEST("Compound Registry") {
                                const Url& specifier) {
     ResolveContext context{
       .type = type,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = specifier,
       .referrer = BASE,
     };
@@ -729,15 +729,15 @@ KJ_TEST("Bundle shadows built-in") {
   registryBuilder.add(builtinBuilder.finish());
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  kj::String bundleSource = kj::str("export const foo = 456;");
-  bundleBuilder.addEsmModule("foo:bar", bundleSource.releaseArray(), Module::Flags::MAIN);
+  auto bundleSource = kj::str("export const foo = 456;");
+  bundleBuilder.addEsmModule("foo:bar", bundleSource, Module::Flags::MAIN);
   registryBuilder.add(bundleBuilder.finish());
 
   auto registry = registryBuilder.finish();
 
   ResolveContext context{
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = foo,
     .referrer = BASE,
   };
@@ -758,13 +758,12 @@ KJ_TEST("Attaching a module registry works") {
     ModuleRegistry::Builder registryBuilder(resolveObserver, BASE);
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
-    kj::String source = kj::str("export default 123; export const m = 'abc';");
+    auto source = kj::str("export default 123; export const m = 'abc';");
     // Done this way to avoid including the nullptr at the end...
-    bundleBuilder.addEsmModule("main", source.first(source.size()).attach(kj::mv(source)));
+    bundleBuilder.addEsmModule("main", source);
 
-    kj::String mainSource = kj::str("import foo from 'main'; export default foo;");
-    bundleBuilder.addEsmModule("worker1",
-        mainSource.first(mainSource.size()).attach(kj::mv(mainSource)), Module::Flags::MAIN);
+    auto mainSource = kj::str("import foo from 'main'; export default foo;");
+    bundleBuilder.addEsmModule("worker1", mainSource.first(mainSource.size()), Module::Flags::MAIN);
 
     registryBuilder.add(bundleBuilder.finish());
 
@@ -774,7 +773,7 @@ KJ_TEST("Attaching a module registry works") {
 
     ResolveContext resolveContext{
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = specifier,
       .referrer = BASE,
     };
@@ -813,14 +812,13 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
     ModuleRegistry::Builder registryBuilder(resolveObserver, BASE);
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
-    bundleBuilder.addSyntheticModule(
-        "abc", Module::newTextModuleHandler(kj::str("hello").releaseArray()));
-    bundleBuilder.addSyntheticModule(
-        "xyz", Module::newDataModuleHandler(kj::heapArray<kj::byte>({1, 2, 3})));
+    auto abcSource = kj::str("hello");
+    auto xyzData = kj::heapArray<kj::byte>({1, 2, 3});
+    bundleBuilder.addSyntheticModule("abc", Module::newTextModuleHandler(abcSource));
+    bundleBuilder.addSyntheticModule("xyz", Module::newDataModuleHandler(xyzData));
 
     auto json = kj::str("{\"foo\":123}");
-    bundleBuilder.addSyntheticModule(
-        "json", Module::newJsonModuleHandler(json.first(json.size()).attach(kj::mv(json))));
+    bundleBuilder.addSyntheticModule("json", Module::newJsonModuleHandler(json.first(json.size())));
 
     auto wasm = kj::heapArray<kj::byte>({
       0x00,
@@ -865,16 +863,15 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
       0x6a,
       0x0b,
     });
-    bundleBuilder.addSyntheticModule("wasm", Module::newWasmModuleHandler(kj::mv(wasm)));
+    bundleBuilder.addSyntheticModule("wasm", Module::newWasmModuleHandler(wasm));
 
-    kj::String mainSource2 = kj::str("export { default as abc } from 'abc';"
-                                     "export { default as xyz } from 'xyz';"
-                                     "export { default as json } from 'json';"
-                                     "export { default as wasm } from 'wasm';"
-                                     "export { default as wasm2 } from 'wasm?a';");
+    auto mainSource2 = kj::str("export { default as abc } from 'abc';"
+                               "export { default as xyz } from 'xyz';"
+                               "export { default as json } from 'json';"
+                               "export { default as wasm } from 'wasm';"
+                               "export { default as wasm2 } from 'wasm?a';");
 
-    bundleBuilder.addEsmModule("worker",
-        mainSource2.first(mainSource2.size()).attach(kj::mv(mainSource2)), Module::Flags::MAIN);
+    bundleBuilder.addEsmModule("worker", mainSource2, Module::Flags::MAIN);
 
     registryBuilder.add(bundleBuilder.finish());
 
@@ -884,7 +881,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
 
     ResolveContext resolveContext{
       .type = ResolveContext::Type::BUNDLE,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = specifier,
       .referrer = BASE,
     };
@@ -954,8 +951,7 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
     });
 
     auto source = kj::str("import 'abc'");
-    bundleBuilder.addEsmModule(
-        "main", source.first(source.size()).attach(kj::mv(source)), Module::Flags::MAIN);
+    bundleBuilder.addEsmModule("main", source, Module::Flags::MAIN);
 
     auto registry =
         ModuleRegistry::Builder(resolveObserver, BASE).add(bundleBuilder.finish()).finish();
@@ -978,10 +974,9 @@ KJ_TEST("import.meta works as expected") {
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto foo = kj::str("export default import.meta");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
     auto bar = kj::str("export default import.meta");
-    bundleBuilder.addEsmModule(
-        "foo/././././bar", bar.first(bar.size()).attach(kj::mv(bar)), Module::Flags::MAIN);
+    bundleBuilder.addEsmModule("foo/././././bar", bar, Module::Flags::MAIN);
     auto registry =
         ModuleRegistry::Builder(ResolveObserver, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1048,7 +1043,7 @@ KJ_TEST("import specifiers with query params and hash fragments work") {
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto foo = kj::str("export default import.meta");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
 
     auto registry =
         ModuleRegistry::Builder(ResolveObserver, BASE).add(bundleBuilder.finish()).finish();
@@ -1095,9 +1090,10 @@ KJ_TEST("Previously resolved modules not found with incompatible resolve context
     auto source = "export default 123;"_kjc;
     builtinBuilder.addEsm(foo, source.first(source.size()).attach(kj::mv(source)));
 
+    auto barData = kj::heapArray<kj::byte>({1, 2, 3});
+
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
-    bundleBuilder.addSyntheticModule(
-        "bar", Module::newDataModuleHandler(kj::heapArray<kj::byte>({1, 2, 3})));
+    bundleBuilder.addSyntheticModule("bar", Module::newDataModuleHandler(barData));
 
     auto registry = ModuleRegistry::Builder(observer, BASE)
                         .add(builtinBuilder.finish())
@@ -1147,10 +1143,10 @@ KJ_TEST("Awaiting top-level dynamic import in synchronous require works as expec
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto foo = kj::str("export default (await import('bar')).default;");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
 
     auto bar = kj::str("export default 123;");
-    bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
+    bundleBuilder.addEsmModule("bar", bar);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1169,7 +1165,7 @@ KJ_TEST("Awaiting a never resolved promise in synchronous require fails as expec
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto foo = kj::str("const p = new Promise(() => {}); await p;");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1198,7 +1194,7 @@ KJ_TEST("Throwing an exception inside a ESM module works as expected") {
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto foo = kj::str("throw new Error('foo');");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1224,7 +1220,7 @@ KJ_TEST("Syntax error in ESM module is properly reported") {
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
 
     auto foo = kj::str("export default 123; syntax error");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1246,9 +1242,11 @@ KJ_TEST("Throwing an exception inside a CJS-style eval module works as expected"
     CompilationObserver compilationObserver;
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
+
+    kj::String source = kj::str("exports.foo = 123; throw new Error('bar');");
+
     bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("exports.foo = 123; throw new Error('bar');"), kj::str("foo")));
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source, "foo"_kj));
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1273,12 +1271,10 @@ KJ_TEST("Invalid JSON syntax module throws exception as expected") {
 
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     auto json = kj::str("not valid json");
-    bundleBuilder.addSyntheticModule(
-        "foo", Module::newJsonModuleHandler(json.first(json.size()).attach(kj::mv(json))));
+    bundleBuilder.addSyntheticModule("foo", Module::newJsonModuleHandler(json.first(json.size())));
 
     auto esm = kj::str("import foo from 'foo'");
-    bundleBuilder.addEsmModule(
-        "bar", esm.first(esm.size()).attach(kj::mv(esm)), Module::Flags::MAIN);
+    bundleBuilder.addEsmModule("bar", esm, Module::Flags::MAIN);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1323,12 +1319,13 @@ KJ_TEST("Recursive import works or fails as expected") {
 
     // A recursive import with an ESM works just fine...
     auto foo = kj::str("import foo from 'foo'; export default 123;");
-    bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+    bundleBuilder.addEsmModule("foo", foo);
+
+    auto source = kj::str("require('bar')");
 
     // A CommonJS-style module, however, does not allow recursive evaluation.
     bundleBuilder.addSyntheticModule("bar",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("require('bar')"), kj::str("bar")));
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source, "bar"_kj));
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1362,16 +1359,17 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (d
     // dependency between foo and bar is more problematic since it is forbidden
     // to depend on an ESM that has not yet been fully resolved.
 
+    auto source1 = kj::str("exports = require('foo');");
+    auto source2 = kj::str("require('baz'); exports = require('bar');");
+
     bundleBuilder.addSyntheticModule("baz",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("exports = require('foo');"), kj::str("baz")));
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1, "baz"_kj));
 
     bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("require('baz'); exports = require('bar');"), kj::str("foo")));
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2, "foo"_kj));
 
     auto bar = kj::str("export default {}; await import('foo');");
-    bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
+    bundleBuilder.addEsmModule("bar", bar);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1404,16 +1402,17 @@ KJ_TEST("Recursively require ESM from CJS required from ESM fails as expected (s
     // dependency between foo and bar is more problematic since it is forbidden
     // to depend on an ESM that has not yet been fully resolved.
 
+    auto source1 = kj::str("exports = require('foo');");
+    auto source2 = kj::str("require('baz'); exports = require('bar');");
+
     bundleBuilder.addSyntheticModule("baz",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("exports = require('foo');"), kj::str("baz")));
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source1, "baz"_kj));
 
     bundleBuilder.addSyntheticModule("foo",
-        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(
-            kj::str("require('baz'); exports = require('bar');"), kj::str("foo")));
+        Module::newCjsStyleModuleHandler<TestType, TestIsolate_TypeWrapper>(source2, "foo"_kj));
 
     auto bar = kj::str("export default {}; import bar from 'foo';");
-    bundleBuilder.addEsmModule("bar", bar.first(bar.size()).attach(kj::mv(bar)));
+    bundleBuilder.addEsmModule("bar", bar);
 
     auto registry = ModuleRegistry::Builder(observer, BASE).add(bundleBuilder.finish()).finish();
 
@@ -1436,8 +1435,8 @@ KJ_TEST("Resolution occurs relative to the referrer") {
   ModuleRegistry::Builder registryBuilder(observer, BASE);
 
   ModuleBundle::BundleBuilder builder(BASE);
-  builder.addSyntheticModule("foo/bar", Module::newDataModuleHandler(kj::heapArray<kj::byte>(0)));
-  builder.addSyntheticModule("bar", Module::newDataModuleHandler(kj::heapArray<kj::byte>(0)));
+  builder.addSyntheticModule("foo/bar", Module::newDataModuleHandler(nullptr));
+  builder.addSyntheticModule("bar", Module::newDataModuleHandler(nullptr));
 
   // The base URL of the referrer is file:///foo/ ... so in each of the
   // following cases, the specifier should be resolved relative to that.
@@ -1449,7 +1448,7 @@ KJ_TEST("Resolution occurs relative to the referrer") {
                      "export * as ghi from '../bar';"        // file:///bar
                      "export * as jkl from '/bar';"          // file:///bar
                      "export * as lmn from '../foo/bar';");  // file:///foo/bar
-  builder.addEsmModule("foo/", bar.first(bar.size()).attach(kj::mv(bar)));
+  builder.addEsmModule("foo/", bar);
 
   auto registry = registryBuilder.add(builder.finish()).finish();
 
@@ -1546,7 +1545,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
     const auto foo = "foo:bar"_url;
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = foo,
       .referrer = BASE,
     };
@@ -1558,7 +1557,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
     const auto bar = "foo:baz"_url;
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = bar,
       .referrer = BASE,
     };
@@ -1570,7 +1569,7 @@ KJ_TEST("Building a bundle from a capnp description works") {
     const auto qux = "foo:qux"_url;
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
-      .source = ResolveContext::Source::OTHER,
+      .source = ResolveContext::Source::INTERNAL,
       .specifier = qux,
       .referrer = BASE,
     };
@@ -1602,7 +1601,7 @@ KJ_TEST("Using a registry from multiple threads works") {
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
   auto foo = kj::str("export default 123; for (let n = 0; n < 1000000; n++) {}");
-  bundleBuilder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+  bundleBuilder.addEsmModule("foo", foo);
   ResolveObserver resolveObserver;
   auto registry =
       ModuleRegistry::Builder(resolveObserver, BASE).add(bundleBuilder.finish()).finish();
@@ -1656,7 +1655,7 @@ KJ_TEST("Fallback service can see original raw specifier if provided") {
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = specifier,
     .referrer = BASE,
     .rawSpecifier = rawSpecifier,
@@ -1682,15 +1681,15 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
 
   builder.add(ModuleBundle::newFallbackBundle([&](const ResolveContext& context) {
     called++;
-    return Module::newSynthetic(url.clone(), Module::Type::FALLBACK,
-        Module::newDataModuleHandler(kj::heapArray<kj::byte>(0)));
+    return Module::newSynthetic(
+        url.clone(), Module::Type::FALLBACK, Module::newDataModuleHandler(nullptr));
   }));
 
   auto registry = builder.finish();
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = specifier,
     .referrer = BASE,
     .rawSpecifier = rawSpecifier,
@@ -1700,7 +1699,7 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
 
   ResolveContext context2 = {
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = url,
     .referrer = BASE,
     .rawSpecifier = rawSpecifier,
@@ -1734,14 +1733,14 @@ KJ_TEST("Percent-encoding in specifiers is normalized properly") {
   // when these different forms are used to import they will resolve to the expected
   // module.
 
-  builder.addSyntheticModule("foo%2fbar", Module::newDataModuleHandler(kj::heapArray<kj::byte>(0)));
-  builder.addSyntheticModule("foo/bar", Module::newDataModuleHandler(kj::heapArray<kj::byte>(0)));
+  builder.addSyntheticModule("foo%2fbar", Module::newDataModuleHandler(nullptr));
+  builder.addSyntheticModule("foo/bar", Module::newDataModuleHandler(nullptr));
 
   auto foo = kj::str("export { default as abc } from 'foo%2fbar';"
                      "export { default as def } from 'foo/bar';"
                      "export { default as ghi } from '%66oo/bar';"
                      "export { default as jkl } from '%66oo%2fbar';");
-  builder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+  builder.addEsmModule("foo", foo);
 
   auto registry = ModuleRegistry::Builder(resolveObserver, BASE).add(builder.finish()).finish();
 
@@ -1768,8 +1767,7 @@ KJ_TEST("Aliased modules (import maps) work") {
   CompilationObserver compilationObserver;
   ModuleBundle::BundleBuilder builder(BASE);
 
-  builder.addSyntheticModule(
-      "http://example/foo", Module::newDataModuleHandler(kj::heapArray<kj::byte>(0)));
+  builder.addSyntheticModule("http://example/foo", Module::newDataModuleHandler(nullptr));
   builder.alias("bar", "http://example/foo");
 
   try {
@@ -1788,20 +1786,20 @@ KJ_TEST("Aliased modules (import maps) work") {
 
   auto src = kj::str("export { default as abc } from 'bar';"
                      "export { default as def } from 'http://example/%66oo';");
-  builder.addEsmModule("qux", src.first(src.size()).attach(kj::mv(src)));
+  builder.addEsmModule("qux", src);
 
   auto registry = ModuleRegistry::Builder(resolveObserver, BASE).add(builder.finish()).finish();
 
   ResolveContext contextBar{
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "file:///bar"_url,
     .referrer = BASE,
   };
 
   ResolveContext contextFoo{
     .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::OTHER,
+    .source = ResolveContext::Source::INTERNAL,
     .specifier = "http://example/foo"_url,
     .referrer = BASE,
   };
@@ -1837,7 +1835,7 @@ KJ_TEST("Import attributes are currently unsupported") {
   ModuleBundle::BundleBuilder builder(BASE);
 
   auto foo = kj::str("import abc from 'foo' with { type: 'json' };");
-  builder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+  builder.addEsmModule("foo", foo);
 
   auto registry = ModuleRegistry::Builder(resolveObserver, BASE).add(builder.finish()).finish();
 
@@ -1861,7 +1859,7 @@ KJ_TEST("Using a deferred eval callback works") {
   ModuleBundle::BundleBuilder builder(BASE);
 
   auto foo = kj::str("export default 1;");
-  builder.addEsmModule("foo", foo.first(foo.size()).attach(kj::mv(foo)));
+  builder.addEsmModule("foo", foo);
 
   bool called = false;
   auto registry = ModuleRegistry::Builder(resolveObserver, BASE)

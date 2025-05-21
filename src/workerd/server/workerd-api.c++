@@ -1088,31 +1088,54 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     KJ_SWITCH_ONEOF(def.content) {
       KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
         jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
+        // Only the first ESM module we encounter is the main module.
+        // This should also be the first module in the list but we're
+        // not enforcing that here.
         if (firstEsm) {
           flags = flags | jsg::modules::Module::Flags::MAIN;
           firstEsm = false;
         }
-        bundleBuilder.addEsmModule(def.name, kj::heapArray<const char>(content.body), flags);
+        // The content.body is memory-resident and is expected to outlive the
+        // module registry. We can safely pass a reference to the module handler.
+        // It will not be copied into a JS string until the module is actually
+        // evaluated.
+        bundleBuilder.addEsmModule(def.name, content.body, flags);
         break;
       }
       KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-        bundleBuilder.addSyntheticModule(def.name,
-            jsg::modules::Module::newTextModuleHandler(kj::heapArray<const char>(content.body)));
+        // The content.body is memory-resident and is expected to outlive the
+        // module registry. We can safely pass a reference to the module handler.
+        // It will not be copied into a JS string until the module is actually
+        // evaluated.
+        bundleBuilder.addSyntheticModule(
+            def.name, jsg::modules::Module::newTextModuleHandler(content.body));
         break;
       }
       KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-        bundleBuilder.addSyntheticModule(def.name,
-            jsg::modules::Module::newDataModuleHandler(kj::heapArray<kj::byte>(content.body)));
+        // The content.body is memory-resident and is expected to outlive the
+        // module registry. We can safely pass a reference to the module handler.
+        // It will not be copied into a JS string until the module is actually
+        // evaluated.
+        bundleBuilder.addSyntheticModule(
+            def.name, jsg::modules::Module::newDataModuleHandler(content.body));
         break;
       }
       KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-        bundleBuilder.addSyntheticModule(def.name,
-            jsg::modules::Module::newWasmModuleHandler(kj::heapArray<kj::byte>(content.body)));
+        // The content.body is memory-resident and is expected to outlive the
+        // module registry. We can safely pass a reference to the module handler.
+        // It will not be copied into a JS string until the module is actually
+        // evaluated.
+        bundleBuilder.addSyntheticModule(
+            def.name, jsg::modules::Module::newWasmModuleHandler(content.body));
         break;
       }
       KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-        bundleBuilder.addSyntheticModule(def.name,
-            jsg::modules::Module::newJsonModuleHandler(kj::heapArray<const char>(content.body)));
+        // The content.body is memory-resident and is expected to outlive the
+        // module registry. We can safely pass a reference to the module handler.
+        // It will not be copied into a JS string until the module is actually
+        // evaluated.
+        bundleBuilder.addSyntheticModule(
+            def.name, jsg::modules::Module::newJsonModuleHandler(content.body));
         break;
       }
       KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
@@ -1122,7 +1145,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         }
         bundleBuilder.addSyntheticModule(def.name,
             jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
-                JsgWorkerdIsolate_TypeWrapper>(kj::str(content.body), kj::str(def.name)),
+                JsgWorkerdIsolate_TypeWrapper>(content.body, def.name),
             KJ_MAP(name, named) { return kj::str(name); });
         break;
       }
@@ -1130,7 +1153,10 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
         KJ_REQUIRE(featureFlags.getPythonWorkers(),
             "The python_workers compatibility flag is required to use Python.");
         hasPythonModules = true;
-        bundleBuilder.addEsmModule(def.name, kj::str(PYTHON_ENTRYPOINT).releaseArray());
+        jsg::modules::Module::Flags flags =
+            jsg::modules::Module::Flags::ESM | jsg::modules::Module::Flags::MAIN;
+        kj::StringPtr entry = PYTHON_ENTRYPOINT;
+        bundleBuilder.addEsmModule(def.name, entry, flags);
         break;
       }
       KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
@@ -1156,31 +1182,16 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
     // Inject metadata that the entrypoint module will read.
     auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    kj::OneOf<kj::Own<PyodideMetadataReader::State>, jsg::Ref<PyodideMetadataReader>>
-        metadataReader = makePyodideMetadataReader(source, pythonConfig, pythonRelease);
     pyodideBundleBuilder.addSynthetic(metadataSpecifier,
         jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
             JsgWorkerdIsolate_TypeWrapper>(
-            [metadataReader = kj::mv(metadataReader)](
+            [state = makePyodideMetadataReader(source, pythonConfig, pythonRelease)](
                 jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::PyodideMetadataReader> {
-      // The metadata reader state is initially created outside of the isolate lock.
-      // Then, once the module is actually evaluated, we'll lazily create the actual
-      // PyodideMetadataReader instance and pass ownership of the state to it.
-      // In practice this is likely only expected to be called once, but with the
-      // new module registry implementation it is at least *possible* for it to
-      // be called multiple times. We don't want to create a new instance each
-      // time so we'll cache the instance and return a ref on each subsequent call.
-      KJ_SWITCH_ONEOF(metadataReader) {
-        KJ_CASE_ONEOF(state, kj::Own<PyodideMetadataReader::State>) {
-          auto ret = js.alloc<PyodideMetadataReader>(kj::mv(state));
-          metadataReader = ret.addRef();
-          return kj::mv(ret);
-        }
-        KJ_CASE_ONEOF(reader, jsg::Ref<PyodideMetadataReader>) {
-          return reader.addRef();
-        }
-      }
-      KJ_UNREACHABLE;
+      // The ModuleRegistry may be shared across multiple isolates and workers.
+      // We need to clone the PyodideMetadataReader::State for each instance
+      // that is evaluated. Typically this is only once per python worker
+      // but could be more in the future.
+      return js.alloc<PyodideMetadataReader>(state->clone());
     }));
     // Inject artifact bundler.
     pyodideBundleBuilder.addSynthetic(artifactsSpecifier,

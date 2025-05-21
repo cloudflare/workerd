@@ -75,6 +75,14 @@ class PythonModuleInfo {
   kj::Array<kj::String> names;
   kj::Array<kj::Array<kj::byte>> contents;
 
+  PythonModuleInfo clone() const {
+    auto clonedContents =
+        KJ_MAP(content, this->contents) { return kj::heapArray<kj::byte>(content); };
+    auto clonedNames = KJ_MAP(name, this->names) { return kj::str(name); };
+    // We need
+    return PythonModuleInfo(kj::mv(clonedNames), kj::mv(clonedContents));
+  }
+
   // Return the list of names to import into a package snapshot.
   kj::Array<kj::String> getPackageSnapshotImports(kj::StringPtr version);
   // Takes in a list of Python files (their contents). Parses these files to find the import
@@ -147,6 +155,10 @@ class PyodideMetadataReader: public jsg::Object {
           memorySnapshot(kj::mv(memorySnapshot)),
           durableObjectClasses(kj::mv(durableObjectClasses)),
           entrypointClasses(kj::mv(entrypointClasses)) {}
+
+    State(const State& other);
+
+    kj::Own<State> clone();
   };
 
   PyodideMetadataReader(kj::Own<State> state): state(kj::mv(state)) {}

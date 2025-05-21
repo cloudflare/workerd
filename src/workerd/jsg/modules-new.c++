@@ -4,6 +4,8 @@
 
 #include "modules-new.h"
 
+#include "buffersource.h"
+
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/util.h>
@@ -64,24 +66,14 @@ constexpr ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::T
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
-  explicit EsModule(Url specifier, Type type, Flags flags, kj::Array<const char> source)
+  explicit EsModule(Url specifier, Type type, Flags flags, kj::ArrayPtr<const char> source)
       : Module(kj::mv(specifier), type, flags | Flags::ESM | Flags::EVAL),
-        source(kj::mv(source)),
-        ptr(this->source),
+        source(source),
         externed(false),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
-
   // This variation does not take ownership of the source buffer.
-  explicit EsModule(Url specifier, Type type, Flags flags, kj::ArrayPtr<const char> source)
-      : Module(kj::mv(specifier), type, flags | Flags::ESM),
-        source(nullptr),
-        ptr(source),
-        externed(true),
-        cachedData(kj::none) {
-    KJ_DASSERT(isEsm());
-  }
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
 
   v8::MaybeLocal<v8::Module> getDescriptor(
@@ -114,7 +106,7 @@ class EsModule final: public Module {
 
     // Note that the Source takes ownership of the CachedData pointer that we pass in.
     // Do not use data after this point.
-    v8::ScriptCompiler::Source source(externed ? js.strExtern(ptr) : js.str(ptr), origin, data);
+    v8::ScriptCompiler::Source source(js.strExtern(this->source), origin, data);
 
     auto maybeCached = source.GetCachedData();
     if (maybeCached != nullptr) {
@@ -178,8 +170,7 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
-  kj::Array<const char> source;
-  kj::ArrayPtr<const char> ptr;
+  kj::ArrayPtr<const char> source;
   // When externed is true, the source buffer is passed into the isolate as an externalized
   // string. This is only appropriate for built-in modules that are compiled into the binary.
   bool externed = false;
@@ -296,7 +287,7 @@ class IsolateModuleRegistry final {
   struct Entry final {
     HashableV8Ref<v8::Module> key;
     SpecifierContext specifier;
-    Module& module;
+    const Module& module;
   };
 
   IsolateModuleRegistry(Lock& js, ModuleRegistry& registry, const CompilationObserver& observer);
@@ -827,7 +818,7 @@ class FallbackModuleBundle final: public ModuleBundle {
       : ModuleBundle(Type::FALLBACK),
         callback(kj::mv(callback)) {}
 
-  kj::Maybe<Module&> resolve(const ResolveContext& context) override {
+  kj::Maybe<const Module&> resolve(const ResolveContext& context) override {
     {
       auto lock = cache.lockShared();
       KJ_IF_SOME(found, lock->storage.find(context.specifier)) {
@@ -875,7 +866,7 @@ class StaticModuleBundle final: public ModuleBundle {
         modules(kj::mv(modules)),
         aliases(kj::mv(aliases)) {}
 
-  kj::Maybe<Module&> resolve(const ResolveContext& context) override {
+  kj::Maybe<const Module&> resolve(const ResolveContext& context) override {
     KJ_IF_SOME(aliased, aliases.find(context.specifier)) {
       // The specifier is registered as an alias. We need to resolve the alias instead.
       // This is set up to allow for recursive aliases.
@@ -952,18 +943,15 @@ void ModuleBundle::getBuiltInBundleFromCapnp(
           continue;
         }
         case workerd::jsg::Module::WASM: {
-          builder.addSynthetic(specifier,
-              Module::newWasmModuleHandler(kj::heapArray<kj::byte>(module.getWasm().asBytes())));
+          builder.addSynthetic(specifier, Module::newWasmModuleHandler(module.getWasm().asBytes()));
           continue;
         }
         case workerd::jsg::Module::DATA: {
-          builder.addSynthetic(specifier,
-              Module::newDataModuleHandler(kj::heapArray<kj::byte>(module.getData().asBytes())));
+          builder.addSynthetic(specifier, Module::newDataModuleHandler(module.getData().asBytes()));
           continue;
         }
         case workerd::jsg::Module::JSON: {
-          builder.addSynthetic(
-              specifier, Module::newJsonModuleHandler(kj::heapArray(module.getJson().asArray())));
+          builder.addSynthetic(specifier, Module::newJsonModuleHandler(module.getJson().asArray()));
           continue;
         }
       }
@@ -1024,14 +1012,14 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
 }
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
-    kj::StringPtr specifier, kj::Array<const char> source, Module::Flags flags) {
+    kj::StringPtr specifier, kj::ArrayPtr<const char> source, Module::Flags flags) {
   auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
-      [url = url.clone(), source = kj::mv(source), flags, type = type()](
+      [url = url.clone(), source, flags, type = type()](
           const ResolveContext& context) mutable -> kj::Maybe<kj::Own<Module>> {
-    return kj::heap<EsModule>(kj::mv(url), type, flags, kj::mv(source));
+    return kj::heap<EsModule>(kj::mv(url), type, flags, source);
   });
   return *this;
 }
@@ -1121,9 +1109,10 @@ kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserve
   return kj::heap<IsolateModuleRegistry>(js, *this, observer);
 }
 
-kj::Maybe<Module&> ModuleRegistry::resolve(const ResolveContext& context) {
-  constexpr auto tryFind = [](const ResolveContext& context,
-                               kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) -> kj::Maybe<Module&> {
+kj::Maybe<const Module&> ModuleRegistry::resolve(const ResolveContext& context) {
+  constexpr auto tryFind =
+      [](const ResolveContext& context,
+          kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) -> kj::Maybe<const Module&> {
     for (auto& bundle: bundles) {
       KJ_IF_SOME(found, bundle->resolve(context)) {
         return found;
@@ -1322,8 +1311,8 @@ kj::ArrayPtr<const kj::StringPtr> Module::ModuleNamespace::getNamedExports() con
 // important to remember that evaluation callbacks can be called multiple times and
 // from multiple threads. The callbacks must be thread-safe and idempotent.
 
-Module::EvaluateCallback Module::newTextModuleHandler(kj::Array<const char> data) {
-  return [data = kj::mv(data)](Lock& js, const Url& specifier, const ModuleNamespace& ns,
+Module::EvaluateCallback Module::newTextModuleHandler(kj::ArrayPtr<const char> data) {
+  return [data](Lock& js, const Url& specifier, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
     return js.tryCatch([&] { return ns.setDefault(js, js.str(data)); }, [&](Value exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
@@ -1332,11 +1321,14 @@ Module::EvaluateCallback Module::newTextModuleHandler(kj::Array<const char> data
   };
 }
 
-Module::EvaluateCallback Module::newDataModuleHandler(kj::Array<kj::byte> data) {
-  return [data = kj::mv(data)](Lock& js, const Url& specifier, const ModuleNamespace& ns,
+Module::EvaluateCallback Module::newDataModuleHandler(kj::ArrayPtr<const kj::byte> data) {
+  return [data](Lock& js, const Url& specifier, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
     return js.tryCatch([&] {
-      return ns.setDefault(js, JsValue(js.wrapBytes(kj::heapArray<kj::byte>(data))));
+      auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
+      backing.asArrayPtr().copyFrom(data);
+      auto buffer = jsg::BufferSource(js, kj::mv(backing));
+      return ns.setDefault(js, JsValue(buffer.getHandle(js)));
     }, [&](Value exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
       return false;
@@ -1344,8 +1336,8 @@ Module::EvaluateCallback Module::newDataModuleHandler(kj::Array<kj::byte> data) 
   };
 }
 
-Module::EvaluateCallback Module::newJsonModuleHandler(kj::Array<const char> data) {
-  return [data = kj::mv(data)](Lock& js, const Url& specifier, const ModuleNamespace& ns,
+Module::EvaluateCallback Module::newJsonModuleHandler(kj::ArrayPtr<const char> data) {
+  return [data](Lock& js, const Url& specifier, const ModuleNamespace& ns,
              const CompilationObserver& observer) -> bool {
     return js.tryCatch([&] {
       auto metrics = observer.onJsonCompilationStart(js.v8Isolate, data.size());
@@ -1357,11 +1349,11 @@ Module::EvaluateCallback Module::newJsonModuleHandler(kj::Array<const char> data
   };
 }
 
-Module::EvaluateCallback Module::newWasmModuleHandler(kj::Array<kj::byte> data) {
+Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byte> data) {
   struct Cache final {
     kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex{};
   };
-  return [data = kj::mv(data), cache = kj::heap<Cache>()](Lock& js, const Url& specifier,
+  return [data, cache = kj::heap<Cache>()](Lock& js, const Url& specifier,
              const ModuleNamespace& ns, const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
       js.setAllowEval(true);

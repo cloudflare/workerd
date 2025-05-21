@@ -324,10 +324,12 @@ class Module {
   // limited to just these kinds of modules, however. These are just the most
   // common.
 
-  static EvaluateCallback newTextModuleHandler(kj::Array<const char> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newDataModuleHandler(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newJsonModuleHandler(kj::Array<const char> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newWasmModuleHandler(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newTextModuleHandler(kj::ArrayPtr<const char> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newDataModuleHandler(
+      kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newJsonModuleHandler(kj::ArrayPtr<const char> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newWasmModuleHandler(
+      kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   // An eval function is used for CommonJS style modules (including Node.js compat
   // modules. The expectation is that this method will be called when the CommonJS
@@ -362,10 +364,9 @@ class Module {
   // type T are exposed as additional globals within the executed scope.
   template <typename T, typename TypeWrapper>
   static EvaluateCallback newCjsStyleModuleHandler(
-      kj::String source, kj::String name) KJ_WARN_UNUSED_RESULT {
-    return [source = kj::mv(source), name = kj::mv(name),
-               evaluatingScope = kj::heap<EvaluatingScope>()](Lock& js, const Url& specifier,
-               const Module::ModuleNamespace& ns,
+      kj::StringPtr source, kj::StringPtr name) KJ_WARN_UNUSED_RESULT {
+    return [source, name, evaluatingScope = kj::heap<EvaluatingScope>()](Lock& js,
+               const Url& specifier, const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
         // A CJS module can only be evaluated once. Return early if evaluation
@@ -472,7 +473,7 @@ class ModuleBundle {
         kj::Array<kj::String> namedExports = nullptr) KJ_LIFETIMEBOUND;
 
     BundleBuilder& addEsmModule(kj::StringPtr specifier,
-        kj::Array<const char> code,
+        kj::ArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr specifier) KJ_LIFETIMEBOUND;
@@ -536,7 +537,7 @@ class ModuleBundle {
 
   virtual ~ModuleBundle() noexcept(false) = default;
 
-  virtual kj::Maybe<Module&> resolve(
+  virtual kj::Maybe<const Module&> resolve(
       const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT = 0;
 
  protected:
@@ -607,7 +608,8 @@ class ModuleRegistry final: public ModuleRegistryBase {
     friend class ModuleRegistry;
   };
 
-  kj::Maybe<Module&> resolve(const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<const Module&> resolve(
+      const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   // Attaches the ModuleRegistry to the given isolate by creating an IsolateModuleRegistry
   // and linking that to the isolate.

@@ -394,6 +394,28 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
+PyodideMetadataReader::State::State(const State& other)
+    : mainModule(kj::str(other.mainModule)),
+      moduleInfo(other.moduleInfo.clone()),
+      requirements(KJ_MAP(req, other.requirements) { return kj::str(req); }),
+      pyodideVersion(kj::str(other.pyodideVersion)),
+      packagesVersion(kj::str(other.packagesVersion)),
+      packagesLock(kj::str(other.packagesLock)),
+      isWorkerdFlag(other.isWorkerdFlag),
+      isTracingFlag(other.isTracingFlag),
+      snapshotToDisk(other.snapshotToDisk),
+      createBaselineSnapshot(other.createBaselineSnapshot),
+      memorySnapshot(other.memorySnapshot.map(
+          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })),
+      durableObjectClasses(other.durableObjectClasses.map(
+          [](auto& classes) { return KJ_MAP(c, classes) { return kj::str(c); }; })),
+      entrypointClasses(other.entrypointClasses.map(
+          [](auto& classes) { return KJ_MAP(c, classes) { return kj::str(c); }; })) {}
+
+kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
+  return kj::heap<PyodideMetadataReader::State>(*this);
+}
+
 kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     kj::HashSet<kj::String> workerModules,
     kj::ArrayPtr<kj::String> imports,
