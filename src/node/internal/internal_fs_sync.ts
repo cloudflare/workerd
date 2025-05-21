@@ -414,7 +414,15 @@ export function mkdtempSync(
   const { encoding = 'utf8' } = options;
   validateEncoding(encoding, 'options.encoding');
   prefix = normalizePath(prefix, encoding);
-  return cffs.mkdir(normalizePath(prefix), { recursive: false, tmp: true })!;
+  const ret = cffs.mkdir(normalizePath(prefix), {
+    recursive: false,
+    tmp: true,
+  });
+  if (ret === undefined) {
+    // TODO(node:fs): Need proper error code here
+    throw new Error('failed to create temporary directory');
+  }
+  return ret;
 }
 
 export type OpenDirOptions = {
@@ -519,12 +527,11 @@ export function readFileSync(
 
   // TODO(node:fs): We are currently ignoring flags on readFileSync.
 
-  const u8 = (() => {
+  const u8 = ((): Uint8Array => {
     if (typeof pathOrFd === 'number') {
       return cffs.readAll(getValidatedFd(pathOrFd));
-    } else {
-      return cffs.readAll(normalizePath(pathOrFd));
     }
+    return cffs.readAll(normalizePath(pathOrFd));
   })();
 
   const buf = Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);

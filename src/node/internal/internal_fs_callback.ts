@@ -130,8 +130,7 @@ export function appendFile(
   } else {
     options = optionsOrCallback;
   }
-  callWithErrorOnlyCallback(
-    // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
+  callWithSingleArgCallback<number>(
     () => fssync.appendFileSync(path, data, options),
     callback
   );
@@ -1237,8 +1236,7 @@ export function writeFile(
   } else {
     options = optionsOrCallback;
   }
-  callWithErrorOnlyCallback(
-    // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
+  callWithSingleArgCallback<number>(
     () => fssync.writeFileSync(path, data, options),
     callback
   );
