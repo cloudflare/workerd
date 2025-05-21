@@ -61,8 +61,8 @@ class V8HandleWrapper {
 #define JSG_FOR_EACH_V8_VALUE_SUBCLASS(f)                                                          \
   f(ArrayBuffer) f(ArrayBufferView) f(TypedArray) f(DataView) f(Int8Array) f(Uint8Array)           \
       f(Uint8ClampedArray) f(Int16Array) f(Uint16Array) f(Int32Array) f(Uint32Array)               \
-          f(Float32Array) f(Float64Array) f(Object) f(String) f(Function) f(WasmMemoryObject)      \
-              f(BigInt)
+          f(Float16Array) f(Float32Array) f(Float64Array) f(Object) f(String) f(Function)          \
+              f(WasmMemoryObject) f(BigInt)
 
   // Define a tryUnwrap() overload for each interesting subclass of v8::Value.
 #define JSG_DEFINE_TRY_UNWRAP(type)                                                                \

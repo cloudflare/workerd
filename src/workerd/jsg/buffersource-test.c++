@@ -87,6 +87,8 @@ KJ_TEST("BufferSource works") {
 
   e.expectEval("const ab = new BigInt64Array(1); takeBufferSource(ab) === ab", "boolean", "true");
 
+  e.expectEval("const ab = new Float16Array(4); takeBufferSource(ab) === ab", "boolean", "true");
+
   e.expectEval("const ab = new Float32Array(2); takeBufferSource(ab) === ab", "boolean", "true");
 
   e.expectEval("const ab = new Float64Array(1); takeBufferSource(ab) === ab", "boolean", "true");

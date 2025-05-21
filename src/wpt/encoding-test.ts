@@ -12,9 +12,6 @@ export default {
   'encodeInto.any.js': {
     comment: 'See comments on each failure',
     expectedFailures: [
-      // Enable once Float16Array is available
-      'Invalid encodeInto() destination: Float16Array, backed by: ArrayBuffer',
-      'Invalid encodeInto() destination: Float16Array, backed by: SharedArrayBuffer',
       // Enable once MessageChannel is implemented
       'encodeInto() and a detached output buffer',
     ],

@@ -18,6 +18,7 @@ namespace workerd::jsg {
   V(Int8Array, 1, true)                                                                            \
   V(Int16Array, 2, true)                                                                           \
   V(Int32Array, 4, true)                                                                           \
+  V(Float16Array, 2, false)                                                                        \
   V(Float32Array, 4, false)                                                                        \
   V(Float64Array, 8, false)                                                                        \
   V(BigInt64Array, 8, true)                                                                        \

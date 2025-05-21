@@ -1700,6 +1700,8 @@ export const byteLength = {
     strictEqual(Buffer.byteLength(int32), 32);
     const uint32 = new Uint32Array(8);
     strictEqual(Buffer.byteLength(uint32), 32);
+    const float16 = new Float16Array(8);
+    strictEqual(Buffer.byteLength(float16), 16);
     const float32 = new Float32Array(8);
     strictEqual(Buffer.byteLength(float32), 32);
     const float64 = new Float64Array(8);

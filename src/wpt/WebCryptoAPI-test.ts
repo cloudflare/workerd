@@ -202,10 +202,7 @@ export default {
     skipAllTests: true,
   },
 
-  'getRandomValues.any.js': {
-    comment: 'Enable once Float16Array is exposed',
-    expectedFailures: ['Float16 arrays'],
-  },
+  'getRandomValues.any.js': {},
   'historical.any.js': {
     comment: 'To investigate but appears irrelevant to workerd',
     expectedFailures: [
