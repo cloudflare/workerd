@@ -59,3 +59,9 @@ export function read(
 ): number;
 
 export function readAll(pathOrFd: number | URL): Uint8Array;
+
+export function writeAll(
+  pathOrFd: number | URL,
+  data: ArrayBufferView,
+  options: { append: boolean; exclusive: boolean }
+): number;

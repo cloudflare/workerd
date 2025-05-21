@@ -39,6 +39,8 @@ import {
   readSync,
   readvSync,
   readFileSync,
+  writeFileSync,
+  appendFileSync,
   access,
   stat,
   chmod,
@@ -1353,6 +1355,28 @@ export const writevSyncTest = {
     // Reading from a position beyond the end of the file returns nothing.
     strictEqual(readvSync(fd, [dest1], 100), 0);
 
+    closeSync(fd);
+  },
+};
+
+export const writeFileSyncTest = {
+  test() {
+    ok(!existsSync('/tmp/test.txt'));
+    strictEqual(writeFileSync('/tmp/test.txt', 'Hello World'), 11);
+    ok(existsSync('/tmp/test.txt'));
+    let stat = statSync('/tmp/test.txt');
+    strictEqual(stat.size, 11);
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World');
+
+    strictEqual(appendFileSync('/tmp/test.txt', '!!!!'), 4);
+    stat = statSync('/tmp/test.txt');
+    strictEqual(stat.size, 15);
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World!!!!');
+
+    // We can also use a file descriptor
+    const fd = openSync('/tmp/test.txt', 'a+');
+    writeFileSync(fd, '##');
+    strictEqual(readFileSync(fd).toString(), 'Hello World!!!!##');
     closeSync(fd);
   },
 };

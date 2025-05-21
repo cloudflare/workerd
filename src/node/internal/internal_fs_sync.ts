@@ -95,7 +95,7 @@ export function appendFileSync(
     flag: 'a',
     flush: false,
   }
-): void {
+): number {
   // We defer to writeFileSync for the actual implementation and validation
   const {
     encoding = 'utf8',
@@ -103,7 +103,7 @@ export function appendFileSync(
     flag = 'a',
     flush = false,
   } = options ?? {};
-  writeFileSync(path, data, { encoding, mode, flag, flush });
+  return writeFileSync(path, data, { encoding, mode, flag, flush });
 }
 
 export function chmodSync(path: FilePath, mode: string | number): void {
@@ -846,7 +846,7 @@ export function writeFileSync(
     flag: 'w',
     flush: false,
   }
-): void {
+): number {
   if (typeof path === 'number') {
     path = getValidatedFd(path);
   } else {
@@ -893,7 +893,7 @@ export function writeFileSync(
     );
   }
 
-  throw new Error('Not implemented');
+  return cffs.writeAll(path, data, { append, exclusive });
 }
 
 export type WriteSyncOptions = {
@@ -1000,7 +1000,7 @@ export function writevSync(
 // (S == Stubbed, I == Implemented, T == Tested, O == Optimized)
 //  S  I  T  O
 // [x][x][x][ ] fs.accessSync(path[, mode])
-// [x][x][ ][ ] fs.appendFileSync(path, data[, options])
+// [x][x][x][ ] fs.appendFileSync(path, data[, options])
 // [x][x][x][ ] fs.chmodSync(path, mode)
 // [x][x][x][ ] fs.chownSync(path, uid, gid)
 // [x][x][x][ ] fs.closeSync(fd)
@@ -1041,7 +1041,7 @@ export function writevSync(
 // [x][x][x][ ] fs.truncateSync(path[, len])
 // [x][x][x][ ] fs.unlinkSync(path)
 // [x][x][x][ ] fs.utimesSync(path, atime, mtime)
-// [x][ ][ ][ ] fs.writeFileSync(file, data[, options])
+// [x][x][x][ ] fs.writeFileSync(file, data[, options])
 // [x][x][x][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
 // [x][x][x][ ] fs.writeSync(fd, buffer[, options])
 // [x][x][x][ ] fs.writeSync(fd, string[, position[, encoding]])

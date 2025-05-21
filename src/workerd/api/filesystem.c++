@@ -447,21 +447,115 @@ jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePa
     KJ_CASE_ONEOF(fd, int) {
       auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
       JSG_REQUIRE(opened.read, Error, "File descriptor not opened for reading"_kj);
-      KJ_SWITCH_ONEOF(opened.node) {
-        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-          return file->readAllBytes(js);
-        }
-        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-          JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
-        }
-        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-          // If we get here, then followSymLinks was set to false when open was called.
-          // We can't read from a symbolic link.
-          JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
-        }
-      }
+
+      // Make sure we're reading from a file.
+      auto& file = JSG_REQUIRE_NONNULL(
+          opened.node.tryGet<kj::Rc<workerd::File>>(), Error, "Invalid operation"_kj);
+
+      // Move the opened.position to the end of the file.
+      KJ_DEFER({
+        auto stat = file->stat(js);
+        opened.position = stat.size;
+      });
+
+      return file->readAllBytes(js);
     }
   }
+  KJ_UNREACHABLE;
+}
+
+uint32_t FileSystemModule::writeAll(jsg::Lock& js,
+    kj::OneOf<int, FilePath> pathOrFd,
+    jsg::BufferSource data,
+    WriteAllOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+
+  static constexpr uint32_t kMax = kj::maxValue;
+  JSG_REQUIRE(data.size() <= kMax, Error, "Data size out of range"_kj);
+
+  KJ_SWITCH_ONEOF(pathOrFd) {
+    KJ_CASE_ONEOF(path, FilePath) {
+      NormalizedFilePath normalized(kj::mv(path));
+      KJ_IF_SOME(node, vfs.resolve(js, normalized)) {
+        // If the exclusive option is set, the file must not already exist.
+        JSG_REQUIRE(!options.exclusive, Error, "file already exists");
+        // The file already exists, we can write to it.
+        KJ_SWITCH_ONEOF(node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            // First let's check that the file is writable.
+            auto stat = file->stat(js);
+            JSG_REQUIRE(stat.writable, Error, "access is denied");
+
+            // If the append option is set, we will write to the end of the file
+            // instead of overwriting it.
+            if (options.append) {
+              return file->write(js, stat.size, data);
+            }
+
+            // Otherwise, we overwrite the entire file.
+            return file->writeAll(js, data);
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            // If we get here, then followSymLinks was set to false when open was called.
+            // We can't write to a symbolic link.
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+      // The file does not exist. We first need to create it, then write to it.
+      // Let's make sure the parent directory exists.
+      const jsg::Url& url = normalized;
+      jsg::Url::Relative relative = url.getRelative();
+      auto parent =
+          JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
+      // Let's make sure the parent is a directory.
+      auto& dir = JSG_REQUIRE_NONNULL(
+          parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+      auto stat = dir->stat(js);
+      JSG_REQUIRE(stat.writable, Error, "access is denied");
+      auto file = workerd::File::newWritable(js, static_cast<uint32_t>(data.size()));
+      auto written = file->writeAll(js, data);
+      dir->add(js, relative.name, kj::mv(file));
+      return written;
+    }
+    KJ_CASE_ONEOF(fd, int) {
+      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
+      // Otherwise, we'll overwrite the file...
+      JSG_REQUIRE(opened.write, Error, "File descriptor not opened for writing"_kj);
+
+      // Make sure we're writing to a file.
+      auto& file = JSG_REQUIRE_NONNULL(
+          opened.node.tryGet<kj::Rc<workerd::File>>(), Error, "Invalid operation"_kj);
+
+      auto stat = file->stat(js);
+      // Make sure the file is writable.
+      JSG_REQUIRE(stat.writable, Error, "access is denied");
+
+      KJ_DEFER({
+        // In either case, we need to update the position of the file descriptor.
+        stat = file->stat(js);
+        opened.position = stat.size;
+      });
+
+      // If the file descriptor was opened in append mode, or if the append option
+      // is set, then we'll use write instead to append to the end of the file.
+      if (opened.append || options.append) {
+        return write(js, fd, kj::arr(kj::mv(data)),
+            {
+              .position = stat.size,
+            });
+      }
+
+      // Otherwise, we overwrite the entire file.
+      return file->writeAll(js, data);
+    }
+  }
+
   KJ_UNREACHABLE;
 }
 

@@ -87,6 +87,17 @@ class FileSystemModule final: public jsg::Object {
 
   jsg::BufferSource readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
 
+  struct WriteAllOptions {
+    bool exclusive;
+    bool append;
+    JSG_STRUCT(exclusive, append);
+  };
+
+  uint32_t writeAll(jsg::Lock& js,
+      kj::OneOf<int, FilePath> pathOrFd,
+      jsg::BufferSource data,
+      WriteAllOptions options);
+
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
@@ -102,6 +113,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(write);
     JSG_METHOD(read);
     JSG_METHOD(readAll);
+    JSG_METHOD(writeAll);
   }
 };
 
@@ -469,6 +481,7 @@ class StorageManager final: public jsg::Object {
   workerd::api::FileSystemModule, workerd::api::Stat, workerd::api::FileSystemModule::StatOptions, \
       workerd::api::FileSystemModule::ReadLinkOptions,                                             \
       workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions,    \
-      workerd::api::FileSystemModule::WriteOptions
+      workerd::api::FileSystemModule::WriteOptions,                                                \
+      workerd::api::FileSystemModule::WriteAllOptions
 
 }  // namespace workerd::api
