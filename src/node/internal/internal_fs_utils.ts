@@ -79,7 +79,7 @@ import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
 // be called from user-code
 export const kBadge = Symbol('kBadge');
 
-export function normalizePath(path: FilePath): URL {
+export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // We treat all of our virtual file system paths as file URLs
   // as a way of normalizing them. Because our file system is
   // fully virtual, we don't need to worry about a number of the
@@ -96,7 +96,7 @@ export function normalizePath(path: FilePath): URL {
   } else if (path instanceof URL) {
     return path;
   } else if (Buffer.isBuffer(path)) {
-    return new URL(path.toString(), 'file://');
+    return new URL(path.toString(encoding), 'file://');
   }
   throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
 }

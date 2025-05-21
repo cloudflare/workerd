@@ -71,3 +71,8 @@ export function renameOrCopy(
   to: URL,
   options: { copy: boolean }
 ): void;
+
+export function mkdir(
+  path: URL,
+  options: { recursive: boolean; tmp: boolean }
+): string | undefined;

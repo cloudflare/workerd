@@ -43,6 +43,8 @@ import {
   appendFileSync,
   copyFileSync,
   renameSync,
+  mkdirSync,
+  mkdtempSync,
   access,
   stat,
   chmod,
@@ -1411,5 +1413,55 @@ export const copyAndRenameTest = {
     ok(!existsSync('/tmp/test.txt'));
     ok(existsSync('/tmp/test3.txt'));
     strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
+  },
+};
+
+export const mkdirTest = {
+  test() {
+    ok(!existsSync('/tmp/testdir'));
+    strictEqual(mkdirSync('/tmp/testdir'), undefined);
+    ok(existsSync('/tmp/testdir'));
+
+    ok(!existsSync('/tmp/testdir/a/b/c'));
+    strictEqual(
+      mkdirSync('/tmp/testdir/a/b/c', { recursive: true }),
+      '/tmp/testdir/a'
+    );
+    ok(existsSync('/tmp/testdir/a/b/c'));
+
+    // Cannot create a directory in a read-only location
+    throws(() => mkdirSync('/bundle/a'), {
+      message: /access is denied/,
+    });
+
+    // Creating a directory that already exists is a non-op
+    mkdirSync('/tmp/testdir');
+
+    // Attempting to create a directory that already exists as a file throws
+    writeFileSync('/tmp/abc', 'Hello World');
+    throws(() => mkdirSync('/tmp/abc'), {
+      message: /File already exists/,
+    });
+
+    // Attempting to create a directory recursively when a parent is a file
+    // throws
+    throws(() => mkdirSync('/tmp/abc/foo', { recursive: true }), {
+      message: /Invalid argument/,
+    });
+
+    // Passing incorrect types for options throws
+    throws(() => mkdirSync('/tmp/testdir', { recursive: 'yes' }), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+
+    throws(() => mkdirSync('/tmp/testdir', 'abc'), {
+      code: /ERR_INVALID_ARG_TYPE/,
+    });
+
+    strictEqual(mkdtempSync('/tmp/testdir-'), '/tmp/testdir-0');
+    strictEqual(mkdtempSync('/tmp/testdir-'), '/tmp/testdir-1');
+    throws(() => mkdtempSync('/bundle/testdir-'), {
+      message: /access is denied/,
+    });
   },
 };

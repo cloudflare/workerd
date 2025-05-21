@@ -12,6 +12,7 @@ namespace workerd::api {
 // Implementation of cloudflare-internal:filesystem in support of node:fs
 
 namespace {
+static constexpr uint32_t kMax = kj::maxValue;
 constexpr kj::StringPtr nameForFsType(FsType type) {
   switch (type) {
     case FsType::FILE:
@@ -339,7 +340,6 @@ void FileSystemModule::close(jsg::Lock& js, int fd) {
 
 uint32_t FileSystemModule::write(
     jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
-  static constexpr uint32_t kMax = kj::maxValue;
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
   auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
@@ -387,7 +387,6 @@ uint32_t FileSystemModule::write(
 
 uint32_t FileSystemModule::read(
     jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
-  static constexpr uint32_t kMax = kj::maxValue;
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
   auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
@@ -471,7 +470,6 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
 
-  static constexpr uint32_t kMax = kj::maxValue;
   JSG_REQUIRE(data.size() <= kMax, Error, "Data size out of range"_kj);
 
   KJ_SWITCH_ONEOF(pathOrFd) {
@@ -614,6 +612,101 @@ void FileSystemModule::renameOrCopy(
     auto relative = srcUrl.getRelative();
     dir->remove(js, kj::Path({relative.name}), {.recursive = true});
   }
+}
+
+jsg::Optional<kj::String> FileSystemModule::mkdir(
+    jsg::Lock& js, FilePath path, MkdirOptions options) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedPath(kj::mv(path));
+  const jsg::Url& url = normalizedPath;
+
+  // The path must not already exist. However, if the path is a directory, we
+  // will just return rather than throwing an error.
+  KJ_IF_SOME(node, vfs.resolve(js, url, {.followLinks = false})) {
+    KJ_SWITCH_ONEOF(node) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        JSG_FAIL_REQUIRE(Error, "File already exists"_kj);
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        // The directory already exists. We will just return.
+        return kj::none;
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        JSG_FAIL_REQUIRE(Error, "File already exists"_kj);
+      }
+    }
+  };
+
+  if (options.recursive) {
+    JSG_REQUIRE(!options.tmp, Error, "Cannot recursively create a temporary directory");
+    // If the recursive option is set, we will create all the directories in the
+    // path that do not exist, returning the path to the first one that was created.
+    const kj::Path kjPath = normalizedPath;
+    const auto parentPath = kjPath.parent();
+    const auto name = kjPath.basename();
+    kj::Maybe<kj::String> createdPath;
+
+    // We'll start from the root and work our way down.
+    auto current = vfs.getRoot(js);
+    kj::Path currentPath{};
+    for (const auto& part: parentPath) {
+      currentPath = currentPath.append(part);
+      // Try opening the next part of the path. Note that we are not using the
+      // createAs option here because we don't necessarily want to implicitly
+      // create the directory if it doesn't exist. We want to create it explicitly
+      // so that we can return the path to the first directory that was created
+      // and tryOpen does not us if the directory already existed or was created.
+      KJ_IF_SOME(node, current->tryOpen(js, kj::Path({part}))) {
+        // Let's make sure the node is a directory.
+        auto& dir = JSG_REQUIRE_NONNULL(
+            node.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+        // Now we can check the next part of the path.
+        current = kj::mv(dir);
+        continue;
+      }
+
+      // The node does not exist, let's create it so long as the current
+      // directory is writable.
+      auto stat = current->stat(js);
+      JSG_REQUIRE(stat.writable, Error, "access is denied");
+      auto dir = workerd::Directory::newWritable();
+      current->add(js, part, dir.addRef());
+      current = kj::mv(dir);
+      if (createdPath == kj::none) {
+        createdPath = currentPath.toString(true);
+      }
+    }
+
+    // Now that we have th parent directory, let's try creating the new directory.
+    auto newDir = workerd::Directory::newWritable();
+    current->add(js, name.toString(false), kj::mv(newDir));
+    return kj::mv(createdPath);
+  }
+
+  // If the recursive option is not set, we will create the directory only if
+  // the parent directory exists. If the parent directory does not exist, we
+  // will return an error.
+  auto relative = url.getRelative();
+  auto parent =
+      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
+  // Let's make sure the parent is a directory.
+  auto& dir = JSG_REQUIRE_NONNULL(
+      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+  auto stat = dir->stat(js);
+  JSG_REQUIRE(stat.writable, Error, "access is denied");
+  auto newDir = workerd::Directory::newWritable();
+
+  if (options.tmp) {
+    JSG_REQUIRE(tmpFileCounter < kMax, Error, "Too many temporary directories");
+    auto name = kj::str(relative.name, tmpFileCounter++);
+    dir->add(js, name, kj::mv(newDir));
+    auto newUrl = KJ_REQUIRE_NONNULL(relative.base.resolve(name), "invalid URL");
+    return kj::str(newUrl.getPathname());
+  }
+
+  dir->add(js, relative.name, kj::mv(newDir));
+  return kj::none;
 }
 
 // =======================================================================================

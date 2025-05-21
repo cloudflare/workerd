@@ -105,6 +105,16 @@ class FileSystemModule final: public jsg::Object {
 
   void renameOrCopy(jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options);
 
+  struct MkdirOptions {
+    bool recursive = false;
+    // When temp is true, the directory name will be augmented with an
+    // additional random string to make it unique and the directory name
+    // will be returned.
+    bool tmp = false;
+    JSG_STRUCT(recursive, tmp);
+  };
+  jsg::Optional<kj::String> mkdir(jsg::Lock& js, FilePath path, MkdirOptions options);
+
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
@@ -122,7 +132,15 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(readAll);
     JSG_METHOD(writeAll);
     JSG_METHOD(renameOrCopy);
+    JSG_METHOD(mkdir);
   }
+
+ private:
+  // Rather than relying on random generation of temp directory names we
+  // use a simple counter. Once the counter reaches the max value we will
+  // refuse to create any more temp directories. This is a bit of a hack
+  // to allow temp dirs to be created outside of an IoContext.
+  uint32_t tmpFileCounter = 0;
 };
 
 // ======================================================================================
@@ -491,6 +509,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions,    \
       workerd::api::FileSystemModule::WriteOptions,                                                \
       workerd::api::FileSystemModule::WriteAllOptions,                                             \
-      workerd::api::FileSystemModule::RenameOrCopyOptions
+      workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
+      workerd::api::FileSystemModule::MkdirOptions
 
 }  // namespace workerd::api

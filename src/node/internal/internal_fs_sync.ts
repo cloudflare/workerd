@@ -396,11 +396,11 @@ export function mkdirSync(
   })();
 
   validateBoolean(recursive, 'options.recursive');
+
+  // We don't implement the mode option in any meaningful way. We just validate it.
   parseFileMode(mode, 'mode');
 
-  path = normalizePath(path);
-
-  throw new Error('Not implemented');
+  return cffs.mkdir(normalizePath(path), { recursive, tmp: false });
 }
 
 export type MkdirTempSyncOptions = {
@@ -414,8 +414,8 @@ export function mkdtempSync(
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
   validateEncoding(encoding, 'options.encoding');
-  prefix = normalizePath(prefix);
-  throw new Error('Not implemented');
+  prefix = normalizePath(prefix, encoding);
+  return cffs.mkdir(normalizePath(prefix), { recursive: false, tmp: true })!;
 }
 
 export type OpenDirOptions = {
@@ -1016,8 +1016,8 @@ export function writevSync(
 // [x][x][x][ ] fs.lutimesSync(path, atime, mtime)
 // [x][x][x][ ] fs.linkSync(existingPath, newPath)
 // [x][x][x][ ] fs.lstatSync(path[, options])
-// [x][ ][ ][ ] fs.mkdirSync(path[, options])
-// [x][ ][ ][ ] fs.mkdtempSync(prefix[, options])
+// [x][x][x][ ] fs.mkdirSync(path[, options])
+// [x][x][x][ ] fs.mkdtempSync(prefix[, options])
 // [x][ ][ ][ ] fs.opendirSync(path[, options])
 // [x][x][x][ ] fs.openSync(path[, flags[, mode]])
 // [x][ ][ ][ ] fs.readdirSync(path[, options])
