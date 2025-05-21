@@ -489,7 +489,7 @@ class StringWrapper {
     } else {
       size_t actual_length =
           simdutf::convert_latin1_to_utf8_safe(handle.data, handle.length, buf.begin(), buf.size());
-      KJ_DASSERT(actual_length == utf8_length);
+      KJ_ASSERT(actual_length == utf8_length);
     }
     if constexpr (kj::isSameType<kj::String, T>()) {
       return js.accountedKjString(kj::mv(buf));
