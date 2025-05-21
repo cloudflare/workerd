@@ -348,6 +348,7 @@ export const encodeWptTest = {
         Uint16Array,
         Uint32Array,
         Uint8ClampedArray,
+        Float16Array,
         Float32Array,
         Float64Array,
       ].forEach((view) => {

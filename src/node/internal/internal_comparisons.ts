@@ -66,7 +66,7 @@ function areSimilarRegExps(a: RegExp, b: RegExp) {
   );
 }
 
-type FloatArray = Float32Array | Float64Array;
+type FloatArray = Float16Array | Float32Array | Float64Array;
 type AnyArrayBuffer = ArrayBuffer | SharedArrayBuffer;
 
 type Memos = {

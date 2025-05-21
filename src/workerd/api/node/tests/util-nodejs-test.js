@@ -286,6 +286,7 @@ export const utilInspect = {
     }
 
     [
+      Float16Array,
       Float32Array,
       Float64Array,
       Int16Array,
@@ -2416,6 +2417,7 @@ export const utilInspect = {
       [new Int8Array(2), '[Int8Array(2): null prototype] [ 0, 0 ]'],
       [new Int16Array(2), '[Int16Array(2): null prototype] [ 0, 0 ]'],
       [new Int32Array(2), '[Int32Array(2): null prototype] [ 0, 0 ]'],
+      [new Float16Array(2), '[Float16Array(2): null prototype] [ 0, 0 ]'],
       [new Float32Array(2), '[Float32Array(2): null prototype] [ 0, 0 ]'],
       [new Float64Array(2), '[Float64Array(2): null prototype] [ 0, 0 ]'],
       [new BigInt64Array(2), '[BigInt64Array(2): null prototype] [ 0n, 0n ]'],
@@ -4615,6 +4617,11 @@ export const testTypes = {
     }
 
     {
+      assert.ok(isFloat16Array(new Float16Array(0)));
+      assert.ok(!isFloat16Array(1));
+    }
+
+    {
       assert.ok(isFloat32Array(new Float32Array(0)));
       assert.ok(!isFloat32Array(1));
     }
@@ -4670,15 +4677,6 @@ export const testTypes = {
       // We don't really expose any externals in any existing APIS
       // where this would be useful, but hey, let's test it anyway.
       assert.ok(!isExternal({}));
-    }
-
-    // TODO(soon): Remove this when Float16Array is available unflagged.
-    // The proposal is stage 4 and the v8 C++ APIs are available, but the
-    // flag is still currently required to use it in JavaScript. We aren't
-    // setting that flag but we can still prepare for it to be available.
-    if (globalThis.Float16Array !== undefined) {
-      assert.ok(isFloat16Array(new Float16Array(0)));
-      assert.ok(!isFloat16Array(1));
     }
   },
 };
