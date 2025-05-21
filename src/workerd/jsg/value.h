@@ -10,6 +10,7 @@
 
 #include "simdutf.h"
 
+#include <workerd/jsg/fast-api.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
@@ -475,6 +476,32 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const DOMString& value) {
     return wrap(context, creator, value.asPtr());
+  }
+
+  template <StringLike T>
+  kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> context, const v8::FastOneByteString& handle, T*) {
+    auto& js = Lock::from(context->GetIsolate());
+    size_t utf8_length = simdutf::utf8_length_from_latin1(handle.data, handle.length);
+    kj::Array<char> buf = kj::heapArray<char>(utf8_length + 1);
+    buf[utf8_length] = '\0';
+    if (utf8_length == handle.length) {
+      buf.first(handle.length).copyFrom(kj::arrayPtr(handle.data, handle.length));
+    } else {
+      size_t actual_length =
+          simdutf::convert_latin1_to_utf8_safe(handle.data, handle.length, buf.begin(), buf.size());
+      KJ_ASSERT(actual_length == utf8_length);
+    }
+    if constexpr (kj::isSameType<kj::String, T>()) {
+      return js.accountedKjString(kj::mv(buf));
+    } else if constexpr (kj::isSameType<ByteString, T>()) {
+      return js.accountedByteString(kj::mv(buf));
+    } else if constexpr (kj::isSameType<USVString, T>()) {
+      return js.accountedUSVString(kj::mv(buf));
+    } else if constexpr (kj::isSameType<DOMString, T>()) {
+      return js.accountedDOMString(kj::mv(buf));
+    } else {
+      return kj::mv(buf);
+    }
   }
 
   kj::Maybe<kj::String> tryUnwrap(v8::Local<v8::Context> context,
