@@ -136,9 +136,7 @@ export function copyFileSync(
   dest: FilePath,
   _mode: number
 ): void {
-  src = normalizePath(src);
-  dest = normalizePath(dest);
-  throw new Error('Not implemented');
+  cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
 }
 
 export type CopySyncOptions = {
@@ -689,10 +687,8 @@ export function realpathSync(
 
 realpathSync.native = realpathSync;
 
-export function renameSync(oldPath: FilePath, newPath: FilePath): void {
-  oldPath = normalizePath(oldPath);
-  newPath = normalizePath(newPath);
-  throw new Error('Not implemented');
+export function renameSync(src: FilePath, dest: FilePath): void {
+  cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: false });
 }
 
 export type RmdirSyncOptions = {
@@ -1004,7 +1000,7 @@ export function writevSync(
 // [x][x][x][ ] fs.chmodSync(path, mode)
 // [x][x][x][ ] fs.chownSync(path, uid, gid)
 // [x][x][x][ ] fs.closeSync(fd)
-// [x][ ][ ][ ] fs.copyFileSync(src, dest[, mode])
+// [x][x][x][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ] fs.cpSync(src, dest[, options])
 // [x][x][x][ ] fs.existsSync(path)
 // [x][x][x][ ] fs.fchmodSync(fd, mode)
@@ -1032,7 +1028,7 @@ export function writevSync(
 // [x][x][x][ ] fs.readvSync(fd, buffers[, position])
 // [x][x][x][ ] fs.realpathSync(path[, options])
 // [x][x][x][ ] fs.realpathSync.native(path[, options])
-// [x][ ][ ][ ] fs.renameSync(oldPath, newPath)
+// [x][x][x][ ] fs.renameSync(oldPath, newPath)
 // [x][ ][ ][ ] fs.rmdirSync(path[, options])
 // [x][ ][ ][ ] fs.rmSync(path[, options])
 // [x][x][x][ ] fs.statSync(path[, options])

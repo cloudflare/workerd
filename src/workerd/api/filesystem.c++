@@ -559,6 +559,63 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
   KJ_UNREACHABLE;
 }
 
+void FileSystemModule::renameOrCopy(
+    jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options) {
+  // The source must exist, the destination must not.
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  NormalizedFilePath normalizedSrc(kj::mv(src));
+  NormalizedFilePath normalizedDest(kj::mv(dest));
+
+  auto srcNode = JSG_REQUIRE_NONNULL(vfs.resolve(js, normalizedSrc), Error, "File not found"_kj);
+
+  const jsg::Url& destUrl = normalizedDest;
+  const jsg::Url& srcUrl = normalizedSrc;
+  JSG_REQUIRE(vfs.resolve(js, destUrl) == kj::none, Error, "File already exists"_kj);
+  auto relative = destUrl.getRelative();
+  // The destination parent must exist.
+  auto parent =
+      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
+  // Let's make sure the parent is a directory.
+  auto& dir = JSG_REQUIRE_NONNULL(
+      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+
+  kj::Maybe<kj::Rc<Directory>> srcParent;
+  if (!options.copy) {
+    // If we are not copying, let's make sure that the source directory is writable
+    // before we actually try moving it.
+    auto relative = srcUrl.getRelative();
+    auto parent =
+        JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
+    auto& srcDir = JSG_REQUIRE_NONNULL(
+        parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
+    auto stat = srcDir->stat(js);
+    JSG_REQUIRE(stat.writable, Error, "access is denied");
+    srcParent = srcDir.addRef();
+  }
+
+  // The next part is easy. We either clone or add ref the original node and add it to the
+  // destination directory.
+  KJ_SWITCH_ONEOF(srcNode) {
+    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+      auto newFile = options.copy ? file->clone(js) : file.addRef();
+      dir->add(js, relative.name, kj::mv(newFile));
+    }
+    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+      JSG_REQUIRE(!options.copy, Error, "Cannot copy a directory");
+      dir->add(js, relative.name, dir.addRef());
+    }
+    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+      dir->add(js, relative.name, link.addRef());
+    }
+  }
+
+  KJ_IF_SOME(dir, srcParent) {
+    auto relative = srcUrl.getRelative();
+    dir->remove(js, kj::Path({relative.name}), {.recursive = true});
+  }
+}
+
 // =======================================================================================
 // Implementation of the Web File System API
 

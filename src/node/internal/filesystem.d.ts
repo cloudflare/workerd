@@ -65,3 +65,9 @@ export function writeAll(
   data: ArrayBufferView,
   options: { append: boolean; exclusive: boolean }
 ): number;
+
+export function renameOrCopy(
+  from: URL,
+  to: URL,
+  options: { copy: boolean }
+): void;

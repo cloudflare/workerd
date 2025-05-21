@@ -41,6 +41,8 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
+  copyFileSync,
+  renameSync,
   access,
   stat,
   chmod,
@@ -1378,5 +1380,36 @@ export const writeFileSyncTest = {
     writeFileSync(fd, '##');
     strictEqual(readFileSync(fd).toString(), 'Hello World!!!!##');
     closeSync(fd);
+  },
+};
+
+export const copyAndRenameTest = {
+  test() {
+    ok(!existsSync('/tmp/test.txt'));
+    ok(!existsSync('/tmp/test2.txt'));
+    writeFileSync('/tmp/test.txt', 'Hello World');
+    ok(existsSync('/tmp/test.txt'));
+    ok(!existsSync('/tmp/test2.txt'));
+
+    copyFileSync('/tmp/test.txt', '/tmp/test2.txt');
+    // Both files exist
+    ok(existsSync('/tmp/test.txt'));
+    ok(existsSync('/tmp/test2.txt'));
+
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      readFileSync('/tmp/test2.txt').toString()
+    );
+
+    // We can modify one of the files and the other remains unchanged
+    writeFileSync('/tmp/test.txt', 'Hello World 2');
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World 2');
+    strictEqual(readFileSync('/tmp/test2.txt').toString(), 'Hello World');
+
+    // Renaming the files work
+    renameSync('/tmp/test.txt', '/tmp/test3.txt');
+    ok(!existsSync('/tmp/test.txt'));
+    ok(existsSync('/tmp/test3.txt'));
+    strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
   },
 };

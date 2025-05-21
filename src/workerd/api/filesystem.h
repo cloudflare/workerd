@@ -98,6 +98,13 @@ class FileSystemModule final: public jsg::Object {
       jsg::BufferSource data,
       WriteAllOptions options);
 
+  struct RenameOrCopyOptions {
+    bool copy;
+    JSG_STRUCT(copy);
+  };
+
+  void renameOrCopy(jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options);
+
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
@@ -114,6 +121,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(read);
     JSG_METHOD(readAll);
     JSG_METHOD(writeAll);
+    JSG_METHOD(renameOrCopy);
   }
 };
 
@@ -482,6 +490,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::ReadLinkOptions,                                             \
       workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions,    \
       workerd::api::FileSystemModule::WriteOptions,                                                \
-      workerd::api::FileSystemModule::WriteAllOptions
+      workerd::api::FileSystemModule::WriteAllOptions,                                             \
+      workerd::api::FileSystemModule::RenameOrCopyOptions
 
 }  // namespace workerd::api
