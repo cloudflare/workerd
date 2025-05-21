@@ -17,10 +17,22 @@
 #include <v8-value.h>
 
 #include <kj/common.h>
+#include <kj/string.h>
 
 namespace workerd::jsg {
 
+class ByteString;
+class DOMString;
 class Lock;
+class USVString;
+
+// Update this list whenever a new string type is added.
+// TODO(soon): Merge this with webidl::isStringType once NonCoercible is supported.
+template <typename T>
+concept StringLike =
+    kj::isSameType<kj::String, T>() || kj::isSameType<kj::ArrayPtr<const char>, T>() ||
+    kj::isSameType<kj::Array<const char>, T>() || kj::isSameType<ByteString, T>() ||
+    kj::isSameType<USVString, T>() || kj::isSameType<DOMString, T>();
 
 template <typename T>
 constexpr bool isFunctionCallbackInfo = false;
@@ -75,9 +87,13 @@ constexpr bool isFastApiCompatible<Ret(jsg::Lock&, Args...)> = FastApiMethod<Ret
 
 template <typename T>
 struct FastApiJSGToV8 {
-  // We allow every type to be passed into v8 fast api using v8::Local<v8::Value>
-  // conversion.
   using value = v8::Local<v8::Value>;
+};
+
+template <typename T>
+  requires StringLike<kj::RemoveConst<kj::Decay<T>>>
+struct FastApiJSGToV8<T> {
+  using value = const v8::FastOneByteString&;
 };
 
 template <typename T>

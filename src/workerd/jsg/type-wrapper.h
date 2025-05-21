@@ -513,6 +513,19 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   auto unwrapFastApi(v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      TypeErrorContext errorContext) -> U {
+    auto maybe = this->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr);
+    KJ_IF_SOME(result, maybe) {
+      return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
+    } else {
+      throwTypeError(
+          context->GetIsolate(), errorContext, TypeWrapper::getName((kj::Decay<U>*)nullptr));
+    }
+  }
+
+  template <typename U>
+  auto unwrapFastApi(v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
     return unwrap<U>(context, arg, errorContext);
