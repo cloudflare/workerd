@@ -44,8 +44,6 @@ struct ResolveObserver {
     // The resolve originated from an internal direct call to
     // the ModuleRegistry.
     INTERNAL,
-    // The resolve originated from some other source (to be defined).
-    OTHER,
   };
 
   // Used to report the status of a module resolution.

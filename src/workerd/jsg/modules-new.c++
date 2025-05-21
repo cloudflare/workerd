@@ -14,13 +14,16 @@
 namespace workerd::jsg::modules {
 
 namespace {
-kj::Maybe<Module&> checkModule(const ResolveContext& context, Module& module) {
+// Returns kj::none if this given module is incapable of resolving the given
+// context. Otherwise, returns the module.
+kj::Maybe<const Module&> checkModule(const ResolveContext& context, const Module& module) {
   if (!module.evaluateContext(context)) {
     return kj::none;
   }
   return module;
 };
 
+// Ensure that the given module has been instantiated or errored.
 bool ensureInstantiated(Lock& js,
     v8::Local<v8::Module> module,
     const CompilationObserver& observer,
@@ -28,9 +31,18 @@ bool ensureInstantiated(Lock& js,
   if (module->GetStatus() == v8::Module::kUninstantiated) {
     bool result;
     if (!self->instantiate(js, module, observer).To(&result)) {
+      // If we got here, instantiation threw an error. Let's return
+      // false and allow that error to propagate.
       return false;
     }
+    // If we got here the instantiation may or may not have succeeded.
+    // Let's check...
     if (!result) {
+      // Nope, it failed. Let's throw an error.
+      // Note here we are scheduling the exception on the isolate directly
+      // rather than via the lock. This is because throwing via the lock
+      // also throws JsExceptionThrown, which is not what we want. Here
+      // we only want to schedule the exception in the isolate
       js.v8Isolate->ThrowError(
           js.str(kj::str("Failed to instantiate module: ", self->specifier())));
       return false;
@@ -39,7 +51,7 @@ bool ensureInstantiated(Lock& js,
   return true;
 }
 
-ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::Type type) {
+constexpr ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::Type type) {
   switch (type) {
     case ModuleBundle::BuiltinBuilder::Type::BUILTIN:
       return ModuleBundle::Type::BUILTIN;
@@ -49,6 +61,7 @@ ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::Type type) 
   KJ_UNREACHABLE;
 }
 
+// The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
   explicit EsModule(Url specifier, Type type, Flags flags, kj::Array<const char> source)
@@ -77,12 +90,12 @@ class EsModule final: public Module {
         type() == Type::BUNDLE ? CompilationObserver::Option::BUNDLE
                                : CompilationObserver::Option::BUILTIN);
 
-    static const int resourceLineOffset = 0;
-    static const int resourceColumnOffset = 0;
-    static const bool resourceIsSharedCrossOrigin = false;
-    static const int scriptId = -1;
-    static const bool resourceIsOpaque = false;
-    static const bool isWasm = false;
+    static constexpr int resourceLineOffset = 0;
+    static constexpr int resourceColumnOffset = 0;
+    static constexpr bool resourceIsSharedCrossOrigin = false;
+    static constexpr int scriptId = -1;
+    static constexpr bool resourceIsOpaque = false;
+    static constexpr bool isWasm = false;
     v8::ScriptOrigin origin(js.str(specifier().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
@@ -179,6 +192,7 @@ class EsModule final: public Module {
 // like CommonJS modules, JSON modules, etc.
 class SyntheticModule final: public Module {
  public:
+  // The name of the default export.
   static constexpr auto DEFAULT = "default"_kjc;
 
   SyntheticModule(Url specifier,
@@ -194,11 +208,12 @@ class SyntheticModule final: public Module {
   }
 
   v8::MaybeLocal<v8::Module> getDescriptor(Lock& js, const CompilationObserver&) const override {
+    // We add one to the size to accomodate the default export.
     v8::LocalVector<v8::String> exports(js.v8Isolate, namedExports.size() + 1);
     int n = 0;
-    exports[n++] = js.str(DEFAULT);
+    exports[n++] = js.strIntern(DEFAULT);
     for (const auto& exp: namedExports) {
-      exports[n++] = js.str(exp);
+      exports[n++] = js.strIntern(exp);
     }
     return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(specifier().getHref()),
         v8::MemorySpan<const v8::Local<v8::String>>(exports.data(), exports.size()),
