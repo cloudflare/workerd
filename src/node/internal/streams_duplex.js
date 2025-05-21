@@ -209,6 +209,10 @@ export function toWeb(duplex) {
   return newReadableWritablePairFromDuplex(duplex);
 }
 
+export function toBYOBWeb(duplex) {
+  return newReadableWritablePairFromDuplex(duplex, true /* createTypeBytes */);
+}
+
 export function from(body) {
   return duplexify(body, 'body');
 }

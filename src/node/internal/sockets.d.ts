@@ -3,15 +3,12 @@ export interface SocketInfo {
   localAddress?: string | null;
 }
 
-export type Reader = ReadableStreamBYOBReader & {
-  getReader(opts: { mode: 'byob' }): ReadableStreamBYOBReader;
-};
+export type Reader = ReadableStream;
 
 export interface Writer extends WritableStream {
   close(): Promise<void>;
   write(data: string | ArrayBufferView): Promise<void>;
   closed: Promise<void>;
-  desiredSize: number | null;
   releaseLock(): void;
 }
 

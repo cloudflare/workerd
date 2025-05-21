@@ -63,6 +63,7 @@ import type {
   OnReadOpts,
 } from 'node:net';
 import type { Writable } from 'node:stream';
+import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 
 const kLastWriteQueueSize = Symbol('kLastWriteQueueSize');
 const kTimeout = Symbol('kTimeout');
@@ -150,7 +151,7 @@ export declare class Socket extends _Socket {
   public _aborted: boolean;
   public _hadError: boolean;
   public _parent: null | Socket['_handle'];
-  public _parentWrap: null | Socket;
+  public _parentWrap: null | Socket | JSStreamSocket;
   public _host: null | string;
   public _peername: null | string;
   public _getsockname(): {
@@ -940,15 +941,6 @@ Object.defineProperties(Socket.prototype, {
       return 'closed';
     },
   },
-  writableLength: {
-    // @ts-expect-error TS2353 Required for __proto__
-    __proto__: null,
-    configurable: false,
-    enumerable: true,
-    get(this: Socket): number {
-      return this._writableState?.length ?? 0;
-    },
-  },
   bufferSize: {
     // @ts-expect-error TS2353 Required for __proto__
     __proto__: null,
@@ -956,7 +948,7 @@ Object.defineProperties(Socket.prototype, {
       if (this._handle) {
         return this.writableLength;
       }
-      return;
+      return undefined;
     },
   },
   [kUpdateTimer]: {
@@ -1211,7 +1203,7 @@ function initializeConnection(
         reader: handle.readable.getReader({ mode: 'byob' }),
         bytesRead: 0,
         bytesWritten: 0,
-        reading: true,
+        reading: false,
         options: {
           host: socket._host,
           port,
@@ -1281,28 +1273,18 @@ function initializeConnection(
 }
 
 export function onConnectionOpened(this: Socket): void {
-  try {
-    // The info.remoteAddress property is going to give the
-    // address in the form of a string like `${host}:{port}`. We can choose
-    // to pull that out here but it's not critical at this point.
-    this.connecting = false;
-    this._sockname = null;
+  // Callback may come after call to destroy
+  if (this.destroyed) {
+    return;
+  }
 
-    this._unrefTimer();
-
-    this.emit('connect');
-    this.emit('ready');
-
-    if (!this.isPaused()) {
-      if (this.encrypted) {
-        // This is required for TLSSocket
-        this._finishInit();
-      }
-
-      tryReadStart(this);
-    }
-  } catch (err) {
-    this.destroy(err as Error);
+  this.connecting = false;
+  this._sockname = null;
+  this._unrefTimer();
+  this.emit('connect');
+  this.emit('ready');
+  if (!this.isPaused()) {
+    tryReadStart(this);
   }
 }
 
@@ -1526,9 +1508,7 @@ function addClientAbortSignalOption(self: Socket, signal: AbortSignal): void {
   }
 
   if (signal.aborted) {
-    queueMicrotask(() => {
-      onAbort();
-    });
+    queueMicrotask(onAbort);
   } else {
     queueMicrotask(() => {
       disposable = addAbortListener(signal, onAbort);

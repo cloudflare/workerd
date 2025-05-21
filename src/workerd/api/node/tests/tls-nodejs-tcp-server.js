@@ -84,3 +84,31 @@ const helloServer = tls.createServer(options, (socket) => {
 helloServer.listen(process.env.HELLO_SERVER_PORT, () =>
   reportPort(helloServer)
 );
+
+const jsStreamServer = tls.createServer(options, (socket) => {
+  socket.resume();
+  socket.end('ohai');
+});
+jsStreamServer.listen(process.env.JS_STREAM_SERVER_PORT, () =>
+  reportPort(jsStreamServer)
+);
+
+// Taken from test/parallel/test-tls-streamwrap-buffersize.js
+const streamWrapServer = tls.createServer(options, (socket) => {
+  let str = '';
+  socket.setEncoding('utf-8');
+  socket.on('data', (chunk) => {
+    str += chunk;
+  });
+
+  socket.on(
+    'end',
+    common.mustCall(() => {
+      strictEqual(str, 'a'.repeat(iter - 1));
+      server.close();
+    })
+  );
+});
+streamWrapServer.listen(process.env.STREAM_WRAP_SERVER_PORT, () =>
+  reportPort(streamWrapServer)
+);
