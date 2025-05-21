@@ -897,8 +897,9 @@ class DurableObject:
     Base class used to define a Durable Object.
     """
 
-    def __init__(*_args, **_kwds):
-        pass
+    def __init__(self, ctx, env):
+        self.ctx = ctx
+        self.env = env
 
 
 class WorkerEntrypoint:
@@ -906,8 +907,9 @@ class WorkerEntrypoint:
     Base class used to define a Worker Entrypoint.
     """
 
-    def __init__(*_args, **_kwds):
-        pass
+    def __init__(self, ctx, env):
+        self.ctx = ctx
+        self.env = env
 
 
 class WorkflowEntrypoint:
@@ -915,5 +917,6 @@ class WorkflowEntrypoint:
     Base class used to define a Workflow Entrypoint.
     """
 
-    def __init__(*_args, **_kwds):
-        pass
+    def __init__(self, ctx, env):
+        self.ctx = ctx
+        self.env = env

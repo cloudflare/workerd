@@ -18,6 +18,12 @@ assertRaisesRegex = TestCase().assertRaisesRegex
 
 
 class PythonRpcTester(WorkerEntrypoint):
+    def __init__(self, ctx, env):
+        super().__init__(ctx, env)
+        # Verify that the superclass constructor initialises the env/ctx fields.
+        assert self.env is not None
+        assert self.ctx is not None
+
     async def no_args(self):
         return "hello from python"
 

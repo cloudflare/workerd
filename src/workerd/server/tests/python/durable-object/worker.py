@@ -18,6 +18,10 @@ class MixinTest:
 
 class DurableObjectExample(DurableObject, MixinTest):
     def __init__(self, state, env):
+        super().__init__(state, env)
+        assert self.env is not None
+        assert self.ctx is not None
+
         self.state = state
         self.counter = 0
         self.storage = state.storage
