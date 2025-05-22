@@ -20,24 +20,23 @@ export default {
   'compression-large-flush-output.any.js': {},
   'compression-multiple-chunks.tentative.any.js': {},
   'compression-output-length.tentative.any.js': {
-    comment: 'Check if this needs backend server',
-    expectedFailures: [
+    comment:
+      'These tests require the sidecar which is not enabled for compression-test',
+    skippedTests: [
       'the length of deflated (with -raw) data should be shorter than that of the original data',
       'the length of deflated data should be shorter than that of the original data',
       'the length of gzipped data should be shorter than that of the original data',
     ],
   },
   'compression-stream.tentative.any.js': {
-    comment: 'Check if this needs backend server',
-    expectedFailures:
-      process.platform === 'win32'
-        ? []
-        : [
-            'deflated small amount data should be reinflated back to its origin',
-            'deflated large amount data should be reinflated back to its origin',
-            'gzipped small amount data should be reinflated back to its origin',
-            'gzipped large amount data should be reinflated back to its origin',
-          ],
+    comment:
+      'These tests require the sidecar which is not enabled for compression-test',
+    skippedTests: [
+      'deflated small amount data should be reinflated back to its origin',
+      'deflated large amount data should be reinflated back to its origin',
+      'gzipped small amount data should be reinflated back to its origin',
+      'gzipped large amount data should be reinflated back to its origin',
+    ],
   },
   'compression-with-detach.tentative.window.js': {},
   'decompression-bad-chunks.tentative.any.js': {
