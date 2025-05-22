@@ -35,11 +35,14 @@ using api::pyodide::PythonConfig;
 class Server final: private kj::TaskSet::ErrorHandler {
  public:
   Server(kj::Filesystem& fs,
-      kj::Timer& timer,
-      kj::Network& network,
+      kj::AsyncIoContext& ioContext,
       kj::EntropySource& entropySource,
       Worker::ConsoleMode consoleMode,
       kj::Function<void(kj::String)> reportConfigError);
+
+  kj::AsyncIoContext& getIoContext() {
+    return ioContext;
+  }
   ~Server() noexcept;
 
   // Permit experimental features to be used. These features may break backwards compatibility
@@ -118,6 +121,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
  private:
   kj::Filesystem& fs;
+  kj::AsyncIoContext& ioContext;
   kj::Timer& timer;
   kj::Network& network;
   kj::EntropySource& entropySource;

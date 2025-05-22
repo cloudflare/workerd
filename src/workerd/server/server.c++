@@ -167,14 +167,14 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 // =======================================================================================
 
 Server::Server(kj::Filesystem& fs,
-    kj::Timer& timer,
-    kj::Network& network,
+    kj::AsyncIoContext& ioContext,
     kj::EntropySource& entropySource,
     Worker::ConsoleMode consoleMode,
     kj::Function<void(kj::String)> reportConfigError)
     : fs(fs),
-      timer(timer),
-      network(network),
+      ioContext(ioContext),
+      timer(ioContext.provider->getTimer()),
+      network(ioContext.provider->getNetwork()),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
       consoleMode(consoleMode),
@@ -3110,21 +3110,29 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // In workerd the module registry is always associated with just a single
     // worker instance, so we initialize it here. In production, however, a
     // single instance may be shared across multiple replicas.
-
     kj::Maybe<kj::String> maybeFallbackService;
     if (conf.hasModuleFallback()) {
       maybeFallbackService = kj::str(conf.getModuleFallback());
     }
 
+    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+        kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+    auto isPythonWorker = featureFlags.getPythonWorkers();
+    auto artifactBundler = isPythonWorker
+        ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+              .attach(kj::mv(pyodidePackageManager))
+        : ArtifactBundler::makeDisabledBundler();
+
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
         source.tryGet<Worker::Script::ModulesSource>(), featureFlags.asReader(), pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService));
+        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler), ioContext);
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig, kj::mv(newModuleRegistry), kj::mv(workerFs));
+      pythonConfig, kj::mv(newModuleRegistry), kj::mv(workerFs), ioContext);
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -3184,8 +3192,17 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     });
   }
 
-  auto script = isolate->newScript(
-      name, kj::mv(source), IsolateObserver::StartType::COLD, false, errorReporter);
+  using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+  kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+      kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+  auto isPythonWorker = featureFlags.getPythonWorkers();
+  auto artifactBundler = isPythonWorker
+      ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+            .attach(kj::mv(pyodidePackageManager))
+      : ArtifactBundler::makeDisabledBundler();
+
+  auto script = isolate->newScript(name, kj::mv(source), IsolateObserver::StartType::COLD, false,
+      errorReporter, kj::mv(artifactBundler));
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
