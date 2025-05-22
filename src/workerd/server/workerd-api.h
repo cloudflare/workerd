@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "workerd/api/pyodide/pyodide.h"
+
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
@@ -277,7 +279,8 @@ class WorkerdApi final: public Worker::Api {
       const Worker::Script::ModulesSource& source,
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,
-      const jsg::Url& bundleBase);
+      const jsg::Url& bundleBase,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none);
 
  private:
   struct Impl;
@@ -286,5 +289,7 @@ class WorkerdApi final: public Worker::Api {
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
 }  // namespace workerd::server
