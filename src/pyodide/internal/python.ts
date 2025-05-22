@@ -112,11 +112,11 @@ function validatePyodideVersion(pyodide: Pyodide): void {
   }
 }
 
-export async function loadPyodide(
+export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string
-): Promise<Pyodide> {
+): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
       SetupEmscripten.getModule()
@@ -131,11 +131,11 @@ export async function loadPyodide(
     Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 
     entropyMountFiles(Module);
-    await enterJaegerSpan('load_packages', () =>
+    enterJaegerSpan('load_packages', () => {
       // NB. loadPackages adds the packages to the `VIRTUALIZED_DIR` global which then gets used in
       // preloadDynamicLibs.
-      loadPackages(Module, TRANSITIVE_REQUIREMENTS)
-    );
+      loadPackages(Module, TRANSITIVE_REQUIREMENTS);
+    });
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
       prepareWasmLinearMemory(Module);

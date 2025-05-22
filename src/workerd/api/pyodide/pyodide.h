@@ -14,8 +14,12 @@
 #include <capnp/serialize.h>
 #include <kj/array.h>
 #include <kj/common.h>
-#include <kj/debug.h>
+#include <kj/compat/http.h>
 #include <kj/filesystem.h>
+#include <kj/function.h>
+#include <kj/string.h>
+#include <kj/table.h>
+#include <kj/timer.h>
 
 namespace workerd::api::pyodide {
 
@@ -491,6 +495,38 @@ class SetupEmscripten: public jsg::Object {
 };
 
 kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease);
+
+// Returns a list of filenames we need to fetch according to the pyodide-lock.json file
+// in addition to the requirements argument, we also must include all "stdlib" packages
+// as well as any transitive dependencies needed
+kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
+    kj::ArrayPtr<kj::String> requirements,
+    kj::StringPtr packagesVersion);
+
+// Constructs the path to a Python package in the package repository
+kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
+
+// Downloads a package with retry logic (up to 3 attempts with 5-second delays)
+kj::Promise<kj::Maybe<kj::Array<byte>>> downloadPackageWithRetry(kj::HttpClient& client,
+    kj::Timer& timer,
+    kj::HttpHeaderTable& headerTable,
+    kj::StringPtr url,
+    kj::StringPtr path);
+
+// Loads a single Python package, either from disk cache or by downloading it
+kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
+    const PyodidePackageManager& pyodidePackageManager,
+    kj::StringPtr packagesVersion,
+    kj::StringPtr filename,
+    kj::HttpClient& client,
+    kj::Timer& timer,
+    kj::HttpHeaderTable& table);
+
+// Preloads all required Python packages for a worker
+void fetchPyodidePackages(const PythonConfig& pyConfig,
+    const PyodidePackageManager& pyodidePackageManager,
+    kj::ArrayPtr<kj::String> pythonRequirements,
+    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {

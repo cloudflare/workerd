@@ -3636,15 +3636,23 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     // In workerd the module registry is always associated with just a single
     // worker instance, so we initialize it here. In production, however, a
     // single instance may be shared across multiple replicas.
-
     kj::Maybe<kj::String> maybeFallbackService;
     KJ_IF_SOME(moduleFallback, def.moduleFallback) {
       maybeFallbackService = kj::str(moduleFallback);
     }
 
+    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+        kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+    auto isPythonWorker = def.featureFlags.getPythonWorkers();
+    auto artifactBundler = isPythonWorker
+        ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+              .attach(kj::mv(pyodidePackageManager))
+        : ArtifactBundler::makeDisabledBundler();
+
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
         def.source.variant.tryGet<Worker::Script::ModulesSource>(), def.featureFlags, pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService));
+        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
@@ -3714,8 +3722,17 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     }
   }
 
-  auto script = isolate->newScript(
-      name, kj::mv(def.source), IsolateObserver::StartType::COLD, false, errorReporter);
+  using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+  kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+      kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+  auto isPythonWorker = def.featureFlags.getPythonWorkers();
+  auto artifactBundler = isPythonWorker
+      ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+            .attach(kj::mv(pyodidePackageManager))
+      : ArtifactBundler::makeDisabledBundler();
+
+  auto script = isolate->newScript(name, kj::mv(def.source), IsolateObserver::StartType::COLD,
+      false, errorReporter, kj::mv(artifactBundler));
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
