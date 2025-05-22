@@ -399,3 +399,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/streams-nodejs-test.js"],
 )
+
+wd_test(
+    src = "tests/http-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/http-nodejs-test.js"],
+)
