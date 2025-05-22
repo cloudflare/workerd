@@ -3066,15 +3066,23 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // In workerd the module registry is always associated with just a single
     // worker instance, so we initialize it here. In production, however, a
     // single instance may be shared across multiple replicas.
-
     kj::Maybe<kj::String> maybeFallbackService;
     if (conf.hasModuleFallback()) {
       maybeFallbackService = kj::str(conf.getModuleFallback());
     }
 
+    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+        kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+    auto isPythonWorker = featureFlags.getPythonWorkers();
+    auto artifactBundler = isPythonWorker
+        ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+              .attach(kj::mv(pyodidePackageManager))
+        : ArtifactBundler::makeDisabledBundler();
+
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
         source.tryGet<Worker::Script::ModulesSource>(), featureFlags.asReader(), pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService));
+        bundleBase, extensions, kj::mv(maybeFallbackService), kj::mv(artifactBundler));
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
@@ -3140,8 +3148,17 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     });
   }
 
-  auto script = isolate->newScript(
-      name, kj::mv(source), IsolateObserver::StartType::COLD, false, errorReporter);
+  using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+  kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+      kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+  auto isPythonWorker = featureFlags.getPythonWorkers();
+  auto artifactBundler = isPythonWorker
+      ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+            .attach(kj::mv(pyodidePackageManager))
+      : ArtifactBundler::makeDisabledBundler();
+
+  auto script = isolate->newScript(name, kj::mv(source), IsolateObserver::StartType::COLD, false,
+      errorReporter, kj::mv(artifactBundler));
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;

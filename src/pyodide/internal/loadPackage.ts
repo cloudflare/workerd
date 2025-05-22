@@ -10,29 +10,17 @@
  */
 
 import {
-  WORKERD_INDEX_URL,
   LOCKFILE,
   PACKAGES_VERSION,
   USING_OLDEST_PACKAGES_VERSION,
-  IS_WORKERD,
 } from 'pyodide-internal:metadata';
 import {
   VIRTUALIZED_DIR,
   STDLIB_PACKAGES,
 } from 'pyodide-internal:setupPackages';
 import { parseTarInfo } from 'pyodide-internal:tar';
-import { default as DiskCache } from 'pyodide-internal:disk_cache';
 import { createTarFS } from 'pyodide-internal:tarfs';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
-
-async function decompressArrayBuffer(
-  arrBuf: ArrayBuffer
-): Promise<ArrayBuffer> {
-  const resp = new Response(arrBuf);
-  return await new Response(
-    resp.body!.pipeThrough(new DecompressionStream('gzip'))
-  ).arrayBuffer();
-}
 
 function getPackageMetadata(requirement: string): PackageDeclaration {
   const obj = LOCKFILE['packages'][requirement];
@@ -43,57 +31,14 @@ function getPackageMetadata(requirement: string): PackageDeclaration {
   return obj;
 }
 
-// loadBundleFromR2 loads the package from the internet (through fetch) and uses the DiskCache as
-// a backing store. This is only used in local dev.
-async function loadBundleFromR2(requirement: string): Promise<Reader> {
-  // first check if the disk cache has what we want
-  const filename = getPackageMetadata(requirement).file_name;
-  let original = DiskCache.get(filename);
-  if (!original) {
-    // we didn't find it in the disk cache, continue with original fetch
-    const url = new URL(WORKERD_INDEX_URL + filename);
-    const response = await fetch(url);
-    if (response.status != 200) {
-      throw new Error(
-        `Could not fetch package at url ${url} received status ${response.status}`
-      );
-    }
-
-    original = await response.arrayBuffer();
-    DiskCache.put(filename, original);
-  }
-
-  if (filename.endsWith('.tar.gz')) {
-    const decompressed = await decompressArrayBuffer(original);
-    return new ArrayBufferReader(decompressed);
-  } else if (filename.endsWith('.tar')) {
-    return new ArrayBufferReader(original);
-  } else {
-    throw new Error('Unsupported package file type: ' + filename);
-  }
-}
-
-async function loadBundleFromR2WithRetry(
-  requirement: string,
-  currRetry: number
-): Promise<Reader> {
-  try {
-    return await loadBundleFromR2(requirement);
-  } catch (exc) {
-    if (currRetry < 3) {
-      console.warn(`Error loading '${requirement}' from R2: ${exc}`);
-      console.log('Retrying fetch in 5 seconds...');
-      await new Promise((r) => setTimeout(r, 5000));
-      return loadBundleFromR2WithRetry(requirement, currRetry + 1);
-    }
-
-    throw new Error(`Could not load '${requirement}' from R2: ${exc}`);
-  }
+// Helper function to get the path to a package in the Python package bucket
+function getPyodidePackagePath(version: string, filename: string): string {
+  return `python-package-bucket/${version}/${filename}`;
 }
 
 function loadBundleFromArtifactBundler(requirement: string): Promise<Reader> {
   const filename = getPackageMetadata(requirement).file_name;
-  const fullPath = 'python-package-bucket/' + PACKAGES_VERSION + '/' + filename;
+  const fullPath = getPyodidePackagePath(PACKAGES_VERSION, filename);
   const reader = ArtifactBundler.getPackage(fullPath);
   if (!reader) {
     throw new Error(
@@ -103,30 +48,9 @@ function loadBundleFromArtifactBundler(requirement: string): Promise<Reader> {
   return Promise.resolve(reader);
 }
 
-/**
- * ArrayBufferReader wraps around an arrayBuffer in a way that tar.js is able to read from
- */
-class ArrayBufferReader {
-  public constructor(private arrayBuffer: ArrayBuffer) {}
-
-  public read(offset: number, buf: Uint8Array): number {
-    const size = this.arrayBuffer.byteLength;
-    if (offset >= size || offset < 0) {
-      return 0;
-    }
-    let toCopy = buf.length;
-    if (size - offset < toCopy) {
-      toCopy = size - offset;
-    }
-    buf.set(new Uint8Array(this.arrayBuffer, offset, toCopy));
-    return toCopy;
-  }
-}
-
-async function loadPackagesImpl(
+async function loadBundle(
   Module: Module,
-  requirements: Set<string>,
-  loadBundle: (req: string) => Promise<Reader>
+  requirements: Set<string>
 ): Promise<void> {
   const loadPromises: Promise<[string, Reader]>[] = [];
   const loading = [];
@@ -137,7 +61,7 @@ async function loadPackagesImpl(
     if (VIRTUALIZED_DIR.hasRequirementLoaded(req)) {
       continue;
     }
-    loadPromises.push(loadBundle(req).then((r) => [req, r]));
+    loadPromises.push(loadBundleFromArtifactBundler(req).then((r) => [req, r]));
     loading.push(req);
   }
 
@@ -177,11 +101,6 @@ export async function loadPackages(
   if (USING_OLDEST_PACKAGES_VERSION) {
     pkgsToLoad = pkgsToLoad.union(new Set(STDLIB_PACKAGES));
   }
-  if (IS_WORKERD) {
-    await loadPackagesImpl(Module, pkgsToLoad, (req) =>
-      loadBundleFromR2WithRetry(req, 0)
-    );
-  } else {
-    await loadPackagesImpl(Module, pkgsToLoad, loadBundleFromArtifactBundler);
-  }
+
+  await loadBundle(Module, pkgsToLoad);
 }

@@ -372,12 +372,9 @@ let pythonEntrypointClasses: {
 
 // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
 // needs to be called inside an IO context.
-if (IS_WORKERD || IS_TRACING) {
-  // Currently when we're running via workerd or when tracing we cannot perform IO in the
+if (IS_TRACING) {
+  // Currently when tracing we cannot perform IO in the
   // top-level. So we have some custom logic for handlers here in that case.
-  //
-  // TODO: rewrite package download logic in workerd to fetch the packages in the same way as in
-  // edgeworker.
   //
   // Because of the above we have limited info, so we cannot get the method names of the classes
   // that are exported. But this doesn't matter as it's only useful for the validator.
@@ -407,6 +404,10 @@ if (IS_WORKERD || IS_TRACING) {
     if (typeof mainModule[pyHandlerName] === 'function') {
       handlers[handlerName] = makeHandler(pyHandlerName);
     }
+  }
+
+  if (typeof mainModule.test === 'function') {
+    handlers.test = makeHandler('test');
   }
 
   // In order to get the entrypoint classes exported by the worker, we use a Python module
