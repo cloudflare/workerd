@@ -241,8 +241,33 @@ export function getSystemErrorMessage(): void {
   throw new Error('node:util getSystemErrorMessage is not implemented');
 }
 
-export function styleText(): void {
-  throw new Error('node:util styleText is not implemented');
+export function styleText(
+  format: string | readonly string[],
+  text: string,
+  options?: { validateStream?: boolean }
+): string {
+  if (typeof text !== 'string') {
+    throw new ERR_INVALID_ARG_TYPE('text', 'string', text);
+  }
+
+  // In Node, options.validateStream defaults to true, in which case the function inserts ANSI
+  // color codes if `options.stream` (default: stdout) is a TTY. In workers, we don't have TTYs at
+  // all, so by default styleText() would never produce any ANSI codes. So, the vast majority of
+  // the type, the correct behavior is to just return `text` verbatim, and it's not really worth
+  // it for us to bother implementing the ANSI logic.
+  //
+  // That said, someone can technically pass `validateStream: false` to request that the ASNI codes
+  // are generated either way. We don't have the necessary tables for this so we'll throw in this
+  // case.
+  if (options && !options.validateStream) {
+    throw new Error(
+      'options.validateStream for node:util styleText() is not implemented'
+    );
+  }
+
+  // ANSI coloring is disabled so the format is irrelevant and we'll just return the text.
+  void format;
+  return text;
 }
 
 export default {

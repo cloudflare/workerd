@@ -4680,3 +4680,31 @@ export const testTypes = {
     }
   },
 };
+
+export const styleText = {
+  test() {
+    const { styleText } = util;
+
+    // Since workers has no TTY streams, styleText never colorizes anything.
+    assert.strictEqual(styleText('red', 'foo'), 'foo');
+    assert.strictEqual(styleText('bold', 'bar'), 'bar');
+    assert.strictEqual(styleText(['red', 'bold'], 'baz'), 'baz');
+    assert.strictEqual(styleText('blue', ''), '');
+
+    // Test options parameter (should be accepted but not affect output)
+    assert.strictEqual(
+      styleText('red', 'foo', { validateStream: true }),
+      'foo'
+    );
+    assert.throws(
+      () => {
+        styleText('red', 'foo', { validateStream: false });
+      },
+      {
+        name: 'Error',
+        message:
+          'options.validateStream for node:util styleText() is not implemented',
+      }
+    );
+  },
+};
