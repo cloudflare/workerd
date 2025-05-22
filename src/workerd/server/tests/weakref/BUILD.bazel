@@ -2,7 +2,6 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 js_test(
     name = "js-weak-ref-test",
-    size = "large",
     data = [
         ":config.capnp",
         ":index.mjs",
