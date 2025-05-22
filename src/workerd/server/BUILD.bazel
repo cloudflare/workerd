@@ -201,6 +201,7 @@ kj_test(
         ":server",
         "//src/workerd/util:test-util",
     ],
+    env = { "QEMU_RESERVED_VA" : "768G" },
 )
 
 kj_test(
