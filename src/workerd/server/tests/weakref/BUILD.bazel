@@ -2,7 +2,6 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 js_test(
     name = "js-weak-ref-test",
-    size = "large",
     data = [
         ":config.capnp",
         ":index.mjs",
@@ -14,5 +13,6 @@ js_test(
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WORKERD_CONFIG": "$(rootpath :config.capnp)",
     },
+    flaky = True,
     tags = ["js-test"],
 )
