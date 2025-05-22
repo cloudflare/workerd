@@ -65,11 +65,6 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
     builder.add(getExternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
   }
 
-  if (featureFlags.getPythonWorkers()) {
-    builder.add(pyodide::getExternalPyodideModuleBundle(featureFlags));
-    builder.add(pyodide::getInternalPyodideModuleBundle(featureFlags));
-  }
-
   if (featureFlags.getRttiApi()) {
     builder.add(getExternalRttiModuleBundle<TypeWrapper>(featureFlags));
   }

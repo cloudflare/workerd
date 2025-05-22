@@ -69,6 +69,8 @@ class WorkerdApi final: public Worker::Api {
       config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter);
 
+  kj::Maybe<const api::pyodide::EmscriptenRuntime&> getEmscriptenRuntime() const override;
+
   void compileModules(jsg::Lock& lock,
       const Worker::Script::ModulesSource& source,
       const Worker::Isolate& isolate,

@@ -53,6 +53,24 @@ bool ensureInstantiated(Lock& js,
   return true;
 }
 
+constexpr ResolveContext::Type moduleTypeToResolveContextType(Module::Type type) {
+  switch (type) {
+    case Module::Type::BUNDLE: {
+      return ResolveContext::Type::BUNDLE;
+    }
+    case Module::Type::BUILTIN: {
+      return ResolveContext::Type::BUILTIN;
+    }
+    case Module::Type::BUILTIN_ONLY: {
+      return ResolveContext::Type::BUILTIN_ONLY;
+    }
+    case Module::Type::FALLBACK: {
+      return ResolveContext::Type::BUNDLE;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 constexpr ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::Type type) {
   switch (type) {
     case ModuleBundle::BuiltinBuilder::Type::BUILTIN:
@@ -69,7 +87,6 @@ class EsModule final: public Module {
   explicit EsModule(Url specifier, Type type, Flags flags, kj::ArrayPtr<const char> source)
       : Module(kj::mv(specifier), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
-        externed(false),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
@@ -100,7 +117,8 @@ class EsModule final: public Module {
       KJ_IF_SOME(c, *lock) {
         // We new new here because v8 will take ownership of the CachedData instance,
         // even tho we are maintaining ownership of the underlying buffer.
-        data = new v8::ScriptCompiler::CachedData(c->data, c->length);
+        data = new v8::ScriptCompiler::CachedData(
+            c->data, c->length, v8::ScriptCompiler::CachedData::BufferPolicy::BufferNotOwned);
       }
     }
 
@@ -134,14 +152,11 @@ class EsModule final: public Module {
     // we do not generate the cache multiple times needlessly. When the lock is acquired
     // we check again to see if the cache is still empty, and skip generating if it is not.
     if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions) {
-      auto lock = cachedData.lockExclusive();
-      if (*lock == kj::none) {
-        auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript());
-        if (ptr != nullptr) {
-          kj::Own<v8::ScriptCompiler::CachedData> cached(
-              ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
-          *lock = kj::mv(cached);
-        }
+      if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
+        kj::Own<v8::ScriptCompiler::CachedData> cached(
+            ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
+        auto lock = cachedData.lockExclusive();
+        *lock = kj::mv(cached);
       }
     }
 
@@ -173,7 +188,6 @@ class EsModule final: public Module {
   kj::ArrayPtr<const char> source;
   // When externed is true, the source buffer is passed into the isolate as an externalized
   // string. This is only appropriate for built-in modules that are compiled into the binary.
-  bool externed = false;
   kj::MutexGuarded<kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>>> cachedData;
 };
 
@@ -332,8 +346,11 @@ class IsolateModuleRegistry final {
       auto& referring = JSG_REQUIRE_NONNULL(lookupCache.find<kj::HashIndex<UrlCallbacks>>(referrer),
           TypeError, kj::str("Referring module not found in the registry: ", referrer.getHref()));
 
+      // Now that we know the referrer module, we can set the context for the
+      // next resolve. In particular, the "type" of the context is determine
+      // by the type of the referring module.
       ResolveContext context = {
-        .type = referring.specifier.type,
+        .type = moduleTypeToResolveContextType(referring.module.type()),
         .source = ResolveContext::Source::DYNAMIC_IMPORT,
         .specifier = specifier,
         .referrer = referrer,
@@ -755,24 +772,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
 
     auto& referrerUrl = registry.lookup(js, referrer)
                             .map([&](IsolateModuleRegistry::Entry& entry) -> const Url& {
-      switch (entry.module.type()) {
-        case Module::Type::BUNDLE: {
-          type = ResolveContext::Type::BUNDLE;
-          break;
-        }
-        case Module::Type::BUILTIN: {
-          type = ResolveContext::Type::BUILTIN;
-          break;
-        }
-        case Module::Type::BUILTIN_ONLY: {
-          type = ResolveContext::Type::BUILTIN_ONLY;
-          break;
-        }
-        case Module::Type::FALLBACK: {
-          type = ResolveContext::Type::BUNDLE;
-          break;
-        }
-      }
+      type = moduleTypeToResolveContextType(entry.module.type());
       return entry.specifier.specifier;
     }).orDefault(registry.getBundleBase());
 

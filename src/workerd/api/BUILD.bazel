@@ -672,7 +672,10 @@ wd_test(
 wd_test(
     src = "tests/new-module-registry-test.wd-test",
     args = ["--experimental"],
-    data = ["tests/new-module-registry-test.js"],
+    data = [
+        "tests/new-module-registry-test.js",
+        "tests/test.wasm",
+    ],
 )
 
 wd_test(

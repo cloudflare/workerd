@@ -79,7 +79,6 @@ class PythonModuleInfo {
     auto clonedContents =
         KJ_MAP(content, this->contents) { return kj::heapArray<kj::byte>(content); };
     auto clonedNames = KJ_MAP(name, this->names) { return kj::str(name); };
-    // We need
     return PythonModuleInfo(kj::mv(clonedNames), kj::mv(clonedContents));
   }
 
@@ -497,20 +496,6 @@ template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {
   // We add `pyodide:` packages here including python-entrypoint-helper.js.
   registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
-}
-
-kj::Own<jsg::modules::ModuleBundle> getInternalPyodideModuleBundle(auto featureFlags) {
-  jsg::modules::ModuleBundle::BuiltinBuilder builder(
-      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
-  return builder.finish();
-}
-
-kj::Own<jsg::modules::ModuleBundle> getExternalPyodideModuleBundle(auto featureFlags) {
-  jsg::modules::ModuleBundle::BuiltinBuilder builder(
-      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
-  jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builder, PYODIDE_BUNDLE);
-  return builder.finish();
 }
 
 #define EW_PYODIDE_ISOLATE_TYPES                                                                   \
