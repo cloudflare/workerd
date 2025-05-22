@@ -1,6 +1,6 @@
-import { throws, ok, strictEqual } from 'node:assert';
-import { validateHeaderName, validateHeaderValue } from 'node:http';
-import { _checkIsHttpToken, _checkInvalidHeaderChar } from 'node:_http_common';
+import { throws, ok, strictEqual, deepStrictEqual } from 'node:assert';
+import { validateHeaderName, validateHeaderValue, METHODS } from 'node:http';
+import httpCommon from 'node:_http_common';
 import { inspect } from 'node:util';
 
 // Tests are taken from
@@ -78,7 +78,7 @@ export const testInvalidHeaderField2 = {
       '3.14159265359',
     ].forEach(function (str) {
       strictEqual(
-        _checkIsHttpToken(str),
+        httpCommon._checkIsHttpToken(str),
         true,
         `_checkIsHttpToken(${inspect(str)}) unexpectedly failed`
       );
@@ -106,7 +106,7 @@ export const testInvalidHeaderField2 = {
       'This,That',
     ].forEach(function (str) {
       strictEqual(
-        _checkIsHttpToken(str),
+        httpCommon._checkIsHttpToken(str),
         false,
         `_checkIsHttpToken(${inspect(str)}) unexpectedly succeeded`
       );
@@ -120,7 +120,7 @@ export const testInvalidHeaderField2 = {
       '!@#$%^&*()-_=+\\;\':"[]{}<>,./?|~`',
     ].forEach(function (str) {
       strictEqual(
-        _checkInvalidHeaderChar(str),
+        httpCommon._checkInvalidHeaderChar(str),
         false,
         `_checkInvalidHeaderChar(${inspect(str)}) unexpectedly failed`
       );
@@ -138,10 +138,57 @@ export const testInvalidHeaderField2 = {
       'Ding!\x07',
     ].forEach(function (str) {
       strictEqual(
-        _checkInvalidHeaderChar(str),
+        httpCommon._checkInvalidHeaderChar(str),
         true,
         `_checkInvalidHeaderChar(${inspect(str)}) unexpectedly succeeded`
       );
     });
+  },
+};
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/c514e8f781b2acedb6a2b42208d8f8f4d8392f09/test/parallel/test-http-methods.js
+export const testHttpMethods = {
+  async test() {
+    const methods = [
+      'ACL',
+      'BIND',
+      'CHECKOUT',
+      'CONNECT',
+      'COPY',
+      'DELETE',
+      'GET',
+      'HEAD',
+      'LINK',
+      'LOCK',
+      'M-SEARCH',
+      'MERGE',
+      'MKACTIVITY',
+      'MKCALENDAR',
+      'MKCOL',
+      'MOVE',
+      'NOTIFY',
+      'OPTIONS',
+      'PATCH',
+      'POST',
+      'PROPFIND',
+      'PROPPATCH',
+      'PURGE',
+      'PUT',
+      'QUERY',
+      'REBIND',
+      'REPORT',
+      'SEARCH',
+      'SOURCE',
+      'SUBSCRIBE',
+      'TRACE',
+      'UNBIND',
+      'UNLINK',
+      'UNLOCK',
+      'UNSUBSCRIBE',
+    ];
+
+    deepStrictEqual(METHODS, methods.toSorted());
+    deepStrictEqual(httpCommon.methods, methods.toSorted());
   },
 };

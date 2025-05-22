@@ -7,14 +7,16 @@ import {
   _checkIsHttpToken,
   _checkInvalidHeaderChar,
 } from 'node-internal:internal_http';
-
+import { METHODS } from 'node-internal:internal_http_constants';
 export { _checkIsHttpToken, _checkInvalidHeaderChar };
 export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
 export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
+export const methods = METHODS;
 
 export default {
   _checkIsHttpToken,
   _checkInvalidHeaderChar,
   chunkExpression,
   continueExpression,
+  methods,
 };
