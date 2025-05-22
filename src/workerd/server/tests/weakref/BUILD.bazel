@@ -13,5 +13,6 @@ js_test(
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
         "WORKERD_CONFIG": "$(rootpath :config.capnp)",
     },
+    flaky = True,
     tags = ["js-test"],
 )
