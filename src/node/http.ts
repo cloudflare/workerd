@@ -7,9 +7,12 @@ import {
   validateHeaderName,
   validateHeaderValue,
 } from 'node-internal:internal_http';
+import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
 
-export { validateHeaderName, validateHeaderValue };
+export { validateHeaderName, validateHeaderValue, METHODS, STATUS_CODES };
 export default {
   validateHeaderName,
   validateHeaderValue,
+  METHODS,
+  STATUS_CODES,
 };
