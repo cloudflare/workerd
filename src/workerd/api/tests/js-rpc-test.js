@@ -547,7 +547,6 @@ export default class DefaultService extends WorkerEntrypoint {
   }
 }
 
-/*
 export let basicServiceBinding = {
   async test(controller, env, ctx) {
     // Test service binding RPC.
@@ -588,7 +587,6 @@ export let basicServiceBinding = {
     // assert.strictEqual(await env.self.twoArgs(123, 2, "foo", "bar", "baz"), 258);
   },
 };
-*/
 
 export let extendingEntrypointClasses = {
   async test(controller, env, ctx) {

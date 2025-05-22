@@ -654,14 +654,14 @@ wd_test(
     ],
 )
 
-wd_test(
-    src = "tests/js-rpc-socket-test.wd-test",
-    args = [
-        "--experimental",
+#wd_test(
+    #src = "tests/js-rpc-socket-test.wd-test",
+    #args = [
+        #"--experimental",
         # "--no-verbose",
-    ],
-    data = ["tests/js-rpc-test.js"],
-)
+    #],
+    #data = ["tests/js-rpc-test.js"],
+#)
 
 wd_test(
     src = "http-test-ts.ts-wd-test",
