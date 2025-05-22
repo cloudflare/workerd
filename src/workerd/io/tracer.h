@@ -49,11 +49,11 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer final: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
+class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<PipelineTracer> {
  public:
   // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer() = default;
-  ~PipelineTracer() noexcept(false);
+  virtual ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
