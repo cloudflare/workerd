@@ -7,6 +7,7 @@ def wd_test(
         args = [],
         ts_deps = [],
         python_snapshot_test = False,
+        env = {},
         **kwargs):
     """Rule to define tests that run `workerd test` with a particular config.
 
@@ -17,6 +18,7 @@ def wd_test(
      data: Additional files which the .capnp config file may embed. All TypeScript files will be compiled,
      their resulting files will be passed to the test as well. Usually TypeScript or Javascript source files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
+     env: Environment variables to set when running the test.
     """
 
     # Add workerd binary to "data" dependencies.
@@ -58,6 +60,7 @@ def wd_test(
         data = data,
         args = args,
         python_snapshot_test = python_snapshot_test,
+        env = env,
         **kwargs
     )
 
@@ -178,6 +181,7 @@ def _wd_test_impl(ctx):
             executable = executable,
             runfiles = runfiles,
         ),
+        testing.TestEnvironment(ctx.attr.env),
     ]
 
 _wd_test = rule(
@@ -219,6 +223,8 @@ _wd_test = rule(
             default = "//src/workerd/api/node:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
+        # Environment variables to set when running the test.
+        "env": attr.string_dict(),
         # A reference to the Windows platform label, needed for the implementation of wd_test
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
