@@ -81,9 +81,11 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
   registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
-    // node:fs will be considered experimental until it is completed,
-    // so unless the experimental flag is enabled, don't register it.
-    if (module.getName() == "node:fs"_kj) {
+    // node:fs and node:http will be considered experimental until they are completed,
+    // so unless the experimental flag is enabled, don't register them.
+    auto name = module.getName();
+    if (name == "node:fs"_kj || name == "node:http"_kj || name == "node:_http_common"_kj ||
+        name == "node:_http_outgoing") {
       return featureFlags.getWorkerdExperimental();
     }
 
