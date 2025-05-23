@@ -165,12 +165,20 @@ export default {
               case 'put': {
                 break;
               }
+              case 'copy': {
+                break;
+              }
               case 'createMultipartUpload': {
                 return Response.json({
                   uploadId: 'multipartId',
                 });
               }
               case 'uploadPart': {
+                return Response.json({
+                  etag: 'partEtag',
+                });
+              }
+              case 'uploadPartCopy': {
                 return Response.json({
                   etag: 'partEtag',
                 });
@@ -183,6 +191,24 @@ export default {
               }
             }
             break;
+          }
+          case 'rangeOffLen': {
+            if (jsonRequest.method === 'createMultipartUpload') {
+              return Response.json({
+                uploadId: 'multipartId',
+              });
+            }
+            let range = jsonRequest.range;
+            if (jsonRequest.method === 'uploadPartCopy') {
+              range = jsonRequest.source.range;
+            }
+            assert.deepEqual(range, {
+              offset: '1',
+              length: '3',
+            });
+            return Response.json({
+              etag: 'partEtag',
+            });
           }
           case 'onlyIfStrongEtag': {
             assert.deepStrictEqual(jsonRequest.onlyIf, {
@@ -200,7 +226,44 @@ export default {
               ],
               uploadedBefore: conditionalDate,
             });
+            if (jsonRequest.method === 'copy') {
+              // Testing rejections
+              return new Response(null, {
+                status: 412,
+                headers: {
+                  'cf-r2-error': `{"version":1,"v4code":10031,"message":"At least one of the pre-conditions you specified did not hold."}`,
+                },
+              });
+            }
             break;
+          }
+
+          case 'onlyIfStrongEtagMultipart': {
+            if (jsonRequest.method === 'createMultipartUpload') {
+              return Response.json({
+                uploadId: 'multipartId',
+              });
+            }
+            if (jsonRequest.method === 'uploadPartCopy') {
+              assert.deepStrictEqual(jsonRequest.source.onlyIf, {
+                etagMatches: [
+                  {
+                    value: 'strongEtag',
+                    type: 'strong',
+                  },
+                ],
+                etagDoesNotMatch: [
+                  {
+                    value: 'strongEtag',
+                    type: 'strong',
+                  },
+                ],
+                uploadedBefore: conditionalDate,
+              });
+              return Response.json({
+                etag: 'partEtag',
+              });
+            }
           }
           case 'onlyIfWildcard': {
             assert.deepStrictEqual(jsonRequest.onlyIf, {
@@ -227,8 +290,9 @@ export default {
               httpFields,
             };
             switch (jsonRequest.method) {
-              case 'put':
+              case 'put': {
                 return Response.json(head);
+              }
               case 'createMultipartUpload':
                 return Response.json({
                   uploadId: 'multipartId',
@@ -370,7 +434,6 @@ export default {
                 include: [0, 1],
                 limit: 1,
                 method: 'list',
-                newRuntime: true,
                 prefix: 'basic',
                 version: 1,
               });
@@ -388,7 +451,6 @@ export default {
               assert.deepEqual(jsonRequest, {
                 include: [0],
                 method: 'list',
-                newRuntime: true,
                 prefix: 'httpMeta',
                 version: 1,
               });
@@ -406,7 +468,6 @@ export default {
               assert.deepEqual(jsonRequest, {
                 include: [1],
                 method: 'list',
-                newRuntime: true,
                 prefix: 'customMeta',
                 version: 1,
               });
@@ -555,6 +616,13 @@ export default {
     {
       // PutObject
       await compareResponse(env.BUCKET.put(key, body));
+      // Copy
+      await compareResponse(
+        env.BUCKET.copy(key, {
+          bucket: 'foo',
+          object: 'bar',
+        })
+      );
       // GetObject
       await compareResponse(env.BUCKET.get(key), {
         body,
@@ -572,6 +640,11 @@ export default {
         // UploadPart
         const part = await multi.uploadPart(1, body);
         assert.equal(part.etag, 'partEtag');
+        const copyPart = await multi.uploadPartCopy(2, {
+          bucket: 'foo',
+          source: 'bar',
+        });
+        assert.equal(copyPart.etag, 'partEtag');
         // Abort(doesn't quite make sense to abort **and** complete, but shouldn't matter)
         await multi.abort();
         // CompleteMultipartUpload
@@ -579,6 +652,10 @@ export default {
           multi.complete([
             {
               partNumber: 1,
+              etag: 'partEtag',
+            },
+            {
+              partNumber: 2,
               etag: 'partEtag',
             },
           ])
@@ -616,6 +693,7 @@ export default {
           offset: 1,
           length: 3,
         };
+        // GetObject
         await compareResponse(
           env.BUCKET.get('rangeOffLen', {
             range,
@@ -625,6 +703,14 @@ export default {
           },
           'ont'
         );
+        // UploadPartCopy
+        const multi = await env.BUCKET.createMultipartUpload('rangeOffLen');
+        const part = await multi.uploadPartCopy(1, {
+          bucket: 'foo',
+          object: 'bar',
+          range,
+        });
+        assert.equal(part.etag, 'partEtag');
       }
       // Suffix
       await compareResponse(
@@ -674,6 +760,38 @@ export default {
           uploadedAfter: new Date('0'),
         },
       });
+      assert.equal(
+        await env.BUCKET.copy(
+          'onlyIfStrongEtag',
+          {
+            bucket: 'foo',
+            object: 'bar',
+          },
+          {
+            onlyIf: {
+              etagMatches: 'strongEtag',
+              etagDoesNotMatch: 'strongEtag',
+              uploadedBefore: new Date('0'),
+            },
+          }
+        ),
+        null
+      );
+      const multipart = await env.BUCKET.createMultipartUpload(
+        'onlyIfStrongEtagMultipart'
+      );
+      assert.rejects(
+        async () =>
+          await multipart.uploadPartCopy(1, {
+            bucket: 'foo',
+            object: 'bar',
+            onlyIf: {
+              etagMatches: 'strongEtag',
+              etagDoesNotMatch: 'strongEtag',
+              uploadedBefore: new Date('0'),
+            },
+          })
+      );
     }
     // Metadata
     {
