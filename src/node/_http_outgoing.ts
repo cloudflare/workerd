@@ -7,9 +7,23 @@ import {
   validateHeaderName,
   validateHeaderValue,
 } from 'node-internal:internal_http';
+import {
+  kUniqueHeaders,
+  kHighWaterMark,
+  parseUniqueHeadersOption,
+} from 'node-internal:internal_http_outgoing';
 
-export { validateHeaderName, validateHeaderValue };
+export {
+  validateHeaderName,
+  validateHeaderValue,
+  kUniqueHeaders,
+  kHighWaterMark,
+  parseUniqueHeadersOption,
+};
 export default {
   validateHeaderName,
   validateHeaderValue,
+  kUniqueHeaders,
+  kHighWaterMark,
+  parseUniqueHeadersOption,
 };

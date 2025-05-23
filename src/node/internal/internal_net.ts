@@ -1436,7 +1436,7 @@ function onReadableStreamEnd(this: Socket): void {
   }
 }
 
-function getTimerDuration(msecs: unknown, name: string): number {
+export function getTimerDuration(msecs: unknown, name: string): number {
   validateNumber(msecs, name);
   if (msecs < 0 || !Number.isFinite(msecs)) {
     throw new ERR_OUT_OF_RANGE(name, 'a non-negative finite number', msecs);
