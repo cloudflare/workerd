@@ -197,11 +197,11 @@ wd_capnp_library(
 kj_test(
     size = "enormous",
     src = "server-test.c++",
+    env = {"QEMU_RESERVED_VA": "768G"},
     deps = [
         ":server",
         "//src/workerd/util:test-util",
     ],
-    env = { "QEMU_RESERVED_VA" : "768G" },
 )
 
 kj_test(

@@ -297,11 +297,11 @@ wd_cc_library(
 # arm64 temporary hack
 kj_test(
     src = "modules-new-test.c++",
+    env = {"QEMU_RESERVED_VA": "256G"},
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [
         ":jsg",
     ],
-    env = { "QEMU_RESERVED_VA" : "256G" },
 )
 
 # Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much
