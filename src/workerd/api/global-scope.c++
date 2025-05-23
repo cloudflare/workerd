@@ -83,17 +83,15 @@ void ExecutionContext::passThroughOnException() {
 }
 
 void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
-  // TODO(someday): Maybe instead of throwing we should TerminateExecution() here? But that
-  //   requires some more extensive changes.
   KJ_IF_SOME(r, reason) {
-    IoContext::current().abort(js.exceptionToKj(r.addRef(js)));
-    js.throwException(kj::mv(r));
+    IoContext::current().abort(js.exceptionToKj(kj::mv(r)));
   } else {
     auto e =
         JSG_KJ_EXCEPTION(FAILED, Error, "Worker execution was aborted due to call to ctx.abort().");
-    IoContext::current().abort(kj::cp(e));
-    kj::throwFatalException(kj::mv(e));
+    IoContext::current().abort(kj::mv(e));
   }
+
+  js.terminateExecutionNow();
 }
 
 namespace {

@@ -342,13 +342,16 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   }
 
   // Force context abort now.
-  void abort(kj::Exception&& e) {
-    if (abortException != kj::none) {
-      return;
-    }
-    abortException = kj::cp(e);
-    abortFulfiller->reject(kj::mv(e));
-  }
+  //
+  // Note that abort() is safe to call while the IoContext is current. Becaues of this, it cannot
+  // cancel any tasks synchronously, as this might cancel the current promise, leading to a crash.
+  void abort(kj::Exception&& e);
+
+  // Await the given promise and, if it throws, call `abort()` with the exception. The promise
+  // given here should just be a monitoring promise, it should not represent any sort of background
+  // work beyond monitoring. In particular, it must not be a task that attempts to enter the
+  // isolate by calling context.run().
+  void abortWhen(kj::Promise<void> promise);
 
   // Has event.passThroughOnException() been called?
   bool isFailOpen() {
@@ -648,10 +651,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
         js, waitForDeferredProxy(kj::mv(promise)), getCriticalSection(), IdentityFunc<T>());
   }
 
-  bool isFinalized() {
-    return ownedObjects.isFinalized();
-  }
-
   // Called by ScheduledEvent
   void setNoRetryScheduled() {
     retryScheduled = false;
@@ -935,7 +934,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   class PendingEvent;
 
   kj::Maybe<PendingEvent&> pendingEvent;
-  kj::Maybe<kj::Promise<void>> runFinalizersTask;
+  kj::Maybe<kj::Promise<void>> abortFromHangTask;
 
   WarningAggregator::Map warningAggregatorMap;
 
@@ -959,7 +958,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Array<jsg::Value> args);
 
   uint addTaskCounter = 0;
-  kj::Maybe<kj::TaskSet> tasks;
+  kj::TaskSet tasks;
 
   // The timeout manager needs to live below `deleteQueue` because the promises may refer to
   // objects in the queue.
@@ -1005,7 +1004,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<InputGate::Lock> inputLock,
       bool allowPermanentException);
 
-  void runFinalizers(Worker::AsyncLock& asyncLock);
+  void abortFromHang(Worker::AsyncLock& asyncLock);
 
   template <typename T>
   struct IdentityFunc {
@@ -1355,7 +1354,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 template <typename T>
 kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
-  struct RefcountedFulfiller: public Finalizeable, public kj::Refcounted {
+  struct RefcountedFulfiller: public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
     kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
     bool isDone = false;
@@ -1387,19 +1386,6 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
         // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
         // this promise.
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
-      }
-    }
-
-    kj::Maybe<kj::StringPtr> finalize() override {
-      if (!isDone) {
-        reject();
-        isDone = true;
-        return "A hanging Promise was canceled. This happens when the worker runtime is waiting "
-               "for a Promise from JavaScript to resolve, but has detected that the Promise "
-               "cannot possibly ever resolve because all code and events related to the "
-               "Promise's I/O context have already finished."_kj;
-      } else {
-        return kj::none;
       }
     }
   };
@@ -1446,7 +1432,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     }, kj::mv(errorHandler));
   }
 
-  return kj::mv(paf.promise);
+  return paf.promise.exclusiveJoin(onAbort().then([]() -> RemoveIoOwn<T> { KJ_UNREACHABLE; }));
 }
 
 template <IoContext::TopUpFlag topUp, typename Func>

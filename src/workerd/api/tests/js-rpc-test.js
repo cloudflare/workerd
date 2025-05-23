@@ -806,7 +806,10 @@ export let namedServiceBinding = {
     // A stateless entryponit method that never returns should fail due to PendingEvent tracking.
     await assert.rejects(() => env.MyService.neverReturn(), {
       name: 'Error',
-      message: 'The script will never generate a response.',
+      message:
+        "The Workers runtime canceled this request because it detected that your Worker's code " +
+        'had hung and would never generate a response. Refer to: ' +
+        'https://developers.cloudflare.com/workers/observability/errors/',
     });
 
     {
@@ -1808,19 +1811,19 @@ export let portAbortCall = {
       let abortPromise = stub.abort();
       let pingPromise = stub.ping();
 
-      // TODO(bug): These should all propagate the abort reason.
       await assert.rejects(abortPromise, {
         name: 'Error',
         message: 'test aborted by abort()',
       });
       await assert.rejects(pingPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test aborted by abort()',
       });
       await assert.rejects(hangPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test aborted by abort()',
       });
+      // TODO(bug): This should propagate the abort reason.
       await assert.rejects(stub.ping(), {
         name: 'Error',
         message:
@@ -1846,10 +1849,9 @@ export let portAbortCall = {
       let failPromise = stub.failCriticalSection();
       let pingPromise = stub.ping();
 
-      // TODO(bug): These should all propagate the abort reason.
       await assert.rejects(failPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test broken critical section',
       });
       await assert.rejects(pingPromise, {
         name: 'Error',
@@ -1857,8 +1859,9 @@ export let portAbortCall = {
       });
       await assert.rejects(hangPromise, {
         name: 'Error',
-        message: 'The execution context responding to this call was canceled.',
+        message: 'test broken critical section',
       });
+      // TODO(bug): This should propagate the abort reason.
       await assert.rejects(stub.ping(), {
         name: 'Error',
         message:

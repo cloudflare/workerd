@@ -3,6 +3,7 @@ load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_test.bzl", "wd_test")
 
 # TODO(cleanup): Split up into smaller targets, although this target is already relatively small and
 # not encumbered with many dependencies.
@@ -375,4 +376,10 @@ kj_test(
     deps = [
         ":io",
     ],
+)
+
+wd_test(
+    src = "io-context-test.wd-test",
+    args = ["--experimental"],
+    data = ["io-context-test.js"],
 )

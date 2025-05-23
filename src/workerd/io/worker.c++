@@ -2667,7 +2667,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       lock->runMicrotasks();
     } else {
       // Oops, we already exceeded the limit, so force the microtask queue to be thrown away.
-      lock->terminateExecution();
+      lock->terminateNextExecution();
       lock->runMicrotasks();
     }
 
@@ -3369,7 +3369,6 @@ struct Worker::Actor::Impl {
   // in each CustomEvent.
   kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
-  kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
   struct ScheduledAlarm {
     ScheduledAlarm(
@@ -3566,7 +3565,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       e.setDescription(kj::mv(description));
     }
 
-    impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
+    context.abort(kj::cp(e));
     impl->classInstance = kj::mv(e);
   }
 }
@@ -3619,11 +3618,7 @@ kj::Promise<void> Worker::Actor::onBroken() {
     impl->abortFulfiller = kj::mv(paf.fulfiller);
   }
 
-  return abortPromise
-      // inputGate.onBroken() is covered by IoContext::onAbort(), but outputGate.onBroken() is
-      // not.
-      .exclusiveJoin(impl->outputGate.onBroken())
-      .exclusiveJoin(kj::mv(impl->constructorFailedPaf.promise));
+  return abortPromise;
 }
 
 const Worker::Actor::Id& Worker::Actor::getId() {

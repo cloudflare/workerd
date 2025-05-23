@@ -2889,7 +2889,6 @@ KJ_TEST("Server: Durable Objects websocket hibernation") {
   // 7. Wake up the actor and have it abort itself. This should disconnect the WebSocket, even
   // though the WebSocket itself is still hibernated.
   KJ_EXPECT_LOG(INFO, "Error: test abort message");
-  KJ_EXPECT_LOG(INFO, "Error: test abort message");
   KJ_EXPECT_LOG(INFO, "other end of WebSocketPipe was destroyed");
   {
     auto conn = test.connect("test-addr");

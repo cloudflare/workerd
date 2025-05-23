@@ -258,8 +258,19 @@ void Lock::runMicrotasks() {
   v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-void Lock::terminateExecution() {
+void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
+}
+
+[[noreturn]] void Lock::terminateExecutionNow() {
+  terminateNextExecution();
+
+  // HACK: This has been observed to reliably make V8 check the termination flag and raise the
+  //   uncatchable termination exception.
+  jsg::check(v8::JSON::Stringify(v8Context(), str()));
+
+  // Shouldn't get here.
+  KJ_FAIL_ASSERT("V8 did not terminate execution when asked.");
 }
 
 bool Lock::pumpMsgLoop() {

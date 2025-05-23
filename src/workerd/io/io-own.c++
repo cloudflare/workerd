@@ -6,22 +6,6 @@
 
 namespace workerd {
 
-#ifdef KJ_DEBUG
-Finalizeable::Finalizeable(): context(IoContext::current()) {
-  if (context.actor != kj::none) {
-    // Disable the destructor check because finalization doesn't apply to actors.
-    finalized = true;
-  }
-}
-
-Finalizeable::~Finalizeable() noexcept(false) {
-  KJ_ASSERT(finalized || !context.isFinalized(),
-      "Finalizeable object survived request finalization without being finalized. This usually "
-      "means it was not passed to IoContext::addObject<T>() as a Finalizeable T.");
-}
-
-#endif
-
 void DeleteQueue::scheduleDeletion(OwnedObject* object) const {
   if (IoContext::hasCurrent() && IoContext::current().deleteQueue.queue.get() == this) {
     // Deletion from same thread. No need to enqueue.
@@ -113,42 +97,12 @@ void OwnedObjectList::unlink(OwnedObject& object) {
 }
 
 void OwnedObjectList::link(kj::Own<OwnedObject> object) {
-  KJ_IF_SOME(f, object->finalizer) {
-    if (finalizersRan) {
-      KJ_LOG(ERROR, "somehow new objects are being added after finalizers already ran",
-          kj::getStackTrace());
-      f.finalize();
-    }
-  }
-
   object->next = kj::mv(head);
   KJ_IF_SOME(next, object->next) {
     next.get()->prev = &object->next;
   }
   object->prev = &head;
   head = kj::mv(object);
-}
-
-kj::Vector<kj::StringPtr> OwnedObjectList::finalize() {
-  KJ_ASSERT(!finalizersRan);
-  finalizersRan = true;
-
-  kj::Vector<kj::StringPtr> warnings;
-  auto* link = &head;
-  while (*link != kj::none) {
-    auto& l = KJ_ASSERT_NONNULL(*link);
-    KJ_IF_SOME(f, l->finalizer) {
-      KJ_IF_SOME(w, f.finalize()) {
-        warnings.add(w);
-      }
-#ifdef KJ_DEBUG
-      f.finalized = true;
-#endif
-    }
-    link = &l->next;
-  }
-
-  return warnings;
 }
 
 void IoCrossContextExecutor::execute(jsg::Lock& js, kj::Function<void(jsg::Lock&)>&& func) {

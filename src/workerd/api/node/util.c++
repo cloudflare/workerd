@@ -283,16 +283,7 @@ namespace {
     ioContext.abort(JSG_KJ_EXCEPTION(FAILED, Error, kj::mv(message)));
   }
   // ...then we tell the isolate to terminate the current JavaScript execution.
-  // Oddly however, this does not appear to *actually* terminate the thread of
-  // execution unless we trigger the Isolate to handle the intercepts, which
-  // calling v8::JSON::Stringify does. Weird... but ok? As long as it works
-  // TODO(soon): Investigate if there is a better approach to triggering the
-  // interrupt handling.
-  js.v8Isolate->TerminateExecution();
-  jsg::check(v8::JSON::Stringify(js.v8Context(), js.str()));
-  // This should be unreachable here as we expect the isolate to terminate and
-  // an exception to have been thrown.
-  KJ_UNREACHABLE;
+  js.terminateExecutionNow();
 }
 }  // namespace
 
