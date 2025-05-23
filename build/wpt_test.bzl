@@ -69,7 +69,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
-        sidecar_port_bindings = ["HTTP_PORT", "HTTPS_PORT"] if start_server else [],
+        sidecar_port_bindings = ["HTTP_PORT", "HTTPS_PORT", "WS_PORT"] if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
         data = data,
         **kwargs
@@ -272,6 +272,7 @@ const unitTests :Workerd.Config = (
           (name = "unsafe", unsafeEval = void),
           (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
           (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
+          (name = "WS_PORT", fromEnvironment = "WS_PORT"),
           (name = "GEN_TEST_CONFIG", fromEnvironment = "GEN_TEST_CONFIG"),
           {bindings}
         ],
@@ -358,7 +359,8 @@ cd $(dirname $0)
   "check_subdomains": false,
   "ports": {{
     "http": [$HTTP_PORT, "auto"],
-    "https": [$HTTPS_PORT, "auto"]
+    "https": [$HTTPS_PORT, "auto"],
+    "ws": [$WS_PORT]
   }}
 }}
 EOF

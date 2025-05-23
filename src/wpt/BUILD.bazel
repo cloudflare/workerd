@@ -108,3 +108,16 @@ wpt_test(
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
+
+wpt_test(
+    name = "websockets",
+    config = "websockets-test.ts",
+    wpt_directory = "@wpt//:websockets@module",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
