@@ -1082,6 +1082,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
+    capnp::List<config::Extension>::Reader extensions,
     kj::Maybe<kj::String> maybeFallbackService) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
@@ -1193,6 +1194,29 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   }
 
   builder.add(bundleBuilder.finish());
+
+  // Handle extensions
+  jsg::modules::ModuleBundle::BuiltinBuilder publicExtensionsBuilder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+  jsg::modules::ModuleBundle::BuiltinBuilder privateExtensionsBuilder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+
+  for (auto extension: extensions) {
+    for (auto module: extension.getModules()) {
+      KJ_IF_SOME(url, jsg::Url::tryParse(module.getName())) {
+        if (module.getInternal()) {
+          privateExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
+        } else {
+          privateExtensionsBuilder.addEsm(url, module.getEsModule().asArray());
+        }
+      } else {
+        KJ_LOG(WARNING, "Ignoring extension module with invalid name", module.getName());
+      }
+    }
+  }
+
+  builder.add(publicExtensionsBuilder.finish());
+  builder.add(privateExtensionsBuilder.finish());
 
   // Add the built-in module bundles that support python workers/pyodide.
   if (hasPythonModules) {
@@ -1403,6 +1427,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     }));
   }
 
+  // All done!
   return builder.finish();
 }
 

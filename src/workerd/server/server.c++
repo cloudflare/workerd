@@ -3076,7 +3076,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     }
 
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver, modulesSource,
-        featureFlags.asReader(), pythonConfig, bundleBase, kj::mv(maybeFallbackService));
+        featureFlags.asReader(), pythonConfig, bundleBase, extensions,
+        kj::mv(maybeFallbackService));
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();

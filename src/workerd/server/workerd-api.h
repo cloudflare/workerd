@@ -278,6 +278,7 @@ class WorkerdApi final: public Worker::Api {
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
+      capnp::List<config::Extension>::Reader extensions,
       kj::Maybe<kj::String> fallbackService = kj::none);
 
  private:
