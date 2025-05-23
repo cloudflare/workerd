@@ -116,6 +116,15 @@ struct EncoderModuleRegistryImpl {
     }
   }
 
+  template <typename Func>
+  void addBuiltinBundleFiltered(jsg::Bundle::Reader bundle, Func filter) {
+    for (auto module: bundle.getModules()) {
+      if (filter(module)) {
+        addBuiltinModule(module);
+      }
+    }
+  }
+
   void addBuiltinModule(jsg::Module::Reader module) {
     TypeScriptModuleContents contents(module.getTsDeclaration());
     ModuleInfo info(module.getName(), module.getType(), kj::mv(contents));

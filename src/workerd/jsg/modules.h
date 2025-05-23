@@ -316,6 +316,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     }
   }
 
+  template <typename Func>
+  void addBuiltinBundleFiltered(Bundle::Reader bundle, Func filter) {
+    for (auto module: bundle.getModules()) {
+      if (filter(module)) {
+        addBuiltinModule(module);
+      }
+    }
+  }
+
   // Register new module accessible by a given importPath. The module is instantiated
   // after first resolve attempt within application has failed, i.e. it is possible for
   // application to override the module.
