@@ -764,3 +764,16 @@ export const webSocketUrlValidation = {
     });
   },
 };
+
+export const reuseCtx = {
+  async test(controller, env, ctx) {
+    ctx.reused = true;
+    await ctx.exports.reuseCtx.check(null);
+    await ctx.exports.reuseCtx.check(null);
+  },
+
+  check(_, env, ctx) {
+    strictEqual(ctx.reused, undefined);
+    ctx.reused = true;
+  },
+};

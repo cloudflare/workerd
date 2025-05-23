@@ -662,11 +662,24 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables delete operations on memory cache if enabled.
 
-  uniqueCtxPerInvocation @74: Bool
+  obsolete74 @74: Bool
       $compatEnableFlag("unique_ctx_per_invocation")
-      $compatDisableFlag("nonclass_entrypoint_reuses_ctx_across_invocations")
       $compatEnableDate("2025-03-10");
-  # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx per invocation
+  # Creates a unique ExportedHandler for each call to `export default` thus allowing a unique ctx
+  # per invocation.
+  #
+  # OBSOLETE: We decided to apply this change even to old workers as we've found some old workers
+  #   that assumed this behavior all along, and so this change actually fixes bugs for them.
+  #   It seems unlikely to break anyone because there's no way a Worker could depend on any two
+  #   requests hitting the same isolate, so how could they depend on any two requests having the
+  #   same `ctx` object? At worst they might store some sort of cache on it which becomes
+  #   ineffective, but their Worker would still work, and anyway this would be a very weird thing
+  #   for someone to do.
+
+  reuseCtxAcrossNonclassEvents @92: Bool
+      $compatEnableFlag("nonclass_entrypoint_reuses_ctx_across_invocations");
+  # Just in case someone somewhere somehow actually relied on every event receiving the same `ctx`
+  # object, this restores the original behavior. We do not recommend this.
 
   queueConsumerNoWaitForWaitUntil @75 :Bool
       $compatEnableFlag("queue_consumer_no_wait_for_wait_until")
@@ -795,4 +808,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # outbound Worker does not really care to block `connect()` requests. Until such a time as we
   # create an actual API for proxying connections, such outbound workers can set this compat flag
   # to opt into allowing connect requests to pass through.
+
+  # NOTE: `reuseCtxAcrossNonclassEvents @92` was declared earlier in the file. Next ordinal is
+  #   @93.
 }

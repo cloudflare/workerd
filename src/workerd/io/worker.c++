@@ -2012,7 +2012,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   kj::StringPtr n = name.orDefault("default"_kj);
   KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
     jsg::Lock& js = *this;
-    if (FeatureFlags::get(js).getUniqueCtxPerInvocation()) {
+    if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
       api::ExportedHandler constructedHandler = h.clone(js);
 
       constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
