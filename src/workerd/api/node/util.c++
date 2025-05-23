@@ -14,7 +14,8 @@ namespace workerd::api::node {
 
 bool isExperimentalNodeJsCompatModule(kj::StringPtr name) {
   return name == "node:fs"_kj || name == "node:http"_kj || name == "node:_http_common"_kj ||
-      name == "node:_http_outgoing"_kj;
+      name == "node:_http_outgoing"_kj || name == "node:_http_client"_kj ||
+      name == "node:_http_incoming"_kj;
 }
 
 MIMEParams::MIMEParams(kj::Maybe<MimeType&> mimeType): mimeType(mimeType) {}

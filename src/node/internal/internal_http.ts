@@ -30,13 +30,19 @@ export function _checkInvalidHeaderChar(val: string): boolean {
   return headerCharRegex.test(val);
 }
 
-export function validateHeaderName(name: string, label: string): void {
+export function validateHeaderName(
+  name: string,
+  label: string = 'Header name'
+): void {
   if (typeof name !== 'string' || !name || !_checkIsHttpToken(name)) {
-    throw new ERR_INVALID_HTTP_TOKEN(label || 'Header name', name);
+    throw new ERR_INVALID_HTTP_TOKEN(label, name);
   }
 }
 
-export function validateHeaderValue(name: string, value?: string): void {
+export function validateHeaderValue(
+  name: string,
+  value: string | undefined
+): void {
   if (value === undefined) {
     throw new ERR_HTTP_INVALID_HEADER_VALUE(value, name);
   }
