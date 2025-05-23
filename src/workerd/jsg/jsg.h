@@ -2779,7 +2779,8 @@ class Lock {
   BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   // Returns a jsg::BufferSource whose underlying JavaScript handle is an ArrayBuffer
-  // as opposed to the default Uint8Array.
+  // as opposed to the default Uint8Array.  May copy and move the bytes if they are
+  // not in the right sandbox.
   BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   enum RegExpFlags {

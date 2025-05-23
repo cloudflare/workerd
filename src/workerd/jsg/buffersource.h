@@ -82,12 +82,21 @@ class BackingStore {
   // V8 sandbox for the isolate.
   static BackingStore from(Lock& js, kj::Array<kj::byte> data) {
     // Creates a new BackingStore that takes over ownership of the given kj::Array.
+    // The bytes may be moved if they are not inside the sandbox already.
     size_t size = data.size();
-    auto ptr = new kj::Array<byte>(kj::mv(data));
-    return BackingStore(
-        v8::ArrayBuffer::NewBackingStore(ptr->begin(), size,
-            [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<byte>*>(ptr); }, ptr),
-        size, 0, getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
+    if (js.v8Isolate->GetGroup().SandboxContains(data.begin())) {
+      auto ptr = new kj::Array<byte>(kj::mv(data));
+      return BackingStore(v8::ArrayBuffer::NewBackingStore(ptr->begin(), size,
+                              [](void*, size_t, void* ptr) {
+        delete reinterpret_cast<kj::Array<byte>*>(ptr);
+      }, ptr),
+          size, 0, getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
+    } else {
+      auto result = BackingStore(v8::ArrayBuffer::NewBackingStore(js.v8Isolate, size), size, 0,
+          getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
+      memcpy(result.asArrayPtr().begin(), data.begin(), size);
+      return result;
+    }
   }
 
   // Creates a new BackingStore of the given size.

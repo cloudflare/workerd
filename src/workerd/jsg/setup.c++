@@ -348,8 +348,13 @@ static v8::Isolate* newIsolate(
 
     if (params.array_buffer_allocator == nullptr &&
         params.array_buffer_allocator_shared == nullptr) {
+#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+          v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
+#else
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+#endif
     }
     return v8::Isolate::New(group, params);
   });
