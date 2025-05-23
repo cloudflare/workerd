@@ -47,6 +47,7 @@ class WebSocketRequestResponsePair;
 class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
+struct EmscriptenRuntime;
 KJ_DECLARE_NON_POLYMORPHIC(ArtifactBundler_State);
 }  // namespace pyodide
 }  // namespace api
@@ -700,6 +701,10 @@ class Worker::Api {
 
   // Return the virtual file system for this worker.
   virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
+
+  virtual kj::Maybe<const api::pyodide::EmscriptenRuntime&> getEmscriptenRuntime() const {
+    return kj::none;
+  }
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually

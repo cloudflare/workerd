@@ -23,10 +23,10 @@ struct ResolveObserver {
 
   // Identifies the context in which a module resolution is being performed.
   enum class Context {
-    // The resolve is being performed in the context of a worker bundle module
+    // The resolve is being performed by a worker bundle module
     // (that is, a worker script is calling import or require).
     BUNDLE,
-    // The resolve is being performed in the context of a builtin module
+    // The resolve is being performed by a builtin module
     // (that is, one of the modules built into the worker runtime).
     BUILTIN,
     // Like builtin, but it's a module that is *only* resolvable from a builtin
@@ -44,8 +44,6 @@ struct ResolveObserver {
     // The resolve originated from an internal direct call to
     // the ModuleRegistry.
     INTERNAL,
-    // The resolve originated from some other source (to be defined).
-    OTHER,
   };
 
   // Used to report the status of a module resolution.

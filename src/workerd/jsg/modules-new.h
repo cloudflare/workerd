@@ -44,20 +44,22 @@ namespace workerd::jsg::modules {
 // service but there is no API to manipulate the ModuleRegistry once it has
 // been created).
 //
-// When a Worker::Isolate is created, a ModuleBundle is created to contain
-// Module definitions declared by the worker bundle configuration. One or more
+// All access to the ModuleRegistry is thread-safe by way of requiring callers
+// to hold and pass the jsg::Lock&. With exception to the fallback service, all
+// operations within the ModuleRegistry are either synchronous or expected to
+// use JavaScript promises to perform asynchronous operations.
+//
+// When a Worker is created, a ModuleBundle is created to contain Module
+// definitions declared by the worker bundle configuration. One or more
 // are also provided that provides modules from within the runtime.
 //
 // When a v8::Isolate* is created for a particular worker, the ModuleRegistry
 // instance will be bound to the isolate in the form of a new IsolateModuleRegistry
 // instance. This is the interface that is actually used to resolve specifiers into
-// imported modules.
+// imported modules. The ModuleRegistry instance itself is owned by the Worker.
 //
-// The relationship between ModuleRegistry and IsolateModuleRegistry is such
-// that a ModuleRegistry can be shared across multiple isolates/contexts safely,
-// while the IsolateModuleRegistry is bound to an individual isolate/context
-// pair. The ModuleRegistry, ModuleBundle, and individual Module instances do
-// not store any state that is specific to an isolate.
+// The ModuleRegistry, ModuleBundle, and individual Module instances do not /
+// must not store any state that is specific to an isolate.
 //
 // Specifiers are always handled as URLs.
 //
@@ -67,7 +69,7 @@ namespace workerd::jsg::modules {
 // `buffer`.
 //
 // Specifiers for modules that come from the worker bundle config are always
-// relative to `file:///`.
+// relative to `file:///bundle` (by default).
 //
 // For ESM modules, the specifier is accessible using import.meta.url.
 // All ESM modules support import.meta.resolve(...)
@@ -82,11 +84,16 @@ namespace workerd::jsg::modules {
 // will never actually be compiled or evaluated.
 //
 // A ModuleBundle will have one of three basic types: Bundle, Builtin,
-// or Builtin-Only. A Bundle ModuleBundle provides access to modules
-// that are defined in the worker bundle configuration. A Builtin ModuleBundle
-// provides access to modules that are compiled into the runtime and are
-// importable by bundle scripts. A Builtin-Only ModuleBundle provides access
-// to built-in modules that can only be imported by other built-ins.
+// or Builtin-Only.
+//
+//  * A Bundle ModuleBundle provides access to modules that are defined in the
+//    worker bundle configuration. These may always be imported by the worker
+//    bundle scripts and may override modules that are defined in the runtime.
+//  * A Builtin ModuleBundle provides access to modules that are compiled into
+//    the runtime and are importable by bundle scripts. These may always be
+//    imported by the worker bundle scripts.
+//  * A Builtin-Only ModuleBundle provides access to built-in modules that can
+//    only be imported by other built-ins. These are invisible to bundle scripts.
 //
 // A special fourth type of ModuleBundle that is available only for local
 // dev in workerd is the Fallback type. This will use dynamic resolution
@@ -114,29 +121,26 @@ namespace workerd::jsg::modules {
 //   1. Builtin-Only ModuleBundle
 //
 // When the Fallback ModuleBundle is used, modules loaded from the fallback
-// are handled as if they are bundle scripts. That key difference, however, is
+// are handled as if they are bundle scripts. The key difference, however, is
 // that the fallback service is not limited to a specific URL root.
 //
 // Notice that for built-ins, the Bundle ModuleBundle is not used. This
-// means it will not be possible to import bundle modules from a built-in.
+// means it will not be possible to import worker bundle modules from a
+// built-in.
 //
 // The ModuleRegistry evaluates modules synchronously and all modules are
 // evaluated outside of the current IoContext (if any). This means the
 // evaluation of any module cannot perform any i/o and therefore is expected
 // to resolve synchronously. This allows for both ESM and CommonJS style
-// imports/requires. However, this also means that modules that do need to
-// be resolved, loaded, and evaluated asynchronously must make appropriate
-// arrangements to be able to do so.
+// imports/requires. However, this also means that module bundles that do need
+// to be resolved, loaded, and evaluated asynchronously (like the fallback
+// service) must make appropriate arrangements to be able to do so.
 //
 // Module resolution occurs in two phases: Resolve and Instantiate.
 // The Resolve phase is respondsible for determining if a module is available
-// and does not require the isolate lock to be held. The Instantiate phase
-// creates the v8::Module instance and does require the isolate lock to be
+// and does not really require the isolate lock to be held. The Instantiate
+// phase creates the v8::Module instance and does require the isolate lock to be
 // held.
-//
-// All modules are Instantiated lazily. That is, the ModuleRegistry will not
-// instantiate a module until after it is resolved (implying an import or
-// require).
 //
 // Metrics can be collected for module resolution and evaluation.
 
@@ -146,9 +150,16 @@ struct ResolveContext final {
   using Source = ResolveObserver::Source;
   using Type = ResolveObserver::Context;
 
+  // The type of module being resolved (one of BUNDLE, BUILTIN, or BUILTIN_ONLY)
   Type type;
+
+  // The source of the module resolution (e.g. import, dynamic import, require, etc);
   Source source;
+
+  // The fully resolved absolute import specifier URL for the module being resolved.
   const Url& specifier;
+
+  // The referrer is the URL of the module that is importing this module.
   const Url& referrer;
 
   // The raw specifier is the original specifier passed in, if any,
@@ -164,8 +175,15 @@ struct ResolveContext final {
 // Importantly, a Module is immutable once created and must be thread-safe.
 // The Module class itself represents the definition of a module and not
 // its actual instantiation.
+// The Module class is a virtual base class that is specialized for the
+// different types of modules being supported. There are essentially two
+// types of modules: ESM and Synthetic. ESM modules are the standard backed
+// by an ESM module script. Synthetic modules are any other type of module.
 class Module {
  public:
+  // The types here echo the types in ResolveContext::Type but also include
+  // the FALLBACK, which is used to identify modules that are loaded from the
+  // fallback service.
   enum class Type : uint8_t {
     BUNDLE,
     BUILTIN,
@@ -173,11 +191,15 @@ class Module {
     FALLBACK,
   };
 
+  // The flags are set internally and are used to identify various properties
+  // of the module.
   enum class Flags : uint8_t {
     NONE = 0,
     // A Module with the MAIN flag set would specify import.meta.main = true.
     // This is generally only suitable for worker-bundle entry point modules,
-    // but could in theory be applied to any module.
+    // but could in theory be applied to any module. Typically only one module
+    // in the ModuleRegistry should have this flag set. We do not verify/enforce
+    // that however.
     MAIN = 1 << 0,
     // A Module with the ESM flag set is interpreted as an ECMAScript module.
     ESM = 1 << 1,
@@ -188,8 +210,8 @@ class Module {
     EVAL = 1 << 2,
   };
 
-  // The EvalCallback is used to to ensure evaluation of a module outside of a
-  // request context, when necessary. If the EvalCallback is not set, then the
+  // The EvalCallback is used to to ensure evaluation of a module outside of an
+  // IoContext, when necessary. If the EvalCallback is not set, then the
   // Flag::EVAL on a module is ignored. If the EvalCallback is set, then any
   // Modules that have the Flag::EVAL set will have their evaluation deferred
   // to this callback.
@@ -203,6 +225,8 @@ class Module {
   inline const Url& specifier() const KJ_LIFETIMEBOUND {
     return specifier_;
   }
+
+  // The module type.
   inline Type type() const {
     return type_;
   }
@@ -221,6 +245,7 @@ class Module {
   // The return value follows the established v8 rules for Maybe. If the returned
   // maybe is empty, then an exception should have been scheduled on the isolate
   // via the lock. Do not throw C++ exceptions from this method unless they are fatal.
+  // The returned v8::Module is not yet instantiated.
   virtual v8::MaybeLocal<v8::Module> getDescriptor(
       Lock& js, const CompilationObserver& observer) const KJ_WARN_UNUSED_RESULT = 0;
 
@@ -299,10 +324,12 @@ class Module {
   // limited to just these kinds of modules, however. These are just the most
   // common.
 
-  static EvaluateCallback newTextModuleHandler(kj::Array<const char> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newDataModuleHandler(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newJsonModuleHandler(kj::Array<const char> data) KJ_WARN_UNUSED_RESULT;
-  static EvaluateCallback newWasmModuleHandler(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newTextModuleHandler(kj::ArrayPtr<const char> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newDataModuleHandler(
+      kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newJsonModuleHandler(kj::ArrayPtr<const char> data) KJ_WARN_UNUSED_RESULT;
+  static EvaluateCallback newWasmModuleHandler(
+      kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   // An eval function is used for CommonJS style modules (including Node.js compat
   // modules. The expectation is that this method will be called when the CommonJS
@@ -337,10 +364,9 @@ class Module {
   // type T are exposed as additional globals within the executed scope.
   template <typename T, typename TypeWrapper>
   static EvaluateCallback newCjsStyleModuleHandler(
-      kj::String source, kj::String name) KJ_WARN_UNUSED_RESULT {
-    return [source = kj::mv(source), name = kj::mv(name),
-               evaluatingScope = kj::heap<EvaluatingScope>()](Lock& js, const Url& specifier,
-               const Module::ModuleNamespace& ns,
+      kj::StringPtr source, kj::StringPtr name) KJ_WARN_UNUSED_RESULT {
+    return [source, name, evaluatingScope = kj::heap<EvaluatingScope>()](Lock& js,
+               const Url& specifier, const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       return js.tryCatch([&] {
         // A CJS module can only be evaluated once. Return early if evaluation
@@ -370,6 +396,7 @@ class Module {
     };
   }
 
+  // A ModuleHandler used to create a synthetic module that is backed by a jsg::Object.
   template <typename T, typename TypeWrapper, typename Func>
   static EvaluateCallback newJsgObjectModuleHandler(Func factory) KJ_WARN_UNUSED_RESULT {
     return [factory = kj::mv(factory)](Lock& js, const Url& specifier,
@@ -446,7 +473,7 @@ class ModuleBundle {
         kj::Array<kj::String> namedExports = nullptr) KJ_LIFETIMEBOUND;
 
     BundleBuilder& addEsmModule(kj::StringPtr specifier,
-        kj::Array<const char> code,
+        kj::ArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
     BundleBuilder& alias(kj::StringPtr alias, kj::StringPtr specifier) KJ_LIFETIMEBOUND;
@@ -510,7 +537,7 @@ class ModuleBundle {
 
   virtual ~ModuleBundle() noexcept(false) = default;
 
-  virtual kj::Maybe<Module&> resolve(
+  virtual kj::Maybe<const Module&> resolve(
       const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT = 0;
 
  protected:
@@ -581,7 +608,8 @@ class ModuleRegistry final: public ModuleRegistryBase {
     friend class ModuleRegistry;
   };
 
-  kj::Maybe<Module&> resolve(const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+  kj::Maybe<const Module&> resolve(
+      const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   // Attaches the ModuleRegistry to the given isolate by creating an IsolateModuleRegistry
   // and linking that to the isolate.

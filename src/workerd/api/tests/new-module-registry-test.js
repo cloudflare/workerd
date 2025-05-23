@@ -200,15 +200,23 @@ export const evalErrorsInEsmTopLevel = {
   },
 };
 
+export const wasmModuleTest = {
+  async test() {
+    const { default: wasm } = await import('wasm');
+    ok(wasm instanceof WebAssembly.Module);
+    await WebAssembly.instantiate(wasm, {});
+  },
+};
+
 // TODO(now): Tests
-// * [ ] Include tests for all known module types
+// * [x] Include tests for all known module types
 //   * [x] ESM
 //   * [x] CommonJS
 //   * [x] Text
 //   * [x] Data
 //   * [x] JSON
-//   * [ ] WASM
-//   * [ ] Python
+//   * [x] WASM
+//   * [x] Python (works, but still needs to be fully tested)
 // * [x] IO is forbidden in top-level module scope
 // * [x] Async local storage context is propagated into dynamic imports
 // * [x] Static import correctly handles node: modules with/without the node: prefix
@@ -229,7 +237,7 @@ export const evalErrorsInEsmTopLevel = {
 // * [x] Errors during CommonJs evaluation are correctly reported
 // * [x] CommonJs modules correctly expose named exports
 // * [x] require('module').createRequire API works as expected
-// * [ ] Entry point ESM with no default export is correctly reported as error
+// * [x] Entry point ESM with no default export is correctly reported as error
 // * [ ] Fallback service works as expected
 // * [x] console.log output correctly uses node-internal:inspect for output
 // ...

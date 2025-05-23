@@ -3064,6 +3064,11 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
     auto& modulesSource = KJ_ASSERT_NONNULL(source.tryGet<Worker::Script::ModulesSource>(),
         "The new MOduleRegistry only works with ES modules syntax, not Service Workers syntax.");
+
+    // In workerd the module registry is always associated with just a single
+    // worker instance, so we initialize it here. In production, however, a
+    // single instance may be shared across multiple replicas.
+
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
         *jsgobserver, modulesSource, featureFlags.asReader(), pythonConfig, bundleBase);
   }
