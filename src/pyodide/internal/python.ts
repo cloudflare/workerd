@@ -64,9 +64,30 @@ function maybeAddVendorDirectoryToPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
-      VENDOR_PATH = "/session/metadata/vendor"
-      if Path(VENDOR_PATH).is_dir():
-        sys.path.append(VENDOR_PATH)
+      if True:
+        print(sys.path)
+        VENDOR_PATH = "/session/metadata/vendor"
+        # Print the list of files in VENDOR_PATH
+        print(list(Path(VENDOR_PATH).iterdir()))
+        if Path(VENDOR_PATH).is_dir():
+          # Insert vendor path after system paths but before site-packages
+          # System paths are typically: ['/session', '/lib/python312.zip', '/lib/python3.12', '/lib/python3.12/lib-dynload']
+          # We want to insert before '/lib/python3.12/site-packages' and other site-packages
+          for i, path in enumerate(sys.path):
+            if 'site-packages' in path:
+              sys.path.insert(i, VENDOR_PATH)
+              break
+          else:
+            # If no site-packages found, fail
+            raise ValueError("No site-packages found in sys.path")
+        print(sys.path)
+
+      if False:
+        print(sys.path)
+        VENDOR_PATH = "/session/metadata/vendor"
+        if Path(VENDOR_PATH).is_dir():
+          sys.path.append(VENDOR_PATH)
+        print(sys.path)
 
     _tmp()
     del _tmp
