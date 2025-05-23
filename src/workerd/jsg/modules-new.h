@@ -438,7 +438,13 @@ class ModuleBundle {
    public:
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
 
-    using ResolveCallback = kj::Function<kj::Maybe<kj::Own<Module>>(const ResolveContext&)>;
+    // The resolve callback is used to perform resolution of a module context.
+    // If the callback returns a string, then resolution will start over with
+    // the new specifier. If the callback returns a Module, then that module
+    // will be used as the resolved module. If the callback returns kj::none,
+    // then the module is not resolved.
+    using ResolveCallback =
+        kj::Function<kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(const ResolveContext&)>;
 
     Builder& add(const Url& specifier, ResolveCallback callback) KJ_LIFETIMEBOUND;
 
@@ -502,10 +508,10 @@ class ModuleBundle {
     BuiltinBuilder& addObject(const Url& specifier) KJ_LIFETIMEBOUND {
       ensureIsNotBundleSpecifier(specifier);
       add(specifier,
-          [specifier = specifier.clone(), type = type()](
-              const ResolveContext& context) mutable -> kj::Maybe<kj::Own<Module>> {
+          [specifier = specifier.clone(), type = type()](const ResolveContext& context) mutable
+          -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
         if (context.specifier != specifier) return kj::none;
-        return Module::newSynthetic(kj::mv(specifier), type,
+        kj::Own<Module> mod = Module::newSynthetic(kj::mv(specifier), type,
             [](Lock& js, const Url& specifier, const Module::ModuleNamespace& ns,
                 const CompilationObserver&) {
           auto value = TypeWrapper::from(js.v8Isolate)
@@ -513,6 +519,7 @@ class ModuleBundle {
           ns.setDefault(js, JsValue(value));
           return true;
         });
+        return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
       });
       return *this;
     }
@@ -537,7 +544,18 @@ class ModuleBundle {
 
   virtual ~ModuleBundle() noexcept(false) = default;
 
-  virtual kj::Maybe<const Module&> resolve(
+  struct Resolved {
+    // This struct exists only to work around the limitation that a kj::OneOf
+    // cannot be used with a const reference or we get a compiler error.
+    kj::Maybe<const Module&> module;
+    kj::Maybe<kj::String> specifier;
+  };
+
+  // Resolve a module context. If a string is returned, then it must be a
+  // module specifier. The resolution will start over with the new specifier.
+  // If a Module is returned, then that is the resolved module. If kj::none
+  // is returned, then the module is not resolved.
+  virtual kj::Maybe<Resolved> resolve(
       const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT = 0;
 
  protected:

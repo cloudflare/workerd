@@ -818,26 +818,43 @@ class FallbackModuleBundle final: public ModuleBundle {
       : ModuleBundle(Type::FALLBACK),
         callback(kj::mv(callback)) {}
 
-  kj::Maybe<const Module&> resolve(const ResolveContext& context) override {
+  kj::Maybe<Resolved> resolve(const ResolveContext& context) override {
     {
       auto lock = cache.lockShared();
       KJ_IF_SOME(found, lock->storage.find(context.specifier)) {
-        return kj::Maybe<Module&>(const_cast<Module&>(*found));
+        const Module& module = *found;
+        return Resolved{
+          .module = module,
+        };
       }
       KJ_IF_SOME(found, lock->aliases.find(context.specifier)) {
-        return kj::Maybe<Module&>(*found);
+        return Resolved{
+          .module = *found,
+        };
       }
     }
 
     {
       auto lock = cache.lockExclusive();
       KJ_IF_SOME(resolved, callback(context)) {
-        Module& module = *resolved;
-        lock->storage.upsert(context.specifier.clone(), kj::mv(resolved));
-        if (module.specifier() != context.specifier) {
-          lock->aliases.upsert(module.specifier().clone(), &module);
+        KJ_SWITCH_ONEOF(resolved) {
+          KJ_CASE_ONEOF(str, kj::String) {
+            return Resolved{
+              .specifier = kj::mv(str),
+            };
+          }
+          KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
+            Module& module = *resolved;
+            lock->storage.upsert(context.specifier.clone(), kj::mv(resolved));
+            if (module.specifier() != context.specifier) {
+              lock->aliases.upsert(module.specifier().clone(), &module);
+            }
+            return Resolved{
+              .module = module,
+            };
+          }
         }
-        return module;
+        KJ_UNREACHABLE;
       }
     }
 
@@ -866,7 +883,7 @@ class StaticModuleBundle final: public ModuleBundle {
         modules(kj::mv(modules)),
         aliases(kj::mv(aliases)) {}
 
-  kj::Maybe<const Module&> resolve(const ResolveContext& context) override {
+  kj::Maybe<Resolved> resolve(const ResolveContext& context) override {
     KJ_IF_SOME(aliased, aliases.find(context.specifier)) {
       // The specifier is registered as an alias. We need to resolve the alias instead.
       // This is set up to allow for recursive aliases.
@@ -882,15 +899,29 @@ class StaticModuleBundle final: public ModuleBundle {
 
     auto lock = cache.lockExclusive();
     KJ_IF_SOME(cached, lock->find(context.specifier)) {
-      return checkModule(context, *cached);
+      return Resolved{
+        .module = checkModule(context, *cached),
+      };
     }
 
     // Module was not cached, try to resolve it.
     KJ_IF_SOME(found, modules.find(context.specifier)) {
       KJ_IF_SOME(resolved, found(context)) {
-        Module& module = *resolved;
-        lock->upsert(context.specifier.clone(), kj::mv(resolved));
-        return checkModule(context, module);
+        KJ_SWITCH_ONEOF(resolved) {
+          KJ_CASE_ONEOF(str, kj::String) {
+            return Resolved{
+              .specifier = kj::mv(str),
+            };
+          }
+          KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
+            Module& module = *resolved;
+            lock->upsert(context.specifier.clone(), kj::mv(resolved));
+            return Resolved{
+              .module = checkModule(context, module),
+            };
+          }
+        }
+        KJ_UNREACHABLE;
       }
     }
 
@@ -1005,8 +1036,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), namedExports = kj::mv(namedExports),
-          type = type()](const ResolveContext& context) mutable -> kj::Maybe<kj::Own<Module>> {
-    return Module::newSynthetic(kj::mv(url), type, kj::mv(callback), kj::mv(namedExports));
+          type = type()](const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod =
+        Module::newSynthetic(kj::mv(url), type, kj::mv(callback), kj::mv(namedExports));
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
 }
@@ -1017,9 +1051,10 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
-      [url = url.clone(), source, flags, type = type()](
-          const ResolveContext& context) mutable -> kj::Maybe<kj::Own<Module>> {
-    return kj::heap<EsModule>(kj::mv(url), type, flags, source);
+      [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = kj::heap<EsModule>(kj::mv(url), type, flags, source);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
 }
@@ -1042,8 +1077,10 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addSynthetic(
   ensureIsNotBundleSpecifier(specifier);
   Builder::add(specifier,
       [url = specifier.clone(), callback = kj::mv(callback), type = type()](
-          const ResolveContext& context) mutable -> kj::Maybe<kj::Own<Module>> {
-    return Module::newSynthetic(kj::mv(url), type, kj::mv(callback));
+          const ResolveContext& context) mutable
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newSynthetic(kj::mv(url), type, kj::mv(callback));
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
 }
@@ -1053,7 +1090,10 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
   ensureIsNotBundleSpecifier(specifier);
   Builder::add(specifier,
       [url = specifier.clone(), source, type = type()](const ResolveContext& context) mutable
-      -> kj::Maybe<kj::Own<Module>> { return Module::newEsm(kj::mv(url), type, source); });
+      -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
+  });
   return *this;
 }
 
@@ -1110,12 +1150,36 @@ kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserve
 }
 
 kj::Maybe<const Module&> ModuleRegistry::resolve(const ResolveContext& context) {
-  constexpr auto tryFind =
-      [](const ResolveContext& context,
-          kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) -> kj::Maybe<const Module&> {
+  auto tryFind = [this](const ResolveContext& context,
+                     kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) -> kj::Maybe<const Module&> {
     for (auto& bundle: bundles) {
       KJ_IF_SOME(found, bundle->resolve(context)) {
-        return found;
+        KJ_IF_SOME(str, found.specifier) {
+          // We received a redirect to another module specifier. Let's
+          // start resolution over again with the new specifier... but only
+          // if we can successfully parse the specifier as a URL.
+          KJ_IF_SOME(specifier, jsg::Url::tryParse(str.asPtr())) {
+
+            kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;
+            for (const auto& [key, value]: context.attributes) {
+              clonedAttrs.insert(key, value);
+            }
+
+            return resolve(ResolveContext{
+              .type = context.type,
+              .source = context.source,
+              .specifier = kj::mv(specifier),
+              .referrer = context.referrer.clone(),
+              .rawSpecifier = context.rawSpecifier.map([](auto& str) { return kj::str(str); }),
+              .attributes = kj::mv(clonedAttrs),
+            });
+          }
+          return kj::none;
+        }
+        KJ_IF_SOME(module, found.module) {
+          return module;
+        }
+        KJ_UNREACHABLE;
       }
     }
     return kj::none;
@@ -1271,7 +1335,7 @@ kj::Own<Module> Module::newSynthetic(Url specifier,
 }
 
 kj::Own<Module> Module::newEsm(Url specifier, Type type, kj::Array<const char> code, Flags flags) {
-  return kj::heap<EsModule>(kj::mv(specifier), type, flags, kj::mv(code));
+  return kj::heap<EsModule>(kj::mv(specifier), type, flags, code).attach(kj::mv(code));
 }
 
 kj::Own<Module> Module::newEsm(Url specifier, Type type, kj::ArrayPtr<const char> code) {

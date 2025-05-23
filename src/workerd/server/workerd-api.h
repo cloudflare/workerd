@@ -277,7 +277,8 @@ class WorkerdApi final: public Worker::Api {
       const Worker::Script::ModulesSource& source,
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,
-      const jsg::Url& bundleBase);
+      const jsg::Url& bundleBase,
+      kj::Maybe<kj::String> fallbackService = kj::none);
 
  private:
   struct Impl;

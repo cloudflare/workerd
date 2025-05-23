@@ -956,3 +956,20 @@ struct Extension {
     # Raw source code of ES module.
   }
 }
+
+# ========================================================================================
+# Fallback Service Request
+#  Used only to define the JSON structure of a request to the fallback service.
+
+struct FallbackServiceRequest {
+  type @0 :Text;
+  specifier @1 :Text;
+  rawSpecifier @2 :Text;
+  referrer @3 :Text;
+
+  struct Attribute {
+    name @0: Text;
+    value @1: Text;
+  }
+  attributes @4 :List(Attribute);
+}

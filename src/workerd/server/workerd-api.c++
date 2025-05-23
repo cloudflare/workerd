@@ -47,6 +47,7 @@
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/server/fallback-service.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
@@ -1080,7 +1081,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const Worker::Script::ModulesSource& source,
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
-    const jsg::Url& bundleBase) {
+    const jsg::Url& bundleBase,
+    kj::Maybe<kj::String> maybeFallbackService) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 
@@ -1105,6 +1107,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   bool firstEsm = true;
   bool hasPythonModules = false;
   using namespace workerd::api::pyodide;
+
   for (auto& def: source.modules) {
     KJ_SWITCH_ONEOF(def.content) {
       KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
@@ -1282,6 +1285,122 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     }));
 
     builder.add(pyodideBundleBuilder.finish());
+  }
+
+  // If we have a fallback service configured, add the fallback bundle.
+  // The fallback bundle is used only in workerd local development mode.
+  // If a module is not found in the static bundles, a registry that is
+  // configured to use the fallback will send a request to the fallback
+  // service to try resolving.
+  KJ_IF_SOME(fallbackService, maybeFallbackService) {
+    builder.add(jsg::modules::ModuleBundle::newFallbackBundle(
+        [fallbackService = kj::str(fallbackService)](const jsg::modules::ResolveContext& context)
+            -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
+      auto specifier = kj::str(context.specifier.getHref());
+      auto referrer = kj::str(context.referrer.getHref());
+      KJ_IF_SOME(resolved,
+          workerd::fallback::tryResolve(workerd::fallback::Version::V2,
+              workerd::fallback::ImportType::IMPORT, fallbackService, specifier,
+              context.rawSpecifier.orDefault(nullptr), referrer, context.attributes)) {
+        KJ_SWITCH_ONEOF(resolved) {
+          KJ_CASE_ONEOF(str, kj::String) {
+            // The fallback service returned an alternative specifier.
+            // The resolution must start over with the new specifier.
+            return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(kj::mv(str));
+          }
+          KJ_CASE_ONEOF(def, kj::Own<server::config::Worker::Module::Reader>) {
+            // The fallback service returned a module definition.
+            // We need to convert that into a Module instance.
+            auto mod = readModuleConf(*def, kj::none);
+            KJ_IF_SOME(specifier, jsg::Url::tryParse(mod.name)) {
+              // Note that unlike the regular case, the module content returned
+              // by the fallback service is not guaranteed to be memory-resident.
+              // We need to copy the content into a heap-allocated arrays and
+              // make sure those stay alive while the Module is alive.
+              KJ_SWITCH_ONEOF(mod.content) {
+                KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
+                  return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
+                      jsg::modules::Module::newEsm(kj::mv(specifier),
+                          jsg::modules::Module::Type::FALLBACK,
+                          kj::heapArray<const char>(content.body)));
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+                  auto ownedData = kj::str(content.body);
+                  auto ptr = ownedData.asPtr();
+                  return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
+                      jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                          jsg::modules::Module::Type::FALLBACK,
+                          jsg::modules::Module::newTextModuleHandler(ptr))
+                          .attach(kj::mv(ownedData)));
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+                  auto ownedData = kj::heapArray<uint8_t>(content.body);
+                  auto ptr = ownedData.asPtr();
+                  return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
+                      jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                          jsg::modules::Module::Type::FALLBACK,
+                          jsg::modules::Module::newDataModuleHandler(ptr))
+                          .attach(kj::mv(ownedData)));
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+                  auto ownedData = kj::heapArray<uint8_t>(content.body);
+                  auto ptr = ownedData.asPtr();
+                  return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
+                      jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                          jsg::modules::Module::Type::FALLBACK,
+                          jsg::modules::Module::newWasmModuleHandler(ptr))
+                          .attach(kj::mv(ownedData)));
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+                  auto ownedData = kj::heapArray<const char>(content.body);
+                  auto ptr = ownedData.asPtr();
+                  return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
+                      jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                          jsg::modules::Module::Type::FALLBACK,
+                          jsg::modules::Module::newJsonModuleHandler(ptr))
+                          .attach(kj::mv(ownedData)));
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+                  auto ownedData = kj::str(content.body);
+                  auto ptr = ownedData.asPtr();
+                  kj::ArrayPtr<const kj::StringPtr> named;
+                  KJ_IF_SOME(n, content.namedExports) {
+                    named = n;
+                  }
+                  return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
+                      jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                          jsg::modules::Module::Type::FALLBACK,
+                          jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
+                              JsgWorkerdIsolate_TypeWrapper>(ptr, mod.name),
+              KJ_MAP(name, named) {
+                    return kj::str(name);
+                  }).attach(kj::mv(ownedData)));
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
+                  // Python modules are not supported.in fallback
+                  KJ_LOG(WARNING, "Fallback service returned a Python module");
+                  return kj::none;
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+                  // Python requirement modules are not supported.in fallback
+                  KJ_LOG(WARNING, "Fallback service returned a Python requirement");
+                  return kj::none;
+                }
+                KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+                  // Capnp modules are not supported.in fallback
+                  KJ_LOG(WARNING, "Fallback service returned a Capnp module");
+                  return kj::none;
+                }
+              }
+              KJ_UNREACHABLE;
+            }
+            KJ_LOG(WARNING, "Fallback service returned an invalid specifier");
+            return kj::none;
+          }
+        }
+      }
+      return kj::none;
+    }));
   }
 
   return builder.finish();
