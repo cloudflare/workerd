@@ -407,6 +407,25 @@ wd_test(
     data = ["tests/http-nodejs-test.js"],
 )
 
+js_binary(
+    name = "http-client-server",
+    entry_point = "tests/http-client-server.js",
+)
+
+wd_test(
+    src = "tests/http-client-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/http-client-nodejs-test.js"],
+    sidecar = "http-client-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+        "ASD_SERVER_PORT",
+        "TIMEOUT_SERVER_PORT",
+        "HELLO_WORLD_SERVER_PORT",
+        "HEADER_VALIDATION_SERVER_PORT",
+    ],
+)
+
 wd_test(
     src = "tests/bound-als-test.wd-test",
     args = ["--experimental"],
