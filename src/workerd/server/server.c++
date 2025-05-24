@@ -3069,8 +3069,17 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // worker instance, so we initialize it here. In production, however, a
     // single instance may be shared across multiple replicas.
 
-    newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(
-        *jsgobserver, modulesSource, featureFlags.asReader(), pythonConfig, bundleBase);
+    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+        kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+    auto isPythonWorker = featureFlags.getPythonWorkers();
+    auto artifactBundler = isPythonWorker
+        ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+              .attach(kj::mv(pyodidePackageManager))
+        : ArtifactBundler::makeDisabledBundler();
+
+    newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver, modulesSource,
+        featureFlags.asReader(), pythonConfig, bundleBase, kj::mv(artifactBundler));
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
@@ -3255,8 +3264,17 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     });
   }
 
-  auto script = isolate->newScript(
-      name, kj::mv(source), IsolateObserver::StartType::COLD, false, errorReporter);
+  using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+  kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
+      kj::heap<workerd::api::pyodide::PyodidePackageManager>();
+  auto isPythonWorker = featureFlags.getPythonWorkers();
+  auto artifactBundler = isPythonWorker
+      ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
+            .attach(kj::mv(pyodidePackageManager))
+      : ArtifactBundler::makeDisabledBundler();
+
+  auto script = isolate->newScript(name, kj::mv(source), IsolateObserver::StartType::COLD, false,
+      errorReporter, kj::mv(artifactBundler));
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
