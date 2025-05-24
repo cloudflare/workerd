@@ -47,6 +47,7 @@ wd_cc_library(
     srcs = [
         "compatibility-date.c++",
         "docker-client.c++",
+        "docker-container-client.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-context.c++",
@@ -59,6 +60,7 @@ wd_cc_library(
     hdrs = [
         "compatibility-date.h",
         "docker-client.h",
+        "docker-container-client.h",
         "features.h",
         "hibernation-manager.h",
         "io-channels.h",

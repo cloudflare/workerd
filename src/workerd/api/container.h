@@ -11,8 +11,6 @@
 #include <workerd/io/io-own.h>
 #include <workerd/jsg/jsg.h>
 
-namespace workerd::io { class DockerClient; }
-
 namespace workerd::api {
 
 class Fetcher;
@@ -23,11 +21,7 @@ class Fetcher;
 // etc.
 class Container: public jsg::Object {
  public:
-  // Constructor for RPC-based containers (production)
   Container(rpc::Container::Client rpcClient, bool running);
-  
-  // Constructor for Docker-based containers (local development)
-  Container(kj::String containerId, kj::String imageTag, io::DockerClient& dockerClient);
 
   struct StartupOptions {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
@@ -66,17 +60,8 @@ class Container: public jsg::Object {
   }
 
  private:
-  // RPC mode members
-  kj::Maybe<IoOwn<rpc::Container::Client>> rpcClient;
-  
-  // Docker mode members  
-  kj::Maybe<kj::String> containerId;
-  kj::Maybe<kj::String> imageTag;
-  kj::Maybe<io::DockerClient&> dockerClient;
-  kj::HashMap<uint16_t, uint16_t> portMappings; // container -> host port
-  
+  IoOwn<rpc::Container::Client> rpcClient;
   bool running;
-  bool isDockerMode = false;
 
   kj::Maybe<jsg::Value> destroyReason;
 
@@ -86,8 +71,6 @@ class Container: public jsg::Object {
 
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
-  class DockerTcpPortWorkerInterface;
-  class DockerTcpPortOutgoingFactory;
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES api::Container, api::Container::StartupOptions

@@ -6,7 +6,6 @@
 
 #include <workerd/api/http.h>
 #include <workerd/io/io-context.h>
-#include <workerd/io/docker-client.h>
 
 namespace workerd::api {
 
@@ -15,95 +14,40 @@ namespace workerd::api {
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
-      running(running), isDockerMode(false) {}
-
-Container::Container(kj::String containerId, kj::String imageTag, io::DockerClient& dockerClient)
-    : containerId(kj::mv(containerId)), imageTag(kj::mv(imageTag)), dockerClient(dockerClient),
-      running(false), isDockerMode(true) {}
+      running(running) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
 
-  if (isDockerMode) {
-    // Docker mode implementation
-    KJ_IF_SOME(client, dockerClient) {
-      // Convert entrypoint to StringPtr array
-      kj::Array<kj::StringPtr> entrypointPtrs;
-      KJ_IF_SOME(entrypoint, options.entrypoint) {
-        auto builder = kj::heapArrayBuilder<kj::StringPtr>(entrypoint.size());
-        for (auto& cmd : entrypoint) {
-          builder.add(cmd.asPtr());
-        }
-        entrypointPtrs = builder.finish();
-      } else {
-        entrypointPtrs = kj::heapArray<kj::StringPtr>(0);
-      }
-      
-      // Convert environment variables
-      kj::Array<kj::StringPtr> envPtrs;
-      KJ_IF_SOME(env, options.env) {
-        auto builder = kj::heapArrayBuilder<kj::StringPtr>(env.fields.size());
-        for (auto& field : env.fields) {
-          JSG_REQUIRE(field.name.findFirst('=') == kj::none, Error,
-              "Environment variable names cannot contain '=': ", field.name);
-          JSG_REQUIRE(field.name.findFirst('\0') == kj::none, Error,
-              "Environment variable names cannot contain '\\0': ", field.name);
-          JSG_REQUIRE(field.value.findFirst('\0') == kj::none, Error,
-              "Environment variable values cannot contain '\\0': ", field.name);
-          
-          builder.add(kj::str(field.name, "=", field.value).asPtr());
-        }
-        envPtrs = builder.finish();
-      } else {
-        envPtrs = kj::heapArray<kj::StringPtr>(0);
-      }
-      
-      KJ_IF_SOME(cId, containerId) {
-        KJ_IF_SOME(tag, imageTag) {
-          // Start container via Docker
-          IoContext::current().addTask(
-            client.startContainer(tag, cId, entrypointPtrs, envPtrs, portMappings)
-              .catch_([](kj::Exception&& e) {
-                // Log error but don't propagate to avoid crashing
-                KJ_LOG(ERROR, "Failed to start container", e);
-              }));
-        }
-      }
-    }
-  } else {
-    // RPC mode implementation (existing code)
-    KJ_IF_SOME(client, rpcClient) {
-      auto req = client->startRequest();
-      KJ_IF_SOME(entrypoint, options.entrypoint) {
-        auto list = req.initEntrypoint(entrypoint.size());
-        for (auto i: kj::indices(entrypoint)) {
-          list.set(i, entrypoint[i]);
-        }
-      }
-      req.setEnableInternet(options.enableInternet);
-
-      KJ_IF_SOME(env, options.env) {
-        auto list = req.initEnvironmentVariables(env.fields.size());
-        for (auto i: kj::indices(env.fields)) {
-          auto field = &env.fields[i];
-          JSG_REQUIRE(field->name.findFirst('=') == kj::none, Error,
-              "Environment variable names cannot contain '=': ", field->name);
-
-          JSG_REQUIRE(field->name.findFirst('\0') == kj::none, Error,
-              "Environment variable names cannot contain '\\0': ", field->name);
-
-          JSG_REQUIRE(field->value.findFirst('\0') == kj::none, Error,
-              "Environment variable values cannot contain '\\0': ", field->name);
-
-          list.set(i, str(field->name, "=", field->value));
-        }
-      }
-
-      IoContext::current().addTask(req.sendIgnoringResult());
+  auto req = rpcClient->startRequest();
+  KJ_IF_SOME(entrypoint, options.entrypoint) {
+    auto list = req.initEntrypoint(entrypoint.size());
+    for (auto i: kj::indices(entrypoint)) {
+      list.set(i, entrypoint[i]);
     }
   }
+  req.setEnableInternet(options.enableInternet);
+
+  KJ_IF_SOME(env, options.env) {
+    auto list = req.initEnvironmentVariables(env.fields.size());
+    for (auto i: kj::indices(env.fields)) {
+      auto field = &env.fields[i];
+      JSG_REQUIRE(field->name.findFirst('=') == kj::none, Error,
+          "Environment variable names cannot contain '=': ", field->name);
+
+      JSG_REQUIRE(field->name.findFirst('\0') == kj::none, Error,
+          "Environment variable names cannot contain '\\0': ", field->name);
+
+      JSG_REQUIRE(field->value.findFirst('\0') == kj::none, Error,
+          "Environment variable values cannot contain '\\0': ", field->name);
+
+      list.set(i, str(field->name, "=", field->value));
+    }
+  }
+
+  IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
 }
@@ -111,47 +55,20 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
-  if (isDockerMode) {
-    // Docker mode implementation
-    KJ_IF_SOME(client, dockerClient) {
-      KJ_IF_SOME(cId, containerId) {
-        return IoContext::current()
-            .awaitIo(js, client.waitForContainerExit(cId))
-            .then(js, [this](jsg::Lock& js) {
-          running = false;
-          KJ_IF_SOME(d, destroyReason) {
-            jsg::Value error = kj::mv(d);
-            destroyReason = kj::none;
-            js.throwException(kj::mv(error));
-          }
-        }, [this](jsg::Lock& js, jsg::Value&& error) {
-          running = false;
-          destroyReason = kj::none;
-          js.throwException(kj::mv(error));
-        });
-      }
+  return IoContext::current()
+      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).sendIgnoringResult())
+      .then(js, [this](jsg::Lock& js) {
+    running = false;
+    KJ_IF_SOME(d, destroyReason) {
+      jsg::Value error = kj::mv(d);
+      destroyReason = kj::none;
+      js.throwException(kj::mv(error));
     }
-    return js.resolvedPromise();
-  } else {
-    // RPC mode implementation (existing code)
-    KJ_IF_SOME(client, rpcClient) {
-      return IoContext::current()
-          .awaitIo(js, client->monitorRequest(capnp::MessageSize{4, 0}).sendIgnoringResult())
-          .then(js, [this](jsg::Lock& js) {
-        running = false;
-        KJ_IF_SOME(d, destroyReason) {
-          jsg::Value error = kj::mv(d);
-          destroyReason = kj::none;
-          js.throwException(kj::mv(error));
-        }
-      }, [this](jsg::Lock& js, jsg::Value&& error) {
-        running = false;
-        destroyReason = kj::none;
-        js.throwException(kj::mv(error));
-      });
-    }
-    return js.resolvedPromise();
-  }
+  }, [this](jsg::Lock& js, jsg::Value&& error) {
+    running = false;
+    destroyReason = kj::none;
+    js.throwException(kj::mv(error));
+  });
 }
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {
@@ -161,47 +78,17 @@ jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> e
     destroyReason = kj::mv(error);
   }
 
-  if (isDockerMode) {
-    // Docker mode implementation
-    KJ_IF_SOME(client, dockerClient) {
-      KJ_IF_SOME(cId, containerId) {
-        return IoContext::current().awaitIo(js, client.stopContainer(cId));
-      }
-    }
-    return js.resolvedPromise();
-  } else {
-    // RPC mode implementation (existing code)
-    KJ_IF_SOME(client, rpcClient) {
-      return IoContext::current().awaitIo(
-          js, client->destroyRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());
-    }
-    return js.resolvedPromise();
-  }
+  return IoContext::current().awaitIo(
+      js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());
 }
 
 void Container::signal(jsg::Lock& js, int signo) {
   JSG_REQUIRE(signo > 0 && signo <= 64, RangeError, "Invalid signal number.");
   JSG_REQUIRE(running, Error, "signal() cannot be called on a container that is not running.");
 
-  if (isDockerMode) {
-    // Docker mode implementation
-    KJ_IF_SOME(client, dockerClient) {
-      KJ_IF_SOME(cId, containerId) {
-        IoContext::current().addTask(
-          client.killContainer(cId, signo)
-            .catch_([](kj::Exception&& e) {
-              KJ_LOG(ERROR, "Failed to signal container", e);
-            }));
-      }
-    }
-  } else {
-    // RPC mode implementation (existing code)
-    KJ_IF_SOME(client, rpcClient) {
-      auto req = client->signalRequest(capnp::MessageSize{4, 0});
-      req.setSigno(signo);
-      IoContext::current().addTask(req.sendIgnoringResult());
-    }
-  }
+  auto req = rpcClient->signalRequest(capnp::MessageSize{4, 0});
+  req.setSigno(signo);
+  IoContext::current().addTask(req.sendIgnoringResult());
 }
 
 // =======================================================================================
@@ -362,129 +249,20 @@ class Container::TcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
   rpc::Container::Port::Client port;
 };
 
-// Docker-specific implementations for getTcpPort()
-class Container::DockerTcpPortWorkerInterface final: public WorkerInterface {
- public:
-  DockerTcpPortWorkerInterface(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::EntropySource& entropySource,
-      const kj::HttpHeaderTable& headerTable,
-      io::DockerClient& dockerClient,
-      kj::StringPtr containerId,
-      uint16_t containerPort)
-      : byteStreamFactory(byteStreamFactory),
-        entropySource(entropySource),
-        headerTable(headerTable),
-        dockerClient(dockerClient),
-        containerId(kj::str(containerId)),
-        containerPort(containerPort) {}
-
-  kj::Promise<void> request(kj::HttpMethod method,
-      kj::StringPtr url,
-      const kj::HttpHeaders& headers,
-      kj::AsyncInputStream& requestBody,
-      kj::HttpService::Response& response) override {
-    KJ_UNIMPLEMENTED("Docker HTTP request not yet implemented");
-  }
-
-  kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
-      kj::AsyncIoStream& connection,
-      ConnectResponse& response,
-      kj::HttpConnectSettings settings) override {
-    JSG_REQUIRE(!settings.useTls, Error,
-        "Connecting to a container using TLS is not currently supported.");
-
-    auto promise = dockerClient.connectToContainerPort(containerId, containerPort, connection);
-
-    kj::HttpHeaders responseHeaders(headerTable);
-    response.accept(200, "OK", responseHeaders);
-
-    return promise;
-  }
-
-  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    return event->notSupported();
-  }
-
-  kj::Promise<void> prewarm(kj::StringPtr url) override { KJ_UNREACHABLE; }
-  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override { KJ_UNREACHABLE; }
-  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override { KJ_UNREACHABLE; }
-
- private:
-  capnp::ByteStreamFactory& byteStreamFactory;
-  kj::EntropySource& entropySource;
-  const kj::HttpHeaderTable& headerTable;
-  io::DockerClient& dockerClient;
-  kj::String containerId;
-  uint16_t containerPort;
-};
-
-class Container::DockerTcpPortOutgoingFactory final: public Fetcher::OutgoingFactory {
- public:
-  DockerTcpPortOutgoingFactory(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::EntropySource& entropySource,
-      const kj::HttpHeaderTable& headerTable,
-      io::DockerClient& dockerClient,
-      kj::String containerId,
-      uint16_t containerPort)
-      : byteStreamFactory(byteStreamFactory),
-        entropySource(entropySource),
-        headerTable(headerTable),
-        dockerClient(dockerClient),
-        containerId(kj::mv(containerId)),
-        containerPort(containerPort) {}
-
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    return kj::heap<DockerTcpPortWorkerInterface>(byteStreamFactory, entropySource, 
-        headerTable, dockerClient, containerId, containerPort);
-  }
-
- private:
-  capnp::ByteStreamFactory& byteStreamFactory;
-  kj::EntropySource& entropySource;
-  const kj::HttpHeaderTable& headerTable;
-  io::DockerClient& dockerClient;
-  kj::String containerId;
-  uint16_t containerPort;
-};
-
 jsg::Ref<Fetcher> Container::getTcpPort(jsg::Lock& js, int port) {
   JSG_REQUIRE(port > 0 && port < 65536, TypeError, "Invalid port number: ", port);
 
+  auto req = rpcClient->getTcpPortRequest(capnp::MessageSize{4, 0});
+  req.setPort(port);
+
   auto& ioctx = IoContext::current();
 
-  if (isDockerMode) {
-    // Docker mode implementation
-    KJ_IF_SOME(client, dockerClient) {
-      KJ_IF_SOME(cId, containerId) {
-        // For Docker mode, we need to connect to the host-mapped port
-        // This is a simplified implementation
-        kj::Own<Fetcher::OutgoingFactory> factory =
-            kj::heap<DockerTcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), 
-                ioctx.getEntropySource(), ioctx.getHeaderTable(), client, 
-                kj::str(cId), port);
+  kj::Own<Fetcher::OutgoingFactory> factory =
+      kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
+          ioctx.getHeaderTable(), req.send().getPort());
 
-        return js.alloc<Fetcher>(
-            ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
-      }
-    }
-    // Fallback if we can't get the required components
-    JSG_FAIL_REQUIRE(Error, "Container not properly initialized for Docker mode");
-  } else {
-    // RPC mode implementation (existing code)
-    KJ_IF_SOME(client, rpcClient) {
-      auto req = client->getTcpPortRequest(capnp::MessageSize{4, 0});
-      req.setPort(port);
-
-      kj::Own<Fetcher::OutgoingFactory> factory =
-          kj::heap<TcpPortOutgoingFactory>(ioctx.getByteStreamFactory(), ioctx.getEntropySource(),
-              ioctx.getHeaderTable(), req.send().getPort());
-
-      return js.alloc<Fetcher>(
-          ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
-    }
-    JSG_FAIL_REQUIRE(Error, "Container not properly initialized for RPC mode");
-  }
+  return js.alloc<Fetcher>(
+      ioctx.addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
 }
 
 }  // namespace workerd::api
