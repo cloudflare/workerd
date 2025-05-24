@@ -1241,6 +1241,13 @@ kj::Maybe<kj::String> getDispatchNamespaceFromReader(const rpc::Trace::Onset::Re
   return kj::none;
 }
 
+kj::Maybe<kj::String> getScriptIdFromReader(const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasScriptId()) {
+    return kj::str(reader.getScriptId());
+  }
+  return kj::none;
+}
+
 kj::Maybe<kj::Array<kj::String>> getScriptTagsFromReader(const rpc::Trace::Onset::Reader& reader) {
   if (reader.hasScriptTags()) {
     auto tags = reader.getScriptTags();
@@ -1272,6 +1279,7 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
     .scriptName = getScriptNameFromReader(reader),
     .scriptVersion = getScriptVersionFromReader(reader),
     .dispatchNamespace = getDispatchNamespaceFromReader(reader),
+    .scriptId = getScriptIdFromReader(reader),
     .scriptTags = getScriptTagsFromReader(reader),
     .entrypoint = getEntrypointFromReader(reader),
   };
@@ -1301,6 +1309,9 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   KJ_IF_SOME(name, workerInfo.dispatchNamespace) {
     builder.setDispatchNamespace(name);
   }
+  KJ_IF_SOME(scriptId, workerInfo.scriptId) {
+    builder.setScriptId(scriptId);
+  }
   KJ_IF_SOME(tags, workerInfo.scriptTags) {
     auto list = builder.initScriptTags(tags.size());
     for (size_t i = 0; i < tags.size(); i++) {
@@ -1326,6 +1337,7 @@ tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
     .scriptName = scriptName.map([](auto& str) { return kj::str(str); }),
     .scriptVersion = scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
     .dispatchNamespace = dispatchNamespace.map([](auto& str) { return kj::str(str); }),
+    .scriptId = mapCopyString(scriptId),
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
     .entrypoint = entrypoint.map([](auto& str) { return kj::str(str); }),

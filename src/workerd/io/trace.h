@@ -712,6 +712,7 @@ struct Onset final {
     kj::Maybe<kj::String> scriptName;
     kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
     kj::Maybe<kj::String> dispatchNamespace;
+    kj::Maybe<kj::String> scriptId;
     kj::Maybe<kj::Array<kj::String>> scriptTags;
     kj::Maybe<kj::String> entrypoint;
 
