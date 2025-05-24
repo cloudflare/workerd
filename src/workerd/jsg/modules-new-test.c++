@@ -258,7 +258,8 @@ KJ_TEST("A user bundle with a single ESM module") {
     .referrer = BASE,
   };
 
-  auto& module = KJ_ASSERT_NONNULL(bundle->resolve(context));
+  auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
+  auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
   KJ_ASSERT(module.specifier() == specifier);
   KJ_ASSERT(module.isEsm());
@@ -320,7 +321,8 @@ KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
       .referrer = BASE,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(bundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
     KJ_ASSERT(module.specifier() == foo);
     KJ_ASSERT(module.isEsm());
@@ -336,7 +338,8 @@ KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
       .referrer = BASE,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(bundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
     KJ_ASSERT(module.specifier() == bar);
     KJ_ASSERT(!module.isEsm());
@@ -509,10 +512,11 @@ KJ_TEST("Built-in modules cannot use file:") {
 
 KJ_TEST("Fallback bundle that returns something") {
   auto fallback = ModuleBundle::newFallbackBundle([](const ResolveContext& context) {
-    return Module::newSynthetic("file:///foo"_url, Module::Type::FALLBACK,
+    kj::Own<Module> mod = Module::newSynthetic("file:///foo"_url, Module::Type::FALLBACK,
         [](Lock&, const Url&, const Module::ModuleNamespace&, const CompilationObserver&) -> bool {
       KJ_FAIL_ASSERT("Should not be called");
     });
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
 
   ResolveObserverImpl observer;
@@ -586,9 +590,10 @@ KJ_TEST("Fallback bundles are not permitted in production") {
   ModuleRegistry::Builder registryBuilder(observer, BASE);
   try {
     registryBuilder.add(ModuleBundle::newFallbackBundle([](const ResolveContext& context) {
-      return Module::newSynthetic(context.specifier.clone(), Module::Type::FALLBACK,
+      kj::Own<Module> mod = Module::newSynthetic(context.specifier.clone(), Module::Type::FALLBACK,
           [](Lock&, const Url&, const Module::ModuleNamespace&,
               const CompilationObserver&) -> bool { KJ_FAIL_ASSERT("Should not be called"); });
+      return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
     }));
     KJ_FAIL_ASSERT("Expected an exception");
   } catch (kj::Exception& exception) {
@@ -610,12 +615,13 @@ KJ_TEST("Compound Registry") {
   const auto qux = "file:///qux"_url;  // Bundle
 
   registryBuilder.add(ModuleBundle::newFallbackBundle(
-      [&](const ResolveContext& context) -> kj::Maybe<kj::Own<Module>> {
+      [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     if (context.specifier != foo) return kj::none;
-    return Module::newSynthetic(foo.clone(), Module::Type::FALLBACK,
+    kj::Own<Module> mod = Module::newSynthetic(foo.clone(), Module::Type::FALLBACK,
         [](Lock&, const Url&, const Module::ModuleNamespace&, const CompilationObserver&) -> bool {
       KJ_FAIL_ASSERT("should not have been called");
     });
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   }));
 
   ModuleBundle::BuiltinBuilder builtinBuilder;
@@ -1549,7 +1555,9 @@ KJ_TEST("Building a bundle from a capnp description works") {
       .specifier = foo,
       .referrer = BASE,
     };
-    auto& module = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(resolved.module);
+
     KJ_ASSERT(module.specifier() == foo);
   }
 
@@ -1561,7 +1569,8 @@ KJ_TEST("Building a bundle from a capnp description works") {
       .specifier = bar,
       .referrer = BASE,
     };
-    auto& module = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(resolved.module);
     KJ_ASSERT(module.specifier() == bar);
   }
 
@@ -1573,7 +1582,8 @@ KJ_TEST("Building a bundle from a capnp description works") {
       .specifier = qux,
       .referrer = BASE,
     };
-    auto& module = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(resolved.module);
     KJ_ASSERT(module.specifier() == qux);
   }
 
@@ -1681,8 +1691,9 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
 
   builder.add(ModuleBundle::newFallbackBundle([&](const ResolveContext& context) {
     called++;
-    return Module::newSynthetic(
+    kj::Own<Module> mod = Module::newSynthetic(
         url.clone(), Module::Type::FALLBACK, Module::newDataModuleHandler(nullptr));
+    return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   }));
 
   auto registry = builder.finish();

@@ -274,10 +274,12 @@ class WorkerdApi final: public Worker::Api {
   // Create the ModuleRegistry instance for the worker.
   static kj::Own<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
       const jsg::ResolveObserver& resolveObserver,
-      const Worker::Script::ModulesSource& source,
+      kj::Maybe<const Worker::Script::ModulesSource&> source,
       const CompatibilityFlags::Reader& featureFlags,
       const PythonConfig& pythonConfig,
-      const jsg::Url& bundleBase);
+      const jsg::Url& bundleBase,
+      capnp::List<config::Extension>::Reader extensions,
+      kj::Maybe<kj::String> fallbackService = kj::none);
 
  private:
   struct Impl;

@@ -109,6 +109,7 @@ wd_cc_library(
         ":actor-id-impl",
         ":alarm-scheduler",
         ":bundle-fs",
+        ":fallback-service",
         ":workerd_capnp",
         "//deps/rust:runtime",
         "//src/cloudflare",
@@ -143,6 +144,23 @@ wd_cc_library(
     deps = [
         ":workerd_capnp",
         "//src/workerd/io",
+    ],
+)
+
+wd_cc_library(
+    name = "fallback-service",
+    srcs = [
+        "fallback-service.c++",
+    ],
+    hdrs = [
+        "fallback-service.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":workerd_capnp",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
