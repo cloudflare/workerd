@@ -4,9 +4,8 @@ use ruff_python_ast::Stmt;
 use ruff_python_ast::StmtImportFrom;
 use ruff_python_parser::parse_module;
 
-#[cxx::bridge(namespace = "edgeworker::rust::python_parser")]
+#[cxx::bridge(namespace = "workerd::rust::python_parser")]
 mod ffi {
-
     extern "Rust" {
         fn get_imports(sources: &[&str]) -> Vec<String>;
     }
