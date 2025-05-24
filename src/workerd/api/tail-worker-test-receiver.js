@@ -27,7 +27,7 @@ export const test = {
     // Number of traces based on how often main tail worker is invoked from previous tests
     let numTraces = 21;
     let basicTrace =
-      '{"type":"onset","scriptTags":[],"info":{"type":"trace","traces":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}';
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}';
     assert.deepStrictEqual(
       Array.from(resposeMap.values()),
       Array(numTraces).fill(basicTrace)

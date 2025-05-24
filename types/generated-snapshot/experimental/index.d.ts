@@ -6608,6 +6608,7 @@ declare namespace TailStream {
     readonly type: "onset";
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
+    readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
