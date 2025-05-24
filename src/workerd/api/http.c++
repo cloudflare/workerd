@@ -2362,6 +2362,13 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethod(jsg::Lock& js, kj::Stri
     return kj::none;
   }
 
+  return getRpcMethodInternal(js, kj::mv(name));
+}
+
+kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, kj::String name) {
+  // Same as getRpcMethod, but skips compatibility check to allow RPC to be used from bindings
+  // attached to workers without rpc flag.
+
   // Do not return a method for `then`, otherwise JavaScript decides this is a thenable, i.e. a
   // custom Promise, which will mean a Promise that resolves to this object will attempt to chain
   // with it, which is not what you want!
