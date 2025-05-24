@@ -3063,9 +3063,6 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // import specifier url will be "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
 
-    auto& modulesSource = KJ_ASSERT_NONNULL(source.tryGet<Worker::Script::ModulesSource>(),
-        "The new ModuleRegistry only works with ES modules syntax, not Service Workers syntax.");
-
     // In workerd the module registry is always associated with just a single
     // worker instance, so we initialize it here. In production, however, a
     // single instance may be shared across multiple replicas.
@@ -3075,9 +3072,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
       maybeFallbackService = kj::str(conf.getModuleFallback());
     }
 
-    newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver, modulesSource,
-        featureFlags.asReader(), pythonConfig, bundleBase, extensions,
-        kj::mv(maybeFallbackService));
+    newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
+        source.tryGet<Worker::Script::ModulesSource>(), featureFlags.asReader(), pythonConfig,
+        bundleBase, extensions, kj::mv(maybeFallbackService));
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
@@ -3092,7 +3089,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   }
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
       kj::mv(limitEnforcer), inspectorPolicy,
-      conf.isServiceWorkerScript() ? Worker::ConsoleMode::INSPECTOR_ONLY : consoleMode);
+      conf.isServiceWorkerScript() && !featureFlags.getNewModuleRegistry()
+          ? Worker::ConsoleMode::INSPECTOR_ONLY
+          : consoleMode);
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.

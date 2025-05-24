@@ -1078,7 +1078,7 @@ static constexpr auto PYTHON_TAR_READER = "export default { }"_kj;
 
 kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry(
     const jsg::ResolveObserver& observer,
-    const Worker::Script::ModulesSource& source,
+    kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
@@ -1103,97 +1103,198 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   // Add the module bundles that are built into to runtime.
   api::registerBuiltinModules<JsgWorkerdIsolate_TypeWrapper>(builder, featureFlags);
 
-  // Add the module bundles that are configured by the worker.
-  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
-  bool firstEsm = true;
-  bool hasPythonModules = false;
-  using namespace workerd::api::pyodide;
+  // Add the module bundles that are configured by the worker (if any)
+  // The only case where maybeSource is none is when the worker is using
+  // the old service worker script format or "inherit", in which case
+  // we will initialize a module registry with the built-ins, extensions,
+  // etc but no worker bundle modules will be added.
+  KJ_IF_SOME(source, maybeSource) {
+    jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(bundleBase);
+    bool firstEsm = true;
+    bool hasPythonModules = false;
+    using namespace workerd::api::pyodide;
 
-  for (auto& def: source.modules) {
-    KJ_SWITCH_ONEOF(def.content) {
-      KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
-        jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
-        // Only the first ESM module we encounter is the main module.
-        // This should also be the first module in the list but we're
-        // not enforcing that here.
-        if (firstEsm) {
-          flags = flags | jsg::modules::Module::Flags::MAIN;
+    for (auto& def: source.modules) {
+      KJ_SWITCH_ONEOF(def.content) {
+        KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
+          jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
+          // Only the first ESM module we encounter is the main module.
+          // This should also be the first module in the list but we're
+          // not enforcing that here.
+          if (firstEsm) {
+            flags = flags | jsg::modules::Module::Flags::MAIN;
+            firstEsm = false;
+          }
+          // The content.body is memory-resident and is expected to outlive the
+          // module registry. We can safely pass a reference to the module handler.
+          // It will not be copied into a JS string until the module is actually
+          // evaluated.
+          bundleBuilder.addEsmModule(def.name, content.body, flags);
+          break;
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+          // The content.body is memory-resident and is expected to outlive the
+          // module registry. We can safely pass a reference to the module handler.
+          // It will not be copied into a JS string until the module is actually
+          // evaluated.
+          bundleBuilder.addSyntheticModule(
+              def.name, jsg::modules::Module::newTextModuleHandler(content.body));
+          break;
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+          // The content.body is memory-resident and is expected to outlive the
+          // module registry. We can safely pass a reference to the module handler.
+          // It will not be copied into a JS string until the module is actually
+          // evaluated.
+          bundleBuilder.addSyntheticModule(
+              def.name, jsg::modules::Module::newDataModuleHandler(content.body));
+          break;
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+          // The content.body is memory-resident and is expected to outlive the
+          // module registry. We can safely pass a reference to the module handler.
+          // It will not be copied into a JS string until the module is actually
+          // evaluated.
+          bundleBuilder.addSyntheticModule(
+              def.name, jsg::modules::Module::newWasmModuleHandler(content.body));
+          break;
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+          // The content.body is memory-resident and is expected to outlive the
+          // module registry. We can safely pass a reference to the module handler.
+          // It will not be copied into a JS string until the module is actually
+          // evaluated.
+          bundleBuilder.addSyntheticModule(
+              def.name, jsg::modules::Module::newJsonModuleHandler(content.body));
+          break;
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+          kj::ArrayPtr<const kj::StringPtr> named;
+          KJ_IF_SOME(n, content.namedExports) {
+            named = n;
+          }
+          bundleBuilder.addSyntheticModule(def.name,
+              jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
+                  JsgWorkerdIsolate_TypeWrapper>(content.body, def.name),
+              KJ_MAP(name, named) { return kj::str(name); });
+          break;
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
+          KJ_REQUIRE(featureFlags.getPythonWorkers(),
+              "The python_workers compatibility flag is required to use Python.");
           firstEsm = false;
+          hasPythonModules = true;
+          kj::StringPtr entry = PYTHON_ENTRYPOINT;
+          bundleBuilder.addEsmModule(def.name, entry);
+          break;
         }
-        // The content.body is memory-resident and is expected to outlive the
-        // module registry. We can safely pass a reference to the module handler.
-        // It will not be copied into a JS string until the module is actually
-        // evaluated.
-        bundleBuilder.addEsmModule(def.name, content.body, flags);
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-        // The content.body is memory-resident and is expected to outlive the
-        // module registry. We can safely pass a reference to the module handler.
-        // It will not be copied into a JS string until the module is actually
-        // evaluated.
-        bundleBuilder.addSyntheticModule(
-            def.name, jsg::modules::Module::newTextModuleHandler(content.body));
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-        // The content.body is memory-resident and is expected to outlive the
-        // module registry. We can safely pass a reference to the module handler.
-        // It will not be copied into a JS string until the module is actually
-        // evaluated.
-        bundleBuilder.addSyntheticModule(
-            def.name, jsg::modules::Module::newDataModuleHandler(content.body));
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-        // The content.body is memory-resident and is expected to outlive the
-        // module registry. We can safely pass a reference to the module handler.
-        // It will not be copied into a JS string until the module is actually
-        // evaluated.
-        bundleBuilder.addSyntheticModule(
-            def.name, jsg::modules::Module::newWasmModuleHandler(content.body));
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-        // The content.body is memory-resident and is expected to outlive the
-        // module registry. We can safely pass a reference to the module handler.
-        // It will not be copied into a JS string until the module is actually
-        // evaluated.
-        bundleBuilder.addSyntheticModule(
-            def.name, jsg::modules::Module::newJsonModuleHandler(content.body));
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-        kj::ArrayPtr<const kj::StringPtr> named;
-        KJ_IF_SOME(n, content.namedExports) {
-          named = n;
+        KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+          // Handled separately
+          break;
         }
-        bundleBuilder.addSyntheticModule(def.name,
-            jsg::modules::Module::newCjsStyleModuleHandler<api::CommonJsModuleContext,
-                JsgWorkerdIsolate_TypeWrapper>(content.body, def.name),
-            KJ_MAP(name, named) { return kj::str(name); });
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-        KJ_REQUIRE(featureFlags.getPythonWorkers(),
-            "The python_workers compatibility flag is required to use Python.");
-        firstEsm = false;
-        hasPythonModules = true;
-        kj::StringPtr entry = PYTHON_ENTRYPOINT;
-        bundleBuilder.addEsmModule(def.name, entry);
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        // Handled separately
-        break;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-        KJ_FAIL_REQUIRE("capnp modules are not yet supported in workerd");
+        KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+          KJ_FAIL_REQUIRE("capnp modules are not yet supported in workerd");
+        }
       }
     }
-  }
 
-  builder.add(bundleBuilder.finish());
+    builder.add(bundleBuilder.finish());
+
+    // Add the built-in module bundles that support python workers/pyodide.
+    if (hasPythonModules) {
+      // TODO(new-module-registry): Move into pyodide.h/pyodide.c++
+      const auto bootrapSpecifier = "internal:setup-emscripten"_url;
+      const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
+      const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
+      const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
+      const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
+      const auto limiterSpecifier = "pyodide-internal:limiter"_url;
+      const auto tarReaderSpecifier = "pyodide-internal:packages_tar_reader"_url;
+
+      // To support python workers we create two modules bundles, one BUILTIN
+      // and the other BUILTIN_ONLY. The BUILTIN bundle contains support modules
+      // that need to be importable by the python worker bootstrap module (which
+      // is added to the BUNDLE modules). The BUILTIN_ONLY bundle contains support
+      // modules that are used by the BUILTIN modules and are not intended to be
+      // accessible from the worker itself.
+
+      // Inject metadata that the entrypoint module will read.
+      auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
+      auto version = getPythonBundleName(pythonRelease);
+      auto bundle = KJ_ASSERT_NONNULL(
+          fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
+
+      // We end up add modules from the bundle twice, once to get BUILTIN modules
+      // and again to get the BUILTIN_ONLY modules. These end up in two different
+      // module bundles.
+      jsg::modules::ModuleBundle::BuiltinBuilder pyodideSdkBuilder;
+
+      // There are two bundles that are relevant here, PYODIDE_BUNDLE, which is
+      // fixed and contains compiled-in modules, and the bundle that is fetched
+      // that contains the more dynamic implementation details. We have to process
+      // both.
+      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideSdkBuilder, PYODIDE_BUNDLE);
+      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideSdkBuilder, bundle);
+      builder.add(pyodideSdkBuilder.finish());
+
+      jsg::modules::ModuleBundle::BuiltinBuilder pyodideBundleBuilder(
+          jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+
+      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, PYODIDE_BUNDLE);
+      jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, bundle);
+
+      pyodideBundleBuilder.addSynthetic(bootrapSpecifier,
+          jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::SetupEmscripten,
+              JsgWorkerdIsolate_TypeWrapper>(
+              [](jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
+        auto& api = Worker::Api::current();
+        return js.alloc<api::pyodide::SetupEmscripten>(
+            KJ_ASSERT_NONNULL(api.getEmscriptenRuntime()));
+      }));
+
+      pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
+
+      pyodideBundleBuilder.addSynthetic(metadataSpecifier,
+          jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
+              JsgWorkerdIsolate_TypeWrapper>(
+              [state = makePyodideMetadataReader(source, pythonConfig, pythonRelease)](
+                  jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::PyodideMetadataReader> {
+        // The ModuleRegistry may be shared across multiple isolates and workers.
+        // We need to clone the PyodideMetadataReader::State for each instance
+        // that is evaluated. Typically this is only once per python worker
+        // but could be more in the future.
+        return js.alloc<PyodideMetadataReader>(state->clone());
+      }));
+      // Inject artifact bundler.
+      pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
+          jsg::modules::Module::newJsgObjectModuleHandler<ArtifactBundler,
+              JsgWorkerdIsolate_TypeWrapper>(
+              [](jsg::Lock& js) mutable -> jsg::Ref<ArtifactBundler> {
+        return js.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler());
+      }));
+      // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
+      pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,
+          jsg::modules::Module::newJsgObjectModuleHandler<DisabledInternalJaeger,
+              JsgWorkerdIsolate_TypeWrapper>(
+              [](jsg::Lock& js) mutable -> jsg::Ref<DisabledInternalJaeger> {
+        return DisabledInternalJaeger::create(js);
+      }));
+      // Inject disk cache module
+      pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
+          jsg::modules::Module::newJsgObjectModuleHandler<DiskCache, JsgWorkerdIsolate_TypeWrapper>(
+              [&packageDiskCacheRoot = pythonConfig.packageDiskCacheRoot](jsg::Lock& js) mutable
+              -> jsg::Ref<DiskCache> { return js.alloc<DiskCache>(packageDiskCacheRoot); }));
+      // Inject a (disabled) SimplePythonLimiter
+      pyodideBundleBuilder.addSynthetic(limiterSpecifier,
+          jsg::modules::Module::newJsgObjectModuleHandler<SimplePythonLimiter,
+              JsgWorkerdIsolate_TypeWrapper>(
+              [](jsg::Lock& js) mutable -> jsg::Ref<SimplePythonLimiter> {
+        return SimplePythonLimiter::makeDisabled(js);
+      }));
+
+      builder.add(pyodideBundleBuilder.finish());
+    }
+  }
 
   // Handle extensions
   jsg::modules::ModuleBundle::BuiltinBuilder publicExtensionsBuilder(
@@ -1217,99 +1318,6 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
   builder.add(publicExtensionsBuilder.finish());
   builder.add(privateExtensionsBuilder.finish());
-
-  // Add the built-in module bundles that support python workers/pyodide.
-  if (hasPythonModules) {
-    // TODO(new-module-registry): Move into pyodide.h/pyodide.c++
-    const auto bootrapSpecifier = "internal:setup-emscripten"_url;
-    const auto metadataSpecifier = "pyodide-internal:runtime-generated/metadata"_url;
-    const auto artifactsSpecifier = "pyodide-internal:artifacts"_url;
-    const auto internalJaegerSpecifier = "pyodide-internal:internalJaeger"_url;
-    const auto diskCacheSpecifier = "pyodide-internal:disk_cache"_url;
-    const auto limiterSpecifier = "pyodide-internal:limiter"_url;
-    const auto tarReaderSpecifier = "pyodide-internal:packages_tar_reader"_url;
-
-    // To support python workers we create two modules bundles, one BUILTIN
-    // and the other BUILTIN_ONLY. The BUILTIN bundle contains support modules
-    // that need to be importable by the python worker bootstrap module (which
-    // is added to the BUNDLE modules). The BUILTIN_ONLY bundle contains support
-    // modules that are used by the BUILTIN modules and are not intended to be
-    // accessible from the worker itself.
-
-    // Inject metadata that the entrypoint module will read.
-    auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    auto version = getPythonBundleName(pythonRelease);
-    auto bundle = KJ_ASSERT_NONNULL(
-        fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
-
-    // We end up add modules from the bundle twice, once to get BUILTIN modules
-    // and again to get the BUILTIN_ONLY modules. These end up in two different
-    // module bundles.
-    jsg::modules::ModuleBundle::BuiltinBuilder pyodideSdkBuilder;
-
-    // There are two bundles that are relevant here, PYODIDE_BUNDLE, which is
-    // fixed and contains compiled-in modules, and the bundle that is fetched
-    // that contains the more dynamic implementation details. We have to process
-    // both.
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideSdkBuilder, PYODIDE_BUNDLE);
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideSdkBuilder, bundle);
-    builder.add(pyodideSdkBuilder.finish());
-
-    jsg::modules::ModuleBundle::BuiltinBuilder pyodideBundleBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, PYODIDE_BUNDLE);
-    jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(pyodideBundleBuilder, bundle);
-
-    pyodideBundleBuilder.addSynthetic(bootrapSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::SetupEmscripten,
-            JsgWorkerdIsolate_TypeWrapper>(
-            [](jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
-      auto& api = Worker::Api::current();
-      return js.alloc<api::pyodide::SetupEmscripten>(KJ_ASSERT_NONNULL(api.getEmscriptenRuntime()));
-    }));
-
-    pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
-
-    pyodideBundleBuilder.addSynthetic(metadataSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
-            JsgWorkerdIsolate_TypeWrapper>(
-            [state = makePyodideMetadataReader(source, pythonConfig, pythonRelease)](
-                jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::PyodideMetadataReader> {
-      // The ModuleRegistry may be shared across multiple isolates and workers.
-      // We need to clone the PyodideMetadataReader::State for each instance
-      // that is evaluated. Typically this is only once per python worker
-      // but could be more in the future.
-      return js.alloc<PyodideMetadataReader>(state->clone());
-    }));
-    // Inject artifact bundler.
-    pyodideBundleBuilder.addSynthetic(artifactsSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<ArtifactBundler,
-            JsgWorkerdIsolate_TypeWrapper>([](jsg::Lock& js) mutable -> jsg::Ref<ArtifactBundler> {
-      return js.alloc<ArtifactBundler>(ArtifactBundler::makeDisabledBundler());
-    }));
-    // Inject jaeger internal tracer in a disabled state (we don't have a use for it in workerd)
-    pyodideBundleBuilder.addSynthetic(internalJaegerSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<DisabledInternalJaeger,
-            JsgWorkerdIsolate_TypeWrapper>(
-            [](jsg::Lock& js) mutable -> jsg::Ref<DisabledInternalJaeger> {
-      return DisabledInternalJaeger::create(js);
-    }));
-    // Inject disk cache module
-    pyodideBundleBuilder.addSynthetic(diskCacheSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<DiskCache, JsgWorkerdIsolate_TypeWrapper>(
-            [&packageDiskCacheRoot = pythonConfig.packageDiskCacheRoot](jsg::Lock& js) mutable
-            -> jsg::Ref<DiskCache> { return js.alloc<DiskCache>(packageDiskCacheRoot); }));
-    // Inject a (disabled) SimplePythonLimiter
-    pyodideBundleBuilder.addSynthetic(limiterSpecifier,
-        jsg::modules::Module::newJsgObjectModuleHandler<SimplePythonLimiter,
-            JsgWorkerdIsolate_TypeWrapper>(
-            [](jsg::Lock& js) mutable -> jsg::Ref<SimplePythonLimiter> {
-      return SimplePythonLimiter::makeDisabled(js);
-    }));
-
-    builder.add(pyodideBundleBuilder.finish());
-  }
 
   // If we have a fallback service configured, add the fallback bundle.
   // The fallback bundle is used only in workerd local development mode.

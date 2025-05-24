@@ -172,17 +172,7 @@ ModuleOrRedirect tryResolveV2(ImportType type,
   capnp::JsonCodec json;
   capnp::MallocMessageBuilder moduleMessage;
   auto request = moduleMessage.initRoot<server::config::FallbackServiceRequest>();
-  switch (type) {
-    case ImportType::IMPORT:
-      request.setType("import");
-      break;
-    case ImportType::REQUIRE:
-      request.setType("require");
-      break;
-    case ImportType::INTERNAL:
-      request.setType("internal");
-      break;
-  }
+  request.setType(getMethodFromType(type));
   request.setSpecifier(specifier);
   request.setReferrer(referrer);
 
@@ -192,7 +182,7 @@ ModuleOrRedirect tryResolveV2(ImportType type,
 
   if (attributes.size() > 0) {
     auto attrs = request.initAttributes(attributes.size());
-    int n = 0;
+    size_t n = 0;
     for (auto& attr: attributes) {
       attrs[n].setName(attr.key);
       attrs[n].setValue(attr.value);
