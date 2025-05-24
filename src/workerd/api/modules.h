@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/api/filesystem.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
@@ -51,6 +52,8 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerRpcModules(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  registry.template addBuiltinModule<FileSystemModule>(
+      "cloudflare-internal:filesystem", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 template <class TypeWrapper>
@@ -80,6 +83,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
         jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
     builtinsBuilder.addObject<EnvModule, TypeWrapper>("cloudflare-internal:env"_url);
+    builtinsBuilder.addObject<FileSystemModule, TypeWrapper>("cloudflare-internal:filesystem"_url);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }

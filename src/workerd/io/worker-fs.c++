@@ -451,20 +451,11 @@ class DirectoryBase final: public Directory {
             return entries.erase(path[0]);
           }
           KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-            path = path.slice(1, path.size());
-            if (path.size() == 0) {
-              if (opts.recursive) {
-                // We can remove it since we are in recursive mode.
-                return entries.erase(path[0]);
-              } else if (dir->count(js) == 0) {
-                // The directory is empty. We can remove it.
-                return entries.erase(path[0]);
-              }
-              // The directory is not empty. We cannot remove it.
-              JSG_FAIL_REQUIRE(Error, "Directory is not empty");
-            } else {
-              return dir->remove(js, path, kj::mv(opts));
+            if (path.size() == 1) {
+              JSG_REQUIRE(opts.recursive || dir->count(js) == 0, Error, "Directory is not empty");
+              return entries.erase(path[0]);
             }
+            return dir->remove(js, path.slice(1, path.size()), kj::mv(opts));
           }
           KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
             // If we found a symbolic link, we can remove it if our path
@@ -1047,7 +1038,8 @@ kj::Maybe<const VirtualFileSystem&> VirtualFileSystem::tryGetCurrent(jsg::Lock&)
   return Worker::Api::current().getVirtualFileSystem();
 }
 
-kj::Maybe<FsNode> VirtualFileSystem::resolve(jsg::Lock& js, const jsg::Url& url) const {
+kj::Maybe<FsNode> VirtualFileSystem::resolve(
+    jsg::Lock& js, const jsg::Url& url, ResolveOptions options) const {
   if (url.getProtocol() != "file:"_kj) {
     // We only accept file URLs.
     return kj::none;
@@ -1055,7 +1047,10 @@ kj::Maybe<FsNode> VirtualFileSystem::resolve(jsg::Lock& js, const jsg::Url& url)
   // We want to strip the leading slash from the path.
   auto path = kj::str(url.getPathname().slice(1));
   kj::Path root{};
-  return getRoot(js)->tryOpen(js, root.eval(path));
+  return getRoot(js)->tryOpen(js, root.eval(path),
+      Directory::OpenOptions{
+        .followLinks = options.followLinks,
+      });
 }
 
 kj::Maybe<Stat> VirtualFileSystem::resolveStat(jsg::Lock& js, const jsg::Url& url) const {
@@ -1229,7 +1224,7 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
       .type = FsType::FILE,
       .size = 0,
       .lastModified = kj::UNIX_EPOCH,
-      .writable = false,
+      .writable = true,
       .device = true,
     };
   }
@@ -1285,7 +1280,7 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
       .type = FsType::FILE,
       .size = 0,
       .lastModified = kj::UNIX_EPOCH,
-      .writable = false,
+      .writable = true,
       .device = true,
     };
   }
