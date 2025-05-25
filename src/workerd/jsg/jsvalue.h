@@ -236,6 +236,10 @@ class JsString final: public JsBase<v8::String, JsString> {
   int length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   size_t utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::ByteString toByteString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
   int hashCode() const;
 
   bool containsOnlyOneByte() const;

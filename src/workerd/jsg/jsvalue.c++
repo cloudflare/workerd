@@ -2,6 +2,7 @@
 
 #include "buffersource.h"
 #include "ser.h"
+#include "simdutf.h"
 
 #include <v8.h>
 
@@ -300,7 +301,42 @@ size_t JsString::utf8Length(jsg::Lock& js) const {
 }
 
 kj::String JsString::toString(jsg::Lock& js) const {
-  return kj::str(inner);
+  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
+  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+  return js.accountedKjString(kj::mv(buf));
+}
+
+jsg::USVString JsString::toUSVString(Lock& js) const {
+  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
+  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(),
+      v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
+  return js.accountedUSVString(kj::mv(buf));
+}
+
+jsg::ByteString JsString::toByteString(Lock& js) const {
+  auto result = js.accountedByteString(toString(js));
+
+  if (!simdutf::validate_ascii(result.begin(), result.size())) {
+    // If storage is one-byte or the string contains only one-byte
+    // characters, we know that it contains extended ASCII characters.
+    //
+    // The order of execution matters, since ContainsOnlyOneByte()
+    // will scan the whole string for two-byte storage.
+    if (inner->ContainsOnlyOneByte()) {
+      result.warning = ByteString::Warning::CONTAINS_EXTENDED_ASCII;
+    } else {
+      // Storage is two-bytes and it contains two-byte characters.
+      result.warning = ByteString::Warning::CONTAINS_UNICODE;
+    }
+  }
+
+  return kj::mv(result);
+}
+
+jsg::DOMString JsString::toDOMString(Lock& js) const {
+  auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
+  inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
+  return js.accountedDOMString(kj::mv(buf));
 }
 
 int JsString::hashCode() const {

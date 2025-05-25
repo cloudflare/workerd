@@ -432,7 +432,6 @@ class StringWrapper {
   static constexpr const char* getName(ByteString*) {
     return "ByteString";
   }
-  // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
 
   static constexpr const char* getName(USVString*) {
     return "USVString";
@@ -508,66 +507,37 @@ class StringWrapper {
       v8::Local<v8::Value> handle,
       kj::String*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
-    v8::Isolate* isolate = context->GetIsolate();
-    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
-    str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-    auto& js = Lock::from(isolate);
-    return js.accountedKjString(kj::mv(buf));
+    // Note that if handle is already a string, calling ToString will just
+    // return handle without any further coercion. For any other type of
+    // value, v8 will try to coerce it into a string. So there is no need
+    // for us to check if handle is a string here or not, ToString does
+    // that for us.
+    JsString str(check(handle->ToString(context)));
+    return str.toString(Lock::from(context->GetIsolate()));
   }
 
   kj::Maybe<ByteString> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       ByteString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
-
-    auto& js = Lock::from(context->GetIsolate());
-    auto inner =
-        KJ_ASSERT_NONNULL(tryUnwrap(context, str, static_cast<kj::String*>(nullptr), parentObject));
-
-    auto result = js.accountedByteString(kj::mv(inner));
-
-    if (!simdutf::validate_ascii(result.begin(), result.size())) {
-      // If storage is one-byte or the string contains only one-byte
-      // characters, we know that it contains extended ASCII characters.
-      //
-      // The order of execution matters, since ContainsOnlyOneByte()
-      // will scan the whole string for two-byte storage.
-      if (str->ContainsOnlyOneByte()) {
-        result.warning = ByteString::Warning::CONTAINS_EXTENDED_ASCII;
-      } else {
-        // Storage is two-bytes and it contains two-byte characters.
-        result.warning = ByteString::Warning::CONTAINS_UNICODE;
-      }
-    }
-
-    return kj::mv(result);
+    JsString str(check(handle->ToString(context)));
+    return str.toByteString(Lock::from(context->GetIsolate()));
   }
 
   kj::Maybe<USVString> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       USVString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
-    v8::Isolate* isolate = context->GetIsolate();
-    auto& js = Lock::from(isolate);
-    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
-    str->WriteUtf8V2(isolate, buf.begin(), buf.size(),
-        v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
-    return js.accountedUSVString(kj::mv(buf));
+    JsString str(check(handle->ToString(context)));
+    return str.toUSVString(Lock::from(context->GetIsolate()));
   }
 
   kj::Maybe<DOMString> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       DOMString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    v8::Local<v8::String> str = check(handle->ToString(context));
-    v8::Isolate* isolate = context->GetIsolate();
-    auto& js = Lock::from(isolate);
-    auto buf = kj::heapArray<char>(str->Utf8LengthV2(isolate) + 1);
-    str->WriteUtf8V2(isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-    return js.accountedDOMString(kj::mv(buf));
+    JsString str(check(handle->ToString(context)));
+    return str.toDOMString(Lock::from(context->GetIsolate()));
   }
 };
 
