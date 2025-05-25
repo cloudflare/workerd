@@ -527,6 +527,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "tests/eventsource-test.wd-test",
     args = ["--experimental"],
     data = ["tests/eventsource-test.js"],
