@@ -517,14 +517,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
 
   KJ_IF_SOME(info, ret.info) {
-    KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
-        obj.set(js, INFO_STR, ToJs(js, fetch, cache));
-      }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
-      }
-    }
+    obj.set(js, INFO_STR, ToJs(js, info, cache));
   }
 
   return obj;

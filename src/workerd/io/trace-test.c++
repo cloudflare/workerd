@@ -424,18 +424,16 @@ KJ_TEST("Read/Write Return works") {
   auto infoBuilder = builder.initRoot<rpc::Trace::Return>();
 
   tracing::FetchResponseInfo fetchInfo(123);
-  tracing::Return info(tracing::Return::Info(kj::mv(fetchInfo)));
+  tracing::Return info(kj::mv(fetchInfo));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
   tracing::Return info2(reader);
-  auto& fetchInfo2 =
-      KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(info2.info).tryGet<tracing::FetchResponseInfo>());
+  auto& fetchInfo2 = KJ_ASSERT_NONNULL(info2.info);
   KJ_ASSERT(fetchInfo2.statusCode == 123);
 
   tracing::Return info3 = info.clone();
-  auto& fetchInfo3 =
-      KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(info3.info).tryGet<tracing::FetchResponseInfo>());
+  auto& fetchInfo3 = KJ_ASSERT_NONNULL(info3.info);
   KJ_ASSERT(fetchInfo3.statusCode == 123);
 }
 
