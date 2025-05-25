@@ -338,7 +338,9 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
-    writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
+    // TODO(o11y): Add top-level spanId
+    writer->report(context,
+        tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), tracing::SpanId((uint64_t)0)));
   }
   trace->eventInfo = kj::mv(info);
 }

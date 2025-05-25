@@ -256,6 +256,9 @@ struct Trace @0x8e8d911203762d34 {
     }
     }
     info @8: Info;
+
+    # TODO
+    spanId @9 :UInt64;
   }
 
   struct Outcome {
