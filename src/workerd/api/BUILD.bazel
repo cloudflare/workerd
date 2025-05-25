@@ -654,6 +654,23 @@ wd_test(
     ],
 )
 
+js_binary(
+    name = "http-socket-server",
+    entry_point = "tests/http-socket-server.js",
+)
+
+wd_test(
+    src = "tests/http-socket-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/http-socket-test.js",
+    ],
+    sidecar = "http-socket-server",
+    sidecar_port_bindings = [
+        "HTTP_SOCKET_SERVER_PORT",
+    ],
+)
+
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
     args = [
