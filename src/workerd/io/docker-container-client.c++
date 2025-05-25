@@ -20,7 +20,6 @@ class DockerContainerClient::DockerPort final: public rpc::Container::Port::Serv
 
   kj::Promise<void> connect(ConnectContext context) override {
     auto params = context.getParams();
-    auto results = context.getResults();
 
     // Get the downstream ByteStream
     auto down = params.getDown();
@@ -31,9 +30,7 @@ class DockerContainerClient::DockerPort final: public rpc::Container::Port::Serv
   }
 
  private:
-  DockerClient& dockerClient;
   kj::String containerId;
-  uint16_t containerPort;
 };
 
 DockerContainerClient::DockerContainerClient(
