@@ -317,6 +317,7 @@ void WorkerTracer::setEventInfo(
       return capnp::clone(*scriptVersion);
     }),
       .dispatchNamespace = mapCopyString(trace->dispatchNamespace),
+      .scriptId = mapCopyString(trace->scriptId),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
       .entrypoint = mapCopyString(trace->entrypoint),
     };
