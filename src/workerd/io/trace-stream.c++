@@ -650,7 +650,13 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
-    if (doneFulfiller->isWaiting()) {
+    // We set doFulfill to indicate that the outcome event has been received via RPC, indicating
+    // that no more events are expected. After that, we still need to provide it to the user-
+    // provided tail handler and wait for the RPC client to receive the stop signal, so we can only
+    // do the actual fulfillment in the destructor.
+    if (doFulfill) {
+      doneFulfiller->fulfill();
+    } else if (doneFulfiller->isWaiting()) {
       doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
     }
   }
@@ -759,7 +765,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
                                "not export a tailStream() handler.");
       results.setStop(true);
-      doneFulfiller->fulfill();
+      doFulfill = true;
       return kj::READY_NOW;
     }
 
@@ -823,19 +829,19 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         // And finally, we'll stop the stream since the tail worker did not return
         // a handler for us to continue with.
         results->get().setStop(true);
-        doneFulfiller->fulfill();
+        doFulfill = true;
       }),
               ioContext.addFunctor([this, results = sharedResults.addRef()](
                                        jsg::Lock& js, jsg::Value&& error) mutable {
         results->get().setStop(true);
-        doneFulfiller->fulfill();
+        doFulfill = true;
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
                                "not return a valid tailStream() handler.");
       results.setStop(true);
-      doneFulfiller->fulfill();
+      doFulfill = true;
       return kj::READY_NOW;
     }
     KJ_UNREACHABLE;
@@ -860,11 +866,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // If any of the events delivered are an outcome event, we will signal that
     // the stream should be stopped and will fulfill the done promise.
     bool finishing = false;
-
-    // When a tail worker receives its outcome event, we need to ensure that the final tail worker
-    // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
-    // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
-    bool doFulfill = false;
 
     for (auto& event: events) {
       // If we already received an outcome event, we will stop processing any
@@ -938,12 +939,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
-      if (doFulfill) {
-        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
-            [&](jsg::Lock& js, jsg::Value&& value) {
-          doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
-        });
-      }
       return ioContext.awaitJs(js, kj::mv(p));
     }
     return kj::READY_NOW;
@@ -959,6 +954,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // The maybeHandler will be empty until we receive and process the
   // onset event.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
+
+  // When a tail worker receives its outcome event, we need to ensure that the final tail worker
+  // invocation is completed and that the TailStreamTarget call has returned before destroying the
+  // tail worker customEvent and incomingRequest. To achieve this, we only fulfill the doneFulfiller
+  // in the destructor, which will be called when the client has deallocated its capability.
+  bool doFulfill = false;
 };
 }  // namespace
 
@@ -1013,8 +1014,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
     rpc::EventDispatcher::Client dispatcher) {
   auto revokePaf = kj::newPromiseAndFulfiller<void>();
 
-  // TODO(streaming-tail): Session is currently being reported as canceled when using
-  // TailStreamCustomEventImpl via RPC, investigate.
   KJ_DEFER({
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
