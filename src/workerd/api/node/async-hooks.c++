@@ -5,8 +5,9 @@
 
 namespace workerd::api::node {
 
-jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(jsg::Lock& js) {
-  return js.alloc<AsyncLocalStorage>();
+jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(
+    jsg::Lock& js, jsg::Optional<AsyncLocalStorage::AsyncLocalStorageOptions> options) {
+  return js.alloc<AsyncLocalStorage>(kj::mv(options));
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::run(jsg::Lock& js,
@@ -40,7 +41,17 @@ v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
       return value.getHandle(js);
     }
   }
+  KJ_IF_SOME(value, defaultValue) {
+    return value.getHandle(js);
+  }
   return js.v8Undefined();
+}
+
+kj::StringPtr AsyncLocalStorage::getName() {
+  KJ_IF_SOME(n, name) {
+    return n.asPtr();
+  }
+  return nullptr;
 }
 
 v8::Local<v8::Function> AsyncLocalStorage::bind(jsg::Lock& js, v8::Local<v8::Function> fn) {
