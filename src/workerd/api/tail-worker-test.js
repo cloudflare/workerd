@@ -65,11 +65,11 @@ export const test = {
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
       // tests/websocket-hibernation.js: hibernatableWebSocket events
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/","cfJson":"","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/","cfJson":"","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":["",""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/hibernation","cfJson":"","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"message"}}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"close","code":1000,"wasClean":true}}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/hibernation","cfJson":"","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"message"}}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"close","code":1000,"wasClean":true}}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
     ];
 
     assert.deepStrictEqual(response, expected);
