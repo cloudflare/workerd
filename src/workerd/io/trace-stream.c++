@@ -84,7 +84,6 @@ namespace {
   V(TRACEID, "traceId")                                                                            \
   V(TRACE, "trace")                                                                                \
   V(TRACES, "traces")                                                                              \
-  V(TRIGGER, "trigger")                                                                            \
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
@@ -379,13 +378,12 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     obj.set(js, SCRIPTVERSION_STR, vobj);
   }
 
-  KJ_IF_SOME(trigger, onset.trigger) {
-    auto tobj = js.obj();
-    tobj.set(js, TRACEID_STR, js.str(trigger.traceId.toGoString()));
-    tobj.set(js, INVOCATIONID_STR, js.str(trigger.invocationId.toGoString()));
-    tobj.set(js, SPANID_STR, js.str(trigger.spanId.toGoString()));
-    obj.set(js, TRIGGER_STR, tobj);
-  }
+  // TODO(o11y): Provide top-level span ID.
+  /*if (isPredictableModeForTest()) {
+    obj.set(js, SPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
+  } else {
+    obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
+  }*/
 
   KJ_SWITCH_ONEOF(onset.info) {
     KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
@@ -654,8 +652,9 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
           scriptTags = kj::mv(sc);
         }
         auto trace = kj::refcounted<Trace>(kj::none, kj::mv(workerInfo.scriptName),
-            kj::mv(workerInfo.scriptVersion), kj::mv(workerInfo.dispatchNamespace), kj::none,
-            kj::mv(scriptTags), kj::mv(workerInfo.entrypoint), workerInfo.executionModel);
+            kj::mv(workerInfo.scriptVersion), kj::mv(workerInfo.dispatchNamespace),
+            kj::mv(workerInfo.scriptId), kj::mv(scriptTags), kj::mv(workerInfo.entrypoint),
+            workerInfo.executionModel);
 
         trace->eventInfo = kj::mv(onset.info);
 
