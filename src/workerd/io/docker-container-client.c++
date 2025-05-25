@@ -14,9 +14,7 @@ namespace workerd::io {
 class DockerContainerClient::DockerPort final: public rpc::Container::Port::Server {
  public:
   DockerPort(DockerClient& dockerClient, kj::String containerId, uint16_t containerPort)
-      : dockerClient(dockerClient),
-        containerId(kj::mv(containerId)),
-        containerPort(containerPort) {}
+      : containerId(kj::mv(containerId)) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
     auto params = context.getParams();
