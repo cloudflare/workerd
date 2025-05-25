@@ -190,8 +190,7 @@ struct Trace @0x8e8d911203762d34 {
     # the response body payload, etc). Not all spans will have a Return mark.
     info :union {
       empty @0 :Void;
-      custom @1 :List(Attribute);
-      fetch @2 :FetchResponseInfo;
+      fetch @1 :FetchResponseInfo;
     }
   }
 

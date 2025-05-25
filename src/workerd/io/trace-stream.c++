@@ -520,14 +520,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
 
   KJ_IF_SOME(info, ret.info) {
-    KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
-        obj.set(js, INFO_STR, ToJs(js, fetch, cache));
-      }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
-      }
-    }
+    obj.set(js, INFO_STR, ToJs(js, info, cache));
   }
 
   return obj;
@@ -718,13 +711,8 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
         traces[0]->diagnosticChannelEvents.add(diag.clone());
       }
       KJ_CASE_ONEOF(r, tracing::Return) {
-        KJ_IF_SOME(rr, r.info) {
-          KJ_SWITCH_ONEOF(rr) {
-            KJ_CASE_ONEOF(fetchInfo, tracing::FetchResponseInfo) {
-              traces[0]->fetchResponseInfo = kj::mv(fetchInfo);
-            }
-            KJ_CASE_ONEOF(custom, tracing::CustomInfo) {}
-          }
+        KJ_IF_SOME(info, r.info) {
+          traces[0]->fetchResponseInfo = kj::mv(info);
         }
       }
       KJ_CASE_ONEOF(r, Link) {}

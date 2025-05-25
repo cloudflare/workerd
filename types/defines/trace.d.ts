@@ -153,7 +153,7 @@ interface Log {
 
 interface Return {
   readonly type: "return";
-  readonly info?: FetchResponseInfo | Attributes;
+  readonly info?: FetchResponseInfo;
 }
 
 interface Link {

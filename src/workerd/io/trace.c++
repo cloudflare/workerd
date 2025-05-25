@@ -942,22 +942,14 @@ tracing::Attribute tracing::Attribute::clone() const {
   return Attribute(kj::str(name), KJ_MAP(v, value) { return cloneValue(v); });
 }
 
-tracing::Return::Return(kj::Maybe<tracing::Return::Info> info): info(kj::mv(info)) {}
+tracing::Return::Return(kj::Maybe<tracing::FetchResponseInfo> info): info(kj::mv(info)) {}
 
 namespace {
-kj::Maybe<tracing::Return::Info> readReturnInfo(const rpc::Trace::Return::Reader& reader) {
+kj::Maybe<tracing::FetchResponseInfo> readReturnInfo(const rpc::Trace::Return::Reader& reader) {
   auto info = reader.getInfo();
   switch (info.which()) {
     case rpc::Trace::Return::Info::EMPTY:
       return kj::none;
-    case rpc::Trace::Return::Info::CUSTOM: {
-      auto list = info.getCustom();
-      kj::Vector<tracing::Attribute> attrs(list.size());
-      for (size_t n = 0; n < list.size(); n++) {
-        attrs.add(tracing::Attribute(list[n]));
-      }
-      return kj::Maybe(attrs.releaseAsArray());
-    }
     case rpc::Trace::Return::Info::FETCH: {
       return kj::Maybe(tracing::FetchResponseInfo(info.getFetch()));
     }
@@ -969,33 +961,15 @@ kj::Maybe<tracing::Return::Info> readReturnInfo(const rpc::Trace::Return::Reader
 tracing::Return::Return(rpc::Trace::Return::Reader reader): info(readReturnInfo(reader)) {}
 
 void tracing::Return::copyTo(rpc::Trace::Return::Builder builder) const {
-  KJ_IF_SOME(i, info) {
+  KJ_IF_SOME(fetchInfo, info) {
     auto infoBuilder = builder.initInfo();
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
-        fetch.copyTo(infoBuilder.initFetch());
-      }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        auto attributes = infoBuilder.initCustom(custom.size());
-        for (size_t n = 0; n < custom.size(); n++) {
-          custom[n].copyTo(attributes[n]);
-        }
-      }
-    }
+    fetchInfo.copyTo(infoBuilder.initFetch());
   }
 }
 
 tracing::Return tracing::Return::clone() const {
-  KJ_IF_SOME(i, info) {
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
-        return Return(kj::Maybe(fetch.clone()));
-      }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        return Return(kj::Maybe(KJ_MAP(i, custom) { return i.clone(); }));
-      }
-    }
-    KJ_UNREACHABLE;
+  KJ_IF_SOME(fetchInfo, info) {
+    return Return(kj::Maybe(fetchInfo.clone()));
   }
   return Return();
 }
