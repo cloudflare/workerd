@@ -42,19 +42,15 @@ DockerContainerClient::DockerContainerClient(
       imageTag(kj::mv(imageTag)),
       dockerClient(dockerClient) {}
 
-kj::Promise<capnp::Response<rpc::Container::StatusResults>> DockerContainerClient::statusRequest(
-    capnp::Request<rpc::Container::StatusParams, rpc::Container::StatusResults> request) {
-  return dockerClient.isContainerRunning(containerId)
-      .then([request = kj::mv(request)](bool isRunning) mutable {
-    auto results = request.initResults();
+kj::Promise<void> DockerContainerClient::status(StatusContext context) {
+  return dockerClient.isContainerRunning(containerId).then([context](bool isRunning) mutable {
+    auto results = context.getResults();
     results.setRunning(isRunning);
-    return kj::mv(request);
   });
 }
 
-kj::Promise<capnp::Response<rpc::Container::StartResults>> DockerContainerClient::startRequest(
-    capnp::Request<rpc::Container::StartParams, rpc::Container::StartResults> request) {
-  auto params = request.getParams();
+kj::Promise<void> DockerContainerClient::start(StartContext context) {
+  auto params = context.getParams();
 
   // Convert entrypoint
   kj::Array<kj::StringPtr> entrypointPtrs;
@@ -83,65 +79,40 @@ kj::Promise<capnp::Response<rpc::Container::StartResults>> DockerContainerClient
   }
 
   return dockerClient.startContainer(imageTag, containerId, entrypointPtrs, envPtrs, portMappings)
-      .then([request = kj::mv(request), this]() mutable {
-    running = true;
-    auto results = request.initResults();
-    return kj::mv(request);
-  });
+      .then([this]() mutable { running = true; });
 }
 
-kj::Promise<capnp::Response<rpc::Container::MonitorResults>> DockerContainerClient::monitorRequest(
-    capnp::Request<rpc::Container::MonitorParams, rpc::Container::MonitorResults> request) {
-  return dockerClient.waitForContainerExit(containerId)
-      .then([request = kj::mv(request), this]() mutable {
-    running = false;
-    auto results = request.initResults();
-    return kj::mv(request);
-  });
+kj::Promise<void> DockerContainerClient::monitor(MonitorContext context) {
+  return dockerClient.waitForContainerExit(containerId).then([this]() mutable { running = false; });
 }
 
-kj::Promise<capnp::Response<rpc::Container::DestroyResults>> DockerContainerClient::destroyRequest(
-    capnp::Request<rpc::Container::DestroyParams, rpc::Container::DestroyResults> request) {
+kj::Promise<void> DockerContainerClient::destroy(DestroyContext context) {
   if (!running) {
-    auto results = request.initResults();
-    return kj::mv(request);
+    return kj::READY_NOW;
   }
 
-  return dockerClient.stopContainer(containerId).then([request = kj::mv(request), this]() mutable {
-    running = false;
-    auto results = request.initResults();
-    return kj::mv(request);
-  });
+  return dockerClient.stopContainer(containerId).then([this]() mutable { running = false; });
 }
 
-kj::Promise<capnp::Response<rpc::Container::SignalResults>> DockerContainerClient::signalRequest(
-    capnp::Request<rpc::Container::SignalParams, rpc::Container::SignalResults> request) {
-  auto params = request.getParams();
+kj::Promise<void> DockerContainerClient::signal(SignalContext context) {
+  auto params = context.getParams();
   uint32_t signo = params.getSigno();
 
-  return dockerClient.killContainer(containerId, signo).then([request = kj::mv(request)]() mutable {
-    auto results = request.initResults();
-    return kj::mv(request);
-  });
+  return dockerClient.killContainer(containerId, signo);
 }
 
-kj::Promise<capnp::Response<rpc::Container::GetTcpPortResults>> DockerContainerClient::
-    getTcpPortRequest(
-        capnp::Request<rpc::Container::GetTcpPortParams, rpc::Container::GetTcpPortResults>
-            request) {
-  auto params = request.getParams();
+kj::Promise<void> DockerContainerClient::getTcpPort(GetTcpPortContext context) {
+  auto params = context.getParams();
   uint16_t port = params.getPort();
 
-  auto results = request.initResults();
+  auto results = context.getResults();
   auto dockerPort = kj::heap<DockerPort>(dockerClient, kj::str(containerId), port);
   results.setPort(kj::mv(dockerPort));
 
-  return kj::mv(request);
+  return kj::READY_NOW;
 }
 
-kj::Promise<capnp::Response<rpc::Container::ListenTcpResults>> DockerContainerClient::
-    listenTcpRequest(
-        capnp::Request<rpc::Container::ListenTcpParams, rpc::Container::ListenTcpResults> request) {
+kj::Promise<void> DockerContainerClient::listenTcp(ListenTcpContext context) {
   // ListenTcp is not implemented for Docker mode yet
   KJ_UNIMPLEMENTED("listenTcp not implemented for Docker containers");
 }

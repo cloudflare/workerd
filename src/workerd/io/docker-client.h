@@ -7,7 +7,7 @@
 #include <workerd/jsg/jsg.h>
 
 #include <kj/async.h>
-#include <kj/http.h>
+#include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/string.h>
 

@@ -12,38 +12,22 @@
 
 namespace workerd::io {
 
-// Docker-based implementation of the rpc::Container::Client interface.
+// Docker-based implementation that implements the rpc::Container::Server interface
+// so it can be used as a rpc::Container::Client via kj::heap<DockerContainerClient>().
 // This allows the Container JSG class to use Docker directly without knowing
 // it's talking to Docker instead of a real RPC service.
-class DockerContainerClient final: public rpc::Container::Client {
+class DockerContainerClient final: public rpc::Container::Server {
  public:
   DockerContainerClient(kj::String containerId, kj::String imageTag, DockerClient& dockerClient);
 
-  // Implement rpc::Container::Client interface
-  kj::Promise<capnp::Response<rpc::Container::StatusResults>> statusRequest(
-      capnp::Request<rpc::Container::StatusParams, rpc::Container::StatusResults> request) override;
-
-  kj::Promise<capnp::Response<rpc::Container::StartResults>> startRequest(
-      capnp::Request<rpc::Container::StartParams, rpc::Container::StartResults> request) override;
-
-  kj::Promise<capnp::Response<rpc::Container::MonitorResults>> monitorRequest(
-      capnp::Request<rpc::Container::MonitorParams, rpc::Container::MonitorResults> request)
-      override;
-
-  kj::Promise<capnp::Response<rpc::Container::DestroyResults>> destroyRequest(
-      capnp::Request<rpc::Container::DestroyParams, rpc::Container::DestroyResults> request)
-      override;
-
-  kj::Promise<capnp::Response<rpc::Container::SignalResults>> signalRequest(
-      capnp::Request<rpc::Container::SignalParams, rpc::Container::SignalResults> request) override;
-
-  kj::Promise<capnp::Response<rpc::Container::GetTcpPortResults>> getTcpPortRequest(
-      capnp::Request<rpc::Container::GetTcpPortParams, rpc::Container::GetTcpPortResults> request)
-      override;
-
-  kj::Promise<capnp::Response<rpc::Container::ListenTcpResults>> listenTcpRequest(
-      capnp::Request<rpc::Container::ListenTcpParams, rpc::Container::ListenTcpResults> request)
-      override;
+  // Implement rpc::Container::Server interface
+  kj::Promise<void> status(StatusContext context) override;
+  kj::Promise<void> start(StartContext context) override;
+  kj::Promise<void> monitor(MonitorContext context) override;
+  kj::Promise<void> destroy(DestroyContext context) override;
+  kj::Promise<void> signal(SignalContext context) override;
+  kj::Promise<void> getTcpPort(GetTcpPortContext context) override;
+  kj::Promise<void> listenTcp(ListenTcpContext context) override;
 
  private:
   kj::String containerId;
