@@ -39,12 +39,21 @@ import { default as crypto } from 'node:crypto';
 import { default as path } from 'node:path';
 
 type CommonOptions = {
+  // Brief explanation of why these options were set for a test
   comment?: string;
+  // Print information about each subtest within this test as it runs
   verbose?: boolean;
+  // Function executed before running the test
   before?: () => void;
+  // Function executed after running the test
   after?: () => void;
+  // Function that modifies the test code before it's run
   replace?: (code: string) => string;
+  // Execute only this test
   only?: boolean;
+  // If true, evaluate the test code within a top-level block. Otherwise, the test runs within the
+  // scope of an anonymous function.
+  runInGlobalScope?: boolean;
 };
 
 type SuccessOptions = {
@@ -1424,9 +1433,21 @@ function getCodeAtPath(
   return replaceInterpolation(code);
 }
 
-function evalAsBlock(env: Env, files: string[]): void {
-  const block = '{' + files.join('\n') + '}';
-  env.unsafe.eval(block);
+function evalAsBlock(
+  env: Env,
+  runInGlobalScope: boolean,
+  files: string[]
+): void {
+  const code = files.join('\n');
+
+  if (runInGlobalScope) {
+    // In this mode, the scope of const, let and function declarations is limited to stop tests
+    // from interfering with each other.
+    env.unsafe.eval(`{ ${code} }`);
+  } else {
+    // Additionally, use an IIFE to limit the scope of var and manipulation of the global scope
+    env.unsafe.eval(`(function () { ${code} })();`);
+  }
 }
 
 type Runner = {
@@ -1511,7 +1532,7 @@ async function runTest(
   }
 
   files.push(getCodeAtPath(env, './', file, options.replace));
-  evalAsBlock(env, files);
+  evalAsBlock(env, options.runInGlobalScope ?? false, files);
 
   if (options.after) {
     options.after();
