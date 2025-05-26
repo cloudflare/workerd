@@ -5,6 +5,7 @@
 #include "sql.h"
 
 #include "actor-state.h"
+#include "workerd/util/uuid.h"
 
 #include <workerd/io/io-context.h>
 
@@ -31,6 +32,8 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   querySql = querySql.internalize(js);
 
   auto& db = getDb(js);
+  auto randomQueryId = randomUUID(kj::none);
+  db.setQueryId(kj::mv(randomQueryId));
   auto& statementCache = *this->statementCache;
 
   kj::Rc<CachedStatement>& slot = statementCache.map.findOrCreate(querySql, [&]() {
@@ -73,7 +76,10 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   SqliteDatabase::Regulator& regulator = *this;
-  auto result = getDb(js).ingestSql(regulator, querySql);
+  auto& db = getDb(js);
+  auto randomQueryId = randomUUID(kj::none);
+  db.setQueryId(kj::mv(randomQueryId));
+  auto result = db.ingestSql(regulator, querySql);
   return IngestResult(
       kj::str(result.remainder), result.rowsRead, result.rowsWritten, result.statementCount);
 }

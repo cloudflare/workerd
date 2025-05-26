@@ -774,7 +774,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
             // Report queryEvent for this statement
             sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
                 queryLatency, dbWalBytesWritten, err, regulator.shouldAddQueryStats(),
-                kj::mv(queryErrorDescription));
+                kj::mv(queryErrorDescription), this->getQueryId());
 
             if (err == SQLITE_DONE) {
               // good
@@ -1323,7 +1323,7 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     : ResetListener(db),
       regulator(regulator),
       maybeStatement(statement.prepareForExecution()),
-      queryEvent(this->db.sqliteObserver) {
+      queryEvent(this->db.sqliteObserver, kj::str(this->db.getQueryId())) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);
@@ -1337,7 +1337,7 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
       regulator(regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
       maybeStatement(ownStatement),
-      queryEvent(this->db.sqliteObserver) {
+      queryEvent(this->db.sqliteObserver, this->db.getQueryId()) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
   init(bindings);

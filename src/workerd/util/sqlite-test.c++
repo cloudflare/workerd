@@ -925,7 +925,8 @@ KJ_TEST("SQLite observer reportQueryEvent") {
         uint64_t dbWalBytesWritten,
         int queryError,
         bool isInternalQuery,
-        kj::Maybe<kj::String> queryErrorDescription) override {
+        kj::Maybe<kj::String> queryErrorDescription,
+        kj::String queryRayId) override {
       KJ_IF_SOME(err, queryErrorDescription) {
         KJ_ASSERT(err.contains("query canceled because reset()"));
       }
