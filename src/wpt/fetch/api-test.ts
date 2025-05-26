@@ -722,7 +722,6 @@ export default {
       "It is error to set .duplex = 'full' when the body is a Uint8Array.",
       "It is error to set .duplex = 'full' when the body is a Blob.",
       "It is error to set .duplex = 'full' when the body is a ReadableStream.",
-      'Constructing a Request with a stream on which read() and releaseLock() are called',
     ],
   },
   'request/request-keepalive.any.js': {
@@ -878,8 +877,6 @@ export default {
       'Attempt to inject value: undefined via Object.prototype.then.',
       'Attempt to inject undefined via Object.prototype.then.',
       'Attempt to inject 8.2 via Object.prototype.then.',
-      'intercepting arraybuffer to body readable stream conversion via Object.prototype.then should not be possible',
-      'intercepting arraybuffer to text conversion via Object.prototype.then should not be possible',
     ],
   },
 } satisfies TestRunnerConfig;
