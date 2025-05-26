@@ -339,7 +339,7 @@ class RunnerState {
     for (const err of this.errors) {
       if (!expectedFailures.delete(err.message)) {
         err.message = sanitize_unpaired_surrogates(err.message);
-        console.error(err);
+        console.warn(err);
         unexpectedFailures.push(err.message);
       } else if (this.options.verbose) {
         err.message = sanitize_unpaired_surrogates(err.message);
@@ -348,7 +348,7 @@ class RunnerState {
     }
 
     if (unexpectedFailures.length > 0) {
-      console.info(
+      console.error(
         'The following tests unexpectedly failed:',
         JSON.stringify(
           unexpectedFailures.map((v) => v.toString()),
@@ -364,7 +364,7 @@ class RunnerState {
     // generation.
 
     if (unexpectedSuccess.size > 0) {
-      console.info(
+      console.error(
         'The following tests were expected to fail but instead succeeded:',
         JSON.stringify(
           [...unexpectedSuccess].map((v) => v.toString()),
@@ -1201,6 +1201,41 @@ globalThis.createBuffer = (
       return new SharedArrayBuffer(length);
   }
 };
+
+const COLORS = {
+  FOREGROUND: 30,
+  BACKGROUND: 40,
+  BLACK: 0,
+  RED: 1,
+  GREEN: 2,
+  YELLOW: 3,
+  BLUE: 4,
+  MAGENTA: 5,
+  CYAN: 6,
+  WHITE: 7,
+};
+
+function colorPrint(
+  fn: (...args: unknown[]) => void,
+  color: number
+): (...args: unknown[]) => void {
+  return (...args: unknown[]): void => {
+    fn(`\x1b[${color}m`, ...args, '\x1b[0m');
+  };
+}
+
+globalThis.console.info = colorPrint(
+  console.info,
+  COLORS.FOREGROUND + COLORS.BLUE
+);
+globalThis.console.warn = colorPrint(
+  console.warn,
+  COLORS.FOREGROUND + COLORS.YELLOW
+);
+globalThis.console.error = colorPrint(
+  console.error,
+  COLORS.FOREGROUND + COLORS.RED
+);
 
 class Location {
   public get ancestorOrigins(): DOMStringList {
