@@ -693,11 +693,15 @@ globalThis.promise_test = (func, name, properties): void => {
   }
 
   globalThis.state.promises.push(
-    promise.catch((err: unknown) => {
-      globalThis.state.errors.push(
-        Object.assign(new AggregateError([err], name), { stack: '' })
-      );
-    })
+    promise
+      .then(() => {
+        testCase.done();
+      })
+      .catch((err: unknown) => {
+        globalThis.state.errors.push(
+          Object.assign(new AggregateError([err], name), { stack: '' })
+        );
+      })
   );
 };
 
