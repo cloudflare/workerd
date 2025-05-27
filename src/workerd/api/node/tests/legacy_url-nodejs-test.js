@@ -2229,24 +2229,24 @@ export const urlParseInvalidInput = {
       // The generation logic above should at a minimum produce these two
       // characters.
       assert(badIDNA.includes('℀'));
-      //   assert(badIDNA.includes('＠'));
-      //   for (const badCodePoint of badIDNA) {
-      //     const badURL = `http://fail${badCodePoint}fail.com/`;
-      //     assert.throws(
-      //       () => {
-      //         url.parse(badURL);
-      //       },
-      //       (e) => e.code === 'ERR_INVALID_URL',
-      //       `parsing ${badURL}`
-      //     );
-      //   }
-      //   assert.throws(
-      //     () => {
-      //       url.parse('http://\u00AD/bad.com/');
-      //     },
-      //     (e) => e.code === 'ERR_INVALID_URL',
-      //     'parsing http://\u00AD/bad.com/'
-      //   );
+      assert(badIDNA.includes('＠'));
+      for (const badCodePoint of badIDNA) {
+        const badURL = `http://fail${badCodePoint}fail.com/`;
+        assert.throws(
+          () => {
+            url.parse(badURL);
+          },
+          (e) => e.code === 'ERR_INVALID_URL',
+          `parsing ${badURL}`
+        );
+      }
+      assert.throws(
+        () => {
+          url.parse('http://\u00AD/bad.com/');
+        },
+        (e) => e.code === 'ERR_INVALID_URL',
+        'parsing http://\u00AD/bad.com/'
+      );
     }
   },
 };
