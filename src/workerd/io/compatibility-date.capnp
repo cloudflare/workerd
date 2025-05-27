@@ -811,4 +811,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   # NOTE: `reuseCtxAcrossNonclassEvents @92` was declared earlier in the file. Next ordinal is
   #   @93.
+
+  bindAsyncLocalStorageSnapshot @93 :Bool
+      $compatEnableFlag("bind_asynclocalstorage_snapshot_to_request")
+      $compatDisableFlag("do_not_bind_asynclocalstorage_snapshot_to-request")
+      $compatEnableDate("2025-06-16");
+      # The AsyncLocalStorage frame can capture values that are bound to the
+      # current IoContext. This is not always in the users control since we use
+      # the ALS storage frame to propagate internal trace spans as well as
+      # user-provided values. This flag, when set, binds the snapshot / bound
+      # functions to the current IoContext and will throw an error if the bound 
+      # functions are called outside of the IoContext in which they were created.
 }

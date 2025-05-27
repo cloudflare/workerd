@@ -3,7 +3,46 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "async-hooks.h"
 
+#include <workerd/io/features.h>
+#include <workerd/io/io-context.h>
+
 namespace workerd::api::node {
+
+namespace {
+// If there is a current IoContext, then it is possible/likely that the
+// current AsyncContextFrame is storing values that are bound to that
+// IoContext. In that case, we want to protect against the case where
+// the returned snapshot function is called from a different IoContext.
+// To do this we will capture a weak reference to the current IoContext
+// and check it against the current IoContext where the snapshot function
+// is invoked.
+jsg::Function<void()> getValidator(jsg::Lock& js) {
+  kj::Maybe<kj::Own<IoContext::WeakRef>> maybeIoContext;
+  if (FeatureFlags::get(js).getBindAsyncLocalStorageSnapshot() && IoContext::hasCurrent()) {
+    // We use a weak reference to the IoContext because the current IoContext
+    // may be destroyed before the snapshot function is called.
+    maybeIoContext = IoContext::current().getWeakRef();
+  }
+
+  static constexpr auto kErrorMessage =
+      "Cannot call this AsyncLocalStorage bound function outside of the "
+      "request in which it was created."_kj;
+
+  return [maybeIoContext = kj::mv(maybeIoContext)](jsg::Lock&) {
+    KJ_IF_SOME(originIoContext, maybeIoContext) {
+      // We had an IoContext when we created the snapshot function.
+      // If it is not the current IoContext, or if there is no current
+      // IoContext, or if the captured IoContext has been destroyed,
+      // we throw an error.
+      JSG_REQUIRE(IoContext::hasCurrent() && originIoContext->isValid(), Error, kErrorMessage);
+      originIoContext->runIfAlive([&](IoContext& otherContext) {
+        JSG_REQUIRE(&otherContext == &IoContext::current(), Error, kErrorMessage);
+      });
+    }
+  };
+}
+
+}  // namespace
 
 jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(jsg::Lock& js) {
   return js.alloc<AsyncLocalStorage>();
@@ -45,14 +84,14 @@ v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
 
 v8::Local<v8::Function> AsyncLocalStorage::bind(jsg::Lock& js, v8::Local<v8::Function> fn) {
   KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
-    return frame.wrap(js, fn);
+    return frame.wrap(js, fn, getValidator(js));
   } else {
     return jsg::AsyncContextFrame::wrapRoot(js, fn);
   }
 }
 
 v8::Local<v8::Function> AsyncLocalStorage::snapshot(jsg::Lock& js) {
-  return jsg::AsyncContextFrame::wrapSnapshot(js);
+  return jsg::AsyncContextFrame::wrapSnapshot(js, getValidator(js));
 }
 
 namespace {
@@ -94,7 +133,7 @@ v8::Local<v8::Function> AsyncResource::bind(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler) {
   v8::Local<v8::Function> bound;
   KJ_IF_SOME(frame, getFrame()) {
-    bound = frame.wrap(js, fn, thisArg);
+    bound = frame.wrap(js, fn, getValidator(js), thisArg);
   } else {
     bound = jsg::AsyncContextFrame::wrapRoot(js, fn, thisArg);
   }

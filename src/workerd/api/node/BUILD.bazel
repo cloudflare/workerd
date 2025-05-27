@@ -68,6 +68,7 @@ wd_cc_library(
         # it, move files to the main node target if needed.
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/io",
         "//src/workerd/util:mimetype",
     ],
 )
@@ -404,4 +405,10 @@ wd_test(
     src = "tests/http-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/http-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tests/bound-als-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/bound-als-test.js"],
 )
