@@ -9,7 +9,8 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [ ( name = "KV", kvNamespace = "kv-test" ), ],
         compatibilityDate = "2023-07-24",
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+        # "experimental" flag is needed to test deleteBulk
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers"],
       )
     ),
   ],

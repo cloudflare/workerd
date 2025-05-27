@@ -1919,6 +1919,7 @@ interface KVNamespace<Key extends string = string> {
     Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
   >;
   delete(key: Key): Promise<void>;
+  deleteBulk(keys: Key | Key[]): Promise<void>;
 }
 interface KVNamespaceListOptions {
   limit?: number;
@@ -2164,6 +2165,11 @@ type R2Objects = {
 );
 interface R2UploadPartOptions {
   ssecKey?: ArrayBuffer | string;
+}
+declare abstract class JsRpcPromise {
+  then(handler: Function, errorHandler?: Function): any;
+  catch(errorHandler: Function): any;
+  finally(onFinally: Function): any;
 }
 declare abstract class JsRpcProperty {
   then(handler: Function, errorHandler?: Function): any;
