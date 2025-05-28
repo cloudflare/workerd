@@ -4,6 +4,7 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/completion-membrane.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/uuid.h>
 
 #include <capnp/membrane.h>
@@ -25,7 +26,6 @@ namespace {
   V(CRON, "cron")                                                                                  \
   V(CUSTOM, "custom")                                                                              \
   V(DAEMONDOWN, "daemonDown")                                                                      \
-  V(DEBUG, "debug")                                                                                \
   V(DIAGNOSTICCHANNEL, "diagnosticChannel")                                                        \
   V(DISPATCHNAMESPACE, "dispatchNamespace")                                                        \
   V(EMAIL, "email")                                                                                \
@@ -35,6 +35,7 @@ namespace {
   V(EXCEEDEDCPU, "exceededCpu")                                                                    \
   V(EXCEEDEDMEMORY, "exceededMemory")                                                              \
   V(EXCEPTION, "exception")                                                                        \
+  V(EXECUTIONMODEL, "executionModel")                                                              \
   V(FETCH, "fetch")                                                                                \
   V(HEADERS, "headers")                                                                            \
   V(HIBERNATABLEWEBSOCKET, "hibernatableWebSocket")                                                \
@@ -88,7 +89,6 @@ namespace {
   V(URL, "url")                                                                                    \
   V(VALUE, "value")                                                                                \
   V(WALLTIME, "wallTime")                                                                          \
-  V(WARN, "warn")                                                                                  \
   V(WASCLEAN, "wasClean")
 
 #define V(N, L) constexpr kj::StringPtr N##_STR = L##_kj;
@@ -336,9 +336,19 @@ jsg::JsValue ToJs(jsg::Lock& js, const EventOutcome& outcome, StringCache& cache
   KJ_UNREACHABLE;
 }
 
+template <typename Enum>
+kj::String enumToStr(const Enum& var) {
+  // TODO(cleanup): Port this to capnproto.
+  auto enums = capnp::Schema::from<Enum>().getEnumerants();
+  uint i = static_cast<uint>(var);
+  KJ_ASSERT(i < enums.size(), "invalid enum value");
+  return kj::str(enums[i].getProto().getName());
+}
+
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
+  obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
     obj.set(js, DISPATCHNAMESPACE_STR, js.str(ns));
@@ -491,19 +501,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Exception& ex, StringCache& cach
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
-  switch (level) {
-    case LogLevel::DEBUG_:
-      return cache.get(js, DEBUG_STR);
-    case LogLevel::ERROR:
-      return cache.get(js, ERROR_STR);
-    case LogLevel::INFO:
-      return cache.get(js, INFO_STR);
-    case LogLevel::LOG:
-      return cache.get(js, LOG_STR);
-    case LogLevel::WARN:
-      return cache.get(js, WARN_STR);
-  }
-  KJ_UNREACHABLE;
+  return cache.get(js, toLower(enumToStr<LogLevel>(level)));
 }
 
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
@@ -519,14 +517,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
 
   KJ_IF_SOME(info, ret.info) {
-    KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchResponseInfo) {
-        obj.set(js, INFO_STR, ToJs(js, fetch, cache));
-      }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-        obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
-      }
-    }
+    obj.set(js, INFO_STR, ToJs(js, info, cache));
   }
 
   return obj;

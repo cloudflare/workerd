@@ -100,6 +100,7 @@ interface Onset {
   readonly type: "onset";
   readonly dispatchNamespace?: string;
   readonly entrypoint?: string;
+  readonly executionModel: string;
   readonly scriptName?: string;
   readonly scriptTags?: string[];
   readonly scriptVersion?: ScriptVersion;
@@ -153,7 +154,7 @@ interface Log {
 
 interface Return {
   readonly type: "return";
-  readonly info?: FetchResponseInfo | Attributes;
+  readonly info?: FetchResponseInfo;
 }
 
 interface Link {

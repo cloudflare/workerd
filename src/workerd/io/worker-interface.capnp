@@ -190,8 +190,7 @@ struct Trace @0x8e8d911203762d34 {
     # the response body payload, etc). Not all spans will have a Return mark.
     info :union {
       empty @0 :Void;
-      custom @1 :List(Attribute);
-      fetch @2 :FetchResponseInfo;
+      fetch @1 :FetchResponseInfo;
     }
   }
 
@@ -233,10 +232,11 @@ struct Trace @0x8e8d911203762d34 {
     scriptName @1 :Text;
     scriptVersion @2 :ScriptVersion;
     dispatchNamespace @3 :Text;
-    scriptTags @4 :List(Text);
-    entryPoint @5 :Text;
+    scriptId @4 :Text;
+    scriptTags @5 :List(Text);
+    entryPoint @6 :Text;
 
-    trigger @6 :InvocationSpanContext;
+    trigger @7 :InvocationSpanContext;
     # If this invocation was triggered by a different invocation that
     # is being traced, the trigger will identify the triggering span.
     # Propagation of the trigger context is not required, and in some
@@ -255,7 +255,7 @@ struct Trace @0x8e8d911203762d34 {
       custom @9 :CustomEventInfo;
     }
     }
-    info @7: Info;
+    info @8: Info;
   }
 
   struct Outcome {

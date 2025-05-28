@@ -627,15 +627,13 @@ namespace tracing {
 // mark is recorded (e.g. due to things like waitUntils or waiting to fully ready
 // the response body payload, etc).
 struct Return final {
-  using Info = kj::OneOf<FetchResponseInfo, CustomInfo>;
-
-  explicit Return(kj::Maybe<Info> info = kj::none);
+  explicit Return(kj::Maybe<FetchResponseInfo> info = kj::none);
   Return(rpc::Trace::Return::Reader reader);
   Return(Return&&) = default;
   Return& operator=(Return&&) = default;
   KJ_DISALLOW_COPY(Return);
 
-  kj::Maybe<Info> info = kj::none;
+  kj::Maybe<FetchResponseInfo> info = kj::none;
 
   void copyTo(rpc::Trace::Return::Builder builder) const;
   Return clone() const;
@@ -712,6 +710,7 @@ struct Onset final {
     kj::Maybe<kj::String> scriptName;
     kj::Maybe<kj::Own<ScriptVersion::Reader>> scriptVersion;
     kj::Maybe<kj::String> dispatchNamespace;
+    kj::Maybe<kj::String> scriptId;
     kj::Maybe<kj::Array<kj::String>> scriptTags;
     kj::Maybe<kj::String> entrypoint;
 
