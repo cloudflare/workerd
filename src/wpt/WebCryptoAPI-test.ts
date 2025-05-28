@@ -221,12 +221,24 @@ export default {
   'import_export/ec_importKey_failures_ECDH.https.any.js': {
     comment:
       'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
-    expectedFailures: [/^Bad key length:/, /^Missing JWK 'crv' parameter:/],
+    expectedFailures: [
+      /^Bad key length:/,
+      /^Missing JWK 'crv' parameter:/,
+      "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-256}, true, [deriveKey, deriveBits])",
+      "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-384}, true, [deriveKey, deriveBits])",
+      "Invalid 'crv' field: importKey(jwk(private), {name: ECDH, namedCurve: P-521}, true, [deriveKey, deriveBits])",
+    ],
   },
   'import_export/ec_importKey_failures_ECDSA.https.any.js': {
     comment:
       'OpenSSL call failed: EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr);',
-    expectedFailures: [/^Bad key length:/, /^Missing JWK 'crv' parameter:/],
+    expectedFailures: [
+      /^Bad key length:/,
+      /^Missing JWK 'crv' parameter:/,
+      "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-256}, true, [sign])",
+      "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-384}, true, [sign])",
+      "Invalid 'crv' field: importKey(jwk(private), {name: ECDSA, namedCurve: P-521}, true, [sign])",
+    ],
   },
   'import_export/ec_importKey_failures_fixtures.js': {},
   'import_export/importKey_failures.js': {},
