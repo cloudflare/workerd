@@ -115,10 +115,10 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     if (pyodide.version === '0.26.0a2') {
       // Inject at cloudflare.workers for backwards compatibility
       pyodide.FS.mkdir(`${sitePackages}/cloudflare`);
-      await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
+      await injectSitePackagesModule(pyodide, '_workers', 'cloudflare/workers');
     }
     // The SDK was moved from `cloudflare.workers` to just `workers`.
-    await injectSitePackagesModule(pyodide, 'workers', 'workers');
+    await injectSitePackagesModule(pyodide, '_workers', 'workers');
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
