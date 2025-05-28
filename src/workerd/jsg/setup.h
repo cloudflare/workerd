@@ -207,7 +207,7 @@ class IsolateBase {
   }
 
   // Get an object referencing this isolate that can be used to adjust external memory usage later
-  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
+  kj::Arc<const ExternalMemoryTarget> getExternalMemoryTarget();
 
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
@@ -298,7 +298,7 @@ class IsolateBase {
   // ExternalMemoryTarget holds a weak reference back to the isolate. ExternalMemoryAjustments
   // hold references to the ExternalMemoryTarget. This allows the ExternalMemoryAjustments to
   // outlive the isolate.
-  kj::Own<const ExternalMemoryTarget> externalMemoryTarget;
+  kj::Arc<const ExternalMemoryTarget> externalMemoryTarget;
 
   // A shared async context key for accessing env
   kj::Own<AsyncContextFrame::StorageKey> envAsyncContextKey;

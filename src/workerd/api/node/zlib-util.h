@@ -293,7 +293,7 @@ class ZlibUtil final: public jsg::Object {
   class CompressionStream: public jsg::Object {
    public:
     explicit CompressionStream(
-        ZlibMode _mode, kj::Own<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        ZlibMode _mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
         : allocator(kj::mv(externalMemoryTarget)),
           context_(_mode) {}
     // TODO(soon): Find a way to add noexcept(false) to this destructor.
@@ -361,7 +361,7 @@ class ZlibUtil final: public jsg::Object {
   class ZlibStream final: public CompressionStream<ZlibContext> {
    public:
     explicit ZlibStream(
-        ZlibMode mode, kj::Own<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        ZlibMode mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
         : CompressionStream(mode, kj::mv(externalMemoryTarget)) {}
     KJ_DISALLOW_COPY_AND_MOVE(ZlibStream);
     static jsg::Ref<ZlibStream> constructor(jsg::Lock& js, ZlibModeValue mode);
@@ -388,7 +388,7 @@ class ZlibUtil final: public jsg::Object {
   class BrotliCompressionStream: public CompressionStream<CompressionContext> {
    public:
     explicit BrotliCompressionStream(
-        ZlibMode _mode, kj::Own<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
+        ZlibMode _mode, kj::Arc<const jsg::ExternalMemoryTarget>&& externalMemoryTarget)
         : CompressionStream<CompressionContext>(_mode, kj::mv(externalMemoryTarget)) {}
     KJ_DISALLOW_COPY_AND_MOVE(BrotliCompressionStream);
     static jsg::Ref<BrotliCompressionStream> constructor(jsg::Lock& js, ZlibModeValue mode);
