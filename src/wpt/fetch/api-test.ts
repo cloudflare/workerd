@@ -219,10 +219,7 @@ export default {
     expectedFailures: ['TypedArray is cloned', 'ArrayBuffer is cloned'],
   },
   'body/formdata.any.js': {},
-  'body/mime-type.any.js': {
-    comment: 'They expected text/html but we kept text/plain',
-    expectedFailures: ['_Response: Extract a MIME type with clone'],
-  },
+  'body/mime-type.any.js': {},
 
   'cors/cors-basic.any.js': {
     comment: 'CORS is not implemented',

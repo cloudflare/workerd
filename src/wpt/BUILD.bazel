@@ -105,6 +105,7 @@ wpt_test(
 
 wpt_test(
     name = "streams",
+    size = "large",
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )

@@ -13,6 +13,10 @@ export default {
     comment: 'URLPattern.compareComponent is not part of the URLPattern spec',
     skipAllTests: true,
   },
+  'urlpattern-generate.tentative.any.js': {
+    comment: 'URLPattern.generate is not part of the URLPattern spec',
+    skipAllTests: true,
+  },
   'urlpattern-hasregexpgroups.any.js': {
     comment: 'urlpattern implementation will soon be replaced with ada-url',
     expectedFailures: [

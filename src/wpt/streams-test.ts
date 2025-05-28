@@ -405,6 +405,7 @@ export default {
   },
   'readable-streams/count-queuing-strategy-integration.any.js': {},
   'readable-streams/crashtests/empty.js': {},
+  'readable-streams/crashtests/garbage-collection.any.js': {},
   'readable-streams/crashtests/strategy-worker.js': {
     comment: 'ReferenceError: importScripts is not defined',
     skipAllTests: true,
@@ -829,6 +830,7 @@ export default {
           ],
   },
   'writable-streams/count-queuing-strategy.any.js': {},
+  'writable-streams/crashtests/garbage-collection.any.js': {},
   'writable-streams/error.any.js': {},
   'writable-streams/floating-point-total-queue-size.any.js': {
     comment: 'Seems we should be using a double for queue size',
