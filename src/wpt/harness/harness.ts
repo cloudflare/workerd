@@ -39,12 +39,21 @@ import { default as crypto } from 'node:crypto';
 import { default as path } from 'node:path';
 
 type CommonOptions = {
+  // Brief explanation of why these options were set for a test
   comment?: string;
+  // Print information about each subtest within this test as it runs
   verbose?: boolean;
+  // Function executed before running the test
   before?: () => void;
+  // Function executed after running the test
   after?: () => void;
+  // Function that modifies the test code before it's run
   replace?: (code: string) => string;
+  // Execute only this test
   only?: boolean;
+  // If true, evaluate the test code within a top-level block. Otherwise, the test runs within the
+  // scope of an anonymous function.
+  runInGlobalScope?: boolean;
 };
 
 type SuccessOptions = {
@@ -330,7 +339,7 @@ class RunnerState {
     for (const err of this.errors) {
       if (!expectedFailures.delete(err.message)) {
         err.message = sanitize_unpaired_surrogates(err.message);
-        console.error(err);
+        console.warn(err);
         unexpectedFailures.push(err.message);
       } else if (this.options.verbose) {
         err.message = sanitize_unpaired_surrogates(err.message);
@@ -339,7 +348,7 @@ class RunnerState {
     }
 
     if (unexpectedFailures.length > 0) {
-      console.info(
+      console.error(
         'The following tests unexpectedly failed:',
         JSON.stringify(
           unexpectedFailures.map((v) => v.toString()),
@@ -355,7 +364,7 @@ class RunnerState {
     // generation.
 
     if (unexpectedSuccess.size > 0) {
-      console.info(
+      console.error(
         'The following tests were expected to fail but instead succeeded:',
         JSON.stringify(
           [...unexpectedSuccess].map((v) => v.toString()),
@@ -684,11 +693,15 @@ globalThis.promise_test = (func, name, properties): void => {
   }
 
   globalThis.state.promises.push(
-    promise.catch((err: unknown) => {
-      globalThis.state.errors.push(
-        Object.assign(new AggregateError([err], name), { stack: '' })
-      );
-    })
+    promise
+      .then(() => {
+        testCase.done();
+      })
+      .catch((err: unknown) => {
+        globalThis.state.errors.push(
+          Object.assign(new AggregateError([err], name), { stack: '' })
+        );
+      })
   );
 };
 
@@ -1189,6 +1202,41 @@ globalThis.createBuffer = (
   }
 };
 
+const COLORS = {
+  FOREGROUND: 30,
+  BACKGROUND: 40,
+  BLACK: 0,
+  RED: 1,
+  GREEN: 2,
+  YELLOW: 3,
+  BLUE: 4,
+  MAGENTA: 5,
+  CYAN: 6,
+  WHITE: 7,
+};
+
+function colorPrint(
+  fn: (...args: unknown[]) => void,
+  color: number
+): (...args: unknown[]) => void {
+  return (...args: unknown[]): void => {
+    fn(`\x1b[${color}m`, ...args, '\x1b[0m');
+  };
+}
+
+globalThis.console.info = colorPrint(
+  console.info,
+  COLORS.FOREGROUND + COLORS.BLUE
+);
+globalThis.console.warn = colorPrint(
+  console.warn,
+  COLORS.FOREGROUND + COLORS.YELLOW
+);
+globalThis.console.error = colorPrint(
+  console.error,
+  COLORS.FOREGROUND + COLORS.RED
+);
+
 class Location {
   public get ancestorOrigins(): DOMStringList {
     return {
@@ -1424,9 +1472,21 @@ function getCodeAtPath(
   return replaceInterpolation(code);
 }
 
-function evalAsBlock(env: Env, files: string[]): void {
-  const block = '{' + files.join('\n') + '}';
-  env.unsafe.eval(block);
+function evalAsBlock(
+  env: Env,
+  runInGlobalScope: boolean,
+  files: string[]
+): void {
+  const code = files.join('\n');
+
+  if (runInGlobalScope) {
+    // In this mode, the scope of const, let and function declarations is limited to stop tests
+    // from interfering with each other.
+    env.unsafe.eval(`{ ${code} }`);
+  } else {
+    // Additionally, use an IIFE to limit the scope of var and manipulation of the global scope
+    env.unsafe.eval(`(function () { ${code} })();`);
+  }
 }
 
 type Runner = {
@@ -1511,7 +1571,7 @@ async function runTest(
   }
 
   files.push(getCodeAtPath(env, './', file, options.replace));
-  evalAsBlock(env, files);
+  evalAsBlock(env, options.runInGlobalScope ?? false, files);
 
   if (options.after) {
     options.after();

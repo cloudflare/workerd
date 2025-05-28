@@ -36,11 +36,19 @@ export default {
   'legacy-mb-japanese/euc-jp/jis0208_index.js': {},
   'legacy-mb-japanese/euc-jp/jis0212_index.js': {},
   'legacy-mb-japanese/iso-2022-jp/iso2022jp-decoder.js': {},
-  'legacy-mb-japanese/iso-2022-jp/iso2022jp-encoder.js': {},
+  'legacy-mb-japanese/iso-2022-jp/iso2022jp-encoder.js': {
+    comment:
+      'This file is meant to be included by tests and cannot run on its own',
+    skipAllTests: true,
+  },
   'legacy-mb-japanese/iso-2022-jp/jis0208_index.js': {},
   'legacy-mb-japanese/shift_jis/jis0208_index.js': {},
   'legacy-mb-japanese/shift_jis/sjis-decoder.js': {},
-  'legacy-mb-japanese/shift_jis/sjis-encoder.js': {},
+  'legacy-mb-japanese/shift_jis/sjis-encoder.js': {
+    comment:
+      'This file is meant to be included by tests and cannot run on its own',
+    skipAllTests: true,
+  },
   'legacy-mb-korean/euc-kr/euckr-decoder.js': {},
   'legacy-mb-korean/euc-kr/euckr-encoder.js': {
     comment: 'ReferenceError: euckr is not defined',
