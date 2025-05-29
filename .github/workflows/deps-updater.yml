@@ -31,6 +31,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Open pull request
+        id: create-pr
         uses: peter-evans/create-pull-request@v7
         with:
           commit-message: "update dependencies to latest version"
@@ -42,3 +43,7 @@ jobs:
           body: |
             This is an automated pull request for updating the dependencies of workerd.
           delete-branch: true
+      - name: Enable Pull Request Automerge
+        run: gh pr merge --rebase --auto ${{ steps.create-pr.outputs.pull-request-number }}
+        env:
+          GH_TOKEN: ${{ secrets.DEVPROD_PAT }}
