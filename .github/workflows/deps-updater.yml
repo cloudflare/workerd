@@ -28,6 +28,8 @@ jobs:
           ref: main
       - name: Update dependencies
         run: build/deps/update-deps.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Open pull request
         uses: peter-evans/create-pull-request@v7
         with:
