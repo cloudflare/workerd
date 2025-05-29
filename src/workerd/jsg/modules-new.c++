@@ -213,7 +213,7 @@ class SyntheticModule final: public Module {
   }
 
   v8::MaybeLocal<v8::Module> getDescriptor(Lock& js, const CompilationObserver&) const override {
-    // We add one to the size to accomodate the default export.
+    // We add one to the size to accommodate the default export.
     v8::LocalVector<v8::String> exports(js.v8Isolate, namedExports.size() + 1);
     int n = 0;
     exports[n++] = js.strIntern(DEFAULT);
