@@ -10,6 +10,41 @@
 #include <v8-proxy.h>
 
 namespace workerd::jsg {
+namespace {
+// Keep in sync with the nativeError serialization tag defined in
+// worker-interface.capnp
+constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
+
+JsObject toJsError(Lock& js, kj::StringPtr name, kj::StringPtr message) {
+  if (name == "TypeError"_kj) {
+    return JsObject(v8::Exception::TypeError(js.str(message)).As<v8::Object>());
+  } else if (name == "RangeError"_kj) {
+    return JsObject(v8::Exception::RangeError(js.str(message)).As<v8::Object>());
+  } else if (name == "ReferenceError"_kj) {
+    return JsObject(v8::Exception::ReferenceError(js.str(message)).As<v8::Object>());
+  } else if (name == "SyntaxError"_kj) {
+    return JsObject(v8::Exception::SyntaxError(js.str(message)).As<v8::Object>());
+  } else if (name == "WasmCompileError"_kj) {
+    return JsObject(v8::Exception::WasmCompileError(js.str(message)).As<v8::Object>());
+  } else if (name == "WasmLinkError"_kj) {
+    return JsObject(v8::Exception::WasmLinkError(js.str(message)).As<v8::Object>());
+  } else if (name == "WasmRuntimeError"_kj) {
+    return JsObject(v8::Exception::WasmRuntimeError(js.str(message)).As<v8::Object>());
+  } else if (name == "WasmSuspendError"_kj) {
+    return JsObject(v8::Exception::WasmSuspendError(js.str(message)).As<v8::Object>());
+  } else if (name == "EvalError"_kj) {
+    return JsObject(v8::Exception::EvalError(js.str(message)).As<v8::Object>());
+  } else if (name == "URIError"_kj) {
+    return JsObject(v8::Exception::URIError(js.str(message)).As<v8::Object>());
+  } else if (name == "AggregateError"_kj) {
+    return JsObject(v8::Exception::AggregateError(js.str(message)).As<v8::Object>());
+  } else if (name == "SuppressedError"_kj) {
+    return JsObject(v8::Exception::SuppressedError(js.str(message)).As<v8::Object>());
+  }
+  return JsObject(v8::Exception::Error(js.str(message)).As<v8::Object>());
+}
+
+}  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Function> func) {
@@ -36,6 +71,11 @@ Serializer::Serializer(Lock& js, Options options)
     ser.SetTreatFunctionsAsHostObjects(true);
     ser.SetTreatProxiesAsHostObjects(true);
   }
+
+  if (options.treatErrorsAsHostObjects) {
+    ser.SetTreatErrorsAsHostObjects(true);
+  }
+
   KJ_IF_SOME(version, options.version) {
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
     KJ_ASSERT(jsg::check(ser.SetWriteVersion(version)));
@@ -109,6 +149,34 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
 v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   try {
     jsg::Lock& js = jsg::Lock::from(isolate);
+
+    if (object->IsNativeError()) {
+      // Get the standard name, message, stack, cause, error, errors properties from
+      // the error object.
+      writeRawUint32(SERIALIZATION_TAG_NATIVE_ERROR);
+
+      jsg::JsObject errorObj(object);
+      auto name = errorObj.get(js, "name"_kj);
+      writeLengthDelimited(name.toString(js));
+
+      auto message = errorObj.get(js, "message"_kj);
+      writeLengthDelimited(message.toString(js));
+
+      auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
+          PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
+
+      writeRawUint64(names.size() - 1);  // Minus one to exclude the message property
+
+      for (size_t n = 0; n < names.size(); n++) {
+        auto name = names.get(js, n).toString(js);
+        if (name == "message"_kj) continue;
+        auto value = errorObj.get(js, name);
+        writeLengthDelimited(name);
+        write(js, value);
+      }
+
+      return v8::Just(true);
+    }
 
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
         !Wrappable::isWorkerdApiObject(object)) {
@@ -291,6 +359,25 @@ v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
 v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
   try {
     uint tag = readRawUint32();
+
+    if (tag == SERIALIZATION_TAG_NATIVE_ERROR) {
+      auto& js = Lock::from(isolate);
+      auto name = readLengthDelimitedString();     // name
+      auto message = readLengthDelimitedString();  // message
+
+      auto obj = toJsError(js, name, message);
+
+      size_t count = readRawUint64();
+      for (size_t n = 0; n < count; n++) {
+        auto name = readLengthDelimitedString();
+        auto value = readValue(js);
+        obj.set(js, js.str(name), value);
+      }
+
+      v8::Local<v8::Object> ret = obj;
+      return ret;
+    }
+
     KJ_IF_SOME(result, IsolateBase::from(isolate).deserialize(Lock::from(isolate), tag, *this)) {
       return result;
     } else {
