@@ -29,6 +29,8 @@ PATCHES = [
     "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
     "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
     "0023-Add-more-sandbox-APIs.patch",
+    "0024-Add-ValueSerializer-SetTreatErrorsAsHostObjects.patch",
+    "0025-Add-more-Error-constructor-methods.patch",
 ]
 
 # V8 and its dependencies

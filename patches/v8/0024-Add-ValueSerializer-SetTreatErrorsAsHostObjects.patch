@@ -1,0 +1,100 @@
+From 5ca4882044d0fe3c68090ee1c788225c31efdf85 Mon Sep 17 00:00:00 2001
+From: James M Snell <jsnell@cloudflare.com>
+Date: Thu, 29 May 2025 13:26:01 -0700
+Subject: [PATCH] Add ValueSerializer::SetTreatErrorsAsHostObjects().
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+---
+ include/v8-value-serializer.h   | 7 +++++++
+ src/api/api.cc                  | 4 ++++
+ src/objects/value-serializer.cc | 7 +++++++
+ src/objects/value-serializer.h  | 8 ++++++++
+ 4 files changed, 26 insertions(+)
+
+diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
+index bdcb2831c55..93f04f42374 100644
+--- a/include/v8-value-serializer.h
++++ b/include/v8-value-serializer.h
+@@ -213,6 +213,13 @@ class V8_EXPORT ValueSerializer {
+    */
+   void SetTreatProxiesAsHostObjects(bool mode);
+ 
++  /**
++   * Indicate whether to treat Errors as host objects.
++   * i.e. pass them to Delegate::WriteHostObject. This should not be
++   * called when no Delegate was pass
++   */
++  void SetTreatErrorsAsHostObjects(bool mode);
++
+   /**
+    * Write raw data in various common formats to the buffer.
+    * Note that integer types are written in base-128 varint format, not with a
+diff --git a/src/api/api.cc b/src/api/api.cc
+index 2a2e3d59f6e..c6291d1a7ea 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -3329,6 +3329,10 @@ void ValueSerializer::SetTreatProxiesAsHostObjects(bool mode) {
+   private_->serializer.SetTreatProxiesAsHostObjects(mode);
+ }
+ 
++void ValueSerializer::SetTreatErrorsAsHostObjects(bool mode) {
++  private_->serializer.SetTreatErrorsAsHostObjects(mode);
++}
++
+ Maybe<bool> ValueSerializer::WriteValue(Local<Context> context,
+                                         Local<Value> value) {
+   auto i_isolate = reinterpret_cast<i::Isolate*>(context->GetIsolate());
+diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
+index ca0166b2c7f..b80d1705480 100644
+--- a/src/objects/value-serializer.cc
++++ b/src/objects/value-serializer.cc
+@@ -342,6 +342,10 @@ void ValueSerializer::SetTreatProxiesAsHostObjects(bool mode) {
+   treat_proxies_as_host_objects_ = mode;
+ }
+ 
++void ValueSerializer::SetTreatErrorsAsHostObjects(bool mode) {
++  treat_errors_as_host_objects_ = mode;
++}
++
+ void ValueSerializer::WriteTag(SerializationTag tag) {
+   uint8_t raw_tag = static_cast<uint8_t>(tag);
+   WriteRawBytes(&raw_tag, sizeof(raw_tag));
+@@ -611,6 +615,9 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
+ 
+   // Eliminate callable and exotic objects, which should not be serialized.
+   InstanceType instance_type = receiver->map()->instance_type();
++  if (instance_type == JS_ERROR_TYPE && treat_errors_as_host_objects_) {
++    return WriteHostObject(receiver);
++  }
+   if (IsCallable(*receiver)) {
+     if (treat_functions_as_host_objects_) {
+       return WriteHostObject(receiver);
+diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
+index 7ec442c5e00..a4f9a429a35 100644
+--- a/src/objects/value-serializer.h
++++ b/src/objects/value-serializer.h
+@@ -120,6 +120,13 @@ class ValueSerializer {
+    */
+   void SetTreatProxiesAsHostObjects(bool mode);
+ 
++  /**
++   * Indicate whether to treat Errors as host objects,
++   * i.e. pass them to Delegate::WriteHostObject. This should not be
++   * called when no Delegate was passed.
++   */
++  void SetTreatErrorsAsHostObjects(bool mode);
++
+  private:
+   // Managing allocations of the internal buffer.
+   Maybe<bool> ExpandBuffer(size_t required_capacity);
+@@ -204,6 +211,7 @@ class ValueSerializer {
+   bool treat_array_buffer_views_as_host_objects_ = false;
+   bool treat_functions_as_host_objects_ = false;
+   bool treat_proxies_as_host_objects_ = false;
++  bool treat_errors_as_host_objects_ = false;
+   bool out_of_memory_ = false;
+   Zone zone_;
+   uint32_t version_;
+-- 
+2.34.1
+
