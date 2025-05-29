@@ -192,7 +192,7 @@ export const utilInspect = {
         Object.assign(new String('hello'), { [Symbol('foo')]: 123 }),
         { showHidden: true }
       ),
-      "[String: 'hello'] { [length]: 5, [Symbol(foo)]: 123 }"
+      "[String: 'hello'] { [length]: 5, Symbol(foo): 123 }"
     );
 
     {
@@ -799,14 +799,14 @@ export const utilInspect = {
     // Note: Symbols are not supported by `Error#toString()` which is called by
     // accessing the `stack` property.
     [
-      [404, '404: foo', '[404]'],
-      [0, '0: foo', '[RangeError: foo]'],
-      [0n, '0: foo', '[RangeError: foo]'],
+      [404, '404 [RangeError]: foo', '[404]'],
+      [0, '0 [RangeError]: foo', '[RangeError: foo]'],
+      [0n, '0 [RangeError]: foo', '[RangeError: foo]'],
       [null, 'null: foo', '[RangeError: foo]'],
       [undefined, 'RangeError: foo', '[RangeError: foo]'],
-      [false, 'false: foo', '[RangeError: foo]'],
+      [false, 'false [RangeError]: foo', '[RangeError: foo]'],
       ['', 'foo', '[RangeError: foo]'],
-      [[1, 2, 3], '1,2,3: foo', '[1,2,3]'],
+      [[1, 2, 3], '1,2,3 [RangeError]: foo', '[[\n  1,\n  2,\n  3\n]]'],
     ].forEach(([value, outputStart, stack]) => {
       let err = new RangeError('foo');
       err.name = value;
@@ -855,7 +855,7 @@ export const utilInspect = {
         util
           .inspect(x)
           .includes(
-            '[Symbol(nodejs.util.inspect.custom)]: [Function: inspect] {\n'
+            'Symbol(nodejs.util.inspect.custom): [Function: inspect] {\n'
           )
       );
     }
@@ -1093,7 +1093,7 @@ export const utilInspect = {
       const UIC = 'nodejs.util.inspect.custom';
       assert.strictEqual(
         util.inspect(subject),
-        `{\n  a: 123,\n  [Symbol(${UIC})]: [Function: [${UIC}]]\n}`
+        `{\n  a: 123,\n  Symbol(${UIC}): [Function: [${UIC}]]\n}`
       );
     }
 
@@ -1203,20 +1203,20 @@ export const utilInspect = {
 
       subject[Symbol('sym\nbol')] = 42;
 
-      assert.strictEqual(util.inspect(subject), '{ [Symbol(sym\\nbol)]: 42 }');
+      assert.strictEqual(util.inspect(subject), '{ Symbol(sym\\nbol): 42 }');
       assert.strictEqual(
         util.inspect(subject, options),
-        '{ [Symbol(sym\\nbol)]: 42 }'
+        '{ Symbol(sym\\nbol): 42 }'
       );
 
       Object.defineProperty(subject, Symbol(), {
         enumerable: false,
         value: 'non-enum',
       });
-      assert.strictEqual(util.inspect(subject), '{ [Symbol(sym\\nbol)]: 42 }');
+      assert.strictEqual(util.inspect(subject), '{ Symbol(sym\\nbol): 42 }');
       assert.strictEqual(
         util.inspect(subject, options),
-        "{ [Symbol(sym\\nbol)]: 42, [Symbol()]: 'non-enum' }"
+        "{ Symbol(sym\\nbol): 42, [Symbol()]: 'non-enum' }"
       );
 
       subject = [1, 2, 3];
@@ -1224,7 +1224,7 @@ export const utilInspect = {
 
       assert.strictEqual(
         util.inspect(subject),
-        '[ 1, 2, 3, [Symbol(symbol)]: 42 ]'
+        '[ 1, 2, 3, Symbol(symbol): 42 ]'
       );
     }
 
@@ -1727,7 +1727,7 @@ export const utilInspect = {
       const obj = { [util.inspect.custom]: 'fhqwhgads' };
       assert.strictEqual(
         util.inspect(obj),
-        "{ [Symbol(nodejs.util.inspect.custom)]: 'fhqwhgads' }"
+        "{ Symbol(nodejs.util.inspect.custom): 'fhqwhgads' }"
       );
     }
 
@@ -1736,7 +1736,7 @@ export const utilInspect = {
       const obj = { [Symbol.toStringTag]: 'a' };
       assert.strictEqual(
         util.inspect(obj),
-        "{ [Symbol(Symbol.toStringTag)]: 'a' }"
+        "{ Symbol(Symbol.toStringTag): 'a' }"
       );
       Object.defineProperty(obj, Symbol.toStringTag, {
         value: 'a',
@@ -2490,7 +2490,7 @@ export const utilInspect = {
       value[Symbol('foo')] = 'yeah';
       res = util.inspect(value);
       assert.notStrictEqual(res, expectedWithoutProto);
-      assert.match(res, /\[Symbol\(foo\)]: 'yeah'/);
+      assert.match(res, /Symbol\(foo\): 'yeah'/);
     });
 
     assert.strictEqual(inspect(1n), '1n');
@@ -2511,7 +2511,7 @@ export const utilInspect = {
       Object.defineProperty(obj, 'Non\nenumerable\tkey', { value: true });
       assert.strictEqual(
         util.inspect(obj, { showHidden: true }),
-        '{ [Non\\nenumerable\\tkey]: true }'
+        "{ ['Non\\nenumerable\\tkey']: true }"
       );
     }
 
@@ -2610,7 +2610,7 @@ export const utilInspect = {
       arr[Symbol('a')] = false;
       assert.strictEqual(
         inspect(arr, { sorted: true }),
-        '[ 3, 2, 1, [Symbol(a)]: false, [Symbol(b)]: true, a: 1, b: 2, c: 3 ]'
+        '[ 3, 2, 1, Symbol(a): false, Symbol(b): true, a: 1, b: 2, c: 3 ]'
       );
     }
 
@@ -3475,8 +3475,136 @@ export const utilInspect = {
             throw new Error();
           },
         }),
-        '{ [Symbol(Symbol.iterator)]: [Getter] }'
+        '{ Symbol(Symbol.iterator): [Getter] }'
       );
+    }
+
+    {
+      const sym = Symbol('bar()');
+      const o = {
+        foo: 0,
+        'Symbol(foo)': 0,
+        [Symbol('foo')]: 0,
+        [Symbol('foo()')]: 0,
+        [sym]: 0,
+      };
+      Object.defineProperty(o, sym, { enumerable: false });
+
+      assert.strictEqual(
+        util.inspect(o, { showHidden: true }),
+        '{\n' +
+          '  foo: 0,\n' +
+          "  'Symbol(foo)': 0,\n" +
+          '  Symbol(foo): 0,\n' +
+          '  Symbol(foo()): 0,\n' +
+          '  [Symbol(bar())]: 0\n' +
+          '}'
+      );
+    }
+
+    {
+      const o = {};
+      const { prototype: BuiltinPrototype } = Object;
+      const desc = Reflect.getOwnPropertyDescriptor(
+        BuiltinPrototype,
+        'constructor'
+      );
+      Object.defineProperty(BuiltinPrototype, 'constructor', {
+        get: () => BuiltinPrototype,
+        configurable: true,
+      });
+      assert.strictEqual(util.inspect(o), '{}');
+      Object.defineProperty(BuiltinPrototype, 'constructor', desc);
+    }
+
+    {
+      const o = { f() {} };
+      const { prototype: BuiltinPrototype } = Function;
+      const desc = Reflect.getOwnPropertyDescriptor(
+        BuiltinPrototype,
+        'constructor'
+      );
+      Object.defineProperty(BuiltinPrototype, 'constructor', {
+        get: () => BuiltinPrototype,
+        configurable: true,
+      });
+      assert.strictEqual(util.inspect(o), '{ f: [Function: f] }');
+      Object.defineProperty(BuiltinPrototype, 'constructor', desc);
+    }
+    {
+      const prototypes = [
+        Array.prototype,
+        ArrayBuffer.prototype,
+        Buffer.prototype,
+        Function.prototype,
+        Map.prototype,
+        Object.prototype,
+        Reflect.getPrototypeOf(Uint8Array.prototype),
+        Set.prototype,
+        Uint8Array.prototype,
+      ];
+      const descriptors = new Map();
+      const buffer = Buffer.from('Hello');
+      const o = {
+        arrayBuffer: new ArrayBuffer(),
+        buffer,
+        typedArray: Uint8Array.from(buffer),
+        array: [],
+        func() {},
+        set: new Set([1]),
+        map: new Map(),
+      };
+      for (const BuiltinPrototype of prototypes) {
+        descriptors.set(
+          BuiltinPrototype,
+          Reflect.getOwnPropertyDescriptor(BuiltinPrototype, 'constructor')
+        );
+        Object.defineProperty(BuiltinPrototype, 'constructor', {
+          get: () => BuiltinPrototype,
+          configurable: true,
+        });
+      }
+      assert.strictEqual(
+        util.inspect(o),
+        '{\n' +
+          '  arrayBuffer: ArrayBuffer { [Uint8Contents]: <>, byteLength: 0 },\n' +
+          '  buffer: <Buffer 48 65 6c 6c 6f>,\n' +
+          '  typedArray: TypedArray(5) [Uint8Array] [ 72, 101, 108, 108, 111 ],\n' +
+          '  array: [],\n' +
+          '  func: [Function: func],\n' +
+          '  set: Set(1) { 1 },\n' +
+          '  map: Map(0) {}\n' +
+          '}'
+      );
+      for (const [BuiltinPrototype, desc] of descriptors) {
+        Object.defineProperty(BuiltinPrototype, 'constructor', desc);
+      }
+    }
+
+    {
+      function f() {}
+      Object.defineProperty(f, 'name', { value: Symbol('f') });
+
+      assert.strictEqual(util.inspect(f), '[Function: Symbol(f)]');
+    }
+
+    {
+      const error = new EvalError();
+      const re = /a/g;
+      error.name = re;
+      assert.strictEqual(error.name, re);
+      assert.strictEqual(
+        util.inspect(error),
+        `${re} [EvalError]
+${error.stack.split('\n').slice(1).join('\n')}`
+      );
+    }
+
+    {
+      const error = new Error();
+      error.stack = [Symbol('foo')];
+
+      assert.strictEqual(inspect(error), '[[\n  Symbol(foo)\n]]');
     }
 
     assertCalledMustCalls();
@@ -4366,9 +4494,95 @@ export const getCallSitesTest = {
 };
 
 export const isDeepStrictEqual = {
+  // parallel/test-util-isDeepStrictEqual.js
   test() {
-    util.isDeepStrictEqual(1, 1);
-    util.isDeepStrictEqual(['hello', 'world'], ['hello', 'world']);
+    function utilIsDeepStrict(a, b) {
+      assert.strictEqual(util.isDeepStrictEqual(a, b), true);
+      assert.strictEqual(util.isDeepStrictEqual(b, a), true);
+    }
+
+    function notUtilIsDeepStrict(a, b) {
+      assert.strictEqual(util.isDeepStrictEqual(a, b), false);
+      assert.strictEqual(util.isDeepStrictEqual(b, a), false);
+    }
+
+    // Handle boxed primitives
+    {
+      const boxedString = new String('test');
+      const boxedSymbol = Object(Symbol());
+      notUtilIsDeepStrict(new Boolean(true), Object(false));
+      notUtilIsDeepStrict(Object(true), new Number(1));
+      notUtilIsDeepStrict(new Number(2), new Number(1));
+      notUtilIsDeepStrict(boxedSymbol, Object(Symbol()));
+      notUtilIsDeepStrict(boxedSymbol, {});
+      utilIsDeepStrict(boxedSymbol, boxedSymbol);
+      utilIsDeepStrict(Object(true), Object(true));
+      utilIsDeepStrict(Object(2), Object(2));
+      utilIsDeepStrict(boxedString, Object('test'));
+      boxedString.slow = true;
+      notUtilIsDeepStrict(boxedString, Object('test'));
+      boxedSymbol.slow = true;
+      notUtilIsDeepStrict(boxedSymbol, {});
+      utilIsDeepStrict(Object(BigInt(1)), Object(BigInt(1)));
+      notUtilIsDeepStrict(Object(BigInt(1)), Object(BigInt(2)));
+
+      const booleanish = new Boolean(true);
+      Object.defineProperty(booleanish, Symbol.toStringTag, {
+        value: 'String',
+      });
+      Object.setPrototypeOf(booleanish, String.prototype);
+      notUtilIsDeepStrict(booleanish, new String('true'));
+
+      const numberish = new Number(42);
+      Object.defineProperty(numberish, Symbol.toStringTag, { value: 'String' });
+      Object.setPrototypeOf(numberish, String.prototype);
+      notUtilIsDeepStrict(numberish, new String('42'));
+
+      const stringish = new String('0');
+      Object.defineProperty(stringish, Symbol.toStringTag, { value: 'Number' });
+      Object.setPrototypeOf(stringish, Number.prototype);
+      notUtilIsDeepStrict(stringish, new Number(0));
+
+      const bigintish = new Object(BigInt(42));
+      Object.defineProperty(bigintish, Symbol.toStringTag, { value: 'String' });
+      Object.setPrototypeOf(bigintish, String.prototype);
+      notUtilIsDeepStrict(bigintish, new String('42'));
+
+      const symbolish = new Object(Symbol('fhqwhgads'));
+      Object.defineProperty(symbolish, Symbol.toStringTag, { value: 'String' });
+      Object.setPrototypeOf(symbolish, String.prototype);
+      notUtilIsDeepStrict(symbolish, new String('fhqwhgads'));
+    }
+
+    // Handle symbols (enumerable only)
+    {
+      const symbol1 = Symbol();
+      const obj1 = { [symbol1]: 1 };
+      const obj2 = { [symbol1]: 1 };
+      const obj3 = { [Symbol()]: 1 };
+      const obj4 = {};
+      // Add a non enumerable symbol as well. It is going to be ignored!
+      Object.defineProperty(obj2, Symbol(), { value: 1 });
+      Object.defineProperty(obj4, symbol1, { value: 1 });
+      notUtilIsDeepStrict(obj1, obj3);
+      utilIsDeepStrict(obj1, obj2);
+      notUtilIsDeepStrict(obj1, obj4);
+      // TypedArrays have a fast path. Test for this as well.
+      const a = new Uint8Array(4);
+      const b = new Uint8Array(4);
+      a[symbol1] = true;
+      b[symbol1] = false;
+      notUtilIsDeepStrict(a, b);
+      b[symbol1] = true;
+      utilIsDeepStrict(a, b);
+      // The same as TypedArrays is valid for boxed primitives
+      const boxedStringA = new String('test');
+      const boxedStringB = new String('test');
+      boxedStringA[symbol1] = true;
+      notUtilIsDeepStrict(boxedStringA, boxedStringB);
+      boxedStringA[symbol1] = true;
+      utilIsDeepStrict(a, b);
+    }
   },
 };
 
