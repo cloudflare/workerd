@@ -2,11 +2,11 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://github.com/capnproto/kj-rs/tarball/85961e850c3e2710847bbfa596e9b8bcb562e873"
-STRIP_PREFIX = "capnproto-kj-rs-85961e8"
-SHA256 = "4682114672487873a8ace77a47fb49c9622c3a3f789630a14aad3509bae918cc"
+URL = "https://github.com/capnproto/kj-rs/tarball/3f0bc9b5e6e0b56a0fa43fd024c9a68601260ead"
+STRIP_PREFIX = "capnproto-kj-rs-3f0bc9b"
+SHA256 = "2b4cfd8f476c6e76cc8c49bdc7e0541c51f769b8d1adab1790a400222353a102"
 TYPE = "tgz"
-COMMIT = "85961e850c3e2710847bbfa596e9b8bcb562e873"
+COMMIT = "3f0bc9b5e6e0b56a0fa43fd024c9a68601260ead"
 
 def dep_kj_rs():
     http_archive(
