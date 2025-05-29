@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <workerd/util/account-limits.h>
+
 #include <kj/filesystem.h>
 #include <kj/function.h>
 #include <kj/list.h>
@@ -81,7 +83,8 @@ class SqliteDatabase {
   SqliteDatabase(const Vfs& vfs,
       kj::Path path,
       kj::Maybe<kj::WriteMode> maybeMode = kj::none,
-      SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT);
+      SqliteObserver& sqliteObserver = SqliteObserver::DEFAULT,
+      kj::Maybe<const ActorAccountLimits&> actorAccountLimits = kj::none);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
@@ -299,6 +302,7 @@ class SqliteDatabase {
   kj::Path path;
   bool readOnly;
   SqliteObserver& sqliteObserver;
+  kj::Maybe<const ActorAccountLimits&> actorAccountLimits;
 
   // This pointer can be left null if a call to reset() failed to re-open the database.
   kj::Maybe<sqlite3&> maybeDb;

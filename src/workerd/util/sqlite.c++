@@ -463,11 +463,13 @@ constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,
-    SqliteObserver& sqliteObserver)
+    SqliteObserver& sqliteObserver,
+    kj::Maybe<const ActorAccountLimits&> actorAccountLimits)
     : vfs(vfs),
       path(kj::mv(path)),
       readOnly(maybeMode == kj::none),
-      sqliteObserver(sqliteObserver) {
+      sqliteObserver(sqliteObserver),
+      actorAccountLimits(actorAccountLimits) {
   init(maybeMode);
 }
 
@@ -1385,6 +1387,12 @@ void SqliteDatabase::Query::destroy() {
 }
 
 void SqliteDatabase::Query::checkRequirements(size_t size) {
+  if (regulator.shouldAddQueryStats()) {
+    KJ_IF_SOME(actorAccountLimits, db.actorAccountLimits) {
+      actorAccountLimits.requireActorCanExecuteQueries();
+    }
+  }
+
   sqlite3_stmt* statement = getStatement();
 
   SQLITE_REQUIRE(!sqlite3_stmt_busy(statement), kj::none,
