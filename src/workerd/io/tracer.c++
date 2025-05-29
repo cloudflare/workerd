@@ -35,7 +35,8 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
   // been closed.
   // This could be an assert, but just log an error in case this is prevalent in some edge case.
   if (outcomeSeen) {
-    KJ_LOG(ERROR, "reported tail stream event after stream close");
+    KJ_LOG(ERROR, "NOSENTRY reported tail stream event after stream close");
+    return;
   }
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
@@ -44,7 +45,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
     KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
     onsetSeen = true;
   } else {
-    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
+    KJ_ASSERT(onsetSeen, "NOSENTRY Tail stream onset was not reported");
     if (event.is<tracing::Outcome>() || event.is<tracing::Hibernate>()) {
       outcomeSeen = true;
     }
@@ -190,18 +191,21 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   // Span events are transmitted together for now.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // TODO(o11y): Provide correct nested spans
+    // TODO(o11y): Provide correct nested spans and span context consistent with non-span events.
     // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
     // invocations as indicated by isTrigger
-    auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
-    tracing::InvocationSpanContext context = [&]() {
-      if (topLevelContext.isTrigger()) {
-        return topLevelContext.clone();
-      } else {
-        return topLevelContext.newChild();
-      }
-    }();
-    writer->report(context, span.clone());
+    // Due to WorkerTracer lifetime issues, the top-level span (which is already superfluous in the
+    // streaming model) may be reported before the setEventInfo call, ignore it in that case.
+    KJ_IF_SOME(topLevelContext, topLevelInvocationSpanContext) {
+      tracing::InvocationSpanContext context = [&]() {
+        if (topLevelContext.isTrigger()) {
+          return topLevelContext.clone();
+        } else {
+          return topLevelContext.newChild();
+        }
+      }();
+      writer->report(context, span.clone());
+    }
   }
 
   trace->bytesUsed = newSize;
