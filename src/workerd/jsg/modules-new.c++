@@ -663,7 +663,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
     v8::Local<v8::Data> host_defined_options,
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_assertions) {
+    v8::Local<v8::FixedArray> import_attributes) {
   auto isolate = context->GetIsolate();
 
   // Since this method is called directly by V8, we don't want to use jsg::check
@@ -684,7 +684,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
       auto spec = js.toString(specifier);
 
-      // The proposed specification for import assertions strongly recommends that
+      // The proposed specification for import attributes strongly recommends that
       // embedders reject import attributes and types they do not understand/implement.
       // This is because import attributes can alter the interpretation of a module.
       // Throwing an error for things we do not understand is the safest thing to do
@@ -692,7 +692,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
       //
       // For now, we do not support any import attributes, so if there are any at all
       // we will reject the import.
-      if (!import_assertions.IsEmpty() && import_assertions->Length() > 0) {
+      if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
         return rejected(js, js.typeError("Import attributes are not supported"));
       };
 
@@ -747,7 +747,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
 // The callback v8 calls when static import is used.
 v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_assertions,
+    v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
   auto isolate = context->GetIsolate();
   auto& registry = IsolateModuleRegistry::from(isolate);
@@ -756,7 +756,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
   return js.tryCatch([&]() -> v8::MaybeLocal<v8::Module> {
     auto spec = kj::str(specifier);
 
-    // The proposed specification for import assertions strongly recommends that
+    // The proposed specification for import attributes strongly recommends that
     // embedders reject import attributes and types they do not understand/implement.
     // This is because import attributes can alter the interpretation of a module.
     // Throwing an error for things we do not understand is the safest thing to do
@@ -764,7 +764,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     //
     // For now, we do not support any import attributes, so if there are any at all
     // we will reject the import.
-    if (!import_assertions.IsEmpty() && import_assertions->Length() > 0) {
+    if (!import_attributes.IsEmpty() && import_attributes->Length() > 0) {
       js.throwException(js.typeError("Import attributes are not supported"));
     }
 
@@ -794,7 +794,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         .referrer = referrerUrl,
         .rawSpecifier = spec.asPtr(),
       };
-      // TODO(soon): Add import assertions to the context.
+      // TODO(soon): Add import attributes to the context.
 
       return registry.resolve(js, resolveContext);
     }
@@ -1321,7 +1321,7 @@ bool Module::isMain() const {
 
 bool Module::evaluateContext(const ResolveContext& context) const {
   if (context.specifier != specifier()) return false;
-  // TODO(soon): Check the import assertions in the context.
+  // TODO(soon): Check the import attributes in the context.
   return true;
 }
 

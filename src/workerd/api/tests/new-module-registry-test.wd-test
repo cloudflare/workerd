@@ -17,7 +17,7 @@ const unitTests :Workerd.Config = (
           # Ensure that async context is propagated into a dynamic import.
           (name = "als", esModule = "export default globalThis.als.getStore()"),
 
-          # Import assertions are not supported currently
+          # Import attributes are not supported currently
           (name = "ia", esModule = "import * as def from 'foo' with { a: 'test' }"),
 
           # Errors on ESM eval should be reported properly in both static and

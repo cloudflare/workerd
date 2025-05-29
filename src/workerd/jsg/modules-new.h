@@ -28,7 +28,7 @@ namespace workerd::jsg::modules {
 // This new implementation of ModuleRegistry is designed to be more flexible,
 // modular, and extensible than the previous implementation. It is also designed
 // to support handling import specifiers as URLs, implement import.meta, properly
-// handle import assertions, sharing of modules across isolate replicas, and more.
+// handle import attributes, sharing of modules across isolate replicas, and more.
 //
 // Every Worker has exactly one ModuleRegistry associated with composed of
 // of or more ModuleBundles (e.g. a ModuleBundle with modules from the worker

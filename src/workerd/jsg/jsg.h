@@ -2682,6 +2682,8 @@ class Lock {
   void setCaptureThrowsAsRejections(bool capture);
 
   void setNodeJsCompatEnabled();
+  void setThrowOnUnrecognizedImportAssertion();
+  bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();
   void disableTopLevelAwait();
 
