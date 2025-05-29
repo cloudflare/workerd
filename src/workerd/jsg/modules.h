@@ -223,7 +223,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     v8::Local<v8::Data> host_defined_options,
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_assertions);
+    v8::Local<v8::FixedArray> import_attributes);
 
 kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallbackService(Lock& js,
     const kj::Path& specifier,
@@ -620,25 +620,10 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     v8::Local<v8::Data> host_defined_options,
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_assertions) {
+    v8::Local<v8::FixedArray> import_attributes) {
   auto& js = Lock::from(context->GetIsolate());
   auto registry = ModuleRegistry::from(js);
   auto& wrapper = TypeWrapper::from(js.v8Isolate);
-
-  // TODO(new-module-registry): The specification for import assertions strongly
-  // recommends that embedders reject import attributes and types they do not
-  // understand/implement. This is because import attributes can alter the
-  // interpretation of a module and are considered to be part of the unique
-  // key for caching a module.
-  // Throwing an error for things we do not understand is the safest thing to do.
-  // However, historically we have not followed this guideline in the spec and
-  // it's not clear if enforcing that constraint would be breaking so let's
-  // first try to determine if anyone is making use of import assertions.
-  // If we're lucky, we won't receive any hits on this and we can start
-  // enforcing the rule without a compat flag.
-  if (import_assertions->Length() > 0) {
-    LOG_NOSENTRY(WARNING, "Import attributes specified (and ignored) on dynamic import");
-  }
 
   // TODO(cleanup): This could probably be simplified using jsg::Promise
   const auto makeRejected = [&](auto reason) {
@@ -649,6 +634,19 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     }
     return v8::Local<v8::Promise>();
   };
+
+  // The specification for import attributes strongly recommends that embedders
+  // reject import attributes and types they do not understand/implement. This
+  // is because import attributes can alter the interpretation of a module and
+  // are considered to be part of the unique key for caching a module.
+  // Throwing an error for things we do not understand is the safest thing to do.
+  // However, historically we have not followed this guideline in the spec
+  // and unfortunately there are applications deployed that will break if we
+  // started enforcing that guideline without a compat flag.
+  if (!import_attributes.IsEmpty() && import_attributes->Length() > 0 &&
+      js.getThrowOnUnrecognizedImportAssertion()) {
+    return makeRejected(js.v8Error("Unrecognized import attributes specified"));
+  }
 
   // The dynamic import might be resolved synchronously or asynchronously.
   // Accordingly, resolveDynamicImport will return a jsg::Promise<jsg::Value>

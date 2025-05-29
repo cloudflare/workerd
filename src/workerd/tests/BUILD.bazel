@@ -1,6 +1,7 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_test.bzl", "wd_test")
 
 wd_cc_library(
     name = "bench-tools",
@@ -83,4 +84,10 @@ wd_cc_benchmark(
     name = "bench-fast-api",
     srcs = ["bench-fast-api.c++"],
     deps = ["//src/workerd/jsg"],
+)
+
+wd_test(
+    src = "unknown-import-assertions-test.wd-test",
+    args = ["--experimental"],
+    data = ["unknown-import-assertions-test.js"],
 )

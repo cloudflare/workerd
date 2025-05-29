@@ -816,10 +816,20 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("bind_asynclocalstorage_snapshot_to_request")
       $compatDisableFlag("do_not_bind_asynclocalstorage_snapshot_to-request")
       $compatEnableDate("2025-06-16");
-      # The AsyncLocalStorage frame can capture values that are bound to the
-      # current IoContext. This is not always in the users control since we use
-      # the ALS storage frame to propagate internal trace spans as well as
-      # user-provided values. This flag, when set, binds the snapshot / bound
-      # functions to the current IoContext and will throw an error if the bound 
-      # functions are called outside of the IoContext in which they were created.
+  # The AsyncLocalStorage frame can capture values that are bound to the
+  # current IoContext. This is not always in the users control since we use
+  # the ALS storage frame to propagate internal trace spans as well as
+  # user-provided values. This flag, when set, binds the snapshot / bound
+  # functions to the current IoContext and will throw an error if the bound
+  # functions are called outside of the IoContext in which they were created.
+
+  throwOnUnrecognizedImportAssertion @94 :Bool
+      $compatEnableFlag("throw_on_unrecognized_import_assertion")
+      $compatDisableFlag("ignore_unrecognized_import_assertion")
+      $compatEnableDate("2025-06-16");
+  # In the original module registry implementation, import attributes that are not recognized
+  # would be ignored. This is not compliant with the spec which strongly recommends that runtimes
+  # throw an error when unknown import attributes are encountered. In the new module registry
+  # implementation the recommended behavior is what is implemented. With this compat flag
+  # enabled, the original module registry implementation will follow the recommended behavior.
 }

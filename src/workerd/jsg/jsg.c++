@@ -201,6 +201,14 @@ void Lock::setNodeJsCompatEnabled() {
   IsolateBase::from(v8Isolate).setNodeJsCompatEnabled({}, true);
 }
 
+void Lock::setThrowOnUnrecognizedImportAssertion() {
+  IsolateBase::from(v8Isolate).setThrowOnUnrecognizedImportAssertion();
+}
+
+bool Lock::getThrowOnUnrecognizedImportAssertion() const {
+  return IsolateBase::from(v8Isolate).getThrowOnUnrecognizedImportAssertion();
+}
+
 void Lock::disableTopLevelAwait() {
   IsolateBase::from(v8Isolate).disableTopLevelAwait();
 }

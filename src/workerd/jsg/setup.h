@@ -227,6 +227,14 @@ class IsolateBase {
     return usingNewModuleRegistry;
   }
 
+  void setThrowOnUnrecognizedImportAssertion() {
+    throwOnUnrecognizedImportAssertion = true;
+  }
+
+  bool getThrowOnUnrecognizedImportAssertion() const {
+    return throwOnUnrecognizedImportAssertion;
+  }
+
   bool pumpMsgLoop() {
     return v8System.pumpMsgLoop(ptr);
   }
@@ -282,6 +290,9 @@ class IsolateBase {
   bool setToStringTag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
+
+  // Only used when the original module registry is used.
+  bool throwOnUnrecognizedImportAssertion = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
