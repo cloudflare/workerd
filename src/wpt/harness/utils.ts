@@ -161,5 +161,7 @@ globalThis.createBuffer = (
       return new ArrayBuffer(length);
     case 'SharedArrayBuffer':
       return new SharedArrayBuffer(length);
+    default:
+      throw new TypeError(`Unsupported buffer type: ${type}`);
   }
 };
