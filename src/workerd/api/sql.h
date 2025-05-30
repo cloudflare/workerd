@@ -193,11 +193,14 @@ class SqlStorage::Cursor final: public jsg::Object {
   double getRowsRead();
   double getRowsWritten();
 
+  void dispose();
+
   jsg::JsArray getColumnNames(jsg::Lock& js);
   JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
     JSG_METHOD(next);
     JSG_METHOD(toArray);
     JSG_METHOD(one);
+    JSG_DISPOSE(dispose);
 
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);

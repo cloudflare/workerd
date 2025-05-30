@@ -357,6 +357,12 @@ void SqlStorage::Cursor::endQuery(State& stateRef) {
   state = kj::none;
 }
 
+void SqlStorage::Cursor::dispose() {
+  KJ_IF_SOME(stateRef, state) {
+    endQuery(*stateRef);
+  }
+}
+
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
     kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
