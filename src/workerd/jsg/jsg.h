@@ -262,6 +262,29 @@ namespace workerd::jsg {
     registry.template registerAsyncIterable<NAME, decltype(&Self::method), &Self::method>();       \
   } while (false)
 
+// JSG_DISPOSE and JSG_ASYNC_DISPOSE are used to make an object compatible with the
+// JavaScript using and await using keywords (respectively). These allow variables to
+// be defined in such a way that they will have their disposer functions automatically
+// called when the variable goes out of scope, for instance:
+//
+// class Foo { [Symbol.dispose]() { console.log('...'); }}
+// { using foo = new Foo(); }
+//
+// When the containing block exits, the [Symbol.dispose] function will be called on
+// the object, allowing cleanup actions to be performed.
+//
+// There are a number of guidelines that should be followed when implementing
+// disposer methods:
+//
+// 1. Always prefer Symbol.dispose over Symbol.asyncDispose, avoid defining both.
+// 2. Always assume that if the resource needs to be disposed, it's being disposed
+//    in an exception case. Clean disposal should always be explicit.
+// 3. At least for the time being, the exception will not be available to the
+//    disposer, so it will not be able to propagate the error
+// 4. Always implement disposal as an idempotent operation and remember that
+//    users can call the disposer methods directly as many times as they want.
+// 5. Remember that errors thrown from within the disposer will mask the original
+//    error using a SupressedError.
 #define JSG_DISPOSE(method)                                                                        \
   do {                                                                                             \
     static const char NAME[] = #method;                                                            \
