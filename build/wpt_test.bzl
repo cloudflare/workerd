@@ -127,7 +127,7 @@ def _wpt_js_test_gen_impl(ctx):
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     files = ctx.attr.wpt_directory.files.to_list()
-    test_files = [file for file in files if file.extension == "js" and not is_in_resources_directory(file)]
+    test_files = [file for file in files if is_test_file(file)]
 
     ctx.actions.write(
         output = src,
@@ -169,6 +169,20 @@ const {{ run, printResults }} = createRunner(config, '{test_name}', allTestFiles
 
 export const zzz_results = printResults();
 """
+
+def is_test_file(file):
+    if not file.path.endswith(".js"):
+        # Not JS code, not a test
+        return False
+
+    if is_in_resources_directory(file):
+        # If it's in a subdirectory named resources/, then it's meant to be included by tests,
+        # not to run on its own. This logic still isn't perfect; sometimes resources are dropped
+        # into the main directory, and would need to manually be marked as skipAllTests
+        return False
+
+    # Probably an actual test
+    return True
 
 def generate_external_cases(base, files):
     """
