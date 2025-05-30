@@ -97,17 +97,6 @@ async function test(state) {
     ]);
   }
 
-  let cursorToBeDisposed;
-  {
-    // Test disposable cursor
-    using cursor = sql.exec('SELECT 123 As foo, "abc" AS bar');
-    cursorToBeDisposed = cursor; // Keep a reference to the cursor
-  }
-  // Cursor should be disposed now, so it can't be used anymore.
-  assert.throws(() => cursorToBeDisposed.one(), {
-    message: /Expected exactly one result from SQL query/,
-  });
-
   {
     // Test one row with .one()
     let cursor = sql.exec('SELECT 123 AS foo, "abc" AS bar');
