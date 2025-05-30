@@ -8,6 +8,11 @@ srcs = glob(
     ],
 )
 
+filegroup(
+    name = "harness@js",
+    srcs = [file.removesuffix(".ts") + ".js" for file in glob(["harness/*.ts"])],
+)
+
 ts_project(
     name = "wpt-all@tsproject",
     srcs = srcs,

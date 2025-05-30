@@ -23,7 +23,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
     test_config_as_js = config.removesuffix(".ts") + ".js"
     wpt_tsproject = "//src/wpt:wpt-all@tsproject"
-    harness_as_js = "//src/wpt:harness/harness.js"
+    harness = "//src/wpt:harness@js"
     wpt_cacert = "@wpt//:tools/certs/cacert.pem"
 
     if compat_date == "":
@@ -46,7 +46,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_directory = wpt_directory,
         test_config = test_config_as_js,
         test_js_generated = js_test_gen_rule,
-        harness = harness_as_js,
+        harness = harness,
         compat_date = compat_date,
         compat_date_path = compat_date_path,
         autogates = autogates,
@@ -58,7 +58,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         test_config_as_js,  # e.g. "url-test.js"
         js_test_gen_rule,  # e.g. "url-test.generated.js",
         wpt_directory,  # e.g. wpt/url/**",
-        harness_as_js,  # i.e. "harness/harness.js"
+        harness,  # e.g. wpt/harness/*.ts
         wpt_cacert,  # i.e. "wpt/tools/certs/cacert.pem",
     ]
 
@@ -127,7 +127,7 @@ def _wpt_js_test_gen_impl(ctx):
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     files = ctx.attr.wpt_directory.files.to_list()
-    test_files = [file for file in files if file.extension == "js" and not is_in_resources_directory(file)]
+    test_files = [file for file in files if is_test_file(file)]
 
     ctx.actions.write(
         output = src,
@@ -169,6 +169,20 @@ const {{ run, printResults }} = createRunner(config, '{test_name}', allTestFiles
 
 export const zzz_results = printResults();
 """
+
+def is_test_file(file):
+    if not file.path.endswith(".js"):
+        # Not JS code, not a test
+        return False
+
+    if is_in_resources_directory(file):
+        # If it's in a subdirectory named resources/, then it's meant to be included by tests,
+        # not to run on its own. This logic still isn't perfect; sometimes resources are dropped
+        # into the main directory, and would need to manually be marked as skipAllTests
+        return False
+
+    # Probably an actual test
+    return True
 
 def generate_external_cases(base, files):
     """
@@ -218,7 +232,7 @@ def _wpt_wd_test_gen_impl(ctx):
             test_config = ctx.file.test_config.basename,
             test_js_generated = ctx.file.test_js_generated.basename,
             bindings = generate_external_bindings(src, base, ctx.attr.wpt_directory.files),
-            harness = wd_test_relative_path(src, ctx.file.harness),
+            harness_modules = generate_harness_modules(src, ctx.attr.harness.files),
             wpt_cacert = wd_test_relative_path(src, ctx.file.wpt_cacert),
             autogates = generate_autogates_field(ctx.attr.autogates),
             compat_date = compat_date,
@@ -241,8 +255,8 @@ _wpt_wd_test_gen = rule(
         "test_config": attr.label(allow_single_file = True),
         # An auto-generated JS file containing the test logic.
         "test_js_generated": attr.label(allow_single_file = True),
-        # Target specifying the location of the WPT test harness
-        "harness": attr.label(allow_single_file = True),
+        # Target specifying the files in the WPT test harness
+        "harness": attr.label(),
         # A string representing the compatibility date
         "compat_date": attr.string(mandatory = False, default = ""),
         # Target specifying the location of the trimmed-supported-compatibility-date.txt file
@@ -265,7 +279,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "{test_js_generated}"),
           (name = "{test_config}", esModule = embed "{test_config}"),
-          (name = "harness/harness", esModule = embed "{harness}"),
+          {harness_modules}
         ],
         bindings = [
           (name = "wpt", service = "wpt"),
@@ -340,6 +354,19 @@ def generate_external_bindings(wd_test_file, base, files):
             continue
 
         result.append('(name = "{}", {} = embed "{}")'.format(module_relative_path(base, file), binding_type, wd_test_relative_path(wd_test_file, file)))
+
+    return ",\n".join(result)
+
+def generate_harness_modules(wd_test_file, files):
+    """
+    Generates a module entry for each file in the harness package
+    """
+    result = []
+
+    for file in files.to_list():
+        relative_path = wd_test_relative_path(wd_test_file, file)
+        import_path = paths.basename(relative_path).removesuffix(".js")
+        result.append('(name = "harness/{}", esModule = embed "{}")'.format(import_path, relative_path))
 
     return ",\n".join(result)
 
