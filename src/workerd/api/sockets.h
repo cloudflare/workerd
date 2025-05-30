@@ -153,7 +153,6 @@ class Socket: public jsg::Object {
     JSG_READONLY_PROTOTYPE_PROPERTY(secureTransport, getSecureTransport);
     JSG_METHOD(close);
     JSG_METHOD(startTls);
-    JSG_ASYNC_DISPOSE(close);
 
     JSG_TS_OVERRIDE({
       get secureTransport(): 'on' | 'off' | 'starttls';
