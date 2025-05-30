@@ -780,17 +780,20 @@ export default {
       const multipart = await env.BUCKET.createMultipartUpload(
         'onlyIfStrongEtagMultipart'
       );
-      assert.rejects(
-        async () =>
-          await multipart.uploadPartCopy(1, {
-            bucket: 'foo',
-            object: 'bar',
-            onlyIf: {
-              etagMatches: 'strongEtag',
-              etagDoesNotMatch: 'strongEtag',
-              uploadedBefore: new Date('0'),
-            },
-          })
+      assert.deepEqual(
+        await multipart.uploadPartCopy(1, {
+          bucket: 'foo',
+          object: 'bar',
+          onlyIf: {
+            etagMatches: 'strongEtag',
+            etagDoesNotMatch: 'strongEtag',
+            uploadedBefore: new Date('0'),
+          },
+        }),
+        {
+          partNumber: 1,
+          etag: 'partEtag',
+        }
       );
     }
     // Metadata

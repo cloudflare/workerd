@@ -124,7 +124,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartCopy(
 
     return context.awaitIo(
         js, kj::mv(promise), [&errorType, partNumber](jsg::Lock& js, R2Result r2Result) mutable {
-      r2Result.throwIfError("uploadPart", errorType);
+      r2Result.throwIfError("uploadPartCopy", errorType);
 
       capnp::MallocMessageBuilder responseMessage;
       capnp::JsonCodec json;

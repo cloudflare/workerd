@@ -125,14 +125,15 @@ void initRange(jsg::Lock& js, Builder& builder, Options& o) {
     }
   }
 }
+static const std::regex hexPattern("^[0-9a-f]+$");
 template <typename Builder, typename Options>
 void initSsec(jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(rawSsecKey, o.ssecKey) {
     auto ssecBuilder = builder.initSsec();
     KJ_SWITCH_ONEOF(rawSsecKey) {
       KJ_CASE_ONEOF(keyString, kj::String) {
-        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-            Error, "SSE-C Key has invalid format");
+        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), hexPattern), Error,
+            "SSE-C Key has invalid format");
         JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
         ssecBuilder.setKey(keyString);
       }
