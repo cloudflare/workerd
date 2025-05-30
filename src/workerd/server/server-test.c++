@@ -1180,6 +1180,40 @@ KJ_TEST("Server: connect() to default outbound") {
   conn.recvHttp200("OK");
 }
 
+KJ_TEST("Server: Socket is async disposable") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    compatibilityFlags = ["nodejs_compat"],
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { connect } from 'cloudflare:sockets';
+          `import assert from 'node:assert';
+          `
+          `export default {
+          `  async fetch(request, env) {
+          `    let sockToBeDisposed;
+          `    {
+          `      await using sock = connect('subhost:123');
+          `      socketToBeDisposed = sock;
+          `    }
+          `    await sockToBeDisposed?.closed;
+          `    return new Response("OK");
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  // auto subreq = test.receiveInternetSubrequest("subhost:123");
+
+  // conn.recvHttp200("OK");
+}
+
 KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
   TestServer test(R"((
     services = [
