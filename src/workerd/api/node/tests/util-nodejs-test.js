@@ -25,16 +25,31 @@
 
 import assert from 'node:assert';
 import { mock } from 'node:test';
-import util, { inspect } from 'node:util';
+import util, {
+  inspect,
+  callbackify,
+  inherits,
+  promisify,
+  getCallSites,
+  emitExperimentalWarning,
+  stripVTControlCharacters,
+  styleText,
+} from 'node:util';
 
 const remainingMustCallErrors = new Set();
 function commonMustCall(f) {
   const error = new Error('Expected function to be called');
   remainingMustCallErrors.add(error);
-  return (...args) => {
+  return function (...args) {
     remainingMustCallErrors.delete(error);
-    return f(...args);
+    return f.call(this, ...args);
   };
+}
+function commonMustSucceed(fn, exact) {
+  return commonMustCall(function (err, ...args) {
+    assert.ifError(err);
+    if (typeof fn === 'function') return fn.apply(this, args);
+  }, exact);
 }
 function assertCalledMustCalls() {
   try {
@@ -42,6 +57,40 @@ function assertCalledMustCalls() {
   } finally {
     remainingMustCallErrors.clear();
   }
+}
+function commonMustNotCall(msg) {
+  const callSite = getCallSites()[1];
+  return function mustNotCall(...args) {
+    const argsInfo =
+      args.length > 0
+        ? `\ncalled with arguments: ${args.map((arg) => inspect(arg)).join(', ')}`
+        : '';
+    assert.fail(
+      `${msg || 'function should not have been called'} at ${callSite.scriptName}:${callSite.lineNumber}` +
+        argsInfo
+    );
+  };
+}
+function commonInvalidArgTypeHelper(input) {
+  if (input == null) {
+    return ` Received ${input}`;
+  }
+  if (typeof input === 'function') {
+    return ` Received function ${input.name}`;
+  }
+  if (typeof input === 'object') {
+    if (input.constructor?.name) {
+      return ` Received an instance of ${input.constructor.name}`;
+    }
+    return ` Received ${inspect(input, { depth: -1 })}`;
+  }
+
+  let inspected = inspect(input, { colors: false });
+  if (inspected.length > 28) {
+    inspected = `${inspected.slice(inspected, 0, 25)}...`;
+  }
+
+  return ` Received type ${typeof input} (${inspected})`;
 }
 
 export const utilInspect = {
@@ -4892,5 +4941,915 @@ export const testTypes = {
       // where this would be useful, but hey, let's test it anyway.
       assert.ok(!isExternal({}));
     }
+  },
+};
+
+// parallel/test-util-inspect-getters-accessing-this.js
+export const testInspectGetters = {
+  async test() {
+    // This test ensures that util.inspect logs getters
+    // which access this.
+    {
+      class X {
+        constructor() {
+          this._y = 123;
+        }
+
+        get y() {
+          return this._y;
+        }
+      }
+
+      const result = inspect(new X(), {
+        getters: true,
+        showHidden: true,
+      });
+
+      assert.strictEqual(result, 'X { _y: 123, [y]: [Getter: 123] }');
+    }
+
+    // Regression test for https://github.com/nodejs/node/issues/37054
+    {
+      class A {
+        constructor(B) {
+          this.B = B;
+        }
+        get b() {
+          return this.B;
+        }
+      }
+
+      class B {
+        constructor() {
+          this.A = new A(this);
+        }
+        get a() {
+          return this.A;
+        }
+      }
+
+      const result = inspect(new B(), {
+        depth: 1,
+        getters: true,
+        showHidden: true,
+      });
+
+      assert.strictEqual(
+        result,
+        '<ref *1> B {\n' +
+          '  A: A { B: [Circular *1], [b]: [Getter] [Circular *1] },\n' +
+          '  [a]: [Getter] A { B: [Circular *1], [b]: [Getter] [Circular *1] }\n' +
+          '}'
+      );
+    }
+  },
+};
+
+// test/parallel/test-util-callbackify.js
+export const testCallbackify = {
+  async test() {
+    const values = [
+      'hello world',
+      null,
+      undefined,
+      false,
+      0,
+      {},
+      { key: 'value' },
+      Symbol('I am a symbol'),
+      function ok() {},
+      ['array', 'with', 4, 'values'],
+      new Error('boo'),
+    ];
+
+    {
+      // Test that the resolution value is passed as second argument to callback
+      for (const value of values) {
+        // Test and `async function`
+        async function asyncFn() {
+          return value;
+        }
+
+        const cbAsyncFn = callbackify(asyncFn);
+        cbAsyncFn(
+          commonMustSucceed((ret) => {
+            assert.strictEqual(ret, value);
+          })
+        );
+
+        // Test Promise factory
+        function promiseFn() {
+          return Promise.resolve(value);
+        }
+
+        const cbPromiseFn = callbackify(promiseFn);
+        cbPromiseFn(
+          commonMustSucceed((ret) => {
+            assert.strictEqual(ret, value);
+          })
+        );
+
+        // Test Thenable
+        function thenableFn() {
+          return {
+            then(onRes, onRej) {
+              onRes(value);
+            },
+          };
+        }
+
+        const cbThenableFn = callbackify(thenableFn);
+        cbThenableFn(
+          commonMustSucceed((ret) => {
+            assert.strictEqual(ret, value);
+          })
+        );
+      }
+    }
+
+    {
+      // Test that rejection reason is passed as first argument to callback
+      for (const value of values) {
+        // Test an `async function`
+        async function asyncFn() {
+          return Promise.reject(value);
+        }
+
+        const cbAsyncFn = callbackify(asyncFn);
+        assert.strictEqual(cbAsyncFn.length, 1);
+        assert.strictEqual(cbAsyncFn.name, 'asyncFnCallbackified');
+        cbAsyncFn(
+          commonMustCall((err, ret) => {
+            assert.strictEqual(ret, undefined);
+            if (err instanceof Error) {
+              if ('reason' in err) {
+                assert(!value);
+                assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+                assert.strictEqual(err.reason, value);
+              } else {
+                assert.strictEqual(String(value).endsWith(err.message), true);
+              }
+            } else {
+              assert.strictEqual(err, value);
+            }
+          })
+        );
+
+        // Test a Promise factory
+        function promiseFn() {
+          return Promise.reject(value);
+        }
+        const obj = {};
+        Object.defineProperty(promiseFn, 'name', {
+          value: obj,
+          writable: false,
+          enumerable: false,
+          configurable: true,
+        });
+
+        const cbPromiseFn = callbackify(promiseFn);
+        assert.strictEqual(promiseFn.name, obj);
+        cbPromiseFn(
+          commonMustCall((err, ret) => {
+            assert.strictEqual(ret, undefined);
+            if (err instanceof Error) {
+              if ('reason' in err) {
+                assert(!value);
+                assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+                assert.strictEqual(err.reason, value);
+              } else {
+                assert.strictEqual(String(value).endsWith(err.message), true);
+              }
+            } else {
+              assert.strictEqual(err, value);
+            }
+          })
+        );
+
+        // Test Thenable
+        function thenableFn() {
+          return {
+            then(onRes, onRej) {
+              onRej(value);
+            },
+          };
+        }
+
+        const cbThenableFn = callbackify(thenableFn);
+        cbThenableFn(
+          commonMustCall((err, ret) => {
+            assert.strictEqual(ret, undefined);
+            if (err instanceof Error) {
+              if ('reason' in err) {
+                assert(!value);
+                assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+                assert.strictEqual(err.reason, value);
+              } else {
+                assert.strictEqual(String(value).endsWith(err.message), true);
+              }
+            } else {
+              assert.strictEqual(err, value);
+            }
+          })
+        );
+      }
+    }
+
+    await new Promise((resolve) => queueMicrotask(resolve));
+
+    {
+      // Test that arguments passed to callbackified function are passed to original
+      for (const value of values) {
+        async function asyncFn(arg) {
+          assert.strictEqual(arg, value);
+          return arg;
+        }
+
+        const cbAsyncFn = callbackify(asyncFn);
+        assert.strictEqual(cbAsyncFn.length, 2);
+        assert.notStrictEqual(
+          Object.getPrototypeOf(cbAsyncFn),
+          Object.getPrototypeOf(asyncFn)
+        );
+        assert.strictEqual(
+          Object.getPrototypeOf(cbAsyncFn),
+          Function.prototype
+        );
+        cbAsyncFn(
+          value,
+          commonMustSucceed((ret) => {
+            assert.strictEqual(ret, value);
+          })
+        );
+
+        function promiseFn(arg) {
+          assert.strictEqual(arg, value);
+          return Promise.resolve(arg);
+        }
+        const obj = {};
+        Object.defineProperty(promiseFn, 'length', {
+          value: obj,
+          writable: false,
+          enumerable: false,
+          configurable: true,
+        });
+
+        const cbPromiseFn = callbackify(promiseFn);
+        assert.strictEqual(promiseFn.length, obj);
+        cbPromiseFn(
+          value,
+          commonMustSucceed((ret) => {
+            assert.strictEqual(ret, value);
+          })
+        );
+      }
+    }
+
+    {
+      // Test that `this` binding is the same for callbackified and original
+      for (const value of values) {
+        const iAmThis = {
+          fn(arg) {
+            assert.strictEqual(this, iAmThis);
+            return Promise.resolve(arg);
+          },
+        };
+        iAmThis.cbFn = callbackify(iAmThis.fn);
+        iAmThis.cbFn(
+          value,
+          commonMustSucceed(function (ret) {
+            assert.strictEqual(ret, value);
+            assert.strictEqual(this, iAmThis);
+          })
+        );
+
+        const iAmThat = {
+          async fn(arg) {
+            assert.strictEqual(this, iAmThat);
+            return arg;
+          },
+        };
+        iAmThat.cbFn = callbackify(iAmThat.fn);
+        iAmThat.cbFn(
+          value,
+          commonMustSucceed(function (ret) {
+            assert.strictEqual(ret, value);
+            assert.strictEqual(this, iAmThat);
+          })
+        );
+      }
+    }
+
+    {
+      // Verify that non-function inputs throw.
+      ['foo', null, undefined, false, 0, {}, Symbol(), []].forEach((value) => {
+        assert.throws(
+          () => {
+            callbackify(value);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+            message:
+              'The "original" argument must be of type function.' +
+              commonInvalidArgTypeHelper(value),
+          }
+        );
+      });
+    }
+
+    {
+      async function asyncFn() {
+        return 42;
+      }
+
+      const cb = callbackify(asyncFn);
+      const args = [];
+
+      // Verify that the last argument to the callbackified function is a function.
+      ['foo', null, undefined, false, 0, {}, Symbol(), []].forEach((value) => {
+        args.push(value);
+        assert.throws(
+          () => {
+            cb(...args);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+            message:
+              'The last argument must be of type function.' +
+              commonInvalidArgTypeHelper(value),
+          }
+        );
+      });
+    }
+
+    {
+      // Test Promise factory
+      function promiseFn(value) {
+        return Promise.reject(value);
+      }
+
+      const cbPromiseFn = callbackify(promiseFn);
+
+      cbPromiseFn(null, (err) => {
+        assert.strictEqual(
+          err.message,
+          'Promise was rejected with falsy value'
+        );
+        assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+        assert.strictEqual(err.reason, null);
+        // const stack = err.stack.split(/[\r\n]+/);
+        // assert.match(stack[1], /at process\.processTicksAndRejections/);
+      });
+    }
+
+    await new Promise((resolve) => queueMicrotask(resolve));
+
+    assertCalledMustCalls();
+  },
+};
+
+// parallel/test-util-inherits.js
+export const testInherits = {
+  async test() {
+    // Super constructor
+    function A() {
+      this._a = 'a';
+    }
+    A.prototype.a = function () {
+      return this._a;
+    };
+
+    // One level of inheritance
+    function B(value) {
+      A.call(this);
+      this._b = value;
+    }
+    inherits(B, A);
+    B.prototype.b = function () {
+      return this._b;
+    };
+
+    assert.deepStrictEqual(Object.getOwnPropertyDescriptor(B, 'super_'), {
+      value: A,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+
+    const b = new B('b');
+    assert.strictEqual(b.a(), 'a');
+    assert.strictEqual(b.b(), 'b');
+    assert.strictEqual(b.constructor, B);
+
+    // Two levels of inheritance
+    function C() {
+      B.call(this, 'b');
+      this._c = 'c';
+    }
+    inherits(C, B);
+    C.prototype.c = function () {
+      return this._c;
+    };
+    C.prototype.getValue = function () {
+      return this.a() + this.b() + this.c();
+    };
+
+    assert.strictEqual(C.super_, B);
+
+    const c = new C();
+    assert.strictEqual(c.getValue(), 'abc');
+    assert.strictEqual(c.constructor, C);
+
+    // Inherits can be called after setting prototype properties
+    function D() {
+      C.call(this);
+      this._d = 'd';
+    }
+
+    D.prototype.d = function () {
+      return this._d;
+    };
+    inherits(D, C);
+
+    assert.strictEqual(D.super_, C);
+
+    const d = new D();
+    assert.strictEqual(d.c(), 'c');
+    assert.strictEqual(d.d(), 'd');
+    assert.strictEqual(d.constructor, D);
+
+    // ES6 classes can inherit from a constructor function
+    class E {
+      constructor() {
+        D.call(this);
+        this._e = 'e';
+      }
+      e() {
+        return this._e;
+      }
+    }
+    inherits(E, D);
+
+    assert.strictEqual(E.super_, D);
+
+    const e = new E();
+    assert.strictEqual(e.getValue(), 'abc');
+    assert.strictEqual(e.d(), 'd');
+    assert.strictEqual(e.e(), 'e');
+    assert.strictEqual(e.constructor, E);
+
+    // Should throw with invalid arguments
+    assert.throws(
+      () => {
+        inherits(A, {});
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          'The "superCtor.prototype" property must be of type object. ' +
+          'Received undefined',
+      }
+    );
+
+    assert.throws(
+      () => {
+        inherits(A, null);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          'The "superCtor" argument must be of type function. ' +
+          'Received null',
+      }
+    );
+
+    assert.throws(
+      () => {
+        inherits(null, A);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message: 'The "ctor" argument must be of type function. Received null',
+      }
+    );
+  },
+};
+
+// parallel/test-util-promisify.js
+export const testPromisify = {
+  async test() {
+    // TODO(gbedford): expectWarning only possible with process.on('warning')
+    // {
+    //   const warningHandler = commonMustNotCall();
+    //   process.on('warning', warningHandler);
+    //   function foo() {}
+    //   foo.constructor = (async () => {}).constructor;
+    //   promisify(foo);
+    //   process.off('warning', warningHandler);
+    // }
+    //
+    // commonExpectWarning(
+    //   'DeprecationWarning',
+    //   'Calling promisify on a function that returns a Promise is likely a mistake.',
+    //   'DEP0174');
+    // promisify(async (callback) => { callback(); })().then(commonMustCall(() => {
+    //   // We must add the second `expectWarning` call in the `.then` handler, when
+    //   // the first warning has already been triggered.
+    //   commonExpectWarning(
+    //     'DeprecationWarning',
+    //     'Calling promisify on a function that returns a Promise is likely a mistake.',
+    //     'DEP0174');
+    //   promisify(async () => {})().then(commonMustNotCall());
+    // }));
+
+    // TODO(gbedford): Enable once fs supported
+    // const stat = promisify(fs.stat);
+
+    // {
+    //   const promise = stat(__filename);
+    //   assert(promise instanceof Promise);
+    //   promise.then(commonMustCall((value) => {
+    //     assert.deepStrictEqual(value, fs.statSync(__filename));
+    //   }));
+    // }
+
+    // {
+    //   const promise = stat('/dontexist');
+    //   promise.catch(commonMustCall((error) => {
+    //     assert(error.message.includes('ENOENT: no such file or directory, stat'));
+    //   }));
+    // }
+
+    {
+      function fn() {}
+
+      function promisifedFn() {}
+      fn[promisify.custom] = promisifedFn;
+      assert.strictEqual(promisify(fn), promisifedFn);
+      assert.strictEqual(promisify(promisify(fn)), promisifedFn);
+    }
+
+    {
+      function fn() {}
+
+      function promisifiedFn() {}
+
+      // util.promisify.custom is a shared symbol which can be accessed
+      // as `Symbol.for("nodejs.util.promisify.custom")`.
+      const kCustomPromisifiedSymbol = Symbol.for(
+        'nodejs.util.promisify.custom'
+      );
+      fn[kCustomPromisifiedSymbol] = promisifiedFn;
+
+      assert.strictEqual(kCustomPromisifiedSymbol, promisify.custom);
+      assert.strictEqual(promisify(fn), promisifiedFn);
+      assert.strictEqual(promisify(promisify(fn)), promisifiedFn);
+    }
+
+    {
+      function fn() {}
+      fn[promisify.custom] = 42;
+      assert.throws(() => promisify(fn), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      });
+    }
+
+    // customPromisifyArgs unsupported
+    // {
+    //   const firstValue = 5;
+    //   const secondValue = 17;
+
+    //   function fn(callback) {
+    //     callback(null, firstValue, secondValue);
+    //   }
+
+    //   fn[customPromisifyArgs] = ['first', 'second'];
+
+    //   promisify(fn)().then(commonMustCall((obj) => {
+    //     assert.deepStrictEqual(obj, { first: firstValue, second: secondValue });
+    //   }));
+    // }
+
+    // vm unsupported
+    // {
+    //   const fn = vm.runInNewContext('(function() {})');
+    //   assert.notStrictEqual(Object.getPrototypeOf(promisify(fn)),
+    //                         Function.prototype);
+    // }
+
+    {
+      function fn(callback) {
+        callback(null, 'foo', 'bar');
+      }
+      promisify(fn)().then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, 'foo');
+        })
+      );
+    }
+
+    {
+      function fn(callback) {
+        callback(null);
+      }
+      promisify(fn)().then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, undefined);
+        })
+      );
+    }
+
+    {
+      function fn(callback) {
+        callback();
+      }
+      promisify(fn)().then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, undefined);
+        })
+      );
+    }
+
+    {
+      function fn(err, val, callback) {
+        callback(err, val);
+      }
+      promisify(fn)(null, 42).then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, 42);
+        })
+      );
+    }
+
+    {
+      function fn(err, val, callback) {
+        callback(err, val);
+      }
+      promisify(fn)(new Error('oops'), null).catch(
+        commonMustCall((err) => {
+          assert.strictEqual(err.message, 'oops');
+        })
+      );
+    }
+
+    {
+      function fn(err, val, callback) {
+        callback(err, val);
+      }
+
+      (async () => {
+        const value = await promisify(fn)(null, 42);
+        assert.strictEqual(value, 42);
+      })().then(commonMustCall());
+    }
+
+    {
+      const o = {};
+      const fn = promisify(function (cb) {
+        cb(null, this === o);
+      });
+
+      o.fn = fn;
+
+      o.fn().then(commonMustCall((val) => assert(val)));
+    }
+
+    {
+      const err = new Error(
+        'Should not have called the callback with the error.'
+      );
+      const stack = err.stack;
+
+      const fn = promisify(function (cb) {
+        cb(null);
+        cb(err);
+      });
+
+      (async () => {
+        await fn();
+        await Promise.resolve();
+        return assert.strictEqual(stack, err.stack);
+      })().then(commonMustCall());
+    }
+
+    {
+      function c() {}
+      const a = promisify(function () {});
+      const b = promisify(a);
+      assert.notStrictEqual(c, a);
+      assert.strictEqual(a, b);
+    }
+
+    {
+      let errToThrow;
+      const thrower = promisify(function (a, b, c, cb) {
+        errToThrow = new Error();
+        throw errToThrow;
+      });
+      thrower(1, 2, 3)
+        .then(assert.fail)
+        .then(assert.fail, (e) => assert.strictEqual(e, errToThrow));
+    }
+
+    {
+      const err = new Error();
+
+      const a = promisify((cb) => cb(err))();
+      const b = promisify(() => {
+        throw err;
+      })();
+
+      Promise.all([
+        a.then(assert.fail, function (e) {
+          assert.strictEqual(err, e);
+        }),
+        b.then(assert.fail, function (e) {
+          assert.strictEqual(err, e);
+        }),
+      ]);
+    }
+
+    [undefined, null, true, 0, 'str', {}, [], Symbol()].forEach((input) => {
+      assert.throws(() => promisify(input), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          'The "original" argument must be of type function.' +
+          commonInvalidArgTypeHelper(input),
+      });
+    });
+  },
+};
+
+// parallel/test-util-emit-experimental-warning.js
+export const testExperimentalWarning = {
+  async test() {
+    // This test ensures that the emitExperimentalWarning in internal/util emits a
+    // warning when passed an unsupported feature and that it simply returns
+    // when passed the same feature multiple times.
+
+    // TODO(gbedford): Enable once process.on is supported
+    // process.on('warning', commonMustCall((warning) => {
+    //   assert.match(warning.message, /is an experimental feature/);
+    // }, 2));
+
+    emitExperimentalWarning('feature1');
+    emitExperimentalWarning('feature1'); // should not warn
+    emitExperimentalWarning('feature2');
+  },
+};
+
+// parallel/test-util-stripvtcontrolcharacters.js
+export const testStripVtControlCharacters = {
+  async test() {
+    // Ref: https://github.com/chalk/ansi-regex/blob/main/test.js
+    const tests = [
+      // [before, expected]
+      [
+        '\u001B[0m\u001B[4m\u001B[42m\u001B[31mfoo\u001B[39m\u001B[49m\u001B[24mfoo\u001B[0m',
+        'foofoo',
+      ], // Basic ANSI
+      ['\u001B[0;33;49;3;9;4mbar\u001B[0m', 'bar'], // Advanced colors
+      ['foo\u001B[0gbar', 'foobar'], // Clear tabs
+      ['foo\u001B[Kbar', 'foobar'], // Clear line
+      ['foo\u001B[2Jbar', 'foobar'], // Clear screen
+    ];
+
+    for (const ST of ['\u0007', '\u001B\u005C', '\u009C']) {
+      tests.push(
+        [`\u001B]8;;mailto:no-replay@mail.com${ST}mail\u001B]8;;${ST}`, 'mail'],
+        [
+          `\u001B]8;k=v;https://example-a.com/?a_b=1&c=2#tit%20le${ST}click\u001B]8;;${ST}`,
+          'click',
+        ]
+      );
+    }
+
+    for (const [before, expected] of tests) {
+      assert.strictEqual(stripVTControlCharacters(before), expected);
+    }
+  },
+};
+
+export const testStyleText = {
+  async test() {
+    const styled = '\u001b[31mtest\u001b[39m';
+    const noChange = 'test';
+
+    [undefined, null, false, 5n, 5, Symbol(), () => {}, {}].forEach(
+      (invalidOption) => {
+        assert.throws(
+          () => {
+            styleText(invalidOption, 'test');
+          },
+          {
+            code: 'ERR_INVALID_ARG_VALUE',
+          }
+        );
+        assert.throws(
+          () => {
+            styleText('red', invalidOption);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+          }
+        );
+      }
+    );
+
+    assert.throws(
+      () => {
+        styleText('invalid', 'text');
+      },
+      {
+        code: 'ERR_INVALID_ARG_VALUE',
+      }
+    );
+
+    assert.strictEqual(
+      styleText('red', 'test', { validateStream: false }),
+      '\u001b[31mtest\u001b[39m'
+    );
+
+    assert.strictEqual(
+      styleText(['bold', 'red'], 'test', { validateStream: false }),
+      '\u001b[1m\u001b[31mtest\u001b[39m\u001b[22m'
+    );
+
+    assert.strictEqual(
+      styleText(['bold', 'red'], 'test', { validateStream: false }),
+      styleText('bold', styleText('red', 'test', { validateStream: false }), {
+        validateStream: false,
+      })
+    );
+
+    assert.throws(
+      () => {
+        styleText(['invalid'], 'text');
+      },
+      {
+        code: 'ERR_INVALID_ARG_VALUE',
+      }
+    );
+
+    assert.throws(
+      () => {
+        styleText('red', 'text', { stream: {} });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    // does not throw
+    styleText('red', 'text', { stream: {}, validateStream: false });
+
+    assert.strictEqual(
+      styleText('red', 'test', { validateStream: false }),
+      styled
+    );
+
+    assert.strictEqual(styleText('none', 'test'), 'test');
+
+    // const fd = common.getTTYfd();
+    // if (fd !== -1) {
+    //   const writeStream = new WriteStream(fd);
+
+    //   const originalEnv = process.env;
+    //   [
+    //     { isTTY: true, env: {}, expected: styled },
+    //     { isTTY: false, env: {}, expected: noChange },
+    //     { isTTY: true, env: { NODE_DISABLE_COLORS: '1' }, expected: noChange },
+    //     { isTTY: true, env: { NO_COLOR: '1' }, expected: noChange },
+    //     { isTTY: true, env: { FORCE_COLOR: '1' }, expected: styled },
+    //     { isTTY: true, env: { FORCE_COLOR: '1', NODE_DISABLE_COLORS: '1' }, expected: styled },
+    //     { isTTY: false, env: { FORCE_COLOR: '1', NO_COLOR: '1', NODE_DISABLE_COLORS: '1' }, expected: styled },
+    //     { isTTY: true, env: { FORCE_COLOR: '1', NO_COLOR: '1', NODE_DISABLE_COLORS: '1' }, expected: styled },
+    //   ].forEach((testCase) => {
+    //     writeStream.isTTY = testCase.isTTY;
+    //     process.env = {
+    //       ...process.env,
+    //       ...testCase.env
+    //     };
+    //     {
+    //       const output = styleText('red', 'test', { stream: writeStream });
+    //       assert.strictEqual(output, testCase.expected);
+    //     }
+    //     {
+    //       // Check that when passing an array of styles, the output behaves the same
+    //       const output = styleText(['red'], 'test', { stream: writeStream });
+    //       assert.strictEqual(output, testCase.expected);
+    //     }
+    //     process.env = originalEnv;
+    //   });
+    // } else {
+    //   common.skip('Could not create TTY fd');
+    // }
   },
 };

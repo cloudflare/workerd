@@ -1,3 +1,202 @@
+import { Buffer } from 'node:buffer';
+
+// Exported symbols
+export const kDestroyed: unique symbol;
+export const kIsErrored: unique symbol;
+export const kIsReadable: unique symbol;
+export const kIsDisturbed: unique symbol;
+export const kPaused: unique symbol;
+export const kOnFinished: unique symbol;
+export const kDestroy: unique symbol;
+export const kConstruct: unique symbol;
+export const kIsDestroyed: unique symbol;
+export const kIsWritable: unique symbol;
+export const kOnConstructed: unique symbol;
+
+// Stream type definitions
+interface ReadableState {
+  readable?: boolean;
+  ended?: boolean;
+  endEmitted?: boolean;
+  destroyed?: boolean;
+  errored?: Error | null;
+  errorEmitted?: boolean;
+  closed?: boolean;
+  closeEmitted?: boolean;
+  constructed?: boolean;
+  reading?: boolean;
+  autoDestroy?: boolean;
+  emitClose?: boolean;
+  objectMode?: boolean;
+  length?: number;
+}
+
+interface WritableState {
+  writable?: boolean;
+  ended?: boolean;
+  finished?: boolean;
+  destroyed?: boolean;
+  errored?: Error | null;
+  errorEmitted?: boolean;
+  closed?: boolean;
+  closeEmitted?: boolean;
+  constructed?: boolean;
+  finalCalled?: boolean;
+  prefinished?: boolean;
+  ending?: boolean;
+  autoDestroy?: boolean;
+  emitClose?: boolean;
+  objectMode?: boolean;
+  length?: number;
+}
+
+interface NodeStreamLike {
+  _readableState?: ReadableState;
+  _writableState?: WritableState;
+  readable?: boolean;
+  writable?: boolean;
+  readableEnded?: boolean;
+  writableEnded?: boolean;
+  readableFinished?: boolean;
+  writableFinished?: boolean;
+  readableErrored?: Error | null;
+  writableErrored?: Error | null;
+  destroyed?: boolean;
+  closed?: boolean;
+  readableDidRead?: boolean;
+  readableAborted?: boolean;
+  _closed?: boolean;
+  _defaultKeepAlive?: boolean;
+  _removedConnection?: boolean;
+  _removedContLen?: boolean;
+  _sent100?: boolean;
+  _consuming?: boolean;
+  _dumped?: boolean;
+  req?: any;
+  aborted?: boolean;
+  pipe?: Function;
+  on?: Function;
+  pause?: Function;
+  resume?: Function;
+  write?: Function;
+  emit?: Function;
+  once?: Function;
+  removeListener?: Function;
+  destroy?: Function;
+  close?: Function;
+  abort?: Function;
+  listenerCount?: Function;
+  _construct?: Function;
+  _destroy?: Function;
+  setHeader?: Function;
+  socket?: any;
+  [kDestroyed]?: boolean;
+  [kIsErrored]?: boolean;
+  [kIsReadable]?: boolean;
+  [kIsDisturbed]?: boolean;
+}
+
+interface WebReadableStream {
+  pipeThrough: Function;
+  getReader: Function;
+  cancel: Function;
+}
+
+interface WebWritableStream {
+  getWriter: Function;
+  abort: Function;
+}
+
+// Stream detection functions
+export function isReadableNodeStream(obj: any, strict?: boolean): boolean;
+export function isWritableNodeStream(obj: any): boolean;
+export function isDuplexNodeStream(obj: any): boolean;
+export function isNodeStream(obj: any): boolean;
+export function isReadableStream(obj: any): boolean;
+export function isWritableStream(obj: any): boolean;
+export function isIterable(obj: any, isAsync?: boolean): boolean;
+
+// Stream state functions
+export function isDestroyed(stream: NodeStreamLike): boolean | null;
+export function isWritableEnded(stream: NodeStreamLike): boolean | null;
+export function isWritableFinished(
+  stream: NodeStreamLike,
+  strict?: boolean
+): boolean | null;
+export function isReadableEnded(stream: NodeStreamLike): boolean | null;
+export function isReadableFinished(
+  stream: NodeStreamLike,
+  strict?: boolean
+): boolean | null;
+export function isReadable(stream: NodeStreamLike): boolean | null;
+export function isWritable(stream: NodeStreamLike): boolean | null;
+
+interface IsFinishedOptions {
+  readable?: boolean;
+  writable?: boolean;
+}
+
+export function isFinished(
+  stream: NodeStreamLike,
+  opts?: IsFinishedOptions
+): boolean | null;
+export function isWritableErrored(stream: NodeStreamLike): Error | null;
+export function isReadableErrored(stream: NodeStreamLike): Error | null;
+export function isClosed(stream: NodeStreamLike): boolean | null;
+export function isOutgoingMessage(stream: any): boolean;
+export function isServerResponse(stream: any): boolean;
+export function isServerRequest(stream: any): boolean;
+export function willEmitClose(stream: NodeStreamLike): boolean | null;
+export function isDisturbed(stream: NodeStreamLike): boolean;
+export function isErrored(stream: NodeStreamLike): boolean;
+
+// Utility functions
+export const nop: () => void;
+export function once<T extends Function>(callback: T): T;
+
+// High water mark functions
+export function highWaterMarkFrom(
+  options: any,
+  isDuplex: boolean,
+  duplexKey: string
+): number | null;
+export function getDefaultHighWaterMark(objectMode?: boolean): number;
+export function setDefaultHighWaterMark(): never;
+export function getHighWaterMark(
+  state: { objectMode?: boolean },
+  options: any,
+  duplexKey: string,
+  isDuplex: boolean
+): number;
+
+// Abort signal function
+export function addAbortSignal(
+  signal: AbortSignal,
+  stream: NodeStreamLike
+): NodeStreamLike;
+
+// BufferList class
+export class BufferList {
+  head: BufferListNode | null;
+  tail: BufferListNode | null;
+  length: number;
+
+  push(v: Buffer | string): void;
+  unshift(v: Buffer | string): void;
+  shift(): Buffer | string | undefined;
+  clear(): void;
+  join(s: string): string;
+  concat(n: number): Buffer;
+  consume(n: number, hasStrings?: boolean): Buffer | string;
+  first(): Buffer | string;
+  [Symbol.iterator](): IterableIterator<Buffer | string>;
+}
+
+interface BufferListNode {
+  data: Buffer | string;
+  next: BufferListNode | null;
+}
+
 import type { FinishedOptions } from 'node:stream';
 
 type FinishedStream =
@@ -13,3 +212,21 @@ export function eos(
   callback?: FinishedCallback
 ): void;
 export function eos(stream: FinishedStream, callback?: FinishedCallback): void;
+
+// Destroy functions
+export function destroy(
+  this: NodeStreamLike,
+  err?: Error,
+  cb?: (err?: Error) => void
+): NodeStreamLike;
+export function undestroy(this: NodeStreamLike): void;
+export function errorOrDestroy(
+  stream: NodeStreamLike,
+  err: Error,
+  sync?: boolean
+): void;
+export function construct(
+  stream: NodeStreamLike,
+  cb: (err?: Error) => void
+): void;
+export function destroyer(stream: NodeStreamLike, err?: Error): void;
