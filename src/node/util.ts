@@ -282,11 +282,12 @@ export function styleText(
     }
 
     // If the stream is falsy or should not be colorized, set skipColorize to true
-    skipColorize =
+    skipColorize = !(
       (stream as any)?.isTTY &&
       (typeof (stream as any)!.getColorDepth === 'function'
         ? (stream as any)!.getColorDepth() > 2
-        : true);
+        : true)
+    );
   }
 
   // If the format is not an array, convert it to an array
