@@ -7,7 +7,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
-#include <workerd/io/supported-compatibility-date.capnp.h>
+#include <workerd/io/supported-compatibility-date.embed.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
 #include <workerd/server/v8-platform-impl.h>
@@ -72,7 +72,8 @@ namespace workerd::server {
 namespace {
 
 static kj::StringPtr getVersionString() {
-  static const kj::String result = kj::str("workerd ", SUPPORTED_COMPATIBILITY_DATE);
+  static const kj::String result =
+      kj::str("workerd ", EMBED_workerd_io_trimmed_supported_compatibility_date_txt);
   return result;
 }
 
