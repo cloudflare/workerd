@@ -13,3 +13,5 @@ export function eos(
   callback?: FinishedCallback
 ): void;
 export function eos(stream: FinishedStream, callback?: FinishedCallback): void;
+
+export { addAbortSignal, finished } from 'node:stream';

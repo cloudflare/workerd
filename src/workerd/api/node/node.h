@@ -85,7 +85,8 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     // so unless the experimental flag is enabled, don't register them.
     auto name = module.getName();
     if (name == "node:fs"_kj || name == "node:http"_kj || name == "node:_http_common"_kj ||
-        name == "node:_http_outgoing") {
+        name == "node:_http_outgoing"_kj || name == "node:_http_client"_kj ||
+        name == "node:_http_agent"_kj) {
       return featureFlags.getWorkerdExperimental();
     }
 
