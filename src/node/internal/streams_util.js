@@ -116,6 +116,25 @@ export function isNodeStream(obj) {
   );
 }
 
+export function isReadableStream(obj) {
+  return !!(
+    obj &&
+    !isNodeStream(obj) &&
+    typeof obj.pipeThrough === 'function' &&
+    typeof obj.getReader === 'function' &&
+    typeof obj.cancel === 'function'
+  );
+}
+
+export function isWritableStream(obj) {
+  return !!(
+    obj &&
+    !isNodeStream(obj) &&
+    typeof obj.getWriter === 'function' &&
+    typeof obj.abort === 'function'
+  );
+}
+
 export function isIterable(obj, isAsync = false) {
   if (obj == null) return false;
   if (isAsync === true) return typeof obj[Symbol.asyncIterator] === 'function';

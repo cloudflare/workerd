@@ -14,6 +14,9 @@ import {
   validateAbortSignal,
   validateObject,
   kValidateObjectAllowObjects,
+  validateString,
+  validateBoolean,
+  validateOneOf,
 } from 'node-internal:validators';
 
 import { debuglog } from 'node-internal:debuglog';
@@ -30,6 +33,11 @@ import {
 } from 'node-internal:internal_inspect';
 
 import { callbackify } from 'node-internal:internal_utils';
+import {
+  isReadableStream,
+  isWritableStream,
+  isNodeStream,
+} from 'node-internal:streams_util';
 export { inspect, format, formatWithOptions, stripVTControlCharacters };
 export { callbackify } from 'node-internal:internal_utils';
 export const types = internalTypes;
@@ -149,7 +157,7 @@ function pad(n: any): string {
 
 // prettier-ignore
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-                'Oct', 'Nov', 'Dec'];
+  'Oct', 'Nov', 'Dec'];
 
 function timestamp(): string {
   const d = new Date();
@@ -239,8 +247,71 @@ export function getSystemErrorMessage(): void {
   throw new Error('node:util getSystemErrorMessage is not implemented');
 }
 
-export function styleText(): void {
-  throw new Error('node:util styleText is not implemented');
+function escapeStyleCode(code: number | undefined): string {
+  if (code === undefined) return '';
+  return `\u001b[${code}m`;
+}
+
+// TODO(gbedford): We do not yet implement process.stdout, so to ensure the correct
+// behaviour, we use a placeholder value internally.
+const stdoutPlaceholder = Object.create(null);
+export function styleText(
+  format: string | string[],
+  text: string,
+  {
+    validateStream = true,
+    stream = stdoutPlaceholder,
+  }: { validateStream?: boolean; stream?: ReadableStream | WritableStream } = {}
+): string {
+  validateString(text, 'text');
+  validateBoolean(validateStream, 'options.validateStream');
+
+  let skipColorize;
+  if (validateStream) {
+    if (
+      !isReadableStream(stream) &&
+      !isWritableStream(stream) &&
+      !isNodeStream(stream) &&
+      stream !== stdoutPlaceholder
+    ) {
+      throw new ERR_INVALID_ARG_TYPE(
+        'stream',
+        ['ReadableStream', 'WritableStream', 'Stream'],
+        stream
+      );
+    }
+
+    // If the stream is falsy or should not be colorized, set skipColorize to true
+    skipColorize =
+      (stream as any)?.isTTY &&
+      (typeof (stream as any)!.getColorDepth === 'function'
+        ? (stream as any)!.getColorDepth() > 2
+        : true);
+  }
+
+  // If the format is not an array, convert it to an array
+  const formatArray = Array.isArray(format) ? format : [format];
+
+  let left = '';
+  let right = '';
+  for (const key of formatArray) {
+    if (key === 'none') continue;
+    const formatCodes =
+      typeof key === 'string' ? inspect.colors[key] : undefined;
+    // If the format is not a valid style, throw an error
+    if (formatCodes == null) {
+      validateOneOf(key, 'format', Object.keys(inspect.colors));
+    }
+    if (skipColorize) continue;
+    left += escapeStyleCode(formatCodes ? formatCodes[0] : undefined);
+    right = `${escapeStyleCode(formatCodes ? formatCodes[1] : undefined)}${right}`;
+  }
+
+  return skipColorize ? text : `${left}${text}${right}`;
+}
+
+export function emitExperimentalWarning(_msg: string): void {
+  // noop
 }
 
 export default {
@@ -261,6 +332,7 @@ export default {
   debuglog,
   debug,
   deprecate,
+  emitExperimentalWarning,
   getSystemErrorMap,
   getSystemErrorMessage,
   getSystemErrorName,
