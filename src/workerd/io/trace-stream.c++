@@ -630,7 +630,7 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   return kj::none;
 }
 
-kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events) {
+kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events, bool isST) {
   // TODO: It is trivial to splice events into multiple traces as needed in the next step.
   // => might not be needed, each tracer only maps to one trace.
   kj::Vector<kj::Own<Trace>> traces;
@@ -751,10 +751,29 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events)
       KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {}
       KJ_CASE_ONEOF(span, CompleteSpan) {
         auto& trace = traces[0];
-        span.spanId = 0x2a2a2a2a2a2a2a2a;
         trace->spans.add(kj::mv(span));
       }
     }
+  }
+  if (isST) {
+    // Span tracing is enabled. Need to synthesize top-level worker span.
+    auto& trace = traces[0];
+    CompleteSpan a(kj::ConstString("worker"_kjc), kj::UNIX_EPOCH);
+    a.spanId = 0x2a2a2a2a2a2a2a2a;
+    a.parentSpanId = 0;
+    a.tags.upsert(kj::ConstString("colo_id"_kjc), kj::str("xyz01"));
+    a.tags.upsert(kj::ConstString("faas.invoked_region"_kjc), kj::str(""_kj));
+
+    KJ_IF_SOME(scriptId, trace->scriptId) {
+      a.tags.upsert(kj::ConstString("script_id"_kjc), kj::str(scriptId));
+    }
+    a.tags.upsert(kj::ConstString("ownerId"_kjc), kj::str(1212));
+    a.tags.upsert(kj::ConstString("zoneId"_kjc), kj::str("test-zone"));
+    //a.tags.upsert(kj::ConstString("deployment_Id"_kjc), kj::str(scriptId));
+    KJ_IF_SOME(stableId, trace->stableId) {
+      a.tags.upsert(kj::ConstString("stable_Id"_kjc), kj::str(stableId));
+    }
+    trace->spans.add(kj::mv(a));
   }
 
   return traces.releaseAsArray();
@@ -891,7 +910,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       this->events.add(kj::mv(event));
     }
     if (isOutcome) {
-      kj::Array<kj::Own<Trace>> assembledTraces = assembleTraces(this->events);
+      kj::Array<kj::Own<Trace>> assembledTraces = assembleTraces(this->events,
+          lock.getWorker().getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans());
       auto& pipelineTracer = KJ_ASSERT_NONNULL(this->pipelineTracer);
 
       pipelineTracer->addTracesFromChild(assembledTraces);
