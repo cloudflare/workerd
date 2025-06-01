@@ -634,7 +634,6 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events,
   // TODO: It is trivial to splice events into multiple traces as needed in the next step.
   // => might not be needed, each tracer only maps to one trace.
   kj::Vector<kj::Own<Trace>> traces;
-  KJ_LOG(WARNING, "assembling trace");
 
   for (auto& event: events) {
     KJ_SWITCH_ONEOF(event.event) {
@@ -791,12 +790,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         doneFulfiller(kj::mv(doneFulfiller)),
         pipelineTracer(kj::mv(pipelineTracer)),
         isFirst(isFirst) {
-    KJ_LOG(WARNING, "TailStreamTarget start");
   }
 
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
-    KJ_LOG(WARNING, "TailStreamTarget shutdown");
     if (doneFulfiller->isWaiting()) {
       doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
     }
@@ -835,7 +832,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
           // First tracer, but using STW
           // TODO: This really needs to check if all tracers are STW, only then should we actually shut this down.
           (!isLegacy && isFirst)) {
-        KJ_DBG("shutting down 'first' stream");
         rpc::TailStreamTarget::TailStreamResults::Builder results = reportContext.initResults();
         this->pipelineTracer = kj::none;
         results.setStop(true);
@@ -914,7 +910,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       pipelineTracer->addTracesFromChild(assembledTraces);
       this->pipelineTracer = kj::none;
       results.setStop(true);
-      KJ_LOG(WARNING, "returning trace fulfillment");
       doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
@@ -1387,7 +1382,6 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
 
         // Transitions into the active state by grabbing the pending client capability.
-        KJ_LOG(WARNING, "TailStreamWriter state makePending");
 
         // The first tail worker is special: If there are LTWs, it acts as the pseudo-STW for all of them.
         // To play that role, it gets the pipelineTracer.
@@ -1415,7 +1409,6 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // the event will be dispatched.
       }
       KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
-        KJ_LOG(WARNING, "TailStreamWriter state continue", event.event.is<tracing::Outcome>());
         // Event cannot be a onset, which should have been validated by the writer.
         KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
       }

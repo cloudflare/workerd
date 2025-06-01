@@ -34,7 +34,6 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
   // expected – reject events following an outcome event, but otherwise just exit if the state has
   // been closed.
   // This could be an assert, but just log an error in case this is prevalent in some edge case.
-  KJ_LOG(WARNING, "TailStreamWriter::report");
 
   if (outcomeSeen) {
     KJ_LOG(ERROR, "reported tail stream event after stream close");
@@ -60,7 +59,6 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
 }  // namespace tracing
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_LOG(WARNING, "PipelineTracer shutdown", completeFulfiller != kj::none);
   KJ_IF_SOME(f, completeFulfiller) {
     f.get()->fulfill(traces.releaseAsArray());
   }
@@ -282,7 +280,6 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
 void WorkerTracer::setEventInfo(
     const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
-  KJ_LOG(WARNING, "setEventInfo parentPipeline dispose", maybeTailStreamWriter != kj::none);
 
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for event info vs.
