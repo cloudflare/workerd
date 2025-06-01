@@ -8,11 +8,11 @@ Subject: Modify where to look for fp16 dependency. This dependency is normally
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index e7c4ae12451a2a6a97c643371d433d19f61edb9a..f1d8db40031df49a9aa7307c6fa7b030939e0687 100644
+index d6e71656c79a486f60faabc450c86349f3b708d9..bae3abad0b68c6b09bdb022b8ce372b738130eb5 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3888,16 +3888,22 @@ filegroup(
-     }),
+@@ -3928,16 +3928,22 @@ v8_library(
+   ],
  )
  
 -v8_library(

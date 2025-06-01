@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yagiz Nizipli <yagiz@nizipli.com>
+Date: Fri, 30 May 2025 14:05:26 -0400
+Subject: Modify where to look for dragonbox
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index f445eed022d8183a97c9258fd837fc9d9e114170..4a31d92dbe96fe28bb962b5b765031800c37510c 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -3915,14 +3915,9 @@ filegroup(
+ )
+ 
+ v8_library(
+-  name = "lib_dragonbox",
+-  srcs = ["third_party/dragonbox/src/include/dragonbox/dragonbox.h"],
+-  hdrs = [
+-    "third_party/dragonbox/src/include/dragonbox/dragonbox.h",
+-  ],
+-  includes = [
+-    "third_party/dragonbox/src/include",
+-  ],
++    name = "lib_dragonbox",
++    srcs = [],
++    deps = ["@dragonbox"]
+ )
+ 
+ cc_library(
+diff --git a/src/numbers/conversions.cc b/src/numbers/conversions.cc
+index 1eec37da8d7570ebf6246c46f346774e3d8945e0..f9320cb59478ccec61decf19e9317661af01c58f 100644
+--- a/src/numbers/conversions.cc
++++ b/src/numbers/conversions.cc
+@@ -23,7 +23,7 @@
+ #include "src/objects/string-inl.h"
+ #include "src/strings/char-predicates-inl.h"
+ #include "src/utils/allocation.h"
+-#include "third_party/dragonbox/src/include/dragonbox/dragonbox.h"
++#include "dragonbox.h"
+ #include "third_party/fast_float/src/include/fast_float/fast_float.h"
+ #include "third_party/fast_float/src/include/fast_float/float_common.h"
+ 
