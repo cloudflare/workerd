@@ -150,12 +150,43 @@ struct SerTestContext: public ContextGlobalObject {
     return result;
   }
 
+  JsObject roundTripError(Lock& js, JsObject errorObj) {
+    Serializer ser(js,
+        Serializer::Options{
+          .treatErrorsAsHostObjects = true,
+        });
+    ser.write(js, errorObj);
+    auto content = ser.release();
+    Deserializer deser(js, content);
+    auto val = KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
+
+    auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
+        PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
+    for (size_t n = 0; n < names.size(); n++) {
+      auto before = errorObj.get(js, names.get(js, n));
+      auto after = val.get(js, names.get(js, n));
+      if (before.isArray()) {
+        auto beforeArray = KJ_ASSERT_NONNULL(before.tryCast<JsArray>());
+        auto afterArray = KJ_ASSERT_NONNULL(after.tryCast<JsArray>());
+        KJ_ASSERT(beforeArray.size() == afterArray.size());
+        for (size_t i = 0; i < beforeArray.size(); i++) {
+          KJ_ASSERT(beforeArray.get(js, i).strictEquals(afterArray.get(js, i)));
+        }
+      } else {
+        KJ_ASSERT(before.strictEquals(after));
+      }
+    }
+
+    return val;
+  }
+
   JSG_RESOURCE_TYPE(SerTestContext) {
     JSG_NESTED_TYPE(Foo);
     JSG_NESTED_TYPE(Bar);
     JSG_NESTED_TYPE(Baz);
     JSG_NESTED_TYPE(Qux);
     JSG_METHOD(roundTrip);
+    JSG_METHOD(roundTripError);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
@@ -282,6 +313,30 @@ KJ_TEST("serialization") {
                 "obj.bar = bar;\n"
                 "roundTrip(obj).bar.val.bar.val.bar.val.i",
       "number", "321");
+}
+
+KJ_TEST("serialization of errors") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  e.expectEval(
+      "e = new Error('a', {cause:'c'}); e.foo = true; roundTripError(e).foo", "boolean", "true");
+  e.expectEval(
+      "roundTripError(new TypeError('a', {cause:'c'})) instanceof TypeError", "boolean", "true");
+  e.expectEval(
+      "roundTripError(new RangeError('a', {cause:'c'})) instanceof RangeError", "boolean", "true");
+  e.expectEval("roundTripError(new ReferenceError('a', {cause:'c'})) instanceof ReferenceError",
+      "boolean", "true");
+  e.expectEval("roundTripError(new SyntaxError('a', {cause:'c'})) instanceof SyntaxError",
+      "boolean", "true");
+  e.expectEval(
+      "roundTripError(new URIError('a', {cause:'c'})) instanceof URIError", "boolean", "true");
+  e.expectEval(
+      "roundTripError(new EvalError('a', {cause:'c'})) instanceof EvalError", "boolean", "true");
+  e.expectEval("roundTripError(new AggregateError(['a', 'b'], 'c')) instanceof AggregateError",
+      "boolean", "true");
+  e.expectEval("roundTripError(new SuppressedError('a', 'b', 'c', {cause:'c'})) instanceof "
+               "SuppressedError",
+      "boolean", "true");
 }
 
 }  // namespace

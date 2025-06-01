@@ -117,6 +117,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
     //   itself, but it may not be worth it to support for only that use case.
     bool treatClassInstancesAsPlainObjects = true;
 
+    bool treatErrorsAsHostObjects = false;
+
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Serializer.
     kj::Maybe<ExternalHandler&> externalHandler;
