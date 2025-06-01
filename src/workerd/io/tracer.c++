@@ -64,9 +64,20 @@ PipelineTracer::~PipelineTracer() noexcept(false) {
   }
 }
 
-void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  for (auto& t: traces) {
-    this->traces.add(kj::addRef(*t));
+void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces, bool isLevel) {
+  // HACK
+  if (isLevel) {
+    auto existing_traces = this->traces.releaseAsArray();
+    for (auto& t: traces) {
+      this->traces.add(kj::addRef(*t));
+    }
+    for (auto& t: existing_traces) {
+      this->traces.add(kj::mv(t));
+    }
+  } else {
+    for (auto& t: traces) {
+      this->traces.add(kj::addRef(*t));
+    }
   }
 }
 
