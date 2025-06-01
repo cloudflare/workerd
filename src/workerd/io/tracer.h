@@ -79,7 +79,7 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
 
   // When collecting traces from multiple stages in a pipeline, this is called by the
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
-  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
+  void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces, bool isLevel = false);
 
  private:
   kj::Vector<kj::Own<Trace>> traces;

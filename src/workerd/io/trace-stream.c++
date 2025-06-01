@@ -907,7 +907,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
           lock.getWorker().getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans());
       auto& pipelineTracer = KJ_ASSERT_NONNULL(this->pipelineTracer);
 
-      pipelineTracer->addTracesFromChild(assembledTraces);
+      pipelineTracer->addTracesFromChild(assembledTraces, 1);
       this->pipelineTracer = kj::none;
       results.setStop(true);
       doneFulfiller->fulfill();
