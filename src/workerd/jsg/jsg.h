@@ -1066,7 +1066,7 @@ class USVString: public kj::String {
   }
 
  private:
-  // This is a seperate method to avoid including simdutf8 in the header file.
+  // This is a separate method to avoid including simdutf8 in the header file.
   bool isValidUtf8() const;
 };
 
