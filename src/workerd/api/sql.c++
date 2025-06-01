@@ -23,6 +23,21 @@ SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage)
 
 SqlStorage::~SqlStorage() {}
 
+void SqlStorage::init(jsg::Lock& js) {
+  auto& db = storage->getSqliteDb(js);
+  db.onUpdate([this](int actionCode, kj::String dbName, kj::String tableName, int64_t rowId) {
+    if (getHandlerCount("update") == 0) {
+      // No listeners, so we don't need to dispatch the event.
+      return;
+    }
+
+    auto& js = jsg::Lock::current();
+    js.withinHandleScope([&] {
+      dispatchEventImpl(js, js.alloc<UpdateEvent>(actionCode, kj::str(dbName), kj::str(tableName), rowId));
+    });
+  });
+}
+
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
   // Internalize the string, so that the cache can be keyed by string identity rather than content.

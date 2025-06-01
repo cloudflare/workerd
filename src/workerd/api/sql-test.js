@@ -1465,6 +1465,28 @@ export class DurableObjectExample extends DurableObject {
       );
     }
   }
+
+  async testUpdateCallback() {
+    const updates = [];
+    this.state.storage.sql.addEventListener('update', ({ action, databaseName, tableName, rowId }) => {
+      updates.push({ action, databaseName, tableName, rowId });
+    });
+    this.state.storage.sql.exec(`
+      DROP TABLE IF EXISTS items;
+      CREATE TABLE items(i INTEGER PRIMARY_KEY, s TEXT);
+      INSERT INTO items VALUES (123, "abc");
+      INSERT INTO items VALUES (12321, "abcbc");
+      UPDATE items set i = 321 where i = 123;
+      DELETE FROM items WHERE i = 12321;
+      `,
+    );
+    assert.deepEqual(updates, [
+      { action: 'insert', databaseName: 'main', tableName: 'items', rowId: 1 },
+      { action: 'insert', databaseName: 'main', tableName: 'items', rowId: 2 },
+      { action: 'update', databaseName: 'main', tableName: 'items', rowId: 1 },
+      { action: 'delete', databaseName: 'main', tableName: 'items', rowId: 2 },
+    ]);
+  }
 }
 
 export default {
@@ -1603,5 +1625,12 @@ export let testAutoRollBackOnCriticalError = {
     // Get a new stub since the old stub is broken due to critical error
     stub = env.ns.get(id);
     await stub.verifyAutoRollbackAfterCriticalError();
+  },
+};
+
+export let testUpdateCallback = {
+  async test(ctrl, env, ctx) {
+    let stub = env.ns.get(env.ns.idFromName('update-callback'));
+    await stub.testUpdateCallback();
   },
 };

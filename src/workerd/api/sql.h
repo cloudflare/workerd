@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/actor-state.h>
+#include <workerd/api/basics.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
@@ -12,7 +13,86 @@
 
 namespace workerd::api {
 
-class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
+class UpdateEvent: public Event {
+ public:
+  UpdateEvent(int actionCode, kj::String dbName, kj::String tableName, int64_t rowId)
+      : Event("update"),
+        actionCode(actionCode),
+        databaseName(kj::mv(dbName)),
+        tableName(kj::mv(tableName)),
+        rowId(rowId) {}
+  UpdateEvent(kj::String type, int actionCode, kj::String dbName, kj::String tableName, int64_t rowId)
+      : Event(kj::mv(type)),
+        actionCode(actionCode),
+        databaseName(kj::mv(dbName)),
+        tableName(kj::mv(tableName)),
+        rowId(rowId) {}
+
+  struct Initializer {
+    jsg::Optional<int> actionCode;
+    jsg::Optional<kj::String> databaseName;
+    jsg::Optional<kj::String> tableName;
+    jsg::Optional<int> rowId;
+
+    JSG_STRUCT(actionCode, databaseName, tableName, rowId);
+    JSG_STRUCT_TS_OVERRIDE(UpdateEventInit);
+  };
+  static jsg::Ref<UpdateEvent> constructor(
+      jsg::Lock& js, kj::String type, jsg::Optional<Initializer> initializer) {
+    Initializer init = kj::mv(initializer).orDefault({});
+    return js.alloc<UpdateEvent>(kj::mv(type), init.actionCode.orDefault(0),
+        kj::mv(init.databaseName).orDefault(nullptr),
+        kj::mv(init.tableName).orDefault(nullptr),
+        init.rowId.orDefault(0));
+  }
+
+  int getActionCode() {
+    return actionCode;
+  }
+  kj::String getAction() {
+    return namedAuthorizerActionCode(actionCode);
+  }
+  kj::StringPtr getDatabaseName() {
+    return databaseName;
+  }
+  kj::StringPtr getTableName() {
+    return tableName;
+  }
+  kj::OneOf<int, int64_t> getRowId() {
+    if (rowId >= (1L << 53) || rowId <= -(1L << 53)) {
+      // If the rowId is greater than MAX_SAFE_INTEGER or less than MIN_SAFE_INTEGER,
+      // return it as a 64-bit integer.
+      return rowId;
+    }
+    return (int) rowId;
+  }
+
+  JSG_RESOURCE_TYPE(UpdateEvent) {
+    JSG_INHERIT(Event);
+
+    JSG_READONLY_INSTANCE_PROPERTY(actionCode, getActionCode);
+    JSG_READONLY_INSTANCE_PROPERTY(action, getAction);
+    JSG_READONLY_INSTANCE_PROPERTY(databaseName, getDatabaseName);
+    JSG_READONLY_INSTANCE_PROPERTY(tableName, getTableName);
+    JSG_READONLY_INSTANCE_PROPERTY(rowId, getRowId);
+
+    JSG_TS_ROOT();
+    // UpdateEvent will be referenced from the `SqlEventMap` define
+  }
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("databaseName", databaseName);
+    tracker.trackField("tableName", tableName);
+  }
+
+ private:
+  int actionCode;
+  kj::String databaseName;
+  kj::String tableName;
+  int64_t rowId;
+};
+
+class SqlStorage final: public EventTarget, private SqliteDatabase::Regulator {
  public:
   SqlStorage(jsg::Ref<DurableObjectStorage> storage);
   ~SqlStorage();
@@ -29,6 +109,8 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   // JSG, which does not need to make a copy.
   using SqlValue = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
 
+  void init(jsg::Lock& js);
+
   jsg::Ref<Cursor> exec(jsg::Lock& js, jsg::JsString query, jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
   void setMaxPageCountForTest(jsg::Lock& js, int count);
@@ -38,6 +120,7 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   double getDatabaseSize(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
+    JSG_INHERIT(EventTarget);
     JSG_METHOD(exec);
 
     if (flags.getWorkerdExperimental()) {
@@ -56,7 +139,11 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
     JSG_NESTED_TYPE(Cursor);
     JSG_NESTED_TYPE(Statement);
 
-    JSG_TS_OVERRIDE({
+    JSG_TS_DEFINE(type SqlEventMap = {
+      update: UpdateEvent;
+    });
+
+    JSG_TS_OVERRIDE(extends EventTarget<SqlEventMap> {
       exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>
     });
   }
@@ -174,6 +261,11 @@ class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
   //   that we're being too clever with optimizations to avoid copying strings when we don't need
   //   to.
   static jsg::JsValue wrapSqlValue(jsg::Lock& js, SqlValue value);
+
+  // Because EventTarget has a constructor(), we have to explicitly delete
+  // the constructor() here or we'll end up with compilation errors
+  // (EventTarget's constructor confuses the hasConstructorMethod in resource.h)
+  static jsg::Ref<SqlStorage> constructor() = delete;
 };
 
 class SqlStorage::Cursor final: public jsg::Object {
@@ -351,7 +443,7 @@ struct SqlStorage::IngestResult {
   api::SqlStorage, api::SqlStorage::Statement, api::SqlStorage::Cursor,                            \
       api::SqlStorage::IngestResult, api::SqlStorage::Cursor::RowIterator,                         \
       api::SqlStorage::Cursor::RowIterator::Next, api::SqlStorage::Cursor::RawIterator,            \
-      api::SqlStorage::Cursor::RawIterator::Next
+      api::SqlStorage::Cursor::RawIterator::Next, api::UpdateEvent, api::UpdateEvent::Initializer
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api
