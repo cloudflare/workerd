@@ -464,8 +464,8 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
 }
 
 export class ERR_FALSY_VALUE_REJECTION extends NodeError {
-  reason: string;
-  constructor(reason: string) {
+  reason: any;
+  constructor(reason: any) {
     super('ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value');
     this.reason = reason;
   }

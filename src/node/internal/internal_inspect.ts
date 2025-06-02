@@ -622,7 +622,8 @@ Object.defineProperty(inspect, 'defaultOptions', {
 // reset code as second entry.
 const defaultFG = 39;
 const defaultBG = 49;
-inspect.colors = {
+const colors: Record<string, [number, number]> = {
+  // @ts-ignore
   __proto__: null,
   reset: [0, 0],
   bold: [1, 22],
@@ -669,7 +670,8 @@ inspect.colors = {
   bgMagentaBright: [105, defaultBG],
   bgCyanBright: [106, defaultBG],
   bgWhiteBright: [107, defaultBG],
-} as any as Record<string, [number, number]>;
+};
+inspect.colors = colors;
 
 function defineColorAlias(target: string, alias: string) {
   Object.defineProperty(inspect.colors, alias, {

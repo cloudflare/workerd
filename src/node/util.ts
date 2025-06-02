@@ -157,7 +157,7 @@ function pad(n: any): string {
 
 // prettier-ignore
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-  'Oct', 'Nov', 'Dec'];
+                'Oct', 'Nov', 'Dec'];
 
 function timestamp(): string {
   const d = new Date();
@@ -252,21 +252,40 @@ function escapeStyleCode(code: number | undefined): string {
   return `\u001b[${code}m`;
 }
 
-// TODO(gbedford): We do not yet implement process.stdout, so to ensure the correct
+// TODO(soon): We do not yet implement process.stdout, so to ensure the correct
 // behaviour, we use a placeholder value internally.
+
+interface StyleTextOptions {
+  validateStream?: boolean;
+  stream?: ReadableStream | WritableStream;
+}
+
+type TTYStream = (ReadableStream | WritableStream) & {
+  isTTY: true;
+  getColorDepth(): number;
+};
+
+function isTTYStream(
+  stream: ReadableStream | WritableStream
+): stream is TTYStream {
+  return (
+    typeof stream === 'object' &&
+    (stream as TTYStream).isTTY &&
+    typeof (stream as TTYStream).getColorDepth === 'function'
+  );
+}
+
 const stdoutPlaceholder = Object.create(null);
 export function styleText(
   format: string | string[],
   text: string,
-  {
-    validateStream = true,
-    stream = stdoutPlaceholder,
-  }: { validateStream?: boolean; stream?: ReadableStream | WritableStream } = {}
+  { validateStream = true, stream = stdoutPlaceholder }: StyleTextOptions = {}
 ): string {
   validateString(text, 'text');
-  validateBoolean(validateStream, 'options.validateStream');
+  if (validateStream !== true)
+    validateBoolean(validateStream, 'options.validateStream');
 
-  let skipColorize;
+  let skipColorize: boolean = false;
   if (validateStream) {
     if (
       !isReadableStream(stream) &&
@@ -282,12 +301,7 @@ export function styleText(
     }
 
     // If the stream is falsy or should not be colorized, set skipColorize to true
-    skipColorize = !(
-      (stream as any)?.isTTY &&
-      (typeof (stream as any)!.getColorDepth === 'function'
-        ? (stream as any)!.getColorDepth() > 2
-        : true)
-    );
+    skipColorize = isTTYStream(stream) ? stream.getColorDepth() > 2 : true;
   }
 
   // If the format is not an array, convert it to an array
@@ -312,7 +326,11 @@ export function styleText(
 }
 
 export function emitExperimentalWarning(_msg: string): void {
-  // noop
+  // We do not currently emit experimental warning messages,
+  // rather, this no-op allows supporting code which relies on
+  // emitting them in Node.js.
+  // In future we could examine emitting these with control over
+  // their log output.
 }
 
 export default {

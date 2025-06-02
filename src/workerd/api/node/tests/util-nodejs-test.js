@@ -30,68 +30,16 @@ import util, {
   callbackify,
   inherits,
   promisify,
-  getCallSites,
   emitExperimentalWarning,
   stripVTControlCharacters,
   styleText,
 } from 'node:util';
-
-const remainingMustCallErrors = new Set();
-function commonMustCall(f) {
-  const error = new Error('Expected function to be called');
-  remainingMustCallErrors.add(error);
-  return function (...args) {
-    remainingMustCallErrors.delete(error);
-    return f.call(this, ...args);
-  };
-}
-function commonMustSucceed(fn, exact) {
-  return commonMustCall(function (err, ...args) {
-    assert.ifError(err);
-    if (typeof fn === 'function') return fn.apply(this, args);
-  }, exact);
-}
-function assertCalledMustCalls() {
-  try {
-    for (const error of remainingMustCallErrors) throw error;
-  } finally {
-    remainingMustCallErrors.clear();
-  }
-}
-function commonMustNotCall(msg) {
-  const callSite = getCallSites()[1];
-  return function mustNotCall(...args) {
-    const argsInfo =
-      args.length > 0
-        ? `\ncalled with arguments: ${args.map((arg) => inspect(arg)).join(', ')}`
-        : '';
-    assert.fail(
-      `${msg || 'function should not have been called'} at ${callSite.scriptName}:${callSite.lineNumber}` +
-        argsInfo
-    );
-  };
-}
-function commonInvalidArgTypeHelper(input) {
-  if (input == null) {
-    return ` Received ${input}`;
-  }
-  if (typeof input === 'function') {
-    return ` Received function ${input.name}`;
-  }
-  if (typeof input === 'object') {
-    if (input.constructor?.name) {
-      return ` Received an instance of ${input.constructor.name}`;
-    }
-    return ` Received ${inspect(input, { depth: -1 })}`;
-  }
-
-  let inspected = inspect(input, { colors: false });
-  if (inspected.length > 28) {
-    inspected = `${inspected.slice(inspected, 0, 25)}...`;
-  }
-
-  return ` Received type ${typeof input} (${inspected})`;
-}
+import {
+  mustCall,
+  mustSucceed,
+  assertCalledMustCalls,
+  invalidArgTypeHelper,
+} from './internal/common.js';
 
 export const utilInspect = {
   // test-util-inspect.js
@@ -1079,7 +1027,7 @@ export const utilInspect = {
 
       assert.strictEqual(util.inspect(subject), "{ foo: 'bar' }");
 
-      subject[util.inspect.custom] = commonMustCall((depth, opts, inspect) => {
+      subject[util.inspect.custom] = mustCall((depth, opts, inspect) => {
         const clone = { ...opts };
         // This might change at some point but for now we keep the stylize function.
         // The function should either be documented or an alternative should be
@@ -1096,7 +1044,7 @@ export const utilInspect = {
         );
         opts.showHidden = true;
         return {
-          [inspect.custom]: commonMustCall((depth, opts2) => {
+          [inspect.custom]: mustCall((depth, opts2) => {
             assert.deepStrictEqual(clone, opts2);
           }),
         };
@@ -1123,7 +1071,7 @@ export const utilInspect = {
 
     {
       const subject = {
-        [util.inspect.custom]: commonMustCall((depth, opts) => {
+        [util.inspect.custom]: mustCall((depth, opts) => {
           assert.strictEqual(depth, null);
           assert.strictEqual(opts.compact, true);
         }),
@@ -4543,7 +4491,7 @@ export const getCallSitesTest = {
 };
 
 export const isDeepStrictEqual = {
-  // parallel/test-util-isDeepStrictEqual.js
+  // https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-isDeepStrictEqual.js
   test() {
     function utilIsDeepStrict(a, b) {
       assert.strictEqual(util.isDeepStrictEqual(a, b), true);
@@ -4944,7 +4892,7 @@ export const testTypes = {
   },
 };
 
-// parallel/test-util-inspect-getters-accessing-this.js
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-inspect-getters-accessing-this.js
 export const testInspectGetters = {
   async test() {
     // This test ensures that util.inspect logs getters
@@ -5005,7 +4953,7 @@ export const testInspectGetters = {
   },
 };
 
-// test/parallel/test-util-callbackify.js
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-callbackify.js
 export const testCallbackify = {
   async test() {
     const values = [
@@ -5032,7 +4980,7 @@ export const testCallbackify = {
 
         const cbAsyncFn = callbackify(asyncFn);
         cbAsyncFn(
-          commonMustSucceed((ret) => {
+          mustSucceed((ret) => {
             assert.strictEqual(ret, value);
           })
         );
@@ -5044,7 +4992,7 @@ export const testCallbackify = {
 
         const cbPromiseFn = callbackify(promiseFn);
         cbPromiseFn(
-          commonMustSucceed((ret) => {
+          mustSucceed((ret) => {
             assert.strictEqual(ret, value);
           })
         );
@@ -5060,7 +5008,7 @@ export const testCallbackify = {
 
         const cbThenableFn = callbackify(thenableFn);
         cbThenableFn(
-          commonMustSucceed((ret) => {
+          mustSucceed((ret) => {
             assert.strictEqual(ret, value);
           })
         );
@@ -5079,7 +5027,7 @@ export const testCallbackify = {
         assert.strictEqual(cbAsyncFn.length, 1);
         assert.strictEqual(cbAsyncFn.name, 'asyncFnCallbackified');
         cbAsyncFn(
-          commonMustCall((err, ret) => {
+          mustCall((err, ret) => {
             assert.strictEqual(ret, undefined);
             if (err instanceof Error) {
               if ('reason' in err) {
@@ -5110,7 +5058,7 @@ export const testCallbackify = {
         const cbPromiseFn = callbackify(promiseFn);
         assert.strictEqual(promiseFn.name, obj);
         cbPromiseFn(
-          commonMustCall((err, ret) => {
+          mustCall((err, ret) => {
             assert.strictEqual(ret, undefined);
             if (err instanceof Error) {
               if ('reason' in err) {
@@ -5137,7 +5085,7 @@ export const testCallbackify = {
 
         const cbThenableFn = callbackify(thenableFn);
         cbThenableFn(
-          commonMustCall((err, ret) => {
+          mustCall((err, ret) => {
             assert.strictEqual(ret, undefined);
             if (err instanceof Error) {
               if ('reason' in err) {
@@ -5177,7 +5125,7 @@ export const testCallbackify = {
         );
         cbAsyncFn(
           value,
-          commonMustSucceed((ret) => {
+          mustSucceed((ret) => {
             assert.strictEqual(ret, value);
           })
         );
@@ -5198,7 +5146,7 @@ export const testCallbackify = {
         assert.strictEqual(promiseFn.length, obj);
         cbPromiseFn(
           value,
-          commonMustSucceed((ret) => {
+          mustSucceed((ret) => {
             assert.strictEqual(ret, value);
           })
         );
@@ -5217,7 +5165,7 @@ export const testCallbackify = {
         iAmThis.cbFn = callbackify(iAmThis.fn);
         iAmThis.cbFn(
           value,
-          commonMustSucceed(function (ret) {
+          mustSucceed(function (ret) {
             assert.strictEqual(ret, value);
             assert.strictEqual(this, iAmThis);
           })
@@ -5232,7 +5180,7 @@ export const testCallbackify = {
         iAmThat.cbFn = callbackify(iAmThat.fn);
         iAmThat.cbFn(
           value,
-          commonMustSucceed(function (ret) {
+          mustSucceed(function (ret) {
             assert.strictEqual(ret, value);
             assert.strictEqual(this, iAmThat);
           })
@@ -5252,7 +5200,7 @@ export const testCallbackify = {
             name: 'TypeError',
             message:
               'The "original" argument must be of type function.' +
-              commonInvalidArgTypeHelper(value),
+              invalidArgTypeHelper(value),
           }
         );
       });
@@ -5278,7 +5226,7 @@ export const testCallbackify = {
             name: 'TypeError',
             message:
               'The last argument must be of type function.' +
-              commonInvalidArgTypeHelper(value),
+              invalidArgTypeHelper(value),
           }
         );
       });
@@ -5310,7 +5258,7 @@ export const testCallbackify = {
   },
 };
 
-// parallel/test-util-inherits.js
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-inherits.js
 export const testInherits = {
   async test() {
     // Super constructor
@@ -5440,10 +5388,10 @@ export const testInherits = {
   },
 };
 
-// parallel/test-util-promisify.js
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-promisify.js
 export const testPromisify = {
   async test() {
-    // TODO(gbedford): expectWarning only possible with process.on('warning')
+    // TODO(soon): expectWarning only possible with process.on('warning')
     // {
     //   const warningHandler = commonMustNotCall();
     //   process.on('warning', warningHandler);
@@ -5457,7 +5405,7 @@ export const testPromisify = {
     //   'DeprecationWarning',
     //   'Calling promisify on a function that returns a Promise is likely a mistake.',
     //   'DEP0174');
-    // promisify(async (callback) => { callback(); })().then(commonMustCall(() => {
+    // promisify(async (callback) => { callback(); })().then(mustCall(() => {
     //   // We must add the second `expectWarning` call in the `.then` handler, when
     //   // the first warning has already been triggered.
     //   commonExpectWarning(
@@ -5467,20 +5415,20 @@ export const testPromisify = {
     //   promisify(async () => {})().then(commonMustNotCall());
     // }));
 
-    // TODO(gbedford): Enable once fs supported
+    // TODO(soon): Enable once fs supported
     // const stat = promisify(fs.stat);
 
     // {
     //   const promise = stat(__filename);
     //   assert(promise instanceof Promise);
-    //   promise.then(commonMustCall((value) => {
+    //   promise.then(mustCall((value) => {
     //     assert.deepStrictEqual(value, fs.statSync(__filename));
     //   }));
     // }
 
     // {
     //   const promise = stat('/dontexist');
-    //   promise.catch(commonMustCall((error) => {
+    //   promise.catch(mustCall((error) => {
     //     assert(error.message.includes('ENOENT: no such file or directory, stat'));
     //   }));
     // }
@@ -5520,7 +5468,7 @@ export const testPromisify = {
       });
     }
 
-    // customPromisifyArgs unsupported
+    // TODO(soon): customPromisifyArgs unsupported
     // {
     //   const firstValue = 5;
     //   const secondValue = 17;
@@ -5531,7 +5479,7 @@ export const testPromisify = {
 
     //   fn[customPromisifyArgs] = ['first', 'second'];
 
-    //   promisify(fn)().then(commonMustCall((obj) => {
+    //   promisify(fn)().then(mustCall((obj) => {
     //     assert.deepStrictEqual(obj, { first: firstValue, second: secondValue });
     //   }));
     // }
@@ -5548,7 +5496,7 @@ export const testPromisify = {
         callback(null, 'foo', 'bar');
       }
       promisify(fn)().then(
-        commonMustCall((value) => {
+        mustCall((value) => {
           assert.strictEqual(value, 'foo');
         })
       );
@@ -5559,7 +5507,7 @@ export const testPromisify = {
         callback(null);
       }
       promisify(fn)().then(
-        commonMustCall((value) => {
+        mustCall((value) => {
           assert.strictEqual(value, undefined);
         })
       );
@@ -5570,7 +5518,7 @@ export const testPromisify = {
         callback();
       }
       promisify(fn)().then(
-        commonMustCall((value) => {
+        mustCall((value) => {
           assert.strictEqual(value, undefined);
         })
       );
@@ -5581,7 +5529,7 @@ export const testPromisify = {
         callback(err, val);
       }
       promisify(fn)(null, 42).then(
-        commonMustCall((value) => {
+        mustCall((value) => {
           assert.strictEqual(value, 42);
         })
       );
@@ -5592,7 +5540,7 @@ export const testPromisify = {
         callback(err, val);
       }
       promisify(fn)(new Error('oops'), null).catch(
-        commonMustCall((err) => {
+        mustCall((err) => {
           assert.strictEqual(err.message, 'oops');
         })
       );
@@ -5606,7 +5554,7 @@ export const testPromisify = {
       (async () => {
         const value = await promisify(fn)(null, 42);
         assert.strictEqual(value, 42);
-      })().then(commonMustCall());
+      })().then(mustCall());
     }
 
     {
@@ -5617,7 +5565,7 @@ export const testPromisify = {
 
       o.fn = fn;
 
-      o.fn().then(commonMustCall((val) => assert(val)));
+      o.fn().then(mustCall((val) => assert(val)));
     }
 
     {
@@ -5635,7 +5583,7 @@ export const testPromisify = {
         await fn();
         await Promise.resolve();
         return assert.strictEqual(stack, err.stack);
-      })().then(commonMustCall());
+      })().then(mustCall());
     }
 
     {
@@ -5665,7 +5613,7 @@ export const testPromisify = {
         throw err;
       })();
 
-      Promise.all([
+      await Promise.all([
         a.then(assert.fail, function (e) {
           assert.strictEqual(err, e);
         }),
@@ -5681,21 +5629,21 @@ export const testPromisify = {
         name: 'TypeError',
         message:
           'The "original" argument must be of type function.' +
-          commonInvalidArgTypeHelper(input),
+          invalidArgTypeHelper(input),
       });
     });
   },
 };
 
-// parallel/test-util-emit-experimental-warning.js
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-emit-experimental-warning.js
 export const testExperimentalWarning = {
   async test() {
     // This test ensures that the emitExperimentalWarning in internal/util emits a
     // warning when passed an unsupported feature and that it simply returns
     // when passed the same feature multiple times.
 
-    // TODO(gbedford): Enable once process.on is supported
-    // process.on('warning', commonMustCall((warning) => {
+    // TODO(soon): Enable once process.on is supported
+    // process.on('warning', mustCall((warning) => {
     //   assert.match(warning.message, /is an experimental feature/);
     // }, 2));
 
@@ -5705,7 +5653,7 @@ export const testExperimentalWarning = {
   },
 };
 
-// parallel/test-util-stripvtcontrolcharacters.js
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-stripvtcontrolcharacters.js
 export const testStripVtControlCharacters = {
   async test() {
     // Ref: https://github.com/chalk/ansi-regex/blob/main/test.js

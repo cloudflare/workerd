@@ -214,7 +214,7 @@ function callbackifyOnRejected(
   // occurred", we error-wrap so the callback consumer can distinguish between
   // "the promise rejected with null" or "the promise fulfilled with undefined".
   if (!reason) {
-    reason = new ERR_FALSY_VALUE_REJECTION(reason as any as string);
+    reason = new ERR_FALSY_VALUE_REJECTION(reason);
   }
   cb(reason);
 }

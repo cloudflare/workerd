@@ -1,4 +1,5 @@
-import { Buffer } from 'node:buffer';
+export type { addAbortSignal } from 'node:stream';
+import type { FinishedOptions } from 'node:stream';
 
 // Exported symbols
 export const kDestroyed: unique symbol;
@@ -169,12 +170,6 @@ export function getHighWaterMark(
   isDuplex: boolean
 ): number;
 
-// Abort signal function
-export function addAbortSignal(
-  signal: AbortSignal,
-  stream: NodeStreamLike
-): NodeStreamLike;
-
 // BufferList class
 export class BufferList {
   head: BufferListNode | null;
@@ -196,8 +191,6 @@ interface BufferListNode {
   data: Buffer | string;
   next: BufferListNode | null;
 }
-
-import type { FinishedOptions } from 'node:stream';
 
 type FinishedStream =
   | NodeJS.ReadableStream

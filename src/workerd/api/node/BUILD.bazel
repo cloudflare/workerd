@@ -246,7 +246,10 @@ wd_test(
 wd_test(
     src = "tests/util-nodejs-test.wd-test",
     args = ["--experimental"],
-    data = ["tests/util-nodejs-test.js"],
+    data = [
+        "tests/internal/common.js",
+        "tests/util-nodejs-test.js",
+    ],
 )
 
 wd_test(
