@@ -10,6 +10,161 @@ namespace workerd::api {
 class Blob;
 class File;
 
+class URL;  // Legacy URL class impl
+namespace url {
+class URL;
+}  // namespace url
+
+// Metadata about a file, directory, or link.
+struct Stat {
+  kj::StringPtr type;  // One of either "file", "directory", or "symlink"
+  uint32_t size;
+  uint64_t lastModified;
+  uint64_t created;
+  bool writable;
+  bool device;
+  JSG_STRUCT(type, size, lastModified, created, writable, device);
+
+  Stat(const workerd::Stat& stat);
+};
+
+class FileSystemModule final: public jsg::Object {
+ public:
+  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
+
+  struct StatOptions {
+    jsg::Optional<bool> followSymlinks;
+    JSG_STRUCT(followSymlinks);
+  };
+
+  kj::Maybe<Stat> stat(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, StatOptions options);
+  void setLastModified(
+      jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, kj::Date lastModified, StatOptions options);
+  void truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, uint32_t size);
+
+  struct ReadLinkOptions {
+    // The readLink method is used for both realpath and readlink. The readlink
+    // API will throw an error if the path is not a symlink. The realpath API
+    // will return the resolved path either way.
+    bool failIfNotSymlink = false;
+    JSG_STRUCT(failIfNotSymlink);
+  };
+  kj::String readLink(jsg::Lock& js, FilePath path, ReadLinkOptions options);
+
+  struct LinkOptions {
+    bool symbolic;
+    JSG_STRUCT(symbolic);
+  };
+
+  void link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options);
+
+  void unlink(jsg::Lock& js, FilePath path);
+
+  struct OpenOptions {
+    // File is opened to supprt reads.
+    bool read;
+    // File is opened to support writes.
+    bool write;
+    // File is opened in append mode. Ignored if write is false.
+    bool append;
+    // If the exclusive option is set, throw if the file already exists.
+    bool exclusive;
+    // If the followSymlinks option is set, follow symbolic links.
+    bool followSymlinks = true;
+    JSG_STRUCT(read, write, append, exclusive, followSymlinks);
+  };
+
+  int open(jsg::Lock& js, FilePath path, OpenOptions options);
+  void close(jsg::Lock& js, int fd);
+
+  struct WriteOptions {
+    kj::Maybe<uint64_t> position;
+    JSG_STRUCT(position);
+  };
+
+  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+
+  jsg::BufferSource readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
+
+  struct WriteAllOptions {
+    bool exclusive;
+    bool append;
+    JSG_STRUCT(exclusive, append);
+  };
+
+  uint32_t writeAll(jsg::Lock& js,
+      kj::OneOf<int, FilePath> pathOrFd,
+      jsg::BufferSource data,
+      WriteAllOptions options);
+
+  struct RenameOrCopyOptions {
+    bool copy;
+    JSG_STRUCT(copy);
+  };
+
+  void renameOrCopy(jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options);
+
+  struct MkdirOptions {
+    bool recursive = false;
+    // When temp is true, the directory name will be augmented with an
+    // additional random string to make it unique and the directory name
+    // will be returned.
+    bool tmp = false;
+    JSG_STRUCT(recursive, tmp);
+  };
+  jsg::Optional<kj::String> mkdir(jsg::Lock& js, FilePath path, MkdirOptions options);
+
+  struct RmOptions {
+    bool recursive = false;
+    bool force = false;
+    bool dironly = false;
+    JSG_STRUCT(recursive, force, dironly);
+  };
+  void rm(jsg::Lock& js, FilePath path, RmOptions options);
+
+  struct DirEntHandle {
+    kj::String name;
+    kj::String parentPath;
+    int type;
+    JSG_STRUCT(name, parentPath, type);
+  };
+  struct ReadDirOptions {
+    bool recursive = false;
+    JSG_STRUCT(recursive);
+  };
+  kj::Array<DirEntHandle> readdir(jsg::Lock& js, FilePath path, ReadDirOptions options);
+
+  FileSystemModule() = default;
+  FileSystemModule(jsg::Lock&, const jsg::Url&) {}
+
+  JSG_RESOURCE_TYPE(FileSystemModule) {
+    JSG_METHOD(stat);
+    JSG_METHOD(setLastModified);
+    JSG_METHOD(truncate);
+    JSG_METHOD(readLink);
+    JSG_METHOD(link);
+    JSG_METHOD(unlink);
+    JSG_METHOD(open);
+    JSG_METHOD(close);
+    JSG_METHOD(write);
+    JSG_METHOD(read);
+    JSG_METHOD(readAll);
+    JSG_METHOD(writeAll);
+    JSG_METHOD(renameOrCopy);
+    JSG_METHOD(mkdir);
+    JSG_METHOD(rm);
+    JSG_METHOD(readdir);
+  }
+
+ private:
+  // Rather than relying on random generation of temp directory names we
+  // use a simple counter. Once the counter reaches the max value we will
+  // refuse to create any more temp directories. This is a bit of a hack
+  // to allow temp dirs to be created outside of an IoContext.
+  uint32_t tmpFileCounter = 0;
+};
+
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
 // All of the classes in this part of the impl are defined by the spec.
@@ -369,5 +524,15 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemDirectoryHandle::EntryIterator::Next,                                \
       workerd::api::FileSystemDirectoryHandle::KeyIterator::Next,                                  \
       workerd::api::FileSystemDirectoryHandle::ValueIterator::Next
+
+#define EW_FILESYSTEM_ISOLATE_TYPES                                                                \
+  workerd::api::FileSystemModule, workerd::api::Stat, workerd::api::FileSystemModule::StatOptions, \
+      workerd::api::FileSystemModule::ReadLinkOptions,                                             \
+      workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions,    \
+      workerd::api::FileSystemModule::WriteOptions,                                                \
+      workerd::api::FileSystemModule::WriteAllOptions,                                             \
+      workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
+      workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions,     \
+      workerd::api::FileSystemModule::DirEntHandle, workerd::api::FileSystemModule::ReadDirOptions
 
 }  // namespace workerd::api

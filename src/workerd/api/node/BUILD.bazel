@@ -412,3 +412,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/bound-als-test.js"],
 )
+
+wd_test(
+    src = "tests/fs-access-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-access-test.js"],
+)
