@@ -35,6 +35,8 @@ declare global {
   function test(func: TestFn, name: string, properties?: unknown): void;
 }
 
+type TestErrorType = Error | 'SKIPPED' | undefined;
+
 /**
  * A single subtest. A Test is not constructed directly but via the
  * :js:func:`test`, :js:func:`async_test` or :js:func:`promise_test` functions.
@@ -58,7 +60,7 @@ export class Test {
   public phase: (typeof Test.Phases)[keyof typeof Test.Phases];
   public cleanup_callbacks: UnknownFunc[] = [];
 
-  public error?: Error;
+  public error: TestErrorType = undefined;
 
   // If this test is asynchronous, stores a promise that resolves on test completion
   public promise?: Promise<void>;
@@ -220,33 +222,25 @@ export class Test {
 }
 
 /* eslint-enable @typescript-eslint/no-this-alias */
+class SkippedTest extends Test {
+  public override error: TestErrorType = 'SKIPPED';
 
-class AsyncTest extends Test {
-  private resolve: () => void;
-
-  public constructor(name: string, properties: unknown) {
-    super(name, properties);
-
-    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.promise = promise;
-    this.resolve = resolve;
-  }
-
-  public override done(): void {
-    super.done();
-    this.resolve();
+  public override step(
+    _func: UnknownFunc,
+    _this_obj?: object,
+    ..._rest: unknown[]
+  ): unknown {
+    return undefined;
   }
 }
 
 class PromiseTest extends Test {
-  public constructor(name: string, properties: unknown) {
-    super(name, properties);
-  }
+  // TODO(soon): Extract out promise_test specific behaviour to make code easier to understand.
 }
 
 globalThis.promise_test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
+    globalThis.state.tests.push(new SkippedTest(name, properties));
     return;
   }
 
@@ -278,8 +272,27 @@ globalThis.promise_test = (func, name, properties): void => {
     });
 };
 
+class AsyncTest extends Test {
+  private resolve: () => void;
+
+  public constructor(name: string, properties: unknown) {
+    super(name, properties);
+
+    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.promise = promise;
+    this.resolve = resolve;
+  }
+
+  public override done(): void {
+    super.done();
+    this.resolve();
+  }
+}
+
 globalThis.async_test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
+    globalThis.state.tests.push(new SkippedTest(name, properties));
     return;
   }
 
@@ -302,6 +315,7 @@ globalThis.async_test = (func, name, properties): void => {
  */
 globalThis.test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
+    globalThis.state.tests.push(new SkippedTest(name, properties));
     return;
   }
 

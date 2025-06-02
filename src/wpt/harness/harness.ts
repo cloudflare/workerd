@@ -139,8 +139,7 @@ class RunnerState {
 
   public async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
-    const promises = this.tests.map((t) => t.promise).filter((p) => !!p);
-    await Promise.all(promises);
+    await Promise.all(this.tests.map((t) => t.promise));
 
     for (const cleanFn of this.completionCallbacks) {
       cleanFn();
@@ -150,11 +149,11 @@ class RunnerState {
     const unexpectedFailures = [];
 
     for (const test of this.tests) {
-      if (!test.error) {
+      const err = test.error;
+
+      if (!err || err === 'SKIPPED') {
         continue;
       }
-
-      const err = test.error;
 
       if (!expectedFailures.delete(err.message)) {
         err.message = sanitize_unpaired_surrogates(err.message);
