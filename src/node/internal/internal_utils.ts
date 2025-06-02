@@ -29,7 +29,10 @@
 import { default as bufferUtil } from 'node-internal:buffer';
 import type { Encoding } from 'node-internal:buffer';
 import { validateFunction } from 'node-internal:validators';
-import { ERR_FALSY_VALUE_REJECTION } from 'node-internal:internal_errors';
+import {
+  ERR_FALSY_VALUE_REJECTION,
+  Falsy,
+} from 'node-internal:internal_errors';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 
@@ -214,7 +217,7 @@ function callbackifyOnRejected(
   // occurred", we error-wrap so the callback consumer can distinguish between
   // "the promise rejected with null" or "the promise fulfilled with undefined".
   if (!reason) {
-    reason = new ERR_FALSY_VALUE_REJECTION(reason);
+    reason = new ERR_FALSY_VALUE_REJECTION(reason as Falsy);
   }
   cb(reason);
 }

@@ -97,17 +97,6 @@ interface NodeStreamLike {
   [kIsDisturbed]?: boolean;
 }
 
-interface WebReadableStream {
-  pipeThrough: Function;
-  getReader: Function;
-  cancel: Function;
-}
-
-interface WebWritableStream {
-  getWriter: Function;
-  abort: Function;
-}
-
 // Stream detection functions
 export function isReadableNodeStream(obj: any, strict?: boolean): boolean;
 export function isWritableNodeStream(obj: any): boolean;
