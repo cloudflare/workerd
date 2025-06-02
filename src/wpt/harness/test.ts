@@ -60,19 +60,13 @@ export class Test {
 
   public error?: Error;
 
-  // For convenience, expose a promise that resolves once done() is called
-  public isDone: Promise<void>;
-  private resolve: () => void;
+  // If this test is asynchronous, stores a promise that resolves on test completion
+  public promise?: Promise<void>;
 
   public constructor(name: string, properties: unknown) {
     this.name = name;
     this.properties = properties;
     this.phase = Test.Phases.INITIAL;
-
-    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.isDone = promise;
-    this.resolve = resolve;
   }
 
   /**
@@ -222,17 +216,43 @@ export class Test {
       cleanFn();
     }
     this.phase = Test.Phases.COMPLETE;
+  }
+}
+
+/* eslint-enable @typescript-eslint/no-this-alias */
+
+class AsyncTest extends Test {
+  private resolve: () => void;
+
+  public constructor(name: string, properties: unknown) {
+    super(name, properties);
+
+    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.promise = promise;
+    this.resolve = resolve;
+  }
+
+  public override done(): void {
+    super.done();
     this.resolve();
   }
 }
-/* eslint-enable @typescript-eslint/no-this-alias */
+
+class PromiseTest extends Test {
+  public constructor(name: string, properties: unknown) {
+    super(name, properties);
+  }
+}
 
 globalThis.promise_test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
     return;
   }
 
-  const testCase = new Test(name, properties);
+  const testCase = new PromiseTest(name, properties);
+  globalThis.state.tests.push(testCase);
+
   const promise = testCase.step(func, testCase, testCase);
 
   if (!(promise instanceof Promise)) {
@@ -240,28 +260,22 @@ globalThis.promise_test = (func, name, properties): void => {
     // but are not required to be async functions. That means they could throw
     // an error immediately when run.
 
-    if (testCase.error) {
-      globalThis.state.errors.push(testCase.error);
-    } else {
-      globalThis.state.errors.push(
-        new Error('Unexpected value returned from promise_test')
-      );
+    if (!testCase.error) {
+      testCase.error = new Error('Unexpected value returned from promise_test');
     }
 
     return;
   }
 
-  globalThis.state.promises.push(
-    promise
-      .then(() => {
-        testCase.done();
-      })
-      .catch((err: unknown) => {
-        globalThis.state.errors.push(
-          Object.assign(new AggregateError([err], name), { stack: '' })
-        );
-      })
-  );
+  testCase.promise = promise
+    .then(() => {
+      testCase.done();
+    })
+    .catch((err: unknown) => {
+      testCase.error = Object.assign(new AggregateError([err], name), {
+        stack: '',
+      });
+    });
 };
 
 globalThis.async_test = (func, name, properties): void => {
@@ -269,16 +283,10 @@ globalThis.async_test = (func, name, properties): void => {
     return;
   }
 
-  const testCase = new Test(name, properties);
-  testCase.step(func, testCase, testCase);
+  const testCase = new AsyncTest(name, properties);
+  globalThis.state.tests.push(testCase);
 
-  globalThis.state.promises.push(
-    testCase.isDone.then(() => {
-      if (testCase.error) {
-        globalThis.state.errors.push(testCase.error);
-      }
-    })
-  );
+  testCase.step(func, testCase, testCase);
 };
 
 /**
@@ -298,12 +306,10 @@ globalThis.test = (func, name, properties): void => {
   }
 
   const testCase = new Test(name, properties);
+  globalThis.state.tests.push(testCase);
+
   testCase.step(func, testCase, testCase);
   testCase.done();
-
-  if (testCase.error) {
-    globalThis.state.errors.push(testCase.error);
-  }
 };
 
 function shouldRunTest(message: string): boolean {
