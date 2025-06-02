@@ -73,24 +73,44 @@ interface NodeStreamLike {
   _sent100?: boolean;
   _consuming?: boolean;
   _dumped?: boolean;
-  req?: any;
+  req?: object;
   aborted?: boolean;
-  pipe?: Function;
-  on?: Function;
-  pause?: Function;
-  resume?: Function;
-  write?: Function;
-  emit?: Function;
-  once?: Function;
-  removeListener?: Function;
-  destroy?: Function;
-  close?: Function;
-  abort?: Function;
-  listenerCount?: Function;
-  _construct?: Function;
-  _destroy?: Function;
-  setHeader?: Function;
-  socket?: any;
+
+  // Stream methods
+  pipe?<T extends NodeJS.WritableStream>(
+    destination: T,
+    options?: { end?: boolean }
+  ): T;
+  on?(event: string | symbol, listener: (...args: unknown[]) => void): this;
+  pause?(): this;
+  resume?(): this;
+  write?(
+    chunk: unknown,
+    encoding?: BufferEncoding,
+    callback?: (error?: Error | null) => void
+  ): boolean;
+  emit?(event: string | symbol, ...args: unknown[]): boolean;
+  once?(event: string | symbol, listener: (...args: unknown[]) => void): this;
+  removeListener?(
+    event: string | symbol,
+    listener: (...args: unknown[]) => void
+  ): this;
+  destroy?(error?: Error): this;
+  close?(callback?: () => void): void;
+  abort?(): void;
+  listenerCount?(event: string | symbol): number;
+
+  // Internal Node.js methods
+  _construct?(callback: (error?: Error | null) => void): void;
+  _destroy?(
+    error: Error | null,
+    callback: (error?: Error | null) => void
+  ): void;
+
+  // HTTP-specific method
+  setHeader?(name: string, value: string | number | readonly string[]): this;
+
+  socket?: unknown;
   [kDestroyed]?: boolean;
   [kIsErrored]?: boolean;
   [kIsReadable]?: boolean;
@@ -98,13 +118,16 @@ interface NodeStreamLike {
 }
 
 // Stream detection functions
-export function isReadableNodeStream(obj: any, strict?: boolean): boolean;
-export function isWritableNodeStream(obj: any): boolean;
-export function isDuplexNodeStream(obj: any): boolean;
-export function isNodeStream(obj: any): boolean;
-export function isReadableStream(obj: any): boolean;
-export function isWritableStream(obj: any): boolean;
-export function isIterable(obj: any, isAsync?: boolean): boolean;
+export function isReadableNodeStream(
+  obj: unknown,
+  strict?: boolean
+): obj is NodeStreamLike;
+export function isWritableNodeStream(obj: unknown): obj is NodeStreamLike;
+export function isDuplexNodeStream(obj: unknown): obj is NodeStreamLike;
+export function isNodeStream(obj: unknown): obj is NodeStreamLike;
+export function isReadableStream(obj: unknown): obj is ReadableStream;
+export function isWritableStream(obj: unknown): obj is WritableStream;
+export function isIterable(obj: unknown, isAsync?: boolean): boolean;
 
 // Stream state functions
 export function isDestroyed(stream: NodeStreamLike): boolean | null;
@@ -133,20 +156,21 @@ export function isFinished(
 export function isWritableErrored(stream: NodeStreamLike): Error | null;
 export function isReadableErrored(stream: NodeStreamLike): Error | null;
 export function isClosed(stream: NodeStreamLike): boolean | null;
-export function isOutgoingMessage(stream: any): boolean;
-export function isServerResponse(stream: any): boolean;
-export function isServerRequest(stream: any): boolean;
+export function isOutgoingMessage(stream: NodeStreamLike): boolean;
+export function isServerResponse(stream: NodeStreamLike): boolean;
+export function isServerRequest(stream: NodeStreamLike): boolean;
 export function willEmitClose(stream: NodeStreamLike): boolean | null;
 export function isDisturbed(stream: NodeStreamLike): boolean;
 export function isErrored(stream: NodeStreamLike): boolean;
 
 // Utility functions
 export const nop: () => void;
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export function once<T extends Function>(callback: T): T;
 
 // High water mark functions
 export function highWaterMarkFrom(
-  options: any,
+  options: object,
   isDuplex: boolean,
   duplexKey: string
 ): number | null;
@@ -154,26 +178,26 @@ export function getDefaultHighWaterMark(objectMode?: boolean): number;
 export function setDefaultHighWaterMark(): never;
 export function getHighWaterMark(
   state: { objectMode?: boolean },
-  options: any,
+  options: object,
   duplexKey: string,
   isDuplex: boolean
 ): number;
 
 // BufferList class
 export class BufferList {
-  head: BufferListNode | null;
-  tail: BufferListNode | null;
-  length: number;
+  public head: BufferListNode | null;
+  public tail: BufferListNode | null;
+  public length: number;
 
-  push(v: Buffer | string): void;
-  unshift(v: Buffer | string): void;
-  shift(): Buffer | string | undefined;
-  clear(): void;
-  join(s: string): string;
-  concat(n: number): Buffer;
-  consume(n: number, hasStrings?: boolean): Buffer | string;
-  first(): Buffer | string;
-  [Symbol.iterator](): IterableIterator<Buffer | string>;
+  public push(v: Buffer | string): void;
+  public unshift(v: Buffer | string): void;
+  public shift(): Buffer | string | undefined;
+  public clear(): void;
+  public join(s: string): string;
+  public concat(n: number): Buffer;
+  public consume(n: number, hasStrings?: boolean): Buffer | string;
+  public first(): Buffer | string;
+  public [Symbol.iterator](): IterableIterator<Buffer | string>;
 }
 
 interface BufferListNode {
