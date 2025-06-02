@@ -274,6 +274,7 @@ struct Method {
   returnType @1 :Type;
   args @2 :List(Type);
   static @3 :Bool;
+  fastApiCompatible @4: Bool;
 }
 
 struct Property {
@@ -282,6 +283,8 @@ struct Property {
   readonly @2 :Bool;
   lazy @3 :Bool;
   prototype @4 :Bool;
+  getterFastApiCompatible @5: Bool;
+  setterFastApiCompatible @6: Bool;
 }
 
 struct Constant {

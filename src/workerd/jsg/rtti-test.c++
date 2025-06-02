@@ -229,14 +229,14 @@ KJ_TEST("resource structure") {
 
   KJ_EXPECT(tStructure<TestResource>() ==
       "(name = \"TestResource\", members = ["
-      "(method = (name = \"instanceMethod\", returnType = (voidt = void), args = [(number = (name = \"int\")), (number = (name = \"double\"))], static = false)), "
-      "(method = (name = \"staticMethod\", returnType = (number = (name = \"int\")), args = [], static = true)), "
-      "(property = (name = \"size\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false)), "
-      "(property = (name = \"readonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = false)), "
-      "(property = (name = \"lazySize\", type = (number = (name = \"int\")), readonly = false, lazy = true, prototype = false)), "
-      "(property = (name = \"lazyReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = true, prototype = false)), "
-      "(property = (name = \"protoSize\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = true)), "
-      "(property = (name = \"protoReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = true)), "
+      "(method = (name = \"instanceMethod\", returnType = (voidt = void), args = [(number = (name = \"int\")), (number = (name = \"double\"))], static = false, fastApiCompatible = true)), "
+      "(method = (name = \"staticMethod\", returnType = (number = (name = \"int\")), args = [], static = true, fastApiCompatible = true)), "
+      "(property = (name = \"size\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false, getterFastApiCompatible = true, setterFastApiCompatible = true)), "
+      "(property = (name = \"readonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = false, getterFastApiCompatible = true, setterFastApiCompatible = false)), "
+      "(property = (name = \"lazySize\", type = (number = (name = \"int\")), readonly = false, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
+      "(property = (name = \"lazyReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
+      "(property = (name = \"protoSize\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = true, getterFastApiCompatible = true, setterFastApiCompatible = true)), "
+      "(property = (name = \"protoReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = true, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
       "(constructor = (args = [(maybe = (value = (string = (name = \"kj::String\")), name = \"jsg::Optional\"))]))], "
       "extends = (structure = (name = \"Base\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::Base\")), "
       "iterable = false, asyncIterable = false, "
@@ -302,8 +302,8 @@ struct TestLazyJsProperty: jsg::Object {
 KJ_TEST("lazyJsProperty") {
   KJ_EXPECT(tStructure<TestLazyJsProperty>() ==
       "(name = \"TestLazyJsProperty\", members = ["
-      "(property = (name = \"JsProperty\", type = (jsBuiltin = (module = \"js-module\", export = \"JsProperty\")), readonly = false, lazy = true, prototype = false)), "
-      "(property = (name = \"JsReadonlyProperty\", type = (jsBuiltin = (module = \"js-readonly-module\", export = \"JsReadonlyProperty\")), readonly = true, lazy = true, prototype = false))], "
+      "(property = (name = \"JsProperty\", type = (jsBuiltin = (module = \"js-module\", export = \"JsProperty\")), readonly = false, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
+      "(property = (name = \"JsReadonlyProperty\", type = (jsBuiltin = (module = \"js-readonly-module\", export = \"JsReadonlyProperty\")), readonly = true, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false))], "
       "iterable = false, asyncIterable = false, fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestLazyJsProperty\", tsRoot = false, "
       "builtinModules = [(specifier = \"testBundle:internal\", tsDeclarations = \"foo: string\")], "
       "disposable = false, asyncDisposable = false)");
@@ -323,8 +323,8 @@ KJ_TEST("struct reference") {
 KJ_TEST("struct structure") {
   KJ_EXPECT(tStructure<TestStruct>() ==
       "(name = \"TestStruct\", members = ["
-      "(property = (name = \"a\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false)), "
-      "(property = (name = \"b\", type = (boolt = void), readonly = false, lazy = false, prototype = false))], "
+      "(property = (name = \"a\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
+      "(property = (name = \"b\", type = (boolt = void), readonly = false, lazy = false, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false))], "
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestStruct\", "
       "tsRoot = false, disposable = false, asyncDisposable = false)");
@@ -347,8 +347,8 @@ KJ_TEST("symbol table") {
 
   KJ_EXPECT(codec.encode(type) ==
       "(name = \"TestSymbolTable\", members = ["
-      "(method = (name = \"acceptResource\", returnType = (voidt = void), args = [(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))], static = false)), "
-      "(method = (name = \"recursiveTypeFunction\", returnType = (voidt = void), args = [(structure = (name = \"TestSymbolTable\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable\"))], static = false))], "
+      "(method = (name = \"acceptResource\", returnType = (voidt = void), args = [(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))], static = false, fastApiCompatible = true)), "
+      "(method = (name = \"recursiveTypeFunction\", returnType = (voidt = void), args = [(structure = (name = \"TestSymbolTable\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable\"))], static = false, fastApiCompatible = true))], "
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable\", "
       "tsRoot = false, disposable = false, asyncDisposable = false)");
@@ -389,7 +389,7 @@ struct TestTypeScriptStruct {
 KJ_TEST("typescript macros") {
   KJ_EXPECT(tStructure<TestTypeScriptResourceType>() ==
       "(name = \"TestTypeScriptResourceType\", members = ["
-      "(property = (name = \"thing\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = false))], "
+      "(property = (name = \"thing\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = false, getterFastApiCompatible = true, setterFastApiCompatible = false))], "
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestTypeScriptResourceType\", "
       "tsRoot = true, "
@@ -398,7 +398,7 @@ KJ_TEST("typescript macros") {
       "disposable = false, asyncDisposable = false)");
   KJ_EXPECT(tStructure<TestTypeScriptStruct>() ==
       "(name = \"TestTypeScriptStruct\", members = ["
-      "(property = (name = \"structThing\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false))], "
+      "(property = (name = \"structThing\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false))], "
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestTypeScriptStruct\", "
       "tsRoot = true, "
