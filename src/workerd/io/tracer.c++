@@ -370,11 +370,4 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>>& WorkerTracer::getTailStreamWriter
   return maybeTailStreamWriter;
 }
 
-void WorkerTracer::extractTrace(rpc::Trace::Builder builder) {
-  trace->copyTo(builder);
-}
-
-void WorkerTracer::setTrace(rpc::Trace::Reader reader) {
-  trace->mergeFrom(reader, pipelineLogLevel);
-}
 }  // namespace workerd
