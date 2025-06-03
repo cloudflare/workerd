@@ -38,6 +38,7 @@ import {
   type RawTime,
   type SymlinkType,
   validatePosition,
+  validateAccessArgs,
 } from 'node-internal:internal_fs_utils';
 import {
   validateInteger,
@@ -83,33 +84,26 @@ import type {
   WriteFileOptions,
 } from 'node:fs';
 
-function accessSyncImpl(
-  path: FilePath,
-  mode: number = F_OK,
+export function accessSyncImpl(
+  path: URL,
+  mode: number,
   followSymlinks: boolean
 ): void {
-  validateUint32(mode, 'mode');
-
-  const normalizedPath = normalizePath(path);
+  // Input validation should have already been done by the caller.
 
   // If the X_OK flag is set we will always throw because we don't
   // support executable files.
   if (mode & X_OK) {
-    throw new ERR_ENOENT(normalizedPath.pathname, { syscall: 'access' });
+    throw new ERR_ENOENT(path.pathname, { syscall: 'access' });
   }
 
-  const stat = cffs.stat(normalizedPath, { followSymlinks });
+  const stat = cffs.stat(path, { followSymlinks });
 
   // Similar to node.js, we make no differentiation between the file
   // not existing and the file existing but not being accessible.
-  if (stat == null) {
-    // Not found...
-    throw new ERR_ENOENT(normalizedPath.pathname, { syscall: 'access' });
-  }
-
-  if (mode & W_OK && !stat.writable) {
-    // Nor writable...
-    throw new ERR_ENOENT(normalizedPath.pathname, { syscall: 'access' });
+  if (stat == null || (mode & W_OK && !stat.writable)) {
+    // Not found... or not writable
+    throw new ERR_ENOENT(path.pathname, { syscall: 'access' });
   }
 
   // We always assume that files are readable, so if we get here the
@@ -117,7 +111,8 @@ function accessSyncImpl(
 }
 
 export function accessSync(path: FilePath, mode: number = F_OK): void {
-  accessSyncImpl(path, mode, true);
+  const { path: actualPath, mode: actualMode } = validateAccessArgs(path, mode);
+  accessSyncImpl(actualPath, actualMode, true);
 }
 
 export function appendFileSync(
@@ -220,9 +215,12 @@ export function existsSync(path: FilePath): boolean {
   try {
     // The existsSync function follows symlinks. If the symlink is broken,
     // it will return false.
-    accessSync(path, F_OK);
+    accessSync(path);
     return true;
-  } catch (err) {
+  } catch {
+    // It's always odd to swallow errors but this is how Node.js does it.
+    // The existsSync function never throws and returns false if any error
+    // occurs.
     return false;
   }
 }
@@ -954,14 +952,14 @@ export function writevSync(
 // ported and verified to work correctly.
 // match exactly, just that they are consistent.
 //  S  I  T  V  O
-// [x][x][1][ ][ ] fs.accessSync(path[, mode])
+// [x][x][2][x][x] fs.accessSync(path[, mode])
+// [x][x][2][x][x] fs.existsSync(path)
 // [x][x][1][ ][ ] fs.appendFileSync(path, data[, options])
 // [x][x][1][ ][ ] fs.chmodSync(path, mode)
 // [x][x][1][ ][ ] fs.chownSync(path, uid, gid)
 // [x][x][1][ ][ ] fs.closeSync(fd)
 // [x][x][1][ ][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
-// [x][x][1][ ][ ] fs.existsSync(path)
 // [x][x][1][ ][ ] fs.fchmodSync(fd, mode)
 // [x][x][1][ ][ ] fs.fchownSync(fd, uid, gid)
 // [x][x][1][ ][ ] fs.fdatasyncSync(fd)
