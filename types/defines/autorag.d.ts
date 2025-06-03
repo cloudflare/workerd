@@ -1,6 +1,7 @@
 export interface AutoRAGInternalError extends Error {}
 export interface AutoRAGNotFoundError extends Error {}
 export interface AutoRAGUnauthorizedError extends Error {}
+export interface AutoRAGNameNotSetError extends Error {}
 
 export type ComparisonFilter = {
   key: string;
@@ -47,11 +48,23 @@ export type AutoRagSearchResponse = {
   next_page: string | null;
 };
 
+export type AutoRagListResponse = {
+  id: string;
+  enable: boolean;
+  type: string;
+  source: string;
+  source_params: object;
+  vectorize_name: string;
+  paused: boolean;
+  status: string;
+}[];
+
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 
 export declare abstract class AutoRAG {
+  list(): Promise<AutoRagListResponse>;
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;

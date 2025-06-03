@@ -27,6 +27,13 @@ export class AutoRAGUnauthorizedError extends Error {
   }
 }
 
+export class AutoRAGNameNotSetError extends Error {
+  public constructor(message: string, name = 'AutoRAGNameNotSetError') {
+    super(message);
+    this.name = name;
+  }
+}
+
 async function parseError(
   res: Response,
   defaultMsg = 'Internal Error',
@@ -94,22 +101,57 @@ export type AutoRagSearchResponse = {
   next_page: string | null;
 };
 
+export type AutoRagListResponse = {
+  id: string;
+  enable: boolean;
+  type: string;
+  source: string;
+  source_params: object;
+  vectorize_name: string;
+  paused: boolean;
+  status: string;
+}[];
+
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 
 export class AutoRAG {
   readonly #fetcher: Fetcher;
-  readonly #autoragId: string;
+  readonly #autoragId: string | null;
 
-  public constructor(fetcher: Fetcher, autoragId: string) {
+  public constructor(fetcher: Fetcher, autoragId: string | null = null) {
     this.#fetcher = fetcher;
     this.#autoragId = autoragId;
+  }
+
+  public async list(): Promise<AutoRagListResponse> {
+    const res = await this.#fetcher.fetch(
+      `https://workers-binding.ai/autorag/rags`,
+      {
+        method: 'GET',
+        headers: {
+          'content-type': 'application/json',
+        },
+      }
+    );
+
+    if (!res.ok) {
+      throw await parseError(res);
+    }
+
+    const data = (await res.json()) as { result: AutoRagListResponse };
+
+    return data.result;
   }
 
   public async search(
     params: AutoRagSearchRequest
   ): Promise<AutoRagSearchResponse> {
+    if (!this.#autoragId) {
+      throw new AutoRAGNameNotSetError('AutoRAG name not defined');
+    }
+
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/autorag/rags/${this.#autoragId}/search`,
       {
@@ -148,6 +190,10 @@ export class AutoRAG {
   public async aiSearch(
     params: AutoRagAiSearchRequest
   ): Promise<AutoRagAiSearchResponse | Response> {
+    if (!this.#autoragId) {
+      throw new AutoRAGNameNotSetError('AutoRAG name not defined');
+    }
+
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/autorag/rags/${this.#autoragId}/ai-search`,
       {

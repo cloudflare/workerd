@@ -333,7 +333,7 @@ export class Ai {
     return new AiGateway(this.fetcher, gatewayId);
   }
 
-  public autorag(autoragId: string): AutoRAG {
+  public autorag(autoragId?: string): AutoRAG {
     return new AutoRAG(this.fetcher, autoragId);
   }
 }
