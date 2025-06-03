@@ -79,7 +79,7 @@ class V8HandleWrapper {
       v8::Local<v8::Value> handle, v8::Global<v8::type>*,                                          \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
-      return v8::Global<v8::type>(context->GetIsolate(), handle.As<v8::type>());                   \
+      return v8::Global<v8::type>(v8::Isolate::GetCurrent(), handle.As<v8::type>());               \
     }                                                                                              \
     return kj::none;                                                                               \
   }                                                                                                \
@@ -88,7 +88,7 @@ class V8HandleWrapper {
       v8::Local<v8::Value> handle, V8Ref<v8::type>*,                                               \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
-      return V8Ref<v8::type>(context->GetIsolate(), handle.As<v8::type>());                        \
+      return V8Ref<v8::type>(v8::Isolate::GetCurrent(), handle.As<v8::type>());                    \
     }                                                                                              \
     return kj::none;                                                                               \
   }                                                                                                \
@@ -97,7 +97,7 @@ class V8HandleWrapper {
       v8::Local<v8::Value> handle, HashableV8Ref<v8::type>*,                                       \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
-      return HashableV8Ref<v8::type>(context->GetIsolate(), handle.As<v8::type>());                \
+      return HashableV8Ref<v8::type>(v8::Isolate::GetCurrent(), handle.As<v8::type>());            \
     }                                                                                              \
     return kj::none;                                                                               \
   }
@@ -116,14 +116,14 @@ class V8HandleWrapper {
   v8::Local<T> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       v8::Global<T> value) {
-    return value.Get(context->GetIsolate());
+    return value.Get(v8::Isolate::GetCurrent());
   }
 
   kj::Maybe<v8::Global<v8::Value>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       v8::Global<v8::Value>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return v8::Global<v8::Value>(context->GetIsolate(), handle);
+    return v8::Global<v8::Value>(v8::Isolate::GetCurrent(), handle);
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
@@ -134,14 +134,14 @@ class V8HandleWrapper {
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
   v8::Local<T> wrap(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, V8Ref<T> value) {
-    return value.getHandle(context->GetIsolate());
+    return value.getHandle(v8::Isolate::GetCurrent());
   }
 
   kj::Maybe<V8Ref<v8::Value>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       V8Ref<v8::Value>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return V8Ref<v8::Value>(context->GetIsolate(), handle);
+    return V8Ref<v8::Value>(v8::Isolate::GetCurrent(), handle);
   }
 };
 
@@ -502,7 +502,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
       throwTypeError(
-          context->GetIsolate(), errorContext, TypeWrapper::getName((kj::Decay<U>*)nullptr));
+          v8::Isolate::GetCurrent(), errorContext, TypeWrapper::getName((kj::Decay<U>*)nullptr));
     }
   }
 
@@ -562,7 +562,8 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
           // We're unwrapping a nonexistent argument into a required parameter. Since Web IDL
           // nullable types (Maybe<T>) can be initialized from `undefined`, we need to explicitly
           // throw here, or else `f(Maybe<T>)` could be called like `f()`.
-          throwTypeError(context->GetIsolate(), errorContext, TypeWrapper::getName((V*)nullptr));
+          throwTypeError(
+              v8::Isolate::GetCurrent(), errorContext, TypeWrapper::getName((V*)nullptr));
         }
       }
 
