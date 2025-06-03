@@ -70,8 +70,15 @@ import type {
 import { isArrayBufferView } from 'node-internal:internal_types';
 
 class FileHandle {
+  // The FileHandle class is a wrapper around a file descriptor.
+  // When the #handle is cleared, the reference to the underlying
+  // file descriptor is dropped. The user is expected to call
+  // close() explicitly but if they do not, the file descriptor
+  // will still be closed when the underlying handle is garbage
+  // collected.
   #fd: number | undefined;
   #handle: cffs.FdHandle | undefined;
+
   public constructor(badge: symbol, fd: number) {
     if (badge !== kBadge) {
       throw new TypeError('Illegal constructor');
@@ -81,6 +88,7 @@ class FileHandle {
   }
 
   public get fd(): number | undefined {
+    // The fd property will be undefined if the handle has been closed.
     return this.#fd;
   }
 
@@ -330,6 +338,10 @@ export function access(
   path: FilePath,
   mode: number = constants.F_OK
 ): Promise<void> {
+  // Unlike the callback version, which throws input validation errors synchronously,
+  // rather than forwarding them to the callback, the promise version throws a errors
+  // asynchronously by rejecting the promise. So we can rely on accessSync to do the
+  // input validation for us.
   return Promise.try(() => fssync.accessSync(path, mode));
 }
 
@@ -369,34 +381,34 @@ export function cp(
   return Promise.try(() => fssync.cpSync(src, dest, options));
 }
 
-export function fchmod(fd: number, mode: string | number): Promise<void> {
+function fchmod(fd: number, mode: string | number): Promise<void> {
   return Promise.try(() => fssync.fchmodSync(fd, mode));
 }
 
-export function fchown(fd: number, uid: number, gid: number): Promise<void> {
+function fchown(fd: number, uid: number, gid: number): Promise<void> {
   return Promise.try(() => fssync.fchownSync(fd, uid, gid));
 }
 
-export function fdatasync(fd: number): Promise<void> {
+function fdatasync(fd: number): Promise<void> {
   return Promise.try(() => fssync.fdatasyncSync(fd));
 }
 
-export function fsync(fd: number): Promise<void> {
+function fsync(fd: number): Promise<void> {
   return Promise.try(() => fssync.fsyncSync(fd));
 }
 
-export function fstat(
+function fstat(
   fd: number,
   options: StatOptions = {}
 ): Promise<Stats | undefined> {
   return Promise.try(() => fssync.fstatSync(fd, options));
 }
 
-export function ftruncate(fd: number, len: number = 0): Promise<void> {
+function ftruncate(fd: number, len: number = 0): Promise<void> {
   return Promise.try(() => fssync.ftruncateSync(fd, len));
 }
 
-export function futimes(
+function futimes(
   fd: number,
   atime: RawTime | Date,
   mtime: RawTime | Date

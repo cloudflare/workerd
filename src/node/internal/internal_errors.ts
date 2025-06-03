@@ -818,15 +818,6 @@ export class ERR_INVALID_CHAR extends NodeTypeError {
   }
 }
 
-export class NodeFsError extends NodeError {
-  syscall: string;
-  path?: string;
-  constructor(code: string, message: string, syscall: string) {
-    super(code, message);
-    this.syscall = syscall;
-  }
-}
-
 export class NodeSyscallError extends NodeError {
   syscall: string;
   errno?: number;
@@ -836,18 +827,18 @@ export class NodeSyscallError extends NodeError {
   }
 }
 
-export class ERR_ENOENT extends NodeFsError {
+export class ERR_ENOENT extends NodeSyscallError {
+  path: string;
   constructor(path: string, options: { syscall: string }) {
     super('ENOENT', `No such file or directory: ${path}`, options.syscall);
-    this.code = 'ENOENT';
     this.path = path;
+    this.errno = -2; // ENOENT
   }
 }
 
 export class ERR_EBADF extends NodeSyscallError {
   constructor(options: { syscall: string }) {
     super('EBADF', `Bad file descriptor`, options.syscall);
-    this.code = 'EBADF';
     this.errno = -9; // EBADF
   }
 }
@@ -855,7 +846,6 @@ export class ERR_EBADF extends NodeSyscallError {
 export class ERR_EINVAL extends NodeSyscallError {
   constructor(options: { syscall: string }) {
     super('EINVAL', `Invalid argument`, options.syscall);
-    this.code = 'EINVAL';
     this.errno = -22; // EINVAL
   }
 }

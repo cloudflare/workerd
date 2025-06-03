@@ -414,6 +414,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/fs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-test.js"],
+)
+
+wd_test(
     src = "tests/fs-access-test.wd-test",
     args = ["--experimental"],
     data = ["tests/fs-access-test.js"],

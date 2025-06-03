@@ -45,7 +45,7 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
-import { Stats } from 'node-internal:internal_fs_utils';
+import { validateAccessArgs, Stats } from 'node-internal:internal_fs_utils';
 import { type Dir } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { isArrayBufferView } from 'node-internal:internal_types';
@@ -115,11 +115,12 @@ export function access(
   } else {
     mode = modeOrCallback;
   }
-  // We are not performing any argument validatation here because we are
-  // falling through to the synchronous version of access, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.accessSync(path, mode), callback);
+
+  const { path: actualPath, mode: actualMode } = validateAccessArgs(path, mode);
+
+  callWithErrorOnlyCallback(() => {
+    fssync.accessSyncImpl(actualPath, actualMode, true);
+  }, callback);
 }
 
 export type ExistsCallback = (result: boolean) => void;
@@ -1183,7 +1184,7 @@ export function createWriteStream(): void {
 //
 // (S == Stubbed, I == Implemented, T == Tested, O == Optimized)
 //  S  I  T  O
-// [x][x][x][ ] fs.access(path[, mode], callback)
+// [x][x][x][x] fs.access(path[, mode], callback)
 // [x][x][ ][ ] fs.appendFile(path, data[, options], callback)
 // [x][x][x][ ] fs.chmod(path, mode, callback)
 // [x][x][x][ ] fs.chown(path, uid, gid, callback)
@@ -1192,7 +1193,7 @@ export function createWriteStream(): void {
 // [x][x][ ][ ] fs.cp(src, dest[, options], callback)
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
-// [x][x][x][ ] fs.exists(path, callback)
+// [x][x][x][x] fs.exists(path, callback)
 // [x][x][x][ ] fs.fchmod(fd, mode, callback)
 // [x][x][x][ ] fs.fchown(fd, uid, gid, callback)
 // [x][x][x][ ] fs.fdatasync(fd, callback)

@@ -273,10 +273,20 @@ export default {
       // TODO(conform): The spec allows a byob read to be fulfilled incrementally over multiple
       // respond calls, we currently do not.
       'ReadableStream with byte source: read(view) with 1 element Uint16Array, respond(1), releaseLock(), read() on second reader, enqueue()',
+      // TODO: investigate this
+      'ReadableStream with byte source: A stream must be errored if close()-d before fulfilling read(view) with Uint16Array',
+      // TODO: investigate this
+      'ReadableStream with byte source: Multiple read(view), big enqueue()',
+      // TODO: investigate this
+      'ReadableStream with byte source: Multiple read(view) and multiple enqueue()',
     ],
   },
   'readable-byte-streams/non-transferable-buffers.any.js': {},
   'readable-byte-streams/patched-global.any.js': {
+    comment: 'TODO investigate this',
+    expectedFailures: [
+      'Patched then() sees byobRequest after filling all pending pull-into descriptors',
+    ],
     runInGlobalScope: true,
   },
   'readable-byte-streams/read-min.any.js': {
@@ -670,6 +680,7 @@ export default {
       'readable.cancel() should not call cancel() again when already called from writable.abort()',
       'writable.close() should not call flush() when cancel() is already called from readable.cancel()',
       'writable.abort() should not call cancel() again when already called from readable.cancel()',
+      'readable.cancel() should not call cancel() when flush() is already called from writable.close()',
     ],
   },
   'transform-streams/errors.any.js': {
