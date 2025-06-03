@@ -38,6 +38,7 @@ import {
   validateFunction,
   validateInt32,
   validateUint32,
+  parseFileMode,
 } from 'node-internal:validators';
 import { isDate, isArrayBufferView } from 'node-internal:internal_types';
 import {
@@ -152,6 +153,44 @@ export function validateAccessArgs(
   return {
     path: normalizePath(rawPath),
     mode: validateMode(mode),
+  };
+}
+
+export function validateChownArgs(
+  pathOrFd: FilePath | number,
+  uid: number,
+  gid: number
+): { pathOrFd: URL | number; uid: number; gid: number } {
+  validateInteger(uid, 'uid', -1, kMaxUserId);
+  validateInteger(gid, 'gid', -1, kMaxUserId);
+  if (typeof pathOrFd === 'number') {
+    return {
+      pathOrFd: getValidatedFd(pathOrFd, 'fd'),
+      uid,
+      gid,
+    };
+  }
+  return {
+    pathOrFd: normalizePath(pathOrFd),
+    uid,
+    gid,
+  };
+}
+
+export function validateChmodArgs(
+  pathOrFd: FilePath | number,
+  mode: number | string
+): { pathOrFd: URL | number; mode: number } {
+  const actualMode = parseFileMode(mode, 'mode');
+  if (typeof pathOrFd === 'number') {
+    return {
+      pathOrFd: getValidatedFd(pathOrFd, 'fd'),
+      mode: actualMode,
+    };
+  }
+  return {
+    pathOrFd: normalizePath(pathOrFd),
+    mode: actualMode,
   };
 }
 

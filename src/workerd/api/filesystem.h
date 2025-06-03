@@ -35,7 +35,7 @@ class FileFdHandle final: public jsg::Object {
   // been closed.
   FileFdHandle(const workerd::VirtualFileSystem& vfs, int fd): vfs(vfs), fd(fd) {}
   ~FileFdHandle() noexcept {
-    // TODO(node:fs): Should call close on destroy.
+    // TODO(node-fs): Should call close on destroy.
   }
 
   static jsg::Ref<FileFdHandle> constructor(jsg::Lock& js, int fd);
