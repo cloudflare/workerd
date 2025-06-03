@@ -16,6 +16,8 @@
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/container-client.h>
+#include <workerd/io/container.capnp.h>
 #include <workerd/io/hibernation-manager.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/request-tracker.h>
@@ -24,6 +26,7 @@
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/rust/container/lib.rs.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/http-util.h>
@@ -1732,7 +1735,8 @@ class Server::WorkerService final: public Service,
       kj::HashSet<kj::String> actorClassEntrypoints,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
-      AbortActorsCallback abortActorsCallback)
+      AbortActorsCallback abortActorsCallback,
+      kj::Maybe<kj::String> containerAddress)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
@@ -1740,7 +1744,8 @@ class Server::WorkerService final: public Service,
         namedEntrypoints(kj::mv(namedEntrypoints)),
         actorClassEntrypoints(kj::mv(actorClassEntrypoints)),
         waitUntilTasks(*this),
-        abortActorsCallback(kj::mv(abortActorsCallback)) {
+        abortActorsCallback(kj::mv(abortActorsCallback)),
+        containerAddress(kj::mv(containerAddress)) {
 
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
@@ -2243,12 +2248,16 @@ class Server::WorkerService final: public Service,
         };
 
         bool enableSql = true;
+        kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader>
+            containerOptions = kj::none;
         KJ_SWITCH_ONEOF(parent.config) {
           KJ_CASE_ONEOF(c, Durable) {
             enableSql = c.enableSql;
+            containerOptions = c.containerOptions;
           }
           KJ_CASE_ONEOF(c, Ephemeral) {
             enableSql = c.enableSql;
+            containerOptions = c.containerOptions;
           }
         }
 
@@ -2267,10 +2276,30 @@ class Server::WorkerService final: public Service,
         // work for local development we need to pass an event type.
         static constexpr uint16_t hibernationEventTypeId = 8;
 
+        kj::Maybe<rpc::Container::Client> containerClient = kj::none;
+
+        KJ_IF_SOME(config, containerOptions) {
+          KJ_IF_SOME(path, service.containerAddress) {
+            rust::container::MessageCallback callback = [](::rust::Slice<const uint8_t> _data) {
+              KJ_UNIMPLEMENTED();
+            };
+            KJ_REQUIRE(config.hasName(), "Container name is required");
+            auto container_name = config.getName();
+            auto service =
+                rust::container::new_service(path.as<Rust>(), container_name.as<Rust>(), callback);
+            io::ContainerAsyncStream stream(kj::mv(service));
+            capnp::TwoPartyClient client(stream);
+            containerClient = client.bootstrap().castAs<rpc::Container>();
+          } else {
+            KJ_FAIL_REQUIRE(
+                "containerAddress needs to be defined in order enable containers on this durable object.");
+          }
+        }
+
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-            tryGetManagerRef(), hibernationEventTypeId));
+            tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
     };
@@ -2436,6 +2465,7 @@ class Server::WorkerService final: public Service,
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
+  kj::Maybe<kj::String> containerAddress;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -3359,10 +3389,15 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     return result;
   };
 
+  kj::Maybe<kj::String> containerAddress = kj::none;
+  if (conf.hasContainer() && conf.getContainer().hasAddress()) {
+    containerAddress = kj::str(conf.getContainer().getAddress());
+  }
+
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), localActorConfigs, kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors));
+      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(containerAddress));
 }
 
 // =======================================================================================
@@ -3916,7 +3951,8 @@ void Server::startServices(jsg::V8System& v8System,
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
                 Durable{.uniqueKey = kj::str(ns.getUniqueKey()),
                   .isEvictable = !ns.getPreventEviction(),
-                  .enableSql = ns.getEnableSql()});
+                  .enableSql = ns.getEnableSql(),
+                  .containerOptions = ns.hasContainer() ? kj::Maybe(ns.getContainer()) : kj::none});
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
             if (!experimental) {
@@ -3926,7 +3962,9 @@ void Server::startServices(jsg::V8System& v8System,
                   "workerd with `--experimental` to use this feature."));
             }
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
-                Ephemeral{.isEvictable = !ns.getPreventEviction(), .enableSql = ns.getEnableSql()});
+                Ephemeral{.isEvictable = !ns.getPreventEviction(),
+                  .enableSql = ns.getEnableSql(),
+                  .containerOptions = ns.hasContainer() ? kj::Maybe(ns.getContainer()) : kj::none});
             continue;
         }
         reportConfigError(kj::str("Encountered unknown DurableObjectNamespace type in service \"",

@@ -44,6 +44,18 @@ alias(
 )
 
 alias(
+    name = "bollard-0.19.0",
+    actual = "@crates_vendor__bollard-0.19.0//:bollard",
+    tags = ["manual"],
+)
+
+alias(
+    name = "bollard",
+    actual = "@crates_vendor__bollard-0.19.0//:bollard",
+    tags = ["manual"],
+)
+
+alias(
     name = "capnp-0.21.1",
     actual = "@crates_vendor__capnp-0.21.1//:capnp",
     tags = ["manual"],
@@ -52,6 +64,18 @@ alias(
 alias(
     name = "capnp",
     actual = "@crates_vendor__capnp-0.21.1//:capnp",
+    tags = ["manual"],
+)
+
+alias(
+    name = "capnp-rpc-0.21.0",
+    actual = "@crates_vendor__capnp-rpc-0.21.0//:capnp_rpc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "capnp-rpc",
+    actual = "@crates_vendor__capnp-rpc-0.21.0//:capnp_rpc",
     tags = ["manual"],
 )
 
@@ -136,6 +160,18 @@ alias(
 alias(
     name = "foldhash",
     actual = "@crates_vendor__foldhash-0.1.5//:foldhash",
+    tags = ["manual"],
+)
+
+alias(
+    name = "futures-0.3.31",
+    actual = "@crates_vendor__futures-0.3.31//:futures",
+    tags = ["manual"],
+)
+
+alias(
+    name = "futures",
+    actual = "@crates_vendor__futures-0.3.31//:futures",
     tags = ["manual"],
 )
 

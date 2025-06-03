@@ -308,6 +308,22 @@ wd_capnp_library(
     ],
 )
 
+wd_cc_library(
+    name = "container-client",
+    hdrs = ["container-client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":container_capnp",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_test(
+    src = "container-client-test.wd-test",
+    args = ["--experimental"],
+    data = ["container-client-test.js"],
+)
+
 kj_test(
     src = "io-gate-test.c++",
     deps = [

@@ -104,6 +104,9 @@ wd_cc_library(
         "server.h",
         "workerd-api.h",
     ],
+    implementation_deps = [
+        "//src/rust/container",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
@@ -123,6 +126,7 @@ wd_cc_library(
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
         "//src/workerd/io",
+        "//src/workerd/io:container-client",
         "//src/workerd/io:trace-stream",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",

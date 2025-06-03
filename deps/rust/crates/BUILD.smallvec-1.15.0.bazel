@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "const_generics",
+        "const_new",
+    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = [
