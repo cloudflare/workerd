@@ -27,6 +27,8 @@ MODULES_TO_PATCH = [
     "tempfile",
     "aiohttp.http_websocket",
     "aiohttp.connector",
+    "urllib3.util.ssl_",
+    "requests.adapters",
     *RUST_PACKAGES,
 ]
 
@@ -160,18 +162,49 @@ def aiohttp_http_websocket_context(module):
         random.Random = Random
 
 
+class NoSslFinder:
+    def find_spec(self, fullname, path, target):
+        if fullname == "ssl":
+            raise ModuleNotFoundError(
+                f"No module named {fullname!r}", name=fullname
+            ) from None
+
+
 @contextmanager
-def aiohttp_connector_context(module):
-    # aiohttp will call ssl.create_default_context() at top level which uses entropy. But it has a
-    # work around for Pyodide where it skips this. By setting sys.modules["ssl"] = None temporarily,
-    # we exercise the Pyodide workaround and so avoid the entropy calls.
-    # After, we put the ssl module back to the normal value.
+def no_ssl():
+    """
+    Various packages will call ssl.create_default_context() at top level which uses entropy if they
+    can import ssl. By temporarily making importing ssl raise an import error, we exercise the
+    workaround code and so avoid the entropy calls. After, we put the ssl module back to the normal
+    value.
+    """
     try:
-        ssl = sys.modules["ssl"]
-        sys.modules["ssl"] = None
+        f = NoSslFinder()
+        ssl = sys.modules.pop("ssl", None)
+        sys.meta_path.insert(0, f)
         yield
     finally:
-        sys.modules["ssl"] = ssl
+        sys.meta_path.remove(f)
+        if ssl:
+            sys.modules["ssl"] = ssl
+
+
+@contextmanager
+def aiohttp_connector_context(module):
+    with no_ssl():
+        yield
+
+
+@contextmanager
+def requests_adapters_context(module):
+    with no_ssl():
+        yield
+
+
+@contextmanager
+def urllib3_util_ssl__context(module):
+    with no_ssl():
+        yield
 
 
 class DeterministicRandomNameSequence:
