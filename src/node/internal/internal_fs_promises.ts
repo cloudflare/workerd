@@ -23,301 +23,540 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* eslint-disable @typescript-eslint/require-await,@typescript-eslint/no-unused-vars */
-
+// TODO(node-fs): These will be remove as development continues.
+/* eslint-disable @typescript-eslint/require-await */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-confusing-void-expression */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+import * as fssync from 'node-internal:internal_fs_sync';
+import { default as cffs } from 'cloudflare-internal:filesystem';
+import type {
+  MkdirTempSyncOptions,
+  ReadDirOptions,
+  ReadDirResult,
+  ReadFileSyncOptions,
+  ReadLinkSyncOptions,
+  StatOptions,
+  WriteSyncOptions,
+} from 'node-internal:internal_fs_sync';
 import {
-  getOptions,
-  copyObject,
-  normalizePath,
-  kMaxUserId,
-  validateCpOptions,
-  toUnixTimestamp,
-  validateRmdirOptions,
+  kBadge,
+  Stats,
+  validatePosition,
+  type Position,
+  type RawTime,
+  type SymlinkType,
   type FilePath,
 } from 'node-internal:internal_fs_utils';
+import { Buffer } from 'node-internal:internal_buffer';
+import { type Dir } from 'node-internal:internal_fs';
+import { ERR_EBADF } from 'node-internal:internal_errors';
+import { validateUint32 } from 'node-internal:validators';
 import * as constants from 'node-internal:internal_fs_constants';
-import {
-  parseFileMode,
-  validateInteger,
-  validateBoolean,
-  validateAbortSignal,
-  validateOneOf,
-} from 'node-internal:validators';
-import type { RmDirOptions, CopyOptions } from 'node:fs';
+import type {
+  BigIntStatsFs,
+  CopySyncOptions,
+  MakeDirectoryOptions,
+  OpenDirOptions,
+  ReadSyncOptions,
+  RmOptions,
+  RmDirOptions,
+  StatsFs,
+  WriteFileOptions,
+} from 'node:fs';
+import { isArrayBufferView } from 'node-internal:internal_types';
 
-export async function access(
-  _path: FilePath,
-  _mode: number = constants.F_OK
-): Promise<void> {
-  throw new Error('Not implemented');
-}
-
-export async function appendFile(
-  _path: FilePath,
-  _data: unknown,
-  options: Record<string, unknown>
-): Promise<void> {
-  options = getOptions(options, { encoding: 'utf8', mode: 0o666, flag: 'a' });
-  options = copyObject(options);
-  options.flag ||= 'a';
-  throw new Error('Not implemented');
-}
-
-export async function chmod(path: FilePath, mode: number): Promise<void> {
-  path = normalizePath(path);
-  mode = parseFileMode(mode, 'mode');
-  throw new Error('Not implemented');
-}
-
-export async function chown(
-  path: FilePath,
-  uid: number,
-  gid: number
-): Promise<void> {
-  path = normalizePath(path);
-  validateInteger(uid, 'uid', -1, kMaxUserId);
-  validateInteger(gid, 'gid', -1, kMaxUserId);
-  throw new Error('Not implemented');
-}
-
-export async function copyFile(
-  src: FilePath,
-  dest: FilePath,
-  _mode: number
-): Promise<void> {
-  src = normalizePath(src);
-  dest = normalizePath(dest);
-  throw new Error('Not implemented');
-}
-
-export async function cp(
-  src: FilePath,
-  dest: FilePath,
-  options: CopyOptions
-): Promise<void> {
-  options = validateCpOptions(options);
-  src = normalizePath(src);
-  dest = normalizePath(dest);
-  throw new Error('Not implemented');
-}
-
-export async function lchmod(_path: FilePath, _mode: number): Promise<void> {
-  throw new Error('Not implemented');
-}
-
-export async function lchown(
-  path: FilePath,
-  uid: number,
-  gid: number
-): Promise<void> {
-  path = normalizePath(path);
-  validateInteger(uid, 'uid', -1, kMaxUserId);
-  validateInteger(gid, 'gid', -1, kMaxUserId);
-  throw new Error('Not implemented');
-}
-
-export async function lutimes(
-  path: FilePath,
-  atime: string | number | Date,
-  mtime: string | number | Date
-): Promise<void> {
-  path = normalizePath(path);
-  atime = toUnixTimestamp(atime);
-  mtime = toUnixTimestamp(mtime);
-  throw new Error('Not implemented');
-}
-
-export async function link(
-  existingPath: FilePath,
-  newPath: FilePath
-): Promise<void> {
-  existingPath = normalizePath(existingPath);
-  newPath = normalizePath(newPath);
-  throw new Error('Not implemented');
-}
-
-export async function lstat(
-  path: FilePath,
-  _options: Record<string, unknown> = { bigint: false }
-): Promise<void> {
-  path = normalizePath(path);
-  throw new Error('Not implemented');
-}
-
-export async function mkdir(
-  path: FilePath,
-  options?: Record<string, unknown>
-): Promise<void> {
-  if (typeof options === 'number' || typeof options === 'string') {
-    options = { mode: options };
+class FileHandle {
+  #fd: number | undefined;
+  #handle: cffs.FdHandle | undefined;
+  public constructor(badge: symbol, fd: number) {
+    if (badge !== kBadge) {
+      throw new TypeError('Illegal constructor');
+    }
+    this.#fd = fd;
+    this.#handle = cffs.getFdHandle(fd);
   }
-  const recursive = options?.recursive ?? false;
-  let mode = options?.mode ?? 0o777;
-  path = normalizePath(path);
-  validateBoolean(recursive, 'options.recursive');
-  mode = parseFileMode(mode, 'mode', 0o777);
-  throw new Error('Not implemented');
+
+  public get fd(): number | undefined {
+    return this.#fd;
+  }
+
+  public async appendFile(
+    data: string | ArrayBufferView,
+    options: WriteFileOptions = {}
+  ): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await appendFile(this.#fd, data, options);
+  }
+
+  public async chmod(mode: string | number): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await fchmod(this.#fd, mode);
+  }
+
+  public async chown(uid: number, gid: number): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await fchown(this.#fd, uid, gid);
+  }
+
+  public async datasync(): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await fdatasync(this.#fd);
+  }
+
+  public async sync(): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await fsync(this.#fd);
+  }
+
+  public async read<T extends NodeJS.ArrayBufferView>(
+    bufferOrOptions: T | ReadSyncOptions = {},
+    offsetOrOptions: number | ReadSyncOptions = {},
+    length?: number,
+    position: Position = null
+  ): Promise<{ bytesRead: number; buffer: T }> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+
+    // TODO(node-fs): Proper type checking here later.
+    let options: any;
+    if (
+      bufferOrOptions != null &&
+      typeof bufferOrOptions === 'object' &&
+      !isArrayBufferView(bufferOrOptions)
+    ) {
+      if (typeof offsetOrOptions === 'number') {
+        options = {
+          buffer: bufferOrOptions,
+          offset: offsetOrOptions,
+          length:
+            length ?? (bufferOrOptions as NodeJS.ArrayBufferView).byteLength,
+          position: position ?? null,
+        };
+      } else {
+        options = {
+          buffer: bufferOrOptions,
+          ...offsetOrOptions,
+        };
+      }
+    } else {
+      options = bufferOrOptions;
+    }
+
+    const {
+      buffer = Buffer.alloc(16384),
+      offset: actualOffset = buffer.byteOffset,
+      length: actualLength = buffer.byteLength - buffer.byteOffset,
+      position: actualPosition = null,
+    } = options || {};
+
+    validateUint32(actualOffset, 'offset');
+    validateUint32(actualLength, 'length');
+    validatePosition(actualPosition, 'position');
+
+    const bytesRead = fssync.readSync(
+      this.#fd,
+      buffer,
+      actualOffset,
+      actualLength,
+      actualPosition
+    );
+
+    return {
+      bytesRead,
+      buffer,
+    };
+  }
+
+  public async readv<T extends NodeJS.ArrayBufferView>(
+    buffers: T[],
+    position: Position = null
+  ): Promise<{ bytesRead: number; buffers: T[] }> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    const bytesRead = fssync.readvSync(this.#fd, buffers, position);
+    return {
+      bytesRead,
+      buffers,
+    };
+  }
+
+  public async readFile(
+    options: BufferEncoding | null | ReadFileSyncOptions = {}
+  ): Promise<string | Buffer> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    return await readFile(this.#fd, options);
+  }
+
+  public readLines(_options: any = undefined): void {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    throw new Error('not implemented');
+  }
+
+  public async stat(options: StatOptions = {}): Promise<Stats | undefined> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    return await fstat(this.#fd, options);
+  }
+
+  public async truncate(len: number = 0): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await ftruncate(this.#fd, len);
+  }
+
+  public async utimes(
+    atime: RawTime | Date,
+    mtime: RawTime | Date
+  ): Promise<void> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    await futimes(this.#fd, atime, mtime);
+  }
+
+  public async write(
+    buffer: NodeJS.ArrayBufferView | string,
+    offsetPositionOrOptions: WriteSyncOptions | Position = null,
+    lengthOrEncoding?: number | BufferEncoding | null,
+    position: Position = null
+  ): Promise<{ bytesWritten: number; buffer: NodeJS.ArrayBufferView }> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+
+    if (typeof buffer === 'string') {
+      buffer = Buffer.from(buffer, lengthOrEncoding as string);
+    }
+
+    const bytesWritten = fssync.writeSync(
+      this.#fd,
+      buffer,
+      offsetPositionOrOptions,
+      lengthOrEncoding,
+      position
+    );
+
+    return {
+      bytesWritten,
+      buffer,
+    };
+  }
+
+  public async writev(
+    buffers: NodeJS.ArrayBufferView[],
+    position: Position = null
+  ): Promise<{ bytesWritten: number; buffers: NodeJS.ArrayBufferView[] }> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    const bytesWritten = fssync.writevSync(this.#fd, buffers, position);
+    return {
+      bytesWritten,
+      buffers,
+    };
+  }
+
+  public async writeFile(
+    data: string | Buffer,
+    options: BufferEncoding | null | WriteFileOptions = {}
+  ): Promise<{ bytesWritten: number; buffer: Buffer }> {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    const bytesWritten = fssync.writeFileSync(this.#fd, data, options);
+    return {
+      bytesWritten,
+      buffer: isArrayBufferView(data)
+        ? data
+        : Buffer.from(data, options as BufferEncoding),
+    };
+  }
+
+  public async close(): Promise<void> {
+    if (this.#handle !== undefined) this.#handle.close();
+    this.#fd = undefined;
+    this.#handle = undefined;
+  }
+
+  public async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+
+  public readableWebStream(_options: any = {}): void {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    throw new Error('not implemented');
+  }
+
+  public createReadStream(_options: any = undefined): void {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    throw new Error('not implemented');
+  }
+
+  public createWriteStream(_options: any = undefined): void {
+    if (this.#fd === undefined) {
+      throw new ERR_EBADF({ syscall: 'stat' });
+    }
+    throw new Error('not implemented');
+  }
 }
 
-export async function mkdtemp(
-  prefix: FilePath,
-  options: Record<string, unknown>
-): Promise<void> {
-  options = getOptions(options);
-  prefix = normalizePath(prefix);
-  throw new Error('Not implemented');
-}
-
-export async function open(
+export function access(
   path: FilePath,
-  _flags: number | string | null,
+  mode: number = constants.F_OK
+): Promise<void> {
+  return Promise.try(() => fssync.accessSync(path, mode));
+}
+
+export function appendFile(
+  path: number | FilePath,
+  data: string | ArrayBufferView,
+  options: WriteFileOptions = {}
+): Promise<void> {
+  return Promise.try(() => {
+    // While appendFileSync returns the number of bytes written,
+    // the promise version does not return anything when successful.
+    fssync.appendFileSync(path, data, options);
+  });
+}
+
+export function chmod(path: FilePath, mode: number): Promise<void> {
+  return Promise.try(() => fssync.chmodSync(path, mode));
+}
+
+export function chown(path: FilePath, uid: number, gid: number): Promise<void> {
+  return Promise.try(() => fssync.chownSync(path, uid, gid));
+}
+
+export function copyFile(
+  src: FilePath,
+  dest: FilePath,
   mode: number
 ): Promise<void> {
-  path = normalizePath(path);
-  mode = parseFileMode(mode, 'mode', 0o666);
-  throw new Error('Not implemented');
+  return Promise.try(() => fssync.copyFileSync(src, dest, mode));
 }
 
-export async function opendir(
+export function cp(
+  src: FilePath,
+  dest: FilePath,
+  options: CopySyncOptions
+): Promise<void> {
+  return Promise.try(() => fssync.cpSync(src, dest, options));
+}
+
+export function fchmod(fd: number, mode: string | number): Promise<void> {
+  return Promise.try(() => fssync.fchmodSync(fd, mode));
+}
+
+export function fchown(fd: number, uid: number, gid: number): Promise<void> {
+  return Promise.try(() => fssync.fchownSync(fd, uid, gid));
+}
+
+export function fdatasync(fd: number): Promise<void> {
+  return Promise.try(() => fssync.fdatasyncSync(fd));
+}
+
+export function fsync(fd: number): Promise<void> {
+  return Promise.try(() => fssync.fsyncSync(fd));
+}
+
+export function fstat(
+  fd: number,
+  options: StatOptions = {}
+): Promise<Stats | undefined> {
+  return Promise.try(() => fssync.fstatSync(fd, options));
+}
+
+export function ftruncate(fd: number, len: number = 0): Promise<void> {
+  return Promise.try(() => fssync.ftruncateSync(fd, len));
+}
+
+export function futimes(
+  fd: number,
+  atime: RawTime | Date,
+  mtime: RawTime | Date
+): Promise<void> {
+  return Promise.try(() => fssync.futimesSync(fd, atime, mtime));
+}
+
+export function lchmod(path: FilePath, mode: number): Promise<void> {
+  return Promise.try(() => fssync.lchmodSync(path, mode));
+}
+
+export function lchown(
   path: FilePath,
-  options: Record<string, unknown>
+  uid: number,
+  gid: number
 ): Promise<void> {
-  path = normalizePath(path);
-  options = getOptions(options, {
-    encoding: 'utf8',
-  });
-  throw new Error('Not implemented');
+  return Promise.try(() => fssync.lchownSync(path, uid, gid));
 }
 
-export async function readdir(
+export function lutimes(
   path: FilePath,
-  options: Record<string, unknown>
+  atime: RawTime | Date,
+  mtime: RawTime | Date
 ): Promise<void> {
-  options = copyObject(getOptions(options));
-  path = normalizePath(path);
-  throw new Error('Not implemented');
+  return Promise.try(() => fssync.lutimesSync(path, atime, mtime));
 }
 
-export async function readFile(
-  _path: FilePath,
-  options: Record<string, unknown>
-): Promise<void> {
-  options = getOptions(options, { flag: 'r' });
-  throw new Error('Not implemented');
+export function link(existingPath: FilePath, newPath: FilePath): Promise<void> {
+  return Promise.try(() => fssync.linkSync(existingPath, newPath));
 }
 
-export async function readlink(
+export function lstat(
   path: FilePath,
-  options: Record<string, unknown>
-): Promise<void> {
-  options = getOptions(options);
-  path = normalizePath(path);
-  throw new Error('Not implemented');
+  options: StatOptions = {}
+): Promise<Stats | undefined> {
+  return Promise.try(() => fssync.lstatSync(path, options));
 }
 
-export async function realpath(
+export function mkdir(
   path: FilePath,
-  options: Record<string, unknown>
-): Promise<void> {
-  path = normalizePath(path);
-  options = getOptions(options);
-  throw new Error('Not implemented');
+  options: number | MakeDirectoryOptions = {}
+): Promise<string | undefined> {
+  return Promise.try(() => fssync.mkdirSync(path, options));
 }
 
-export async function rename(
-  oldPath: FilePath,
-  newPath: FilePath
-): Promise<void> {
-  oldPath = normalizePath(oldPath);
-  newPath = normalizePath(newPath);
-  throw new Error('Not implemented');
+export function mkdtemp(
+  prefix: FilePath,
+  options: MkdirTempSyncOptions = {}
+): Promise<string> {
+  return Promise.try(() => fssync.mkdtempSync(prefix, options));
 }
 
-export async function rmdir(
+export function open(
   path: FilePath,
-  options: RmDirOptions
-): Promise<void> {
-  path = normalizePath(path);
-  options = validateRmdirOptions(options);
-  throw new Error('Not implemented');
+  flags: number | string,
+  mode: number | string
+): Promise<FileHandle> {
+  return Promise.try(
+    () => new FileHandle(kBadge, fssync.openSync(path, flags, mode))
+  );
 }
 
-export async function rm(
+export function opendir(
   path: FilePath,
-  _options: Record<string, unknown>
-): Promise<void> {
-  path = normalizePath(path);
-  throw new Error('Not implemented');
+  options: OpenDirOptions = {}
+): Promise<Dir> {
+  return Promise.try(() => fssync.opendirSync(path, options));
 }
 
-export async function stat(
+export function readdir(
   path: FilePath,
-  _options: Record<string, unknown> = { bigint: false }
-): Promise<void> {
-  path = normalizePath(path);
-  throw new Error('Not implemented');
+  options: ReadDirOptions = {}
+): Promise<ReadDirResult> {
+  return Promise.try(() => fssync.readdirSync(path, options));
 }
 
-export async function statfs(
-  _path: FilePath,
-  _options: Record<string, unknown> = { bigint: false }
-): Promise<void> {
-  throw new Error('Not implemented');
+export function readFile(
+  path: number | FilePath,
+  options: BufferEncoding | null | ReadFileSyncOptions = {}
+): Promise<string | Buffer> {
+  return Promise.try(() => fssync.readFileSync(path, options));
 }
 
-export async function symlink(
+export function readlink(
+  path: FilePath,
+  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+): Promise<string | Buffer> {
+  return Promise.try(() => fssync.readlinkSync(path, options));
+}
+
+export function realpath(
+  path: FilePath,
+  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+): Promise<string | Buffer> {
+  return Promise.try(() => fssync.realpathSync(path, options));
+}
+
+export function rename(oldPath: FilePath, newPath: FilePath): Promise<void> {
+  return Promise.try(() => fssync.renameSync(oldPath, newPath));
+}
+
+export function rmdir(path: FilePath, options: RmDirOptions): Promise<void> {
+  return Promise.try(() => fssync.rmdirSync(path, options));
+}
+
+export function rm(path: FilePath, options: RmOptions = {}): Promise<void> {
+  return Promise.try(() => fssync.rmSync(path, options));
+}
+
+export function stat(
+  path: FilePath,
+  options: StatOptions = {}
+): Promise<Stats | undefined> {
+  return Promise.try(() => fssync.statSync(path, options));
+}
+
+export function statfs(
+  path: FilePath,
+  options: { bigint?: boolean | undefined } = {}
+): Promise<StatsFs | BigIntStatsFs> {
+  return Promise.try(() => fssync.statfsSync(path, options));
+}
+
+export function symlink(
   target: FilePath,
   path: FilePath,
-  type: string | null | undefined
+  type: SymlinkType = null
 ): Promise<void> {
-  validateOneOf(type, 'type', ['dir', 'file', 'junction', null, undefined]);
-  target = normalizePath(target);
-  path = normalizePath(path);
-  throw new Error('Not implemented');
+  return Promise.try(() => fssync.symlinkSync(target, path, type));
 }
 
-export async function truncate(
-  _path: FilePath,
-  _len: number = 0
-): Promise<void> {
-  throw new Error('Not implemented');
+export function truncate(path: FilePath, len: number = 0): Promise<void> {
+  return Promise.try(() => fssync.truncateSync(path, len));
 }
 
-export async function unlink(path: FilePath): Promise<void> {
-  path = normalizePath(path);
-  throw new Error('Not implemented');
+export function unlink(path: FilePath): Promise<void> {
+  return Promise.try(() => fssync.unlinkSync(path));
 }
 
-export async function utimes(
+export function utimes(
   path: FilePath,
-  atime: string | number | Date,
-  mtime: string | number | Date
+  atime: RawTime | Date,
+  mtime: RawTime | Date
 ): Promise<void> {
-  path = normalizePath(path);
-  atime = toUnixTimestamp(atime);
-  mtime = toUnixTimestamp(mtime);
+  return Promise.try(() => fssync.utimesSync(path, atime, mtime));
+}
+
+export function watch(): Promise<void> {
+  // We do not implement the watch function.
   throw new Error('Not implemented');
 }
 
-export async function watch(): Promise<void> {
-  throw new Error('Not implemented');
-}
-
-export async function writeFile(
-  _path: FilePath,
-  _data: unknown,
-  options: Record<string, unknown>
+export function writeFile(
+  path: number | FilePath,
+  data: string | ArrayBufferView,
+  options: BufferEncoding | null | WriteFileOptions = {}
 ): Promise<void> {
-  options = getOptions(options, {
-    encoding: 'utf8',
-    mode: 0o666,
-    flag: 'w',
-    flush: false,
+  return Promise.try(() => {
+    // While writeFileSync returns the number of bytes written,
+    // the promise version does not return anything when successful.
+    fssync.writeFileSync(path, data, options);
   });
-  const flush = options.flush ?? false;
-
-  validateBoolean(flush, 'options.flush');
-  validateAbortSignal(options.signal, 'options.signal');
-
-  throw new Error('Not implemented');
 }

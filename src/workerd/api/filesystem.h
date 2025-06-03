@@ -28,6 +28,29 @@ struct Stat {
   Stat(const workerd::Stat& stat);
 };
 
+class FileFdHandle final: public jsg::Object {
+ public:
+  // A simple RAII handle for a file descriptor. When the instance is
+  // destroyed, the file descriptor is closed if it hasn't already
+  // been closed.
+  FileFdHandle(const workerd::VirtualFileSystem& vfs, int fd): vfs(vfs), fd(fd) {}
+  ~FileFdHandle() noexcept {
+    // TODO(node:fs): Should call close on destroy.
+  }
+
+  static jsg::Ref<FileFdHandle> constructor(jsg::Lock& js, int fd);
+
+  void close(jsg::Lock&);
+
+  JSG_RESOURCE_TYPE(FileFdHandle) {
+    JSG_METHOD(close);
+  }
+
+ private:
+  kj::Maybe<const workerd::VirtualFileSystem&> vfs;
+  kj::Maybe<int> fd;
+};
+
 class FileSystemModule final: public jsg::Object {
  public:
   using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
@@ -138,6 +161,10 @@ class FileSystemModule final: public jsg::Object {
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
+  jsg::Ref<FileFdHandle> getFdHandle(jsg::Lock& js, int fd) {
+    return FileFdHandle::constructor(js, fd);
+  }
+
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_METHOD(stat);
     JSG_METHOD(setLastModified);
@@ -155,6 +182,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(mkdir);
     JSG_METHOD(rm);
     JSG_METHOD(readdir);
+    JSG_METHOD(getFdHandle);
   }
 
  private:
@@ -533,6 +561,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::WriteAllOptions,                                             \
       workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
       workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions,     \
-      workerd::api::FileSystemModule::DirEntHandle, workerd::api::FileSystemModule::ReadDirOptions
+      workerd::api::FileSystemModule::DirEntHandle,                                                \
+      workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle
 
 }  // namespace workerd::api

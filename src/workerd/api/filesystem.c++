@@ -811,6 +811,21 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
   return entries.releaseAsArray();
 }
 
+jsg::Ref<FileFdHandle> FileFdHandle::constructor(jsg::Lock& js, int fd) {
+  auto& vfs = JSG_REQUIRE_NONNULL(
+      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  return js.alloc<FileFdHandle>(vfs, fd);
+}
+
+void FileFdHandle::close(jsg::Lock& js) {
+  auto& fs = JSG_REQUIRE_NONNULL(vfs, Error, "No current virtual file system");
+  KJ_IF_SOME(val, fd) {
+    fs.closeFd(js, val);
+    fd = kj::none;
+    vfs = kj::none;
+  }
+}
+
 // =======================================================================================
 // Implementation of the Web File System API
 
@@ -1250,5 +1265,4 @@ jsg::Promise<void> FileSystemWritableFileStream::truncate(jsg::Lock& js, uint32_
   }
   return js.resolvedPromise();
 }
-
 }  // namespace workerd::api
