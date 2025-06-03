@@ -32,6 +32,8 @@ import {
   getBindingPath,
 } from './common';
 
+import { Test } from './test';
+
 // These imports introduce functions into the global scope, so that WPT tests can call them
 
 // Test, promise_test, async_test, test
@@ -118,11 +120,8 @@ class RunnerState {
   // Makes test options available from assertion functions
   public options: TestRunnerOptions;
 
-  // List of failed assertions occuring in the test
-  public errors: Error[] = [];
-
-  // Promises returned in the test. The test is done once all promises have resolved.
-  public promises: Promise<unknown>[] = [];
+  // A test is pushed to this list as soon as it is discovered
+  public tests: Test[] = [];
 
   // Callbacks to be run once the entire test is done.
   public completionCallbacks: UnknownFunc[] = [];
@@ -141,7 +140,7 @@ class RunnerState {
 
   public async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
-    await Promise.all(this.promises);
+    await Promise.all(this.tests.map((t) => t.promise));
 
     for (const cleanFn of this.completionCallbacks) {
       cleanFn();
@@ -150,7 +149,13 @@ class RunnerState {
     const expectedFailures = new FilterList(this.options.expectedFailures);
     const unexpectedFailures = [];
 
-    for (const err of this.errors) {
+    for (const test of this.tests) {
+      const err = test.error;
+
+      if (!err || err === 'SKIPPED') {
+        continue;
+      }
+
       if (!expectedFailures.delete(err.message)) {
         err.message = sanitize_unpaired_surrogates(err.message);
         console.warn(err);

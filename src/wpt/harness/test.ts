@@ -35,6 +35,8 @@ declare global {
   function test(func: TestFn, name: string, properties?: unknown): void;
 }
 
+type TestErrorType = Error | 'SKIPPED' | undefined;
+
 /**
  * A single subtest. A Test is not constructed directly but via the
  * :js:func:`test`, :js:func:`async_test` or :js:func:`promise_test` functions.
@@ -58,21 +60,15 @@ export class Test {
   public phase: (typeof Test.Phases)[keyof typeof Test.Phases];
   public cleanup_callbacks: UnknownFunc[] = [];
 
-  public error?: Error;
+  public error: TestErrorType = undefined;
 
-  // For convenience, expose a promise that resolves once done() is called
-  public isDone: Promise<void>;
-  private resolve: () => void;
+  // If this test is asynchronous, stores a promise that resolves on test completion
+  public promise?: Promise<void>;
 
   public constructor(name: string, properties: unknown) {
     this.name = name;
     this.properties = properties;
     this.phase = Test.Phases.INITIAL;
-
-    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.isDone = promise;
-    this.resolve = resolve;
   }
 
   /**
@@ -222,17 +218,35 @@ export class Test {
       cleanFn();
     }
     this.phase = Test.Phases.COMPLETE;
-    this.resolve();
   }
 }
+
 /* eslint-enable @typescript-eslint/no-this-alias */
+class SkippedTest extends Test {
+  public override error: TestErrorType = 'SKIPPED';
+
+  public override step(
+    _func: UnknownFunc,
+    _this_obj?: object,
+    ..._rest: unknown[]
+  ): unknown {
+    return undefined;
+  }
+}
+
+class PromiseTest extends Test {
+  // TODO(soon): Extract out promise_test specific behaviour to make code easier to understand.
+}
 
 globalThis.promise_test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
+    globalThis.state.tests.push(new SkippedTest(name, properties));
     return;
   }
 
-  const testCase = new Test(name, properties);
+  const testCase = new PromiseTest(name, properties);
+  globalThis.state.tests.push(testCase);
+
   const promise = testCase.step(func, testCase, testCase);
 
   if (!(promise instanceof Promise)) {
@@ -240,45 +254,52 @@ globalThis.promise_test = (func, name, properties): void => {
     // but are not required to be async functions. That means they could throw
     // an error immediately when run.
 
-    if (testCase.error) {
-      globalThis.state.errors.push(testCase.error);
-    } else {
-      globalThis.state.errors.push(
-        new Error('Unexpected value returned from promise_test')
-      );
+    if (!testCase.error) {
+      testCase.error = new Error('Unexpected value returned from promise_test');
     }
 
     return;
   }
 
-  globalThis.state.promises.push(
-    promise
-      .then(() => {
-        testCase.done();
-      })
-      .catch((err: unknown) => {
-        globalThis.state.errors.push(
-          Object.assign(new AggregateError([err], name), { stack: '' })
-        );
-      })
-  );
+  testCase.promise = promise
+    .then(() => {
+      testCase.done();
+    })
+    .catch((err: unknown) => {
+      testCase.error = Object.assign(new AggregateError([err], name), {
+        stack: '',
+      });
+    });
 };
+
+class AsyncTest extends Test {
+  private resolve: () => void;
+
+  public constructor(name: string, properties: unknown) {
+    super(name, properties);
+
+    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.promise = promise;
+    this.resolve = resolve;
+  }
+
+  public override done(): void {
+    super.done();
+    this.resolve();
+  }
+}
 
 globalThis.async_test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
+    globalThis.state.tests.push(new SkippedTest(name, properties));
     return;
   }
 
-  const testCase = new Test(name, properties);
-  testCase.step(func, testCase, testCase);
+  const testCase = new AsyncTest(name, properties);
+  globalThis.state.tests.push(testCase);
 
-  globalThis.state.promises.push(
-    testCase.isDone.then(() => {
-      if (testCase.error) {
-        globalThis.state.errors.push(testCase.error);
-      }
-    })
-  );
+  testCase.step(func, testCase, testCase);
 };
 
 /**
@@ -294,16 +315,15 @@ globalThis.async_test = (func, name, properties): void => {
  */
 globalThis.test = (func, name, properties): void => {
   if (!shouldRunTest(name)) {
+    globalThis.state.tests.push(new SkippedTest(name, properties));
     return;
   }
 
   const testCase = new Test(name, properties);
+  globalThis.state.tests.push(testCase);
+
   testCase.step(func, testCase, testCase);
   testCase.done();
-
-  if (testCase.error) {
-    globalThis.state.errors.push(testCase.error);
-  }
 };
 
 function shouldRunTest(message: string): boolean {
