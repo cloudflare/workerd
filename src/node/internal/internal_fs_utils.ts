@@ -140,6 +140,51 @@ export const kWriteFileMaxChunkSize = 512 * 1024;
 
 export const kMaxUserId = 2 ** 32 - 1;
 
+// In Node.js async callback APIs, input arguments are always validated
+// with input validation errors thrown synchronously. Only errors that
+// occur during the actual operation (e.g. file not found) are reported
+// via the callback. The validateAccessArgs function is used by both the
+// accessSync and access-with-callback APIs to validate the input args.
+export function validateAccessArgs(
+  rawPath: FilePath,
+  mode: number
+): { path: URL; mode: number } {
+  return {
+    path: normalizePath(rawPath),
+    mode: validateMode(mode),
+  };
+}
+
+// Validate the mode argument for either copyFile or access operations.
+// The mode argument is a bitmask that can be used to specify the access
+// permissions for a file. The valid modes depend on the operation type:
+// - For copyFile, the valid modes are COPYFILE_EXCL, COPYFILE_FICLONE, and
+//   COPYFILE_FICLONE_FORCE, with a default of 0.
+// - For access, the valid modes are F_OK, R_OK, W_OK, and X_OK, with a
+//   default of F_OK.
+// In either case, the mode must be a valid bitmask integer within the
+// a given range. If the mode is not provided, the default value is used.
+// Throws ERR_INVALID_ARG_TYPE if the mode is not a valid integer, or
+// ERR_OUT_OF_RANGE if the mode is outside the valid range.
+export function validateMode(
+  mode: number | undefined,
+  type: 'copyFile' | 'access' = 'access'
+): number {
+  let min = kMinimumAccessMode;
+  let max = kMaximumAccessMode;
+  let def = F_OK;
+  if (type === 'copyFile') {
+    min = kMinimumCopyMode;
+    max = kMaximumCopyMode;
+    def = mode || kDefaultCopyMode;
+  } else {
+    strictEqual(type, 'access');
+  }
+  mode ??= def;
+  validateInteger(mode, 'mode', min, max);
+  return mode;
+}
+
 export function assertEncoding(encoding: unknown): asserts encoding is string {
   if (encoding && !Buffer.isEncoding(encoding as string)) {
     const reason = 'is invalid encoding';
@@ -178,27 +223,6 @@ export function copyObject<T>(source: Record<string, T>): Record<string, T> {
   return target;
 }
 
-export function getValidMode(
-  mode: number | undefined,
-  type: 'copyFile' | 'access'
-): number {
-  let min = kMinimumAccessMode;
-  let max = kMaximumAccessMode;
-  let def = F_OK;
-  if (type === 'copyFile') {
-    min = kMinimumCopyMode;
-    max = kMaximumCopyMode;
-    def = mode || kDefaultCopyMode;
-  } else {
-    strictEqual(type, 'access');
-  }
-  if (mode == null) {
-    return def;
-  }
-  validateInteger(mode, 'mode', min, max);
-  return mode;
-}
-
 const defaultCpOptions: CopyOptions = {
   dereference: false,
   errorOnExist: false,
@@ -220,7 +244,7 @@ export function validateCpOptions(
   validateBoolean(options.preserveTimestamps, 'options.preserveTimestamps');
   validateBoolean(options.recursive, 'options.recursive');
   validateBoolean(options.verbatimSymlinks, 'options.verbatimSymlinks');
-  options.mode = getValidMode(options.mode, 'copyFile');
+  options.mode = validateMode(options.mode, 'copyFile');
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
   if (options.dereference === true && options.verbatimSymlinks === true) {
     throw new ERR_INCOMPATIBLE_OPTION_PAIR('dereference', 'verbatimSymlinks');

@@ -38,7 +38,7 @@ import { default as bufferUtil } from 'node-internal:buffer';
 // TODO(someday): Not current implementing parseFileMode
 
 export function isInt32(value: unknown): value is number {
-  // @ts-expect-error Due to value being unknown
+  if (typeof value !== 'number') return false;
   return value === (value | 0);
 }
 export function isUint32(value: unknown): value is number {
