@@ -10,13 +10,17 @@ def kj_test(
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
 
-    native.cc_test(
+    native.cc_binary(
         name = binary_name,
         testonly = True,
         srcs = [src],
         deps = [
             "@capnp-cpp//src/kj:kj-test",
         ] + deps,
+        linkstatic = select({
+            "@platforms//os:linux": 0,
+            "//conditions:default": 1,
+        }),
         linkopts = select({
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
