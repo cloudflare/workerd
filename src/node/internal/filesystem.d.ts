@@ -92,3 +92,9 @@ export function readdir(
   path: URL,
   options: { recursive: boolean }
 ): DirEntryHandle[];
+
+interface FdHandle {
+  close(): void;
+}
+
+export function getFdHandle(fd: number): FdHandle;

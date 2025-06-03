@@ -1,3 +1,27 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+//
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
 import * as fssync from 'node-internal:internal_fs_sync';
 import type {
   FStatOptions,
@@ -12,6 +36,9 @@ import type {
 import {
   validatePosition,
   type FilePath,
+  type Position,
+  type RawTime,
+  type SymlinkType,
 } from 'node-internal:internal_fs_utils';
 import { F_OK } from 'node-internal:internal_fs_constants';
 import {
@@ -76,12 +103,6 @@ function callWithSingleArgCallback<T>(
   }
 }
 
-export function access(path: FilePath, callback: ErrorOnlyCallback): void;
-export function access(
-  path: FilePath,
-  mode: number,
-  callback: ErrorOnlyCallback
-): void;
 export function access(
   path: FilePath,
   modeOrCallback: number | ErrorOnlyCallback = F_OK,
@@ -94,6 +115,9 @@ export function access(
   } else {
     mode = modeOrCallback;
   }
+  // We are not performing any argument validatation here because we are
+  // falling through to the synchronous version of access, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.accessSync(path, mode), callback);
 }
@@ -101,21 +125,16 @@ export function access(
 export type ExistsCallback = (result: boolean) => void;
 
 export function exists(path: FilePath, callback: ExistsCallback): void {
+  // With the other methods we perform the method and *then* pass the results
+  // back to the callback using queueMicrotask. Here, however, we wait to
+  // perform the method until we are in the mcirotask. This is so we can
+  // best avoid the race condition that has long existed with the exists
+  // method in Node.js where the file may be deleted between the time we
+  // check for its existence and the time we call the callback.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   queueMicrotask(() => callback(fssync.existsSync(path)));
 }
 
-export function appendFile(
-  path: number | FilePath,
-  data: string | ArrayBufferView,
-  callback: ErrorOnlyCallback
-): void;
-export function appendFile(
-  path: number | FilePath,
-  data: string | ArrayBufferView,
-  options: WriteFileOptions,
-  callback: ErrorOnlyCallback
-): void;
 export function appendFile(
   path: number | FilePath,
   data: string | ArrayBufferView,
@@ -134,6 +153,9 @@ export function appendFile(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of appendFile, which does the
+  // validation itself.
   callWithSingleArgCallback<number>(
     () => fssync.appendFileSync(path, data, options),
     callback
@@ -145,6 +167,9 @@ export function chmod(
   mode: number,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of chmod, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.chmodSync(path, mode), callback);
 }
@@ -155,6 +180,9 @@ export function chown(
   gid: number,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of chown, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.chownSync(path, uid, gid), callback);
 }
@@ -163,21 +191,13 @@ export function close(
   fd: number,
   callback: ErrorOnlyCallback = () => {}
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of close, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.closeSync(fd), callback);
 }
 
-export function copyFile(
-  src: FilePath,
-  dest: FilePath,
-  callback: ErrorOnlyCallback
-): void;
-export function copyFile(
-  src: FilePath,
-  dest: FilePath,
-  mode: number,
-  callback: ErrorOnlyCallback
-): void;
 export function copyFile(
   src: FilePath,
   dest: FilePath,
@@ -191,6 +211,9 @@ export function copyFile(
   } else {
     mode = modeOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of copyFile, which does the
+  // validation itself.
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
     () => fssync.copyFileSync(src, dest, mode),
@@ -198,17 +221,6 @@ export function copyFile(
   );
 }
 
-export function cp(
-  src: FilePath,
-  dest: FilePath,
-  callback: ErrorOnlyCallback
-): void;
-export function cp(
-  src: FilePath,
-  dest: FilePath,
-  options: CopySyncOptions,
-  callback: ErrorOnlyCallback
-): void;
 export function cp(
   src: FilePath,
   dest: FilePath,
@@ -222,6 +234,9 @@ export function cp(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of cp, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.cpSync(src, dest, options), callback);
 }
@@ -231,6 +246,9 @@ export function fchmod(
   mode: string | number,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of fchmod, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.fchmodSync(fd, mode), callback);
 }
@@ -241,21 +259,21 @@ export function fchown(
   gid: number,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of fchown, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.fchownSync(fd, uid, gid), callback);
 }
 
 export function fdatasync(fd: number, callback: ErrorOnlyCallback): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of fdatasync, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.fdatasyncSync(fd), callback);
 }
 
-export function fstat(fd: number, callback: SingleArgCallback<Stats>): void;
-export function fstat(
-  fd: number,
-  options: FStatOptions,
-  callback: SingleArgCallback<Stats>
-): void;
 export function fstat(
   fd: number,
   optionsOrCallback: SingleArgCallback<Stats> | FStatOptions,
@@ -268,6 +286,9 @@ export function fstat(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of fstat, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.fstatSync(fd, options), callback);
 }
 
@@ -275,16 +296,13 @@ export function fsync(
   fd: number,
   callback: ErrorOnlyCallback = () => {}
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of fsync, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.fsyncSync(fd), callback);
 }
 
-export function ftruncate(fd: number, callback: ErrorOnlyCallback): void;
-export function ftruncate(
-  fd: number,
-  len: number,
-  callback: ErrorOnlyCallback
-): void;
 export function ftruncate(
   fd: number,
   lenOrCallback: number | ErrorOnlyCallback,
@@ -297,16 +315,22 @@ export function ftruncate(
   } else {
     len = lenOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of ftruncate, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.ftruncateSync(fd, len), callback);
 }
 
 export function futimes(
   fd: number,
-  atime: string | number | Date,
-  mtime: string | number | Date,
+  atime: RawTime | Date,
+  mtime: RawTime | Date,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of futimes, which does the
+  // validation itself.
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
     () => fssync.futimesSync(fd, atime, mtime),
@@ -319,6 +343,9 @@ export function lchmod(
   mode: string | number,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of lchmod, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.lchmodSync(path, mode), callback);
 }
@@ -329,16 +356,22 @@ export function lchown(
   gid: number,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of lchown, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.lchownSync(path, uid, gid), callback);
 }
 
 export function lutimes(
   path: FilePath,
-  atime: string | number | Date,
-  mtime: string | number | Date,
+  atime: RawTime | Date,
+  mtime: RawTime | Date,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of lutimes, which does the
+  // validation itself.
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
     () => fssync.lutimesSync(path, atime, mtime),
@@ -351,19 +384,13 @@ export function link(
   dest: FilePath,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of link, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.linkSync(src, dest), callback);
 }
 
-export function lstat(
-  path: FilePath,
-  callback: SingleArgCallback<Stats | undefined>
-): void;
-export function lstat(
-  path: FilePath,
-  options: StatOptions,
-  callback: SingleArgCallback<Stats | undefined>
-): void;
 export function lstat(
   path: FilePath,
   optionsOrCallback: SingleArgCallback<Stats | undefined> | StatOptions,
@@ -376,18 +403,12 @@ export function lstat(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of lstat, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.lstatSync(path, options), callback);
 }
 
-export function mkdir(
-  path: FilePath,
-  callback: SingleArgCallback<string | undefined>
-): void;
-export function mkdir(
-  path: FilePath,
-  options: number | MakeDirectoryOptions,
-  callback: SingleArgCallback<string | undefined>
-): void;
 export function mkdir(
   path: FilePath,
   optionsOrCallback:
@@ -403,18 +424,12 @@ export function mkdir(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of mkdir, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.mkdirSync(path, options), callback);
 }
 
-export function mkdtemp(
-  prefix: FilePath,
-  callback: SingleArgCallback<string>
-): void;
-export function mkdtemp(
-  prefix: FilePath,
-  options: MkdirTempSyncOptions,
-  callback: SingleArgCallback<string>
-): void;
 export function mkdtemp(
   prefix: FilePath,
   optionsOrCallback: SingleArgCallback<string> | MkdirTempSyncOptions,
@@ -427,24 +442,15 @@ export function mkdtemp(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of mkdtemp, which does the
+  // validation itself.
   callWithSingleArgCallback(
     () => fssync.mkdtempSync(prefix, options),
     callback
   );
 }
 
-export function open(path: FilePath, callback: SingleArgCallback<number>): void;
-export function open(
-  path: FilePath,
-  flags: string | number,
-  callback: SingleArgCallback<number>
-): void;
-export function open(
-  path: FilePath,
-  flags: string | number,
-  mode: string | number,
-  callback: SingleArgCallback<number>
-): void;
 export function open(
   path: FilePath,
   flagsOrCallback: string | number | SingleArgCallback<number> = 'r',
@@ -464,15 +470,12 @@ export function open(
     flags = flagsOrCallback;
     mode = modeOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of open, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.openSync(path, flags, mode), callback);
 }
 
-export function opendir(path: FilePath, callback: SingleArgCallback<Dir>): void;
-export function opendir(
-  path: FilePath,
-  options: OpenDirOptions,
-  callback: SingleArgCallback<Dir>
-): void;
 export function opendir(
   path: FilePath,
   optionsOrCallback: SingleArgCallback<Dir> | OpenDirOptions,
@@ -489,6 +492,9 @@ export function opendir(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of opendir, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.opendirSync(path, options), callback);
 }
 
@@ -515,7 +521,7 @@ export function read<T extends NodeJS.ArrayBufferView>(
     | number
     | DoubleArgCallback<number, T>,
   lengthOrCallback?: null | number | DoubleArgCallback<number, T>,
-  position?: number | bigint | null,
+  position?: Position,
   callback?: DoubleArgCallback<number, T>
 ): void {
   // Node.js... you're killing me here with these polymorphic signatures.
@@ -581,7 +587,7 @@ export function read<T extends NodeJS.ArrayBufferView>(
   // Should never be negative and never extends
   // beyond the end of the buffer (that is,
   // actualOffset + actualLength <= actualBuffer.byteLength)
-  let actualPosition: number | bigint | null = null; // The position within the
+  let actualPosition: Position = null; // The position within the
   // file to read from. If null,
   // the current position for the fd
   // is used.
@@ -766,15 +772,6 @@ export function read<T extends NodeJS.ArrayBufferView>(
 
 export function readdir(
   path: FilePath,
-  callback: SingleArgCallback<ReadDirResult>
-): void;
-export function readdir(
-  path: FilePath,
-  options: ReadDirOptions,
-  callback: SingleArgCallback<ReadDirResult>
-): void;
-export function readdir(
-  path: FilePath,
   optionsOrCallback: SingleArgCallback<ReadDirResult> | ReadDirOptions,
   callback?: SingleArgCallback<ReadDirResult>
 ): void {
@@ -789,39 +786,44 @@ export function readdir(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of readdir, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.readdirSync(path, options), callback);
 }
 
 export function readFile(
   path: FilePath,
-  optionsOrCallback: SingleArgCallback<string | Buffer> | ReadFileSyncOptions,
+  optionsOrCallback:
+    | SingleArgCallback<string | Buffer>
+    | BufferEncoding
+    | null
+    | ReadFileSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: ReadFileSyncOptions;
+  let options: BufferEncoding | null | ReadFileSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of readFile, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.readFileSync(path, options), callback);
 }
 
 export function readlink(
   path: FilePath,
-  callback: SingleArgCallback<string | Buffer>
-): void;
-export function readlink(
-  path: FilePath,
-  options: ReadLinkSyncOptions,
-  callback: SingleArgCallback<string | Buffer>
-): void;
-export function readlink(
-  path: FilePath,
-  optionsOrCallback: SingleArgCallback<string | Buffer> | ReadLinkSyncOptions,
+  optionsOrCallback:
+    | SingleArgCallback<string | Buffer>
+    | BufferEncoding
+    | null
+    | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: ReadLinkSyncOptions;
+  let options: BufferEncoding | null | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
@@ -834,12 +836,7 @@ export function readlink(
 export function readv<T extends NodeJS.ArrayBufferView>(
   fd: number,
   buffers: T[],
-  positionOrCallback:
-    | undefined
-    | null
-    | bigint
-    | number
-    | DoubleArgCallback<number, T[]>,
+  positionOrCallback: undefined | Position | DoubleArgCallback<number, T[]>,
   callback?: DoubleArgCallback<number, T[]>
 ): void {
   if (typeof positionOrCallback === 'function') {
@@ -864,25 +861,23 @@ export function readv<T extends NodeJS.ArrayBufferView>(
 
 export function realpath(
   path: FilePath,
-  callback: SingleArgCallback<string | Buffer>
-): void;
-export function realpath(
-  path: FilePath,
-  options: ReadLinkSyncOptions,
-  callback: SingleArgCallback<string | Buffer>
-): void;
-export function realpath(
-  path: FilePath,
-  optionsOrCallback: SingleArgCallback<string | Buffer> | ReadLinkSyncOptions,
+  optionsOrCallback:
+    | SingleArgCallback<string | Buffer>
+    | BufferEncoding
+    | null
+    | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: ReadLinkSyncOptions;
+  let options: BufferEncoding | null | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of realpath, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.realpathSync(path, options), callback);
 }
 
@@ -893,6 +888,9 @@ export function rename(
   newPath: FilePath,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of rename, which does the
+  // validation itself.
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
     () => fssync.renameSync(oldPath, newPath),
@@ -900,12 +898,6 @@ export function rename(
   );
 }
 
-export function rmdir(path: FilePath, callback: ErrorOnlyCallback): void;
-export function rmdir(
-  path: FilePath,
-  options: RmDirOptions,
-  callback: ErrorOnlyCallback
-): void;
 export function rmdir(
   path: FilePath,
   optionsOrCallback: ErrorOnlyCallback | RmDirOptions,
@@ -918,16 +910,13 @@ export function rmdir(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of rmdir, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.rmdirSync(path, options), callback);
 }
 
-export function rm(path: FilePath, callback: ErrorOnlyCallback): void;
-export function rm(
-  path: FilePath,
-  options: RmOptions,
-  callback: ErrorOnlyCallback
-): void;
 export function rm(
   path: FilePath,
   optionsOrCallback: ErrorOnlyCallback | RmOptions,
@@ -940,19 +929,13 @@ export function rm(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of rm, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.rmSync(path, options), callback);
 }
 
-export function stat(
-  path: FilePath,
-  callback: SingleArgCallback<Stats | undefined>
-): void;
-export function stat(
-  path: FilePath,
-  options: StatOptions,
-  callback: SingleArgCallback<Stats | undefined>
-): void;
 export function stat(
   path: FilePath,
   optionsOrCallback: SingleArgCallback<Stats | undefined> | StatOptions,
@@ -965,59 +948,48 @@ export function stat(
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of stat, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.statSync(path, options), callback);
 }
 
 export function statfs(
   path: FilePath,
-  callback: SingleArgCallback<StatsFs | BigIntStatsFs>
-): void;
-export function statfs(
-  path: FilePath,
-  options: { bigint: boolean },
-  callback: SingleArgCallback<StatsFs | BigIntStatsFs>
-): void;
-export function statfs(
-  path: FilePath,
   optionsOrCallback:
     | SingleArgCallback<StatsFs | BigIntStatsFs>
-    | { bigint?: boolean },
+    | { bigint?: boolean | undefined },
   callback?: SingleArgCallback<StatsFs | BigIntStatsFs>
 ): void {
-  let options: { bigint?: boolean };
+  let options: { bigint?: boolean | undefined };
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = { bigint: false };
   } else {
     options = optionsOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of statfs, which does the
+  // validation itself.
   callWithSingleArgCallback(() => fssync.statfsSync(path, options), callback);
 }
 
 export function symlink(
   target: FilePath,
   path: FilePath,
-  callback: ErrorOnlyCallback
-): void;
-export function symlink(
-  target: FilePath,
-  path: FilePath,
-  type: string,
-  callback: ErrorOnlyCallback
-): void;
-export function symlink(
-  target: FilePath,
-  path: FilePath,
-  typeOrCallback: string | ErrorOnlyCallback,
+  typeOrCallback: SymlinkType | ErrorOnlyCallback,
   callback?: ErrorOnlyCallback
 ): void {
-  let type: string | null;
+  let type: SymlinkType;
   if (typeof typeOrCallback === 'function') {
     callback = typeOrCallback;
     type = null;
   } else {
     type = typeOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of symlink, which does the
+  // validation itself.
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
     () => fssync.symlinkSync(target, path, type),
@@ -1025,12 +997,6 @@ export function symlink(
   );
 }
 
-export function truncate(path: FilePath, callback: ErrorOnlyCallback): void;
-export function truncate(
-  path: FilePath,
-  len: number,
-  callback: ErrorOnlyCallback
-): void;
 export function truncate(
   path: FilePath,
   lenOrCallback: number | ErrorOnlyCallback,
@@ -1043,21 +1009,30 @@ export function truncate(
   } else {
     len = lenOrCallback;
   }
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of truncate, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.truncateSync(path, len), callback);
 }
 
 export function unlink(path: FilePath, callback: ErrorOnlyCallback): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of unlink, which does the
+  // validation itself.
   // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
   callWithErrorOnlyCallback(() => fssync.unlinkSync(path), callback);
 }
 
 export function utimes(
   path: FilePath,
-  atime: string | number | Date,
-  mtime: string | number | Date,
+  atime: RawTime | Date,
+  mtime: RawTime | Date,
   callback: ErrorOnlyCallback
 ): void {
+  // We are not performing any argument validation here because we are
+  // falling through to the synchronous version of utimes, which does the
+  // validation itself.
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
     () => fssync.utimesSync(path, atime, mtime),
@@ -1069,16 +1044,14 @@ export function write<T extends NodeJS.ArrayBufferView>(
   fd: number,
   buffer: T | string,
   offsetOptionsPositionOrCallback?:
-    | null
     | WriteSyncOptions
-    | number
-    | bigint
+    | Position
     | DoubleArgCallback<number, T>,
   encodingLengthOrCallback?:
     | number
     | BufferEncoding
     | DoubleArgCallback<number, T>,
-  positionOrCallback?: null | bigint | number | DoubleArgCallback<number, T>,
+  positionOrCallback?: Position | DoubleArgCallback<number, T>,
   callback?: DoubleArgCallback<number, T>
 ): void {
   if (typeof offsetOptionsPositionOrCallback === 'function') {
@@ -1125,21 +1098,14 @@ export function write<T extends NodeJS.ArrayBufferView>(
 export function writeFile(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  callback: ErrorOnlyCallback
-): void;
-export function writeFile(
-  path: number | FilePath,
-  data: string | ArrayBufferView,
-  options: WriteFileOptions,
-  callback: ErrorOnlyCallback
-): void;
-export function writeFile(
-  path: number | FilePath,
-  data: string | ArrayBufferView,
-  optionsOrCallback: ErrorOnlyCallback | WriteFileOptions,
+  optionsOrCallback:
+    | ErrorOnlyCallback
+    | BufferEncoding
+    | null
+    | WriteFileOptions,
   callback?: ErrorOnlyCallback
 ): void {
-  let options: WriteFileOptions;
+  let options: BufferEncoding | null | WriteFileOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {
@@ -1160,7 +1126,7 @@ export function writeFile(
 export function writev<T extends NodeJS.ArrayBufferView>(
   fd: number,
   buffers: T[],
-  positionOrCallback?: null | number | bigint | DoubleArgCallback<number, T[]>,
+  positionOrCallback?: Position | DoubleArgCallback<number, T[]>,
   callback?: DoubleArgCallback<number, T[]>
 ): void {
   if (typeof positionOrCallback === 'function') {
@@ -1262,10 +1228,10 @@ export function createWriteStream(): void {
 // [x][x][x][ ] fs.symlink(target, path[, type], callback)
 // [x][x][x][ ] fs.truncate(path[, len], callback)
 // [x][x][x][ ] fs.unlink(path, callback)
-// [ ][ ][ ][ ] fs.unwatchFile(filename[, listener])
+// [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [x][x][x][ ] fs.utimes(path, atime, mtime, callback)
-// [ ][ ][ ][ ] fs.watch(filename[, options][, listener])
-// [ ][ ][ ][ ] fs.watchFile(filename[, options], listener)
+// [-][-][-][-] fs.watch(filename[, options][, listener])
+// [-][-][-][-] fs.watchFile(filename[, options], listener)
 // [x][x][ ][ ] fs.write(fd, buffer, offset[, length[, position]], callback)
 // [x][x][ ][ ] fs.write(fd, buffer[, options], callback)
 // [x][x][ ][ ] fs.write(fd, string[, position[, encoding]], callback)

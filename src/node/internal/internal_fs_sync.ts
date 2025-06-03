@@ -1,3 +1,27 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+//
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* eslint-disable @typescript-eslint/no-unused-vars,@typescript-eslint/no-unnecessary-condition */
 
 import {
@@ -10,6 +34,9 @@ import {
   Stats,
   kBadge,
   type FilePath,
+  type Position,
+  type RawTime,
+  type SymlinkType,
   validatePosition,
 } from 'node-internal:internal_fs_utils';
 import {
@@ -266,7 +293,7 @@ export function ftruncateSync(fd: number, len: number = 0): void {
   cffs.truncate(getValidatedFd(fd), len);
 }
 
-function getDate(time: string | number | bigint | Date): Date {
+function getDate(time: RawTime | Date): Date {
   if (typeof time === 'number') {
     return new Date(time);
   } else if (typeof time === 'bigint') {
@@ -285,8 +312,8 @@ function getDate(time: string | number | bigint | Date): Date {
 
 export function futimesSync(
   fd: number,
-  atime: string | number | bigint | Date,
-  mtime: string | number | bigint | Date
+  atime: RawTime | Date,
+  mtime: RawTime | Date
 ): void {
   // We do not actually make use of access time in our filesystem. We just
   // validate the inputs here.
@@ -324,8 +351,8 @@ export function lchownSync(path: FilePath, uid: number, gid: number): void {
 
 export function lutimesSync(
   path: FilePath,
-  atime: string | number | bigint | Date,
-  mtime: string | number | bigint | Date
+  atime: RawTime | Date,
+  mtime: RawTime | Date
 ): void {
   // We do not actually make use of access time in our filesystem. We just
   // validate the inputs here.
@@ -349,7 +376,7 @@ export type StatOptions = {
 
 export function lstatSync(
   path: FilePath,
-  options: StatOptions = { bigint: false, throwIfNoEntry: true }
+  options: StatOptions = {}
 ): Stats | undefined {
   validateObject(options, 'options');
   const { bigint = false, throwIfNoEntry = true } = options;
@@ -422,6 +449,7 @@ export function opendirSync(path: FilePath, options: OpenDirOptions = {}): Dir {
   validateUint32(bufferSize, 'options.bufferSize');
   validateBoolean(recursive, 'options.recursive');
   path = normalizePath(path);
+  // TODO(node-fs): Need implementation
   throw new Error('Not implemented');
 }
 
@@ -556,7 +584,7 @@ export function readSync(
   buffer: NodeJS.ArrayBufferView,
   offsetOrOptions: ReadSyncOptions | number = {},
   length?: number,
-  position: number | bigint | null = null
+  position: Position = null
 ): number {
   fd = getValidatedFd(fd);
 
@@ -628,22 +656,11 @@ export function readSync(
 export function readvSync(
   fd: number,
   buffers: NodeJS.ArrayBufferView[],
-  position: number | bigint | null = null
+  position: Position = null
 ): number {
   fd = getValidatedFd(fd);
   validateBufferArray(buffers);
-
-  if (
-    position != null &&
-    typeof position !== 'number' &&
-    typeof position !== 'bigint'
-  ) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'position',
-      ['null', 'number', 'bigint'],
-      position
-    );
-  }
+  validatePosition(position, 'position');
 
   if (buffers.length === 0) {
     return 0;
@@ -651,7 +668,6 @@ export function readvSync(
   return cffs.read(fd, buffers, { position });
 }
 
-// TODO: Implement fs.realpathSync.native
 export function realpathSync(
   p: FilePath,
   options: BufferEncoding | null | ReadLinkSyncOptions = {}
@@ -762,10 +778,10 @@ export function statfsSync(
 export function symlinkSync(
   target: FilePath,
   path: FilePath,
-  type: string | null = null
+  type: SymlinkType = null
 ): void {
   // We don't implement type in any meaningful way but we do validate it.
-  validateOneOf(type, 'type', ['dir', 'file', 'junction', null, undefined]);
+  validateOneOf(type, 'type', ['dir', 'file', 'junction', null]);
   cffs.link(normalizePath(path), normalizePath(target), { symbolic: true });
 }
 
@@ -780,8 +796,8 @@ export function unlinkSync(path: FilePath): void {
 
 export function utimesSync(
   path: FilePath,
-  atime: number | string | bigint | Date,
-  mtime: number | string | bigint | Date
+  atime: RawTime | Date,
+  mtime: RawTime | Date
 ): void {
   // We do not actually make use of access time in our filesystem. We just
   // validate the inputs here.
@@ -831,7 +847,7 @@ export function writeFileSync(
 
   // We're not currently implementing the exclusive flag. We're validating
   // it here just to use it so the compiler doesn't complain.
-  validateBoolean(exclusive, '');
+  validateBoolean(exclusive, 'options.exclusive');
 
   if (typeof data === 'string') {
     data = Buffer.from(data, encoding);
@@ -851,15 +867,15 @@ export function writeFileSync(
 export type WriteSyncOptions = {
   offset?: number | undefined;
   length?: number | undefined;
-  position?: number | null | undefined;
+  position?: Position | undefined;
 };
 
 export function writeSync(
   fd: number,
   buffer: NodeJS.ArrayBufferView | string,
-  offsetOrOptions: number | WriteSyncOptions | null | bigint = null,
+  offsetOrOptions: WriteSyncOptions | Position = null,
   length?: number | BufferEncoding | null,
-  position?: number | bigint | null
+  position?: Position
 ): number {
   fd = getValidatedFd(fd);
 
@@ -896,19 +912,11 @@ export function writeSync(
   validateStringAfterArrayBufferView(buffer, 'buffer');
 
   // In this case, offsetOrOptions must either be a number, bigint, or null.
-  if (
-    offsetOrOptions != null &&
-    typeof offsetOrOptions !== 'number' &&
-    typeof offsetOrOptions !== 'bigint'
-  ) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'offset',
-      ['null', 'number', 'bigint'],
-      offsetOrOptions
-    );
-  }
+  validatePosition(offsetOrOptions, 'position');
   position = offsetOrOptions;
 
+  // In this instance, buffer is a string and the length arg specifies
+  // the encoding to use.
   validateEncoding(buffer, length as string);
   buffer = Buffer.from(buffer, length as string /* encoding */);
 
@@ -918,22 +926,11 @@ export function writeSync(
 export function writevSync(
   fd: number,
   buffers: NodeJS.ArrayBufferView[],
-  position: number | null | bigint = null
+  position: Position = null
 ): number {
   fd = getValidatedFd(fd);
   validateBufferArray(buffers);
-
-  if (
-    position != null &&
-    typeof position !== 'number' &&
-    typeof position !== 'bigint'
-  ) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'position',
-      ['null', 'number', 'bigint'],
-      position
-    );
-  }
+  validatePosition(position, 'position');
 
   if (buffers.length === 0) {
     return 0;

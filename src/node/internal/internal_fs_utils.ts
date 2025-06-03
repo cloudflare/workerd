@@ -79,6 +79,9 @@ import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
 // be called from user-code
 export const kBadge = Symbol('kBadge');
 
+export type RawTime = string | number | bigint;
+export type SymlinkType = 'dir' | 'file' | 'junction' | null | undefined;
+
 export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // We treat all of our virtual file system paths as file URLs
   // as a way of normalizing them. Because our file system is
@@ -340,10 +343,12 @@ export function validateRmdirOptions(
   return options;
 }
 
+export type Position = number | null | bigint;
+
 export function validatePosition(
   position: unknown,
   name: string
-): asserts position is number | bigint | null {
+): asserts position is Position {
   if (typeof position === 'number') {
     validateUint32(position, name);
   } else if (typeof position !== 'bigint' && position !== null) {

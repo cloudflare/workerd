@@ -1220,7 +1220,7 @@ export const writeSyncTest2 = {
       message: 'Position out of range',
     });
     throws(() => writeSync(fd, 'Hello World', 2 ** 32), {
-      message: 'Position out of range',
+      code: 'ERR_OUT_OF_RANGE',
     });
 
     strictEqual(writeSync(fd, 'aa', 0, 'ascii'), 2);
