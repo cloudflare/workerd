@@ -761,9 +761,24 @@ export default {
     skipAllTests: true,
   },
   'response/response-clone.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
+    comment: 'TODO Investigate this',
+    expectedFailures: [
+      "Check Response's clone with default values, without body",
+      'Check response clone use structureClone for teed ReadableStreams (Int8Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Int16Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Int32Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (ArrayBufferchunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint8Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint8ClampedArraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint16Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Uint32Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (BigInt64Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (BigUint64Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Float16Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Float32Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (Float64Arraychunk)',
+      'Check response clone use structureClone for teed ReadableStreams (DataViewchunk)',
+    ],
   },
   'response/response-consume-empty.any.js': {
     comment:
@@ -772,18 +787,21 @@ export default {
   },
   'response/response-consume-stream.any.js': {},
   'response/response-error-from-stream.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
+    comment: 'We have TypeError, they want pull Error',
+    expectedFailures: [
+      'ReadableStream start() Error propagates to Response.formData() Promise',
+      'ReadableStream pull() Error propagates to Response.formData() Promise',
+    ],
   },
   'response/response-error.any.js': {
     comment: 'Likely just missing validation',
     expectedFailures: ["Throws TypeError when responseInit's statusText is Ā"],
   },
   'response/response-from-stream.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
+    comment: 'Missing expected exception (TypeError)',
+    expectedFailures: [
+      'Constructing a Response with a stream on which getReader() is called',
+    ],
   },
   'response/response-headers-guard.any.js': {
     comment: 'Likely just missing validation',
@@ -825,46 +843,14 @@ export default {
       'Check response returned by static method redirect(), status = 308',
     ],
   },
-  'response/response-stream-bad-chunk.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-1.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-2.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-3.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-4.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-5.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-6.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
-  'response/response-stream-disturbed-by-pipe.any.js': {
-    comment:
-      'Several issues. Firstly, we require the type field to always be passed to ReadableStream',
-    skipAllTests: true,
-  },
+  'response/response-stream-bad-chunk.any.js': {},
+  'response/response-stream-disturbed-1.any.js': {},
+  'response/response-stream-disturbed-2.any.js': {},
+  'response/response-stream-disturbed-3.any.js': {},
+  'response/response-stream-disturbed-4.any.js': {},
+  'response/response-stream-disturbed-5.any.js': {},
+  'response/response-stream-disturbed-6.any.js': {},
+  'response/response-stream-disturbed-by-pipe.any.js': {},
   'response/response-stream-disturbed-util.js': {},
   'response/response-stream-with-broken-then.any.js': {
     comment:

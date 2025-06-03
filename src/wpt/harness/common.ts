@@ -23,6 +23,8 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import path from 'node:path';
+
 export type UnknownFunc = (...args: unknown[]) => unknown;
 export type TestFn = UnknownFunc;
 export type PromiseTestFn = () => Promise<unknown>;
@@ -131,4 +133,12 @@ export function getHostInfo(): HostInfo {
     HTTP_PORT: httpUrl.port,
     HTTPS_PORT: httpsUrl.port,
   };
+}
+
+export function getBindingPath(base: string, rawPath: string): string {
+  if (path.isAbsolute(rawPath)) {
+    return rawPath;
+  }
+
+  return path.relative('/', path.resolve(base, rawPath));
 }

@@ -23,6 +23,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import path from 'node:path';
+import { getBindingPath } from './common';
+
 // @ts-expect-error We're just exposing enough stuff for the tests to pass; it's not a perfect match
 globalThis.self = globalThis;
 
@@ -72,12 +75,17 @@ globalThis.fetch = async (
   init?: RequestInit
 ): Promise<Response> => {
   if (typeof input === 'string' && input.endsWith('.json')) {
+    const relativePath = getBindingPath(
+      path.dirname(globalThis.state.testFileName),
+      input
+    );
     // WPT sometimes uses fetch to load a resource file, we "serve" this from the bindings
-    const exports: unknown = globalThis.state.env[input];
-    const response = new Response();
-    // eslint-disable-next-line @typescript-eslint/require-await -- We are emulating an existing interface that returns a promise
-    response.json = async (): Promise<unknown> => exports;
-    return response;
+    const exports: unknown = globalThis.state.env[relativePath];
+    if (exports === undefined) {
+      throw new Error(`Unable to load resources file ${input} from bindings`);
+    }
+
+    return new Response(JSON.stringify(exports));
   }
   return realFetch(relativizeRequest(input, init));
 };

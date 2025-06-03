@@ -29,6 +29,7 @@ import {
   UnknownFunc,
   sanitize_unpaired_surrogates,
   getHostInfo,
+  getBindingPath,
 } from './common';
 
 // These imports introduce functions into the global scope, so that WPT tests can call them
@@ -284,14 +285,6 @@ function parseWptMetadata(code: string): WPTMetadata {
   }
 
   return meta;
-}
-
-function getBindingPath(base: string, rawPath: string): string {
-  if (path.isAbsolute(rawPath)) {
-    return rawPath;
-  }
-
-  return path.relative('/', path.resolve(base, rawPath));
 }
 
 const EXCLUDED_PATHS = new Set([
