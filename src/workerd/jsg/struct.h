@@ -29,7 +29,8 @@ class FieldWrapper {
   explicit FieldWrapper(v8::Isolate* isolate)
       : nameHandle(isolate, v8StrIntern(isolate, exportedName)) {}
 
-  void wrap(TypeWrapper& wrapper,
+  void wrap(Lock& js,
+      TypeWrapper& wrapper,
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
@@ -44,7 +45,7 @@ class FieldWrapper {
         // Don't even set optional fields that aren't present.
         if (in.*field == kj::none) return;
       }
-      auto value = wrapper.wrap(context, creator, kj::mv(in.*field));
+      auto value = wrapper.wrap(js, context, creator, kj::mv(in.*field));
       check(out->Set(context, nameHandle.Get(isolate), value));
     }
   }
@@ -85,17 +86,19 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
   }
 
   v8::Local<v8::Object> wrap(
-      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
-    auto isolate = context->GetIsolate();
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
+    auto isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
     auto& fields = getFields(isolate);
     v8::Local<v8::Object> out = v8::Object::New(isolate);
-    (kj::get<indices>(fields).wrap(static_cast<Self&>(*this), isolate, context, creator, in, out),
+    (kj::get<indices>(fields).wrap(
+         js, static_cast<Self&>(*this), isolate, context, creator, in, out),
         ...);
     return handleScope.Escape(out);
   }
 
-  kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> context,
+  kj::Maybe<T> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       T*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
