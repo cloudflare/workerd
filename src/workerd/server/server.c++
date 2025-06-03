@@ -16,6 +16,9 @@
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/container.capnp.h>
+#include <workerd/io/docker-client.h>
+#include <workerd/io/docker-container-client.h>
 #include <workerd/io/hibernation-manager.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/request-tracker.h>
@@ -2266,10 +2269,20 @@ class Server::WorkerService final: public Service,
         // work for local development we need to pass an event type.
         static constexpr uint16_t hibernationEventTypeId = 8;
 
+        // Create container client if needed
+        kj::Maybe<rpc::Container::Client> container = kj::none;
+        // TODO: Add container configuration and instantiation logic here
+        // Example:
+        // if (shouldCreateContainer) {
+        //   auto dockerClient = kj::heap<DockerClient>(parent.service.network, "/var/run/docker.sock");
+        //   auto containerClient = kj::heap<DockerContainerClient>("container-id", "image:tag", *dockerClient);
+        //   container = kj::mv(containerClient);
+        // }
+
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-            tryGetManagerRef(), hibernationEventTypeId));
+            tryGetManagerRef(), hibernationEventTypeId, kj::mv(container)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
     };
