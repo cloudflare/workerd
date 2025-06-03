@@ -2372,6 +2372,13 @@ class Lock {
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
   }
 
+  // Like alloc() but attaches an external memory adjustment of size indicated by `accountedSize`.
+  template <typename T, typename... Params>
+  Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
+    return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
+                      .attach(getExternalMemoryAdjustment(accountedSize)));
+  }
+
   // Returns a kj::String with an external memory adjustment attached.
   kj::String accountedKjString(kj::Array<char>&& str);
   kj::String accountedKjString(kj::String&& str) {
