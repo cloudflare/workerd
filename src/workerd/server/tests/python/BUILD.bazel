@@ -34,25 +34,13 @@ py_wd_test("seek-metadatafs")
     gen_import_tests(
         PYTHON_IMPORTS_TO_TEST[info["packages"]],
         python_version,
-        # TODO: Micropip version mismatch for 0.27.0
-        #
         # TODO: The packages below don't currently work in the latest package/python versions. Need
         # to fix them.
-        #
-        # TODO: pydantic_core started to fail with "no module named typing_extensions" after 0.27.5
-        # was rebuilt and backport bumped.
         pkg_skip_versions = {
             "0.27.5": [
                 "micropip",  # missing lockfile
                 "soupsieve",  # Circular dependency with beautifulsoup4
                 "starlette",  # No module named 'starlette.converters'
-                # requests and dependencies have an ssl problem
-                "langchain-core",
-                "langchain_openai",
-                "langsmith",
-                "requests",
-                # aiohttp has same ssl problem
-                "aiohttp",
             ],
         },
     )
