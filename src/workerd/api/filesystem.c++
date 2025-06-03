@@ -116,19 +116,22 @@ kj::Maybe<Stat> FileSystemModule::stat(
       }
     }
     KJ_CASE_ONEOF(fd, int) {
-      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
-      KJ_SWITCH_ONEOF(opened.node) {
-        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-          return Stat(file->stat(js));
+      KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+        KJ_SWITCH_ONEOF(opened.node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            return Stat(file->stat(js));
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            return Stat(dir->stat(js));
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            return Stat(link->stat(js));
+          }
         }
-        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-          return Stat(dir->stat(js));
-        }
-        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-          return Stat(link->stat(js));
-        }
+        KJ_UNREACHABLE;
+      } else {
+        throwUVException(js, UV_EBADF, "fstat"_kj);
       }
-      KJ_UNREACHABLE;
     }
   }
   return kj::none;
@@ -163,20 +166,24 @@ void FileSystemModule::setLastModified(
       }
     }
     KJ_CASE_ONEOF(fd, int) {
-      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
-      KJ_SWITCH_ONEOF(opened.node) {
-        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-          file->setLastModified(js, lastModified);
-          return;
+      KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+        KJ_SWITCH_ONEOF(opened.node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            file->setLastModified(js, lastModified);
+            return;
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            // Do nothing
+            return;
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            // Do nothing
+            return;
+          }
         }
-        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-          // Do nothing
-          return;
-        }
-        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-          // Do nothing
-          return;
-        }
+        KJ_UNREACHABLE;
+      } else {
+        throwUVException(js, UV_EBADF, "futimes"_kj);
       }
     }
   }
@@ -208,19 +215,23 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
       }
     }
     KJ_CASE_ONEOF(fd, int) {
-      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
-      KJ_SWITCH_ONEOF(opened.node) {
-        KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-          file->resize(js, size);
-          return;
+      KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+        KJ_SWITCH_ONEOF(opened.node) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            file->resize(js, size);
+            return;
+          }
+          KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
+            return;
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+          }
         }
-        KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-          JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
-          return;
-        }
-        KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-          JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
-        }
+        KJ_UNREACHABLE;
+      } else {
+        throwUVException(js, UV_EBADF, "ftruncate"_kj);
       }
     }
   }
@@ -342,84 +353,90 @@ uint32_t FileSystemModule::write(
     jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
-  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
 
-  static const auto getPosition = [](jsg::Lock& js, auto& opened, auto& file,
-                                      const WriteOptions& options) -> uint32_t {
-    if (opened.append) {
-      // If the file descriptor is opened in append mode, we ignore the position
-      // option and always append to the end of the file.
-      auto stat = file->stat(js);
-      return stat.size;
-    }
-    auto pos = options.position.orDefault(opened.position);
-    JSG_REQUIRE(pos <= kMax, Error, "Position out of range");
-    return static_cast<uint32_t>(pos);
-  };
+  KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+    static const auto getPosition = [](jsg::Lock& js, auto& opened, auto& file,
+                                        const WriteOptions& options) -> uint32_t {
+      if (opened.append) {
+        // If the file descriptor is opened in append mode, we ignore the position
+        // option and always append to the end of the file.
+        auto stat = file->stat(js);
+        return stat.size;
+      }
+      auto pos = options.position.orDefault(opened.position);
+      JSG_REQUIRE(pos <= kMax, Error, "Position out of range");
+      return static_cast<uint32_t>(pos);
+    };
 
-  KJ_SWITCH_ONEOF(opened.node) {
-    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-      auto pos = getPosition(js, opened, file, options);
-      uint32_t total = 0;
-      for (auto& buffer: data) {
-        auto written = file->write(js, pos, buffer);
-        pos += written;
-        total += written;
+    KJ_SWITCH_ONEOF(opened.node) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        auto pos = getPosition(js, opened, file, options);
+        uint32_t total = 0;
+        for (auto& buffer: data) {
+          auto written = file->write(js, pos, buffer);
+          pos += written;
+          total += written;
+        }
+        // We only update the position if the options.position is not set and
+        // the file descriptor is not opened in append mode.
+        if (options.position == kj::none && !opened.append) {
+          opened.position += total;
+        }
+        return total;
       }
-      // We only update the position if the options.position is not set and
-      // the file descriptor is not opened in append mode.
-      if (options.position == kj::none && !opened.append) {
-        opened.position += total;
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
       }
-      return total;
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        // If we get here, then followSymLinks was set to false when open was called.
+        // We can't write to a symbolic link.
+        JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+      }
     }
-    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-      JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
-    }
-    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-      // If we get here, then followSymLinks was set to false when open was called.
-      // We can't write to a symbolic link.
-      JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
-    }
+    KJ_UNREACHABLE;
+  } else {
+    throwUVException(js, UV_EBADF, "write"_kj);
   }
-  KJ_UNREACHABLE;
 }
 
 uint32_t FileSystemModule::read(
     jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
-  auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
-  JSG_REQUIRE(opened.read, Error, "File descriptor not opened for reading"_kj);
+  KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+    JSG_REQUIRE(opened.read, Error, "File descriptor not opened for reading"_kj);
 
-  KJ_SWITCH_ONEOF(opened.node) {
-    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-      auto pos = options.position.orDefault(opened.position);
-      JSG_REQUIRE(pos <= kMax, Error, "Position out of range");
-      uint32_t total = 0;
-      for (auto& buffer: data) {
-        auto read = file->read(js, pos, buffer);
-        // if read is less than the size of the buffer, we are at EOF.
-        pos += read;
-        total += read;
-        if (read < buffer.size()) break;
+    KJ_SWITCH_ONEOF(opened.node) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        auto pos = options.position.orDefault(opened.position);
+        JSG_REQUIRE(pos <= kMax, Error, "Position out of range");
+        uint32_t total = 0;
+        for (auto& buffer: data) {
+          auto read = file->read(js, pos, buffer);
+          // if read is less than the size of the buffer, we are at EOF.
+          pos += read;
+          total += read;
+          if (read < buffer.size()) break;
+        }
+        // We only update the position if the options.position is not set.
+        if (options.position == kj::none) {
+          opened.position += total;
+        }
+        return total;
       }
-      // We only update the position if the options.position is not set.
-      if (options.position == kj::none) {
-        opened.position += total;
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
       }
-      return total;
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        // If we get here, then followSymLinks was set to false when open was called.
+        // We can't read from a symbolic link.
+        JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
+      }
     }
-    KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-      JSG_FAIL_REQUIRE(Error, "Invalid operation on a directory");
-    }
-    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-      // If we get here, then followSymLinks was set to false when open was called.
-      // We can't read from a symbolic link.
-      JSG_FAIL_REQUIRE(Error, "Invalid operation on a symlink");
-    }
+    KJ_UNREACHABLE;
+  } else {
+    throwUVException(js, UV_EBADF, "read"_kj);
   }
-  KJ_UNREACHABLE;
 }
 
 jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd) {
@@ -444,20 +461,23 @@ jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePa
       }
     }
     KJ_CASE_ONEOF(fd, int) {
-      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
-      JSG_REQUIRE(opened.read, Error, "File descriptor not opened for reading"_kj);
+      KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+        JSG_REQUIRE(opened.read, Error, "File descriptor not opened for reading"_kj);
 
-      // Make sure we're reading from a file.
-      auto& file = JSG_REQUIRE_NONNULL(
-          opened.node.tryGet<kj::Rc<workerd::File>>(), Error, "Invalid operation"_kj);
+        // Make sure we're reading from a file.
+        auto& file = JSG_REQUIRE_NONNULL(
+            opened.node.tryGet<kj::Rc<workerd::File>>(), Error, "Invalid operation"_kj);
 
-      // Move the opened.position to the end of the file.
-      KJ_DEFER({
-        auto stat = file->stat(js);
-        opened.position = stat.size;
-      });
+        // Move the opened.position to the end of the file.
+        KJ_DEFER({
+          auto stat = file->stat(js);
+          opened.position = stat.size;
+        });
 
-      return file->readAllBytes(js);
+        return file->readAllBytes(js);
+      } else {
+        throwUVException(js, UV_EBADF, "fread"_kj);
+      }
     }
   }
   KJ_UNREACHABLE;
@@ -522,35 +542,38 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
       return written;
     }
     KJ_CASE_ONEOF(fd, int) {
-      auto& opened = JSG_REQUIRE_NONNULL(vfs.tryGetFd(js, fd), Error, "Bad file descriptor"_kj);
-      // Otherwise, we'll overwrite the file...
-      JSG_REQUIRE(opened.write, Error, "File descriptor not opened for writing"_kj);
+      KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
+        // Otherwise, we'll overwrite the file...
+        JSG_REQUIRE(opened.write, Error, "File descriptor not opened for writing"_kj);
 
-      // Make sure we're writing to a file.
-      auto& file = JSG_REQUIRE_NONNULL(
-          opened.node.tryGet<kj::Rc<workerd::File>>(), Error, "Invalid operation"_kj);
+        // Make sure we're writing to a file.
+        auto& file = JSG_REQUIRE_NONNULL(
+            opened.node.tryGet<kj::Rc<workerd::File>>(), Error, "Invalid operation"_kj);
 
-      auto stat = file->stat(js);
-      // Make sure the file is writable.
-      JSG_REQUIRE(stat.writable, Error, "access is denied");
+        auto stat = file->stat(js);
+        // Make sure the file is writable.
+        JSG_REQUIRE(stat.writable, Error, "access is denied");
 
-      KJ_DEFER({
-        // In either case, we need to update the position of the file descriptor.
-        stat = file->stat(js);
-        opened.position = stat.size;
-      });
+        KJ_DEFER({
+          // In either case, we need to update the position of the file descriptor.
+          stat = file->stat(js);
+          opened.position = stat.size;
+        });
 
-      // If the file descriptor was opened in append mode, or if the append option
-      // is set, then we'll use write instead to append to the end of the file.
-      if (opened.append || options.append) {
-        return write(js, fd, kj::arr(kj::mv(data)),
-            {
-              .position = stat.size,
-            });
+        // If the file descriptor was opened in append mode, or if the append option
+        // is set, then we'll use write instead to append to the end of the file.
+        if (opened.append || options.append) {
+          return write(js, fd, kj::arr(kj::mv(data)),
+              {
+                .position = stat.size,
+              });
+        }
+
+        // Otherwise, we overwrite the entire file.
+        return file->writeAll(js, data);
+      } else {
+        throwUVException(js, UV_EBADF, "fwrite"_kj);
       }
-
-      // Otherwise, we overwrite the entire file.
-      return file->writeAll(js, data);
     }
   }
 
@@ -824,6 +847,70 @@ void FileFdHandle::close(jsg::Lock& js) {
     fd = kj::none;
     vfs = kj::none;
   }
+}
+
+// =======================================================================================
+namespace {
+#define UV_STRERROR_GEN(name, msg)                                                                 \
+  case UV_##name:                                                                                  \
+    return msg##_kj;
+kj::Maybe<kj::StringPtr> uv_strerror(int err) {
+  switch (err) { UV_ERRNO_MAP(UV_STRERROR_GEN) }
+  return kj::none;
+}
+#undef UV_STRERROR_GEN
+
+#define UV_ERR_NAME_GEN(name, _)                                                                   \
+  case UV_##name:                                                                                  \
+    return #name##_kj;
+kj::StringPtr uv_err_name(int err) {
+  switch (err) { UV_ERRNO_MAP(UV_ERR_NAME_GEN) }
+  return "UNKNOWN"_kj;
+}
+#undef UV_ERR_NAME_GEN
+}  // namespace
+
+jsg::JsValue createUVException(jsg::Lock& js,
+    int errorno,
+    kj::StringPtr syscall,
+    kj::StringPtr message,
+    kj::StringPtr path,
+    kj::StringPtr dest) {
+  KJ_ASSERT(syscall != nullptr, "syscall must not be null");
+
+  jsg::JsObject obj = KJ_ASSERT_NONNULL(([&] {
+    if (message == nullptr) {
+      KJ_IF_SOME(msg, uv_strerror(errorno)) {
+        return js.error(msg);
+      } else {
+      }  // Necessary to avoid a compiler warning.
+      return js.error(kj::str("Unknown error: ", errorno));
+    }
+    return js.error(message);
+  })()
+                                            .tryCast<jsg::JsObject>());
+
+  obj.set(js, "syscall"_kj, js.str(syscall));
+  obj.set(js, "code"_kj, js.str(uv_err_name(errorno)));
+
+  if (path != nullptr) {
+    obj.set(js, "path"_kj, js.str(path));
+  }
+  if (dest != nullptr) {
+    obj.set(js, "dest"_kj, js.str(dest));
+  }
+
+  return obj;
+}
+
+void throwUVException(jsg::Lock& js,
+    int errorno,
+    kj::StringPtr syscall,
+    kj::StringPtr message,
+    kj::StringPtr path,
+    kj::StringPtr dest) {
+  auto ex = createUVException(js, errorno, syscall, message, path, dest);
+  js.throwException(ex);
 }
 
 // =======================================================================================

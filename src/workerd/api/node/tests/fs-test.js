@@ -618,7 +618,8 @@ export const openCloseTest = {
     strictEqual(stat.size, 0n);
 
     throws(() => fstatSync(123), {
-      message: /Bad file descriptor/,
+      message: /bad file descriptor/,
+      code: 'EBADF',
     });
     throws(() => fstatSync(fd, { bigint: 'yes' }), {
       code: /ERR_INVALID_ARG_TYPE/,
@@ -969,7 +970,8 @@ export const writevSyncTest = {
     });
 
     throws(() => writevSync(100, [Buffer.from('')]), {
-      message: 'Bad file descriptor',
+      message: 'bad file descriptor',
+      code: 'EBADF',
     });
 
     const stat2 = fstatSync(fd, { bigint: true });
