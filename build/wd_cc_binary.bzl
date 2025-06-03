@@ -27,3 +27,20 @@ def wd_cc_binary(
         visibility = visibility,
         **kwargs
     )
+
+    pkg = native.package_name().removeprefix("src/")
+    # print(pkg)
+
+    cross_alias = name + "_cross"
+    prebuilt_binary_name = name.removesuffix("_bin")  # TODO: pass this in
+    # print(prebuilt_binary_name)
+    # print("//:tmp2/bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, prebuilt_binary_name))
+    native.alias(
+        name = cross_alias,
+        visibility = visibility,
+        actual = select({
+            "//build/config:prebuilt_binaries_arm64": "//:bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, prebuilt_binary_name),
+            "//build/config:prebuilt_binaries_x64": "//:bin.x64/tmp/{}/{}".format(pkg, prebuilt_binary_name),
+            "//conditions:default": name,
+        }),
+    )
