@@ -18,23 +18,11 @@ deps_gen()
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-NODE_VERSION = "22.14.0"
+NODE_VERSION = "22.15.1"
 
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
-
-load(
-    "@build_bazel_apple_support//lib:repositories.bzl",
-    "apple_support_dependencies",
-)
-
-apple_support_dependencies()
-
-# apple_support now requires bazel_features, pull in its dependencies too.
-load("@bazel_features//:deps.bzl", "bazel_features_deps")
-
-bazel_features_deps()
 
 # ========================================================================================
 # Simple dependencies
