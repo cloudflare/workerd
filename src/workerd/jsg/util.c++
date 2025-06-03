@@ -521,7 +521,8 @@ void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception
 
 kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
   auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  return jsgIsolate.unwrapException(isolate->GetCurrentContext(), exception);
+  auto& js = Lock::from(isolate);
+  return jsgIsolate.unwrapException(js, isolate->GetCurrentContext(), exception);
 }
 
 kj::Exception Lock::exceptionToKj(Value&& exception) {
