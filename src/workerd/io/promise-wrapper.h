@@ -40,13 +40,12 @@ class PromiseWrapper {
 
   template <typename T>
   kj::Maybe<kj::Promise<T>> tryUnwrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Promise<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto& wrapper = static_cast<Self&>(*this);
     auto jsPromise = KJ_UNWRAP_OR_RETURN(
-        wrapper.tryUnwrap(js, context, handle, (jsg::Promise<T>*)nullptr, parentObject), kj::none);
+        wrapper.tryUnwrap(js, handle, (jsg::Promise<T>*)nullptr, parentObject), kj::none);
     return IoContext::current().awaitJs(js, kj::mv(jsPromise));
   }
 

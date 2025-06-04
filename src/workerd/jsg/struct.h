@@ -98,11 +98,8 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     return handleScope.Escape(out);
   }
 
-  kj::Maybe<T> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      T*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<T> tryUnwrap(
+      Lock& js, v8::Local<v8::Value> handle, T*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // In the case that an individual field is the wrong type, we don't return null, but throw an
     // exception directly. This is because:
     // 1) If we returned null, we'd lose useful debugging information about which exact field was
@@ -139,8 +136,8 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     //   it prescribes lexicographically-ordered member initialization, with base members ordered
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
-    auto t =
-        T{kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), js.v8Isolate, context, in)...};
+    auto t = T{kj::get<indices>(fields).unwrap(
+        static_cast<Self&>(*this), js.v8Isolate, js.v8Context(), in)...};
 
     // Note that if a `validate` function is provided, then it will be called after the struct is
     // unwrapped from v8. This would be an appropriate time to throw an error.

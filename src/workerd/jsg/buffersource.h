@@ -476,7 +476,6 @@ class BufferSourceWrapper {
   }
 
   kj::Maybe<BufferSource> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       BufferSource*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
