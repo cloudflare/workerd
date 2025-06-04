@@ -31,8 +31,10 @@ namespace workerd::jsg {
 // from any particular JS value.
 // A concept that identifies types that can be unwrapped without needing a JS value
 template <typename TypeWrapper, typename T>
-concept ValueLessParameter = requires(
-    TypeWrapper wrapper, v8::Local<v8::Context> context, T* ptr) { wrapper.unwrap(context, ptr); };
+concept ValueLessParameter =
+    requires(TypeWrapper wrapper, Lock& js, v8::Local<v8::Context> context, T* ptr) {
+      wrapper.unwrap(js, context, ptr);
+    };
 
 // TypeWrapper mixin for V8 handles.
 //
