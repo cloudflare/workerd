@@ -522,7 +522,7 @@ class Isolate: public IsolateBase {
   kj::Exception unwrapException(
       Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> exception) override {
     return getWrapperByContext(context)->template unwrap<kj::Exception>(
-        js, context, exception, jsg::TypeErrorContext::other());
+        js, exception, jsg::TypeErrorContext::other());
   }
 
   v8::Local<v8::Value> wrapException(
@@ -592,9 +592,9 @@ class Isolate: public IsolateBase {
     // Convert a JavaScript value to a C++ value, or throw a JS exception if the type doesn't
     // match.
     template <typename T>
-    auto unwrap(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
-      return jsgIsolate.getWrapperByContext(context)->template unwrap<T>(
-          *this, context, handle, jsg::TypeErrorContext::other());
+    auto unwrap(v8::Local<v8::Value> handle) {
+      return jsgIsolate.getWrapperByContext(v8Context())
+          ->template unwrap<T>(*this, handle, jsg::TypeErrorContext::other());
     }
 
     Ref<DOMException> domException(
@@ -666,16 +666,16 @@ class Isolate: public IsolateBase {
     }
     kj::String toString(v8::Local<v8::Value> value) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<kj::String>(
-          *this, v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+          *this, value, jsg::TypeErrorContext::other());
     }
     jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) override {
       return jsgIsolate.getWrapperByContext(*this)
           ->template unwrap<jsg::Dict<v8::Local<v8::Value>>>(
-              *this, v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+              *this, value, jsg::TypeErrorContext::other());
     }
     jsg::Dict<jsg::JsValue> toDict(const jsg::JsValue& value) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Dict<jsg::JsValue>>(
-          *this, v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+          *this, value, jsg::TypeErrorContext::other());
     }
     v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
       return jsgIsolate.getWrapperByContext(*this)->wrap(
@@ -683,7 +683,7 @@ class Isolate: public IsolateBase {
     }
     jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Value> promise) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<jsg::Value>>(
-          *this, v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
+          *this, promise, jsg::TypeErrorContext::other());
     }
 
     template <typename T, typename... Args>

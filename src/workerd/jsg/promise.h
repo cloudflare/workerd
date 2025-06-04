@@ -562,8 +562,7 @@ void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto context = isolate->GetCurrentContext();
     auto& js = Lock::from(isolate);
     return wrapOpaque(context,
-        wrapper.template unwrap<Output>(
-            js, context, args[0], TypeErrorContext::promiseResolution()));
+        wrapper.template unwrap<Output>(js, args[0], TypeErrorContext::promiseResolution()));
   });
 }
 

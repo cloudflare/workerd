@@ -111,7 +111,7 @@ class ModuleRegistry {
       v8::Local<v8::Object> handle = provider.getContext(lock);
       auto fn =
           jsg::check(v8::ScriptCompiler::CompileFunction(context, &source, 0, nullptr, 1, &handle));
-      return lock.template unwrap<jsg::Function<void()>>(context, fn);
+      return lock.template unwrap<jsg::Function<void()>>(fn);
     }
   };
 
