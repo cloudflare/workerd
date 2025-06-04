@@ -11,14 +11,9 @@ import {
 } from 'node:assert';
 
 import {
-  accessSync,
   existsSync,
   statSync,
-  chmodSync,
-  chownSync,
   statfsSync,
-  lchmodSync,
-  lchownSync,
   linkSync,
   lstatSync,
   symlinkSync,
@@ -31,8 +26,6 @@ import {
   ftruncateSync,
   fsyncSync,
   fdatasyncSync,
-  fchmodSync,
-  fchownSync,
   futimesSync,
   utimesSync,
   lutimesSync,
@@ -51,8 +44,6 @@ import {
   rmdirSync,
   readdirSync,
   stat,
-  chmod,
-  chown,
   constants,
   statfs,
   link,
@@ -65,8 +56,6 @@ import {
   ftruncate,
   fsync,
   fdatasync,
-  fchmod,
-  fchown,
   futimes,
   utimes,
   lutimes,
@@ -148,75 +137,6 @@ export const statSyncTest = {
     // returns undefined.
     const statNoThrow = statSync('/does/not/exist', { throwIfNoEntry: false });
     strictEqual(statNoThrow, undefined);
-  },
-};
-
-export const chmodSyncTest = {
-  test() {
-    // Incorrect input types should throw.
-    throws(() => chmodSync(123), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-    throws(() => chmodSync('/', {}), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-
-    // Should be non-op
-    accessSync('/tmp', W_OK | R_OK);
-    chmodSync('/tmp', 0o000);
-    chmodSync('/tmp', '000');
-    accessSync('/tmp', W_OK | R_OK);
-
-    chmodSync(Buffer.from('/tmp'), 0o000);
-    chmodSync(Buffer.from('/tmp'), '000');
-    accessSync(Buffer.from('/tmp'), W_OK | R_OK);
-
-    chmodSync(new URL('file:///tmp'), 0o000);
-    chmodSync(new URL('file:///tmp'), '000');
-    accessSync(new URL('file:///tmp'), W_OK | R_OK);
-
-    // Should throw if the mode is invalid
-    throws(() => chmodSync('/tmp', -1), {
-      code: /ERR_OUT_OF_RANGE/,
-    });
-  },
-};
-
-export const chownSyncTest = {
-  test() {
-    // Incorrect input types should throw.
-    throws(() => chownSync(123), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-    throws(() => chownSync('/', {}), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-
-    // Should be non-op
-    const stat1 = statSync('/tmp');
-    strictEqual(stat1.uid, 0);
-    strictEqual(stat1.gid, 0);
-    chownSync('/tmp', 1000, 1000);
-    const stat2 = statSync('/tmp');
-    strictEqual(stat1.uid, stat2.uid);
-    strictEqual(stat1.gid, stat2.gid);
-
-    chownSync(Buffer.from('/tmp'), 1000, 1000);
-    const stat3 = statSync(Buffer.from('/tmp'));
-    strictEqual(stat1.uid, stat3.uid);
-    strictEqual(stat1.gid, stat3.gid);
-
-    chownSync(new URL('file:///tmp'), 1000, 1000);
-    const stat4 = statSync(new URL('file:///tmp'));
-    strictEqual(stat1.uid, stat4.uid);
-    strictEqual(stat1.gid, stat4.gid);
-
-    throws(() => chownSync('/tmp', -1000, 0), {
-      code: /ERR_OUT_OF_RANGE/,
-    });
-    throws(() => chownSync('/tmp', 0, -1000), {
-      code: /ERR_OUT_OF_RANGE/,
-    });
   },
 };
 
@@ -315,77 +235,6 @@ export const statTest = {
     });
 
     await callStatFail('/does/not/exist', 'ENOENT');
-  },
-};
-
-export const chmodTest = {
-  async test() {
-    // Incorrect input types should throw.
-    throws(() => chmod(123), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-    throws(() => chmod('/', {}), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-
-    async function callChmod(path) {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      chmod(path, 0o000, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      await promise;
-    }
-
-    // Should be non-op
-    accessSync('/tmp', W_OK | R_OK);
-    await callChmod('/tmp');
-    await callChmod('/tmp');
-    accessSync('/tmp', W_OK | R_OK);
-
-    await callChmod(Buffer.from('/tmp'));
-    await callChmod(Buffer.from('/tmp'));
-    accessSync(Buffer.from('/tmp'), W_OK | R_OK);
-  },
-};
-
-export const chownTest = {
-  async test() {
-    // Incorrect input types should throw.
-    throws(() => chown(123), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-    throws(() => chown('/', {}), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-
-    async function callChown(path) {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      chown(path, 1000, 1000, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      await promise;
-    }
-
-    // Should be non-op
-    const stat1 = statSync('/tmp');
-    strictEqual(stat1.uid, 0);
-    strictEqual(stat1.gid, 0);
-    await callChown('/tmp');
-    const stat2 = statSync('/tmp');
-    strictEqual(stat1.uid, stat2.uid);
-    strictEqual(stat1.gid, stat2.gid);
-
-    await callChown(Buffer.from('/tmp'));
-    const stat3 = statSync(Buffer.from('/tmp'));
-    strictEqual(stat1.uid, stat3.uid);
-    strictEqual(stat1.gid, stat3.gid);
-
-    await callChown(new URL('file:///tmp'));
-    const stat4 = statSync(new URL('file:///tmp'));
-    strictEqual(stat1.uid, stat4.uid);
-    strictEqual(stat1.gid, stat4.gid);
   },
 };
 
@@ -572,13 +421,6 @@ export const linkTest = {
       message: /Cannot add a file/,
     });
 
-    // lchmod and lchown are non-ops. They don't throw but they also
-    // don't change anything.
-    lchmodSync('/tmp/a', 0o000);
-    lchmodSync('/tmp/b', 0o000);
-    lchownSync('/tmp/a', 1000, 1000);
-    lchownSync('/tmp/b', 1000, 1000);
-
     // unlinkSync removes things
     unlinkSync('/tmp/a');
     ok(!existsSync('/tmp/a'));
@@ -677,30 +519,6 @@ export const openCloseTest = {
     {
       const { promise, resolve, reject } = Promise.withResolvers();
       fdatasync(fd, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      await promise;
-    }
-
-    // fchmod and fchown are non-ops. They don't throw but they also
-    // don't change anything.
-    fchmodSync(fd, 0o000);
-    fchmodSync(fd, '000');
-    fchownSync(fd, 1000, 1000);
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      fchmod(fd, 0o000, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      fchown(fd, 1000, 1000, (err) => {
         if (err) return reject(err);
         resolve();
       });

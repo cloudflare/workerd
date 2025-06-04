@@ -25,7 +25,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars,@typescript-eslint/no-unnecessary-condition */
 
 import {
-  kMaxUserId,
   stringToFlags,
   getValidatedFd,
   validateBufferArray,
@@ -39,6 +38,8 @@ import {
   type SymlinkType,
   validatePosition,
   validateAccessArgs,
+  validateChownArgs,
+  validateChmodArgs,
 } from 'node-internal:internal_fs_utils';
 import {
   validateInteger,
@@ -134,8 +135,10 @@ export function appendFileSync(
 }
 
 export function chmodSync(path: FilePath, mode: string | number): void {
-  parseFileMode(mode, 'mode');
-  accessSync(path, F_OK);
+  const { pathOrFd } = validateChmodArgs(path, mode);
+  if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chmod' });
+  }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
   // we just return as a non-op.
@@ -144,9 +147,10 @@ export function chmodSync(path: FilePath, mode: string | number): void {
 }
 
 export function chownSync(path: FilePath, uid: number, gid: number): void {
-  validateInteger(uid, 'uid', -1, kMaxUserId);
-  validateInteger(gid, 'gid', -1, kMaxUserId);
-  accessSync(path, F_OK);
+  const { pathOrFd } = validateChownArgs(path, uid, gid);
+  if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chown' });
+  }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of ownership. Once we validate the inputs we just
   // return as a non-op.
@@ -239,10 +243,8 @@ export function fchmodSync(fd: number, mode: string | number): void {
 }
 
 export function fchownSync(fd: number, uid: number, gid: number): void {
-  fd = getValidatedFd(fd);
-  validateInteger(uid, 'uid', -1, kMaxUserId);
-  validateInteger(gid, 'gid', -1, kMaxUserId);
-  if (cffs.stat(fd, { followSymlinks: true }) == null) {
+  const { pathOrFd } = validateChownArgs(fd, uid, gid);
+  if (cffs.stat(pathOrFd as number, { followSymlinks: true }) == null) {
     throw new ERR_EBADF({ syscall: 'fchown' });
   }
   // We do not implement chown in any meaningful way as our filesystem
@@ -321,10 +323,9 @@ export function futimesSync(
 }
 
 export function lchmodSync(path: FilePath, mode: string | number): void {
-  path = normalizePath(path);
-  parseFileMode(mode, 'mode');
-  if (cffs.stat(normalizePath(path), { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT(path.pathname, { syscall: 'lchmod' });
+  const { pathOrFd } = validateChmodArgs(path, mode);
+  if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
+    throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchmod' });
   }
   // We do not implement chmod in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs
@@ -334,11 +335,9 @@ export function lchmodSync(path: FilePath, mode: string | number): void {
 }
 
 export function lchownSync(path: FilePath, uid: number, gid: number): void {
-  path = normalizePath(path);
-  validateInteger(uid, 'uid', -1, kMaxUserId);
-  validateInteger(gid, 'gid', -1, kMaxUserId);
-  if (cffs.stat(normalizePath(path), { followSymlinks: false }) == null) {
-    throw new ERR_ENOENT(path.pathname, { syscall: 'lchown' });
+  const { pathOrFd } = validateChownArgs(path, uid, gid);
+  if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
+    throw new ERR_ENOENT((path as URL).pathname, { syscall: 'lchown' });
   }
   // We do not implement chown in any meaningful way as our filesystem
   // has no concept of user-defined permissions. Once we validate the inputs

@@ -733,7 +733,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
 }
 
 void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
-  // TODO(node:fs): Implement the force option.
+  // TODO(node-fs): Implement the force option.
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
   NormalizedFilePath normalizedPath(kj::mv(path));
