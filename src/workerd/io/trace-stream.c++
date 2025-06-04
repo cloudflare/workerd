@@ -797,9 +797,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
     KJ_LOG(WARNING, "TailStreamTarget shutdown");
-    if (doFulfill) {
-      doneFulfiller->fulfill();
-    }
     if (doneFulfiller->isWaiting()) {
       doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
     }
@@ -842,7 +839,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         rpc::TailStreamTarget::TailStreamResults::Builder results = reportContext.initResults();
         this->pipelineTracer = kj::none;
         results.setStop(true);
-        doFulfill = true;
+        doneFulfiller->fulfill();
         return kj::READY_NOW;
       }
 
@@ -917,9 +914,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       pipelineTracer->addTracesFromChild(assembledTraces);
       this->pipelineTracer = kj::none;
       results.setStop(true);
-      doFulfill = true;
-      //doneFulfiller->fulfill();
       KJ_LOG(WARNING, "returning trace fulfillment");
+      doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
     // TODO: An alternative approach could try to not create a separate WorkerInterface/custom
@@ -1062,6 +1058,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     // the stream should be stopped and will fulfill the done promise.
     bool finishing = false;
 
+    // When a tail worker receives its outcome event, we need to ensure that the final tail worker
+    // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
+    // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
+    bool doFulfill = false;
+
     for (auto& event: events) {
       // If we already received an outcome event, we will stop processing any
       // further events.
@@ -1135,12 +1136,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
-      /*if (doFulfill) {
+      if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
             [&](jsg::Lock& js, jsg::Value&& value) {
           doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
         });
-      }*/
+      }
       return ioContext.awaitJs(js, kj::mv(p));
     }
     return kj::READY_NOW;
@@ -1160,11 +1161,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer;
   bool isFirst;
   kj::Vector<tracing::TailEvent> events;
-
-  // When a tail worker receives its outcome event, we need to ensure that the final tail worker
-  // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
-  // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
-  bool doFulfill = false;
 };
 }  // namespace
 
