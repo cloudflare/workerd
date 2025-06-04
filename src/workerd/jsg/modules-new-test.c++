@@ -98,10 +98,7 @@ struct TestTypeWrapper {
   static TestTypeWrapper& from(v8::Isolate*) {
     KJ_UNIMPLEMENTED("not implemented");
   }
-  v8::Local<v8::Value> wrap(jsg::Lock& lock,
-      v8::Local<v8::Context>,
-      kj::Maybe<v8::Local<v8::Object>>,
-      jsg::Ref<TestType>) {
+  v8::Local<v8::Value> wrap(jsg::Lock& lock, kj::Maybe<v8::Local<v8::Object>>, jsg::Ref<TestType>) {
     KJ_UNIMPLEMENTED("not implemented");
   }
 };
@@ -368,10 +365,8 @@ KJ_TEST("A built-in bundle with two modules") {
       static W w;
       return w;
     }
-    v8::Local<v8::Value> wrap(jsg::Lock& lock,
-        v8::Local<v8::Context>,
-        kj::Maybe<v8::Local<v8::Object>>,
-        jsg::Ref<TestType>) {
+    v8::Local<v8::Value> wrap(
+        jsg::Lock& lock, kj::Maybe<v8::Local<v8::Object>>, jsg::Ref<TestType>) {
       return v8::Local<v8::Value>();
     }
   };
@@ -949,7 +944,7 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
       auto ext = js.alloc<TestType>(js, specifier);
       auto& wrapper = TestIsolate_TypeWrapper::from(js.v8Isolate);
       auto fn = Module::compileEvalFunction(js, "bar(123);"_kj, "foo"_kj,
-          JsObject(wrapper.wrap(js, js.v8Context(), kj::none, ext.addRef())), observer);
+          JsObject(wrapper.wrap(js, kj::none, ext.addRef())), observer);
       return js.tryCatch([&] {
         fn(js);
         KJ_ASSERT(ext->barCalled);

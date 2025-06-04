@@ -443,7 +443,7 @@ void* getJsCageBase();
 //       v8::Local<v8::Context> context = lock.newContext(lock.isolate, MyContextType());
 //
 //       // Create an instance of MyType.
-//       v8::Local<v8::Object> obj = lock.getTypeHandler<MyType>().wrap(lock, context, MyType());
+//       v8::Local<v8::Object> obj = lock.getTypeHandler<MyType>().wrap(lock, MyType());
 //     });
 //
 template <typename TypeWrapper>
@@ -527,8 +527,7 @@ class Isolate: public IsolateBase {
 
   v8::Local<v8::Value> wrapException(
       Lock& js, v8::Local<v8::Context> context, kj::Exception&& exception) override {
-    return getWrapperByContext(context)->wrap(
-        js, context, kj::none, kj::fwd<kj::Exception>(exception));
+    return getWrapperByContext(context)->wrap(js, kj::none, kj::fwd<kj::Exception>(exception));
   }
 
   bool serialize(
@@ -577,9 +576,8 @@ class Isolate: public IsolateBase {
 
     // Wrap a C++ value, returning a v8::Local (possibly of a specific type).
     template <typename T>
-    auto wrap(v8::Local<v8::Context> context, T&& value) {
-      return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::fwd<T>(value));
+    auto wrap(T&& value) {
+      return jsgIsolate.getWrapperByContext(v8Context())->wrap(*this, kj::none, kj::fwd<T>(value));
     }
 
     // Wrap a context-independent value. Only a few built-in types, like numbers and strings,
@@ -649,20 +647,19 @@ class Isolate: public IsolateBase {
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
         jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction)
         override {
-      return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(simpleFunction));
+      return jsgIsolate.getWrapperByContext(context)->wrap(*this, kj::none, kj::mv(simpleFunction));
     }
     v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
             returningFunction) override {
       return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(returningFunction));
+          *this, kj::none, kj::mv(returningFunction));
     }
     v8::Local<v8::Function> wrapPromiseReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<jsg::Promise<jsg::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
             returningFunction) override {
       return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(returningFunction));
+          *this, kj::none, kj::mv(returningFunction));
     }
     kj::String toString(v8::Local<v8::Value> value) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<kj::String>(
@@ -678,8 +675,7 @@ class Isolate: public IsolateBase {
           *this, value, jsg::TypeErrorContext::other());
     }
     v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
-      return jsgIsolate.getWrapperByContext(*this)->wrap(
-          *this, v8Context(), kj::none, kj::mv(promise));
+      return jsgIsolate.getWrapperByContext(*this)->wrap(*this, kj::none, kj::mv(promise));
     }
     jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Value> promise) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<jsg::Value>>(

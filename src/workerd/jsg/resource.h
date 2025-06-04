@@ -215,16 +215,15 @@ struct MethodCallback<TypeWrapper,
 
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto obj = args.This();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
-      auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto& self = extractInternalPointer<T, isContext>(lock.v8Context(), obj);
       if constexpr (isVoid<Ret>()) {
         (self.*method)(wrapper.template unwrap<Args>(lock, args, indexes,
             TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(lock, context, obj,
+        return wrapper.wrap(lock, obj,
             (self.*method)(wrapper.template unwrap<Args>(lock, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
@@ -275,17 +274,16 @@ struct MethodCallback<TypeWrapper,
     }
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto obj = args.This();
       auto& wrapper = TypeWrapper::from(isolate);
-      auto& self = extractInternalPointer<T, isContext>(context, obj);
       auto& lock = Lock::from(isolate);
+      auto& self = extractInternalPointer<T, isContext>(lock.v8Context(), obj);
       if constexpr (isVoid<Ret>()) {
         (self.*method)(lock,
             wrapper.template unwrap<Args>(lock, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(lock, context, obj,
+        return wrapper.wrap(lock, obj,
             (self.*method)(lock,
                 wrapper.template unwrap<Args>(lock, args, indexes,
                     TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
@@ -336,17 +334,16 @@ struct MethodCallback<TypeWrapper,
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto obj = args.This();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
-      auto& self = extractInternalPointer<T, isContext>(context, obj);
+      auto& self = extractInternalPointer<T, isContext>(lock.v8Context(), obj);
       if constexpr (isVoid<Ret>()) {
         (self.*method)(args,
             wrapper.template unwrap<Args>(lock, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(lock, context, obj,
+        return wrapper.wrap(lock, obj,
             (self.*method)(args,
                 wrapper.template unwrap<Args>(lock, args, indexes,
                     TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
@@ -412,14 +409,13 @@ struct StaticMethodCallback<TypeWrapper,
     }
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
       if constexpr (isVoid<Ret>()) {
         (*method)(wrapper.template unwrap<Args>(lock, args, indexes,
             TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
+        return wrapper.wrap(lock, kj::none,
             (*method)(wrapper.template unwrap<Args>(lock, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
@@ -467,7 +463,6 @@ struct StaticMethodCallback<TypeWrapper,
 
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& lock = Lock::from(isolate);
       if constexpr (isVoid<Ret>()) {
@@ -475,7 +470,7 @@ struct StaticMethodCallback<TypeWrapper,
             wrapper.template unwrap<Args>(lock, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
+        return wrapper.wrap(lock, kj::none,
             (*method)(lock,
                 wrapper.template unwrap<Args>(lock, args, indexes,
                     TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
@@ -523,7 +518,6 @@ struct StaticMethodCallback<TypeWrapper,
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto& lock = Lock::from(isolate);
       auto& wrapper = TypeWrapper::from(isolate);
       if constexpr (isVoid<Ret>()) {
@@ -531,7 +525,7 @@ struct StaticMethodCallback<TypeWrapper,
             wrapper.template unwrap<Args>(lock, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(lock, context, kj::none,
+        return wrapper.wrap(lock, kj::none,
             (*method)(args,
                 wrapper.template unwrap<Args>(lock, args, indexes,
                     TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
@@ -578,7 +572,6 @@ struct GetterCallback;
       }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
-        auto context = isolate->GetCurrentContext();                                               \
         auto obj = info.This();                                                                    \
         auto& js = Lock::from(isolate);                                                            \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
@@ -586,9 +579,9 @@ struct GetterCallback;
         if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
-        auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
+        auto& self = extractInternalPointer<T, isContext>(js.v8Context(), obj);                    \
         return wrapper.wrap(                                                                       \
-            js, context, obj, (self.*method)(wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));   \
+            js, obj, (self.*method)(wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));            \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -622,7 +615,6 @@ struct GetterCallback;
       }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
-        auto context = isolate->GetCurrentContext();                                               \
         auto& js = Lock::from(isolate);                                                            \
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
@@ -630,9 +622,9 @@ struct GetterCallback;
         if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
-        auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
-        return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(js, wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));                 \
+        auto& self = extractInternalPointer<T, isContext>(js.v8Context(), obj);                    \
+        return wrapper.wrap(                                                                       \
+            js, obj, (self.*method)(js, wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));        \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -696,7 +688,6 @@ struct PropertyGetterCallback;
       }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
-        auto context = isolate->GetCurrentContext();                                               \
         auto& js = Lock::from(isolate);                                                            \
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
@@ -704,9 +695,9 @@ struct PropertyGetterCallback;
         if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
-        auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
+        auto& self = extractInternalPointer<T, isContext>(js.v8Context(), obj);                    \
         return wrapper.wrap(                                                                       \
-            js, context, obj, (self.*method)(wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));   \
+            js, obj, (self.*method)(wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));            \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -717,10 +708,9 @@ struct PropertyGetterCallback;
       }                                                                                            \
       auto isolate = options.isolate;                                                              \
       v8::HandleScope handleScope(isolate);                                                        \
-      auto context = isolate->GetCurrentContext();                                                 \
-      auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
-      auto& wrapper = TypeWrapper::from(isolate);                                                  \
       auto& js = Lock::from(isolate);                                                              \
+      auto& self = extractInternalPointer<T, isContext>(js.v8Context(), receiver);                 \
+      auto& wrapper = TypeWrapper::from(isolate);                                                  \
                                                                                                    \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
         return (self.*method)(wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...);                   \
@@ -740,7 +730,6 @@ struct PropertyGetterCallback;
       }                                                                                            \
       liftKj(info, [&]() {                                                                         \
         auto isolate = info.GetIsolate();                                                          \
-        auto context = isolate->GetCurrentContext();                                               \
         auto& js = Lock::from(isolate);                                                            \
         auto obj = info.This();                                                                    \
         auto& wrapper = TypeWrapper::from(isolate);                                                \
@@ -748,9 +737,9 @@ struct PropertyGetterCallback;
         if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {          \
           throwTypeError(isolate, kIllegalInvocation);                                             \
         }                                                                                          \
-        auto& self = extractInternalPointer<T, isContext>(context, obj);                           \
-        return wrapper.wrap(js, context, obj,                                                      \
-            (self.*method)(js, wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));                 \
+        auto& self = extractInternalPointer<T, isContext>(js.v8Context(), obj);                    \
+        return wrapper.wrap(                                                                       \
+            js, obj, (self.*method)(js, wrapper.unwrap(js, (kj::Decay<Args>*)nullptr)...));        \
       });                                                                                          \
     }                                                                                              \
     template <typename ReturnType = Ret>                                                           \
@@ -761,9 +750,8 @@ struct PropertyGetterCallback;
       }                                                                                            \
       auto isolate = options.isolate;                                                              \
       v8::HandleScope handleScope(isolate);                                                        \
-      auto context = isolate->GetCurrentContext();                                                 \
-      auto& self = extractInternalPointer<T, isContext>(context, receiver);                        \
       auto& js = Lock::from(isolate);                                                              \
+      auto& self = extractInternalPointer<T, isContext>(js.v8Context(), receiver);                 \
       auto& wrapper = TypeWrapper::from(isolate);                                                  \
                                                                                                    \
       return liftKj<ReturnType>(isolate, [&]() -> ReturnType {                                     \
@@ -985,7 +973,7 @@ struct DeserializeInvoker<TypeWrapper,
     Ret(Lock&, Tag, Deserializer&, const TypeHandler<Types>&...)> {
   static v8::Local<v8::Object> call(
       TypeWrapper& wrapper, Lock& js, Tag tag, Deserializer& deserializer) {
-    return wrapper.wrap(js, js.v8Context(), kj::none,
+    return wrapper.wrap(js, kj::none,
         T::deserialize(
             js, tag, deserializer, TypeWrapper::template TYPE_HANDLER_INSTANCE<Types>...));
   }
@@ -1128,17 +1116,16 @@ struct WildcardPropertyCallbacks<TypeWrapper,
     v8::Intercepted result = v8::Intercepted::kNo;
     liftKj(info, [&]() -> v8::Local<v8::Value> {
       auto isolate = info.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       if (!wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
-      auto& self = extractInternalPointer<T, false>(context, obj);
       auto& lock = Lock::from(isolate);
+      auto& self = extractInternalPointer<T, false>(lock.v8Context(), obj);
       KJ_IF_SOME(value, (self.*getNamedMethod)(lock, kj::str(name.As<v8::String>()))) {
         result = v8::Intercepted::kYes;
-        return wrapper.wrap(lock, context, obj, kj::fwd<Ret>(value));
+        return wrapper.wrap(lock, obj, kj::fwd<Ret>(value));
       } else {
         // Return an empty handle to indicate the member doesn't exist.
         return {};
@@ -1669,10 +1656,7 @@ class ResourceWrapper {
     return typeid(T);
   }
 
-  v8::Local<v8::Object> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Ref<T>&& value) {
+  v8::Local<v8::Object> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Ref<T>&& value) {
     // Wrap a value of type T.
 
     auto isolate = js.v8Isolate;
@@ -1697,7 +1681,7 @@ class ResourceWrapper {
           i(*value, wrapper);
         }
       }
-      v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
+      v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(js.v8Context()));
       value.attachWrapper(isolate, object);
       return object;
     }
@@ -1904,10 +1888,8 @@ class ObjectWrapper {
   }
 
   // Wrap a value of type T.
-  v8::Local<v8::Object> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Ref<Object>&& value) {
+  v8::Local<v8::Object> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Ref<Object>&& value) {
     auto isolate = js.v8Isolate;
 
     KJ_IF_SOME(h, value->tryGetHandle(isolate)) {
@@ -1924,7 +1906,7 @@ class ObjectWrapper {
       KJ_IF_SOME(i, info.reflectionInitializer) {
         i(*value, wrapper);
       }
-      v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
+      v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(js.v8Context()));
       value.attachWrapper(isolate, object);
       return object;
     }

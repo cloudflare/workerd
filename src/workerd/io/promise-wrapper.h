@@ -30,12 +30,10 @@ class PromiseWrapper {
   // For some reason, this wasn't needed for jsg::V8Ref<T>...
 
   template <typename T>
-  v8::Local<v8::Promise> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Promise<T> promise) {
+  v8::Local<v8::Promise> wrap(
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Promise<T> promise) {
     auto jsPromise = IoContext::current().awaitIoLegacy(js, kj::mv(promise));
-    return static_cast<Self&>(*this).wrap(js, context, kj::mv(creator), kj::mv(jsPromise));
+    return static_cast<Self&>(*this).wrap(js, kj::mv(creator), kj::mv(jsPromise));
   }
 
   template <typename T>

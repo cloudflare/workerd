@@ -508,8 +508,7 @@ const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandl
 
 jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
-  return jsg::JsObject(
-      kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(ref)));
+  return jsg::JsObject(kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(kj::mv(ref)));
 }
 
 const jsg::IsolateObserver& WorkerdApi::getObserver() const {
@@ -840,31 +839,27 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
 
     KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
-      value = lock.wrap(context,
-          lock.alloc<api::Fetcher>(pipeline.channel,
-              pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
-                                    : api::Fetcher::RequiresHostAndProtocol::NO,
-              pipeline.isInHouse));
+      value = lock.wrap(lock.alloc<api::Fetcher>(pipeline.channel,
+          pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
+                                : api::Fetcher::RequiresHostAndProtocol::NO,
+          pipeline.isInHouse));
     }
 
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {
-      value = lock.wrap(context,
-          lock.alloc<api::KvNamespace>(
-              kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
+      value = lock.wrap(lock.alloc<api::KvNamespace>(
+          kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2, Global::R2Bucket) {
-      value = lock.wrap(
-          context, lock.alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
+      value = lock.wrap(lock.alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(r2a, Global::R2Admin) {
-      value = lock.wrap(
-          context, lock.alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
+      value = lock.wrap(lock.alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(ns, Global::QueueBinding) {
-      value = lock.wrap(context, lock.alloc<api::WorkerQueue>(ns.subrequestChannel));
+      value = lock.wrap(lock.alloc<api::WorkerQueue>(ns.subrequestChannel));
     }
 
     KJ_CASE_ONEOF(key, Global::CryptoKey) {
@@ -874,13 +869,13 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           keyData = kj::heapArray(data.asPtr());
         }
         KJ_CASE_ONEOF(json, Global::Json) {
-          v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
+          v8::Local<v8::String> str = lock.wrap(kj::mv(json.text));
           v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
           keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(obj);
         }
       }
 
-      v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
+      v8::Local<v8::String> algoStr = lock.wrap(kj::mv(key.algorithm.text));
       v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
       auto importKeyAlgo =
           lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(algo);
@@ -889,43 +884,40 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
           api::SubtleCrypto().importKeySync(lock, key.format, kj::mv(keyData),
               api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.extractable, key.usages);
 
-      value = lock.wrap(context, kj::mv(importedKey));
+      value = lock.wrap(kj::mv(importedKey));
     }
 
     KJ_CASE_ONEOF(cache, Global::MemoryCache) {
-      value = lock.wrap(context,
-          lock.alloc<api::MemoryCache>(
-              api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
-                  {
-                    .maxKeys = cache.maxKeys,
-                    .maxValueSize = cache.maxValueSize,
-                    .maxTotalValueSize = cache.maxTotalValueSize,
-                  })));
+      value = lock.wrap(lock.alloc<api::MemoryCache>(
+          api::SharedMemoryCache::Use(memoryCacheProvider.getInstance(cache.cacheId),
+              {
+                .maxKeys = cache.maxKeys,
+                .maxValueSize = cache.maxValueSize,
+                .maxTotalValueSize = cache.maxTotalValueSize,
+              })));
     }
 
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
-      value = lock.wrap(context, lock.alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
+      value = lock.wrap(lock.alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
     }
 
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
-      value = lock.wrap(context,
-          lock.alloc<api::DurableObjectNamespace>(
-              ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+      value = lock.wrap(lock.alloc<api::DurableObjectNamespace>(
+          ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
       // Use subrequestChannel as logfwdrChannel
-      value = lock.wrap(context,
-          lock.alloc<api::AnalyticsEngine>(
-              ae.subrequestChannel, kj::str(ae.dataset), ae.version, ownerId));
+      value = lock.wrap(lock.alloc<api::AnalyticsEngine>(
+          ae.subrequestChannel, kj::str(ae.dataset), ae.version, ownerId));
     }
 
     KJ_CASE_ONEOF(text, kj::String) {
-      value = lock.wrap(context, kj::mv(text));
+      value = lock.wrap(kj::mv(text));
     }
 
     KJ_CASE_ONEOF(data, kj::Array<byte>) {
-      value = lock.wrap(context, kj::heapArray(data.asPtr()));
+      value = lock.wrap(kj::heapArray(data.asPtr()));
     }
 
     KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
@@ -961,12 +953,12 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       }
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
-      value = lock.wrap(context,
+      value = lock.wrap(
           lock.alloc<api::Hyperdrive>(hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
               kj::str(hyperdrive.user), kj::str(hyperdrive.password), kj::str(hyperdrive.scheme)));
     }
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
-      value = lock.wrap(context, lock.alloc<api::UnsafeEval>());
+      value = lock.wrap(lock.alloc<api::UnsafeEval>());
     }
   }
 

@@ -604,12 +604,12 @@ struct JsValueWrapper {
   }
 
 #define V(Name)                                                                                    \
-  v8::Local<v8::Name> wrap(jsg::Lock& js, v8::Local<v8::Context> context,                          \
-      kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {                                  \
+  v8::Local<v8::Name> wrap(                                                                        \
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Js##Name value) {                   \
     return value;                                                                                  \
   }                                                                                                \
-  v8::Local<v8::Name> wrap(jsg::Lock& js, v8::Local<v8::Context> context,                          \
-      kj::Maybe<v8::Local<v8::Object>> creator, JsRef<Js##Name> value) {                           \
+  v8::Local<v8::Name> wrap(                                                                        \
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, JsRef<Js##Name> value) {            \
     return value.getHandle(js);                                                                    \
   }
 

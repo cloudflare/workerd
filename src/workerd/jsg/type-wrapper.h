@@ -47,10 +47,7 @@ class V8HandleWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      v8::Local<T> value) {
+  v8::Local<T> wrap(jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, v8::Local<T> value) {
     return value;
   }
 
@@ -112,10 +109,7 @@ class V8HandleWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      v8::Global<T> value) {
+  v8::Local<T> wrap(jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, v8::Global<T> value) {
     return value.Get(js.v8Isolate);
   }
 
@@ -132,10 +126,7 @@ class V8HandleWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      V8Ref<T> value) {
+  v8::Local<T> wrap(jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, V8Ref<T> value) {
     return value.getHandle(js.v8Isolate);
   }
 
@@ -153,10 +144,8 @@ class UnimplementedWrapper {
     return typeid(Unimplemented);
   }
 
-  v8::Local<v8::Value> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Unimplemented value) = delete;
+  v8::Local<v8::Value> wrap(
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Unimplemented value) = delete;
   kj::Maybe<Unimplemented> tryUnwrap(Lock& js,
       v8::Local<v8::Value> handle,
       Unimplemented*,
@@ -189,7 +178,7 @@ class UnimplementedWrapper {
 // The extension mixin must declare the following methods:
 //
 //     static constexpr const char* getName(T* dummy);
-//     v8::Local<v8::Value> wrap(jsg::Lock& js, v8::Local<v8::Context> jsContext,
+//     v8::Local<v8::Value> wrap(jsg::Lock& js,
 //                               kj::Maybe<v8::Local<v8::Object>> creator,
 //                               T cppValue);
 //     kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> jsHandle,
@@ -311,7 +300,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 // The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
 // values. It primarily implements two methods:
 //
-//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
+//     v8::Local<v8::Value> wrap(jsg::Lock& js,
 //                               kj::Maybe<v8::Local<v8::Object>> creator
 //                               T cppValue);
 //     // Converts cppValue to JavaScript.
@@ -608,8 +597,7 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
  public:
   v8::Local<v8::Value> wrap(Lock& js, T value) const override {
     auto isolate = js.v8Isolate;
-    auto context = js.v8Context();
-    return TypeWrapper::from(isolate).wrap(js, context, kj::none, kj::mv(value));
+    return TypeWrapper::from(isolate).wrap(js, kj::none, kj::mv(value));
   }
 
   kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const override {

@@ -541,20 +541,15 @@ class GeneratorWrapper {
   }
 
   template <typename T>
+  v8::Local<v8::Object> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>>, Generator<T>&&) = delete;
+
+  template <typename T>
   v8::Local<v8::Object> wrap(
-      Lock& js, v8::Local<v8::Context>, kj::Maybe<v8::Local<v8::Object>>, Generator<T>&&) = delete;
+      Lock& js, kj::Maybe<v8::Local<v8::Object>>, AsyncGenerator<T>&&) = delete;
 
   template <typename T>
-  v8::Local<v8::Object> wrap(Lock& js,
-      v8::Local<v8::Context>,
-      kj::Maybe<v8::Local<v8::Object>>,
-      AsyncGenerator<T>&&) = delete;
-
-  template <typename T>
-  v8::Local<v8::Object> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>>,
-      GeneratorNext<T>&& next) = delete;
+  v8::Local<v8::Object> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>>, GeneratorNext<T>&& next) = delete;
   // Generator, AsyncGenerator, and GeneratorNext instances should never be
   // passed back out into JavaScript. Use Iterators for that.
 
@@ -678,29 +673,25 @@ class SequenceWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      jsg::Sequence<U> sequence) {
+  v8::Local<v8::Value> wrap(
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, jsg::Sequence<U> sequence) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
-      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(sequence[i]));
+      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      jsg::Sequence<U>& sequence) {
+  v8::Local<v8::Value> wrap(
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, jsg::Sequence<U>& sequence) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
-      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(sequence[i]));
+      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
