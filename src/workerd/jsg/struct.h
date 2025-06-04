@@ -116,7 +116,7 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     // For similar reasons, if we are initializing this dictionary from null/undefined, and the
     // dictionary has required members, we throw.
 
-    auto isolate = context->GetIsolate();
+    auto isolate = js.v8Isolate;
 
     if (handle->IsUndefined() || handle->IsNull()) {
       if constexpr (((webidl::isOptional<typename FieldWrappers::Type> ||

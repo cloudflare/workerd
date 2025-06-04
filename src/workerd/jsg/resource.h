@@ -1774,7 +1774,7 @@ class ResourceWrapper {
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
       setupJavascript(js);
-      return JsContext<T>(context, kj::mv(ptr), kj::mv(maybeNewModuleRegistry));
+      return JsContext<T>(js.v8Isolate, context, kj::mv(ptr), kj::mv(maybeNewModuleRegistry));
     });
   }
 
@@ -1788,7 +1788,7 @@ class ResourceWrapper {
     if (handle->IsObject()) {
       v8::Local<v8::Object> instance =
           v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
-              getTemplate(context->GetIsolate(), nullptr));
+              getTemplate(js.v8Isolate, nullptr));
       if (!instance.IsEmpty()) {
         return extractInternalPointer<T, false>(context, instance);
       }
