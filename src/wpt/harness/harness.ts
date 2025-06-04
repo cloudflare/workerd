@@ -121,7 +121,7 @@ class RunnerState {
   public options: TestRunnerOptions;
 
   // A test is pushed to this list as soon as it is discovered
-  public tests: Test[] = [];
+  public subtests: Test[] = [];
 
   // Callbacks to be run once the entire test is done.
   public completionCallbacks: UnknownFunc[] = [];
@@ -140,7 +140,7 @@ class RunnerState {
 
   public async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
-    await Promise.all(this.tests.map((t) => t.promise));
+    await Promise.all(this.subtests.map((t) => t.promise));
 
     for (const cleanFn of this.completionCallbacks) {
       cleanFn();
@@ -149,20 +149,18 @@ class RunnerState {
     const expectedFailures = new FilterList(this.options.expectedFailures);
     const unexpectedFailures = [];
 
-    for (const test of this.tests) {
-      const err = test.error;
+    for (const subtest of this.subtests) {
+      const err = subtest.error;
 
-      if (!err || err === 'SKIPPED') {
-        continue;
-      }
-
-      if (!expectedFailures.delete(err.message)) {
-        err.message = sanitize_unpaired_surrogates(err.message);
-        console.warn(err);
-        unexpectedFailures.push(err.message);
-      } else if (this.options.verbose) {
-        err.message = sanitize_unpaired_surrogates(err.message);
-        console.warn('Expected failure: ', err);
+      if (err instanceof Error) {
+        if (!expectedFailures.delete(err.message)) {
+          err.message = sanitize_unpaired_surrogates(err.message);
+          console.warn(err);
+          unexpectedFailures.push(err.message);
+        } else if (this.options.verbose) {
+          err.message = sanitize_unpaired_surrogates(err.message);
+          console.warn('Expected failure: ', err);
+        }
       }
     }
 
@@ -203,7 +201,10 @@ class RunnerState {
 
 declare global {
   /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
+  // Current RunnerState
   var state: RunnerState;
+  // All RunnerStates (to get results later)
+  var results: { [file: string]: RunnerState };
   /* eslint-enable no-var */
 }
 
@@ -379,6 +380,7 @@ export function createRunner(
   }
 
   const onlyFlagUsed = Object.values(config).some((options) => options.only);
+  globalThis.results = {};
 
   return {
     run(file: string): TestCase | Record<string, never> {
@@ -415,6 +417,15 @@ async function runTest(
     );
   }
 
+  const testUrl = new URL(path.join(moduleBase, file), 'http://localhost');
+
+  // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
+  // Update the URL's port so we can connect to it
+  testUrl.port = env.HTTP_PORT ?? '';
+
+  globalThis.state = new RunnerState(testUrl, file, env, options);
+  globalThis.results[file] = globalThis.state;
+
   if (options.disabledTests === true) {
     console.warn(
       `All tests in ${file} have been disabled because "${options.comment}".`
@@ -429,13 +440,6 @@ async function runTest(
     return;
   }
 
-  const testUrl = new URL(path.join(moduleBase, file), 'http://localhost');
-
-  // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
-  // Update the URL's port so we can connect to it
-  testUrl.port = env.HTTP_PORT ?? '';
-
-  globalThis.state = new RunnerState(testUrl, file, env, options);
   const meta = parseWptMetadata(String(env[file]));
 
   if (options.before) {
@@ -464,9 +468,21 @@ function printResults(
   moduleBase: string,
   env: Env
 ): void {
+  const results: string[] = [];
+
   if (env.GEN_TEST_CONFIG) {
-    console.log(generateConfig(config, allTestFiles, moduleBase));
+    results.push(generateConfig(config, allTestFiles, moduleBase));
   }
+
+  if (env.GEN_TEST_REPORT) {
+    results.push(generateReport(config));
+  }
+
+  if (env.GEN_TEST_STATS) {
+    results.push(generateStats(moduleBase, config));
+  }
+
+  console.log(results.join('\n\n'));
 }
 
 function generateConfig(
@@ -489,4 +505,154 @@ function generateConfig(
 import { type TestRunnerConfig } from 'harness/harness';
 
 export default ${JSON.stringify(generatedConfig, null, 2)} satisfies TestRunnerConfig;`;
+}
+
+class WPTTestResult {
+  public test: string;
+  public status: 'OK' | 'ERROR';
+  public subtests: WPTSubtestResult[] = [];
+  // TODO(soon): Track elapsed time
+  public duration: number = 0;
+
+  public constructor(result: RunnerState, options: TestRunnerOptions) {
+    this.test = WPTTestResult.getTestNameFromUrl(result.testUrl);
+    this.status = options.disabledTests === true ? 'ERROR' : 'OK';
+    this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
+  }
+
+  private static getTestNameFromUrl(testUrl: URL): string {
+    const testNameUrl = new URL(testUrl);
+    testNameUrl.pathname = testNameUrl.pathname.replace('.js', '.html');
+    return testNameUrl.href.slice(testNameUrl.origin.length);
+  }
+}
+
+class WPTSubtestResult {
+  public name: string;
+  public status: 'PASS' | 'FAIL';
+  public message?: string;
+  public isExpectedFailure?: true;
+
+  public constructor(result: Test) {
+    this.name = result.name;
+    if (result.error instanceof Error) {
+      this.message = result.error.message;
+      // TODO(soon): This is true in main, but not necessarily if you run a report in local dev
+      this.isExpectedFailure = true;
+      this.status = 'FAIL';
+    } else if (result.error === 'DISABLED') {
+      this.isExpectedFailure = true;
+      this.status = 'FAIL';
+    } else {
+      this.status = 'PASS';
+    }
+  }
+}
+
+function generateReport(config: TestRunnerConfig): string {
+  const results: WPTTestResult[] = [];
+  for (const [file, options] of Object.entries(config)) {
+    const testResult = globalThis.results[file];
+    if (!testResult) {
+      throw new Error(
+        `Unable to find test results for ${file}. This is probably a harness bug`
+      );
+    }
+
+    results.push(new WPTTestResult(testResult, options));
+  }
+
+  return JSON.stringify({ results }, null, 2);
+}
+
+class Stats {
+  public moduleBase: string;
+  public coverage = new CoverageStats();
+  public pass = new PassStats();
+
+  public constructor(moduleBase: string) {
+    this.moduleBase = moduleBase;
+  }
+
+  public toString(): string {
+    const entries = [this.moduleBase, this.coverage, this.pass].join(' | ');
+    return `| ${entries} |`;
+  }
+}
+class CoverageStats {
+  public ok: number = 0;
+  public disabled: number = 0;
+
+  public get total(): number {
+    return this.ok + this.disabled;
+  }
+
+  public get ok_percent(): number {
+    return (this.ok / this.total) * 100;
+  }
+
+  public toString(): string {
+    return [
+      this.ok,
+      this.disabled,
+      this.total,
+      this.ok_percent.toFixed() + ' %',
+    ].join(' | ');
+  }
+}
+
+class PassStats {
+  public pass: number = 0;
+  public fail: number = 0;
+  public disabled: number = 0;
+
+  public get total(): number {
+    return this.pass + this.fail + this.disabled;
+  }
+
+  public get pass_percent(): number {
+    return (this.pass / this.total) * 100;
+  }
+
+  public toString(): string {
+    return [
+      this.pass,
+      this.fail,
+      this.disabled,
+      this.total,
+      this.pass_percent.toFixed() + ' %',
+    ].join(' | ');
+  }
+}
+
+function generateStats(moduleBase: string, config: TestRunnerConfig): string {
+  const stats = new Stats(moduleBase);
+
+  for (const [file, options] of Object.entries(config)) {
+    if (options.disabledTests === true) {
+      stats.coverage.disabled++;
+    } else if (options.omittedTests !== true) {
+      stats.coverage.ok++;
+    }
+
+    const testResult = globalThis.results[file];
+
+    if (!testResult) {
+      throw new Error(
+        `Unable to find test results for ${file}. This is probably a harness bug`
+      );
+    }
+
+    for (const subtestResult of testResult.subtests) {
+      if (subtestResult.error === 'DISABLED') {
+        stats.pass.disabled++;
+      } else if (subtestResult.error instanceof Error) {
+        stats.pass.fail++;
+      } else if (subtestResult.error === undefined) {
+        stats.pass.pass++;
+      }
+    }
+  }
+
+  return stats.toString();
 }

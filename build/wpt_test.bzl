@@ -287,6 +287,8 @@ const unitTests :Workerd.Config = (
           (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
           (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
           (name = "GEN_TEST_CONFIG", fromEnvironment = "GEN_TEST_CONFIG"),
+          (name = "GEN_TEST_REPORT", fromEnvironment = "GEN_TEST_REPORT"),
+          (name = "GEN_TEST_STATS", fromEnvironment = "GEN_TEST_STATS"),
           {bindings}
         ],
         {compat_date}

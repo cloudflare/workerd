@@ -35,7 +35,7 @@ declare global {
   function test(func: TestFn, name: string, properties?: unknown): void;
 }
 
-type TestErrorType = Error | 'SKIPPED' | undefined;
+type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
 
 /**
  * A single subtest. A Test is not constructed directly but via the
@@ -65,7 +65,7 @@ export class Test {
   // If this test is asynchronous, stores a promise that resolves on test completion
   public promise?: Promise<void>;
 
-  public constructor(name: string, properties: unknown) {
+  public constructor(name: string, properties?: unknown) {
     this.name = name;
     this.properties = properties;
     this.phase = Test.Phases.INITIAL;
@@ -223,7 +223,10 @@ export class Test {
 
 /* eslint-enable @typescript-eslint/no-this-alias */
 class SkippedTest extends Test {
-  public override error: TestErrorType = 'SKIPPED';
+  public constructor(name: string, reason: TestErrorType) {
+    super(name);
+    this.error = reason;
+  }
 
   public override step(
     _func: UnknownFunc,
@@ -239,13 +242,12 @@ class PromiseTest extends Test {
 }
 
 globalThis.promise_test = (func, name, properties): void => {
-  if (!shouldRunTest(name)) {
-    globalThis.state.tests.push(new SkippedTest(name, properties));
+  if (maybeAddSkippedTest(name)) {
     return;
   }
 
   const testCase = new PromiseTest(name, properties);
-  globalThis.state.tests.push(testCase);
+  globalThis.state.subtests.push(testCase);
 
   const promise = testCase.step(func, testCase, testCase);
 
@@ -291,13 +293,12 @@ class AsyncTest extends Test {
 }
 
 globalThis.async_test = (func, name, properties): void => {
-  if (!shouldRunTest(name)) {
-    globalThis.state.tests.push(new SkippedTest(name, properties));
+  if (maybeAddSkippedTest(name)) {
     return;
   }
 
   const testCase = new AsyncTest(name, properties);
-  globalThis.state.tests.push(testCase);
+  globalThis.state.subtests.push(testCase);
 
   testCase.step(func, testCase, testCase);
 };
@@ -314,34 +315,35 @@ globalThis.async_test = (func, name, properties): void => {
  * given file and must be invariant between runs.
  */
 globalThis.test = (func, name, properties): void => {
-  if (!shouldRunTest(name)) {
-    globalThis.state.tests.push(new SkippedTest(name, properties));
+  if (maybeAddSkippedTest(name)) {
     return;
   }
 
   const testCase = new Test(name, properties);
-  globalThis.state.tests.push(testCase);
+  globalThis.state.subtests.push(testCase);
 
   testCase.step(func, testCase, testCase);
   testCase.done();
 };
 
-function shouldRunTest(message: string): boolean {
+function maybeAddSkippedTest(message: string): boolean {
   const disabledTests = new FilterList(globalThis.state.options.disabledTests);
 
   if (disabledTests.has(message)) {
-    return false;
+    globalThis.state.subtests.push(new SkippedTest(message, 'DISABLED'));
+    return true;
   }
 
   const omittedTests = new FilterList(globalThis.state.options.omittedTests);
 
   if (omittedTests.has(message)) {
-    return false;
+    globalThis.state.subtests.push(new SkippedTest(message, 'OMITTED'));
+    return true;
   }
 
   if (globalThis.state.options.verbose) {
     console.info('run', message);
   }
 
-  return true;
+  return false;
 }
