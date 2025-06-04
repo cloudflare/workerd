@@ -98,12 +98,12 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
       if constexpr (isVoid<Ret>()) {
         func(Lock::from(isolate),
             wrapper.template unwrap<Args>(
-                context, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
+                js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
       } else {
         return wrapper.wrap(js, context, args.This(),
             func(Lock::from(isolate),
                 wrapper.template unwrap<Args>(
-                    context, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
+                    js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
       }
     });
   }
@@ -128,12 +128,12 @@ struct FunctorCallback<TypeWrapper,
       if constexpr (isVoid<Ret>()) {
         func(js, args,
             wrapper.template unwrap<Args>(
-                context, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
+                js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
       } else {
         return wrapper.wrap(js, context, args.This(),
             func(js, args,
                 wrapper.template unwrap<Args>(
-                    context, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
+                    js, context, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
       }
     });
   }
@@ -400,7 +400,7 @@ class FunctionWrapper {
 
         v8::Local<v8::Object> result = check(func->NewInstance(context, sizeof...(Args), argv));
         return typeWrapper.template unwrap<Ret>(
-            context, result, TypeErrorContext::callbackReturn());
+            js, context, result, TypeErrorContext::callbackReturn());
       });
     };
 
@@ -436,7 +436,7 @@ class FunctionWrapper {
         auto result = check(func->Call(context, receiver, argv.size(), argv.data()));
         if constexpr (!isVoid<Ret>()) {
           return typeWrapper.template unwrap<Ret>(
-              context, result, TypeErrorContext::callbackReturn());
+              js, context, result, TypeErrorContext::callbackReturn());
         } else {
           return;
         }
@@ -481,7 +481,7 @@ class FunctionWrapper {
 
         if constexpr (!isVoid<Ret>()) {
           return typeWrapper.template unwrap<Ret>(
-              context, result, TypeErrorContext::callbackReturn());
+              js, context, result, TypeErrorContext::callbackReturn());
         } else {
           return;
         }

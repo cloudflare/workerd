@@ -55,8 +55,9 @@ class FieldWrapper {
       v8::Local<v8::Context> context,
       v8::Local<v8::Object> in) {
     v8::Local<v8::Value> jsValue = check(in->Get(context, nameHandle.Get(isolate)));
+    auto& js = Lock::from(isolate);
     return wrapper.template unwrap<Type>(
-        context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
+        js, context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
   }
 
  private:
