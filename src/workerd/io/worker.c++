@@ -1102,9 +1102,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetPromiseCrossContextCallback(
         [](v8::Local<v8::Context> context, v8::Local<v8::Promise> promise,
             v8::Local<v8::Object> tag) -> v8::MaybeLocal<v8::Promise> {
+      auto& js = jsg::Lock::current();
       try {
-        auto& js = jsg::Lock::from(v8::Isolate::GetCurrent());
-
         // Generally this condition is only going to happen when using dynamic imports.
         // It should not be common.
         JSG_REQUIRE(IoContext::hasCurrent(), Error,
@@ -1129,7 +1128,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       } catch (...) {
         auto ex = kj::getCaughtExceptionAsKj();
         KJ_LOG(ERROR, "Setting promise cross context follower failed unexpectedly", ex);
-        jsg::throwInternalError(v8::Isolate::GetCurrent(), kj::mv(ex));
+        jsg::throwInternalError(js.v8Isolate, kj::mv(ex));
         return v8::MaybeLocal<v8::Promise>();
       }
     });
