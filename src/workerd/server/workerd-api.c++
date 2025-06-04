@@ -482,11 +482,10 @@ jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(jsg::Lock& 
 jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<jsg::Dict<NamedExport>>(
-      lock.v8Context(), moduleNamespace);
+      moduleNamespace);
 }
 NamedExport WorkerdApi::unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const {
-  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<NamedExport>(
-      lock.v8Context(), exportVal);
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).unwrap<NamedExport>(exportVal);
 }
 EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   auto& typedLock = kj::downcast<JsgWorkerdIsolate::Lock>(lock);
@@ -877,14 +876,14 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
         KJ_CASE_ONEOF(json, Global::Json) {
           v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
           v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
-          keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(context, obj);
+          keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(obj);
         }
       }
 
       v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
       v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
       auto importKeyAlgo =
-          lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
+          lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(algo);
 
       jsg::Ref<api::CryptoKey> importedKey =
           api::SubtleCrypto().importKeySync(lock, key.format, kj::mv(keyData),

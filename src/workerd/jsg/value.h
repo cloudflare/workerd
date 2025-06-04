@@ -922,7 +922,7 @@ class ArrayWrapper {
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::Value> element = check(array->Get(js.v8Context(), i));
       builder.add(static_cast<TypeWrapper*>(this)->template unwrap<U>(
-          js, js.v8Context(), element, TypeErrorContext::arrayElement(i)));
+          js, element, TypeErrorContext::arrayElement(i)));
     }
     return builder.finish();
   }
@@ -976,7 +976,7 @@ class SetWrapper {
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::Value> element = check(array->Get(js.v8Context(), i));
       auto value = static_cast<TypeWrapper*>(this)->template unwrap<U>(
-          js, js.v8Context(), element, TypeErrorContext::other());
+          js, element, TypeErrorContext::other());
       builder.upsert(kj::mv(value), [&](U& existing, U&& replacement) {
         JSG_FAIL_REQUIRE(TypeError, "Duplicate values in the set after unwrapping.");
       });
@@ -1180,8 +1180,7 @@ class DictWrapper {
         auto strName = convertToUtf8(name);
         const char* cstrName = strName.cStr();
         builder.add(typename Dict<V, K>::Field{kj::mv(strName),
-          wrapper.template unwrap<V>(
-              js, js.v8Context(), value, TypeErrorContext::dictField(cstrName), object)});
+          wrapper.template unwrap<V>(js, value, TypeErrorContext::dictField(cstrName), object)});
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
