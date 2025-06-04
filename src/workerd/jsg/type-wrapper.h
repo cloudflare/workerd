@@ -33,7 +33,7 @@ namespace workerd::jsg {
 template <typename TypeWrapper, typename T>
 concept ValueLessParameter =
     requires(TypeWrapper wrapper, Lock& js, v8::Local<v8::Context> context, T* ptr) {
-      wrapper.unwrap(js, context, ptr);
+      wrapper.unwrap(js, ptr);
     };
 
 // TypeWrapper mixin for V8 handles.
@@ -293,7 +293,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
     return "Configuration";
   }
 
-  Configuration unwrap(Lock& js, v8::Local<v8::Context> context, Configuration*) {
+  Configuration unwrap(Lock& js, Configuration*) {
     return configuration;
   }
 
@@ -321,7 +321,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 //     // (like Promises) where the KJ convention is to assume that the creator must outlive the
 //     // returned object.
 //
-//     T unwrap<T>(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle);
+//     T unwrap<T>(jsg::Lock& js, v8::Local<v8::Value> jsHandle);
 //     // Converts jsValue to C++, expecting type T.
 //
 // The design is based on mixins: TypeWrapper derives from classes that handle each individual
@@ -332,7 +332,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 //     // you can also return `const std::type_info&` here, in which case the type name will
 //     // be derived by stripping off the namespace from the C++ type name.
 //
-//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
+//     v8::Local<v8::Value> wrap(jsg::Lock& js,
 //                               kj::Maybe<v8::Local<v8::Object>> creator,
 //                               T cppValue);
 //     // Converts cppValue to JavaScript.
@@ -481,7 +481,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   template <typename U>
-  const TypeHandler<U>& unwrap(Lock& js, v8::Local<v8::Context>, TypeHandler<U>*) {
+  const TypeHandler<U>& unwrap(Lock& js, TypeHandler<U>*) {
     // if you're here because of compiler error template garbage, you forgot to register
     // a type with JSG_DECLARE_ISOLATE_TYPE
     return TYPE_HANDLER_INSTANCE<U>;
@@ -498,7 +498,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   auto unwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       TypeErrorContext errorContext,
       kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none) -> RemoveRvalueRef<U> {
@@ -534,14 +533,13 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
-    return unwrap<U>(js, context, arg, errorContext);
+    return unwrap<U>(js, arg, errorContext);
   }
 
   // Helper for unwrapping function/method arguments correctly. Specifically, we need logic to
   // handle the case where the user passes in fewer arguments than the function has parameters.
   template <typename U>
   auto unwrap(Lock& js,
-      v8::Local<v8::Context> context,
       const v8::FunctionCallbackInfo<v8::Value>& args,
       size_t parameterIndex,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
@@ -554,12 +552,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;
       auto builder = kj::heapArrayBuilder<E>(size);
       for (size_t i = parameterIndex; i < args.Length(); i++) {
-        builder.add(unwrap<E>(js, context, args[i], errorContext));
+        builder.add(unwrap<E>(js, args[i], errorContext));
       }
       return builder.finish();
     } else if constexpr (ValueLessParameter<Self, V>) {
       // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
-      return unwrap(js, context, (V*)nullptr);
+      return unwrap(js, (V*)nullptr);
     } else {
       if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {
         // TODO(perf): Better to perform this parameter index check once, at the unwrap<U>() call
@@ -576,7 +574,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       // If we get here, we're either unwrapping into an optional or unimplemented parameter, in
       // which cases we're fine with nonexistent arguments implying `undefined`, or we have an
       // argument at this parameter index.
-      return unwrap<U>(js, context, args[parameterIndex], errorContext);
+      return unwrap<U>(js, args[parameterIndex], errorContext);
     }
   }
 
@@ -585,15 +583,15 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     reflection.self = holder;
     reflection.unwrapper = [](v8::Isolate* isolate, v8::Local<v8::Object> object,
                                kj::StringPtr name) -> kj::Maybe<U> {
-      auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
-      auto value = jsg::check(object->Get(context, v8StrIntern(isolate, name)));
+      auto value =
+          jsg::check(object->Get(isolate->GetCurrentContext(), v8StrIntern(isolate, name)));
       if (value->IsUndefined()) {
         return kj::none;
       } else {
         // TypeErrorContext::structField() produces a pretty good error message for this case.
         return from(isolate).template unwrap<U>(
-            js, context, value, TypeErrorContext::structField(typeid(Holder), name.cStr()), object);
+            js, value, TypeErrorContext::structField(typeid(Holder), name.cStr()), object);
       }
     };
   }
