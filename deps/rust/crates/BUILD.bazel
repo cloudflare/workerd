@@ -44,14 +44,14 @@ alias(
 )
 
 alias(
-    name = "capnp-0.21.0",
-    actual = "@crates_vendor__capnp-0.21.0//:capnp",
+    name = "capnp-0.21.1",
+    actual = "@crates_vendor__capnp-0.21.1//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.21.0//:capnp",
+    actual = "@crates_vendor__capnp-0.21.1//:capnp",
     tags = ["manual"],
 )
 
@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.23",
-    actual = "@crates_vendor__cc-1.2.23//:cc",
+    name = "cc-1.2.25",
+    actual = "@crates_vendor__cc-1.2.25//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.23//:cc",
+    actual = "@crates_vendor__cc-1.2.25//:cc",
     tags = ["manual"],
 )
 
@@ -92,14 +92,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.38",
-    actual = "@crates_vendor__clap-4.5.38//:clap",
+    name = "clap-4.5.39",
+    actual = "@crates_vendor__clap-4.5.39//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.38//:clap",
+    actual = "@crates_vendor__clap-4.5.39//:clap",
     tags = ["manual"],
 )
 
@@ -224,14 +224,14 @@ alias(
 )
 
 alias(
-    name = "rustversion-1.0.20",
-    actual = "@crates_vendor__rustversion-1.0.20//:rustversion",
+    name = "rustversion-1.0.21",
+    actual = "@crates_vendor__rustversion-1.0.21//:rustversion",
     tags = ["manual"],
 )
 
 alias(
     name = "rustversion",
-    actual = "@crates_vendor__rustversion-1.0.20//:rustversion",
+    actual = "@crates_vendor__rustversion-1.0.21//:rustversion",
     tags = ["manual"],
 )
 
@@ -272,6 +272,18 @@ alias(
 )
 
 alias(
+    name = "static_assertions-1.1.0",
+    actual = "@crates_vendor__static_assertions-1.1.0//:static_assertions",
+    tags = ["manual"],
+)
+
+alias(
+    name = "static_assertions",
+    actual = "@crates_vendor__static_assertions-1.1.0//:static_assertions",
+    tags = ["manual"],
+)
+
+alias(
     name = "syn-2.0.101",
     actual = "@crates_vendor__syn-2.0.101//:syn",
     tags = ["manual"],
@@ -296,14 +308,14 @@ alias(
 )
 
 alias(
-    name = "tokio-1.45.0",
-    actual = "@crates_vendor__tokio-1.45.0//:tokio",
+    name = "tokio-1.45.1",
+    actual = "@crates_vendor__tokio-1.45.1//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.45.0//:tokio",
+    actual = "@crates_vendor__tokio-1.45.1//:tokio",
     tags = ["manual"],
 )
 
@@ -340,7 +352,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.38//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.39//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
