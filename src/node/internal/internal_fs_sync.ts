@@ -30,6 +30,7 @@ import {
   validateBufferArray,
   validateStringAfterArrayBufferView,
   normalizePath,
+  getDate,
   Stats,
   kBadge,
   type FilePath,
@@ -291,23 +292,6 @@ export function fsyncSync(fd: number): void {
 export function ftruncateSync(fd: number, len: number = 0): void {
   validateUint32(len, 'len');
   cffs.truncate(getValidatedFd(fd), len);
-}
-
-function getDate(time: RawTime | Date): Date {
-  if (typeof time === 'number') {
-    return new Date(time);
-  } else if (typeof time === 'bigint') {
-    return new Date(Number(time));
-  } else if (typeof time === 'string') {
-    return new Date(time);
-  } else if (time instanceof Date) {
-    return time;
-  }
-  throw new ERR_INVALID_ARG_TYPE(
-    'time',
-    ['string', 'number', 'bigint', 'Date'],
-    time
-  );
 }
 
 export function futimesSync(
@@ -953,23 +937,25 @@ export function writevSync(
 //  S  I  T  V  O
 // [x][x][2][x][x] fs.accessSync(path[, mode])
 // [x][x][2][x][x] fs.existsSync(path)
+// [x][x][2][x][x] fs.chmodSync(path, mode)
+// [x][x][2][x][x] fs.chownSync(path, uid, gid)
+// [x][x][2][x][x] fs.fchmodSync(fd, mode)
+// [x][x][2][x][x] fs.fchownSync(fd, uid, gid)
+// [x][x][2][x][x] fs.lchmodSync(path, mode)
+// [x][x][2][x][x] fs.lchownSync(path, uid, gid)
+// [x][x][2][x][x] fs.futimesSync(fd, atime, mtime)
+// [x][x][2][x][x] fs.lutimesSync(path, atime, mtime)
+// [x][x][2][x][x] fs.utimesSync(path, atime, mtime)
+//
 // [x][x][1][ ][ ] fs.appendFileSync(path, data[, options])
-// [x][x][1][ ][ ] fs.chmodSync(path, mode)
-// [x][x][1][ ][ ] fs.chownSync(path, uid, gid)
 // [x][x][1][ ][ ] fs.closeSync(fd)
 // [x][x][1][ ][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
-// [x][x][1][ ][ ] fs.fchmodSync(fd, mode)
-// [x][x][1][ ][ ] fs.fchownSync(fd, uid, gid)
 // [x][x][1][ ][ ] fs.fdatasyncSync(fd)
 // [x][x][1][ ][ ] fs.fstatSync(fd[, options])
 // [x][x][1][ ][ ] fs.fsyncSync(fd)
 // [x][x][1][ ][ ] fs.ftruncateSync(fd[, len])
-// [x][x][1][ ][ ] fs.futimesSync(fd, atime, mtime)
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])
-// [x][x][1][ ][ ] fs.lchmodSync(path, mode)
-// [x][x][1][ ][ ] fs.lchownSync(path, uid, gid)
-// [x][x][1][ ][ ] fs.lutimesSync(path, atime, mtime)
 // [x][x][1][ ][ ] fs.linkSync(existingPath, newPath)
 // [x][x][1][ ][ ] fs.lstatSync(path[, options])
 // [x][x][1][ ][ ] fs.mkdirSync(path[, options])
@@ -992,7 +978,6 @@ export function writevSync(
 // [x][x][1][ ][ ] fs.symlinkSync(target, path[, type])
 // [x][x][1][ ][ ] fs.truncateSync(path[, len])
 // [x][x][1][ ][ ] fs.unlinkSync(path)
-// [x][x][1][ ][ ] fs.utimesSync(path, atime, mtime)
 // [x][x][1][ ][ ] fs.writeFileSync(file, data[, options])
 // [x][x][1][ ][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
 // [x][x][1][ ][ ] fs.writeSync(fd, buffer[, options])

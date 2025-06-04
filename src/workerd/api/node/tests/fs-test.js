@@ -26,9 +26,6 @@ import {
   ftruncateSync,
   fsyncSync,
   fdatasyncSync,
-  futimesSync,
-  utimesSync,
-  lutimesSync,
   writeSync,
   writevSync,
   readSync,
@@ -44,7 +41,6 @@ import {
   rmdirSync,
   readdirSync,
   stat,
-  constants,
   statfs,
   link,
   symlink,
@@ -56,12 +52,7 @@ import {
   ftruncate,
   fsync,
   fdatasync,
-  futimes,
-  utimes,
-  lutimes,
 } from 'node:fs';
-
-const { R_OK, W_OK } = constants;
 
 export const statSyncTest = {
   test() {
@@ -543,77 +534,6 @@ export const openCloseTest = {
       });
       await promise;
     }
-  },
-};
-
-export const utimesTest = {
-  async test() {
-    const fd = openSync('/tmp/test.txt', 'w+');
-    ok(existsSync('/tmp/test.txt'));
-
-    const stat = fstatSync(fd, { bigint: true });
-    strictEqual(stat.atimeMs, 0n);
-    strictEqual(stat.mtimeMs, 0n);
-    strictEqual(stat.ctimeMs, 0n);
-    strictEqual(stat.birthtimeMs, 0n);
-    strictEqual(stat.atimeNs, 0n);
-    strictEqual(stat.mtimeNs, 0n);
-    strictEqual(stat.atimeNs, 0n);
-    strictEqual(stat.mtimeNs, 0n);
-
-    utimesSync('/tmp/test.txt', 1000, 2000);
-    const stat2 = fstatSync(fd, { bigint: true });
-
-    strictEqual(stat2.atimeMs, 0n);
-    strictEqual(stat2.mtimeMs, 2000n);
-
-    lutimesSync('/tmp/test.txt', 3000, 4000);
-    const stat3 = fstatSync(fd, { bigint: true });
-    strictEqual(stat3.atimeMs, 0n);
-    strictEqual(stat3.mtimeMs, 4000n);
-
-    futimesSync(fd, 5000, 6000);
-    const stat4 = fstatSync(fd, { bigint: true });
-    strictEqual(stat4.atimeMs, 0n);
-    strictEqual(stat4.mtimeMs, 6000n);
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      futimes(fd, 7000, 8000, (err) => {
-        if (err) return reject(err);
-        const stat5 = fstatSync(fd, { bigint: true });
-        strictEqual(stat5.atimeMs, 0n);
-        strictEqual(stat5.mtimeMs, 8000n);
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      utimes('/tmp/test.txt', 8000, 9000, (err) => {
-        if (err) return reject(err);
-        const stat5 = fstatSync(fd, { bigint: true });
-        strictEqual(stat5.atimeMs, 0n);
-        strictEqual(stat5.mtimeMs, 9000n);
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      lutimes('/tmp/test.txt', 9000, 10000, (err) => {
-        if (err) return reject(err);
-        const stat5 = fstatSync(fd, { bigint: true });
-        strictEqual(stat5.atimeMs, 0n);
-        strictEqual(stat5.mtimeMs, 10000n);
-        resolve();
-      });
-      await promise;
-    }
-
-    closeSync(fd);
   },
 };
 

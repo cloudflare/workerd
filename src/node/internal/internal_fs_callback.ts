@@ -36,6 +36,7 @@ import type {
 } from 'node-internal:internal_fs_sync';
 import {
   validatePosition,
+  getDate,
   type FilePath,
   type Position,
   type RawTime,
@@ -340,6 +341,8 @@ export function futimes(
   mtime: RawTime | Date,
   callback: ErrorOnlyCallback
 ): void {
+  atime = getDate(atime);
+  mtime = getDate(mtime);
   // We are not performing any argument validation here because we are
   // falling through to the synchronous version of futimes, which does the
   // validation itself.
@@ -383,6 +386,8 @@ export function lutimes(
   mtime: RawTime | Date,
   callback: ErrorOnlyCallback
 ): void {
+  atime = getDate(atime);
+  mtime = getDate(mtime);
   // We are not performing any argument validation here because we are
   // falling through to the synchronous version of lutimes, which does the
   // validation itself.
@@ -1044,6 +1049,8 @@ export function utimes(
   mtime: RawTime | Date,
   callback: ErrorOnlyCallback
 ): void {
+  atime = getDate(atime);
+  mtime = getDate(mtime);
   // We are not performing any argument validation here because we are
   // falling through to the synchronous version of utimes, which does the
   // validation itself.
@@ -1198,26 +1205,31 @@ export function createWriteStream(): void {
 // (S == Stubbed, I == Implemented, T == Tested, O == Optimized)
 //  S  I  T  O
 // [x][x][x][x] fs.access(path[, mode], callback)
+// [x][x][x][x] fs.chmod(path, mode, callback)
+// [x][x][x][x] fs.chown(path, uid, gid, callback)
+// [x][x][x][x] fs.exists(path, callback)
+// [x][x][x][x] fs.fchmod(fd, mode, callback)
+// [x][x][x][x] fs.fchown(fd, uid, gid, callback)
+// [x][x][x][x] fs.futimes(fd, atime, mtime, callback)
+// [x][x][x][x] fs.lchmod(path, mode, callback)
+// [x][x][x][x] fs.lchown(path, uid, gid, callback)
+// [x][x][x][x] fs.lutimes(path, atime, mtime, callback)
+// [x][x][x][x] fs.utimes(path, atime, mtime, callback)
+// [-][-][-][-] fs.unwatchFile(filename[, listener])
+// [-][-][-][-] fs.watch(filename[, options][, listener])
+// [-][-][-][-] fs.watchFile(filename[, options], listener)
+//
 // [x][x][ ][ ] fs.appendFile(path, data[, options], callback)
-// [x][x][x][ ] fs.chmod(path, mode, callback)
-// [x][x][x][ ] fs.chown(path, uid, gid, callback)
 // [x][x][x][ ] fs.close(fd[, callback])
 // [x][x][ ][ ] fs.copyFile(src, dest[, mode], callback)
 // [x][x][ ][ ] fs.cp(src, dest[, options], callback)
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
-// [x][x][x][x] fs.exists(path, callback)
-// [x][x][x][ ] fs.fchmod(fd, mode, callback)
-// [x][x][x][ ] fs.fchown(fd, uid, gid, callback)
 // [x][x][x][ ] fs.fdatasync(fd, callback)
 // [x][x][x][ ] fs.fstat(fd[, options], callback)
 // [x][x][x][ ] fs.fsync(fd, callback)
 // [x][x][x][ ] fs.ftruncate(fd[, len], callback)
-// [x][x][x][ ] fs.futimes(fd, atime, mtime, callback)
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
-// [x][x][x][ ] fs.lchmod(path, mode, callback)
-// [x][x][x][ ] fs.lchown(path, uid, gid, callback)
-// [x][x][x][ ] fs.lutimes(path, atime, mtime, callback)
 // [x][x][x][ ] fs.link(existingPath, newPath, callback)
 // [x][x][x][ ] fs.lstat(path[, options], callback)
 // [x][x][ ][ ] fs.mkdir(path[, options], callback)
@@ -1242,10 +1254,6 @@ export function createWriteStream(): void {
 // [x][x][x][ ] fs.symlink(target, path[, type], callback)
 // [x][x][x][ ] fs.truncate(path[, len], callback)
 // [x][x][x][ ] fs.unlink(path, callback)
-// [-][-][-][-] fs.unwatchFile(filename[, listener])
-// [x][x][x][ ] fs.utimes(path, atime, mtime, callback)
-// [-][-][-][-] fs.watch(filename[, options][, listener])
-// [-][-][-][-] fs.watchFile(filename[, options], listener)
 // [x][x][ ][ ] fs.write(fd, buffer, offset[, length[, position]], callback)
 // [x][x][ ][ ] fs.write(fd, buffer[, options], callback)
 // [x][x][ ][ ] fs.write(fd, string[, position[, encoding]], callback)
