@@ -573,9 +573,8 @@ class IsolateModuleRegistry final {
 v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
   try {
-    auto isolate = v8::Isolate::GetCurrent();
-    auto& js = Lock::from(isolate);
-    auto& registry = IsolateModuleRegistry::from(isolate);
+    auto& js = Lock::current();
+    auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
     KJ_IF_SOME(found, registry.lookup(js, module)) {
       return found.module.evaluate(
@@ -585,7 +584,7 @@ v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
     // This case really should never actually happen but we handle it anyway.
     KJ_LOG(ERROR, "Synthetic module not found in registry for evaluation");
 
-    isolate->ThrowError(js.str("Requested module does not exist"_kj));
+    js.v8Isolate->ThrowError(js.str("Requested module does not exist"_kj));
     return v8::MaybeLocal<v8::Value>();
   } catch (...) {
     kj::throwFatalException(kj::getCaughtExceptionAsKj());
@@ -595,9 +594,8 @@ v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
 // Set up the special `import.meta` property for the module.
 void importMeta(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module, v8::Local<v8::Object> meta) {
-  auto isolate = v8::Isolate::GetCurrent();
-  auto& js = Lock::from(isolate);
-  auto& registry = IsolateModuleRegistry::from(isolate);
+  auto& js = Lock::current();
+  auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   try {
     js.tryCatch([&] {
       KJ_IF_SOME(found, registry.lookup(js, module)) {
@@ -664,7 +662,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes) {
-  auto isolate = v8::Isolate::GetCurrent();
+  auto& js = Lock::current();
 
   // Since this method is called directly by V8, we don't want to use jsg::check
   // or the js.rejectedPromise variants since those can throw JsExceptionThrown.
@@ -678,8 +676,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
     return resolver->GetPromise();
   };
 
-  auto& js = Lock::from(isolate);
-  auto& registry = IsolateModuleRegistry::from(isolate);
+  auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   try {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
       auto spec = js.toString(specifier);
@@ -749,9 +746,8 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
-  auto isolate = v8::Isolate::GetCurrent();
-  auto& registry = IsolateModuleRegistry::from(isolate);
-  auto& js = Lock::from(isolate);
+  auto& js = Lock::current();
+  auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
   return js.tryCatch([&]() -> v8::MaybeLocal<v8::Module> {
     auto spec = kj::str(specifier);
