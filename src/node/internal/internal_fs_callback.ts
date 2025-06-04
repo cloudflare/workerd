@@ -37,6 +37,11 @@ import type {
 import {
   validatePosition,
   getDate,
+  validateAccessArgs,
+  validateChownArgs,
+  validateChmodArgs,
+  validateStatArgs,
+  Stats,
   type FilePath,
   type Position,
   type RawTime,
@@ -49,12 +54,6 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
-import {
-  validateAccessArgs,
-  validateChownArgs,
-  validateChmodArgs,
-  Stats,
-} from 'node-internal:internal_fs_utils';
 import { type Dir } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { isArrayBufferView } from 'node-internal:internal_types';
@@ -299,9 +298,7 @@ export function fstat(
   } else {
     options = optionsOrCallback;
   }
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of fstat, which does the
-  // validation itself.
+  validateStatArgs(fd, options, true /* is fstat */);
   callWithSingleArgCallback(() => fssync.fstatSync(fd, options), callback);
 }
 
@@ -422,6 +419,7 @@ export function lstat(
   } else {
     options = optionsOrCallback;
   }
+  validateStatArgs(path, options);
   // We are not performing any argument validation here because we are
   // falling through to the synchronous version of lstat, which does the
   // validation itself.
@@ -967,6 +965,7 @@ export function stat(
   } else {
     options = optionsOrCallback;
   }
+  validateStatArgs(path, options);
   // We are not performing any argument validation here because we are
   // falling through to the synchronous version of stat, which does the
   // validation itself.
@@ -1215,6 +1214,10 @@ export function createWriteStream(): void {
 // [x][x][x][x] fs.lchown(path, uid, gid, callback)
 // [x][x][x][x] fs.lutimes(path, atime, mtime, callback)
 // [x][x][x][x] fs.utimes(path, atime, mtime, callback)
+// [x][x][x][x] fs.fstat(fd[, options], callback)
+// [x][x][x][x] fs.lstat(path[, options], callback)
+// [x][x][x][x] fs.stat(path[, options], callback)
+// [x][x][x][x] fs.statfs(path[, options], callback)
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
@@ -1226,12 +1229,10 @@ export function createWriteStream(): void {
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
 // [x][x][x][ ] fs.fdatasync(fd, callback)
-// [x][x][x][ ] fs.fstat(fd[, options], callback)
 // [x][x][x][ ] fs.fsync(fd, callback)
 // [x][x][x][ ] fs.ftruncate(fd[, len], callback)
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
 // [x][x][x][ ] fs.link(existingPath, newPath, callback)
-// [x][x][x][ ] fs.lstat(path[, options], callback)
 // [x][x][ ][ ] fs.mkdir(path[, options], callback)
 // [x][x][ ][ ] fs.mkdtemp(prefix[, options], callback)
 // [x][x][x][ ] fs.open(path[, flags[, mode]], callback)
@@ -1249,8 +1250,6 @@ export function createWriteStream(): void {
 // [x][x][ ][ ] fs.rename(oldPath, newPath, callback)
 // [x][x][ ][ ] fs.rmdir(path[, options], callback)
 // [x][x][ ][ ] fs.rm(path[, options], callback)
-// [x][x][x][ ] fs.stat(path[, options], callback)
-// [x][x][x][ ] fs.statfs(path[, options], callback)
 // [x][x][x][ ] fs.symlink(target, path[, type], callback)
 // [x][x][x][ ] fs.truncate(path[, len], callback)
 // [x][x][x][ ] fs.unlink(path, callback)

@@ -7,8 +7,10 @@ import * as constants from 'node-internal:internal_fs_constants';
 import * as callbackMethods from 'node-internal:internal_fs_callback';
 import { WriteStream, ReadStream } from 'node-internal:internal_fs_streams';
 import { Dirent, Dir } from 'node-internal:internal_fs';
+import { Stats } from 'node-internal:internal_fs_utils';
 
 export * from 'node-internal:internal_fs_callback';
+
 import {
   accessSync,
   existsSync,
@@ -105,6 +107,7 @@ export {
   writeFileSync,
   writeSync,
   writevSync,
+  Stats,
 };
 
 export default {
@@ -114,6 +117,7 @@ export default {
   Dir,
   WriteStream,
   ReadStream,
+  Stats,
   ...callbackMethods,
   accessSync,
   existsSync,

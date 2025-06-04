@@ -194,6 +194,34 @@ export function validateChownArgs(
   };
 }
 
+export function validateStatArgs(
+  path: number | FilePath,
+  options: {
+    bigint?: boolean | undefined;
+    throwIfNoEntry?: boolean | undefined;
+  } = {},
+  isfstat = false
+): { pathOrFd: number | URL; bigint: boolean; throwIfNoEntry: boolean } {
+  validateObject(options, 'options');
+  const { bigint = false, throwIfNoEntry = true } = options;
+  validateBoolean(bigint, 'options.bigint');
+  validateBoolean(throwIfNoEntry, 'options.throwIfNoEntry');
+  if (typeof path === 'number') {
+    return {
+      pathOrFd: getValidatedFd(path, 'fd'),
+      bigint,
+      throwIfNoEntry,
+    };
+  }
+  if (isfstat) {
+    throw new ERR_INVALID_ARG_TYPE('fd', 'number', path);
+  }
+  return {
+    pathOrFd: normalizePath(path),
+    bigint,
+    throwIfNoEntry,
+  };
+}
 export function validateChmodArgs(
   pathOrFd: FilePath | number,
   mode: number | string
@@ -582,6 +610,7 @@ export class Stats {
       this.dev = BigInt(stat.device);
       this.size = BigInt(stat.size);
 
+      this.mode = BigInt(this.mode);
       this.atimeNs = 0n;
       this.mtimeNs = stat.lastModified;
       this.ctimeNs = stat.lastModified;

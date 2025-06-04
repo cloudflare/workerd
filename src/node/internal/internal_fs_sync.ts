@@ -41,6 +41,7 @@ import {
   validateAccessArgs,
   validateChownArgs,
   validateChmodArgs,
+  validateStatArgs,
 } from 'node-internal:internal_fs_utils';
 import {
   validateInteger,
@@ -269,11 +270,13 @@ export type FStatOptions = {
 };
 
 export function fstatSync(fd: number, options: FStatOptions = {}): Stats {
-  fd = getValidatedFd(fd);
   validateObject(options, 'options');
-  const { bigint = false } = options;
-  validateBoolean(bigint, 'options.bigint');
-  const stat = cffs.stat(fd, { followSymlinks: true });
+  const { pathOrFd: validatedFd, bigint } = validateStatArgs(
+    fd,
+    options,
+    true /* is fstat */
+  );
+  const stat = cffs.stat(validatedFd as number, { followSymlinks: true });
   if (stat == null) {
     throw new ERR_EBADF({ syscall: 'stat' });
   }
@@ -359,15 +362,17 @@ export function lstatSync(
   path: FilePath,
   options: StatOptions = {}
 ): Stats | undefined {
-  validateObject(options, 'options');
-  const { bigint = false, throwIfNoEntry = true } = options;
-  validateBoolean(bigint, 'options.bigint');
-  validateBoolean(throwIfNoEntry, 'options.throwIfNoEntry');
-  const normalizedPath = normalizePath(path);
-  const stat = cffs.stat(normalizedPath, { followSymlinks: false });
+  const {
+    pathOrFd: validatedPath,
+    bigint,
+    throwIfNoEntry,
+  } = validateStatArgs(path, options);
+  const stat = cffs.stat(validatedPath as URL, { followSymlinks: false });
   if (stat == null) {
     if (throwIfNoEntry) {
-      throw new ERR_ENOENT(normalizedPath.pathname, { syscall: 'lstat' });
+      throw new ERR_ENOENT((validatedPath as URL).pathname, {
+        syscall: 'lstat',
+      });
     }
     return undefined;
   }
@@ -708,15 +713,17 @@ export function statSync(
   path: FilePath,
   options: StatOptions = {}
 ): Stats | undefined {
-  validateObject(options, 'options');
-  const { bigint = false, throwIfNoEntry = true } = options;
-  validateBoolean(bigint, 'options.bigint');
-  validateBoolean(throwIfNoEntry, 'options.throwIfNoEntry');
-  const normalizedPath = normalizePath(path);
-  const stat = cffs.stat(normalizedPath, { followSymlinks: true });
+  const {
+    pathOrFd: validatedPath,
+    bigint,
+    throwIfNoEntry,
+  } = validateStatArgs(path, options);
+  const stat = cffs.stat(validatedPath as URL, { followSymlinks: true });
   if (stat == null) {
     if (throwIfNoEntry) {
-      throw new ERR_ENOENT(normalizedPath.pathname, { syscall: 'stat' });
+      throw new ERR_ENOENT((validatedPath as URL).pathname, {
+        syscall: 'stat',
+      });
     }
     return undefined;
   }
@@ -946,18 +953,20 @@ export function writevSync(
 // [x][x][2][x][x] fs.futimesSync(fd, atime, mtime)
 // [x][x][2][x][x] fs.lutimesSync(path, atime, mtime)
 // [x][x][2][x][x] fs.utimesSync(path, atime, mtime)
+// [x][x][2][x][x] fs.fstatSync(fd[, options])
+// [x][x][2][x][x] fs.lstatSync(path[, options])
+// [x][x][2][x][x] fs.statSync(path[, options])
+// [x][x][2][x][x] fs.statfsSync(path[, options])
 //
 // [x][x][1][ ][ ] fs.appendFileSync(path, data[, options])
 // [x][x][1][ ][ ] fs.closeSync(fd)
 // [x][x][1][ ][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
 // [x][x][1][ ][ ] fs.fdatasyncSync(fd)
-// [x][x][1][ ][ ] fs.fstatSync(fd[, options])
 // [x][x][1][ ][ ] fs.fsyncSync(fd)
 // [x][x][1][ ][ ] fs.ftruncateSync(fd[, len])
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])
 // [x][x][1][ ][ ] fs.linkSync(existingPath, newPath)
-// [x][x][1][ ][ ] fs.lstatSync(path[, options])
 // [x][x][1][ ][ ] fs.mkdirSync(path[, options])
 // [x][x][1][ ][ ] fs.mkdtempSync(prefix[, options])
 // [x][ ][ ][ ][ ] fs.opendirSync(path[, options])
@@ -973,8 +982,6 @@ export function writevSync(
 // [x][x][1][ ][ ] fs.renameSync(oldPath, newPath)
 // [x][x][1][ ][ ] fs.rmdirSync(path[, options])
 // [x][x][1][ ][ ] fs.rmSync(path[, options])
-// [x][x][1][ ][ ] fs.statSync(path[, options])
-// [x][x][1][ ][ ] fs.statfsSync(path[, options])
 // [x][x][1][ ][ ] fs.symlinkSync(target, path[, type])
 // [x][x][1][ ][ ] fs.truncateSync(path[, len])
 // [x][x][1][ ][ ] fs.unlinkSync(path)
