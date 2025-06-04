@@ -730,7 +730,7 @@ class Isolate: public IsolateBase {
       auto& js = Lock::from(v8Isolate);
       KJ_IF_SOME(domException,
           jsgIsolate.getWrapperByContext(*this)->tryUnwrap(
-              js, v8Context(), value, static_cast<DOMException*>(nullptr), kj::none)) {
+              js, value, static_cast<DOMException*>(nullptr), kj::none)) {
         auto desc =
             kj::str("DOMException(", domException.getName(), "): ", domException.getMessage());
         jsgIsolate.reportError(*this, kj::mv(desc), value, JsMessage::create(*this, value));

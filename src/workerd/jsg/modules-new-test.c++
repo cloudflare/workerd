@@ -1011,8 +1011,7 @@ KJ_TEST("import.meta works as expected") {
 
       auto& wrapper = TestIsolate_TypeWrapper::from(js.v8Isolate);
       KJ_IF_SOME(fn,
-          wrapper.tryUnwrap(
-              js, js.v8Context(), res, (Function<kj::String(kj::String)>*)nullptr, kj::none)) {
+          wrapper.tryUnwrap(js, res, (Function<kj::String(kj::String)>*)nullptr, kj::none)) {
         KJ_ASSERT(fn(js, kj::str("foo/bar")) == "file:///foo/bar"_kj);
       } else {
       }

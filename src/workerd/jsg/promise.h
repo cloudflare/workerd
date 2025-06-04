@@ -610,7 +610,6 @@ class PromiseWrapper {
 
   template <typename T>
   kj::Maybe<Promise<T>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Promise<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -625,8 +624,8 @@ class PromiseWrapper {
         //   case, pull out promise->Result(), unwrap it, and make a new immediate promise.
         //   Similarly in `wrap()`. Not clear if the added complexity is worth it, though.
         auto then = check(v8::Function::New(
-            context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
-        promise = check(promise->Then(context, then));
+            js.v8Context(), &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
+        promise = check(promise->Then(js.v8Context(), then));
       }
       return Promise<T>(js.v8Isolate, promise);
     } else {
@@ -639,10 +638,10 @@ class PromiseWrapper {
       // Unfortunately this needs to be gated by a compatibility flag because there are
       // existing workers that appear to rely on the old behavior -- although it's not clear
       // if those workers actually work the way they were intended to.
-      if (config.unwrapCustomThenables && isThenable(context, handle)) {
-        auto paf = check(v8::Promise::Resolver::New(context));
-        check(paf->Resolve(context, handle));
-        return tryUnwrap(js, context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
+      if (config.unwrapCustomThenables && isThenable(js.v8Context(), handle)) {
+        auto paf = check(v8::Promise::Resolver::New(js.v8Context()));
+        check(paf->Resolve(js.v8Context(), handle));
+        return tryUnwrap(js, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
       }
 
       if constexpr (isVoid<T>()) {
@@ -661,7 +660,7 @@ class PromiseWrapper {
         return js.resolvedPromise();
       } else {
         auto& wrapper = *static_cast<TypeWrapper*>(this);
-        KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+        KJ_IF_SOME(value, wrapper.tryUnwrap(js, handle, (T*)nullptr, parentObject)) {
           return js.resolvedPromise(kj::mv(value));
         } else {
           // Wrong type.

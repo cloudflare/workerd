@@ -49,11 +49,10 @@ class TestExtension {
   v8::Local<v8::Context> newContext(v8::Isolate* isolate, TestExtensionType value) = delete;
 
   kj::Maybe<TestExtensionType> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       TestExtensionType*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return TestExtensionType{handle->Int32Value(context).ToChecked()};
+    return TestExtensionType{handle->Int32Value(js.v8Context()).ToChecked()};
   }
 
   template <bool isContext = false>
