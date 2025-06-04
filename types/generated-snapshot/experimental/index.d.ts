@@ -4719,7 +4719,6 @@ type AutoRagListResponse = {
   enable: boolean;
   type: string;
   source: string;
-  source_params: object;
   vectorize_name: string;
   paused: boolean;
   status: string;

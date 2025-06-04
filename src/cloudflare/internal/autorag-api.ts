@@ -106,7 +106,6 @@ export type AutoRagListResponse = {
   enable: boolean;
   type: string;
   source: string;
-  source_params: object;
   vectorize_name: string;
   paused: boolean;
   status: string;
@@ -120,9 +119,9 @@ export class AutoRAG {
   readonly #fetcher: Fetcher;
   readonly #autoragId: string | null;
 
-  public constructor(fetcher: Fetcher, autoragId: string | null = null) {
+  public constructor(fetcher: Fetcher, autoragId?: string) {
     this.#fetcher = fetcher;
-    this.#autoragId = autoragId;
+    this.#autoragId = autoragId || null;
   }
 
   public async list(): Promise<AutoRagListResponse> {
