@@ -68,25 +68,25 @@ type CommonOptions = {
 
 type SuccessOptions = {
   expectedFailures?: undefined;
-  skippedTests?: undefined;
-  skipAllTests?: false;
+  disabledTests?: undefined;
+  omittedTests?: undefined;
 };
 
 type ErrorOptions = {
-  // A comment is mandatory when there are expected failures or skipped tests
+  // A comment is mandatory when there are expected failure, skipped tests or excluded tests
   comment: string;
-} & (
-  | {
-      expectedFailures?: (string | RegExp)[];
-      skippedTests?: (string | RegExp)[];
-      skipAllTests?: false;
-    }
-  | {
-      expectedFailures?: undefined;
-      skippedTests?: undefined;
-      skipAllTests: true;
-    }
-);
+
+  // Known errors when running the tests
+  expectedFailures?: (string | RegExp)[] | true;
+
+  // Tests that cannot be run for now, either due to harness limitations, workerd bugs or
+  // features not yet implemented.
+  disabledTests?: (string | RegExp)[] | true;
+
+  // Tests that we have decided not to use. These are omitted from results and coverage
+  // calculations.
+  omittedTests?: (string | RegExp)[] | true;
+};
 
 type TestRunnerOptions = CommonOptions & (SuccessOptions | ErrorOptions);
 
@@ -415,8 +415,17 @@ async function runTest(
     );
   }
 
-  if (options.skipAllTests) {
-    console.warn(`All tests in ${file} have been skipped.`);
+  if (options.disabledTests === true) {
+    console.warn(
+      `All tests in ${file} have been disabled because "${options.comment}".`
+    );
+    return;
+  }
+
+  if (options.omittedTests === true) {
+    console.warn(
+      `All tests in ${file} have been omitted because "${options.comment}".`
+    );
     return;
   }
 

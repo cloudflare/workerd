@@ -59,13 +59,13 @@ export default {
   'basic/error-after-response.any.js': {
     comment:
       'Stream disconnected prematurely and a dropped promise when faced with intentionally bad chunked encoding from WPT',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/gc.any.js': {},
   'basic/header-value-combining.any.js': {
     comment:
       "Stream disconnected prematurely and a dropped promise. Not yet sure what is triggering about WPT's output",
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/header-value-null-byte.any.js': {
     comment: 'We should return a nicer TypeError instead of "internal error"',
@@ -78,7 +78,7 @@ export default {
   'basic/http-response-code.any.js': {},
   'basic/integrity.sub.any.js': {
     comment: 'Integrity is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/keepalive.any.js': {
     comment: 'Hard to run - involves iframes and workers',
@@ -98,19 +98,19 @@ export default {
   },
   'basic/mode-no-cors.sub.any.js': {
     comment: 'Request.mode is not relevant to us',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/mode-same-origin.any.js': {
     comment: 'Request.mode is not relevant to us',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/referrer.any.js': {
     comment: 'Referrer is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/request-forbidden-headers.any.js': {
     comment: 'We do not have forbidden headers',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'basic/request-head.any.js': {},
   'basic/request-headers-case.any.js': {
@@ -159,30 +159,30 @@ export default {
   },
   'basic/request-private-network-headers.tentative.any.js': {
     comment: 'We do not have forbidden headers',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'basic/request-referrer.any.js': {
     comment: 'Referrer is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/request-upload.any.js': {
-    comment: 'Multiple reasons for failure; see below',
-    skipAllTests: true,
+    comment: 'Appears to corrupt the state of workerd',
+    disabledTests: true,
   },
   'basic/request-upload.h2.any.js': {
     comment: 'Do we support HTTP 2?',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/response-null-body.any.js': {
     comment:
       'Response begins with hello-worldHTTP/1.1 which will lead to invalid protocol errors coming up on other tests later on',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/response-url.sub.any.js': {},
   'basic/scheme-about.any.js': {},
   'basic/scheme-blob.sub.any.js': {
     comment: 'URL.createObjectURL() is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/scheme-data.any.js': {
     comment: 'Response.type must be basic',
@@ -199,7 +199,7 @@ export default {
   'basic/scheme-others.sub.any.js': {},
   'basic/status.h2.any.js': {
     comment: 'Do we support HTTP 2?',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'basic/stream-response.any.js': {},
   'basic/stream-safe-creation.any.js': {},
@@ -223,83 +223,83 @@ export default {
 
   'cors/cors-basic.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-cookies-redirect.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-cookies.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-expose-star.sub.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-filtering.sub.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-keepalive.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-multiple-origins.sub.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-no-preflight.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-origin.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-cache.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-not-cors-safelisted.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-redirect.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-referrer.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-response-validation.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-star.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight-status.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-preflight.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-redirect-credentials.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-redirect-preflight.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'cors/cors-redirect.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
 
   'crashtests/huge-fetch.any.js': {},
@@ -322,7 +322,7 @@ export default {
   },
   'credentials/cookies.any.js': {
     comment: 'Request.credentials is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
 
   'headers/header-setcookie.any.js': {
@@ -407,7 +407,7 @@ export default {
   },
   'headers/headers-no-cors.any.js': {
     comment: 'Request.mode is not relevant',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'headers/headers-normalize.any.js': {},
   'headers/headers-record.any.js': {
@@ -425,38 +425,38 @@ export default {
   'headers/headers-structure.any.js': {},
 
   'idlharness.any.js': {
-    comment: 'Does not contain any relevant tests',
-    skipAllTests: true,
+    comment: 'Implement IDL support in harness',
+    disabledTests: true,
   },
 
   'policies/csp-blocked.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/nested-policy.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-no-referrer.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-origin-when-cross-origin.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-origin.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'policies/referrer-unsafe-url.js': {
     comment: 'CSP is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
 
   'redirect/redirect-back-to-original-origin.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'redirect/redirect-count.any.js': {},
   'redirect/redirect-empty-location.any.js': {
@@ -534,7 +534,7 @@ export default {
   },
   'redirect/redirect-mode.any.js': {
     comment: 'CORS is not implemented',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'redirect/redirect-origin.any.js': {
     comment: 'CORS is not implemented',
@@ -573,22 +573,22 @@ export default {
   },
   'redirect/redirect-referrer-override.any.js': {
     comment: 'Referer is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'redirect/redirect-referrer.any.js': {
     comment: 'Referrer is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'redirect/redirect-schemes.any.js': {},
   'redirect/redirect-to-dataurl.any.js': {},
   'redirect/redirect-upload.h2.any.js': {
     comment: 'Do we support HTTP 2?',
-    skipAllTests: true,
+    disabledTests: true,
   },
 
   'request/forbidden-method.any.js': {
     comment: 'We do not have forbidden methods',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'request/multi-globals/construct-in-detached-frame.window.js': {
     comment: "We don't support detached realms",
@@ -599,35 +599,35 @@ export default {
   'request/request-bad-port.any.js': {},
   'request/request-cache-default-conditional.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache-default.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache-force-cache.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache-no-cache.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache-no-store.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache-only-if-cached.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache-reload.any.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-cache.js': {
     comment: 'Will be enabled in a later PR',
-    skipAllTests: true,
+    expectedFailures: true,
   },
   'request/request-constructor-init-body-override.any.js': {},
   'request/request-consume-empty.any.js': {
@@ -707,7 +707,7 @@ export default {
   'request/request-init-contenttype.any.js': {},
   'request/request-init-priority.any.js': {
     comment: 'Request.priority is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'request/request-init-stream.any.js': {
     comment: 'Most of these are because duplex is not implemented',
@@ -723,7 +723,7 @@ export default {
   },
   'request/request-keepalive.any.js': {
     comment: 'keepalive is not implemented',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'request/request-structure.any.js': {
     comment: 'Unimplemented or partially implemented fields',
@@ -749,16 +749,16 @@ export default {
   },
   'response/response-arraybuffer-realm.window.js': {
     comment: 'Skipped because it involves iframes',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'response/response-blob-realm.any.js': {
     comment: 'Skipped because it involves iframes',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'response/response-cancel-stream.any.js': {},
   'response/response-clone-iframe.window.js': {
     comment: 'Skipped because it involves iframes',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'response/response-clone.any.js': {
     comment: 'TODO Investigate this',

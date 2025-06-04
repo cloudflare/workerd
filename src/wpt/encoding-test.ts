@@ -18,7 +18,7 @@ export default {
   },
   'idlharness.any.js': {
     comment: 'Test file /resources/WebIDLParser.js not found',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'iso-2022-jp-decoder.any.js': {
     comment: 'TODO investigate this',
@@ -31,7 +31,7 @@ export default {
   'legacy-mb-japanese/euc-jp/eucjp-decoder.js': {},
   'legacy-mb-japanese/euc-jp/eucjp-encoder.js': {
     comment: 'ReferenceError: jis0208 is not defined',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-japanese/euc-jp/jis0208_index.js': {},
   'legacy-mb-japanese/euc-jp/jis0212_index.js': {},
@@ -39,7 +39,7 @@ export default {
   'legacy-mb-japanese/iso-2022-jp/iso2022jp-encoder.js': {
     comment:
       'This file is meant to be included by tests and cannot run on its own',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-japanese/iso-2022-jp/jis0208_index.js': {},
   'legacy-mb-japanese/shift_jis/jis0208_index.js': {},
@@ -47,26 +47,26 @@ export default {
   'legacy-mb-japanese/shift_jis/sjis-encoder.js': {
     comment:
       'This file is meant to be included by tests and cannot run on its own',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-korean/euc-kr/euckr-decoder.js': {},
   'legacy-mb-korean/euc-kr/euckr-encoder.js': {
     comment: 'ReferenceError: euckr is not defined',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-korean/euc-kr/euckr_index.js': {},
   'legacy-mb-schinese/gb18030/gb18030-decoder.any.js': {
     comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-schinese/gbk/gbk-decoder.any.js': {
     comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-tchinese/big5/big5-decoder.js': {},
   'legacy-mb-tchinese/big5/big5-encoder.js': {
     comment: 'big5 is not defined',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'legacy-mb-tchinese/big5/big5_index.js': {},
   'replacement-encodings.any.js': {
@@ -88,7 +88,7 @@ export default {
   },
   'single-byte-decoder.window.js': {
     comment: 'Too many failures to list individually',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'streams/backpressure.any.js': {
     comment: 'Implement step_timeout in harness',
@@ -110,7 +110,7 @@ export default {
   'streams/decode-bad-chunks.any.js': {
     comment: 'Failed V8 assert',
     //  external/v8/src/api/api-inl.h:163; message = v8::internal::ValueHelper::IsEmpty(that) || IsJSArrayBufferView(v8::internal::Tagged<v8::internal::Object>( v8::internal::ValueHelper::ValueAsAddress(that)))
-    skipAllTests: true,
+    disabledTests: true,
   },
   'streams/decode-ignore-bom.any.js': {},
   'streams/decode-incomplete-input.any.js': {
@@ -204,7 +204,7 @@ export default {
   'streams/readable-writable-properties.any.js': {},
   'streams/realms.window.js': {
     comment: 'ReferenceError: window is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'textdecoder-arguments.any.js': {},
   'textdecoder-byte-order-marks.any.js': {},
@@ -282,6 +282,6 @@ export default {
   },
   'unsupported-labels.window.js': {
     comment: 'Too many failures to list by name',
-    skipAllTests: true,
+    disabledTests: true,
   },
 } satisfies TestRunnerConfig;
