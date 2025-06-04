@@ -61,7 +61,7 @@ def gen_import_tests(to_test, python_version, pkg_skip_versions = {}):
             python_flags = [python_version],
             skip_python_flags = skip_python_flags,
             make_snapshot = False,
-            args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels"],
-            data = [worker_py_fname, "@all_pyodide_wheels//:whls"],
+            args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels_20240829.4"],
+            data = [worker_py_fname, "@all_pyodide_wheels_20240829.4//:whls"],
             size = "enormous",
         )

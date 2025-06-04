@@ -26,10 +26,7 @@ _package_lockfiles = [
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
 # Each of these gets embedded in the workerd and EW binary.
-#
-# The key is the `packages` field in pythonSnapshotRelease and the value is the sha256 checksum of
-# the lock file. Used by both workerd and edgeworker to download the package lockfiles.
-PYTHON_LOCKFILES = {meta["info"]["tag"]: meta["info"]["lockfile_hash"] for meta in _package_lockfiles}
+PYTHON_LOCKFILES = [meta["info"] for meta in _package_lockfiles]
 
 # Used to generate the import tests, where we import each top level name from each package and check
 # that it doesn't fail.
