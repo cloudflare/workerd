@@ -555,7 +555,7 @@ function generateReport(config: TestRunnerConfig): string {
     const testResult = globalThis.results[file];
     if (!testResult) {
       throw new Error(
-        `Unable to find test results for ${file}. This is proably a harness bug`
+        `Unable to find test results for ${file}. This is probably a harness bug`
       );
     }
 
@@ -639,7 +639,7 @@ function generateStats(moduleBase: string, config: TestRunnerConfig): string {
 
     if (!testResult) {
       throw new Error(
-        `Unable to find test results for ${file}. This is proably a harness bug`
+        `Unable to find test results for ${file}. This is probably a harness bug`
       );
     }
 
