@@ -19,7 +19,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
-  auto& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  auto& js = Lock::current();
   v8::MaybeLocal<v8::Module> result;
 
   // The specification for import attributes strongly recommends that embedders
@@ -107,7 +107,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
 // callback; V8 will crash if you try to call `SetSyntheticModuleExport()` from anywhere else.
 v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
-  auto& js = Lock::from(v8::Isolate::GetCurrent());
+  auto& js = Lock::current();
   v8::EscapableHandleScope scope(js.v8Isolate);
   v8::MaybeLocal<v8::Value> result;
 
