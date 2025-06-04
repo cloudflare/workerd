@@ -546,9 +546,8 @@ void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       v8::Isolate* isolate = args.GetIsolate();
       auto& wrapper = TypeWrapper::from(isolate);
-      auto context = isolate->GetCurrentContext();
       auto& lock = Lock::from(isolate);
-      return wrapper.wrap(lock, context, kj::none, unwrapOpaque<Input>(isolate, args[0]));
+      return wrapper.wrap(lock, kj::none, unwrapOpaque<Input>(isolate, args[0]));
     });
   }
 }
@@ -582,10 +581,8 @@ class PromiseWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Promise> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Promise<T>&& promise) {
+  v8::Local<v8::Promise> wrap(
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Promise<T>&& promise) {
     // Add a .then() to unwrap the value (i.e. convert C++ value to JavaScript).
     //
     // We use `creator` as the `data` value for this continuation so that the creator object
@@ -593,9 +590,9 @@ class PromiseWrapper {
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;
-    auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
-        1, v8::ConstructorBehavior::kThrow));
-    auto ret = check(promise.consumeHandle(js)->Then(context, then));
+    auto then = check(v8::Function::New(js.v8Context(), &thenWrap<TypeWrapper, T>,
+        creator.orDefault({}), 1, v8::ConstructorBehavior::kThrow));
+    auto ret = check(promise.consumeHandle(js)->Then(js.v8Context(), then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
     // particular, if the C++ code marked the Promise handled, then the derived JavaScript promise

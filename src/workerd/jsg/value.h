@@ -34,7 +34,7 @@ namespace workerd::jsg {
 // JavaScript: we need to be able to wrap C++ constants in V8 values before a
 // context has been entered.
 //
-// Note that we can't generally change the wrap(js, context, ...) functions to wrap(isolate, ...)
+// Note that we can't generally change the wrap(js, ...) functions to wrap(isolate, ...)
 // because ResourceWrapper<TW, T>::wrap() needs the context to create new object instances.
 class PrimitiveWrapper {
  public:
@@ -42,10 +42,7 @@ class PrimitiveWrapper {
     return "number";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      double value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, double value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -65,10 +62,7 @@ class PrimitiveWrapper {
     return "byte";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      int8_t value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int8_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -97,10 +91,7 @@ class PrimitiveWrapper {
     return "octet";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      uint8_t value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint8_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -131,10 +122,7 @@ class PrimitiveWrapper {
     return "short integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      int16_t value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int16_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -163,10 +151,7 @@ class PrimitiveWrapper {
     return "unsigned short integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      uint16_t value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint16_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -197,10 +182,7 @@ class PrimitiveWrapper {
     return "integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      int value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -233,10 +215,7 @@ class PrimitiveWrapper {
     return "unsigned integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      uint32_t value) {
+  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint32_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -271,10 +250,7 @@ class PrimitiveWrapper {
     return "bigint";
   }
 
-  v8::Local<v8::BigInt> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      uint64_t value) {
+  v8::Local<v8::BigInt> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -315,10 +291,7 @@ class PrimitiveWrapper {
     return "bigint";
   }
 
-  v8::Local<v8::BigInt> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      int64_t value) {
+  v8::Local<v8::BigInt> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int64_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -356,8 +329,7 @@ class PrimitiveWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::isSameType<T, bool>()>>
-  v8::Local<v8::Boolean> wrap(
-      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
+  v8::Local<v8::Boolean> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // The template is needed to prevent this overload from being chosen for arbitrary types that
     // can convert to bool, such as pointers.
     return wrap(js.v8Isolate, creator, value);
@@ -386,10 +358,7 @@ class NameWrapper {
     return "string or Symbol";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Name value) {
+  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Name value) {
     KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
       KJ_CASE_ONEOF(string, kj::StringPtr) {
         auto& wrapper = static_cast<TypeWrapper&>(*this);
@@ -455,18 +424,14 @@ class StringWrapper {
     return "DOMString";
   }
 
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::ArrayPtr<const char> value) {
+  v8::Local<v8::String> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::ArrayPtr<const char> value) {
     return v8Str(js.v8Isolate, value);
   }
 
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Array<const char> value) {
-    return wrap(js, context, creator, value.asPtr());
+  v8::Local<v8::String> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<const char> value) {
+    return wrap(js, creator, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(
@@ -474,26 +439,20 @@ class StringWrapper {
     return v8Str(isolate, value);
   }
 
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const ByteString& value) {
+  v8::Local<v8::String> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
-    return wrap(js, context, creator, value.asPtr());
+    return wrap(js, creator, value.asPtr());
   }
 
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const USVString& value) {
-    return wrap(js, context, creator, value.asPtr());
+  v8::Local<v8::String> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const USVString& value) {
+    return wrap(js, creator, value.asPtr());
   }
 
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const DOMString& value) {
-    return wrap(js, context, creator, value.asPtr());
+  v8::Local<v8::String> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const DOMString& value) {
+    return wrap(js, creator, value.asPtr());
   }
 
   template <StringLike T>
@@ -582,12 +541,9 @@ class OptionalWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Optional<U> ptr) {
+  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Optional<U> ptr) {
     KJ_IF_SOME(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
+      return static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::fwd<U>(p));
     } else {
       return v8::Undefined(js.v8Isolate);
     }
@@ -618,12 +574,10 @@ class LenientOptionalWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      LenientOptional<U> ptr) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, LenientOptional<U> ptr) {
     KJ_IF_SOME(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
+      return static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::fwd<U>(p));
     } else {
       return v8::Undefined(js.v8Isolate);
     }
@@ -665,12 +619,9 @@ class MaybeWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Maybe<U> ptr) {
+  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Maybe<U> ptr) {
     KJ_IF_SOME(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
+      return static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::fwd<U>(p));
     } else {
       return v8::Null(js.v8Isolate);
     }
@@ -728,13 +679,11 @@ class OneOfWrapper {
 
   template <typename U, typename... V>
   bool wrapHelper(Lock& js,
-      v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::OneOf<V...>& in,
       v8::Local<v8::Value>& out) {
     if (in.template is<U>()) {
-      out =
-          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(in.template get<U>()));
+      out = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(in.template get<U>()));
       return true;
     } else {
       return false;
@@ -742,25 +691,22 @@ class OneOfWrapper {
   }
 
   template <typename... U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::OneOf<U...> value) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::OneOf<U...> value) {
     v8::Local<v8::Value> result;
-    if (!(wrapHelper<U>(js, context, creator, value, result) || ...)) {
+    if (!(wrapHelper<U>(js, creator, value, result) || ...)) {
       result = v8::Undefined(js.v8Isolate);
     }
     return result;
   }
 
   template <template <typename> class Predicate, typename U, typename... V>
-  bool unwrapHelperRecursive(
-      Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> in, kj::OneOf<V...>& out) {
+  bool unwrapHelperRecursive(Lock& js, v8::Local<v8::Value> in, kj::OneOf<V...>& out) {
     if constexpr (isOneOf<U>) {
       // Ugh, a nested OneOf. We can't just call tryUnwrap(), because then our string/numeric
       // coercion might trigger early.
       U val;
-      if (unwrapHelper<Predicate>(js, context, in, val)) {
+      if (unwrapHelper<Predicate>(js, in, val)) {
         out.template init<U>(kj::mv(val));
         return true;
       }
@@ -774,9 +720,8 @@ class OneOfWrapper {
   }
 
   template <template <typename> class Predicate, typename... U>
-  bool unwrapHelper(
-      Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> in, kj::OneOf<U...>& out) {
-    return (unwrapHelperRecursive<Predicate, U>(js, context, in, out) || ...);
+  bool unwrapHelper(Lock& js, v8::Local<v8::Value> in, kj::OneOf<U...>& out) {
+    return (unwrapHelperRecursive<Predicate, U>(js, in, out) || ...);
   }
 
   // Predicates for helping implement nested OneOf unwrapping. These must be struct templates
@@ -840,14 +785,14 @@ class OneOfWrapper {
     //
     // TODO(someday): Prove that this is the same algorithm as the one defined by Web IDL.
     kj::OneOf<U...> result;
-    if (unwrapHelper<IsResourceType>(js, js.v8Context(), handle, result) ||
-        unwrapHelper<IsFallibleType>(js, js.v8Context(), handle, result) ||
-        (handle->IsBoolean() && unwrapHelper<IsBooleanType>(js, js.v8Context(), handle, result)) ||
-        (handle->IsNumber() && unwrapHelper<IsNumericType>(js, js.v8Context(), handle, result)) ||
-        (handle->IsBigInt() && unwrapHelper<IsNumericType>(js, js.v8Context(), handle, result)) ||
-        (unwrapHelper<IsStringType>(js, js.v8Context(), handle, result)) ||
-        (unwrapHelper<IsNumericType>(js, js.v8Context(), handle, result)) ||
-        (unwrapHelper<IsBooleanType>(js, js.v8Context(), handle, result))) {
+    if (unwrapHelper<IsResourceType>(js, handle, result) ||
+        unwrapHelper<IsFallibleType>(js, handle, result) ||
+        (handle->IsBoolean() && unwrapHelper<IsBooleanType>(js, handle, result)) ||
+        (handle->IsNumber() && unwrapHelper<IsNumericType>(js, handle, result)) ||
+        (handle->IsBigInt() && unwrapHelper<IsNumericType>(js, handle, result)) ||
+        (unwrapHelper<IsStringType>(js, handle, result)) ||
+        (unwrapHelper<IsNumericType>(js, handle, result)) ||
+        (unwrapHelper<IsBooleanType>(js, handle, result))) {
       return kj::mv(result);
     }
     return kj::none;
@@ -868,43 +813,37 @@ class ArrayWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Array<U> array) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<U> array) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(array[n]));
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
     return handleScope.Escape(out);
   }
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::ArrayPtr<U> array) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::ArrayPtr<U> array) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(array[n]));
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
     return handleScope.Escape(out);
   }
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Array<U>& array) {
-    return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, array.asPtr());
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<U>& array) {
+    return static_cast<TypeWrapper*>(this)->wrap(js, creator, array.asPtr());
   }
 
   template <typename U>
@@ -942,10 +881,8 @@ class SetWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::HashSet<U> set) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::HashSet<U> set) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
 
@@ -953,7 +890,7 @@ class SetWrapper {
     for (auto& item: set) {
       v8::HandleScope scope(isolate);
       check(out->Add(
-          context, static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(item))));
+          js.v8Context(), static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(item))));
     }
 
     return handleScope.Escape(out);
@@ -1043,10 +980,8 @@ class ArrayBufferWrapper {
     return "ArrayBuffer or ArrayBufferView";
   }
 
-  v8::Local<v8::ArrayBuffer> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Array<byte> value) {
+  v8::Local<v8::ArrayBuffer> wrap(
+      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<byte> value) {
     return wrap(js.v8Isolate, creator, kj::mv(value));
   }
 
@@ -1125,10 +1060,7 @@ class DictWrapper {
   }
 
   template <typename K, typename V>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Dict<V, K> dict) {
+  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Dict<V, K> dict) {
     static_assert(webidl::isStringType<K>, "Dicts must be keyed on a string type.");
 
     v8::Isolate* isolate = js.v8Isolate;
@@ -1137,9 +1069,9 @@ class DictWrapper {
     for (auto& field: dict.fields) {
       // Set() returns Maybe<bool>. As usual, if the Maybe is null, then there was an exception,
       // but I have no idea what it means if the Maybe was filled in with the boolean value false...
-      KJ_ASSERT(check(out->Set(context,
-          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(field.name)),
-          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(field.value)))));
+      KJ_ASSERT(check(out->Set(js.v8Context(),
+          static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(field.name)),
+          static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(field.value)))));
     }
     return handleScope.Escape(out);
   }
@@ -1215,11 +1147,8 @@ class DateWrapper {
     return "date";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Date date) {
-    return check(v8::Date::New(context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Date date) {
+    return check(v8::Date::New(js.v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
   }
 
   kj::Maybe<kj::Date> tryUnwrap(Lock& js,
@@ -1271,10 +1200,8 @@ class NonCoercibleWrapper {
   }
 
   template <CoercibleType T>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      NonCoercible<T>) = delete;
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, NonCoercible<T>) = delete;
 
   template <CoercibleType T>
   kj::Maybe<NonCoercible<T>> tryUnwrap(Lock& js,
@@ -1337,14 +1264,12 @@ class MemoizedIdentityWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      MemoizedIdentity<T>& value) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, MemoizedIdentity<T>& value) {
     auto& wrapper = static_cast<TypeWrapper&>(*this);
     KJ_SWITCH_ONEOF(value.value) {
       KJ_CASE_ONEOF(raw, T) {
-        auto handle = wrapper.wrap(js, context, creator, kj::mv(raw));
+        auto handle = wrapper.wrap(js, creator, kj::mv(raw));
         value.value.template init<Value>(js.v8Isolate, handle);
         return handle;
       }
@@ -1374,10 +1299,8 @@ class IdentifiedWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Identified<T>& value) = delete;
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Identified<T>& value) = delete;
 
   template <typename T>
   kj::Maybe<Identified<T>> tryUnwrap(Lock& js,
@@ -1408,10 +1331,8 @@ class SelfRefWrapper {
     return "SelfRef";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const SelfRef& value) = delete;
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const SelfRef& value) = delete;
 
   kj::Maybe<SelfRef> tryUnwrap(Lock& js,
       v8::Local<v8::Value> handle,
@@ -1442,10 +1363,8 @@ class ExceptionWrapper {
     return "Exception";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::Exception exception) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Exception exception) {
     return makeInternalError(js.v8Isolate, kj::mv(exception));
   }
 

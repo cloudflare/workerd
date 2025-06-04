@@ -89,18 +89,17 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
       auto& wrapper = TypeWrapper::from(isolate);
       auto& func = extractInternalPointer<WrappableFunction<Ret(Args...)>, false>(
-          context, args.Data().As<v8::Object>());
+          js.v8Context(), args.Data().As<v8::Object>());
 
       if constexpr (isVoid<Ret>()) {
         func(Lock::from(isolate),
             wrapper.template unwrap<Args>(
                 js, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
       } else {
-        return wrapper.wrap(js, context, args.This(),
+        return wrapper.wrap(js, args.This(),
             func(Lock::from(isolate),
                 wrapper.template unwrap<Args>(
                     js, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
@@ -118,19 +117,18 @@ struct FunctorCallback<TypeWrapper,
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
       auto& wrapper = TypeWrapper::from(isolate);
       auto& js = Lock::from(isolate);
       auto& func = extractInternalPointer<
           WrappableFunction<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)>, false>(
-          context, args.Data().As<v8::Object>());
+          js.v8Context(), args.Data().As<v8::Object>());
 
       if constexpr (isVoid<Ret>()) {
         func(js, args,
             wrapper.template unwrap<Args>(
                 js, args, indexes, TypeErrorContext::callbackArgument(indexes))...);
       } else {
-        return wrapper.wrap(js, context, args.This(),
+        return wrapper.wrap(js, args.This(),
             func(js, args,
                 wrapper.template unwrap<Args>(
                     js, args, indexes, TypeErrorContext::callbackArgument(indexes))...));
@@ -323,18 +321,13 @@ class FunctionWrapper {
 
   template <typename Func,
       typename Signature = MethodSignature<decltype(&kj::Decay<Func>::operator())>>
-  v8::Local<v8::Function> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Func&& func) {
-    return wrap(js, context, creator, jsg::Function<Signature>(kj::mv(func)));
+  v8::Local<v8::Function> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Func&& func) {
+    return wrap(js, creator, jsg::Function<Signature>(kj::mv(func)));
   }
 
   template <typename Signature>
-  v8::Local<v8::Function> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      Function<Signature>&& func) {
+  v8::Local<v8::Function> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Function<Signature>&& func) {
     v8::Isolate* isolate = js.v8Isolate;
     return func.getOrCreateHandle(isolate, [&](Ref<WrappableFunction<Signature>>& ref) {
       v8::Local<v8::Object> data;
@@ -364,15 +357,15 @@ class FunctionWrapper {
         // produces exactly the same JavaScript handle. So... screw it.
         data = h;
       } else {
-        data = ref->attachOpaqueWrapper(context, ref->needsGcTracing);
+        data = ref->attachOpaqueWrapper(js.v8Context(), ref->needsGcTracing);
       }
 
       // TODO(conform): Correctly set `length` on all functions. Probably doesn't need a compat flag
       //   but I'd like to do it as a separate commit which can be reverted. We also currently fail
       //   to set this on constructors and methods (see resource.h). Remember not to count
       //   injected parameters!
-      return check(
-          v8::Function::New(context, &FunctorCallback<TypeWrapper, Signature>::callback, data));
+      return check(v8::Function::New(
+          js.v8Context(), &FunctorCallback<TypeWrapper, Signature>::callback, data));
     });
   }
 
@@ -393,11 +386,11 @@ class FunctionWrapper {
       auto& typeWrapper = TypeWrapper::from(isolate);
 
       return js.withinHandleScope([&] {
-        auto context = js.v8Context();
         v8::Local<v8::Value> argv[sizeof...(Args)]{
-          typeWrapper.wrap(js, context, kj::none, kj::fwd<Args>(args))...};
+          typeWrapper.wrap(js, kj::none, kj::fwd<Args>(args))...};
 
-        v8::Local<v8::Object> result = check(func->NewInstance(context, sizeof...(Args), argv));
+        v8::Local<v8::Object> result =
+            check(func->NewInstance(js.v8Context(), sizeof...(Args), argv));
         return typeWrapper.template unwrap<Ret>(js, result, TypeErrorContext::callbackReturn());
       });
     };
@@ -424,13 +417,11 @@ class FunctionWrapper {
       auto& typeWrapper = TypeWrapper::from(isolate);
 
       return js.withinHandleScope([&] {
-        auto context = js.v8Context();
         v8::LocalVector<v8::Value> argv(js.v8Isolate,
             std::initializer_list<v8::Local<v8::Value>>{
-              typeWrapper.wrap(js, context, kj::none, kj::fwd<Args>(args))
-                  .template As<v8::Value>()...});
+              typeWrapper.wrap(js, kj::none, kj::fwd<Args>(args)).template As<v8::Value>()...});
 
-        auto result = check(func->Call(context, receiver, argv.size(), argv.data()));
+        auto result = check(func->Call(js.v8Context(), receiver, argv.size(), argv.data()));
         if constexpr (!isVoid<Ret>()) {
           return typeWrapper.template unwrap<Ret>(js, result, TypeErrorContext::callbackReturn());
         } else {

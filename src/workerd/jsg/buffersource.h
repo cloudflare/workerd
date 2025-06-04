@@ -468,10 +468,8 @@ class BufferSourceWrapper {
     return "BufferSource";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      BufferSource bufferSource) {
+  v8::Local<v8::Value> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, BufferSource bufferSource) {
     return bufferSource.getHandle(js);
   }
 

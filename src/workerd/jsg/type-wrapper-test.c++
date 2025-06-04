@@ -39,10 +39,8 @@ class TestExtension {
     return "TestExtensionTypeName";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      TestExtensionType value) {
+  v8::Local<v8::Number> wrap(
+      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, TestExtensionType value) {
     return v8::Number::New(js.v8Isolate, value.value);
   }
 
