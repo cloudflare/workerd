@@ -594,7 +594,7 @@ class Isolate: public IsolateBase {
     template <typename T>
     auto unwrap(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
       return jsgIsolate.getWrapperByContext(context)->template unwrap<T>(
-          context, handle, jsg::TypeErrorContext::other());
+          *this, context, handle, jsg::TypeErrorContext::other());
     }
 
     Ref<DOMException> domException(
@@ -666,16 +666,16 @@ class Isolate: public IsolateBase {
     }
     kj::String toString(v8::Local<v8::Value> value) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<kj::String>(
-          v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+          *this, v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
     }
     jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) override {
       return jsgIsolate.getWrapperByContext(*this)
           ->template unwrap<jsg::Dict<v8::Local<v8::Value>>>(
-              v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+              *this, v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
     }
     jsg::Dict<jsg::JsValue> toDict(const jsg::JsValue& value) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Dict<jsg::JsValue>>(
-          v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+          *this, v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
     }
     v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
       return jsgIsolate.getWrapperByContext(*this)->wrap(
@@ -683,7 +683,7 @@ class Isolate: public IsolateBase {
     }
     jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Value> promise) override {
       return jsgIsolate.getWrapperByContext(*this)->template unwrap<jsg::Promise<jsg::Value>>(
-          v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
+          *this, v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
     }
 
     template <typename T, typename... Args>

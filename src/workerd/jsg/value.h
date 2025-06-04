@@ -950,7 +950,7 @@ class ArrayWrapper {
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::Value> element = check(array->Get(context, i));
       builder.add(static_cast<TypeWrapper*>(this)->template unwrap<U>(
-          context, element, TypeErrorContext::arrayElement(i)));
+          js, context, element, TypeErrorContext::arrayElement(i)));
     }
     return builder.finish();
   }
@@ -1005,7 +1005,7 @@ class SetWrapper {
     for (auto i: kj::zeroTo(length)) {
       v8::Local<v8::Value> element = check(array->Get(context, i));
       auto value = static_cast<TypeWrapper*>(this)->template unwrap<U>(
-          context, element, TypeErrorContext::other());
+          js, context, element, TypeErrorContext::other());
       builder.upsert(kj::mv(value), [&](U& existing, U&& replacement) {
         JSG_FAIL_REQUIRE(TypeError, "Duplicate values in the set after unwrapping.");
       });
@@ -1212,7 +1212,7 @@ class DictWrapper {
         const char* cstrName = strName.cStr();
         builder.add(typename Dict<V, K>::Field{kj::mv(strName),
           wrapper.template unwrap<V>(
-              context, value, TypeErrorContext::dictField(cstrName), object)});
+              js, context, value, TypeErrorContext::dictField(cstrName), object)});
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
