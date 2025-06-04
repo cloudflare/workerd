@@ -8,7 +8,7 @@ export default {
   'compression-bad-chunks.tentative.any.js': {
     comment:
       'V8 assertion - Cannot construct ArrayBuffer with a BackingStore of SharedArrayBuffer',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'compression-constructor-error.tentative.any.js': {
     comment: 'TODO investigate this',
@@ -22,7 +22,7 @@ export default {
   'compression-output-length.tentative.any.js': {
     comment:
       'These tests require the sidecar which is not enabled for compression-test',
-    skippedTests: [
+    disabledTests: [
       'the length of deflated (with -raw) data should be shorter than that of the original data',
       'the length of deflated data should be shorter than that of the original data',
       'the length of gzipped data should be shorter than that of the original data',
@@ -31,7 +31,7 @@ export default {
   'compression-stream.tentative.any.js': {
     comment:
       'These tests require the sidecar which is not enabled for compression-test',
-    skippedTests: [
+    disabledTests: [
       'deflated small amount data should be reinflated back to its origin',
       'deflated large amount data should be reinflated back to its origin',
       'gzipped small amount data should be reinflated back to its origin',
@@ -42,7 +42,7 @@ export default {
   'decompression-bad-chunks.tentative.any.js': {
     comment:
       'V8 assertion - Cannot construct ArrayBuffer with a BackingStore of SharedArrayBuffer',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'decompression-buffersource.tentative.any.js': {},
   'decompression-constructor-error.tentative.any.js': {
@@ -64,7 +64,7 @@ export default {
   },
   'idlharness.https.any.js': {
     comment: 'Test file /resources/WebIDLParser.js not found',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'third_party/pako/pako_inflate.min.js': {},
 } satisfies TestRunnerConfig;

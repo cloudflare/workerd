@@ -327,9 +327,15 @@ globalThis.test = (func, name, properties): void => {
 };
 
 function shouldRunTest(message: string): boolean {
-  const skippedTests = new FilterList(globalThis.state.options.skippedTests);
+  const disabledTests = new FilterList(globalThis.state.options.disabledTests);
 
-  if (skippedTests.has(message)) {
+  if (disabledTests.has(message)) {
+    return false;
+  }
+
+  const omittedTests = new FilterList(globalThis.state.options.omittedTests);
+
+  if (omittedTests.has(message)) {
     return false;
   }
 

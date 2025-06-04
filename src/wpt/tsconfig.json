@@ -22,6 +22,7 @@
     "declaration": true,
     "composite": true,
     "sourceMap": true,
+    "erasableSyntaxOnly": true,
     "paths": {
       "harness/*": ["./harness/*"]
     }

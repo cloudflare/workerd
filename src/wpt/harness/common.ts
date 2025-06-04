@@ -30,12 +30,26 @@ export type TestFn = UnknownFunc;
 export type PromiseTestFn = () => Promise<unknown>;
 
 export class FilterList {
+  // Matches any input
+  private matchesAll: boolean = false;
+
+  // List of strings to match exactly
   private strings: Set<string> = new Set();
+
+  // List of regexps to match against
   private regexps: RegExp[] = [];
+
+  // Regexes which never matched any of the inputs
+  // We keep this set so we can warn the user about this.
   private unmatchedRegexps: Set<RegExp> = new Set();
 
-  public constructor(filters: (string | RegExp)[] | undefined) {
+  public constructor(filters: (string | RegExp)[] | true | undefined) {
     if (filters === undefined) {
+      return;
+    }
+
+    if (filters === true) {
+      this.matchesAll = true;
       return;
     }
 
@@ -51,6 +65,10 @@ export class FilterList {
   }
 
   public has(input: string): boolean {
+    if (this.matchesAll) {
+      return true;
+    }
+
     if (this.strings.has(input)) {
       return true;
     }
@@ -59,6 +77,10 @@ export class FilterList {
   }
 
   public delete(input: string): boolean {
+    if (this.matchesAll) {
+      return true;
+    }
+
     if (this.strings.delete(input)) {
       return true;
     }

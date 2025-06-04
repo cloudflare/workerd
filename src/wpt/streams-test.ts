@@ -7,7 +7,7 @@ import { type TestRunnerConfig } from 'harness/harness';
 export default {
   'idlharness.any.js': {
     comment: 'Test file /resources/WebIDLParser.js not found.',
-    skipAllTests: true,
+    disabledTests: true,
   },
 
   'piping/abort.any.js': {
@@ -29,12 +29,12 @@ export default {
   },
   'piping/close-propagation-backward.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'piping/close-propagation-forward.any.js': {},
   'piping/error-propagation-backward.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'piping/error-propagation-forward.any.js': {
     comment: 'To be investigated',
@@ -130,7 +130,7 @@ export default {
 
   'queuing-strategies-size-function-per-global.window.js': {
     comment: 'document is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'queuing-strategies.any.js': {
     comment: 'Likely missing validation',
@@ -291,7 +291,7 @@ export default {
   },
   'readable-byte-streams/read-min.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'readable-byte-streams/respond-after-enqueue.any.js': {
     comment: 'To be investigated',
@@ -372,6 +372,16 @@ export default {
   },
   'readable-streams/bad-underlying-sources.any.js': {
     comment: 'See individual comments',
+    disabledTests: [
+      // TODO(conform): The spec expects pull to be called twice when the stream is created and
+      // a single read happens. We currently only call it once in this case, so we have to read
+      // again to trigger the error case.
+      'Underlying source pull: throwing method (second pull)',
+      // TODO(conform): The spec expects pull() to be called twice when the stream is
+      // constructed and the first read occurs, we currently only call it once, so to
+      // trigger the error, we perform a read again.
+      'read should not error if it dequeues and pull() throws',
+    ],
     expectedFailures: [
       // TODO(conform): If the start function throws synchronously, the constructor
       // should throw, per the spec. Currently we only error the stream and do not
@@ -384,20 +394,10 @@ export default {
       // We currently treat it as an error.
       'Underlying source: calling error after close should not throw',
     ],
-    skippedTests: [
-      // TODO(conform): The spec expects pull to be called twice when the stream is created and
-      // a single read happens. We currently only call it once in this case, so we have to read
-      // again to trigger the error case.
-      'Underlying source pull: throwing method (second pull)',
-      // TODO(conform): The spec expects pull() to be called twice when the stream is
-      // constructed and the first read occurs, we currently only call it once, so to
-      // trigger the error, we perform a read again.
-      'read should not error if it dequeues and pull() throws',
-    ],
   },
   'readable-streams/cancel.any.js': {
     comment: 'See detailed explanation in comments',
-    skippedTests: [
+    disabledTests: [
       // underlyingSource is converted in prose in the method body, whereas queuingStrategy is done at the IDL layer.
       // So the queuingStrategy exception should be encountered first.
       // TODO(conform): We currently handle these differently and end up throwing error1 instead.
@@ -418,7 +418,7 @@ export default {
   'readable-streams/crashtests/garbage-collection.any.js': {},
   'readable-streams/crashtests/strategy-worker.js': {
     comment: 'ReferenceError: importScripts is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'readable-streams/cross-realm-crash.window.js': {
     comment: 'document is not defined',
@@ -462,6 +462,15 @@ export default {
   },
   'readable-streams/from.any.js': {
     comment: 'See comments on tests',
+    disabledTests: [
+      // A hanging promise was cancelled
+      'ReadableStream.from: cancel() resolves when return() method is missing',
+      'ReadableStream.from: cancel() rejects when return() rejects',
+      'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
+      // Heap use-after-free
+      'ReadableStream.from: reader.cancel() inside return()',
+      'ReadableStream.from: reader.cancel() inside next()',
+    ],
     expectedFailures: [
       // To be investigated
       'ReadableStream.from: cancel() rejects when return() is not a method',
@@ -485,27 +494,18 @@ export default {
       'ReadableStream.from(array), push() to array while reading',
       'ReadableStream.from: cancelling the returned stream calls and awaits return()',
     ],
-    skippedTests: [
-      // A hanging promise was cancelled
-      'ReadableStream.from: cancel() resolves when return() method is missing',
-      'ReadableStream.from: cancel() rejects when return() rejects',
-      'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
-      // Heap use-after-free
-      'ReadableStream.from: reader.cancel() inside return()',
-      'ReadableStream.from: reader.cancel() inside next()',
-    ],
   },
   'readable-streams/garbage-collection.any.js': {
     comment: 'See comments on individual tests',
-    expectedFailures: [
-      // Failed to execute 'error' on 'ReadableStreamDefaultController': parameter 1 is not of type 'Value'
-      'ReadableStreamController methods should continue working properly when scripts lose their reference to the readable stream',
-    ],
-    skippedTests: [
+    disabledTests: [
       // A hanging promise was cancelled
       'ReadableStream closed promise should reject even if stream and reader JS references are lost',
       'Garbage-collecting a ReadableStreamDefaultReader should not unlock its stream',
       'A ReadableStream and its reader should not be garbage collected while there is a read promise pending',
+    ],
+    expectedFailures: [
+      // Failed to execute 'error' on 'ReadableStreamDefaultController': parameter 1 is not of type 'Value'
+      'ReadableStreamController methods should continue working properly when scripts lose their reference to the readable stream',
     ],
   },
   'readable-streams/general.any.js': {
@@ -566,7 +566,7 @@ export default {
   },
   'readable-streams/read-task-handling.window.js': {
     comment: 'document is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'readable-streams/reentrant-strategies.any.js': {
     comment: 'See individual comments',
@@ -610,6 +610,10 @@ export default {
   },
   'readable-streams/templated.any.js': {
     comment: 'To be investigated',
+    disabledTests: [
+      // TODO(soon): This test appears to mess up the state of the workerd test case itself. Investigate why.
+      'ReadableStream reader (closed via cancel after getting reader): closed should fulfill with undefined',
+    ],
     expectedFailures: [
       'ReadableStream (empty): calling getReader with invalid arguments should throw appropriate errors',
       'ReadableStream (empty) reader: canceling via the reader should cause the reader to act closed',
@@ -632,15 +636,11 @@ export default {
       'ReadableStream (two chunks enqueued, then closed) reader: third read(), without waiting, should give { value: undefined, done: true } (sequential)',
       'ReadableStream (two chunks enqueued, then closed) reader: third read(), without waiting, should give { value: undefined, done: true } (nested)',
     ],
-    skippedTests: [
-      // TODO(soon): This test appears to mess up the state of the workerd test case itself. Investigate why.
-      'ReadableStream reader (closed via cancel after getting reader): closed should fulfill with undefined',
-    ],
   },
 
   'transferable/deserialize-error.window.js': {
     comment: 'ReferenceError: document is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'transferable/transfer-with-messageport.window.js': {
     comment: 'Enable once MessagePort is supported.',
@@ -669,7 +669,7 @@ export default {
 
   'transform-streams/backpressure.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'transform-streams/cancel.any.js': {
     comment: 'To be investigated',
@@ -685,6 +685,10 @@ export default {
   },
   'transform-streams/errors.any.js': {
     comment: 'To be investigated',
+    disabledTests: [
+      // TODO(soon): This test appears to mess up the state of the workerd test case itself. Investigate why.
+      'an exception from transform() should error the stream if terminate has been requested but not completed',
+    ],
     expectedFailures: [
       'when controller.error is followed by a rejection, the error reason should come from controller.error',
       'TransformStream constructor should throw when start does',
@@ -697,10 +701,6 @@ export default {
       'controller.error() should close writable immediately after readable.cancel()',
       'abort should set the close reason for the writable when it happens before cancel during underlying sink write, but cancel should still succeed',
       'erroring during write with backpressure should result in the write failing',
-    ],
-    skippedTests: [
-      // TODO(soon): This test appears to mess up the state of the workerd test case itself. Investigate why.
-      'an exception from transform() should error the stream if terminate has been requested but not completed',
     ],
   },
   'transform-streams/flush.any.js': {
@@ -755,15 +755,15 @@ export default {
   },
   'transform-streams/strategies.any.js': {
     comment: 'To be investigated',
+    disabledTests: [
+      // TODO(soon): This test appears to mess up the state of the workerd test case itself. Investigate why.
+      'default readable strategy should be equivalent to { highWaterMark: 0 }',
+    ],
     expectedFailures: [
       'writable should have the correct size() function',
       'a RangeError should be thrown for an invalid highWaterMark',
       'a bad readableStrategy size function should error the stream on enqueue even when transformer.transform() catches the exception',
       'a bad readableStrategy size function should cause writer.write() to reject on an identity transform',
-    ],
-    skippedTests: [
-      // TODO(soon): This test appears to mess up the state of the workerd test case itself. Investigate why.
-      'default readable strategy should be equivalent to { highWaterMark: 0 }',
     ],
   },
   'transform-streams/terminate.any.js': {
@@ -871,7 +871,7 @@ export default {
   },
   'writable-streams/reentrant-strategy.any.js': {
     comment: 'A hanging Promise was canceled.',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'writable-streams/start.any.js': {
     comment: 'To be investigated',
