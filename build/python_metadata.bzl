@@ -1,5 +1,5 @@
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
-load("//:build/python/packages_20250324_1.bzl", "PACKAGES_20250324_1")
+load("//:build/python/packages_20250604.bzl", "PACKAGES_20250604")
 
 PYODIDE_VERSIONS = [
     {
@@ -21,7 +21,7 @@ PYODIDE_VERSIONS = [
 # first.
 _package_lockfiles = [
     PACKAGES_20240829_4,
-    PACKAGES_20250324_1,
+    PACKAGES_20250604,
 ]
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
@@ -84,7 +84,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "name": "0.27.5",
         "pyodide_version": "0.27.5",
         "pyodide_date": "2025-01-16",
-        "packages": "20250324.1",
+        "packages": "20250604",
         "backport": "27",
         "integrity": "sha256-0DOMRRWGt67ZuvDKINiyfZyDz7yzDoUd2Vcug5Fhv7Y=",
         "flag": "pythonWorkers20250116",
