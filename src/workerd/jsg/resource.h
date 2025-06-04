@@ -1788,7 +1788,7 @@ class ResourceWrapper {
     if (handle->IsObject()) {
       v8::Local<v8::Object> instance =
           v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
-              getTemplate(context->GetIsolate(), nullptr));
+              getTemplate(js.v8Isolate, nullptr));
       if (!instance.IsEmpty()) {
         return extractInternalPointer<T, false>(context, instance);
       }

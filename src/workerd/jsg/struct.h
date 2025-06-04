@@ -116,15 +116,13 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     // For similar reasons, if we are initializing this dictionary from null/undefined, and the
     // dictionary has required members, we throw.
 
-    auto isolate = context->GetIsolate();
-
     if (handle->IsUndefined() || handle->IsNull()) {
       if constexpr (((webidl::isOptional<typename FieldWrappers::Type> ||
                          kj::isSameType<typename FieldWrappers::Type, Unimplemented>()) &&
                         ...)) {
         return T{};
       }
-      jsg::throwTypeError(isolate,
+      jsg::throwTypeError(js.v8Isolate,
           kj::str("Cannot initialize ", typeid(T).name(),
               " with required members from an "
               "undefined or null value."));
@@ -132,8 +130,8 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
 
     if (!handle->IsObject()) return kj::none;
 
-    v8::HandleScope handleScope(isolate);
-    auto& fields = getFields(isolate);
+    v8::HandleScope handleScope(js.v8Isolate);
+    auto& fields = getFields(js.v8Isolate);
     auto in = handle.As<v8::Object>();
 
     // Note: We unwrap struct members in the order in which the compiler evaluates the expressions
@@ -141,13 +139,13 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     //   it prescribes lexicographically-ordered member initialization, with base members ordered
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
-    auto t = T{kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), isolate, context, in)...};
+    auto t =
+        T{kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), js.v8Isolate, context, in)...};
 
     // Note that if a `validate` function is provided, then it will be called after the struct is
     // unwrapped from v8. This would be an appropriate time to throw an error.
     // Signature: void validate(jsg::Lock& js);
-    if constexpr (requires(jsg::Lock& js) { t.validate(js); }) {
-      jsg::Lock& js = jsg::Lock::from(isolate);
+    if constexpr (requires { t.validate(js); }) {
       t.validate(js);
     }
 
