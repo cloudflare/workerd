@@ -23,6 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 import * as fssync from 'node-internal:internal_fs_sync';
+import { default as cffs } from 'cloudflare-internal:filesystem';
 import type {
   FStatOptions,
   MkdirTempSyncOptions,
@@ -42,10 +43,17 @@ import {
 } from 'node-internal:internal_fs_utils';
 import { F_OK } from 'node-internal:internal_fs_constants';
 import {
+  ERR_EBADF,
+  ERR_ENOENT,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
-import { validateAccessArgs, Stats } from 'node-internal:internal_fs_utils';
+import {
+  validateAccessArgs,
+  validateChownArgs,
+  validateChmodArgs,
+  Stats,
+} from 'node-internal:internal_fs_utils';
 import { type Dir } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { isArrayBufferView } from 'node-internal:internal_types';
@@ -165,14 +173,15 @@ export function appendFile(
 
 export function chmod(
   path: FilePath,
-  mode: number,
+  mode: number | string,
   callback: ErrorOnlyCallback
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of chmod, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.chmodSync(path, mode), callback);
+  const { pathOrFd } = validateChmodArgs(path, mode);
+  callWithErrorOnlyCallback(() => {
+    if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
+      throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'chmod' });
+    }
+  }, callback);
 }
 
 export function chown(
@@ -181,11 +190,12 @@ export function chown(
   gid: number,
   callback: ErrorOnlyCallback
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of chown, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.chownSync(path, uid, gid), callback);
+  const { pathOrFd } = validateChownArgs(path, uid, gid);
+  callWithErrorOnlyCallback(() => {
+    if (cffs.stat(pathOrFd as URL, { followSymlinks: true }) == null) {
+      throw new ERR_ENOENT((path as URL).pathname, { syscall: 'chown' });
+    }
+  }, callback);
 }
 
 export function close(
@@ -260,11 +270,12 @@ export function fchown(
   gid: number,
   callback: ErrorOnlyCallback
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of fchown, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.fchownSync(fd, uid, gid), callback);
+  const { pathOrFd } = validateChownArgs(fd, uid, gid);
+  callWithErrorOnlyCallback(() => {
+    if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
+      throw new ERR_EBADF({ syscall: 'fchown' });
+    }
+  }, callback);
 }
 
 export function fdatasync(fd: number, callback: ErrorOnlyCallback): void {
@@ -344,11 +355,12 @@ export function lchmod(
   mode: string | number,
   callback: ErrorOnlyCallback
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of lchmod, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.lchmodSync(path, mode), callback);
+  const { pathOrFd } = validateChmodArgs(path, mode);
+  callWithErrorOnlyCallback(() => {
+    if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
+      throw new ERR_ENOENT((pathOrFd as URL).pathname, { syscall: 'lchmod' });
+    }
+  }, callback);
 }
 
 export function lchown(
@@ -357,11 +369,12 @@ export function lchown(
   gid: number,
   callback: ErrorOnlyCallback
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of lchown, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.lchownSync(path, uid, gid), callback);
+  const { pathOrFd } = validateChownArgs(path, uid, gid);
+  callWithErrorOnlyCallback(() => {
+    if (cffs.stat(pathOrFd as URL, { followSymlinks: false }) == null) {
+      throw new ERR_ENOENT((path as URL).pathname, { syscall: 'lchown' });
+    }
+  }, callback);
 }
 
 export function lutimes(
