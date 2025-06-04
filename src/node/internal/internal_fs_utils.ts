@@ -83,6 +83,23 @@ export const kBadge = Symbol('kBadge');
 export type RawTime = string | number | bigint;
 export type SymlinkType = 'dir' | 'file' | 'junction' | null | undefined;
 
+export function getDate(time: RawTime | Date): Date {
+  if (typeof time === 'number') {
+    return new Date(time);
+  } else if (typeof time === 'bigint') {
+    return new Date(Number(time));
+  } else if (typeof time === 'string') {
+    return new Date(time);
+  } else if (time instanceof Date) {
+    return time;
+  }
+  throw new ERR_INVALID_ARG_TYPE(
+    'time',
+    ['string', 'number', 'bigint', 'Date'],
+    time
+  );
+}
+
 export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // We treat all of our virtual file system paths as file URLs
   // as a way of normalizing them. Because our file system is
