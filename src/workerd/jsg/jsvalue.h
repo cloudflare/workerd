@@ -625,7 +625,7 @@ struct JsValueWrapper {
     if constexpr (kj::isSameType<T, JsString>()) {
       return T(check(handle->ToString(context)));
     } else if constexpr (kj::isSameType<T, JsBoolean>()) {
-      return T(handle->ToBoolean(context->GetIsolate()));
+      return T(handle->ToBoolean(js.v8Isolate));
     } else if constexpr (kj::isSameType<T, JsNumber>()) {
       return T(check(handle->ToNumber(context)));
     } else {
@@ -643,7 +643,7 @@ struct JsValueWrapper {
       v8::Local<v8::Value> handle,
       JsRef<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto isolate = context->GetIsolate();
+    auto isolate = js.v8Isolate;
     KJ_IF_SOME(result,
         TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
       return JsRef(js, result);
