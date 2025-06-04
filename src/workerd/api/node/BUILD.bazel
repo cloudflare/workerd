@@ -436,3 +436,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/fs-utimes-test.js"],
 )
+
+wd_test(
+    src = "tests/fs-stat-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-stat-test.js"],
+)
