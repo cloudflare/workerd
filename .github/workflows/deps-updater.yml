@@ -30,6 +30,8 @@ jobs:
         run: build/deps/update-deps.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update rust dependencies
+        run: bazel run //deps/rust:crates_vendor -- --repin full
       - name: Open pull request
         id: create-pr
         uses: peter-evans/create-pull-request@v7
