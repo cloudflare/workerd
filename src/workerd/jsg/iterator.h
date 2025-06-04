@@ -569,7 +569,7 @@ class GeneratorWrapper {
       auto& typeWrapper = TypeWrapper::from(isolate);
       auto object = handle.template As<v8::Object>();
 
-      bool done = typeWrapper.template unwrap<bool>(context,
+      bool done = typeWrapper.template unwrap<bool>(js, context,
           check(object->Get(context, v8StrIntern(isolate, "done"_kj))), TypeErrorContext::other());
 
       auto value = check(object->Get(context, v8StrIntern(isolate, "value"_kj)));

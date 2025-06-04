@@ -68,7 +68,7 @@ class V8HandleWrapper {
 
   // Define a tryUnwrap() overload for each interesting subclass of v8::Value.
 #define JSG_DEFINE_TRY_UNWRAP(type)                                                                \
-  kj::Maybe<v8::Local<v8::type>> tryUnwrap(Lock& js, v8::Local<v8::Context> context,               \
+  kj::Maybe<v8::Local<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,          \
       v8::Local<v8::Value> handle, v8::Local<v8::type>*,                                           \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
@@ -77,7 +77,7 @@ class V8HandleWrapper {
     return kj::none;                                                                               \
   }                                                                                                \
                                                                                                    \
-  kj::Maybe<v8::Global<v8::type>> tryUnwrap(Lock& js, v8::Local<v8::Context> context,              \
+  kj::Maybe<v8::Global<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,         \
       v8::Local<v8::Value> handle, v8::Global<v8::type>*,                                          \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
@@ -86,7 +86,7 @@ class V8HandleWrapper {
     return kj::none;                                                                               \
   }                                                                                                \
                                                                                                    \
-  kj::Maybe<V8Ref<v8::type>> tryUnwrap(Lock& js, v8::Local<v8::Context> context,                   \
+  kj::Maybe<V8Ref<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,              \
       v8::Local<v8::Value> handle, V8Ref<v8::type>*,                                               \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
@@ -95,7 +95,7 @@ class V8HandleWrapper {
     return kj::none;                                                                               \
   }                                                                                                \
   template <typename T = v8::type, typename = decltype(&T::GetIdentityHash)>                       \
-  kj::Maybe<HashableV8Ref<T>> tryUnwrap(Lock& js, v8::Local<v8::Context> context,                  \
+  kj::Maybe<HashableV8Ref<T>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,             \
       v8::Local<v8::Value> handle, HashableV8Ref<v8::type>*,                                       \
       kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
@@ -299,7 +299,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
     return "Configuration";
   }
 
-  Configuration unwrap(v8::Local<v8::Context> context, Configuration*) {
+  Configuration unwrap(Lock& js, v8::Local<v8::Context> context, Configuration*) {
     return configuration;
   }
 
@@ -487,7 +487,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   template <typename U>
-  const TypeHandler<U>& unwrap(v8::Local<v8::Context>, TypeHandler<U>*) {
+  const TypeHandler<U>& unwrap(Lock& js, v8::Local<v8::Context>, TypeHandler<U>*) {
     // if you're here because of compiler error template garbage, you forgot to register
     // a type with JSG_DECLARE_ISOLATE_TYPE
     return TYPE_HANDLER_INSTANCE<U>;
@@ -504,11 +504,11 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   template <typename U>
-  auto unwrap(v8::Local<v8::Context> context,
+  auto unwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       TypeErrorContext errorContext,
       kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none) -> RemoveRvalueRef<U> {
-    auto& js = Lock::from(v8::Isolate::GetCurrent());
     auto maybe = this->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject);
     KJ_IF_SOME(result, maybe) {
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
@@ -541,13 +541,14 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
-    return unwrap<U>(context, arg, errorContext);
+    return unwrap<U>(js, context, arg, errorContext);
   }
 
   // Helper for unwrapping function/method arguments correctly. Specifically, we need logic to
   // handle the case where the user passes in fewer arguments than the function has parameters.
   template <typename U>
-  auto unwrap(v8::Local<v8::Context> context,
+  auto unwrap(Lock& js,
+      v8::Local<v8::Context> context,
       const v8::FunctionCallbackInfo<v8::Value>& args,
       size_t parameterIndex,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
@@ -560,12 +561,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;
       auto builder = kj::heapArrayBuilder<E>(size);
       for (size_t i = parameterIndex; i < args.Length(); i++) {
-        builder.add(unwrap<E>(context, args[i], errorContext));
+        builder.add(unwrap<E>(js, context, args[i], errorContext));
       }
       return builder.finish();
     } else if constexpr (ValueLessParameter<Self, V>) {
       // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
-      return unwrap(context, (V*)nullptr);
+      return unwrap(js, context, (V*)nullptr);
     } else {
       if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {
         // TODO(perf): Better to perform this parameter index check once, at the unwrap<U>() call
@@ -575,15 +576,14 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
           // We're unwrapping a nonexistent argument into a required parameter. Since Web IDL
           // nullable types (Maybe<T>) can be initialized from `undefined`, we need to explicitly
           // throw here, or else `f(Maybe<T>)` could be called like `f()`.
-          throwTypeError(
-              v8::Isolate::GetCurrent(), errorContext, TypeWrapper::getName((V*)nullptr));
+          throwTypeError(js.v8Isolate, errorContext, TypeWrapper::getName((V*)nullptr));
         }
       }
 
       // If we get here, we're either unwrapping into an optional or unimplemented parameter, in
       // which cases we're fine with nonexistent arguments implying `undefined`, or we have an
       // argument at this parameter index.
-      return unwrap<U>(context, args[parameterIndex], errorContext);
+      return unwrap<U>(js, context, args[parameterIndex], errorContext);
     }
   }
 
@@ -593,13 +593,14 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     reflection.unwrapper = [](v8::Isolate* isolate, v8::Local<v8::Object> object,
                                kj::StringPtr name) -> kj::Maybe<U> {
       auto context = isolate->GetCurrentContext();
+      auto& js = Lock::from(isolate);
       auto value = jsg::check(object->Get(context, v8StrIntern(isolate, name)));
       if (value->IsUndefined()) {
         return kj::none;
       } else {
         // TypeErrorContext::structField() produces a pretty good error message for this case.
         return from(isolate).template unwrap<U>(
-            context, value, TypeErrorContext::structField(typeid(Holder), name.cStr()), object);
+            js, context, value, TypeErrorContext::structField(typeid(Holder), name.cStr()), object);
       }
     };
   }
