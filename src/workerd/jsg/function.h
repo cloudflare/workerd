@@ -378,7 +378,6 @@ class FunctionWrapper {
 
   template <typename Ret, typename... Args>
   kj::Maybe<Constructor<Ret(Args...)>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Constructor<Ret(Args...)>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -405,13 +404,12 @@ class FunctionWrapper {
     };
 
     return Constructor<Ret(Args...)>(wrapperFn,
-        V8Ref(isolate, parentObject.orDefault(context->Global())),
+        V8Ref(isolate, parentObject.orDefault(js.v8Context()->Global())),
         V8Ref(isolate, handle.As<v8::Function>()));
   }
 
   template <typename Ret, typename... Args>
   kj::Maybe<Function<Ret(Args...)>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Function<Ret(Args...)>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -444,13 +442,12 @@ class FunctionWrapper {
     };
 
     return Function<Ret(Args...)>(wrapperFn,
-        V8Ref(isolate, parentObject.orDefault(context->Global())),
+        V8Ref(isolate, parentObject.orDefault(js.v8Context()->Global())),
         V8Ref(isolate, handle.As<v8::Function>()));
   }
 
   template <typename Ret>
   kj::Maybe<Function<Ret(Arguments<Value>)>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Function<Ret(Arguments<Value>)>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -489,7 +486,7 @@ class FunctionWrapper {
     };
 
     return Function<Ret(Arguments<Value>)>(wrapperFn,
-        V8Ref(isolate, parentObject.orDefault(context->Global())),
+        V8Ref(isolate, parentObject.orDefault(js.v8Context()->Global())),
         V8Ref(isolate, handle.As<v8::Function>()));
   }
 };

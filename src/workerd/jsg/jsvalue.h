@@ -617,17 +617,14 @@ struct JsValueWrapper {
 #undef V
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
-  kj::Maybe<T> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      T*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<T> tryUnwrap(
+      Lock& js, v8::Local<v8::Value> handle, T*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if constexpr (kj::isSameType<T, JsString>()) {
-      return T(check(handle->ToString(context)));
+      return T(check(handle->ToString(js.v8Context())));
     } else if constexpr (kj::isSameType<T, JsBoolean>()) {
       return T(handle->ToBoolean(js.v8Isolate));
     } else if constexpr (kj::isSameType<T, JsNumber>()) {
-      return T(check(handle->ToNumber(context)));
+      return T(check(handle->ToNumber(js.v8Context())));
     } else {
       JsValue value(handle);
       KJ_IF_SOME(t, value.tryCast<T>()) {
@@ -639,13 +636,12 @@ struct JsValueWrapper {
 
   template <typename T, typename = kj::EnableIf<std::is_assignable_v<JsValue, T>>>
   kj::Maybe<JsRef<T>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       JsRef<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto isolate = js.v8Isolate;
     KJ_IF_SOME(result,
-        TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+        TypeWrapper::from(isolate).tryUnwrap(js, handle, (T*)nullptr, parentObject)) {
       return JsRef(js, result);
     }
     return kj::none;

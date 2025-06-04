@@ -1778,11 +1778,8 @@ class ResourceWrapper {
     });
   }
 
-  kj::Maybe<T&> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      T*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<T&> tryUnwrap(
+      Lock& js, v8::Local<v8::Value> handle, T*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Try to unwrap a value of type T.
 
     if (handle->IsObject()) {
@@ -1790,7 +1787,7 @@ class ResourceWrapper {
           v8::Local<v8::Object>::Cast(handle)->FindInstanceInPrototypeChain(
               getTemplate(js.v8Isolate, nullptr));
       if (!instance.IsEmpty()) {
-        return extractInternalPointer<T, false>(context, instance);
+        return extractInternalPointer<T, false>(js.v8Context(), instance);
       }
     }
 
@@ -1798,13 +1795,12 @@ class ResourceWrapper {
   }
 
   kj::Maybe<Ref<T>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Ref<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Try to unwrap a value of type Ref<T>.
 
-    KJ_IF_SOME(p, tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+    KJ_IF_SOME(p, tryUnwrap(js, handle, (T*)nullptr, parentObject)) {
       return Ref<T>(kj::addRef(p));
     } else {
       return kj::none;
@@ -1939,7 +1935,6 @@ class ObjectWrapper {
 
   // We do not support unwrapping Ref<Object>; use V8Ref<v8::Object> instead.
   kj::Maybe<Ref<Object>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Ref<Object>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
