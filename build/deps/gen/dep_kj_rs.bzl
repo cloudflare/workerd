@@ -2,11 +2,11 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://github.com/capnproto/kj-rs/tarball/3f0bc9b5e6e0b56a0fa43fd024c9a68601260ead"
-STRIP_PREFIX = "capnproto-kj-rs-3f0bc9b"
-SHA256 = "2b4cfd8f476c6e76cc8c49bdc7e0541c51f769b8d1adab1790a400222353a102"
+URL = "https://github.com/capnproto/kj-rs/tarball/d0c6021c76841905150649e308fc03b85753f775"
+STRIP_PREFIX = "capnproto-kj-rs-d0c6021"
+SHA256 = "d7d6f750d9e12cb66ff04fd1fcf56657d16589b9b8e21f45dc1da856d0a251d6"
 TYPE = "tgz"
-COMMIT = "3f0bc9b5e6e0b56a0fa43fd024c9a68601260ead"
+COMMIT = "d0c6021c76841905150649e308fc03b85753f775"
 
 def dep_kj_rs():
     http_archive(
@@ -15,4 +15,5 @@ def dep_kj_rs():
         strip_prefix = STRIP_PREFIX,
         type = TYPE,
         sha256 = SHA256,
+        repo_mapping = {"@crates.io": "@crates_vendor"},
     )
