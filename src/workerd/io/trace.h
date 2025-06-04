@@ -330,7 +330,7 @@ struct JsRpcEventInfo final {
 
 // Describes a scheduled request
 struct ScheduledEventInfo final {
-  explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
+  explicit ScheduledEventInfo(double scheduledTime, kj::String cron, kj::String cfJson);
   ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader);
   ScheduledEventInfo(ScheduledEventInfo&&) = default;
   ScheduledEventInfo& operator=(ScheduledEventInfo&&) = default;
@@ -338,6 +338,7 @@ struct ScheduledEventInfo final {
 
   double scheduledTime;
   kj::String cron;
+  kj::String cfJson;
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const;
   ScheduledEventInfo clone() const;

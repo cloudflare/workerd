@@ -185,7 +185,7 @@ KJ_TEST("Read/Write ScheduledEventInfo workers") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::ScheduledEventInfo>();
 
-  tracing::ScheduledEventInfo info(1.2, kj::str("foo"));
+  tracing::ScheduledEventInfo info(1.2, kj::str("foo"), kj::str("bar"));
 
   info.copyTo(infoBuilder);
 
@@ -194,10 +194,13 @@ KJ_TEST("Read/Write ScheduledEventInfo workers") {
   tracing::ScheduledEventInfo info2(reader);
   KJ_ASSERT(info2.scheduledTime == 1.2);
   KJ_ASSERT(info2.cron == "foo"_kj);
+  // TODO: Add support for cfJson field in capnp and re-enable
+  // KJ_ASSERT(info2.cfJson == "bar"_kj);
 
   tracing::ScheduledEventInfo info3 = info.clone();
   KJ_ASSERT(info3.scheduledTime == 1.2);
   KJ_ASSERT(info3.cron == "foo"_kj);
+  KJ_ASSERT(info3.cfJson == "bar"_kj);
 }
 
 KJ_TEST("Read/Write AlarmEventInfo works") {

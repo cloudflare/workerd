@@ -280,7 +280,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     };
 
     t.setEventInfo(context.getInvocationSpanContext(), timestamp,
-        tracing::FetchEventInfo(method, kj::str(url), kj::str(cfJson), kj::mv(traceHeadersArray)));
+        tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -559,8 +559,12 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, context.getWorkerTracer()) {
+    kj::String cfJson;
+    KJ_IF_SOME(c, cfBlobJson) {
+      cfJson = kj::str(c);
+    }
     t.setEventInfo(context.getInvocationSpanContext(), context.now(),
-        tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
+        tracing::ScheduledEventInfo(eventTime, kj::str(cron), kj::mv(cfJson)));
   }
 
   // Scheduled handlers run entirely in waitUntil() tasks.

@@ -215,6 +215,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, String
     obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
   }
   obj.set(js, CRON_STR, js.str(info.cron));
+  obj.set(js, CFJSON_STR, js.str(info.cfJson));
   return obj;
 }
 
