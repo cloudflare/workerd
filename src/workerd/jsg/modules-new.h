@@ -377,8 +377,8 @@ class Module {
         auto& wrapper = TypeWrapper::from(js.v8Isolate);
         auto ext = js.alloc<T>(js, specifier);
         ns.setDefault(js, ext->getExports(js));
-        auto fn = Module::compileEvalFunction(js, source, name,
-            JsObject(wrapper.wrap(js, js.v8Context(), kj::none, ext.addRef())), observer);
+        auto fn = Module::compileEvalFunction(
+            js, source, name, JsObject(wrapper.wrap(js, kj::none, ext.addRef())), observer);
         fn(js);
         // If there are named exports specified for the module namespace,
         // then we want to examine the ext->getExports() to extract those.
@@ -403,8 +403,7 @@ class Module {
                const Module::ModuleNamespace& ns,
                const CompilationObserver& observer) mutable -> bool {
       Ref<T> instance = factory(js);
-      auto value =
-          TypeWrapper::from(js.v8Isolate).wrap(js, js.v8Context(), kj::none, kj::mv(instance));
+      auto value = TypeWrapper::from(js.v8Isolate).wrap(js, kj::none, kj::mv(instance));
       return ns.setDefault(js, JsValue(value));
     };
   }
@@ -515,8 +514,8 @@ class ModuleBundle {
         kj::Own<Module> mod = Module::newSynthetic(kj::mv(specifier), type,
             [](Lock& js, const Url& specifier, const Module::ModuleNamespace& ns,
                 const CompilationObserver&) {
-          auto value = TypeWrapper::from(js.v8Isolate)
-                           .wrap(js, js.v8Context(), kj::none, js.alloc<T>(js, specifier));
+          auto value =
+              TypeWrapper::from(js.v8Isolate).wrap(js, kj::none, js.alloc<T>(js, specifier));
           ns.setDefault(js, JsValue(value));
           return true;
         });

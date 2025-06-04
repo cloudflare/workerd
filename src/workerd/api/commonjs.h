@@ -75,7 +75,7 @@ struct CommonJsImpl: public jsg::ModuleRegistry::CommonJsModuleInfo::CommonJsMod
   KJ_DISALLOW_COPY_AND_MOVE(CommonJsImpl);
   jsg::JsObject getContext(jsg::Lock& js) override {
     auto& lock = kj::downcast<LockType>(js);
-    return jsg::JsObject(lock.wrap(js.v8Context(), context.addRef()));
+    return jsg::JsObject(lock.wrap(context.addRef()));
   }
   jsg::JsValue getExports(jsg::Lock& js) override {
     return jsg::JsValue(context->getModule(js)->getExports(js));
