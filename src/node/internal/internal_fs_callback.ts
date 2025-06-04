@@ -46,6 +46,7 @@ import {
   type Position,
   type RawTime,
   type SymlinkType,
+  getValidatedFd,
 } from 'node-internal:internal_fs_utils';
 import { F_OK } from 'node-internal:internal_fs_constants';
 import {
@@ -279,11 +280,10 @@ export function fchown(
 }
 
 export function fdatasync(fd: number, callback: ErrorOnlyCallback): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of fdatasync, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.fdatasyncSync(fd), callback);
+  getValidatedFd(fd);
+  callWithErrorOnlyCallback(() => {
+    fssync.fdatasyncSync(fd);
+  }, callback);
 }
 
 export function fstat(
@@ -306,11 +306,10 @@ export function fsync(
   fd: number,
   callback: ErrorOnlyCallback = () => {}
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of fsync, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.fsyncSync(fd), callback);
+  getValidatedFd(fd);
+  callWithErrorOnlyCallback(() => {
+    fssync.fsyncSync(fd);
+  }, callback);
 }
 
 export function ftruncate(
@@ -1218,6 +1217,8 @@ export function createWriteStream(): void {
 // [x][x][x][x] fs.lstat(path[, options], callback)
 // [x][x][x][x] fs.stat(path[, options], callback)
 // [x][x][x][x] fs.statfs(path[, options], callback)
+// [x][x][x][x] fs.fdatasync(fd, callback)
+// [x][x][x][x] fs.fsync(fd, callback)
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
@@ -1228,8 +1229,6 @@ export function createWriteStream(): void {
 // [x][x][ ][ ] fs.cp(src, dest[, options], callback)
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
-// [x][x][x][ ] fs.fdatasync(fd, callback)
-// [x][x][x][ ] fs.fsync(fd, callback)
 // [x][x][x][ ] fs.ftruncate(fd[, len], callback)
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
 // [x][x][x][ ] fs.link(existingPath, newPath, callback)
