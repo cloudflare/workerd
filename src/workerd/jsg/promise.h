@@ -628,7 +628,7 @@ class PromiseWrapper {
             context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
         promise = check(promise->Then(context, then));
       }
-      return Promise<T>(context->GetIsolate(), promise);
+      return Promise<T>(js.v8Isolate, promise);
     } else {
       // Input is a resolved value (not a promise). Try to unwrap it now.
 
@@ -639,13 +639,12 @@ class PromiseWrapper {
       // Unfortunately this needs to be gated by a compatibility flag because there are
       // existing workers that appear to rely on the old behavior -- although it's not clear
       // if those workers actually work the way they were intended to.
-      if (config.unwrapCustomThenables && isThenable(context, handle)) {
+      if (config.unwrapCustomThenables && isThenable(js, context, handle)) {
         auto paf = check(v8::Promise::Resolver::New(context));
         check(paf->Resolve(context, handle));
         return tryUnwrap(js, context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
       }
 
-      auto& js = Lock::from(context->GetIsolate());
       if constexpr (isVoid<T>()) {
         // When expecting Promise<void>, we treat absolutely any non-promise value as being
         // an immediately-resolved promise. This is consistent with JavaScript where you'd
@@ -675,10 +674,10 @@ class PromiseWrapper {
  private:
   const JsgConfig config;
 
-  static bool isThenable(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
+  static bool isThenable(Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
     if (handle->IsObject()) {
       auto obj = handle.As<v8::Object>();
-      return check(obj->Has(context, v8StrIntern(context->GetIsolate(), "then")));
+      return check(obj->Has(context, v8StrIntern(js.v8Isolate, "then")));
     }
     return false;
   }

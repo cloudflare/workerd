@@ -565,7 +565,7 @@ class GeneratorWrapper {
       GeneratorNext<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsObject()) {
-      auto isolate = context->GetIsolate();
+      auto isolate = js.v8Isolate;
       auto& typeWrapper = TypeWrapper::from(isolate);
       auto object = handle.template As<v8::Object>();
 
@@ -602,8 +602,7 @@ class GeneratorWrapper {
           .value = kj::mv(v),
         };
       } else {
-        throwTypeError(
-            context->GetIsolate(), TypeErrorContext::other(), TypeWrapper::getName((T*)nullptr));
+        throwTypeError(js.v8Isolate, TypeErrorContext::other(), TypeWrapper::getName((T*)nullptr));
       }
     }
 
@@ -617,7 +616,7 @@ class GeneratorWrapper {
       Generator<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsObject()) {
-      auto isolate = context->GetIsolate();
+      auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
       if (iter->IsFunction()) {
@@ -638,7 +637,7 @@ class GeneratorWrapper {
       AsyncGenerator<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsObject()) {
-      auto isolate = context->GetIsolate();
+      auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetAsyncIterator(isolate)));
       // If there is no async iterator, let's try a sync iterator
@@ -713,13 +712,13 @@ class SequenceWrapper {
       v8::Local<v8::Value> handle,
       Sequence<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto isolate = context->GetIsolate();
+    auto isolate = js.v8Isolate;
     auto& typeWrapper = TypeWrapper::from(isolate);
     KJ_IF_SOME(gen,
         typeWrapper.tryUnwrap(js, context, handle, (Generator<U>*)nullptr, parentObject)) {
       kj::Vector<U> items;
       // We intentionally ignore the forEach return value.
-      gen.forEach(Lock::from(isolate), [&items](Lock&, U item, auto&) { items.add(kj::mv(item)); });
+      gen.forEach(js, [&items](Lock&, U item, auto&) { items.add(kj::mv(item)); });
       return Sequence<U>(items.releaseAsArray());
     }
     return kj::none;

@@ -1787,10 +1787,11 @@ class JsContext {
   static_assert(
       std::is_base_of_v<ContextGlobal, T>, "context global type must extend jsg::ContextGlobal");
 
-  JsContext(v8::Local<v8::Context> handle,
+  JsContext(v8::Isolate* isolate,
+      v8::Local<v8::Context> handle,
       Ref<T> object,
       kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
-      : handle(handle->GetIsolate(), handle),
+      : handle(isolate, handle),
         object(kj::mv(object)),
         maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
 
