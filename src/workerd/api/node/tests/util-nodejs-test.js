@@ -34,12 +34,45 @@ import util, {
   stripVTControlCharacters,
   styleText,
 } from 'node:util';
-import {
-  mustCall,
-  mustSucceed,
-  assertCalledMustCalls,
-  invalidArgTypeHelper,
-} from './internal/common.js';
+
+const remainingMustCallErrors = new Set();
+function commonMustCall(f) {
+  const error = new Error('Expected function to be called');
+  remainingMustCallErrors.add(error);
+  return function (...args) {
+    remainingMustCallErrors.delete(error);
+    return f.call(this, ...args);
+  };
+}
+function assertCalledMustCalls() {
+  try {
+    for (const error of remainingMustCallErrors) throw error;
+  } finally {
+    remainingMustCallErrors.clear();
+  }
+}
+
+function invalidArgTypeHelper(input) {
+  if (input == null) {
+    return ` Received ${input}`;
+  }
+  if (typeof input === 'function') {
+    return ` Received function ${input.name}`;
+  }
+  if (typeof input === 'object') {
+    if (input.constructor?.name) {
+      return ` Received an instance of ${input.constructor.name}`;
+    }
+    return ` Received ${inspect(input, { depth: -1 })}`;
+  }
+
+  let inspected = inspect(input, { colors: false });
+  if (inspected.length > 28) {
+    inspected = `${inspected.slice(inspected, 0, 25)}...`;
+  }
+
+  return ` Received type ${typeof input} (${inspected})`;
+}
 
 export const utilInspect = {
   // test-util-inspect.js
@@ -1027,7 +1060,7 @@ export const utilInspect = {
 
       assert.strictEqual(util.inspect(subject), "{ foo: 'bar' }");
 
-      subject[util.inspect.custom] = mustCall((depth, opts, inspect) => {
+      subject[util.inspect.custom] = commonMustCall((depth, opts, inspect) => {
         const clone = { ...opts };
         // This might change at some point but for now we keep the stylize function.
         // The function should either be documented or an alternative should be
@@ -1044,7 +1077,7 @@ export const utilInspect = {
         );
         opts.showHidden = true;
         return {
-          [inspect.custom]: mustCall((depth, opts2) => {
+          [inspect.custom]: commonMustCall((depth, opts2) => {
             assert.deepStrictEqual(clone, opts2);
           }),
         };
@@ -1071,7 +1104,7 @@ export const utilInspect = {
 
     {
       const subject = {
-        [util.inspect.custom]: mustCall((depth, opts) => {
+        [util.inspect.custom]: commonMustCall((depth, opts) => {
           assert.strictEqual(depth, null);
           assert.strictEqual(opts.compact, true);
         }),
@@ -4980,7 +5013,8 @@ export const testCallbackify = {
 
         const cbAsyncFn = callbackify(asyncFn);
         cbAsyncFn(
-          mustSucceed((ret) => {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
           })
         );
@@ -4992,7 +5026,8 @@ export const testCallbackify = {
 
         const cbPromiseFn = callbackify(promiseFn);
         cbPromiseFn(
-          mustSucceed((ret) => {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
           })
         );
@@ -5008,7 +5043,8 @@ export const testCallbackify = {
 
         const cbThenableFn = callbackify(thenableFn);
         cbThenableFn(
-          mustSucceed((ret) => {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
           })
         );
@@ -5027,7 +5063,7 @@ export const testCallbackify = {
         assert.strictEqual(cbAsyncFn.length, 1);
         assert.strictEqual(cbAsyncFn.name, 'asyncFnCallbackified');
         cbAsyncFn(
-          mustCall((err, ret) => {
+          commonMustCall((err, ret) => {
             assert.strictEqual(ret, undefined);
             if (err instanceof Error) {
               if ('reason' in err) {
@@ -5058,7 +5094,7 @@ export const testCallbackify = {
         const cbPromiseFn = callbackify(promiseFn);
         assert.strictEqual(promiseFn.name, obj);
         cbPromiseFn(
-          mustCall((err, ret) => {
+          commonMustCall((err, ret) => {
             assert.strictEqual(ret, undefined);
             if (err instanceof Error) {
               if ('reason' in err) {
@@ -5085,7 +5121,7 @@ export const testCallbackify = {
 
         const cbThenableFn = callbackify(thenableFn);
         cbThenableFn(
-          mustCall((err, ret) => {
+          commonMustCall((err, ret) => {
             assert.strictEqual(ret, undefined);
             if (err instanceof Error) {
               if ('reason' in err) {
@@ -5125,7 +5161,8 @@ export const testCallbackify = {
         );
         cbAsyncFn(
           value,
-          mustSucceed((ret) => {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
           })
         );
@@ -5146,7 +5183,8 @@ export const testCallbackify = {
         assert.strictEqual(promiseFn.length, obj);
         cbPromiseFn(
           value,
-          mustSucceed((ret) => {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
           })
         );
@@ -5165,7 +5203,8 @@ export const testCallbackify = {
         iAmThis.cbFn = callbackify(iAmThis.fn);
         iAmThis.cbFn(
           value,
-          mustSucceed(function (ret) {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
             assert.strictEqual(this, iAmThis);
           })
@@ -5180,7 +5219,8 @@ export const testCallbackify = {
         iAmThat.cbFn = callbackify(iAmThat.fn);
         iAmThat.cbFn(
           value,
-          mustSucceed(function (ret) {
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
             assert.strictEqual(ret, value);
             assert.strictEqual(this, iAmThat);
           })
@@ -5496,7 +5536,7 @@ export const testPromisify = {
         callback(null, 'foo', 'bar');
       }
       promisify(fn)().then(
-        mustCall((value) => {
+        commonMustCall((value) => {
           assert.strictEqual(value, 'foo');
         })
       );
@@ -5507,7 +5547,7 @@ export const testPromisify = {
         callback(null);
       }
       promisify(fn)().then(
-        mustCall((value) => {
+        commonMustCall((value) => {
           assert.strictEqual(value, undefined);
         })
       );
@@ -5518,7 +5558,7 @@ export const testPromisify = {
         callback();
       }
       promisify(fn)().then(
-        mustCall((value) => {
+        commonMustCall((value) => {
           assert.strictEqual(value, undefined);
         })
       );
@@ -5529,7 +5569,7 @@ export const testPromisify = {
         callback(err, val);
       }
       promisify(fn)(null, 42).then(
-        mustCall((value) => {
+        commonMustCall((value) => {
           assert.strictEqual(value, 42);
         })
       );
@@ -5540,7 +5580,7 @@ export const testPromisify = {
         callback(err, val);
       }
       promisify(fn)(new Error('oops'), null).catch(
-        mustCall((err) => {
+        commonMustCall((err) => {
           assert.strictEqual(err.message, 'oops');
         })
       );
@@ -5554,7 +5594,7 @@ export const testPromisify = {
       (async () => {
         const value = await promisify(fn)(null, 42);
         assert.strictEqual(value, 42);
-      })().then(mustCall());
+      })().then(commonMustCall());
     }
 
     {
@@ -5565,7 +5605,7 @@ export const testPromisify = {
 
       o.fn = fn;
 
-      o.fn().then(mustCall((val) => assert(val)));
+      o.fn().then(commonMustCall((val) => assert(val)));
     }
 
     {
@@ -5583,7 +5623,7 @@ export const testPromisify = {
         await fn();
         await Promise.resolve();
         return assert.strictEqual(stack, err.stack);
-      })().then(mustCall());
+      })().then(commonMustCall());
     }
 
     {
@@ -5764,40 +5804,5 @@ export const testStyleText = {
     );
 
     assert.strictEqual(styleText('none', 'test'), 'test');
-
-    // const fd = common.getTTYfd();
-    // if (fd !== -1) {
-    //   const writeStream = new WriteStream(fd);
-
-    //   const originalEnv = process.env;
-    //   [
-    //     { isTTY: true, env: {}, expected: styled },
-    //     { isTTY: false, env: {}, expected: noChange },
-    //     { isTTY: true, env: { NODE_DISABLE_COLORS: '1' }, expected: noChange },
-    //     { isTTY: true, env: { NO_COLOR: '1' }, expected: noChange },
-    //     { isTTY: true, env: { FORCE_COLOR: '1' }, expected: styled },
-    //     { isTTY: true, env: { FORCE_COLOR: '1', NODE_DISABLE_COLORS: '1' }, expected: styled },
-    //     { isTTY: false, env: { FORCE_COLOR: '1', NO_COLOR: '1', NODE_DISABLE_COLORS: '1' }, expected: styled },
-    //     { isTTY: true, env: { FORCE_COLOR: '1', NO_COLOR: '1', NODE_DISABLE_COLORS: '1' }, expected: styled },
-    //   ].forEach((testCase) => {
-    //     writeStream.isTTY = testCase.isTTY;
-    //     process.env = {
-    //       ...process.env,
-    //       ...testCase.env
-    //     };
-    //     {
-    //       const output = styleText('red', 'test', { stream: writeStream });
-    //       assert.strictEqual(output, testCase.expected);
-    //     }
-    //     {
-    //       // Check that when passing an array of styles, the output behaves the same
-    //       const output = styleText(['red'], 'test', { stream: writeStream });
-    //       assert.strictEqual(output, testCase.expected);
-    //     }
-    //     process.env = originalEnv;
-    //   });
-    // } else {
-    //   common.skip('Could not create TTY fd');
-    // }
   },
 };

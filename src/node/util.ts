@@ -270,7 +270,8 @@ function isTTYStream(
 ): stream is TTYStream {
   return (
     typeof stream === 'object' &&
-    (stream as TTYStream).isTTY &&
+    'isTTY' in stream &&
+    !!stream.isTTY &&
     typeof (stream as TTYStream).getColorDepth === 'function'
   );
 }
