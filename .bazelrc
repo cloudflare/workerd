@@ -362,6 +362,10 @@ build:release_macos --linkopt="-Wl,-no_function_starts"
 build:release_macos_cross_x86_64 --config=release_macos
 build:release_macos_cross_x86_64 --config=macos-cross-x86_64
 
+# Set DEVELOPER_DIR for all builds on macOS to fix bzlmod apple_support
+build --action_env=DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+build --host_action_env=DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+
 # On macOS, optionally compile using LLD (19 or higher is compatible with the default flags added by
 # apple_support). Requires Homebrew's lld package to be installed and symlinked into /usr/local/bin.
 # This is less CPU intensive than the system linker, but also slightly slower in terms of wall time
