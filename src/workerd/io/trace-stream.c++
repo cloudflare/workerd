@@ -725,7 +725,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // shutdown.
   kj::Promise<void> handleOnset(Worker::Lock& lock,
       IoContext& ioContext,
-      kj::ArrayPtr<tracing::TailEvent> events,
+      kj::Array<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
     // There should be only a single onset event in this batch.
     KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
@@ -835,7 +835,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Promise<void> handleEvents(Worker::Lock& lock,
       const jsg::JsValue& handler,
       IoContext& ioContext,
-      kj::ArrayPtr<tracing::TailEvent> events,
+      kj::Array<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
     jsg::Lock& js = lock;
 
