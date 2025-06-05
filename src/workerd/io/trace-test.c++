@@ -409,7 +409,7 @@ KJ_TEST("Read/Write Attribute works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Attribute>();
 
-  tracing::Attribute attr(kj::str("foo"), {123.0, 321.2});
+  tracing::Attribute attr("foo"_kjc, {123.0, 321.2});
   attr.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -590,8 +590,8 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
 
   // An attribute event can have one or more Attributes specified.
   kj::Vector<tracing::Attribute> attrs(2);
-  attrs.add(tracing::Attribute(kj::str("foo"), true));
-  attrs.add(tracing::Attribute(kj::str("bar"), (int64_t)123));
+  attrs.add(tracing::Attribute("foo"_kjc, true));
+  attrs.add(tracing::Attribute("bar"_kjc, (int64_t)123));
 
   tracing::TailEvent info(context, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
   info.copyTo(infoBuilder);

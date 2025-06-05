@@ -14,6 +14,7 @@ using import "/capnp/compat/http-over-capnp.capnp".HttpService;
 using import "/capnp/compat/byte-stream.capnp".ByteStream;
 using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
+using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
 struct InvocationSpanContext {
@@ -169,16 +170,8 @@ struct Trace @0x8e8d911203762d34 {
     # The Attribute struct can also be used to provide arbitrary additional
     # properties for some other structs.
     # Modeled after https://opentelemetry.io/docs/concepts/signals/traces/#attributes
-    struct Value {
-      inner :union {
-        text @0 :Text;
-        bool @1 :Bool;
-        int @2 :Int64;
-        float @3 :Float64;
-      }
-    }
     name @0 :Text;
-    value @1 :List(Value);
+    value @1 :List(TagValue);
   }
 
   struct Return {
