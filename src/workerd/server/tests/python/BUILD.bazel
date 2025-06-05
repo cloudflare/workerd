@@ -37,7 +37,7 @@ py_wd_test("seek-metadatafs")
         # TODO: The packages below don't currently work in the latest package/python versions. Need
         # to fix them.
         pkg_skip_versions = {
-            "0.27.5": [
+            "0.27.7": [
                 "micropip",  # missing lockfile
                 "soupsieve",  # Circular dependency with beautifulsoup4
                 "starlette",  # No module named 'starlette.converters'
