@@ -463,9 +463,10 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
   }
 }
 
+export type Falsy = false | 0 | -0 | 0n | '' | null | undefined | typeof NaN;
 export class ERR_FALSY_VALUE_REJECTION extends NodeError {
-  reason: string;
-  constructor(reason: string) {
+  reason: Falsy;
+  constructor(reason: Falsy) {
     super('ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value');
     this.reason = reason;
   }

@@ -29,7 +29,10 @@
 import { default as bufferUtil } from 'node-internal:buffer';
 import type { Encoding } from 'node-internal:buffer';
 import { validateFunction } from 'node-internal:validators';
-import { ERR_FALSY_VALUE_REJECTION } from 'node-internal:internal_errors';
+import {
+  ERR_FALSY_VALUE_REJECTION,
+  Falsy,
+} from 'node-internal:internal_errors';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;
 
@@ -209,9 +212,12 @@ function callbackifyOnRejected(
   reason: unknown,
   cb: (error?: unknown) => void
 ): void {
+  // `!reason` guard inspired by bluebird (https://github.com/petkaantonov/bluebird/blob/2207fae3572f03b089bc92d3a6cefdd278cff7ab/src/nodeify.js#L30-L43).
+  // Because `null` is a special error value in callbacks which means "no error
+  // occurred", we error-wrap so the callback consumer can distinguish between
+  // "the promise rejected with null" or "the promise fulfilled with undefined".
   if (!reason) {
-    cb(new ERR_FALSY_VALUE_REJECTION(String(reason)));
-    return;
+    reason = new ERR_FALSY_VALUE_REJECTION(reason as Falsy);
   }
   cb(reason);
 }
