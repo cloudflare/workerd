@@ -16,13 +16,14 @@ use capnp::capability::Promise;
 use capnp::message::ReaderOptions;
 use capnp_rpc::rpc_twoparty_capnp;
 use container_capnp::container;
+use futures::AsyncReadExt;
+use futures::AsyncWriteExt;
 use futures::StreamExt;
 use thiserror::Error;
 use tokio::runtime::Builder;
 
 pub mod io;
-use io::MpscReader;
-use io::MpscWriter;
+use io::channel;
 use io::signo_as_string;
 
 #[derive(Debug, Error)]
@@ -126,9 +127,9 @@ impl Impl {
         container_name: &str,
         mut messages_callback: Pin<&'static mut ffi::MessageCallback>,
     ) -> Result<Self, ContainerError> {
-        let (input_sender, input_receiver) = mpsc::sync_channel(1000);
-        let (output_sender, output_receiver) = mpsc::sync_channel::<Vec<u8>>(1000);
-        let (tokio_input_sender, tokio_input_receiver) = tokio::sync::mpsc::channel(1000);
+        let (input_sender, input_receiver) = mpsc::sync_channel::<Vec<u8>>(1000);
+        let (mut output_sender, mut output_receiver) = channel();
+        let (mut tokio_input_sender, mut tokio_input_receiver) = channel();
 
         let server = Server::connect(address, container_name)?;
         let runtime = Builder::new_current_thread().enable_all().build().unwrap();
@@ -140,8 +141,8 @@ impl Impl {
                 let client: container::Client = capnp_rpc::new_client(server);
                 dbg!("INITIALIZING RPC");
                 let network = capnp_rpc::twoparty::VatNetwork::new(
-                    MpscReader::new(tokio_input_receiver),
-                    MpscWriter::new(output_sender),
+                    tokio_input_receiver,
+                    output_sender,
                     rpc_twoparty_capnp::Side::Server,
                     ReaderOptions::default(),
                 );
@@ -150,19 +151,24 @@ impl Impl {
                 dbg!("RPC_SYSTEM SPAWNING");
                 tokio::task::spawn_local(rpc_system);
             });
-            runtime.spawn(async move {
-                while let Ok(message) = dbg!(output_receiver.recv()) {
-                    messages_callback.as_mut().call(&message);
+            local.spawn_local(async move {
+                while true {
+                    let mut buf = [0; 8096];
+                    let len = output_receiver.read(&mut buf).await;
+                    if len.is_err() {
+                        break;
+                    }
+                    messages_callback.as_mut().call(&buf[0..len.unwrap()]);
                 }
                 dbg!("OUTPUT_RECEIVER.RECV() ENDED");
             });
-            runtime.spawn_blocking(move || {
-              while let Ok(msg) = dbg!(input_receiver.recv()) {
-                if dbg!(tokio_input_sender.blocking_send(msg)).is_err() {
-                  break;
+            local.spawn_local(async move {
+                while let Ok(msg) = input_receiver.recv() {
+                    if tokio_input_sender.write_all(&msg).await.is_err() {
+                        break;
+                    }
                 }
-              }
-              dbg!("INPUT_RECEIVER.RECV() ENDED");
+                dbg!("INPUT_RECEIVER.RECV() ENDED");
             });
             runtime.block_on(local);
             dbg!("RPC_SYSTEM DONE");
@@ -182,6 +188,7 @@ struct Server {
 
 impl Server {
     fn connect(address: &str, container_name: &str) -> Result<Self, ContainerError> {
+        dbg!("CONNECT");
         let docker = Docker::connect_with_socket(address, 120, API_DEFAULT_VERSION)?;
         Ok(Server {
             docker: docker.into(),
@@ -196,6 +203,7 @@ impl container::Server for Server {
         _: container::DestroyParams,
         _: container::DestroyResults,
     ) -> Promise<(), capnp::Error> {
+        dbg!("DESTROY");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -219,6 +227,7 @@ impl container::Server for Server {
         params: container::SignalParams,
         _: container::SignalResults,
     ) -> Promise<(), capnp::Error> {
+        dbg!("SIGNAL");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -243,6 +252,7 @@ impl container::Server for Server {
         raw_params: container::StartParams,
         _: container::StartResults,
     ) -> Promise<(), capnp::Error> {
+        dbg!("START");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -288,7 +298,7 @@ impl container::Server for Server {
         _: container::StatusParams,
         mut results: container::StatusResults,
     ) -> Promise<(), capnp::Error> {
-        todo!();
+        dbg!("STATUS");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -310,6 +320,7 @@ impl container::Server for Server {
         _: container::MonitorParams,
         _: container::MonitorResults,
     ) -> Promise<(), capnp::Error> {
+        dbg!("MONITOR");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -343,6 +354,7 @@ impl container::Server for Server {
         _params: container::ListenTcpParams,
         _results: container::ListenTcpResults,
     ) -> Promise<(), capnp::Error> {
+        dbg!("LISTEN_TCP");
         Promise::from_future(async move {
             Err(capnp::Error::unimplemented(
                 "listen_tcp is not implemented".to_owned(),
@@ -356,6 +368,7 @@ impl container::Server for Server {
         _params: container::GetTcpPortParams,
         _results: container::GetTcpPortResults,
     ) -> Promise<(), capnp::Error> {
+        dbg!("GET_TCP_PORT");
         Promise::from_future(async move {
             Err(capnp::Error::unimplemented(
                 "get_tcp_port is not implemented".to_owned(),

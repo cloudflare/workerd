@@ -13,7 +13,7 @@ ContainerStreamSharedState::ContainerStreamSharedState() {}
 
 void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> message) {
   auto lockedQueue = messageQueue.lockExclusive();
-  for (auto& byte : message) {
+  for (auto& byte: message) {
     lockedQueue->push(byte);
   }
 
@@ -24,7 +24,8 @@ void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> mes
   }
 }
 
-kj::Maybe<size_t> ContainerStreamSharedState::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+kj::Maybe<size_t> ContainerStreamSharedState::tryRead(
+    void* buffer, size_t minBytes, size_t maxBytes) {
   auto lockedQueue = messageQueue.lockExclusive();
   if (lockedQueue->empty()) {
     return kj::none;

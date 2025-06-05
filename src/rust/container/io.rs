@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::pin::Pin;
-use std::sync::mpsc;
-use std::task::Context;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Poll;
+use std::task::Waker;
 
 use futures::AsyncRead;
 use futures::AsyncWrite;
@@ -24,91 +24,147 @@ pub fn signo_as_string(signo: u32) -> Option<String> {
     }
 }
 
-pub struct MpscReader {
-    pub receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
-    unread_data: VecDeque<u8>,
+#[derive(Debug)]
+struct Inner {
+    buffer: Vec<u8>,
+    write_cursor: usize,
+    read_cursor: usize,
+    write_end_closed: bool,
+    read_end_closed: bool,
+    read_waker: Option<Waker>,
+    write_waker: Option<Waker>,
 }
 
-impl MpscReader {
-    #[must_use]
-    pub fn new(receiver: tokio::sync::mpsc::Receiver<Vec<u8>>) -> Self {
+impl Inner {
+    fn new() -> Self {
         Self {
-            receiver,
-            unread_data: VecDeque::new(),
+            buffer: vec![0; 8096],
+            write_cursor: 0,
+            read_cursor: 0,
+            write_end_closed: false,
+            read_end_closed: false,
+            read_waker: None,
+            write_waker: None,
         }
-    }
-
-    fn read_unread(
-        mut self: Pin<&mut Self>,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        let len = std::cmp::min(buf.len(), self.unread_data.len());
-        let data = self.unread_data.drain(..len);
-        for (i, byte) in data.enumerate() {
-            buf[i] = byte;
-        }
-        Poll::Ready(Ok(len))
     }
 }
 
-impl AsyncRead for MpscReader {
+pub struct Sender {
+    inner: Arc<Mutex<Inner>>,
+}
+
+impl Drop for Sender {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.write_end_closed = true;
+        if let Some(read_waker) = inner.read_waker.take() {
+            read_waker.wake();
+        }
+    }
+}
+
+pub struct Receiver {
+    inner: Arc<Mutex<Inner>>,
+}
+
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.read_end_closed = true;
+        if let Some(write_waker) = inner.write_waker.take() {
+            write_waker.wake();
+        }
+    }
+}
+
+pub fn channel() -> (Sender, Receiver) {
+    let inner = Arc::new(Mutex::new(Inner::new()));
+    let sender = Sender {
+        inner: inner.clone(),
+    };
+    let receiver = Receiver { inner };
+    (sender, receiver)
+}
+
+impl AsyncRead for Receiver {
     fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut futures::task::Context,
         buf: &mut [u8],
-    ) -> Poll<std::io::Result<usize>> {
-        if !dbg!(&self.unread_data).is_empty() {
-            return self.read_unread(buf);
-        }
-
-        match dbg!(self.receiver.poll_recv(cx)) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(None) => Poll::Ready(Ok(0)),
-            Poll::Ready(Some(data)) => {
-              self.unread_data.extend(data.iter());
-              self.read_unread(buf)
+    ) -> futures::task::Poll<Result<usize, futures::io::Error>> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.read_cursor == inner.write_cursor {
+            if inner.write_end_closed {
+                Poll::Ready(Ok(0))
+            } else {
+                inner.read_waker = Some(cx.waker().clone());
+                Poll::Pending
             }
+        } else {
+            assert!(inner.read_cursor < inner.write_cursor);
+            let copy_len = std::cmp::min(buf.len(), inner.write_cursor - inner.read_cursor);
+            buf[0..copy_len]
+                .copy_from_slice(&inner.buffer[inner.read_cursor..inner.read_cursor + copy_len]);
+            inner.read_cursor += copy_len;
+            if let Some(write_waker) = inner.write_waker.take() {
+                write_waker.wake();
+            }
+            Poll::Ready(Ok(copy_len))
         }
     }
 }
 
-pub struct MpscWriter {
-    pub sender: mpsc::SyncSender<Vec<u8>>,
-}
-
-impl MpscWriter {
-    #[must_use]
-    pub fn new(sender: mpsc::SyncSender<Vec<u8>>) -> Self {
-        Self { sender }
-    }
-}
-
-impl AsyncWrite for MpscWriter {
+impl AsyncWrite for Sender {
     fn poll_write(
         self: Pin<&mut Self>,
-        _: &mut Context<'_>,
+        cx: &mut futures::task::Context,
         buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        match dbg!(self.sender.try_send(buf.to_vec())) {
-            Ok(()) => Poll::Ready(Ok(buf.len())),
-            Err(mpsc::TrySendError::Full(_)) => Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::StorageFull,
-                "Channel is full",
-            ))),
-            Err(mpsc::TrySendError::Disconnected(_)) => Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "Channel disconnected",
-            ))),
+    ) -> futures::task::Poll<Result<usize, futures::io::Error>> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.read_end_closed {
+            return Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "read end closed",
+            )));
         }
+        if inner.write_cursor == inner.buffer.len() {
+            if inner.read_cursor == inner.buffer.len() {
+                inner.write_cursor = 0;
+                inner.read_cursor = 0;
+            } else {
+                inner.write_waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+        }
+
+        assert!(inner.write_cursor < inner.buffer.len());
+
+        let copy_len = std::cmp::min(buf.len(), inner.buffer.len() - inner.write_cursor);
+        let dest_range = inner.write_cursor..inner.write_cursor + copy_len;
+        inner.buffer[dest_range].copy_from_slice(&buf[0..copy_len]);
+        inner.write_cursor += copy_len;
+        if let Some(read_waker) = inner.read_waker.take() {
+            read_waker.wake();
+        }
+        Poll::Ready(Ok(copy_len))
     }
 
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        // MPSC channels don't need explicit flushing
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        _cx: &mut futures::task::Context,
+    ) -> Poll<Result<(), futures::io::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        // Closing is handled by dropping the sender
+    fn poll_close(
+        self: Pin<&mut Self>,
+        _cx: &mut futures::task::Context,
+    ) -> Poll<Result<(), futures::io::Error>> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.write_end_closed = true;
+        if let Some(read_waker) = inner.read_waker.take() {
+            read_waker.wake();
+        }
         Poll::Ready(Ok(()))
     }
 }

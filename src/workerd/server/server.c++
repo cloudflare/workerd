@@ -2298,7 +2298,8 @@ class Server::WorkerService final: public Service,
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
             tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient))
-                                            .attach(kj::mv(containerStream)).attach(kj::mv(containerRpcClient)));
+                                            .attach(kj::mv(containerStream))
+                                            .attach(kj::mv(containerRpcClient)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
     };
