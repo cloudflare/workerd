@@ -111,6 +111,7 @@ struct Trace @0x8e8d911203762d34 {
   struct TraceEventInfo {
     struct TraceItem {
       scriptName @0 :Text;
+      actorId @1 :Text;
     }
 
     traces @0 :List(TraceItem);

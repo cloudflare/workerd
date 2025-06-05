@@ -396,8 +396,29 @@ namespace {
 kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   return KJ_MAP(t, traces) -> tracing::TraceEventInfo::TraceItem {
+    // Extract actor_id from spans if available
+    kj::Maybe<kj::String> actorId = kj::none;
+    for (const auto& span : t->spans) {
+      for (const auto& tag : span.tags) {
+        if (tag.key == "actor_id"_kjc) {
+          KJ_SWITCH_ONEOF(tag.value) {
+            KJ_CASE_ONEOF(str, kj::String) {
+              actorId = kj::str(str);
+              break;
+            }
+            KJ_CASE_ONEOF(_, auto) {
+              // Non-string actor_id, ignore
+            }
+          }
+          break;
+        }
+      }
+      if (actorId != kj::none) break;
+    }
+    
     return tracing::TraceEventInfo::TraceItem(
-        t->scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
+        t->scriptName.map([](auto& scriptName) { return kj::str(scriptName); }),
+        kj::mv(actorId));
   };
 }
 
@@ -426,21 +447,29 @@ tracing::TraceEventInfo tracing::TraceEventInfo::clone() const {
   return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
 }
 
-tracing::TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
-    : scriptName(kj::mv(scriptName)) {}
+tracing::TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> actorId)
+    : scriptName(kj::mv(scriptName)), actorId(kj::mv(actorId)) {}
 
 tracing::TraceEventInfo::TraceItem::TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader)
-    : scriptName(kj::str(reader.getScriptName())) {}
+    : scriptName(kj::str(reader.getScriptName())) {
+  if (reader.hasActorId()) {
+    actorId = kj::str(reader.getActorId());
+  }
+}
 
 void tracing::TraceEventInfo::TraceItem::copyTo(
     rpc::Trace::TraceEventInfo::TraceItem::Builder builder) const {
   KJ_IF_SOME(name, scriptName) {
     builder.setScriptName(name);
   }
+  KJ_IF_SOME(id, actorId) {
+    builder.setActorId(id);
+  }
 }
 
 tracing::TraceEventInfo::TraceItem tracing::TraceEventInfo::TraceItem::clone() const {
-  return TraceItem(scriptName.map([](auto& name) { return kj::str(name); }));
+  return TraceItem(scriptName.map([](auto& name) { return kj::str(name); }),
+                   actorId.map([](auto& id) { return kj::str(id); }));
 }
 
 tracing::DiagnosticChannelEvent::DiagnosticChannelEvent(

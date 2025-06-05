@@ -400,13 +400,14 @@ struct TraceEventInfo final {
   KJ_DISALLOW_COPY(TraceEventInfo);
 
   struct TraceItem final {
-    explicit TraceItem(kj::Maybe<kj::String> scriptName);
+    explicit TraceItem(kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> actorId = kj::none);
     TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
     TraceItem(TraceItem&&) = default;
     TraceItem& operator=(TraceItem&&) = default;
     KJ_DISALLOW_COPY(TraceItem);
 
     kj::Maybe<kj::String> scriptName;
+    kj::Maybe<kj::String> actorId;
 
     void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder) const;
     TraceItem clone() const;
