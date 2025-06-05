@@ -12,6 +12,7 @@ export { _checkIsHttpToken, _checkInvalidHeaderChar };
 export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
 export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
 export const methods = METHODS;
+export const kIncomingMessage = Symbol('IncomingMessage');
 
 export default {
   _checkIsHttpToken,
@@ -19,4 +20,5 @@ export default {
   chunkExpression,
   continueExpression,
   methods,
+  kIncomingMessage,
 };
