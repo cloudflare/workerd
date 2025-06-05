@@ -396,8 +396,7 @@ namespace {
 kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   return KJ_MAP(t, traces) -> tracing::TraceEventInfo::TraceItem {
-    return tracing::TraceEventInfo::TraceItem(
-        t->scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
+    return tracing::TraceEventInfo::TraceItem(mapCopyString(t->scriptName));
   };
 }
 
@@ -440,7 +439,7 @@ void tracing::TraceEventInfo::TraceItem::copyTo(
 }
 
 tracing::TraceEventInfo::TraceItem tracing::TraceEventInfo::TraceItem::clone() const {
-  return TraceItem(scriptName.map([](auto& name) { return kj::str(name); }));
+  return TraceItem(mapCopyString(scriptName));
 }
 
 tracing::DiagnosticChannelEvent::DiagnosticChannelEvent(
@@ -709,8 +708,7 @@ void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
 }
 
 tracing::Exception tracing::Exception::clone() const {
-  return Exception(timestamp, kj::str(name), kj::str(message),
-      stack.map([](auto& stack) { return kj::str(stack); }));
+  return Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack));
 }
 
 void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel) {
@@ -1116,8 +1114,7 @@ void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) const {
 }
 
 tracing::Link tracing::Link::clone() const {
-  return Link(
-      label.map([](const kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
+  return Link(mapCopyString(label), traceId, invocationId, spanId);
 }
 
 tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
@@ -1308,13 +1305,13 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
 tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
   return WorkerInfo{
     .executionModel = executionModel,
-    .scriptName = scriptName.map([](auto& str) { return kj::str(str); }),
+    .scriptName = mapCopyString(scriptName),
     .scriptVersion = scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
-    .dispatchNamespace = dispatchNamespace.map([](auto& str) { return kj::str(str); }),
+    .dispatchNamespace = mapCopyString(dispatchNamespace),
     .scriptId = mapCopyString(scriptId),
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
-    .entrypoint = entrypoint.map([](auto& str) { return kj::str(str); }),
+    .entrypoint = mapCopyString(entrypoint),
   };
 }
 

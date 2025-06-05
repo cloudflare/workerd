@@ -280,7 +280,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     };
 
     t.setEventInfo(context.getInvocationSpanContext(), timestamp,
-        tracing::FetchEventInfo(method, kj::str(url), kj::str(cfJson), kj::mv(traceHeadersArray)));
+        tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
