@@ -24,6 +24,22 @@ def wd_cc_binary(
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
         }),
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
         visibility = visibility,
         **kwargs
+    )
+
+    pkg = native.package_name().removeprefix("src/")
+    cross_alias = name + "_cross"
+    prebuilt_binary_name = name.removesuffix("_bin")
+    native.alias(
+        name = cross_alias,
+        visibility = visibility,
+        actual = select({
+            "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, prebuilt_binary_name),
+            "//conditions:default": name,
+        }),
     )
