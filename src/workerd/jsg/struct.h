@@ -45,7 +45,7 @@ class FieldWrapper {
         // Don't even set optional fields that aren't present.
         if (in.*field == kj::none) return;
       }
-      auto value = wrapper.wrap(js, creator, kj::mv(in.*field));
+      auto value = wrapper.wrap(js, context, creator, kj::mv(in.*field));
       check(out->Set(context, nameHandle.Get(isolate), value));
     }
   }
@@ -57,7 +57,7 @@ class FieldWrapper {
     v8::Local<v8::Value> jsValue = check(in->Get(context, nameHandle.Get(isolate)));
     auto& js = Lock::from(isolate);
     return wrapper.template unwrap<Type>(
-        js, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
+        js, context, jsValue, TypeErrorContext::structField(typeid(Struct), exportedName), in);
   }
 
  private:
@@ -86,19 +86,23 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     return typeid(T);
   }
 
-  v8::Local<v8::Object> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
+  v8::Local<v8::Object> wrap(
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
     auto isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
     auto& fields = getFields(isolate);
     v8::Local<v8::Object> out = v8::Object::New(isolate);
     (kj::get<indices>(fields).wrap(
-         js, static_cast<Self&>(*this), isolate, js.v8Context(), creator, in, out),
+         js, static_cast<Self&>(*this), isolate, context, creator, in, out),
         ...);
     return handleScope.Escape(out);
   }
 
-  kj::Maybe<T> tryUnwrap(
-      Lock& js, v8::Local<v8::Value> handle, T*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<T> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      T*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // In the case that an individual field is the wrong type, we don't return null, but throw an
     // exception directly. This is because:
     // 1) If we returned null, we'd lose useful debugging information about which exact field was
@@ -135,8 +139,8 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     //   it prescribes lexicographically-ordered member initialization, with base members ordered
     //   before derived members. Objects with mutating getters might be broken by this, but it
     //   doesn't seem worth fixing absent a compelling use case.
-    auto t = T{kj::get<indices>(fields).unwrap(
-        static_cast<Self&>(*this), js.v8Isolate, js.v8Context(), in)...};
+    auto t =
+        T{kj::get<indices>(fields).unwrap(static_cast<Self&>(*this), js.v8Isolate, context, in)...};
 
     // Note that if a `validate` function is provided, then it will be called after the struct is
     // unwrapped from v8. This would be an appropriate time to throw an error.

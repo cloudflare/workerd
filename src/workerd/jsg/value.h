@@ -34,7 +34,7 @@ namespace workerd::jsg {
 // JavaScript: we need to be able to wrap C++ constants in V8 values before a
 // context has been entered.
 //
-// Note that we can't generally change the wrap(js, ...) functions to wrap(isolate, ...)
+// Note that we can't generally change the wrap(js, context, ...) functions to wrap(isolate, ...)
 // because ResourceWrapper<TW, T>::wrap() needs the context to create new object instances.
 class PrimitiveWrapper {
  public:
@@ -42,7 +42,10 @@ class PrimitiveWrapper {
     return "number";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, double value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      double value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -52,17 +55,21 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<double> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       double*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return check(handle->ToNumber(js.v8Context()))->Value();
+    return check(handle->ToNumber(context))->Value();
   }
 
   static constexpr const char* getName(int8_t*) {
     return "byte";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int8_t value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int8_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -72,10 +79,11 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<int8_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       int8_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
 
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
@@ -91,7 +99,10 @@ class PrimitiveWrapper {
     return "octet";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint8_t value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint8_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -101,10 +112,11 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<uint8_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       uint8_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
@@ -122,7 +134,10 @@ class PrimitiveWrapper {
     return "short integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int16_t value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int16_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -132,10 +147,11 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<int16_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       int16_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
 
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
@@ -151,7 +167,10 @@ class PrimitiveWrapper {
     return "unsigned short integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint16_t value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint16_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -161,10 +180,11 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<uint16_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       uint16_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
@@ -182,7 +202,10 @@ class PrimitiveWrapper {
     return "integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -191,13 +214,16 @@ class PrimitiveWrapper {
     return v8::Number::New(isolate, value);
   }
 
-  kj::Maybe<int> tryUnwrap(
-      Lock& js, v8::Local<v8::Value> handle, int*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    if (int num; handle->IsInt32() && handle->Int32Value(js.v8Context()).To(&num)) {
+  kj::Maybe<int> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      int*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (int num; handle->IsInt32() && handle->Int32Value(context).To(&num)) {
       return num;
     }
 
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
     if (!isFinite(value)) {
       return 0;
     }
@@ -215,7 +241,10 @@ class PrimitiveWrapper {
     return "unsigned integer";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint32_t value) {
+  v8::Local<v8::Number> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint32_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -225,14 +254,15 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<uint32_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       uint32_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    if (uint32_t num; handle->IsUint32() && handle->Uint32Value(js.v8Context()).To(&num)) {
+    if (uint32_t num; handle->IsUint32() && handle->Uint32Value(context).To(&num)) {
       return num;
     }
 
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
@@ -250,7 +280,10 @@ class PrimitiveWrapper {
     return "bigint";
   }
 
-  v8::Local<v8::BigInt> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, uint64_t value) {
+  v8::Local<v8::BigInt> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      uint64_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -260,11 +293,12 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<uint64_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       uint64_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (v8::Local<v8::BigInt> bigint;
-        handle->IsBigInt() && handle->ToBigInt(js.v8Context()).ToLocal(&bigint)) {
+        handle->IsBigInt() && handle->ToBigInt(context).ToLocal(&bigint)) {
       bool lossless;
       auto value = bigint->Uint64Value(&lossless);
       JSG_REQUIRE(lossless, TypeError,
@@ -273,7 +307,7 @@ class PrimitiveWrapper {
       return value;
     }
 
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
@@ -291,7 +325,10 @@ class PrimitiveWrapper {
     return "bigint";
   }
 
-  v8::Local<v8::BigInt> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, int64_t value) {
+  v8::Local<v8::BigInt> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      int64_t value) {
     return wrap(js.v8Isolate, creator, value);
   }
 
@@ -301,11 +338,12 @@ class PrimitiveWrapper {
   }
 
   kj::Maybe<int64_t> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       int64_t*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (v8::Local<v8::BigInt> bigint;
-        handle->IsBigInt() && handle->ToBigInt(js.v8Context()).ToLocal(&bigint)) {
+        handle->IsBigInt() && handle->ToBigInt(context).ToLocal(&bigint)) {
       bool lossless;
       auto value = bigint->Int64Value(&lossless);
       JSG_REQUIRE(
@@ -313,7 +351,7 @@ class PrimitiveWrapper {
       return value;
     }
 
-    auto value = check(handle->ToNumber(js.v8Context()))->Value();
+    auto value = check(handle->ToNumber(context))->Value();
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
@@ -329,7 +367,8 @@ class PrimitiveWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::isSameType<T, bool>()>>
-  v8::Local<v8::Boolean> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
+  v8::Local<v8::Boolean> wrap(
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // The template is needed to prevent this overload from being chosen for arbitrary types that
     // can convert to bool, such as pointers.
     return wrap(js.v8Isolate, creator, value);
@@ -343,8 +382,11 @@ class PrimitiveWrapper {
     return v8::Boolean::New(isolate, value);
   }
 
-  kj::Maybe<bool> tryUnwrap(
-      Lock& js, v8::Local<v8::Value> handle, bool*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<bool> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      bool*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     return handle->ToBoolean(js.v8Isolate)->Value();
   }
 };
@@ -358,7 +400,10 @@ class NameWrapper {
     return "string or Symbol";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Name value) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Name value) {
     KJ_SWITCH_ONEOF(value.getUnwrapped(js.v8Isolate)) {
       KJ_CASE_ONEOF(string, kj::StringPtr) {
         auto& wrapper = static_cast<TypeWrapper&>(*this);
@@ -371,8 +416,11 @@ class NameWrapper {
     KJ_UNREACHABLE;
   }
 
-  kj::Maybe<Name> tryUnwrap(
-      Lock& js, v8::Local<v8::Value> handle, Name*, kj::Maybe<v8::Local<v8::Object>> parentObject) {
+  kj::Maybe<Name> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Name*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsSymbol()) {
       return Name(js, handle.As<v8::Symbol>());
     }
@@ -380,7 +428,7 @@ class NameWrapper {
     // Since most things are coercible to a string, this ought to catch pretty much
     // any value other than symbol
     auto& wrapper = static_cast<TypeWrapper&>(*this);
-    KJ_IF_SOME(string, wrapper.tryUnwrap(js, handle, (kj::String*)nullptr, parentObject)) {
+    KJ_IF_SOME(string, wrapper.tryUnwrap(js, context, handle, (kj::String*)nullptr, parentObject)) {
       return Name(kj::mv(string));
     }
 
@@ -424,14 +472,18 @@ class StringWrapper {
     return "DOMString";
   }
 
-  v8::Local<v8::String> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::ArrayPtr<const char> value) {
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::ArrayPtr<const char> value) {
     return v8Str(js.v8Isolate, value);
   }
 
-  v8::Local<v8::String> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<const char> value) {
-    return wrap(js, creator, value.asPtr());
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<const char> value) {
+    return wrap(js, context, creator, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(
@@ -439,24 +491,31 @@ class StringWrapper {
     return v8Str(isolate, value);
   }
 
-  v8::Local<v8::String> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const ByteString& value) {
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
-    return wrap(js, creator, value.asPtr());
+    return wrap(js, context, creator, value.asPtr());
   }
 
-  v8::Local<v8::String> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const USVString& value) {
-    return wrap(js, creator, value.asPtr());
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const USVString& value) {
+    return wrap(js, context, creator, value.asPtr());
   }
 
-  v8::Local<v8::String> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const DOMString& value) {
-    return wrap(js, creator, value.asPtr());
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const DOMString& value) {
+    return wrap(js, context, creator, value.asPtr());
   }
 
   template <StringLike T>
-  kj::Maybe<T> tryUnwrap(Lock& js, const v8::FastOneByteString& handle, T*) {
+  kj::Maybe<T> tryUnwrap(
+      Lock& js, v8::Local<v8::Context> context, const v8::FastOneByteString& handle, T*) {
     size_t utf8_length = simdutf::utf8_length_from_latin1(handle.data, handle.length);
     kj::Array<char> buf = kj::heapArray<char>(utf8_length + 1);
     buf[utf8_length] = '\0';
@@ -481,6 +540,7 @@ class StringWrapper {
   }
 
   kj::Maybe<kj::String> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::String*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -489,31 +549,34 @@ class StringWrapper {
     // value, v8 will try to coerce it into a string. So there is no need
     // for us to check if handle is a string here or not, ToString does
     // that for us.
-    JsString str(check(handle->ToString(js.v8Context())));
+    JsString str(check(handle->ToString(context)));
     return str.toString(js);
   }
 
   kj::Maybe<ByteString> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       ByteString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(check(handle->ToString(js.v8Context())));
+    JsString str(check(handle->ToString(context)));
     return str.toByteString(js);
   }
 
   kj::Maybe<USVString> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       USVString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(check(handle->ToString(js.v8Context())));
+    JsString str(check(handle->ToString(context)));
     return str.toUSVString(js);
   }
 
   kj::Maybe<DOMString> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       DOMString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(check(handle->ToString(js.v8Context())));
+    JsString str(check(handle->ToString(context)));
     return str.toDOMString(js);
   }
 };
@@ -541,9 +604,12 @@ class OptionalWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Optional<U> ptr) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Optional<U> ptr) {
     KJ_IF_SOME(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::fwd<U>(p));
+      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
     } else {
       return v8::Undefined(js.v8Isolate);
     }
@@ -551,6 +617,7 @@ class OptionalWrapper {
 
   template <typename U>
   kj::Maybe<Optional<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Optional<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -558,7 +625,7 @@ class OptionalWrapper {
       return Optional<U>(kj::none);
     } else {
       return static_cast<TypeWrapper*>(this)
-          ->tryUnwrap(js, handle, (kj::Decay<U>*)nullptr, parentObject)
+          ->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject)
           .map([](auto&& value) -> Optional<U> { return kj::fwd<decltype(value)>(value); });
     }
   }
@@ -574,10 +641,12 @@ class LenientOptionalWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, LenientOptional<U> ptr) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      LenientOptional<U> ptr) {
     KJ_IF_SOME(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::fwd<U>(p));
+      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
     } else {
       return v8::Undefined(js.v8Isolate);
     }
@@ -585,6 +654,7 @@ class LenientOptionalWrapper {
 
   template <typename U>
   kj::Maybe<LenientOptional<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       LenientOptional<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -593,7 +663,7 @@ class LenientOptionalWrapper {
     } else {
       KJ_IF_SOME(unwrapped,
           static_cast<TypeWrapper*>(this)->tryUnwrap(
-              js, handle, (kj::Decay<U>*)nullptr, parentObject)) {
+              js, context, handle, (kj::Decay<U>*)nullptr, parentObject)) {
         return LenientOptional<U>(kj::mv(unwrapped));
       } else {
         return LenientOptional<U>(kj::none);
@@ -619,9 +689,12 @@ class MaybeWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Maybe<U> ptr) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Maybe<U> ptr) {
     KJ_IF_SOME(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::fwd<U>(p));
+      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
     } else {
       return v8::Null(js.v8Isolate);
     }
@@ -629,6 +702,7 @@ class MaybeWrapper {
 
   template <typename U>
   kj::Maybe<kj::Maybe<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Maybe<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -639,11 +713,11 @@ class MaybeWrapper {
       // the following tryUnwrap returning a nullptr because of an incorrect type. The
       // noSubstituteNull compatibility flag is needed to fix that.
       return static_cast<TypeWrapper*>(this)
-          ->tryUnwrap(js, handle, (kj::Decay<U>*)nullptr, parentObject)
+          ->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject)
           .map([](auto&& value) -> kj::Maybe<U> { return kj::fwd<decltype(value)>(value); });
     } else {
       return static_cast<TypeWrapper*>(this)->tryUnwrap(
-          js, handle, (kj::Decay<U>*)nullptr, parentObject);
+          js, context, handle, (kj::Decay<U>*)nullptr, parentObject);
     }
   }
 
@@ -679,11 +753,13 @@ class OneOfWrapper {
 
   template <typename U, typename... V>
   bool wrapHelper(Lock& js,
+      v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::OneOf<V...>& in,
       v8::Local<v8::Value>& out) {
     if (in.template is<U>()) {
-      out = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(in.template get<U>()));
+      out =
+          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(in.template get<U>()));
       return true;
     } else {
       return false;
@@ -691,27 +767,31 @@ class OneOfWrapper {
   }
 
   template <typename... U>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::OneOf<U...> value) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::OneOf<U...> value) {
     v8::Local<v8::Value> result;
-    if (!(wrapHelper<U>(js, creator, value, result) || ...)) {
+    if (!(wrapHelper<U>(js, context, creator, value, result) || ...)) {
       result = v8::Undefined(js.v8Isolate);
     }
     return result;
   }
 
   template <template <typename> class Predicate, typename U, typename... V>
-  bool unwrapHelperRecursive(Lock& js, v8::Local<v8::Value> in, kj::OneOf<V...>& out) {
+  bool unwrapHelperRecursive(
+      Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> in, kj::OneOf<V...>& out) {
     if constexpr (isOneOf<U>) {
       // Ugh, a nested OneOf. We can't just call tryUnwrap(), because then our string/numeric
       // coercion might trigger early.
       U val;
-      if (unwrapHelper<Predicate>(js, in, val)) {
+      if (unwrapHelper<Predicate>(js, context, in, val)) {
         out.template init<U>(kj::mv(val));
         return true;
       }
     } else if constexpr (Predicate<kj::Decay<U>>::value) {
-      KJ_IF_SOME(val, static_cast<TypeWrapper*>(this)->tryUnwrap(js, in, (U*)nullptr, kj::none)) {
+      KJ_IF_SOME(val,
+          static_cast<TypeWrapper*>(this)->tryUnwrap(js, context, in, (U*)nullptr, kj::none)) {
         out.template init<U>(kj::mv(val));
         return true;
       }
@@ -720,8 +800,9 @@ class OneOfWrapper {
   }
 
   template <template <typename> class Predicate, typename... U>
-  bool unwrapHelper(Lock& js, v8::Local<v8::Value> in, kj::OneOf<U...>& out) {
-    return (unwrapHelperRecursive<Predicate, U>(js, in, out) || ...);
+  bool unwrapHelper(
+      Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> in, kj::OneOf<U...>& out) {
+    return (unwrapHelperRecursive<Predicate, U>(js, context, in, out) || ...);
   }
 
   // Predicates for helping implement nested OneOf unwrapping. These must be struct templates
@@ -751,6 +832,7 @@ class OneOfWrapper {
 
   template <typename... U>
   kj::Maybe<kj::OneOf<U...>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::OneOf<U...>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -785,14 +867,14 @@ class OneOfWrapper {
     //
     // TODO(someday): Prove that this is the same algorithm as the one defined by Web IDL.
     kj::OneOf<U...> result;
-    if (unwrapHelper<IsResourceType>(js, handle, result) ||
-        unwrapHelper<IsFallibleType>(js, handle, result) ||
-        (handle->IsBoolean() && unwrapHelper<IsBooleanType>(js, handle, result)) ||
-        (handle->IsNumber() && unwrapHelper<IsNumericType>(js, handle, result)) ||
-        (handle->IsBigInt() && unwrapHelper<IsNumericType>(js, handle, result)) ||
-        (unwrapHelper<IsStringType>(js, handle, result)) ||
-        (unwrapHelper<IsNumericType>(js, handle, result)) ||
-        (unwrapHelper<IsBooleanType>(js, handle, result))) {
+    if (unwrapHelper<IsResourceType>(js, context, handle, result) ||
+        unwrapHelper<IsFallibleType>(js, context, handle, result) ||
+        (handle->IsBoolean() && unwrapHelper<IsBooleanType>(js, context, handle, result)) ||
+        (handle->IsNumber() && unwrapHelper<IsNumericType>(js, context, handle, result)) ||
+        (handle->IsBigInt() && unwrapHelper<IsNumericType>(js, context, handle, result)) ||
+        (unwrapHelper<IsStringType>(js, context, handle, result)) ||
+        (unwrapHelper<IsNumericType>(js, context, handle, result)) ||
+        (unwrapHelper<IsBooleanType>(js, context, handle, result))) {
       return kj::mv(result);
     }
     return kj::none;
@@ -813,41 +895,48 @@ class ArrayWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<U> array) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<U> array) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(array[n]));
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
     return handleScope.Escape(out);
   }
   template <typename U>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::ArrayPtr<U> array) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::ArrayPtr<U> array) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
 
     v8::LocalVector<v8::Value> items(isolate, array.size());
     for (auto n = 0; n < items.size(); n++) {
-      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(array[n]));
+      items[n] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(array[n]));
     }
     auto out = v8::Array::New(isolate, items.data(), items.size());
 
     return handleScope.Escape(out);
   }
   template <typename U>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<U>& array) {
-    return static_cast<TypeWrapper*>(this)->wrap(js, creator, array.asPtr());
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<U>& array) {
+    return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, array.asPtr());
   }
 
   template <typename U>
   kj::Maybe<kj::Array<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Array<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -859,9 +948,9 @@ class ArrayWrapper {
     auto length = array->Length();
     auto builder = kj::heapArrayBuilder<U>(length);
     for (auto i: kj::zeroTo(length)) {
-      v8::Local<v8::Value> element = check(array->Get(js.v8Context(), i));
+      v8::Local<v8::Value> element = check(array->Get(context, i));
       builder.add(static_cast<TypeWrapper*>(this)->template unwrap<U>(
-          js, element, TypeErrorContext::arrayElement(i)));
+          js, context, element, TypeErrorContext::arrayElement(i)));
     }
     return builder.finish();
   }
@@ -881,8 +970,10 @@ class SetWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::HashSet<U> set) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::HashSet<U> set) {
     v8::Isolate* isolate = js.v8Isolate;
     v8::EscapableHandleScope handleScope(isolate);
 
@@ -890,7 +981,7 @@ class SetWrapper {
     for (auto& item: set) {
       v8::HandleScope scope(isolate);
       check(out->Add(
-          js.v8Context(), static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(item))));
+          context, static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(item))));
     }
 
     return handleScope.Escape(out);
@@ -898,6 +989,7 @@ class SetWrapper {
 
   template <typename U>
   kj::Maybe<kj::HashSet<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::HashSet<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -911,9 +1003,9 @@ class SetWrapper {
     auto builder = kj::HashSet<U>();
     builder.reserve(length);
     for (auto i: kj::zeroTo(length)) {
-      v8::Local<v8::Value> element = check(array->Get(js.v8Context(), i));
+      v8::Local<v8::Value> element = check(array->Get(context, i));
       auto value = static_cast<TypeWrapper*>(this)->template unwrap<U>(
-          js, element, TypeErrorContext::other());
+          js, context, element, TypeErrorContext::other());
       builder.upsert(kj::mv(value), [&](U& existing, U&& replacement) {
         JSG_FAIL_REQUIRE(TypeError, "Duplicate values in the set after unwrapping.");
       });
@@ -980,8 +1072,10 @@ class ArrayBufferWrapper {
     return "ArrayBuffer or ArrayBufferView";
   }
 
-  v8::Local<v8::ArrayBuffer> wrap(
-      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Array<byte> value) {
+  v8::Local<v8::ArrayBuffer> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Array<byte> value) {
     return wrap(js.v8Isolate, creator, kj::mv(value));
   }
 
@@ -1028,6 +1122,7 @@ class ArrayBufferWrapper {
   }
 
   kj::Maybe<kj::Array<byte>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Array<byte>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1040,10 +1135,11 @@ class ArrayBufferWrapper {
   }
 
   kj::Maybe<kj::Array<const byte>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Array<const byte>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return tryUnwrap(js, handle, (kj::Array<byte>*)nullptr, parentObject);
+    return tryUnwrap(js, context, handle, (kj::Array<byte>*)nullptr, parentObject);
   }
 };
 
@@ -1060,7 +1156,10 @@ class DictWrapper {
   }
 
   template <typename K, typename V>
-  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Dict<V, K> dict) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Dict<V, K> dict) {
     static_assert(webidl::isStringType<K>, "Dicts must be keyed on a string type.");
 
     v8::Isolate* isolate = js.v8Isolate;
@@ -1069,15 +1168,16 @@ class DictWrapper {
     for (auto& field: dict.fields) {
       // Set() returns Maybe<bool>. As usual, if the Maybe is null, then there was an exception,
       // but I have no idea what it means if the Maybe was filled in with the boolean value false...
-      KJ_ASSERT(check(out->Set(js.v8Context(),
-          static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(field.name)),
-          static_cast<TypeWrapper*>(this)->wrap(js, creator, kj::mv(field.value)))));
+      KJ_ASSERT(check(out->Set(context,
+          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(field.name)),
+          static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(field.value)))));
     }
     return handleScope.Escape(out);
   }
 
   template <typename K, typename V>
   kj::Maybe<Dict<V, K>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Dict<V, K>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1100,30 +1200,30 @@ class DictWrapper {
     }
 
     auto object = handle.As<v8::Object>();
-    v8::Local<v8::Array> names = check(object->GetOwnPropertyNames(js.v8Context()));
+    v8::Local<v8::Array> names = check(object->GetOwnPropertyNames(context));
     auto length = names->Length();
     auto builder = kj::heapArrayBuilder<typename Dict<V, K>::Field>(length);
     for (auto i: kj::zeroTo(length)) {
-      v8::Local<v8::String> name =
-          check(check(names->Get(js.v8Context(), i))->ToString(js.v8Context()));
-      v8::Local<v8::Value> value = check(object->Get(js.v8Context(), name));
+      v8::Local<v8::String> name = check(check(names->Get(context, i))->ToString(context));
+      v8::Local<v8::Value> value = check(object->Get(context, name));
 
       if constexpr (kj::isSameType<K, kj::String>()) {
         auto strName = convertToUtf8(name);
         const char* cstrName = strName.cStr();
         builder.add(typename Dict<V, K>::Field{kj::mv(strName),
-          wrapper.template unwrap<V>(js, value, TypeErrorContext::dictField(cstrName), object)});
+          wrapper.template unwrap<V>(
+              js, context, value, TypeErrorContext::dictField(cstrName), object)});
       } else {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
         // Thus, we do the unwrapping manually and UTF-8-convert the name only if it's needed.
-        auto unwrappedName = wrapper.tryUnwrap(js, name, (K*)nullptr, object);
+        auto unwrappedName = wrapper.tryUnwrap(js, context, name, (K*)nullptr, object);
         if (unwrappedName == kj::none) {
           auto strName = convertToUtf8(name);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictKey(strName.cStr()),
               TypeWrapper::getName((K*)nullptr));
         }
-        auto unwrappedValue = wrapper.tryUnwrap(js, value, (V*)nullptr, object);
+        auto unwrappedValue = wrapper.tryUnwrap(js, context, value, (V*)nullptr, object);
         if (unwrappedValue == kj::none) {
           auto strName = convertToUtf8(name);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictField(strName.cStr()),
@@ -1147,11 +1247,15 @@ class DateWrapper {
     return "date";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Date date) {
-    return check(v8::Date::New(js.v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Date date) {
+    return check(v8::Date::New(context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
   }
 
   kj::Maybe<kj::Date> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Date*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1200,11 +1304,14 @@ class NonCoercibleWrapper {
   }
 
   template <CoercibleType T>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, NonCoercible<T>) = delete;
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      NonCoercible<T>) = delete;
 
   template <CoercibleType T>
   kj::Maybe<NonCoercible<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       NonCoercible<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1212,7 +1319,7 @@ class NonCoercibleWrapper {
     if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
         kj::isSameType<jsg::DOMString, T>()) {
       if (!handle->IsString()) return kj::none;
-      KJ_IF_SOME(value, wrapper.tryUnwrap(js, handle, (T*)nullptr, parentObject)) {
+      KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
         return NonCoercible<T>{
           .value = kj::mv(value),
         };
@@ -1220,14 +1327,14 @@ class NonCoercibleWrapper {
       return kj::none;
     } else if constexpr (kj::isSameType<bool, T>()) {
       if (!handle->IsBoolean()) return kj::none;
-      return wrapper.tryUnwrap(js, handle, (T*)nullptr, parentObject).map([](auto& value) {
+      return wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject).map([](auto& value) {
         return NonCoercible<T>{
           .value = value,
         };
       });
     } else if constexpr (kj::isSameType<double, T>()) {
       if (!handle->IsNumber()) return kj::none;
-      return wrapper.tryUnwrap(js, handle, (T*)nullptr, parentObject).map([](auto& value) {
+      return wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject).map([](auto& value) {
         return NonCoercible<T>{
           .value = value,
         };
@@ -1264,12 +1371,14 @@ class MemoizedIdentityWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, MemoizedIdentity<T>& value) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      MemoizedIdentity<T>& value) {
     auto& wrapper = static_cast<TypeWrapper&>(*this);
     KJ_SWITCH_ONEOF(value.value) {
       KJ_CASE_ONEOF(raw, T) {
-        auto handle = wrapper.wrap(js, creator, kj::mv(raw));
+        auto handle = wrapper.wrap(js, context, creator, kj::mv(raw));
         value.value.template init<Value>(js.v8Isolate, handle);
         return handle;
       }
@@ -1282,6 +1391,7 @@ class MemoizedIdentityWrapper {
 
   template <typename T>
   kj::Maybe<MemoizedIdentity<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       MemoizedIdentity<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) = delete;
@@ -1299,11 +1409,14 @@ class IdentifiedWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Identified<T>& value) = delete;
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Identified<T>& value) = delete;
 
   template <typename T>
   kj::Maybe<Identified<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Identified<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1312,7 +1425,7 @@ class IdentifiedWrapper {
     }
 
     auto& wrapper = static_cast<TypeWrapper&>(*this);
-    return wrapper.tryUnwrap(js, handle, (T*)nullptr, parentObject)
+    return wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)
         .map([&](T&& value) -> Identified<T> {
       auto isolate = js.v8Isolate;
       auto obj = handle.As<v8::Object>();
@@ -1331,10 +1444,13 @@ class SelfRefWrapper {
     return "SelfRef";
   }
 
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, const SelfRef& value) = delete;
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const SelfRef& value) = delete;
 
   kj::Maybe<SelfRef> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       SelfRef*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1363,12 +1479,15 @@ class ExceptionWrapper {
     return "Exception";
   }
 
-  v8::Local<v8::Value> wrap(
-      Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, kj::Exception exception) {
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      kj::Exception exception) {
     return makeInternalError(js.v8Isolate, kj::mv(exception));
   }
 
   kj::Maybe<kj::Exception> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       kj::Exception*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -1391,12 +1510,10 @@ class ExceptionWrapper {
         if (handle->IsObject()) {
           auto object = handle.As<v8::Object>();
 
-          if (js.toBool(
-                  check(object->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "overloaded"_kj))))) {
+          if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "overloaded"_kj))))) {
             return kj::Exception::Type::OVERLOADED;
           }
-          if (js.toBool(
-                  check(object->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "retryable"_kj))))) {
+          if (js.toBool(check(object->Get(context, v8StrIntern(js.v8Isolate, "retryable"_kj))))) {
             return kj::Exception::Type::DISCONNECTED;
           }
         }
@@ -1404,7 +1521,7 @@ class ExceptionWrapper {
       }();
 
       KJ_IF_SOME(domException,
-          wrapper.tryUnwrap(js, handle, (DOMException*)nullptr, parentObject)) {
+          wrapper.tryUnwrap(js, context, handle, (DOMException*)nullptr, parentObject)) {
         return KJ_EXCEPTION(FAILED,
             kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
       } else {

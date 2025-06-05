@@ -1079,7 +1079,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
       // TODO(cleanup): IoContext doesn't really need to be involved here. We are trying to call
       // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
-      // do something like unwrap(lock).emitPromiseRejection().
+      // do something like unwrap(lock, isolate->GetCurrentContext()).emitPromiseRejection().
       // However, JSG doesn't currently provide an easy way to do this.
       if (IoContext::hasCurrent()) {
         try {

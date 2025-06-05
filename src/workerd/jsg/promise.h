@@ -546,8 +546,9 @@ void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       v8::Isolate* isolate = args.GetIsolate();
       auto& wrapper = TypeWrapper::from(isolate);
+      auto context = isolate->GetCurrentContext();
       auto& lock = Lock::from(isolate);
-      return wrapper.wrap(lock, kj::none, unwrapOpaque<Input>(isolate, args[0]));
+      return wrapper.wrap(lock, context, kj::none, unwrapOpaque<Input>(isolate, args[0]));
     });
   }
 }
@@ -561,7 +562,8 @@ void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto context = isolate->GetCurrentContext();
     auto& js = Lock::from(isolate);
     return wrapOpaque(context,
-        wrapper.template unwrap<Output>(js, args[0], TypeErrorContext::promiseResolution()));
+        wrapper.template unwrap<Output>(
+            js, context, args[0], TypeErrorContext::promiseResolution()));
   });
 }
 
@@ -581,8 +583,10 @@ class PromiseWrapper {
   }
 
   template <typename T>
-  v8::Local<v8::Promise> wrap(
-      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Promise<T>&& promise) {
+  v8::Local<v8::Promise> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Promise<T>&& promise) {
     // Add a .then() to unwrap the value (i.e. convert C++ value to JavaScript).
     //
     // We use `creator` as the `data` value for this continuation so that the creator object
@@ -590,9 +594,9 @@ class PromiseWrapper {
     // the object whose method returned the promise will not be destroyed while the promise is
     // still executing.
     auto markedAsHandled = promise.markedAsHandled;
-    auto then = check(v8::Function::New(js.v8Context(), &thenWrap<TypeWrapper, T>,
-        creator.orDefault({}), 1, v8::ConstructorBehavior::kThrow));
-    auto ret = check(promise.consumeHandle(js)->Then(js.v8Context(), then));
+    auto then = check(v8::Function::New(context, &thenWrap<TypeWrapper, T>, creator.orDefault({}),
+        1, v8::ConstructorBehavior::kThrow));
+    auto ret = check(promise.consumeHandle(js)->Then(context, then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
     // particular, if the C++ code marked the Promise handled, then the derived JavaScript promise
@@ -606,6 +610,7 @@ class PromiseWrapper {
 
   template <typename T>
   kj::Maybe<Promise<T>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Promise<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -620,8 +625,8 @@ class PromiseWrapper {
         //   case, pull out promise->Result(), unwrap it, and make a new immediate promise.
         //   Similarly in `wrap()`. Not clear if the added complexity is worth it, though.
         auto then = check(v8::Function::New(
-            js.v8Context(), &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
-        promise = check(promise->Then(js.v8Context(), then));
+            context, &thenUnwrap<TypeWrapper, T>, {}, 1, v8::ConstructorBehavior::kThrow));
+        promise = check(promise->Then(context, then));
       }
       return Promise<T>(js.v8Isolate, promise);
     } else {
@@ -634,10 +639,10 @@ class PromiseWrapper {
       // Unfortunately this needs to be gated by a compatibility flag because there are
       // existing workers that appear to rely on the old behavior -- although it's not clear
       // if those workers actually work the way they were intended to.
-      if (config.unwrapCustomThenables && isThenable(js.v8Context(), handle)) {
-        auto paf = check(v8::Promise::Resolver::New(js.v8Context()));
-        check(paf->Resolve(js.v8Context(), handle));
-        return tryUnwrap(js, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
+      if (config.unwrapCustomThenables && isThenable(context, handle)) {
+        auto paf = check(v8::Promise::Resolver::New(context));
+        check(paf->Resolve(context, handle));
+        return tryUnwrap(js, context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
       }
 
       if constexpr (isVoid<T>()) {
@@ -656,7 +661,7 @@ class PromiseWrapper {
         return js.resolvedPromise();
       } else {
         auto& wrapper = *static_cast<TypeWrapper*>(this);
-        KJ_IF_SOME(value, wrapper.tryUnwrap(js, handle, (T*)nullptr, parentObject)) {
+        KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
           return js.resolvedPromise(kj::mv(value));
         } else {
           // Wrong type.
