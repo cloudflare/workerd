@@ -899,17 +899,16 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         // Synthesize sub-events
         auto open = SpanOpen(span.parentSpanId, kj::str(span.operationName));
         auto close = SpanClose();
-        kj::Vector<workerd::tracing::Attribute> attr(span.tags.size());
-        for (auto& tag: span.tags) {
-          attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
-        }
+        kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) -> tracing::Attribute {
+          return tracing::Attribute(kj::mv(tag.key), kj::mv(tag.value));
+        };
         InvocationSpanContext context(event.traceId, event.invocationId, event.spanId);
 
         // TODO(o11y): Replace this with proper instrumentation so that SpanOpen/SpanClose/
         // Attributes events are created and reported individually. Sequence is not supported here yet.
         auto openEvent = TailEvent(context, span.startTime, 0, kj::mv(open));
         auto closeEvent = TailEvent(context, span.endTime, 0, kj::mv(close));
-        auto attrEvent = TailEvent(context, span.startTime, 0, attr.releaseAsArray());
+        auto attrEvent = TailEvent(context, span.startTime, 0, kj::mv(attr));
         processEvent(openEvent);
         processEvent(attrEvent);
         processEvent(closeEvent);
