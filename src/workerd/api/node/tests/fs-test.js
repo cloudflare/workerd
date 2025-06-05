@@ -1,24 +1,11 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import {
-  deepStrictEqual,
-  notDeepStrictEqual,
-  ifError,
-  ok,
-  strictEqual,
-  throws,
-} from 'node:assert';
+import { deepStrictEqual, ifError, ok, strictEqual, throws } from 'node:assert';
 
 import {
   existsSync,
   statSync,
-  linkSync,
-  lstatSync,
-  symlinkSync,
-  readlinkSync,
-  realpathSync,
-  unlinkSync,
   openSync,
   closeSync,
   fstatSync,
@@ -39,166 +26,12 @@ import {
   rmSync,
   rmdirSync,
   readdirSync,
-  link,
-  symlink,
-  readlink,
-  realpath,
-  unlink,
   close,
   fstat,
   ftruncate,
   fsync,
   fdatasync,
 } from 'node:fs';
-
-export const linkTest = {
-  async test() {
-    ok(!existsSync('/tmp/a'));
-    linkSync('/dev/null', '/tmp/a');
-    ok(existsSync('/tmp/a'));
-
-    // These are the same file.
-    deepStrictEqual(statSync('/tmp/a'), statSync('/dev/null'));
-    deepStrictEqual(lstatSync('/tmp/a'), statSync('/dev/null'));
-
-    // Because this is a hard link, the realpath is /tmp/a
-    strictEqual(realpathSync('/tmp/a'), '/tmp/a');
-
-    // And readlinkSync throws
-    throws(() => readlinkSync('/tmp/a'), {
-      message: 'invalid argument',
-    });
-
-    ok(!existsSync('/tmp/b'));
-    symlinkSync('/dev/null', '/tmp/b');
-    ok(existsSync('/tmp/b'));
-
-    deepStrictEqual(statSync('/tmp/b'), statSync('/dev/null'));
-    const lstatB = lstatSync('/tmp/b');
-    notDeepStrictEqual(lstatB, statSync('/dev/null'));
-    ok(lstatB.isSymbolicLink());
-
-    strictEqual(realpathSync('/tmp/b'), '/dev/null');
-    strictEqual(readlinkSync('/tmp/b'), '/dev/null');
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      link('/dev/null', '/tmp/c', (err) => {
-        try {
-          ifError(err);
-          ok(existsSync('/tmp/c'));
-          deepStrictEqual(statSync('/tmp/c'), statSync('/dev/null'));
-          deepStrictEqual(lstatSync('/tmp/c'), statSync('/dev/null'));
-        } catch (err) {
-          reject(err);
-        }
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      symlink('/dev/null', '/tmp/d', (err) => {
-        try {
-          ifError(err);
-          ok(existsSync('/tmp/d'));
-          deepStrictEqual(statSync('/tmp/d'), statSync('/dev/null'));
-          notDeepStrictEqual(lstatSync('/tmp/d'), statSync('/dev/null'));
-        } catch (err) {
-          reject(err);
-        }
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      readlink('/tmp/d', (err, link) => {
-        try {
-          ifError(err);
-          strictEqual(link, '/dev/null');
-        } catch (err) {
-          reject(err);
-        }
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      realpath('/tmp/d', (err, link) => {
-        try {
-          ifError(err);
-          strictEqual(link, '/dev/null');
-        } catch (err) {
-          reject(err);
-        }
-        resolve();
-      });
-    }
-
-    // Creating a symlink to a file that doesn't exist works.
-    symlinkSync('/does/not/exist', '/tmp/e');
-
-    // But creating a hard link to a file that doesn't exist throws.
-    throws(() => linkSync('/does/not/exist', '/tmp/f'), {
-      message: /file not found/,
-    });
-
-    // If the link name is empty, throw
-    throws(() => symlinkSync('/does/not/exist', new URL('file:///tmp/g/')), {
-      message: /Invalid filename/,
-    });
-
-    // If the directory does not exist, throw
-    throws(() => symlinkSync('/does/not/exist', new URL('file:///tmp/a/b/c')), {
-      message: /Directory does not exist/,
-    });
-
-    // If the file already exists, throw
-    throws(() => symlinkSync('/does/not/exist', '/tmp/a'), {
-      message: /File already exists/,
-    });
-    throws(() => linkSync('/does/not/exist', '/tmp/a'), {
-      message: /File already exists/,
-    });
-
-    // If the destination is read-only, throw
-    throws(() => symlinkSync('/dev/null', '/bundle/a'), {
-      message: /Cannot add a file/,
-    });
-    throws(() => linkSync('/dev/null', '/bundle/a'), {
-      message: /Cannot add a file/,
-    });
-
-    // unlinkSync removes things
-    unlinkSync('/tmp/a');
-    ok(!existsSync('/tmp/a'));
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      unlink('/tmp/b', (err) => {
-        if (err) return reject(err);
-        ok(!existsSync('/tmp/b'));
-        resolve();
-      });
-      await promise;
-    }
-
-    // Cannot unlink read-only files
-    throws(() => unlinkSync('/bundle/worker'), {
-      message: /Cannot remove a file/,
-    });
-
-    // Cannot unlink directories
-    throws(() => unlinkSync('/bundle'), {
-      message: /Cannot unlink a directory/,
-    });
-  },
-};
 
 export const openCloseTest = {
   async test() {
@@ -609,7 +442,7 @@ export const rmTest = {
     mkdirSync('/tmp/testdir');
     writeFileSync('/tmp/testdir/a.txt', 'Hello World');
     throws(() => rmdirSync('/tmp/testdir'), {
-      message: /Directory is not empty/,
+      code: /ENOTEMPTY/,
     });
     rmdirSync('/tmp/testdir', { recursive: true });
 

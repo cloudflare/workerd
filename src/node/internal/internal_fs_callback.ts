@@ -41,6 +41,7 @@ import {
   validateChownArgs,
   validateChmodArgs,
   validateStatArgs,
+  normalizePath,
   Stats,
   type FilePath,
   type Position,
@@ -58,7 +59,7 @@ import {
 import { type Dir } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { isArrayBufferView } from 'node-internal:internal_types';
-import { validateUint32 } from 'node-internal:validators';
+import { validateOneOf, validateUint32 } from 'node-internal:validators';
 import type {
   BigIntStatsFs,
   CopySyncOptions,
@@ -399,11 +400,11 @@ export function link(
   dest: FilePath,
   callback: ErrorOnlyCallback
 ): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of link, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.linkSync(src, dest), callback);
+  const normalizedSrc = normalizePath(src);
+  const normalizedDest = normalizePath(dest);
+  callWithErrorOnlyCallback(() => {
+    fssync.linkSync(normalizedSrc, normalizedDest);
+  }, callback);
 }
 
 export function lstat(
@@ -1004,12 +1005,14 @@ export function symlink(
   } else {
     type = typeOrCallback;
   }
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of symlink, which does the
-  // validation itself.
+  const normalizedTarget = normalizePath(target);
+  const normalizedPath = normalizePath(path);
+  if (type != null) {
+    validateOneOf(type, 'type', ['dir', 'file', 'junction', null]);
+  }
   callWithErrorOnlyCallback(
     // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-    () => fssync.symlinkSync(target, path, type),
+    () => fssync.symlinkSync(normalizedTarget, normalizedPath, type),
     callback
   );
 }
@@ -1034,11 +1037,10 @@ export function truncate(
 }
 
 export function unlink(path: FilePath, callback: ErrorOnlyCallback): void {
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of unlink, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.unlinkSync(path), callback);
+  const normalizedPath = normalizePath(path);
+  callWithErrorOnlyCallback(() => {
+    fssync.unlinkSync(normalizedPath);
+  }, callback);
 }
 
 export function utimes(
@@ -1222,6 +1224,12 @@ export function createWriteStream(): void {
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
+// [x][x][x][x] fs.link(existingPath, newPath, callback)
+// [x][x][x][x] fs.readlink(path[, options], callback)
+// [x][x][x][x] fs.realpath(path[, options], callback)
+// [x][x][x][x] fs.realpath.native(path[, options], callback)
+// [x][x][x][x] fs.symlink(target, path[, type], callback)
+// [x][x][x][x] fs.unlink(path, callback)
 //
 // [x][x][ ][ ] fs.appendFile(path, data[, options], callback)
 // [x][x][x][ ] fs.close(fd[, callback])
@@ -1231,7 +1239,6 @@ export function createWriteStream(): void {
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
 // [x][x][x][ ] fs.ftruncate(fd[, len], callback)
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
-// [x][x][x][ ] fs.link(existingPath, newPath, callback)
 // [x][x][ ][ ] fs.mkdir(path[, options], callback)
 // [x][x][ ][ ] fs.mkdtemp(prefix[, options], callback)
 // [x][x][x][ ] fs.open(path[, flags[, mode]], callback)
@@ -1242,16 +1249,11 @@ export function createWriteStream(): void {
 // [x][x][ ][ ] fs.read(fd, buffer[, options], callback)
 // [x][x][ ][ ] fs.readdir(path[, options], callback)
 // [x][x][ ][ ] fs.readFile(path[, options], callback)
-// [x][x][x][ ] fs.readlink(path[, options], callback)
 // [x][x][ ][ ] fs.readv(fd, buffers[, position], callback)
-// [x][x][x][ ] fs.realpath(path[, options], callback)
-// [x][x][x][ ] fs.realpath.native(path[, options], callback)
 // [x][x][ ][ ] fs.rename(oldPath, newPath, callback)
 // [x][x][ ][ ] fs.rmdir(path[, options], callback)
 // [x][x][ ][ ] fs.rm(path[, options], callback)
-// [x][x][x][ ] fs.symlink(target, path[, type], callback)
 // [x][x][x][ ] fs.truncate(path[, len], callback)
-// [x][x][x][ ] fs.unlink(path, callback)
 // [x][x][ ][ ] fs.write(fd, buffer, offset[, length[, position]], callback)
 // [x][x][ ][ ] fs.write(fd, buffer[, options], callback)
 // [x][x][ ][ ] fs.write(fd, string[, position[, encoding]], callback)

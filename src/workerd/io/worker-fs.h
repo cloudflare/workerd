@@ -164,6 +164,15 @@ struct Stat final {
 
 class SymbolicLink;
 
+enum class FsError {
+  // Path segment is not a directory
+  NOT_DIRECTORY,
+  // Directory is not empty
+  NOT_EMPTY,
+  // Node is read-only
+  READ_ONLY,
+};
+
 // A file in the virtual file system. If the file is read-only, then the
 // mutation methods will throw an exception.
 //
@@ -335,7 +344,8 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // node has references in other directories, those will not be removed.
   // If the target is a symbolic link, the symbolic link will be removed but
   // the target will not be removed.
-  virtual bool remove(jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {false}) = 0;
+  virtual kj::OneOf<FsError, bool> remove(
+      jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {false}) = 0;
 
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
