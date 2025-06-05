@@ -27,7 +27,7 @@ use io::signo_as_string;
 #[derive(Debug, Error)]
 pub enum ContainerError {
     #[error("Socket error: {0}")]
-    SocketError(#[from] bollard::errors::Error),
+    Socket(#[from] bollard::errors::Error),
     #[error("RPC error: {0}")]
     RpcError(#[from] capnp::Error),
     #[error("Unimplemented: {0}")]
@@ -37,7 +37,7 @@ pub enum ContainerError {
 impl From<ContainerError> for capnp::Error {
     fn from(value: ContainerError) -> Self {
         match value {
-            ContainerError::SocketError(err) => Self::failed(err.to_string()),
+            ContainerError::Socket(err) => Self::failed(err.to_string()),
             ContainerError::RpcError(err) => err,
             ContainerError::Unimplemented(msg) => Self::unimplemented(msg),
         }
@@ -143,7 +143,9 @@ impl Impl {
 
                 tokio::task::spawn_local(rpc_system);
             });
+        });
 
+        cxx_integration::tokio::spawn(async move {
             while let Ok(message) = output_receiver.recv() {
                 messages_callback.as_mut().call(&message);
             }
@@ -184,13 +186,13 @@ impl container::Server for Server {
             docker
                 .stop_container(&container_name, Some(options.build()))
                 .await
-                .map_err(ContainerError::SocketError)?;
+                .map_err(ContainerError::Socket)?;
 
             let remove_options = RemoveContainerOptionsBuilder::default().force(true);
             docker
                 .remove_container(&container_name, Some(remove_options.build()))
                 .await
-                .map_err(ContainerError::SocketError)?;
+                .map_err(ContainerError::Socket)?;
             Ok(())
         })
     }
@@ -210,7 +212,7 @@ impl container::Server for Server {
             docker
                 .kill_container(&container_name, Some(options.build()))
                 .await
-                .map_err(ContainerError::SocketError)?;
+                .map_err(ContainerError::Socket)?;
             Ok(())
         })
     }
@@ -300,9 +302,7 @@ impl container::Server for Server {
             let mut stream = docker.wait_container(&container_name, Some(options));
 
             if let Some(wait_result) = stream.next().await {
-                let status_code = wait_result
-                    .map_err(ContainerError::SocketError)?
-                    .status_code;
+                let status_code = wait_result.map_err(ContainerError::Socket)?.status_code;
                 if status_code == 0 {
                     return Ok(());
                 }

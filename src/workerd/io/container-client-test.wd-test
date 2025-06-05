@@ -16,6 +16,10 @@ const unitTests :Workerd.Config = (
             container = (name = "container-example") ),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+        bindings = [
+          ( name = "SERVICE", service = "container-client-test" ),
+          ( name = "MY_CONTAINER", durableObjectNamespace = "DurableObjectExample" ),
+        ],
       )
     ),
     ( name = "internet", network = ( allow = ["private"] ) ),

@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 #pragma once
 
 #include <workerd/rust/container/lib.rs.h>
@@ -8,24 +12,34 @@
 #include <kj/async-io.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/mutex.h>
+
+#include <queue>
 
 namespace workerd::io {
+
+class ContainerStreamSharedState;
+
+// ContainerAsyncStream provides bidirectional communication with a container.
+//
+// This stream implements both reading and writing:
+// - Writing sends data to the container via the Rust service
+// - Reading receives messages from the container via MessageCallback queuing
+//
+// The stream uses shared state to coordinate between the MessageCallback
+// (which receives messages from the container asynchronously) and the
+// tryRead() method (which provides those messages to the C++ side).
 struct ContainerAsyncStream final: public kj::AsyncIoStream {
-  ContainerAsyncStream(::rust::Box<rust::container::ContainerService> service)
-      : service(kj::mv(service)) {}
+  ContainerAsyncStream(::rust::Box<rust::container::ContainerService> service,
+      kj::Own<ContainerStreamSharedState> sharedState)
+      : service(kj::mv(service)),
+        sharedState(kj::mv(sharedState)) {}
 
   void shutdownWrite() override {
     service->shutdown_write();
   }
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    // For now, return 0 bytes read (EOF) since this is primarily a write-only stream
-    // In a full implementation, this would read from the container's output
-    (void)buffer;
-    (void)minBytes;
-    (void)maxBytes;
-    return size_t(0);
-  }
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     if (service->write_data(buffer.as<Rust>())) {
@@ -35,8 +49,7 @@ struct ContainerAsyncStream final: public kj::AsyncIoStream {
     }
   }
 
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    // Write each piece sequentially
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     for (auto piece: pieces) {
       if (!service->write_data(piece.as<Rust>())) {
         return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
@@ -49,14 +62,29 @@ struct ContainerAsyncStream final: public kj::AsyncIoStream {
     if (service->is_write_disconnected()) {
       return kj::READY_NOW;
     }
-
-    // TODO(soon): Implement this.
-    // In a full implementation, this would return a promise that resolves
-    // when the write side becomes disconnected. For now, we return a promise
-    // that never resolves if not already disconnected.
     return kj::NEVER_DONE;
   }
 
+ private:
   ::rust::Box<rust::container::ContainerService> service;
+  kj::Own<ContainerStreamSharedState> sharedState;
 };
+
+// Shared state between MessageCallback and ContainerAsyncStream
+class ContainerStreamSharedState {
+ public:
+  ContainerStreamSharedState();
+
+  void enqueueMessage(::rust::Slice<const uint8_t> message);
+  kj::Maybe<kj::Array<kj::byte>> dequeueMessage();
+  kj::Promise<void> waitForMessage();
+
+ private:
+  kj::MutexGuarded<std::queue<kj::Array<kj::byte>>> messageQueue;
+  kj::MutexGuarded<kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>> readWaiter;
+};
+
+kj::Own<ContainerAsyncStream> createContainerRpcStream(
+    kj::StringPtr address, kj::StringPtr containerName);
+
 }  // namespace workerd::io

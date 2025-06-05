@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::pin::Pin;
 use std::sync::mpsc;
@@ -25,26 +26,45 @@ pub fn signo_as_string(signo: u32) -> Option<String> {
 
 pub struct MpscReader {
     pub receiver: mpsc::Receiver<Vec<u8>>,
+    unread_data: VecDeque<u8>,
 }
 
 impl MpscReader {
     #[must_use]
     pub fn new(receiver: mpsc::Receiver<Vec<u8>>) -> Self {
-        Self { receiver }
+        Self {
+            receiver,
+            unread_data: VecDeque::new(),
+        }
+    }
+
+    fn read_unread(
+        mut self: Pin<&mut Self>,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        let len = std::cmp::min(buf.len(), self.unread_data.len());
+        let data = self.unread_data.drain(..len);
+        for (i, byte) in data.enumerate() {
+            buf[i] = byte;
+        }
+        Poll::Ready(Ok(len))
     }
 }
 
 impl AsyncRead for MpscReader {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<std::io::Result<usize>> {
+        if !self.unread_data.is_empty() {
+            return self.read_unread(buf);
+        }
+
         match self.receiver.try_recv() {
             Ok(data) => {
-                let len = std::cmp::min(buf.len(), data.len());
-                buf[..len].copy_from_slice(&data[..len]);
-                Poll::Ready(Ok(len))
+                self.unread_data.extend(data.iter());
+                self.read_unread(buf)
             }
             Err(mpsc::TryRecvError::Empty) => {
                 cx.waker().wake_by_ref();
@@ -71,15 +91,15 @@ impl MpscWriter {
 impl AsyncWrite for MpscWriter {
     fn poll_write(
         self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        _: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         match self.sender.try_send(buf.to_vec()) {
             Ok(()) => Poll::Ready(Ok(buf.len())),
-            Err(mpsc::TrySendError::Full(_)) => {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
+            Err(mpsc::TrySendError::Full(_)) => Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::StorageFull,
+                "Channel is full",
+            ))),
             Err(mpsc::TrySendError::Disconnected(_)) => Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "Channel disconnected",

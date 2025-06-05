@@ -2277,29 +2277,26 @@ class Server::WorkerService final: public Service,
         static constexpr uint16_t hibernationEventTypeId = 8;
 
         kj::Maybe<rpc::Container::Client> containerClient = kj::none;
+        kj::Own<io::ContainerAsyncStream> containerStream;
 
         KJ_IF_SOME(config, containerOptions) {
           KJ_IF_SOME(path, service.containerAddress) {
-            rust::container::MessageCallback callback = [](::rust::Slice<const uint8_t> _data) {
-              KJ_UNIMPLEMENTED();
-            };
             KJ_REQUIRE(config.hasName(), "Container name is required");
             auto container_name = config.getName();
-            auto service =
-                rust::container::new_service(path.as<Rust>(), container_name.as<Rust>(), callback);
-            io::ContainerAsyncStream stream(kj::mv(service));
-            capnp::TwoPartyClient client(stream);
+            containerStream = io::createContainerRpcStream(kj::str(path), kj::str(container_name));
+            capnp::TwoPartyClient client(*containerStream);
             containerClient = client.bootstrap().castAs<rpc::Container>();
           } else {
             KJ_FAIL_REQUIRE(
-                "containerAddress needs to be defined in order enable containers on this durable object.");
+                "container address needs to be defined in order enable containers on this durable object.");
           }
         }
 
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-            tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient)));
+            tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient))
+                                            .attach(kj::mv(containerStream)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
     };

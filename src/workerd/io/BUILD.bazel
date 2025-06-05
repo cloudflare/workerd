@@ -310,10 +310,12 @@ wd_capnp_library(
 
 wd_cc_library(
     name = "container-client",
+    srcs = ["container-client.c++"],
     hdrs = ["container-client.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":container_capnp",
+        "//src/rust/container",
         "@capnp-cpp//src/kj",
     ],
 )
