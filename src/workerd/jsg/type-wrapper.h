@@ -33,7 +33,7 @@ namespace workerd::jsg {
 template <typename TypeWrapper, typename T>
 concept ValueLessParameter =
     requires(TypeWrapper wrapper, Lock& js, v8::Local<v8::Context> context, T* ptr) {
-      wrapper.unwrap(js, ptr);
+      wrapper.unwrap(js, context, ptr);
     };
 
 // TypeWrapper mixin for V8 handles.
@@ -47,11 +47,15 @@ class V8HandleWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, v8::Local<T> value) {
+  v8::Local<T> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      v8::Local<T> value) {
     return value;
   }
 
   kj::Maybe<v8::Local<v8::Value>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       v8::Local<v8::Value>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -66,32 +70,36 @@ class V8HandleWrapper {
 
   // Define a tryUnwrap() overload for each interesting subclass of v8::Value.
 #define JSG_DEFINE_TRY_UNWRAP(type)                                                                \
-  kj::Maybe<v8::Local<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Value> handle,             \
-      v8::Local<v8::type>*, kj::Maybe<v8::Local<v8::Object>> parentObject) {                       \
+  kj::Maybe<v8::Local<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,          \
+      v8::Local<v8::Value> handle, v8::Local<v8::type>*,                                           \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
       return handle.As<v8::type>();                                                                \
     }                                                                                              \
     return kj::none;                                                                               \
   }                                                                                                \
                                                                                                    \
-  kj::Maybe<v8::Global<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Value> handle,            \
-      v8::Global<v8::type>*, kj::Maybe<v8::Local<v8::Object>> parentObject) {                      \
+  kj::Maybe<v8::Global<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,         \
+      v8::Local<v8::Value> handle, v8::Global<v8::type>*,                                          \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
       return v8::Global<v8::type>(js.v8Isolate, handle.As<v8::type>());                            \
     }                                                                                              \
     return kj::none;                                                                               \
   }                                                                                                \
                                                                                                    \
-  kj::Maybe<V8Ref<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Value> handle,                 \
-      V8Ref<v8::type>*, kj::Maybe<v8::Local<v8::Object>> parentObject) {                           \
+  kj::Maybe<V8Ref<v8::type>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,              \
+      v8::Local<v8::Value> handle, V8Ref<v8::type>*,                                               \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
       return V8Ref<v8::type>(js.v8Isolate, handle.As<v8::type>());                                 \
     }                                                                                              \
     return kj::none;                                                                               \
   }                                                                                                \
   template <typename T = v8::type, typename = decltype(&T::GetIdentityHash)>                       \
-  kj::Maybe<HashableV8Ref<T>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Value> handle,                \
-      HashableV8Ref<v8::type>*, kj::Maybe<v8::Local<v8::Object>> parentObject) {                   \
+  kj::Maybe<HashableV8Ref<T>> tryUnwrap(jsg::Lock& js, v8::Local<v8::Context> context,             \
+      v8::Local<v8::Value> handle, HashableV8Ref<v8::type>*,                                       \
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {                                             \
     if (handle->Is##type()) {                                                                      \
       return HashableV8Ref<v8::type>(js.v8Isolate, handle.As<v8::type>());                         \
     }                                                                                              \
@@ -109,11 +117,15 @@ class V8HandleWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, v8::Global<T> value) {
+  v8::Local<T> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      v8::Global<T> value) {
     return value.Get(js.v8Isolate);
   }
 
   kj::Maybe<v8::Global<v8::Value>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       v8::Global<v8::Value>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -126,11 +138,15 @@ class V8HandleWrapper {
   }
 
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
-  v8::Local<T> wrap(jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, V8Ref<T> value) {
+  v8::Local<T> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      V8Ref<T> value) {
     return value.getHandle(js.v8Isolate);
   }
 
   kj::Maybe<V8Ref<v8::Value>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       V8Ref<v8::Value>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -144,9 +160,12 @@ class UnimplementedWrapper {
     return typeid(Unimplemented);
   }
 
-  v8::Local<v8::Value> wrap(
-      jsg::Lock& js, kj::Maybe<v8::Local<v8::Object>> creator, Unimplemented value) = delete;
+  v8::Local<v8::Value> wrap(jsg::Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Unimplemented value) = delete;
   kj::Maybe<Unimplemented> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Unimplemented*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -178,10 +197,10 @@ class UnimplementedWrapper {
 // The extension mixin must declare the following methods:
 //
 //     static constexpr const char* getName(T* dummy);
-//     v8::Local<v8::Value> wrap(jsg::Lock& js,
+//     v8::Local<v8::Value> wrap(jsg::Lock& js, v8::Local<v8::Context> jsContext,
 //                               kj::Maybe<v8::Local<v8::Object>> creator,
 //                               T cppValue);
-//     kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> jsHandle,
+//     kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle,
 //                            T* dummy, kj::Maybe<v8::Local<v8::Object>> parentObject);
 //
 //     Ref<T, v8::Context> newContext(v8::Isolate* isolate, T* dummy, Args&&... args);
@@ -282,7 +301,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
     return "Configuration";
   }
 
-  Configuration unwrap(Lock& js, Configuration*) {
+  Configuration unwrap(Lock& js, v8::Local<v8::Context> context, Configuration*) {
     return configuration;
   }
 
@@ -300,7 +319,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 // The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
 // values. It primarily implements two methods:
 //
-//     v8::Local<v8::Value> wrap(jsg::Lock& js,
+//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
 //                               kj::Maybe<v8::Local<v8::Object>> creator
 //                               T cppValue);
 //     // Converts cppValue to JavaScript.
@@ -310,7 +329,7 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 //     // (like Promises) where the KJ convention is to assume that the creator must outlive the
 //     // returned object.
 //
-//     T unwrap<T>(jsg::Lock& js, v8::Local<v8::Value> jsHandle);
+//     T unwrap<T>(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle);
 //     // Converts jsValue to C++, expecting type T.
 //
 // The design is based on mixins: TypeWrapper derives from classes that handle each individual
@@ -321,12 +340,12 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
 //     // you can also return `const std::type_info&` here, in which case the type name will
 //     // be derived by stripping off the namespace from the C++ type name.
 //
-//     v8::Local<v8::Value> wrap(jsg::Lock& js,
+//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
 //                               kj::Maybe<v8::Local<v8::Object>> creator,
 //                               T cppValue);
 //     // Converts cppValue to JavaScript.
 //
-//     kj::Maybe<T> tryUnwrap(Lock& js,
+//     kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Context> jsContext,
 //                            v8::Local<v8::Value> jsHandle, T* dummy,
 //                            kj::Maybe<v8::Local<v8::Object>> parentObject);
 //     // Converts jsValue to C++, expecting type T. If the input is not of type T, returns
@@ -470,7 +489,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   }
 
   template <typename U>
-  const TypeHandler<U>& unwrap(Lock& js, TypeHandler<U>*) {
+  const TypeHandler<U>& unwrap(Lock& js, v8::Local<v8::Context>, TypeHandler<U>*) {
     // if you're here because of compiler error template garbage, you forgot to register
     // a type with JSG_DECLARE_ISOLATE_TYPE
     return TYPE_HANDLER_INSTANCE<U>;
@@ -478,6 +497,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   kj::Maybe<const TypeHandler<U>&> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       TypeHandler<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
@@ -487,10 +507,11 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   template <typename U>
   auto unwrap(Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       TypeErrorContext errorContext,
       kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none) -> RemoveRvalueRef<U> {
-    auto maybe = this->tryUnwrap(js, handle, (kj::Decay<U>*)nullptr, parentObject);
+    auto maybe = this->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject);
     KJ_IF_SOME(result, maybe) {
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
@@ -509,7 +530,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Context> context,
       const v8::FastOneByteString& handle,
       TypeErrorContext errorContext) -> U {
-    auto maybe = this->tryUnwrap(js, handle, (kj::Decay<U>*)nullptr);
+    auto maybe = this->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr);
     KJ_IF_SOME(result, maybe) {
       return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
@@ -522,13 +543,14 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
-    return unwrap<U>(js, arg, errorContext);
+    return unwrap<U>(js, context, arg, errorContext);
   }
 
   // Helper for unwrapping function/method arguments correctly. Specifically, we need logic to
   // handle the case where the user passes in fewer arguments than the function has parameters.
   template <typename U>
   auto unwrap(Lock& js,
+      v8::Local<v8::Context> context,
       const v8::FunctionCallbackInfo<v8::Value>& args,
       size_t parameterIndex,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
@@ -541,12 +563,12 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;
       auto builder = kj::heapArrayBuilder<E>(size);
       for (size_t i = parameterIndex; i < args.Length(); i++) {
-        builder.add(unwrap<E>(js, args[i], errorContext));
+        builder.add(unwrap<E>(js, context, args[i], errorContext));
       }
       return builder.finish();
     } else if constexpr (ValueLessParameter<Self, V>) {
       // C++ parameters which don't unwrap JS values, like TypeHandlers or v8::FunctionCallbackInfo.
-      return unwrap(js, (V*)nullptr);
+      return unwrap(js, context, (V*)nullptr);
     } else {
       if constexpr (!webidl::isOptional<V> && !kj::isSameType<V, Unimplemented>()) {
         // TODO(perf): Better to perform this parameter index check once, at the unwrap<U>() call
@@ -563,7 +585,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       // If we get here, we're either unwrapping into an optional or unimplemented parameter, in
       // which cases we're fine with nonexistent arguments implying `undefined`, or we have an
       // argument at this parameter index.
-      return unwrap<U>(js, args[parameterIndex], errorContext);
+      return unwrap<U>(js, context, args[parameterIndex], errorContext);
     }
   }
 
@@ -572,15 +594,15 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     reflection.self = holder;
     reflection.unwrapper = [](v8::Isolate* isolate, v8::Local<v8::Object> object,
                                kj::StringPtr name) -> kj::Maybe<U> {
+      auto context = isolate->GetCurrentContext();
       auto& js = Lock::from(isolate);
-      auto value =
-          jsg::check(object->Get(isolate->GetCurrentContext(), v8StrIntern(isolate, name)));
+      auto value = jsg::check(object->Get(context, v8StrIntern(isolate, name)));
       if (value->IsUndefined()) {
         return kj::none;
       } else {
         // TypeErrorContext::structField() produces a pretty good error message for this case.
         return from(isolate).template unwrap<U>(
-            js, value, TypeErrorContext::structField(typeid(Holder), name.cStr()), object);
+            js, context, value, TypeErrorContext::structField(typeid(Holder), name.cStr()), object);
       }
     };
   }
@@ -597,12 +619,14 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
  public:
   v8::Local<v8::Value> wrap(Lock& js, T value) const override {
     auto isolate = js.v8Isolate;
-    return TypeWrapper::from(isolate).wrap(js, kj::none, kj::mv(value));
+    auto context = js.v8Context();
+    return TypeWrapper::from(isolate).wrap(js, context, kj::none, kj::mv(value));
   }
 
   kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const override {
     auto isolate = js.v8Isolate;
-    return TypeWrapper::from(isolate).tryUnwrap(js, handle, (T*)nullptr, kj::none);
+    auto context = js.v8Context();
+    return TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, kj::none);
   }
 };
 
