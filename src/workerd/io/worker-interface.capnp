@@ -468,17 +468,10 @@ struct JsValue {
 
       socket :group {
         # A Socket. Like ReadableStream, this requires bi-directional stream communication.
-
-        readableStreamIndex @8 :UInt32;
-        # Index into the externals array pointing to the readable stream component.
-
-        writableStreamIndex @9 :UInt32;
-        # Index into the externals array pointing to the writable stream component.
-
-        remoteAddress @10 :Text;
+        remoteAddress @8 :Text;
         # The remote address this socket is connected to.
 
-        secureTransport @11 :Text;
+        secureTransport @9 :Text;
         # Security transport mode: "on", "off", or "starttls".
       }
 
