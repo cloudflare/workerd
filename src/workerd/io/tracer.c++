@@ -69,10 +69,6 @@ void PipelineTracer::addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces) {
   }
 }
 
-void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
-  tailStreamWriters.add(kj::mv(writer));
-}
-
 kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
@@ -364,10 +360,6 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
     writer->report(
         spanContext, tracing::Return({KJ_ASSERT_NONNULL(trace->fetchResponseInfo).clone()}));
   }
-}
-
-kj::Maybe<kj::Own<tracing::TailStreamWriter>>& WorkerTracer::getTailStreamWriter() {
-  return maybeTailStreamWriter;
 }
 
 }  // namespace workerd
