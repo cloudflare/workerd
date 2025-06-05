@@ -49,29 +49,64 @@ kj::Promise<void> ContainerStreamSharedState::waitForMessage() {
   return kj::mv(paf.promise);
 }
 
+void ContainerAsyncStream::shutdownWrite() {
+  KJ_DBG("SHUTDOWN_WRITE");
+  service->shutdown_write();
+}
+
 kj::Promise<size_t> ContainerAsyncStream::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
   KJ_DBG("TRY_READ");
   KJ_IF_SOME(consumed, sharedState->tryRead(buffer, minBytes, maxBytes)) {
-    return consumed;
+    co_return consumed;
   }
 
   if (minBytes == 0) {
-    return minBytes;
+    co_return minBytes;
   }
 
-  return sharedState->waitForMessage().then(
-      [this, buffer, minBytes, maxBytes]() -> kj::Promise<size_t> {
-    return tryRead(buffer, minBytes, maxBytes);
-  });
+  co_await sharedState->waitForMessage();
+  co_return co_await tryRead(buffer, minBytes, maxBytes);
+}
+
+kj::Promise<void> ContainerAsyncStream::write(kj::ArrayPtr<const kj::byte> buffer) {
+  KJ_DBG("WRITE");
+  if (service->write_data(buffer.as<Rust>())) {
+    return kj::READY_NOW;
+  } else {
+    KJ_DBG("WRITE FAILED");
+    return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
+  }
+}
+
+kj::Promise<void> ContainerAsyncStream::write(
+    kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) {
+  KJ_DBG("WRITE_ALL");
+  for (auto piece: pieces) {
+    if (!service->write_data(piece.as<Rust>())) {
+      KJ_DBG("WRITE_ALL FAILED");
+      return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
+    }
+  }
+  KJ_DBG("WRITE_ALL FINISHED");
+  return kj::READY_NOW;
+}
+
+kj::Promise<void> ContainerAsyncStream::whenWriteDisconnected() {
+  // TODO(now): this is wrong, the returned promise should fulfill when the write end disconnects.
+  // as written this will only return a fulfilled promise if the write end already disconnected.
+  if (service->is_write_disconnected()) {
+    return kj::READY_NOW;
+  }
+  return kj::NEVER_DONE;
 }
 
 kj::Own<ContainerAsyncStream> createContainerRpcStream(
     kj::StringPtr address, kj::StringPtr containerName) {
-  auto sharedState = kj::heap<ContainerStreamSharedState>();
-  ContainerStreamSharedState* ptr = sharedState.get();
+  auto sharedState = kj::rc<ContainerStreamSharedState>();
 
-  rust::container::MessageCallback callback = [ptr](::rust::Slice<const uint8_t> message) {
-    ptr->enqueueMessage(message);
+  rust::container::MessageCallback callback = [sharedState = sharedState.addRef()](
+                                                  ::rust::Slice<const uint8_t> message) mutable {
+    sharedState->enqueueMessage(message);
   };
 
   auto service = rust::container::new_service(address.cStr(), containerName.cStr(), callback);

@@ -31,53 +31,23 @@ class ContainerStreamSharedState;
 // tryRead() method (which provides those messages to the C++ side).
 struct ContainerAsyncStream final: public kj::AsyncIoStream {
   ContainerAsyncStream(::rust::Box<rust::container::ContainerService> service,
-      kj::Own<ContainerStreamSharedState> sharedState)
+      kj::Rc<ContainerStreamSharedState> sharedState)
       : service(kj::mv(service)),
         sharedState(kj::mv(sharedState)) {}
 
-  void shutdownWrite() override {
-    KJ_DBG("SHUTDOWN_WRITE");
-    service->shutdown_write();
-  }
-
+  void shutdownWrite() override;
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    KJ_DBG("WRITE");
-    if (service->write_data(buffer.as<Rust>())) {
-      return kj::READY_NOW;
-    } else {
-      KJ_DBG("WRITE FAILED");
-      return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
-    }
-  }
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    KJ_DBG("WRITE_ALL");
-    for (auto piece: pieces) {
-      if (!service->write_data(piece.as<Rust>())) {
-        KJ_DBG("WRITE_ALL FAILED");
-        return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
-      }
-    }
-    KJ_DBG("WRITE_ALL FINISHED");
-    return kj::READY_NOW;
-  }
-
-  kj::Promise<void> whenWriteDisconnected() override {
-    if (service->is_write_disconnected()) {
-      return kj::READY_NOW;
-    }
-    return kj::NEVER_DONE;
-  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override;
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
+  kj::Promise<void> whenWriteDisconnected() override;
 
  private:
   ::rust::Box<rust::container::ContainerService> service;
-  kj::Own<ContainerStreamSharedState> sharedState;
+  kj::Rc<ContainerStreamSharedState> sharedState;
 };
 
 // Shared state between MessageCallback and ContainerAsyncStream
-class ContainerStreamSharedState {
+class ContainerStreamSharedState: public kj::Refcounted {
  public:
   ContainerStreamSharedState();
 
