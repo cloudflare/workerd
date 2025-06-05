@@ -2278,14 +2278,16 @@ class Server::WorkerService final: public Service,
 
         kj::Maybe<rpc::Container::Client> containerClient = kj::none;
         kj::Own<io::ContainerAsyncStream> containerStream;
+        kj::Own<capnp::TwoPartyClient> containerRpcClient;
 
         KJ_IF_SOME(config, containerOptions) {
           KJ_IF_SOME(path, service.containerAddress) {
             KJ_REQUIRE(config.hasName(), "Container name is required");
             auto container_name = config.getName();
             containerStream = io::createContainerRpcStream(kj::str(path), kj::str(container_name));
-            capnp::TwoPartyClient client(*containerStream);
-            containerClient = client.bootstrap().castAs<rpc::Container>();
+            containerRpcClient = kj::heap<capnp::TwoPartyClient>(*containerStream);
+            containerClient = containerRpcClient->bootstrap().castAs<rpc::Container>();
+            KJ_DBG("CREATED CONTAINER CLIENT");
           } else {
             KJ_FAIL_REQUIRE(
                 "container address needs to be defined in order enable containers on this durable object.");
@@ -2296,7 +2298,7 @@ class Server::WorkerService final: public Service,
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
             tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient))
-                                            .attach(kj::mv(containerStream)));
+                                            .attach(kj::mv(containerStream)).attach(kj::mv(containerRpcClient)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
     };

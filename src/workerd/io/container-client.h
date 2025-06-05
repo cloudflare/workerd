@@ -36,25 +36,31 @@ struct ContainerAsyncStream final: public kj::AsyncIoStream {
         sharedState(kj::mv(sharedState)) {}
 
   void shutdownWrite() override {
+    KJ_DBG("SHUTDOWN_WRITE");
     service->shutdown_write();
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    KJ_DBG("WRITE");
     if (service->write_data(buffer.as<Rust>())) {
       return kj::READY_NOW;
     } else {
+      KJ_DBG("WRITE FAILED");
       return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
     }
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    KJ_DBG("WRITE_ALL");
     for (auto piece: pieces) {
       if (!service->write_data(piece.as<Rust>())) {
+        KJ_DBG("WRITE_ALL FAILED");
         return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
       }
     }
+    KJ_DBG("WRITE_ALL FINISHED");
     return kj::READY_NOW;
   }
 
@@ -76,11 +82,11 @@ class ContainerStreamSharedState {
   ContainerStreamSharedState();
 
   void enqueueMessage(::rust::Slice<const uint8_t> message);
-  kj::Maybe<kj::Array<kj::byte>> dequeueMessage();
+  kj::Maybe<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes);
   kj::Promise<void> waitForMessage();
 
  private:
-  kj::MutexGuarded<std::queue<kj::Array<kj::byte>>> messageQueue;
+  kj::MutexGuarded<std::queue<kj::byte>> messageQueue;
   kj::MutexGuarded<kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>> readWaiter;
 };
 

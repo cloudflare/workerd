@@ -18,6 +18,7 @@ use capnp_rpc::rpc_twoparty_capnp;
 use container_capnp::container;
 use futures::StreamExt;
 use thiserror::Error;
+use tokio::runtime::Builder;
 
 pub mod io;
 use io::MpscReader;
@@ -96,7 +97,8 @@ impl ContainerService {
         {
             return false;
         }
-        self.r#impl.sender.try_send(data.to_vec()).is_ok()
+        self.r#impl.sender.try_send(data.to_vec()).unwrap();
+        true
     }
 
     pub fn shutdown_write(&mut self) {
@@ -126,29 +128,44 @@ impl Impl {
     ) -> Result<Self, ContainerError> {
         let (input_sender, input_receiver) = mpsc::sync_channel(1000);
         let (output_sender, output_receiver) = mpsc::sync_channel::<Vec<u8>>(1000);
+        let (tokio_input_sender, tokio_input_receiver) = tokio::sync::mpsc::channel(1000);
 
         let server = Server::connect(address, container_name)?;
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
 
-        cxx_integration::tokio::spawn(async move {
-            #[allow(clippy::let_underscore_future)]
-            let _ = tokio::task::LocalSet::new().run_until(async move {
+        std::thread::spawn(move || {
+            dbg!("SPAWNING TOKIO");
+            let local = tokio::task::LocalSet::new();
+            local.spawn_local(async move {
                 let client: container::Client = capnp_rpc::new_client(server);
+                dbg!("INITIALIZING RPC");
                 let network = capnp_rpc::twoparty::VatNetwork::new(
-                    MpscReader::new(input_receiver),
+                    MpscReader::new(tokio_input_receiver),
                     MpscWriter::new(output_sender),
                     rpc_twoparty_capnp::Side::Server,
                     ReaderOptions::default(),
                 );
                 let rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client));
 
+                dbg!("RPC_SYSTEM SPAWNING");
                 tokio::task::spawn_local(rpc_system);
             });
-        });
-
-        cxx_integration::tokio::spawn(async move {
-            while let Ok(message) = output_receiver.recv() {
-                messages_callback.as_mut().call(&message);
-            }
+            runtime.spawn(async move {
+                while let Ok(message) = dbg!(output_receiver.recv()) {
+                    messages_callback.as_mut().call(&message);
+                }
+                dbg!("OUTPUT_RECEIVER.RECV() ENDED");
+            });
+            runtime.spawn_blocking(move || {
+              while let Ok(msg) = dbg!(input_receiver.recv()) {
+                if dbg!(tokio_input_sender.blocking_send(msg)).is_err() {
+                  break;
+                }
+              }
+              dbg!("INPUT_RECEIVER.RECV() ENDED");
+            });
+            runtime.block_on(local);
+            dbg!("RPC_SYSTEM DONE");
         });
 
         Ok(Impl {
@@ -271,6 +288,7 @@ impl container::Server for Server {
         _: container::StatusParams,
         mut results: container::StatusResults,
     ) -> Promise<(), capnp::Error> {
+        todo!();
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {

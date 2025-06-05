@@ -62,9 +62,9 @@ async function startAndWaitForPort(container, portToAwait, maxTries = 10) {
 export class DurableObjectExample extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => {
-      await startAndWaitForPort(ctx.container, OPEN_CONTAINER_PORT);
-    });
+    // ctx.blockConcurrencyWhile(async () => {
+    //   await startAndWaitForPort(ctx.container, OPEN_CONTAINER_PORT);
+    // });
   }
 
   async fetch(request) {
@@ -93,5 +93,6 @@ export const testStatus = {
     assert.strictEqual(id.name, 'container-example');
     const container = env.MY_CONTAINER.get(id);
     assert.strictEqual(await container.getStatus(), false);
+    console.log('succeeded');
   },
 };

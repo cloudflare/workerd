@@ -17,7 +17,6 @@ const unitTests :Workerd.Config = (
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
         bindings = [
-          ( name = "SERVICE", service = "container-client-test" ),
           ( name = "MY_CONTAINER", durableObjectNamespace = "DurableObjectExample" ),
         ],
       )

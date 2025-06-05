@@ -25,13 +25,13 @@ pub fn signo_as_string(signo: u32) -> Option<String> {
 }
 
 pub struct MpscReader {
-    pub receiver: mpsc::Receiver<Vec<u8>>,
+    pub receiver: tokio::sync::mpsc::Receiver<Vec<u8>>,
     unread_data: VecDeque<u8>,
 }
 
 impl MpscReader {
     #[must_use]
-    pub fn new(receiver: mpsc::Receiver<Vec<u8>>) -> Self {
+    pub fn new(receiver: tokio::sync::mpsc::Receiver<Vec<u8>>) -> Self {
         Self {
             receiver,
             unread_data: VecDeque::new(),
@@ -57,21 +57,16 @@ impl AsyncRead for MpscReader {
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<std::io::Result<usize>> {
-        if !self.unread_data.is_empty() {
+        if !dbg!(&self.unread_data).is_empty() {
             return self.read_unread(buf);
         }
 
-        match self.receiver.try_recv() {
-            Ok(data) => {
-                self.unread_data.extend(data.iter());
-                self.read_unread(buf)
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Poll::Ready(Ok(0)) // EOF
+        match dbg!(self.receiver.poll_recv(cx)) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => Poll::Ready(Ok(0)),
+            Poll::Ready(Some(data)) => {
+              self.unread_data.extend(data.iter());
+              self.read_unread(buf)
             }
         }
     }
@@ -94,7 +89,7 @@ impl AsyncWrite for MpscWriter {
         _: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        match self.sender.try_send(buf.to_vec()) {
+        match dbg!(self.sender.try_send(buf.to_vec())) {
             Ok(()) => Poll::Ready(Ok(buf.len())),
             Err(mpsc::TrySendError::Full(_)) => Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::StorageFull,

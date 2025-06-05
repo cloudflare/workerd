@@ -12,11 +12,10 @@ namespace workerd::io {
 ContainerStreamSharedState::ContainerStreamSharedState() {}
 
 void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> message) {
-  auto messageArray = kj::heapArray<kj::byte>(message.size());
-  memcpy(messageArray.begin(), message.data(), message.size());
-
   auto lockedQueue = messageQueue.lockExclusive();
-  lockedQueue->push(kj::mv(messageArray));
+  for (auto& byte : message) {
+    lockedQueue->push(byte);
+  }
 
   auto lockedWaiter = readWaiter.lockExclusive();
   KJ_IF_SOME(fulfiller, *lockedWaiter) {
@@ -25,15 +24,19 @@ void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> mes
   }
 }
 
-kj::Maybe<kj::Array<kj::byte>> ContainerStreamSharedState::dequeueMessage() {
+kj::Maybe<size_t> ContainerStreamSharedState::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
   auto lockedQueue = messageQueue.lockExclusive();
   if (lockedQueue->empty()) {
     return kj::none;
   }
 
-  auto message = kj::mv(lockedQueue->front());
-  lockedQueue->pop();
-  return kj::mv(message);
+  size_t min = kj::min(lockedQueue->size(), maxBytes);
+  KJ_REQUIRE(min > 0, "Should never happen");
+  memcpy(buffer, &lockedQueue->front(), min);
+  for (auto i = 0; i < min; ++i) {
+    lockedQueue->pop();
+  }
+  return min;
 }
 
 kj::Promise<void> ContainerStreamSharedState::waitForMessage() {
@@ -46,10 +49,9 @@ kj::Promise<void> ContainerStreamSharedState::waitForMessage() {
 }
 
 kj::Promise<size_t> ContainerAsyncStream::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
-  KJ_IF_SOME(message, sharedState->dequeueMessage()) {
-    size_t bytesToCopy = kj::min(message.size(), maxBytes);
-    memcpy(buffer, message.begin(), bytesToCopy);
-    return bytesToCopy;
+  KJ_DBG("TRY_READ");
+  KJ_IF_SOME(consumed, sharedState->tryRead(buffer, minBytes, maxBytes)) {
+    return consumed;
   }
 
   if (minBytes == 0) {
