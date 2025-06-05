@@ -537,7 +537,7 @@ export interface DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp";
+export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
