@@ -231,6 +231,7 @@ js_capnp_library(
     data = ["//:node_modules/capnp-es"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
+        "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],

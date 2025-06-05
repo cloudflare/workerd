@@ -16,6 +16,16 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+# Cross alias for prebuilt bundle
+alias(
+    name = "pyodide.capnp.bin_cross",
+    visibility = ["//visibility:public"],
+    actual = select({
+        "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/pyodide/pyodide.capnp.bin.aarch64-linux-gnu",
+        "//conditions:default": "pyodide.capnp.bin",
+    }),
+)
+
 alias(
     name = "pyodide.capnp.bin@rule",
     actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,

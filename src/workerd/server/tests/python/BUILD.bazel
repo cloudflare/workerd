@@ -9,7 +9,7 @@ load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 # the Pyodide bundle.
 copy_file(
     name = "pyodide_dev.capnp.bin@rule",
-    src = "//src/pyodide:pyodide.capnp.bin",
+    src = "//src/pyodide:pyodide.capnp.bin_cross",
     out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
     visibility = ["//visibility:public"],
 )

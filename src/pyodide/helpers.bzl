@@ -109,6 +109,10 @@ def pyodide_extra():
             ":pyodide-lock_%s.json@capnp" % tag
             for tag in package_tags
         ],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
 def python_bundles(overrides = {}):
@@ -349,5 +353,9 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         ]),
         tools = ["@capnp-cpp//src/capnp:capnp_tool"],
         visibility = ["//visibility:public"],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
     return pyodide_cappn_bin_rule

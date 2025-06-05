@@ -224,6 +224,6 @@ kj_test(
 
 copy_file(
     name = "pyodide.capnp.bin@rule",
-    src = "//src/pyodide:pyodide.capnp.bin@rule",
+    src = "//src/pyodide:pyodide.capnp.bin_cross",
     out = "pyodide.capnp.bin",
 )

@@ -58,6 +58,10 @@ def wd_rust_binary(
             "@platforms//os:windows": 0,
             "//conditions:default": 1,
         }),
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     rust_test(
@@ -73,5 +77,9 @@ def wd_rust_binary(
         experimental_use_cc_common_link = select({
             "@platforms//os:windows": 0,
             "//conditions:default": 1,
+        }),
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
         }),
     )

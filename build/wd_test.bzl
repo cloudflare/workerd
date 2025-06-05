@@ -20,7 +20,7 @@ def wd_test(
     """
 
     # Add workerd binary to "data" dependencies.
-    data = data + [src, "//src/workerd/server:workerd"]
+    data = data + [src, "//src/workerd/server:workerd_cross"]
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
@@ -48,7 +48,7 @@ def wd_test(
 
     # Add initial arguments for `workerd test` command.
     args = [
-        "$(location //src/workerd/server:workerd)",
+        "$(location //src/workerd/server:workerd_cross)",
         "test",
         "$(location {})".format(src),
     ] + args
@@ -189,7 +189,7 @@ _wd_test = rule(
             allow_single_file = True,
             executable = True,
             cfg = "exec",
-            default = "//src/workerd/server:workerd",
+            default = "//src/workerd/server:workerd_cross",
         ),
         # A list of files that this test requires to be present in order to run.
         "data": attr.label_list(allow_files = True),
