@@ -69,6 +69,8 @@ def pyodide_extra():
         out_name = "pyodide_extra_tmpl.capnp",
     )
 
+    package_tags = [info["tag"] for info in PYTHON_LOCKFILES]
+
     expand_template(
         name = "pyodide_extra_expand_template@rule",
         out = "generated/pyodide_extra.capnp",
@@ -76,8 +78,8 @@ def pyodide_extra():
             "%PACKAGE_LOCKS": ",".join(
                 [
                     '(packageDate = "%s", lock = embed "pyodide-lock_%s.json")' %
-                    (package_date, package_date)
-                    for package_date in PYTHON_LOCKFILES.keys()
+                    (tag, tag)
+                    for tag in package_tags
                 ],
             ),
             "%PYTHON_RELEASES": ", ".join(
@@ -93,8 +95,8 @@ def pyodide_extra():
         deps = ["pyodide_extra_expand_template@rule"],
     )
 
-    for package_date in PYTHON_LOCKFILES:
-        _copy_and_capnp_embed("@pyodide-lock_" + package_date + ".json//file")
+    for tag in package_tags:
+        _copy_and_capnp_embed("@pyodide-lock_" + tag + ".json//file")
 
     cc_capnp_library(
         name = "pyodide_extra_capnp",
@@ -104,8 +106,8 @@ def pyodide_extra():
             ":pyodide_extra_file_embed",
             ":python-entrypoint.js@capnp",
         ] + [
-            ":pyodide-lock_" + package_date + ".json@capnp"
-            for package_date in PYTHON_LOCKFILES.keys()
+            ":pyodide-lock_%s.json@capnp" % tag
+            for tag in package_tags
         ],
     )
 

@@ -5,6 +5,7 @@ PACKAGES_20250324_1 = {
     "info": {
         "tag": "20250324.1",
         "lockfile_hash": "3e5a9317dc0cfcf63e556034bf0e87b958bd6debcfdccdfffc8ce477cc439626",
+        "all_wheels_hash": "a7c9791b0b49f8358cd6deafd169c58611dc6f5cb65a6b6f76290ff0f532ddff",
     },
     "import_tests": {
         "PyJWT": [
