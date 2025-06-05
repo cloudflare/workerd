@@ -398,6 +398,7 @@ enum SerializationTag {
   # without breaking things).
 
   abortSignal @9;
+  socket @10;
 }
 
 enum StreamEncoding {
@@ -464,6 +465,22 @@ struct JsValue {
       # mechanism used to trigger the abort later. This is modeled as a stream, since the sender is
       # the one that will later on send the abort signal. This external will have an associated
       # stream in the corresponding `StreamSink` with type `AbortTrigger`.
+
+      socket :group {
+        # A Socket. Like ReadableStream, this requires bi-directional stream communication.
+
+        readableStreamIndex @8 :UInt32;
+        # Index into the externals array pointing to the readable stream component.
+
+        writableStreamIndex @9 :UInt32;
+        # Index into the externals array pointing to the writable stream component.
+
+        remoteAddress @10 :Text;
+        # The remote address this socket is connected to.
+
+        secureTransport @11 :Text;
+        # Security transport mode: "on", "off", or "starttls".
+      }
 
       # TODO(soon): WebSocket, Request, Response
     }

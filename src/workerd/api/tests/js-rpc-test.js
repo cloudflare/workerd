@@ -5,6 +5,7 @@ import {
   RpcStub,
   RpcTarget,
 } from 'cloudflare:workers';
+import { connect } from 'cloudflare:sockets';
 
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
@@ -246,6 +247,18 @@ export class MyService extends WorkerEntrypoint {
     let func = (a, b) => a ^ b;
     func.someProperty = 123;
     return func;
+  }
+
+  async getSocket() {
+    // Try to create and return a Socket object
+    // This should fail with a serialization error since Socket objects
+    // contain stateful connection information that cannot be transferred over RPC
+    try {
+      return connect('example.com:80');
+    } catch (error) {
+      // If socket creation fails (e.g. in test environment), return error info
+      return { error: true, name: error.name, message: error.message };
+    }
   }
 
   getRpcPromise(callback) {
@@ -801,6 +814,14 @@ export let namedServiceBinding = {
       message:
         'Could not serialize object of type "Object". This type does not support ' +
         'serialization.',
+    });
+
+    // Can't serialize Socket objects due to their stateful connection nature.
+    await assert.rejects(() => env.MyService.getSocket(), {
+      name: 'TypeError',
+      message:
+        'Socket serialization is not yet fully implemented - Socket objects contain complex ' +
+        'connection state that cannot be safely transferred over RPC',
     });
 
     // A stateless entryponit method that never returns should fail due to PendingEvent tracking.

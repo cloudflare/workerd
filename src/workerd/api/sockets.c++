@@ -507,6 +507,37 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
       }));
 }
 
+void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // For now, throw an error since Socket serialization is complex and not fully implemented.
+  // Socket serialization would require:
+  // 1. Serializing the underlying connection state
+  // 2. Coordinating the readable and writable streams
+  // 3. Maintaining connection security properties across RPC boundaries
+  // 4. Handling connection lifecycle (opened/closed state)
+
+  JSG_FAIL_REQUIRE(TypeError,
+      "Socket serialization is not yet fully implemented - "
+      "Socket objects contain complex connection state that cannot be safely transferred over RPC");
+}
+
+jsg::Ref<Socket> Socket::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(deserializer.getExternalHandler(), DOMDataCloneError,
+      "Socket can only be deserialized from RPC.");
+  auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
+  JSG_REQUIRE(
+      externalHandler != nullptr, DOMDataCloneError, "Socket can only be deserialized from RPC.");
+
+  auto external = externalHandler->read();
+  auto socket = external.getSocket();
+
+  // For now, throw an error indicating that Socket deserialization is not fully implemented
+  // since it requires complex reconstruction of the underlying connection state
+  JSG_FAIL_REQUIRE(TypeError,
+      "Socket deserialization is not yet implemented - "
+      "Socket objects cannot be fully reconstructed over RPC due to underlying connection state");
+}
+
 jsg::Ref<Socket> SocketsModule::connect(
     jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
   return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));

@@ -144,6 +144,11 @@ class Socket: public jsg::Object {
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
 
+  // RPC serialization support
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Socket> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
   JSG_RESOURCE_TYPE(Socket) {
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
@@ -158,6 +163,8 @@ class Socket: public jsg::Object {
       get secureTransport(): 'on' | 'off' | 'starttls';
     });
   }
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::SOCKET);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackFieldWithSize(
