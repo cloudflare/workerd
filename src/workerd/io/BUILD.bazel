@@ -308,6 +308,30 @@ wd_capnp_library(
     ],
 )
 
+wd_capnp_library(src = "docker-api.capnp")
+
+wd_cc_library(
+    name = "container-client",
+    srcs = ["container-client.c++"],
+    hdrs = ["container-client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":container_capnp",
+        ":docker-api_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_test(
+    src = "container-client-test.wd-test",
+    args = ["--experimental"],
+    data = ["container-client-test.js"],
+)
+
 kj_test(
     src = "io-gate-test.c++",
     deps = [
