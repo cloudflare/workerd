@@ -7,6 +7,9 @@ on:
   # Allow manual triggering for testing
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   report:
     runs-on: ubuntu-latest
