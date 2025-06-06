@@ -10,6 +10,7 @@ wd_cc_library(
         "crypto-keys.c++",
         "diagnostics-channel.c++",
         "module.c++",
+        "process.c++",
         "timers.c++",
         "util.c++",
         "zlib-util.c++",
@@ -19,6 +20,7 @@ wd_cc_library(
         "diagnostics-channel.h",
         "module.h",
         "node.h",
+        "process.h",
         "timers.h",
         "util.h",
         "zlib-util.h",
@@ -70,6 +72,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/io",
         "//src/workerd/util:mimetype",
+        "@generated_versions//:versions",
     ],
 )
 

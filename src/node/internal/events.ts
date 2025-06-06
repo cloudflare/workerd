@@ -42,7 +42,7 @@ import {
   validateObject,
 } from 'node-internal:validators';
 
-import * as process from 'node-internal:process';
+import * as process from 'node-internal:internal_process';
 
 import { spliceOne } from 'node-internal:internal_utils';
 
@@ -495,24 +495,34 @@ function _addListener(
           `added to an EventEmitter. Use ` +
           'emitter.setMaxListeners() to increase limit'
       );
-      // TODO(soon): Implement process.emitWarning and inspect
-      // // No error code for this since it is a Warning
-      // // eslint-disable-next-line no-restricted-syntax
-      // const w = new Error(
-      //   "Possible EventEmitter memory leak detected. " +
-      //     `${existing.length} ${String(type)} listeners ` +
-      //     `added to ${inspect(target, { depth: -1 })}. Use ` +
-      //     "emitter.setMaxListeners() to increase limit",
-      // );
-      // w.name = "MaxListenersExceededWarning";
-      // w.emitter = target;
-      // w.type = type;
-      // w.count = existing.length;
-      // process.emitWarning(w);
+      // No error code for this since it is a Warning
+      // eslint-disable-next-line no-restricted-syntax
+      const w: EventEmitterError = Object.assign(
+        new Error(
+          'Possible EventEmitter memory leak detected. ' +
+            `${existing.length} ${String(type)} listeners ` +
+            `added to ${inspect(target, { depth: -1 })}. Use ` +
+            'emitter.setMaxListeners() to increase limit'
+        ),
+        {
+          name: 'MaxListenersExceededWarning',
+          emitter: target,
+          type: type,
+          count: existing.length,
+        }
+      );
+      process.emitWarning(w);
     }
   }
 
   return target;
+}
+
+interface EventEmitterError extends Error {
+  name: string;
+  emitter: unknown;
+  type: string | symbol;
+  count: number;
 }
 
 EventEmitter.prototype.addListener = function addListener(
@@ -1020,3 +1030,6 @@ export function on(
     iterator.return();
   }
 }
+
+// Initialize the process global as an event emitter
+process._initProcess();

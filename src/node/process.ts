@@ -3,5 +3,32 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-export * from 'node-internal:process';
-export { default } from 'node-internal:process';
+// Note: an explicit list here is used to avoid exposing the private export
+// "initProcess"
+export {
+  version,
+  versions,
+  title,
+  argv,
+  argv0,
+  execArgv,
+  arch,
+  platform,
+  release,
+  config,
+  pid,
+  ppid,
+  getegid,
+  geteuid,
+  setegid,
+  seteuid,
+  setSourceMapsEnabled,
+  nextTick,
+  emitWarning,
+  env,
+  exit,
+  getBuiltinModule,
+  features,
+  allowedNodeEnvironmentFlags,
+} from 'node-internal:internal_process';
+export { default } from 'node-internal:internal_process';

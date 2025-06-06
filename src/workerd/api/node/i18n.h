@@ -59,6 +59,9 @@ class Converter final {
 jsg::BufferSource transcode(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> source, Encoding fromEncoding, Encoding toEncoding);
 
+// Get the ICU version string
+kj::String getIcuVersion();
+
 }  // namespace i18n
 
 }  // namespace workerd::api::node

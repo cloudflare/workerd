@@ -210,6 +210,10 @@ bind(
     actual = "@com_googlesource_chromium_icu//:icu",
 )
 
+load("//build/deps:versions.bzl", "extract_versions")
+
+extract_versions(node_version = NODE_VERSION)
+
 # Tell workerd code where to find v8.
 #
 # We indirect through `@workerd-v8` to allow dependents to override how and where `v8` is built.

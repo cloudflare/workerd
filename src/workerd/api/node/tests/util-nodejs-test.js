@@ -5430,30 +5430,6 @@ export const testInherits = {
 // https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-promisify.js
 export const testPromisify = {
   async test() {
-    // TODO(soon): expectWarning only possible with process.on('warning')
-    // {
-    //   const warningHandler = commonMustNotCall();
-    //   process.on('warning', warningHandler);
-    //   function foo() {}
-    //   foo.constructor = (async () => {}).constructor;
-    //   promisify(foo);
-    //   process.off('warning', warningHandler);
-    // }
-    //
-    // commonExpectWarning(
-    //   'DeprecationWarning',
-    //   'Calling promisify on a function that returns a Promise is likely a mistake.',
-    //   'DEP0174');
-    // promisify(async (callback) => { callback(); })().then(mustCall(() => {
-    //   // We must add the second `expectWarning` call in the `.then` handler, when
-    //   // the first warning has already been triggered.
-    //   commonExpectWarning(
-    //     'DeprecationWarning',
-    //     'Calling promisify on a function that returns a Promise is likely a mistake.',
-    //     'DEP0174');
-    //   promisify(async () => {})().then(commonMustNotCall());
-    // }));
-
     // TODO(soon): Enable once fs supported
     // const stat = promisify(fs.stat);
 
