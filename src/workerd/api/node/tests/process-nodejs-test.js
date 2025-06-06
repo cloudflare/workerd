@@ -62,3 +62,182 @@ export const processEnv = {
     );
   },
 };
+
+export const processProperties = {
+  test() {
+    // Test basic process properties
+    assert.strictEqual(typeof process.title, 'string');
+    assert.ok(process.title.length > 0);
+
+    assert.ok(Array.isArray(process.argv));
+    assert.ok(process.argv.length >= 1);
+
+    assert.strictEqual(typeof process.arch, 'string');
+    assert.ok(['x64', 'arm64', 'ia32'].includes(process.arch));
+
+    assert.strictEqual(typeof process.version, 'string');
+    assert.ok(process.version.startsWith('v'));
+
+    // Test additional properties
+    assert.strictEqual(process.argv0, 'node');
+    assert.ok(Array.isArray(process.execArgv));
+    assert.strictEqual(process.execArgv.length, 0);
+
+    assert.strictEqual(process.pid, 1);
+    assert.strictEqual(process.ppid, 0);
+
+    // Test release object
+    assert.strictEqual(typeof process.release, 'object');
+    assert.strictEqual(process.release.name, 'node');
+    assert.ok(process.release.sourceUrl.includes('nodejs.org'));
+    assert.ok(process.release.headersUrl.includes('nodejs.org'));
+
+    // Test config object
+    assert.strictEqual(typeof process.config, 'object');
+    assert.strictEqual(typeof process.config.target_defaults, 'object');
+    assert.strictEqual(typeof process.config.variables, 'object');
+
+    // Test uid/gid functions
+    assert.strictEqual(process.getegid(), 0);
+    assert.strictEqual(process.geteuid(), 0);
+    process.setegid(1000); // Should be no-op
+    process.seteuid(1000); // Should be no-op
+    assert.strictEqual(process.getegid(), 0);
+    assert.strictEqual(process.geteuid(), 0);
+
+    // Test other functions
+    process.setSourceMapsEnabled(false); // Should be no-op
+
+    // Test allowedNodeEnvironmentFlags
+    assert.ok(process.allowedNodeEnvironmentFlags instanceof Set);
+    assert.strictEqual(process.allowedNodeEnvironmentFlags.size, 0);
+  },
+};
+
+export const processVersions = {
+  test() {
+    assert.strictEqual(typeof process.versions, 'object');
+    assert.ok(process.versions !== null);
+
+    // List of expected version properties
+    const expectedVersions = [
+      'ada',
+      'node',
+      'brotli',
+      'simdutf',
+      'sqlite',
+      'nbytes',
+      'ncrypto',
+    ];
+
+    // Check that all expected versions are included and are strings
+    for (const versionKey of expectedVersions) {
+      assert.strictEqual(
+        typeof process.versions[versionKey],
+        'string',
+        `process.versions.${versionKey} should be a string`
+      );
+    }
+
+    // Semver regex pattern (basic validation for x.y.z format with optional pre-release/build)
+    const semverRegex =
+      /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+    // Test that all versions follow semver format
+    for (const versionKey of expectedVersions) {
+      const version = process.versions[versionKey];
+      assert.ok(
+        semverRegex.test(version),
+        `process.versions.${versionKey} (${version}) should be valid semver`
+      );
+    }
+
+    // Check that versions object contains all expected keys
+    const versionKeys = Object.keys(process.versions);
+    for (const expectedKey of expectedVersions) {
+      assert.ok(
+        versionKeys.includes(expectedKey),
+        `process.versions should include ${expectedKey}`
+      );
+    }
+
+    // Test ICU version - ICU version is not semver but just X.Y format
+    assert.strictEqual(
+      typeof process.versions.icu,
+      'string',
+      'process.versions.icu should be a string'
+    );
+
+    // ICU version format is X.Y (e.g., "72.1", "73.2", etc.)
+    const icuVersionRegex = /^\d+\.\d+$/;
+    assert.ok(
+      icuVersionRegex.test(process.versions.icu),
+      `process.versions.icu (${process.versions.icu}) should be in X.Y format`
+    );
+  },
+};
+
+export const processFeatures = {
+  test() {
+    assert.strictEqual(typeof process.features, 'object');
+    assert.ok(process.features !== null);
+
+    // Process features should be an object that can be inspected
+    const features = Object.keys(process.features);
+    assert.ok(Array.isArray(features));
+  },
+};
+
+export const processNextTick = {
+  async test() {
+    let called = false;
+    let order = [];
+
+    // Test basic nextTick functionality
+    process.nextTick(() => {
+      called = true;
+      order.push('nextTick1');
+    });
+
+    // Test multiple nextTick calls
+    process.nextTick(() => {
+      order.push('nextTick2');
+    });
+
+    // Test nextTick with arguments
+    process.nextTick(
+      (arg1, arg2) => {
+        assert.strictEqual(arg1, 'hello');
+        assert.strictEqual(arg2, 'world');
+        order.push('nextTick3');
+      },
+      'hello',
+      'world'
+    );
+
+    order.push('sync');
+
+    // Wait for microtasks to complete
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.ok(called);
+    assert.deepStrictEqual(order, [
+      'sync',
+      'nextTick1',
+      'nextTick2',
+      'nextTick3',
+    ]);
+  },
+};
+
+export const processGetBuiltinModule = {
+  test() {
+    // Should be able to get built-in modules
+    const processBuiltin = process.getBuiltinModule('node:process');
+    assert.strictEqual(typeof processBuiltin, 'object');
+
+    // Should return null/undefined for non-existent modules
+    const nonExistent = process.getBuiltinModule('node:nonexistent');
+    assert.ok(nonExistent == null);
+  },
+};

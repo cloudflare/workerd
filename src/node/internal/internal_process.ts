@@ -12,11 +12,158 @@ import { validateObject } from 'node-internal:validators';
 
 import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
 
-import { default as utilImpl } from 'node-internal:util';
+import { default as processImpl } from 'node-internal:process';
+import EventEmitter from 'node-internal:events';
+
+export const versions = processImpl.versions;
+
+export const version = `v${processImpl.versions.node}`;
+
+export const title = 'workerd';
+
+export const argv = ['node'];
+
+export const argv0 = 'node';
+
+export const execArgv = [];
+
+export const arch = 'x64';
+
+export const platform = processImpl.processPlatform;
+
+export const release = {
+  name: 'node',
+  sourceUrl: `https://nodejs.org/download/release/v${version}/node-v${version}.tar.gz`,
+  headersUrl: `https://nodejs.org/download/release/v${version}/node-v${version}-headers.tar.gz`,
+};
+
+export const config = {
+  target_defaults: {},
+  variables: {},
+};
+
+export const pid = 1;
+export const ppid = 0;
+
+export function getegid() {
+  return 0;
+}
+
+export function geteuid() {
+  return 0;
+}
+
+export function setegid(_guid: number) {
+  // no-op, since we only support gid 0
+}
+
+export function seteuid(_uid: number) {
+  // no-op, since we only support uid 0
+}
+
+export function setSourceMapsEnabled(_enabled: boolean) {
+  // no-op since we do not support disabling source maps
+}
 
 export function nextTick(cb: Function, ...args: unknown[]) {
   queueMicrotask(() => {
     cb(...args);
+  });
+}
+interface EmitWarningOptions {
+  type?: string | undefined;
+  code?: string | undefined;
+  ctor?: Function | undefined;
+  detail?: string | undefined;
+}
+export function emitWarning(warning: string | Error, ctor?: Function): void;
+export function emitWarning(
+  warning: string | Error,
+  type?: string,
+  ctor?: Function
+): void;
+export function emitWarning(
+  warning: string | Error,
+  type?: string,
+  code?: string,
+  ctor?: Function
+): void;
+export function emitWarning(
+  warning: string | Error,
+  options?: Function | string | EmitWarningOptions
+): void {
+  let err: Error;
+  let name = 'Warning';
+  let detail: string | undefined;
+  let code: string | undefined;
+  let ctor: Function | undefined;
+
+  // Handle different overloads
+  if (
+    typeof options === 'object' &&
+    options !== null &&
+    !(options instanceof Function)
+  ) {
+    // emitWarning(warning, options)
+    if (options.type) name = options.type;
+    if (options.code) code = options.code;
+    if (options.detail) detail = options.detail;
+    ctor = options.ctor;
+  } else {
+    // Handle other overloads
+    const args = Array.from(arguments);
+
+    if (typeof args[1] === 'string') {
+      // emitWarning(warning, type, ...)
+      name = args[1];
+      if (typeof args[2] === 'string') {
+        // emitWarning(warning, type, code, ctor)
+        code = args[2];
+        ctor = args[3];
+      } else if (typeof args[2] === 'function') {
+        // emitWarning(warning, type, ctor)
+        ctor = args[2];
+      }
+    } else if (typeof args[1] === 'function') {
+      // emitWarning(warning, ctor)
+      ctor = args[1];
+    }
+  }
+
+  // Convert string warning to Error
+  if (typeof warning === 'string') {
+    // Use the provided constructor if available, otherwise use Error
+    const ErrorConstructor = (ctor as new (message: string) => Error) || Error;
+    err = new ErrorConstructor(warning);
+    err.name = name;
+  } else {
+    err = warning;
+    // Override name if provided
+    if (name && name !== 'Warning') {
+      err.name = name;
+    }
+  }
+
+  // Add code if provided
+  if (code) {
+    (err as any).code = code;
+  }
+
+  // Add detail if provided
+  if (detail) {
+    (err as any).detail = detail;
+  }
+
+  // Capture stack trace using the provided constructor or emitWarning itself
+  // This excludes the constructor (and frames above it) from the stack trace
+  if (Error.captureStackTrace) {
+    Error.captureStackTrace(err, ctor || emitWarning);
+  }
+
+  // Emit the warning event on the process object
+  // Use nextTick to ensure the warning is emitted asynchronously
+  nextTick(() => {
+    process.emit('warning', err);
   });
 }
 
@@ -82,7 +229,7 @@ function isJsonSerializable(
 
 function getInitialEnv() {
   let env: Record<string, string> = {};
-  for (let [key, value] of Object.entries(utilImpl.getEnvObject())) {
+  for (let [key, value] of Object.entries(processImpl.getEnvObject())) {
     // Workers environment variables can have a variety of types, but process.env vars are
     // strictly strings. We want to convert our workers env into process.env, but allowing
     // process.env to contain non-strings would probably break Node apps.
@@ -180,14 +327,12 @@ export const env = new Proxy(getInitialEnv(), {
 });
 
 export function getBuiltinModule(id: string): any {
-  return utilImpl.getBuiltinModule(id);
+  return processImpl.getBuiltinModule(id);
 }
 
 export function exit(code: number) {
-  utilImpl.processExitImpl(code);
+  processImpl.processExitImpl(code);
 }
-
-export const platform = utilImpl.processPlatform;
 
 // The following features does not include deprecated or experimental flags mentioned in
 // https://nodejs.org/docs/latest/api/process.html
@@ -205,11 +350,66 @@ export const features = Object.freeze({
   tls: true,
 });
 
-export default {
+export const allowedNodeEnvironmentFlags = new Set();
+
+interface Process extends EventEmitter {
+  version: typeof version;
+  versions: typeof versions;
+  title: typeof title;
+  argv: typeof argv;
+  argv0: typeof argv0;
+  execArgv: typeof execArgv;
+  arch: typeof arch;
+  platform: typeof platform;
+  release: typeof release;
+  config: typeof config;
+  pid: typeof pid;
+  ppid: typeof ppid;
+  getegid: typeof getegid;
+  geteuid: typeof geteuid;
+  setegid: typeof setegid;
+  seteuid: typeof seteuid;
+  setSourceMapsEnabled: typeof setSourceMapsEnabled;
+  nextTick: typeof nextTick;
+  emitWarning: typeof emitWarning;
+  env: typeof env;
+  exit: typeof exit;
+  getBuiltinModule: typeof getBuiltinModule;
+  features: typeof features;
+  allowedNodeEnvironmentFlags: typeof allowedNodeEnvironmentFlags;
+}
+
+const process = {
+  version,
+  versions,
+  title,
+  argv,
+  argv0,
+  execArgv,
+  arch,
+  platform,
+  release,
+  config,
+  pid,
+  ppid,
+  getegid,
+  geteuid,
+  setegid,
+  seteuid,
+  setSourceMapsEnabled,
   nextTick,
+  emitWarning,
   env,
   exit,
   getBuiltinModule,
-  platform,
   features,
-};
+  allowedNodeEnvironmentFlags,
+} as Process;
+
+export default process;
+
+// Private export, not to be reexported
+export function _initProcess() {
+  Object.setPrototypeOf(process, EventEmitter.prototype);
+  EventEmitter.call(process);
+}
