@@ -10,8 +10,8 @@
 namespace workerd::io {
 
 ContainerStreamSharedState::ContainerStreamSharedState() {
-  callback = [self = addRefToThis()](
-                 ::rust::Slice<const uint8_t> message) mutable { self->enqueueMessage(message); };
+  callback = [this](
+                 ::rust::Slice<const uint8_t> message) mutable { this->enqueueMessage(message); };
 }
 
 void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> message) const {

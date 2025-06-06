@@ -47,8 +47,7 @@ struct ContainerAsyncStream final: public kj::AsyncIoStream {
 };
 
 // Shared state between MessageCallback and ContainerAsyncStream
-class ContainerStreamSharedState: public kj::AtomicRefcounted,
-                                  public kj::EnableAddRefToThis<ContainerStreamSharedState> {
+class ContainerStreamSharedState: public kj::AtomicRefcounted {
  public:
   ContainerStreamSharedState();
 
