@@ -35,7 +35,6 @@ import * as fssync from 'node-internal:internal_fs_sync';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 import type {
   MkdirTempSyncOptions,
-  ReadDirOptions,
   ReadDirResult,
   ReadFileSyncOptions,
   ReadLinkSyncOptions,
@@ -50,6 +49,7 @@ import {
   type RawTime,
   type SymlinkType,
   type FilePath,
+  type ReadDirOptions,
 } from 'node-internal:internal_fs_utils';
 import { Buffer } from 'node-internal:internal_buffer';
 import { type Dir } from 'node-internal:internal_fs';
