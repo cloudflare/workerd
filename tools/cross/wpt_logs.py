@@ -48,7 +48,7 @@ class TimeInterval:
 
 
 def run_tests(test_target: str, options: Options) -> TimeInterval:
-    cmd = ["bazel", "test", "--config", "ci", test_target]
+    cmd = ["bazel", "test", "--config", "ci-test", test_target]
 
     if options.config:
         cmd.append("--test_env=GEN_TEST_CONFIG=1")
@@ -126,7 +126,7 @@ def stats_table(logs: list[Log]) -> str:
 
 
 def cmd_output(cmd: list[str]) -> str:
-    return subprocess.run(cmd, capture_output=True).stdout.decode().strip()
+    return subprocess.run(cmd, capture_output=True, check=True).stdout.decode().strip()
 
 
 def get_os() -> str:
@@ -156,7 +156,9 @@ def wpt_report(logs: list[Log], time_interval: TimeInterval) -> dict[str, Any]:
             "revision": cmd_output(["git", "rev-parse", "HEAD"]),
             "os": get_os(),
         },
-        "results": [log.report["results"] for log in logs if log.report],
+        "results": [
+            result for log in logs if log.report for result in log.report["results"]
+        ],
     }
 
 
