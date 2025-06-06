@@ -326,14 +326,6 @@ export function styleText(
   return skipColorize ? text : `${left}${text}${right}`;
 }
 
-export function emitExperimentalWarning(_msg: string): void {
-  // We do not currently emit experimental warning messages,
-  // rather, this no-op allows supporting code which relies on
-  // emitting them in Node.js.
-  // In future we could examine emitting these with control over
-  // their log output.
-}
-
 export default {
   types,
   callbackify,
@@ -352,7 +344,6 @@ export default {
   debuglog,
   debug,
   deprecate,
-  emitExperimentalWarning,
   getSystemErrorMap,
   getSystemErrorMessage,
   getSystemErrorName,
