@@ -705,13 +705,17 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "ExternalHttpServer::request()");
       KJ_REQUIRE(wrappedResponse == kj::none, "object should only receive one request");
-      wrappedResponse = response;
+      auto& res = response;
+      if (parent.rewriter->needsRewriteResponse()) {
+        wrappedResponse = response;
+        res = *this;
+      }
       if (parent.rewriter->needsRewriteRequest()) {
         auto rewrite = parent.rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
         co_return co_await parent.serviceAdapter->request(
-            method, url, *rewrite.headers, requestBody, *this);
+            method, url, *rewrite.headers, requestBody, res);
       } else {
-        co_return co_await parent.serviceAdapter->request(method, url, headers, requestBody, *this);
+        co_return co_await parent.serviceAdapter->request(method, url, headers, requestBody, res);
       }
     }
 
@@ -762,13 +766,9 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
       if (parent.rewriter->needsRewriteResponse()) {
         auto rewrite = headers.cloneShallow();
         parent.rewriter->rewriteResponse(rewrite);
-        auto res = response.send(statusCode, statusText, rewrite, expectedBodySize);
-        wrappedResponse = kj::none;
-        return res;
+        return response.send(statusCode, statusText, rewrite, expectedBodySize);
       } else {
-        auto res = response.send(statusCode, statusText, headers, expectedBodySize);
-        wrappedResponse = kj::none;
-        return res;
+        return response.send(statusCode, statusText, headers, expectedBodySize);
       }
     }
 
@@ -778,13 +778,9 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
       if (parent.rewriter->needsRewriteResponse()) {
         auto rewrite = headers.cloneShallow();
         parent.rewriter->rewriteResponse(rewrite);
-        auto res = response.acceptWebSocket(rewrite);
-        wrappedResponse = kj::none;
-        return res;
+        return response.acceptWebSocket(rewrite);
       } else {
-        auto res = response.acceptWebSocket(headers);
-        wrappedResponse = kj::none;
-        return res;
+        return response.acceptWebSocket(headers);
       }
     }
   };
@@ -2303,7 +2299,7 @@ class Server::WorkerService final: public Service,
           KJ_ASSERT(config.hasImageName(), "Image name is required");
           auto containerName = config.getContainerName();
           auto imageName = config.getImageName();
-          containerClient = kj::heap<io::ContainerClient>(byteStreamFactory,
+          containerClient = kj::heap<io::ContainerClient>(byteStreamFactory, timer,
               asHttpClient(networkPtr->startRequest({})),
               asHttpClient(servicePtr->startRequest({})), kj::str(containerName),
               kj::str(imageName));

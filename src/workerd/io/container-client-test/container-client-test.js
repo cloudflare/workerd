@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import assert from 'node:assert';
+import { scheduler } from 'node:timers/promises';
 
 const CONTAINER_NAME = 'container-example';
 const IMAGE_TAG = 'ubuntu';
@@ -7,39 +8,12 @@ const IMAGE_TAG = 'ubuntu';
 export class DurableObjectExample extends DurableObject {
   async testBasics() {
     let container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((err) => {});
+      await container.destroy();
+      await monitor;
+    }
     assert.strictEqual(container.running, false);
-
-    // Test environment variable validation
-    // const badEnvs = [
-    //   {
-    //     value: { A: 'B\0' },
-    //     err: "Environment variable values cannot contain '\\0': A",
-    //   },
-    //   {
-    //     value: { 'B\0': 'A' },
-    //     err: "Environment variable names cannot contain '\\0': B\0",
-    //   },
-    //   {
-    //     value: { 'B=': 'A' },
-    //     err: "Environment variable names cannot contain '=': B=",
-    //   },
-    // ];
-
-    // for (const badEnv of badEnvs) {
-    //   await assert.rejects(
-    //     async () => {
-    //       await container.start({
-    //         entrypoint: ['/bin/sh'],
-    //         env: badEnv.value,
-    //         enableInternet: true,
-    //       });
-    //       throw new Error("start should've thrown an error");
-    //     },
-    //     {
-    //       message: badEnv.err,
-    //     }
-    //   );
-    // }
 
     // Start container with valid configuration
     await container.start({
@@ -48,43 +22,25 @@ export class DurableObjectExample extends DurableObject {
       enableInternet: true,
     });
 
-    // Sleep for 1 second:
-    // await new Promise((resolve) => setTimeout(resolve, 10000));
-
-    // let monitor = container.monitor().catch((err) => this.ctx.abort(err));
-
-    // TODO: Enable tests when getTcpPort() is fully implemented.
-    // Test simple TCP connection on port 20
-    // {
-    //   let sock = container.getTcpPort(20).connect('foo:123');
-    //   let reader = sock.readable.getReader();
-    //   let { done, value } = await reader.read();
-    //   assert.strictEqual(
-    //     new TextDecoder().decode(value),
-    //     "Hello, you've reached port 20"
-    //   );
-    //   await sock.close();
-    // }
-
-    // Test container information retrieval on port 123
-    // {
-    //   let sock = container.getTcpPort(123).connect('foo:123');
-    //   let reader = sock.readable.getReader();
-    //   let { done, value } = await reader.read();
-    //   let response = new TextDecoder().decode(value);
-
-    //   // Check that response contains expected container information
-    //   assert(response.includes('entrypoint: foo, bar, baz'));
-    //   assert(response.includes('environment variables: A=B, C=D, L=F'));
-    //   assert(response.includes('enable internet: true'));
-    //   await sock.close();
-    // }
+    let monitor = container.monitor().catch((err) => {});
 
     // Test HTTP requests to container
     {
-      let resp = await container
-        .getTcpPort(8080)
-        .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
+      let resp;
+      for (let i = 0; i < 6; i++) {
+        try {
+          console.log(`Attempt ${i} to connect to container ${Date.now()}`);
+          resp = await container
+            .getTcpPort(8080)
+            .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
+          break;
+        } catch (e) {
+          await scheduler.wait(1000);
+          if (i === 5) {
+            throw e;
+          }
+        }
+      }
 
       assert.equal(resp.status, 200);
       assert.equal(resp.statusText, 'OK');
@@ -94,7 +50,7 @@ export class DurableObjectExample extends DurableObject {
       assert.strictEqual(text, 'Hello World!');
     }
     await container.destroy();
-    // await monitor;
+    await monitor;
     assert.strictEqual(container.running, false);
   }
 

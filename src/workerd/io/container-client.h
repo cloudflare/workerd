@@ -13,6 +13,7 @@
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/string.h>
+#include <kj/tuple.h>
 
 namespace workerd::io {
 
@@ -23,6 +24,7 @@ namespace workerd::io {
 class ContainerClient final: public rpc::Container::Server {
  public:
   ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
+      kj::Timer& timer,
       kj::Own<kj::HttpClient> network,
       kj::Own<kj::HttpClient> httpClient,
       kj::String containerName,
@@ -39,12 +41,11 @@ class ContainerClient final: public rpc::Container::Server {
 
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
+  kj::Timer& timer;
   kj::Own<kj::HttpClient> network;
   kj::Own<kj::HttpClient> httpClient;
   kj::String containerName;
   kj::String imageName;
-  bool running = false;
-  kj::HashMap<uint16_t, uint16_t> portMappings;
 
   // Docker-specific Port implementation
   class DockerPort;
@@ -57,7 +58,7 @@ class ContainerClient final: public rpc::Container::Server {
   // Docker API v1.50 helper methods
   kj::Promise<Response> dockerApiRequest(
       kj::HttpMethod method, kj::StringPtr endpoint, kj::Maybe<kj::StringPtr> body = kj::none);
-  kj::Promise<void> inspectContainer();
+  kj::Promise<kj::Tuple<bool, kj::HashMap<uint16_t, uint16_t>>> inspectContainer();
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment);
   kj::Promise<void> startContainer();
