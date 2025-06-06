@@ -520,7 +520,8 @@ class Blob:
         end: int | None = None,
         content_type: str | None = None,
     ):
-        return self.js_object.slice(start, end, content_type)
+        js_sliced_blob = self.js_object.slice(start, end, content_type)
+        return Blob([js_sliced_blob])
 
 
 class File(Blob):
@@ -572,7 +573,7 @@ class File(Blob):
 
     @property
     def last_modified(self) -> int:
-        return self._js_blob.last_modified
+        return self._js_blob.lastModified
 
 
 class Request:
