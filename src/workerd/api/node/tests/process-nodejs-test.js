@@ -89,11 +89,13 @@ export const processProperties = {
     // Test release object
     assert.strictEqual(typeof process.release, 'object');
     assert.strictEqual(process.release.name, 'node');
-    assert.ok(
-      new URL(process.release.sourceUrl).hostname.includes('nodejs.org')
+    assert.strictEqual(
+      new URL(process.release.sourceUrl).hostname,
+      'nodejs.org'
     );
-    assert.ok(
-      new URL(process.release.headersUrl).hostname.includes('nodejs.org')
+    assert.strictEqual(
+      new URL(process.release.headersUrl).hostname,
+      'nodejs.org'
     );
 
     // Test config object
