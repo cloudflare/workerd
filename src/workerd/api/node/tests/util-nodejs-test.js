@@ -30,7 +30,6 @@ import util, {
   callbackify,
   inherits,
   promisify,
-  emitExperimentalWarning,
   stripVTControlCharacters,
   styleText,
 } from 'node:util';
@@ -5672,24 +5671,6 @@ export const testPromisify = {
           invalidArgTypeHelper(input),
       });
     });
-  },
-};
-
-// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-emit-experimental-warning.js
-export const testExperimentalWarning = {
-  async test() {
-    // This test ensures that the emitExperimentalWarning in internal/util emits a
-    // warning when passed an unsupported feature and that it simply returns
-    // when passed the same feature multiple times.
-
-    // TODO(soon): Enable once process.on is supported
-    // process.on('warning', mustCall((warning) => {
-    //   assert.match(warning.message, /is an experimental feature/);
-    // }, 2));
-
-    emitExperimentalWarning('feature1');
-    emitExperimentalWarning('feature1'); // should not warn
-    emitExperimentalWarning('feature2');
   },
 };
 
