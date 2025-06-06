@@ -18,6 +18,16 @@
 
 namespace workerd::io {
 
+template <typename T>
+typename T::Builder decodeJsonResponse(kj::String response) {
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<T>();
+  capnp::MallocMessageBuilder message;
+  auto jsonRoot = message.initRoot<T>();
+  codec.decode(response, jsonRoot);
+  return jsonRoot;
+}
+
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Timer& timer,
     kj::Own<kj::HttpClient> network,
@@ -126,11 +136,8 @@ kj::Promise<kj::Tuple<bool, kj::HashMap<uint16_t, uint16_t>>> ContainerClient::i
   }
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
   // Parse JSON response
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::ContainerInspectResponse>();
-  capnp::MallocMessageBuilder message;
-  auto jsonRoot = message.initRoot<docker_api::Docker::ContainerInspectResponse>();
-  codec.decode(response.body, jsonRoot);
+  auto jsonRoot =
+      decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(kj::mv(response.body));
   kj::HashMap<uint16_t, uint16_t> portMappings;
   for (auto portMapping: jsonRoot.getNetworkSettings().getPorts().getObject()) {
     auto port = portMapping.getName();
@@ -276,11 +283,8 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     JSG_REQUIRE(response.statusCode == 200, Error,
         "Monitoring container failed with: ", response.statusCode, response.body);
     // Parse JSON response
-    capnp::JsonCodec codec;
-    codec.handleByAnnotation<docker_api::Docker::ContainerMonitorResponse>();
-    capnp::MallocMessageBuilder message;
-    auto jsonRoot = message.initRoot<docker_api::Docker::ContainerMonitorResponse>();
-    codec.decode(response.body, jsonRoot);
+    auto jsonRoot =
+        decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(kj::mv(response.body));
     auto statusCode = jsonRoot.getStatusCode();
     JSG_REQUIRE(
         statusCode == 0, Error, "Container exited with unexpected exit code ", kj::str(statusCode));
