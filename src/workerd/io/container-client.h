@@ -43,6 +43,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Own<kj::HttpClient> httpClient;
   kj::String containerName;
   kj::String imageName;
+  bool running = false;
   kj::HashMap<uint16_t, uint16_t> portMappings;
 
   // Docker-specific Port implementation
@@ -56,7 +57,7 @@ class ContainerClient final: public rpc::Container::Server {
   // Docker API v1.50 helper methods
   kj::Promise<Response> dockerApiRequest(
       kj::HttpMethod method, kj::StringPtr endpoint, kj::Maybe<kj::StringPtr> body = kj::none);
-  kj::Promise<bool> isContainerRunning();
+  kj::Promise<void> inspectContainer();
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment);
   kj::Promise<void> startContainer();

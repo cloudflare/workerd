@@ -32,38 +32,41 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
 class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
  public:
-  DockerPort(capnp::ByteStreamFactory& byteStreamFactory,
-      kj::HttpClient& network,
-      kj::String containerName,
-      kj::String containerHost,
-      uint16_t containerPort)
-      : byteStreamFactory(byteStreamFactory),
-        network(network),
-        containerName(kj::mv(containerName)),
+  DockerPort(ContainerClient& containerClient, kj::String containerHost, uint16_t containerPort)
+      : containerClient(containerClient),
         containerHost(kj::mv(containerHost)),
         containerPort(containerPort) {}
 
   kj::Promise<void> connect(ConnectContext context) override {
     kj::HttpHeaderTable headerTable;
     kj::HttpHeaders headers(headerTable);
-    auto request = network.connect(
-        kj::str(containerHost, ":", containerPort), headers, kj::HttpConnectSettings());
+
+    auto maybeMappedPort = containerClient.portMappings.find(containerPort);
+    if (maybeMappedPort == kj::none) {
+      co_await containerClient.inspectContainer();
+      maybeMappedPort = containerClient.portMappings.find(containerPort);
+    }
+    if (maybeMappedPort == kj::none) {
+      throw KJ_EXCEPTION(DISCONNECTED, "connect(): Connection refused: container port not found");
+    }
+    auto mappedPort = KJ_ASSERT_NONNULL(maybeMappedPort);
+
+    auto request = containerClient.network->connect(
+        kj::str(containerHost, ":", mappedPort), headers, kj::HttpConnectSettings());
     auto upPipe = kj::newOneWayPipe();
     auto upEnd = kj::mv(upPipe.in);
     auto results = context.getResults();
-    results.setUp(byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
-    auto downEnd = byteStreamFactory.capnpToKj(context.getParams().getDown());
+    results.setUp(containerClient.byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
+    auto downEnd = containerClient.byteStreamFactory.capnpToKj(context.getParams().getDown());
     pumpTask = kj::joinPromisesFailFast(
         kj::arr(upEnd->pumpTo(*request.connection), request.connection->pumpTo(*downEnd)))
                    .ignoreResult()
                    .attach(kj::mv(upEnd), kj::mv(request.connection), kj::mv(downEnd));
-    return kj::READY_NOW;
+    co_return;
   }
 
  private:
-  capnp::ByteStreamFactory& byteStreamFactory;
-  kj::HttpClient& network;
-  kj::String containerName;
+  ContainerClient& containerClient;
   kj::String containerHost;
   uint16_t containerPort;
   kj::Maybe<kj::Promise<void>> pumpTask;
@@ -103,7 +106,7 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(
   }
 }
 
-kj::Promise<bool> ContainerClient::isContainerRunning() {
+kj::Promise<void> ContainerClient::inspectContainer() {
   // Docker API: GET /containers/{id}/json
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
@@ -111,7 +114,9 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
   // We check if the container with the given name exist, and if it's not,
   // we simply return false while avoiding an unnecessary error.
   if (response.statusCode == 404) {
-    co_return false;
+    running = false;
+    portMappings.clear();
+    co_return;
   }
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
   KJ_DBG("response.body", response.body);
@@ -139,7 +144,7 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
   JSG_REQUIRE(state.hasStatus(), Error, "Malformed ContainerInspect response");
   auto status = state.getStatus();
   KJ_DBG("STATUS", status);
-  co_return status == "running";
+  running = status == "running";
 }
 
 kj::Promise<void> ContainerClient::createContainer(
@@ -234,7 +239,7 @@ kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
 }
 
 kj::Promise<void> ContainerClient::status(StatusContext context) {
-  bool running = co_await isContainerRunning();
+  co_await inspectContainer();
   context.getResults().setRunning(running);
 }
 
@@ -275,7 +280,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
-  const bool running = co_await isContainerRunning();
+  co_await inspectContainer();
   if (running) {
     co_await stopContainer();
     auto endpoint = kj::str("/containers/", containerName, "?force=true");
@@ -301,13 +306,8 @@ kj::Promise<void> ContainerClient::signal(SignalContext context) {
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
   auto params = context.getParams();
   uint16_t port = params.getPort();
-  auto mappedPort = JSG_REQUIRE_NONNULL(
-      portMappings.find(port), Error, "Could not find mapped port for port ", port);
-
   auto results = context.getResults();
-  // TODO: Use correct hostname here.
-  auto dockerPort = kj::heap<DockerPort>(
-      byteStreamFactory, *network, kj::str(containerName), kj::str("localhost"), mappedPort);
+  auto dockerPort = kj::heap<DockerPort>(*this, kj::str("localhost"), port);
   results.setPort(kj::mv(dockerPort));
   co_return;
 }
