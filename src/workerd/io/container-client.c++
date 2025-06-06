@@ -70,12 +70,11 @@ kj::Promise<size_t> ContainerAsyncStream::tryRead(void* buffer, size_t minBytes,
 
 kj::Promise<void> ContainerAsyncStream::write(kj::ArrayPtr<const kj::byte> buffer) {
   KJ_DBG("WRITE");
-  if (service->write_data(buffer.as<Rust>())) {
-    return kj::READY_NOW;
-  } else {
+  if (!service->write_data(buffer.as<Rust>())) {
     KJ_DBG("WRITE FAILED");
     return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
   }
+  return kj::READY_NOW;
 }
 
 kj::Promise<void> ContainerAsyncStream::write(

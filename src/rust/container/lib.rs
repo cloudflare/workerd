@@ -25,6 +25,7 @@ use tokio::runtime::Builder;
 pub mod io;
 use io::channel;
 use io::signo_as_string;
+use tokio::sync::Notify;
 
 #[derive(Debug, Error)]
 pub enum ContainerError {
@@ -99,6 +100,7 @@ impl ContainerService {
             return false;
         }
         self.r#impl.sender.try_send(data.to_vec()).unwrap();
+        self.r#impl.notify.notify_one();
         true
     }
 
@@ -118,6 +120,7 @@ impl ContainerService {
 
 struct Impl {
     sender: mpsc::SyncSender<Vec<u8>>,
+    notify: Arc<Notify>,
     write_shutdown: std::sync::atomic::AtomicBool,
 }
 
@@ -128,8 +131,10 @@ impl Impl {
         mut messages_callback: Pin<&'static mut ffi::MessageCallback>,
     ) -> Result<Self, ContainerError> {
         let (input_sender, input_receiver) = mpsc::sync_channel::<Vec<u8>>(1000);
-        let (mut output_sender, mut output_receiver) = channel();
-        let (mut tokio_input_sender, mut tokio_input_receiver) = channel();
+        let (output_sender, mut output_receiver) = channel();
+        let (mut tokio_input_sender, tokio_input_receiver) = channel();
+        let output_notify = Arc::new(Notify::new());
+        let notifiy_awaiter = output_notify.clone();
 
         let server = Server::connect(address, container_name)?;
         let runtime = Builder::new_current_thread().enable_all().build().unwrap();
@@ -152,7 +157,7 @@ impl Impl {
                 tokio::task::spawn_local(rpc_system);
             });
             local.spawn_local(async move {
-                while true {
+                loop {
                     let mut buf = [0; 8096];
                     let len = output_receiver.read(&mut buf).await;
                     if len.is_err() {
@@ -163,9 +168,12 @@ impl Impl {
                 dbg!("OUTPUT_RECEIVER.RECV() ENDED");
             });
             local.spawn_local(async move {
-                while let Ok(msg) = input_receiver.recv() {
-                    if tokio_input_sender.write_all(&msg).await.is_err() {
-                        break;
+                loop {
+                    notifiy_awaiter.notified().await;
+                    while let Ok(msg) = input_receiver.try_recv() {
+                        if tokio_input_sender.write(&msg).await.is_err() {
+                            break;
+                        }
                     }
                 }
                 dbg!("INPUT_RECEIVER.RECV() ENDED");
@@ -176,6 +184,7 @@ impl Impl {
 
         Ok(Impl {
             sender: input_sender,
+            notify: output_notify,
             write_shutdown: std::sync::atomic::AtomicBool::new(false),
         })
     }

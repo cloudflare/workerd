@@ -2277,28 +2277,24 @@ class Server::WorkerService final: public Service,
         static constexpr uint16_t hibernationEventTypeId = 8;
 
         kj::Maybe<rpc::Container::Client> containerClient = kj::none;
-        kj::Own<io::ContainerAsyncStream> containerStream;
         kj::Own<capnp::TwoPartyClient> containerRpcClient;
 
         KJ_IF_SOME(config, containerOptions) {
-          KJ_IF_SOME(path, service.containerAddress) {
-            KJ_REQUIRE(config.hasName(), "Container name is required");
-            auto container_name = config.getName();
-            containerStream = io::createContainerRpcStream(kj::str(path), kj::str(container_name));
-            containerRpcClient = kj::heap<capnp::TwoPartyClient>(*containerStream);
-            containerClient = containerRpcClient->bootstrap().castAs<rpc::Container>();
-            KJ_DBG("CREATED CONTAINER CLIENT");
-          } else {
-            KJ_FAIL_REQUIRE(
-                "container address needs to be defined in order enable containers on this durable object.");
-          }
+          auto& path = KJ_ASSERT_NONNULL(service.containerAddress,
+              "container address needs to be defined in order enable containers on this durable object.");
+          KJ_REQUIRE(config.hasName(), "Container name is required");
+          auto container_name = config.getName();
+          auto containerStream =
+              io::createContainerRpcStream(kj::str(path), kj::str(container_name));
+          containerRpcClient =
+              kj::heap<capnp::TwoPartyClient>(*containerStream).attach(kj::mv(containerStream));
+          containerClient = containerRpcClient->bootstrap().castAs<rpc::Container>();
         }
 
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
             tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient))
-                                            .attach(kj::mv(containerStream))
                                             .attach(kj::mv(containerRpcClient)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
