@@ -289,31 +289,7 @@ struct Docker {
     path @2 :Text $Json.name("Path");
     args @3 :List(Text) $Json.name("Args");
     state @4 :ContainerState $Json.name("State");
-    image @5 :Text $Json.name("Image");
-    resolvConfPath @6 :Text $Json.name("ResolvConfPath");
-    hostnamePath @7 :Text $Json.name("HostnamePath");
-    hostsPath @8 :Text $Json.name("HostsPath");
-    logPath @9 :Text $Json.name("LogPath");
-    name @10 :Text $Json.name("Name");
-    restartCount @11 :UInt32 $Json.name("RestartCount");
-    driver @12 :Text $Json.name("Driver");
-    mountLabel @13 :Text $Json.name("MountLabel");
-    processLabel @14 :Text $Json.name("ProcessLabel");
-    appArmorProfile @15 :Text $Json.name("AppArmorProfile");
-    execIds @16 :List(Text) $Json.name("ExecIDs");
-    hostConfig @17 :HostConfigInspect $Json.name("HostConfig");
-    graphDriver @18 :GraphDriverData $Json.name("GraphDriver");
-    sizeRw @19 :UInt64 $Json.name("SizeRw");
-    sizeRootFs @20 :UInt64 $Json.name("SizeRootFs");
-    mounts @21 :List(MountPoint) $Json.name("Mounts");
-    config @22 :ContainerConfig $Json.name("Config");
-    networkSettings @23 :NetworkSettings $Json.name("NetworkSettings");
-
-    # HostConfig for inspect (subset of full HostConfig)
-    struct HostConfigInspect {
-      networkMode @0 :Text $Json.name("NetworkMode");
-      # Add other commonly used HostConfig fields as needed
-    }
+    # networkSettings @5 :NetworkSettings $Json.name("NetworkSettings");
   }
 
   struct Command {

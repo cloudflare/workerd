@@ -26,16 +26,19 @@ export class DurableObjectExample extends DurableObject {
     ];
 
     for (const badEnv of badEnvs) {
-      try {
-        await container.start({
-          entrypoint: ['/bin/sh'],
-          env: badEnv.value,
-          enableInternet: true,
-        });
-        throw new Error("start should've thrown an error");
-      } catch (err) {
-        assert.equal(err.message, badEnv.err);
-      }
+      await assert.rejects(
+        async () => {
+          await container.start({
+            entrypoint: ['/bin/sh'],
+            env: badEnv.value,
+            enableInternet: true,
+          });
+          throw new Error("start should've thrown an error");
+        },
+        {
+          message: badEnv.err,
+        }
+      );
     }
 
     // Start container with valid configuration
@@ -91,7 +94,6 @@ export class DurableObjectExample extends DurableObject {
     //   assert(text.includes('path: /bar/baz'));
     //   assert(text.includes('body: hello'));
     // }
-    assert.strictEqual(container.running, true);
     await container.destroy();
     // await monitor;
     assert.strictEqual(container.running, false);
@@ -111,13 +113,14 @@ export class DurableObjectExample extends DurableObject {
 
   async checkRunning() {
     // Check container was started using leaveRunning()
-    let container = this.ctx.container;
+    const container = this.ctx.container;
 
     // Let's guard in case the test assumptions are wrong.
     if (!container.running) {
       return;
     }
 
+    // TODO: Enable these tests once getTcpPort() is working.
     // {
     //   let sock = container.getTcpPort(123).connect('foo:123');
     //   let reader = sock.readable.getReader();

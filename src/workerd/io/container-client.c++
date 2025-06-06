@@ -34,12 +34,12 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
  public:
   DockerPort(capnp::ByteStreamFactory& byteStreamFactory,
       kj::HttpClient& network,
-      kj::String containerId,
+      kj::String containerName,
       kj::String containerHost,
       uint16_t containerPort)
       : byteStreamFactory(byteStreamFactory),
         network(network),
-        containerId(kj::mv(containerId)),
+        containerName(kj::mv(containerName)),
         containerHost(kj::mv(containerHost)),
         containerPort(containerPort) {}
 
@@ -60,7 +60,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
  private:
   capnp::ByteStreamFactory& byteStreamFactory;
   kj::HttpClient& network;
-  [[maybe_unused]] kj::String containerId;
+  kj::String containerName;
   kj::String containerHost;
   uint16_t containerPort;
 };
@@ -104,6 +104,8 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
   auto response = co_await dockerApiRequest(kj::HttpMethod::GET, endpoint);
+  // We check if the container with the given name exist, and if it's not,
+  // we simply return false while avoiding an unnecessary error.
   if (response.statusCode == 404) {
     co_return false;
   }
@@ -124,7 +126,8 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
       co_return status == "running";
     }
   }
-  co_return false;
+
+  KJ_FAIL_ASSERT("Docker API returned an unknown response for their inspect endpoint.");
 }
 
 kj::Promise<void> ContainerClient::createContainer(
@@ -160,7 +163,7 @@ kj::Promise<void> ContainerClient::createContainer(
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, jsonBody.asPtr());
 
   // statusCode 201 refers to "container created successfully"
-  // statusCode 409 refers to "conflict"
+  // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
   if (response.statusCode != 201 && response.statusCode != 409) {
     if (response.statusCode == 404) {
       JSG_FAIL_REQUIRE(Error, "No such image available named ", imageTag);
@@ -173,6 +176,7 @@ kj::Promise<void> ContainerClient::createContainer(
 kj::Promise<void> ContainerClient::startContainer() {
   // Docker API v1.50: POST /containers/{id}/start
   auto endpoint = kj::str("/containers/", containerName, "/start");
+  // We have to send an empty body since docker API will throw an error if we don't.
   kj::StringPtr body = "";
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
   // statusCode 304 refers to "container already started"
@@ -232,7 +236,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
       response.statusCode == 200, Error, "Monitoring container failed with: ", response.body);
   // Parse JSON response
   capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::ContainerInspectResponse>();
+  codec.handleByAnnotation<docker_api::Docker::ContainerMonitorResponse>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerMonitorResponse>();
   codec.decode(response.body, jsonRoot);
@@ -242,7 +246,8 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
-  if (co_await isContainerRunning()) {
+  const bool running = co_await isContainerRunning();
+  if (running) {
     co_await stopContainer();
     auto endpoint = kj::str("/containers/", containerName, "?force=true");
     auto response = co_await dockerApiRequest(kj::HttpMethod::DELETE, endpoint);
