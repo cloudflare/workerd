@@ -95,14 +95,8 @@ KJ_TEST("The BundleDirectoryDelegate works") {
     KJ_EXPECT(file->read(env.js, 100, buffer) == 0);
 
     // Attempts to modify anything should fail.
-    try {
-      dir->remove(env.js, kj::Path({"a", "esModule"}));
-      KJ_FAIL_ASSERT("should have failed");
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_EXPECT(ex.getDescription() ==
-          "jsg.Error: Cannot remove a file or directory from a read-only directory");
-    }
+    auto error = dir->remove(env.js, kj::Path({"a", "esModule"})).get<FsError>();
+    KJ_EXPECT(error == FsError::READ_ONLY);
 
     // Attempting to create a file should fail.
     try {
@@ -180,7 +174,7 @@ KJ_TEST("Guarding against circular symlinks works") {
     }
 
     // And while we're at it, let's check that a symlink can be removed
-    KJ_EXPECT(tempDir->remove(env.js, kj::Path({"a"})));
+    KJ_EXPECT(tempDir->remove(env.js, kj::Path({"a"})).get<bool>());
     // Removing the symlink means that the cycle is broken and a resolve for
     // c or b should return kj::none.
     KJ_EXPECT(vfs->resolve(env.js, "file:///a"_url) == kj::none);

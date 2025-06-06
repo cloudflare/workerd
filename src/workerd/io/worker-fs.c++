@@ -98,7 +98,8 @@ class TmpDirectory final: public Directory {
     JSG_FAIL_REQUIRE(Error, "Cannot add a file into a read-only directory");
   }
 
-  bool remove(jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {}) override {
+  kj::OneOf<FsError, bool> remove(
+      jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {}) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
       return dir->remove(js, path, kj::mv(options));
     }
@@ -173,7 +174,8 @@ class LazyDirectory final: public Directory {
     getDirectory()->add(js, name, kj::mv(item));
   }
 
-  bool remove(jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {}) override {
+  kj::OneOf<FsError, bool> remove(
+      jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {}) override {
     return getDirectory()->remove(js, path, kj::mv(options));
   }
 
@@ -440,19 +442,21 @@ class DirectoryBase final: public Directory {
   // If the node is a file, it will be removed regardless of the recursive option
   // if the directory is not read only.
   // The path must be relative to the current directory.
-  bool remove(jsg::Lock& js, kj::PathPtr path, RemoveOptions opts = {}) override {
+  kj::OneOf<FsError, bool> remove(
+      jsg::Lock& js, kj::PathPtr path, RemoveOptions opts = {}) override {
     if constexpr (Writable) {
       if (path.size() == 0) return false;
       KJ_IF_SOME(found, entries.find(path[0])) {
         KJ_SWITCH_ONEOF(found) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
-            JSG_REQUIRE(
-                path.size() == 1, Error, "Path resolved to a file but has more than one component");
+            if (path.size() != 1) return FsError::NOT_DIRECTORY;
             return entries.erase(path[0]);
           }
           KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
             if (path.size() == 1) {
-              JSG_REQUIRE(opts.recursive || dir->count(js) == 0, Error, "Directory is not empty");
+              if (dir->count(js) > 0 && !opts.recursive) {
+                return FsError::NOT_EMPTY;
+              }
               return entries.erase(path[0]);
             }
             return dir->remove(js, path.slice(1, path.size()), kj::mv(opts));
@@ -462,8 +466,7 @@ class DirectoryBase final: public Directory {
             // is exactly the symbolic link. If the path is longer, then
             // we are trying to remove the target of the symbolic link
             // which we do not allow.
-            JSG_REQUIRE(path.size() == 1, Error,
-                "Path resolved to a symbolic link but has more than one component");
+            if (path.size() != 1) return FsError::NOT_DIRECTORY;
             return entries.erase(path[0]);
           }
         }
@@ -471,7 +474,7 @@ class DirectoryBase final: public Directory {
 
       return true;
     } else {
-      JSG_FAIL_REQUIRE(Error, "Cannot remove a file or directory from a read-only directory");
+      return FsError::READ_ONLY;
     }
   }
 
