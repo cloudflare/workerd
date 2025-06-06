@@ -16,6 +16,26 @@ export const location = undefined;
 
 export function addEventListener(): void {}
 
+// Mostly we use the `jsglobals` variable for everything except for:
+// * Pyodide's scheduler.ts
+// * Emscripten's implementation of syscalls etc
+//
+// These locations use the globals directly so they will get them from the pool isolate unless we
+// modify globalThis to include setTimeout etc from the main isolate.
+// We could just change scheduler.ts to use jsglobals but it won't fix Emscripten so we'll need to
+// do this either way.
+export function setSetTimeout(
+  st: typeof setTimeout,
+  ct: typeof clearTimeout,
+  si: typeof setInterval,
+  ci: typeof clearInterval
+): void {
+  globalThis.setTimeout = st;
+  globalThis.clearTimeout = ct;
+  globalThis.setInterval = si;
+  globalThis.clearInterval = ci;
+}
+
 export function reportUndefinedSymbolsPatched(Module: Module): void {
   if (Module.API.version === '0.26.0a2') {
     return;

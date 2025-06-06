@@ -97,6 +97,12 @@ interface Module {
   setGetRandomValues(
     func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
   ): void;
+  setSetTimeout(
+    st: typeof setTimeout,
+    ct: typeof clearTimeout,
+    si: typeof setInterval,
+    ci: typeof clearInterval
+  ): void;
   getMemory(size: number): number;
   getMemoryPatched(
     Module: Module,

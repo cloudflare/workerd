@@ -106,6 +106,7 @@ export async function loadPyodide(
     }
     Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
+    Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 
     entropyMountFiles(Module);
     await enterJaegerSpan('load_packages', () =>
