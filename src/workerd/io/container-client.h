@@ -26,7 +26,7 @@ class ContainerClient final: public rpc::Container::Server {
       kj::Own<kj::HttpClient> network,
       kj::Own<kj::HttpClient> httpClient,
       kj::String containerName,
-      kj::String imageTag);
+      kj::String imageName);
 
   // Implement rpc::Container::Server interface
   kj::Promise<void> status(StatusContext context) override;
@@ -42,7 +42,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Own<kj::HttpClient> network;
   kj::Own<kj::HttpClient> httpClient;
   kj::String containerName;
-  kj::String imageTag;
+  kj::String imageName;
   kj::HashMap<uint16_t, uint16_t> portMappings;
 
   // Docker-specific Port implementation

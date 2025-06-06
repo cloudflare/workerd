@@ -22,12 +22,12 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Own<kj::HttpClient> network,
     kj::Own<kj::HttpClient> httpClient,
     kj::String containerName,
-    kj::String imageTag)
+    kj::String imageName)
     : byteStreamFactory(byteStreamFactory),
       network(kj::mv(network)),
       httpClient(kj::mv(httpClient)),
       containerName(kj::mv(containerName)),
-      imageTag(kj::mv(imageTag)) {}
+      imageName(kj::mv(imageName)) {}
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
 class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
@@ -100,7 +100,7 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(
 }
 
 kj::Promise<bool> ContainerClient::isContainerRunning() {
-  // Docker API v1.50: GET /containers/{id}/json
+  // Docker API: GET /containers/{id}/json
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
   auto response = co_await dockerApiRequest(kj::HttpMethod::GET, endpoint);
@@ -110,7 +110,7 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
     co_return false;
   }
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
-
+  KJ_DBG("response.body", response.body);
   // Parse JSON response
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ContainerInspectResponse>();
@@ -119,24 +119,23 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
   codec.decode(response.body, jsonRoot);
 
   // Look for Status field in the JSON object
-  if (jsonRoot.hasState()) {
-    auto state = jsonRoot.getState();
-    if (state.hasStatus()) {
-      auto status = state.getStatus();
-      co_return status == "running";
-    }
-  }
-
-  KJ_FAIL_ASSERT("Docker API returned an unknown response for their inspect endpoint.");
+  JSG_REQUIRE(jsonRoot.hasState(), Error, "Malformed ContainerInspect response");
+  auto state = jsonRoot.getState();
+  JSG_REQUIRE(state.hasStatus(), Error, "Malformed ContainerInspect response");
+  auto status = state.getStatus();
+  KJ_DBG("STATUS", status);
+  co_return status == "running";
 }
 
 kj::Promise<void> ContainerClient::createContainer(
     kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
     kj::Maybe<capnp::List<capnp::Text>::Reader> environment) {
-  // Docker API v1.50: POST /containers/create
+  // Docker API: POST /containers/create
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<docker_api::Docker::ContainerCreateRequest>();
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerCreateRequest>();
-  jsonRoot.setImage(imageTag);
+  jsonRoot.setImage(imageName);
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
@@ -153,10 +152,14 @@ kj::Promise<void> ContainerClient::createContainer(
     }
   }
 
+  jsonRoot.initHostConfig().setPublishAllPorts(true);
+  // auto exposedPorts = jsonRoot.initExposedPorts().initObject(1);
+  // exposedPorts[0].setName("8080/tcp");
+  // exposedPorts[0].initValue().initObject(0);
+
   // Encode to JSON string
-  capnp::JsonCodec codec;
-  codec.handleByAnnotation<docker_api::Docker::ContainerInspectResponse>();
   kj::String jsonBody = codec.encode(jsonRoot);
+  KJ_DBG("JSON body", jsonBody);
 
   auto endpoint = kj::str("/containers/create?name=", containerName);
 
@@ -166,7 +169,7 @@ kj::Promise<void> ContainerClient::createContainer(
   // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
   if (response.statusCode != 201 && response.statusCode != 409) {
     if (response.statusCode == 404) {
-      JSG_FAIL_REQUIRE(Error, "No such image available named ", imageTag);
+      JSG_FAIL_REQUIRE(Error, "No such image available named ", imageName);
     } else {
       JSG_FAIL_REQUIRE(Error, "Create container failed with: ", response.body);
     }
@@ -174,18 +177,27 @@ kj::Promise<void> ContainerClient::createContainer(
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
-  // Docker API v1.50: POST /containers/{id}/start
+  // Docker API: POST /containers/{id}/start
   auto endpoint = kj::str("/containers/", containerName, "/start");
   // We have to send an empty body since docker API will throw an error if we don't.
   kj::StringPtr body = "";
-  auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
-  // statusCode 304 refers to "container already started"
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304, Error,
-      "Starting container failed with: ", response.body);
+  KJ_DBG("Starting container");
+  try {
+    auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
+    KJ_DBG("Started container", response.statusCode, response.body);
+    // statusCode 204 refers to "no error" (this is what we want
+    // statusCode 304 refers to "container already started"
+    JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304, Error,
+        "Starting container failed with: ", response.body);
+  } catch (...) {
+    auto e = kj::getCaughtExceptionAsKj();
+    KJ_DBG("Failed to start container", e);
+    kj::throwFatalException(kj::mv(e));
+  }
 }
 
 kj::Promise<void> ContainerClient::stopContainer() {
-  // Docker API v1.50: POST /containers/{id}/stop
+  // Docker API: POST /containers/{id}/stop
   auto endpoint = kj::str("/containers/", containerName, "/stop");
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
   // statusCode 204 refers to "no error"
@@ -196,7 +208,7 @@ kj::Promise<void> ContainerClient::stopContainer() {
 
 kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
   // TODO: Convert signo to signal string here.
-  // Docker API v1.50: POST /containers/{id}/kill
+  // Docker API: POST /containers/{id}/kill
   auto endpoint = kj::str("/containers/", containerName, "/kill?signal=", signal);
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
   // statusCode 409 refers to "container is not running"
@@ -228,7 +240,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
-  // Docker API v1.50: POST /containers/{id}/wait - wait for container to exit
+  // Docker API: POST /containers/{id}/wait - wait for container to exit
   auto endpoint = kj::str("/containers/", containerName, "/wait");
 
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);

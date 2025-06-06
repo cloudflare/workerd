@@ -3,6 +3,7 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
+
 @0xfafd0bdf57acc528;
 using Cxx = import "/capnp/c++.capnp";
 using Json = import "/capnp/compat/json.capnp";
@@ -13,12 +14,6 @@ $Cxx.allowCancellation;
 
 struct Docker {
   # Docker API structures for container operations
-
-  struct KeyValuePair {
-    key @0 :Text;
-    value @1 :Text;
-  }
-
   struct PortBinding {
     hostIp @0 :Text $Json.name("HostIp");
     hostPort @1 :Text $Json.name("HostPort");
@@ -26,7 +21,7 @@ struct Docker {
 
   struct LogConfig {
     type @0 :Text $Json.name("Type");
-    config @1 :List(KeyValuePair) $Json.name("Config");
+    config @1 :Json.Value $Json.name("Config");
   }
 
   struct RestartPolicy {
@@ -55,7 +50,7 @@ struct Docker {
     count @1 :Int32;
     deviceIds @2 :List(Text);
     capabilities @3 :List(List(Text));
-    options @4 :List(KeyValuePair);
+    options @4 :Json.Value;
   }
 
   struct Ulimit {
@@ -83,19 +78,9 @@ struct Docker {
     globalIpv6Address @9 :Text $Json.name("GlobalIPv6Address");
     globalIpv6PrefixLen @10 :UInt32 $Json.name("GlobalIPv6PrefixLen");
     macAddress @11 :Text $Json.name("MacAddress");
-    driverOpts @12 :List(KeyValuePair) $Json.name("DriverOpts");
+    driverOpts @12 :Json.Value $Json.name("DriverOpts");
   }
 
-  struct NetworkingConfig {
-    # Networking configuration for container creation
-    # EndpointsConfig is a map of network name to endpoint settings
-    endpointsConfig @0 :List(NetworkEndpoint) $Json.name("EndpointsConfig");
-
-    struct NetworkEndpoint {
-      networkName @0 :Text;
-      settings @1 :EndpointSettings;
-    }
-  }
 
   struct ContainerCreateRequest {
     # Request body for ContainerCreate operation - flattened structure
@@ -103,10 +88,10 @@ struct Docker {
     hostname @0 :Text $Json.name("Hostname");
     domainname @1 :Text $Json.name("Domainname");
     user @2 :Text $Json.name("User");
-    attachStdin @3 :Bool $Json.name("AttachStdin");
-    attachStdout @4 :Bool $Json.name("AttachStdout");
-    attachStderr @5 :Bool $Json.name("AttachStderr");
-    exposedPorts @6 :List(KeyValuePair) $Json.name("ExposedPorts"); # Ports mapped to empty objects
+    attachStdin @3 :Bool = false $Json.name("AttachStdin");
+    attachStdout @4 :Bool = false $Json.name("AttachStdout");
+    attachStderr @5 :Bool = false $Json.name("AttachStderr");
+    exposedPorts @6 :Json.Value $Json.name("ExposedPorts"); # Ports mapped to empty objects
     tty @7 :Bool $Json.name("Tty");
     openStdin @8 :Bool $Json.name("OpenStdin");
     stdinOnce @9 :Bool $Json.name("StdinOnce");
@@ -114,51 +99,51 @@ struct Docker {
     cmd @11 :List(Text) $Json.name("Cmd"); # Command to run
     entrypoint @12 :Text $Json.name("Entrypoint"); # Can be string or array - simplified as Text
     image @13 :Text $Json.name("Image"); # Image name/reference
-    labels @14 :List(KeyValuePair) $Json.name("Labels"); # Labels as key-value pairs
-    volumes @15 :List(KeyValuePair) $Json.name("Volumes"); # Volume mount points mapped to empty objects
+    labels @14 :Json.Value $Json.name("Labels"); # Labels as key-value pairs
+    volumes @15 :Json.Value $Json.name("Volumes"); # Volume mount points mapped to empty objects
     workingDir @16 :Text $Json.name("WorkingDir");
     networkDisabled @17 :Bool $Json.name("NetworkDisabled");
     macAddress @18 :Text $Json.name("MacAddress");
     stopSignal @19 :Text $Json.name("StopSignal");
-    stopTimeout @20 :UInt32 $Json.name("StopTimeout");
+    stopTimeout @20 :UInt32 = 10 $Json.name("StopTimeout");
 
     # Host configuration
     hostConfig @21 :HostConfig $Json.name("HostConfig");
 
     # Networking configuration
-    networkingConfig @22 :NetworkingConfig $Json.name("NetworkingConfig");
+    # networkingConfig @22 :NetworkingConfig $Json.name("NetworkingConfig");
 
     struct HostConfig {
       # Container configuration that depends on the host
       binds @0 :List(Text) $Json.name("Binds"); # Volume bindings
       links @1 :List(Text) $Json.name("Links");
-      memory @2 :UInt64 $Json.name("Memory");
-      memorySwap @3 :UInt64 $Json.name("MemorySwap");
-      memoryReservation @4 :UInt64 $Json.name("MemoryReservation");
-      kernelMemory @5 :UInt64 $Json.name("KernelMemory");
-      nanoCpus @6 :UInt64 $Json.name("NanoCpus");
-      cpuPercent @7 :UInt64 $Json.name("CpuPercent");
-      cpuShares @8 :UInt64 $Json.name("CpuShares");
-      cpuPeriod @9 :UInt64 $Json.name("CpuPeriod");
-      cpuRealtimePeriod @10 :UInt64 $Json.name("CpuRealtimePeriod");
-      cpuRealtimeRuntime @11 :UInt64 $Json.name("CpuRealtimeRuntime");
-      cpuQuota @12 :UInt64 $Json.name("CpuQuota");
+      memory @2 :UInt32 $Json.name("Memory");
+      memorySwap @3 :UInt32 $Json.name("MemorySwap");
+      memoryReservation @4 :UInt32 $Json.name("MemoryReservation");
+      kernelMemory @5 :UInt32 $Json.name("KernelMemory");
+      nanoCpus @6 :UInt32 $Json.name("NanoCpus");
+      cpuPercent @7 :UInt32 $Json.name("CpuPercent");
+      cpuShares @8 :UInt32 $Json.name("CpuShares");
+      cpuPeriod @9 :UInt32 $Json.name("CpuPeriod");
+      cpuRealtimePeriod @10 :UInt32 $Json.name("CpuRealtimePeriod");
+      cpuRealtimeRuntime @11 :UInt32 $Json.name("CpuRealtimeRuntime");
+      cpuQuota @12 :UInt32 $Json.name("CpuQuota");
       cpusetCpus @13 :Text $Json.name("CpusetCpus");
       cpusetMems @14 :Text $Json.name("CpusetMems");
-      maximumIOps @15 :UInt64 $Json.name("MaximumIOps");
-      maximumIOBps @16 :UInt64 $Json.name("MaximumIOBps");
+      maximumIOps @15 :UInt32 $Json.name("MaximumIOps");
+      maximumIOBps @16 :UInt32 $Json.name("MaximumIOBps");
       blkioWeight @17 :UInt16 $Json.name("BlkioWeight");
       blkioWeightDevice @18 :List(WeightDevice) $Json.name("BlkioWeightDevice");
       blkioDeviceReadBps @19 :List(ThrottleDevice) $Json.name("BlkioDeviceReadBps");
       blkioDeviceReadIOps @20 :List(ThrottleDevice) $Json.name("BlkioDeviceReadIOps");
       blkioDeviceWriteBps @21 :List(ThrottleDevice) $Json.name("BlkioDeviceWriteBps");
       blkioDeviceWriteIOps @22 :List(ThrottleDevice) $Json.name("BlkioDeviceWriteIOps");
-      memorySwappiness @23 :UInt64 $Json.name("MemorySwappiness");
+      memorySwappiness @23 :UInt32 $Json.name("MemorySwappiness");
       oomKillDisable @24 :Bool $Json.name("OomKillDisable");
       oomScoreAdj @25 :Int32 $Json.name("OomScoreAdj");
       pidMode @26 :Text $Json.name("PidMode");
-      pidsLimit @27 :Int64 $Json.name("PidsLimit"); # Can be -1
-      portBindings @28 :List(PortBindingEntry) $Json.name("PortBindings"); # Port bindings map
+      pidsLimit @27 :Int32 $Json.name("PidsLimit"); # Can be -1
+      portBindings @28 :Json.Value $Json.name("PortBindings"); # Port bindings map
       publishAllPorts @29 :Bool $Json.name("PublishAllPorts");
       privileged @30 :Bool $Json.name("Privileged");
       readonlyRootfs @31 :Bool $Json.name("ReadonlyRootfs");
@@ -176,15 +161,11 @@ struct Docker {
       ulimits @43 :List(Ulimit) $Json.name("Ulimits");
       logConfig @44 :LogConfig $Json.name("LogConfig");
       securityOpt @45 :List(Text) $Json.name("SecurityOpt");
-      storageOpt @46 :List(KeyValuePair) $Json.name("StorageOpt");
+      storageOpt @46 :Json.Value $Json.name("StorageOpt");
       cgroupParent @47 :Text $Json.name("CgroupParent");
       volumeDriver @48 :Text $Json.name("VolumeDriver");
-      shmSize @49 :UInt64 $Json.name("ShmSize");
+      shmSize @49 :UInt32 $Json.name("ShmSize");
 
-      struct PortBindingEntry {
-        containerPort @0 :Text; # e.g., "22/tcp"
-        hostBindings @1 :List(PortBinding);
-      }
     }
   }
 
@@ -216,7 +197,7 @@ struct Docker {
   struct GraphDriverData {
     # Information about the storage driver
     name @0 :Text $Json.name("Name");
-    data @1 :List(KeyValuePair) $Json.name("Data");
+    data @1 :Json.Value $Json.name("Data");
   }
 
   struct MountPoint {
@@ -247,12 +228,8 @@ struct Docker {
     ipPrefixLen @11 :UInt32 $Json.name("IPPrefixLen");
     ipv6Gateway @12 :Text $Json.name("IPv6Gateway");
     macAddress @13 :Text $Json.name("MacAddress");
-    networks @14 :List(NetworkEndpointInspect) $Json.name("Networks");
-
-    struct NetworkEndpointInspect {
-      networkName @0 :Text;
-      settings @1 :EndpointSettings;
-    }
+    networks @14 :Json.Value $Json.name("Networks");
+    ports @15 :Json.Value $Json.name("Ports");
   }
 
   struct ContainerConfig {
@@ -263,20 +240,20 @@ struct Docker {
     attachStdin @3 :Bool $Json.name("AttachStdin");
     attachStdout @4 :Bool $Json.name("AttachStdout");
     attachStderr @5 :Bool $Json.name("AttachStderr");
-    exposedPorts @6 :List(KeyValuePair) $Json.name("ExposedPorts");
+    exposedPorts @6 :Json.Value $Json.name("ExposedPorts");
     tty @7 :Bool $Json.name("Tty");
     openStdin @8 :Bool $Json.name("OpenStdin");
     stdinOnce @9 :Bool $Json.name("StdinOnce");
     env @10 :List(Text) $Json.name("Env");
     cmd @11 :List(Text) $Json.name("Cmd");
     image @12 :Text $Json.name("Image");
-    volumes @13 :List(KeyValuePair) $Json.name("Volumes");
+    volumes @13 :Json.Value $Json.name("Volumes");
     workingDir @14 :Text $Json.name("WorkingDir");
     entrypoint @15 :List(Text) $Json.name("Entrypoint");
     networkDisabled @16 :Bool $Json.name("NetworkDisabled");
     macAddress @17 :Text $Json.name("MacAddress");
     onBuild @18 :List(Text) $Json.name("OnBuild");
-    labels @19 :List(KeyValuePair) $Json.name("Labels");
+    labels @19 :Json.Value $Json.name("Labels");
     stopSignal @20 :Text $Json.name("StopSignal");
     stopTimeout @21 :UInt32 $Json.name("StopTimeout");
     shell @22 :List(Text) $Json.name("Shell");

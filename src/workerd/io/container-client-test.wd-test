@@ -21,7 +21,8 @@ const unitTests :Workerd.Config = (
         durableObjectNamespaces = [
           ( className = "DurableObjectExample",
             uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e",
-            container = (containerName = "container-example", imageTag = "ubuntu") ),
+            # created with "docker build -t "simple-node"
+            container = (containerName = "container-example", imageTag = "simple-node") ),
         ],
         durableObjectStorage = (localDisk = "TEST_TMPDIR"),
         bindings = [

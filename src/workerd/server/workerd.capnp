@@ -609,8 +609,9 @@ struct Worker {
       containerName @0 :Text;
       # Name of the container that should be created.
 
-      imageTag @1 :Text;
-      # Image tag to be used to create the container using supported provider.
+      imageName @1 :Text;
+      # Image name to be used to create the container using supported provider.
+      # By default, we pull the "latest" tag of this image.
     }
   }
 

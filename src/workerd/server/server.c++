@@ -2300,13 +2300,13 @@ class Server::WorkerService final: public Service,
           auto& networkPtr = KJ_ASSERT_NONNULL(service.containerNetwork,
               "container network needs to be defined in order enable containers on this durable object.");
           KJ_ASSERT(config.hasContainerName(), "Container name is required");
-          KJ_ASSERT(config.hasImageTag(), "Image tag is required");
-          auto container_name = config.getContainerName();
-          auto image_tag = config.getImageTag();
+          KJ_ASSERT(config.hasImageName(), "Image name is required");
+          auto containerName = config.getContainerName();
+          auto imageName = config.getImageName();
           containerClient = kj::heap<io::ContainerClient>(byteStreamFactory,
               asHttpClient(networkPtr->startRequest({})),
-              asHttpClient(servicePtr->startRequest({})), kj::str(container_name),
-              kj::str(image_tag));
+              asHttpClient(servicePtr->startRequest({})), kj::str(containerName),
+              kj::str(imageName));
         }
 
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
