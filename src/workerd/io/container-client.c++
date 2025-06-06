@@ -53,8 +53,11 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
     auto results = context.getResults();
     results.setUp(byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
     auto downEnd = byteStreamFactory.capnpToKj(context.getParams().getDown());
-    co_await kj::joinPromisesFailFast(
-        kj::arr(upEnd->pumpTo(*request.connection), request.connection->pumpTo(*downEnd)));
+    pumpTask = kj::joinPromisesFailFast(
+        kj::arr(upEnd->pumpTo(*request.connection), request.connection->pumpTo(*downEnd)))
+                   .ignoreResult()
+                   .attach(kj::mv(upEnd), kj::mv(request.connection), kj::mv(downEnd));
+    return kj::READY_NOW;
   }
 
  private:
@@ -63,6 +66,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   kj::String containerName;
   kj::String containerHost;
   uint16_t containerPort;
+  kj::Maybe<kj::Promise<void>> pumpTask;
 };
 
 kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(
@@ -117,6 +121,17 @@ kj::Promise<bool> ContainerClient::isContainerRunning() {
   capnp::MallocMessageBuilder message;
   auto jsonRoot = message.initRoot<docker_api::Docker::ContainerInspectResponse>();
   codec.decode(response.body, jsonRoot);
+  portMappings.clear();
+  for (auto portMapping: jsonRoot.getNetworkSettings().getPorts().getObject()) {
+    auto port = portMapping.getName();
+    auto portMappingSlashIndex = KJ_ASSERT_NONNULL(port.asString().find("/"));
+    auto portNumberStr = port.asString().slice(0, portMappingSlashIndex);
+    auto portNumber1 = kj::str(portNumberStr);
+    auto portNumber = portNumber1.parseAs<uint16_t>();
+    auto mappedPortStr = portMapping.getValue().getArray()[0].getObject()[1].getValue().getString();
+    auto mappedPort = mappedPortStr.asString().parseAs<uint16_t>();
+    portMappings.insert(portNumber, mappedPort);
+  }
 
   // Look for Status field in the JSON object
   JSG_REQUIRE(jsonRoot.hasState(), Error, "Malformed ContainerInspect response");
@@ -152,7 +167,9 @@ kj::Promise<void> ContainerClient::createContainer(
     }
   }
 
-  jsonRoot.initHostConfig().setPublishAllPorts(true);
+  auto hostConfig = jsonRoot.initHostConfig();
+  hostConfig.setPublishAllPorts(true);
+  hostConfig.initRestartPolicy().setName("on-failure");
   // auto exposedPorts = jsonRoot.initExposedPorts().initObject(1);
   // exposedPorts[0].setName("8080/tcp");
   // exposedPorts[0].initValue().initObject(0);
@@ -267,6 +284,12 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
     // statusCode 404 refers to "no such container"
     JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
         "Removing a container failed with: ", response.body);
+    {
+      auto endpoint = kj::str("/containers/", containerName, "/wait");
+      auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
+      JSG_REQUIRE(response.statusCode == 200, Error,
+          "Waiting for container removal failed with: ", response.body);
+    }
   }
 }
 
@@ -278,11 +301,13 @@ kj::Promise<void> ContainerClient::signal(SignalContext context) {
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
   auto params = context.getParams();
   uint16_t port = params.getPort();
+  auto mappedPort = JSG_REQUIRE_NONNULL(
+      portMappings.find(port), Error, "Could not find mapped port for port ", port);
 
   auto results = context.getResults();
   // TODO: Use correct hostname here.
   auto dockerPort = kj::heap<DockerPort>(
-      byteStreamFactory, *network, kj::str(containerName), kj::str("localhost"), port);
+      byteStreamFactory, *network, kj::str(containerName), kj::str("localhost"), mappedPort);
   results.setPort(kj::mv(dockerPort));
   co_return;
 }

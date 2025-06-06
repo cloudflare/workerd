@@ -327,9 +327,9 @@ wd_cc_library(
 )
 
 wd_test(
-    src = "container-client-test.wd-test",
+    src = "container-client-test/container-client-test.wd-test",
     args = ["--experimental"],
-    data = ["container-client-test.js"],
+    data = ["container-client-test/container-client-test.js"],
 )
 
 kj_test(

@@ -266,7 +266,7 @@ struct Docker {
     path @2 :Text $Json.name("Path");
     args @3 :List(Text) $Json.name("Args");
     state @4 :ContainerState $Json.name("State");
-    # networkSettings @5 :NetworkSettings $Json.name("NetworkSettings");
+    networkSettings @5 :NetworkSettings $Json.name("NetworkSettings");
   }
 
   struct Command {
