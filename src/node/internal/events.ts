@@ -1031,5 +1031,7 @@ export function on(
   }
 }
 
-// Initialize the process global as an event emitter
-process._initProcess();
+// Initialize the process global as an event emitter, if process executed first
+if (process._initialized) process._initProcess();
+
+export var _initialized = true;

@@ -13,7 +13,10 @@ import { validateObject } from 'node-internal:validators';
 import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
 
 import { default as processImpl } from 'node-internal:process';
-import EventEmitter from 'node-internal:events';
+import {
+  _initialized as eventsInitialized,
+  default as EventEmitter,
+} from 'node-internal:events';
 
 export const versions = processImpl.versions;
 
@@ -408,8 +411,18 @@ const process = {
 
 export default process;
 
+// Must be a var binding to support TDZ checks
+export var _initialized = true;
+
 // Private export, not to be reexported
 export function _initProcess() {
   Object.setPrototypeOf(process, EventEmitter.prototype);
   EventEmitter.call(process);
+}
+
+// If process executes first, events will call _initProcess
+// If events executes first, process calls _initProcess itself
+// This allows us to handle the cycle between process and Events
+if (eventsInitialized) {
+  _initProcess();
 }
