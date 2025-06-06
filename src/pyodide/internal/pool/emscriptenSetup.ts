@@ -14,6 +14,7 @@ import { _createPyodideModule } from 'pyodide-internal:generated/pyodide.asm';
 import {
   setUnsafeEval,
   setGetRandomValues,
+  setSetTimeout,
   finishSetup,
 } from 'pyodide-internal:pool/builtin_wrappers';
 
@@ -216,6 +217,7 @@ export async function instantiateEmscriptenModule(
   const emscriptenModule = await emscriptenSettings.readyPromise;
   emscriptenModule.setUnsafeEval = setUnsafeEval;
   emscriptenModule.setGetRandomValues = setGetRandomValues;
+  emscriptenModule.setSetTimeout = setSetTimeout;
   finishSetup();
   return emscriptenModule;
 }
