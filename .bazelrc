@@ -43,9 +43,6 @@ build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external/v8@-Wno-unused-function'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
-# for some reason tcmalloc uses internal msan-enabled annotation in the code, rather than public
-# one – this is not needed with tagged absl LTS versions, but we want to use a specific absl commit
-build --per_file_copt=external/com_google_tcmalloc@-DANNOTATE_MEMORY_IS_INITIALIZED=ABSL_ANNOTATE_MEMORY_IS_INITIALIZED
 build --per_file_copt=external/protobuf@-Wno-deprecated-this-capture
 build --host_per_file_copt=external/protobuf@-Wno-deprecated-this-capture
 
