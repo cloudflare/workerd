@@ -495,8 +495,6 @@ function _addListener(
           `added to an EventEmitter. Use ` +
           'emitter.setMaxListeners() to increase limit'
       );
-      // No error code for this since it is a Warning
-      // eslint-disable-next-line no-restricted-syntax
       const w: EventEmitterError = Object.assign(
         new Error(
           'Possible EventEmitter memory leak detected. ' +
