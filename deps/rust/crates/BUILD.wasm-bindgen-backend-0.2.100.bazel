@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "0.2.100",
     deps = [
-        "@crates_vendor__bumpalo-3.17.0//:bumpalo",
+        "@crates_vendor__bumpalo-3.18.1//:bumpalo",
         "@crates_vendor__log-0.4.27//:log",
         "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
         "@crates_vendor__quote-1.0.40//:quote",

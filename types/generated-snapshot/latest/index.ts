@@ -537,7 +537,7 @@ export interface DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-export type DurableObjectJurisdiction = "eu" | "fedramp";
+export type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -4299,7 +4299,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId: string): AutoRAG;
+  autorag(autoragId?: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
@@ -4451,6 +4451,7 @@ export declare abstract class AiGateway {
 export interface AutoRAGInternalError extends Error {}
 export interface AutoRAGNotFoundError extends Error {}
 export interface AutoRAGUnauthorizedError extends Error {}
+export interface AutoRAGNameNotSetError extends Error {}
 export type ComparisonFilter = {
   key: string;
   type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
@@ -4495,10 +4496,20 @@ export type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
+export type AutoRagListResponse = {
+  id: string;
+  enable: boolean;
+  type: string;
+  source: string;
+  vectorize_name: string;
+  paused: boolean;
+  status: string;
+}[];
 export type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 export declare abstract class AutoRAG {
+  list(): Promise<AutoRagListResponse>;
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;

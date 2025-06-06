@@ -93,17 +93,17 @@ void sendExceptionToInspector(jsg::Lock& js,
   auto stackTrace = msg->GetStackTrace();
 
   // The resource name is whatever we set in the Script ctor, e.g. "worker.js".
-  auto scriptResourceName = msg->GetScriptResourceName();
+  auto scriptResourceName = kj::str(msg->GetScriptResourceName());
+  auto detailedMessage = kj::str(msg->Get());
 
   auto lineNumber = msg->GetLineNumber(context).FromMaybe(0);
   auto startColumn = msg->GetStartColumn(context).FromMaybe(0);
 
   // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect this
   //   has something to do with the incorrect links in the console when it logs uncaught exceptions.
-  inspector.exceptionThrown(context, jsg::toInspectorStringView(kj::mv(source)), exception,
-      jsg::toInspectorStringView(kj::str(msg->Get())),
-      jsg::toInspectorStringView(kj::str(scriptResourceName)), lineNumber, startColumn,
-      inspector.createStackTrace(stackTrace), 0);
+  inspector.exceptionThrown(context, jsg::toInspectorStringView(source), exception,
+      jsg::toInspectorStringView(detailedMessage), jsg::toInspectorStringView(scriptResourceName),
+      lineNumber, startColumn, inspector.createStackTrace(stackTrace), 0);
 }
 
 }  // namespace workerd::jsg

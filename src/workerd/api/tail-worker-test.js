@@ -30,7 +30,7 @@ export const test = {
   async test() {
     // HACK: The prior tests terminates once the scheduled() invocation has returned a response, but
     // propagating the outcome of the invocation may take longer. Wait briefly so this can go ahead.
-    await scheduler.wait(100);
+    await scheduler.wait(50);
     // This test verifies that we're able to receive tail stream events for various handlers.
 
     // Recorded streaming tail worker events, in insertion order.

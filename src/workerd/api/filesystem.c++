@@ -79,6 +79,24 @@ struct NormalizedFilePath {
     return root.eval(path);
   }
 };
+
+[[noreturn]] void throwFsError(jsg::Lock& js, workerd::FsError error, kj::StringPtr syscall) {
+  switch (error) {
+    case workerd::FsError::NOT_DIRECTORY: {
+      throwUVException(js, UV_ENOTDIR, syscall);
+    }
+    case workerd::FsError::NOT_EMPTY: {
+      throwUVException(js, UV_ENOTEMPTY, syscall);
+    }
+    case workerd::FsError::READ_ONLY: {
+      throwUVException(js, UV_EPERM, syscall);
+    }
+    default: {
+      throwUVException(js, UV_EPERM, syscall);
+    }
+  }
+  KJ_UNREACHABLE;
+}
 }  // namespace
 
 Stat::Stat(const workerd::Stat& stat)
@@ -246,12 +264,16 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
       vfs.resolve(js, normalizedPath, {.followLinks = false}), Error, "file not found");
   KJ_SWITCH_ONEOF(node) {
     KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-      JSG_REQUIRE(!options.failIfNotSymlink, Error, "invalid argument");
+      if (options.failIfNotSymlink) {
+        throwUVException(js, UV_EINVAL, "readlink"_kj);
+      }
       kj::Path path = normalizedPath;
       return path.toString(true);
     }
     KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-      JSG_REQUIRE(!options.failIfNotSymlink, Error, "invalid argument");
+      if (options.failIfNotSymlink) {
+        throwUVException(js, UV_EINVAL, "readlink"_kj);
+      }
       kj::Path path = normalizedPath;
       return path.toString(true);
     }
@@ -273,39 +295,51 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
   const jsg::Url& fromUrl = normalizedFrom;
   const jsg::Url& toUrl = normalizedTo;
 
-  JSG_REQUIRE(vfs.resolve(js, fromUrl) == kj::none, Error, "File already exists"_kj);
+  if (vfs.resolve(js, fromUrl) != kj::none) {
+    throwUVException(js, UV_EEXIST, "link"_kj, "File already exists"_kj);
+  }
+
   // Now, let's split the fromUrl into a base directory URL and a file name so
   // that we can make sure the destination directory exists.
   jsg::Url::Relative fromRelative = fromUrl.getRelative();
-  JSG_REQUIRE(fromRelative.name.size() > 0, Error, "Invalid filename"_kj);
 
-  auto parent =
-      JSG_REQUIRE_NONNULL(vfs.resolve(js, fromRelative.base), Error, "Directory does not exist"_kj);
-  auto& dir = JSG_REQUIRE_NONNULL(
-      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
-
-  // Dir is where the new link will go. fromRelative.name is the name of the new link
-  // in this directory.
-
-  // If we are creating a symbolic link, we do not need to check if the target exists.
-  if (options.symbolic) {
-    dir->add(js, fromRelative.name, vfs.newSymbolicLink(js, toUrl));
-    return;
+  if (fromRelative.name.size() == 0) {
+    throwUVException(js, UV_EINVAL, "link"_kj, "Invalid filename"_kj);
   }
 
-  // If we are creating a hard link, however, the target must exist.
-  auto target = JSG_REQUIRE_NONNULL(
-      vfs.resolve(js, toUrl, {.followLinks = false}), Error, "file not found"_kj);
-  KJ_SWITCH_ONEOF(target) {
-    KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-      dir->add(js, fromRelative.name, file.addRef());
+  KJ_IF_SOME(parent, vfs.resolve(js, fromRelative.base)) {
+    KJ_IF_SOME(dir, parent.tryGet<kj::Rc<workerd::Directory>>()) {
+      // Dir is where the new link will go. fromRelative.name is the name of
+      // the new link in this directory.
+
+      // If we are creating a symbolic link, we do not need to check if the target exists.
+      if (options.symbolic) {
+        dir->add(js, fromRelative.name, vfs.newSymbolicLink(js, toUrl));
+        return;
+      }
+
+      // If we are creating a hard link, however, the target must exist.
+      KJ_IF_SOME(target, vfs.resolve(js, toUrl, {.followLinks = false})) {
+        KJ_SWITCH_ONEOF(target) {
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            dir->add(js, fromRelative.name, file.addRef());
+          }
+          KJ_CASE_ONEOF(tdir, kj::Rc<workerd::Directory>) {
+            // It is not permitted to hardlink to a directory.
+            throwUVException(js, UV_EPERM, "link"_kj, "Cannot hardlink to a directory"_kj);
+          }
+          KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+            dir->add(js, fromRelative.name, link.addRef());
+          }
+        }
+      } else {
+        throwUVException(js, UV_ENOENT, "link"_kj, "File not found"_kj);
+      }
+    } else {
+      throwUVException(js, UV_EINVAL, "link"_kj, "Not a directory"_kj);
     }
-    KJ_CASE_ONEOF(tdir, kj::Rc<workerd::Directory>) {
-      dir->add(js, fromRelative.name, tdir.addRef());
-    }
-    KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-      dir->add(js, fromRelative.name, link.addRef());
-    }
+  } else {
+    throwUVException(js, UV_ENOENT, "link"_kj, "Directory does not exist"_kj);
   }
 }
 
@@ -315,17 +349,32 @@ void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
   NormalizedFilePath normalizedPath(kj::mv(path));
   const jsg::Url& url = normalizedPath;
   auto relative = url.getRelative();
-  auto parent =
-      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
-  auto& dir = JSG_REQUIRE_NONNULL(
-      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
-  // The unlink method cannot be used to remove directories.
 
-  kj::Path fpath(relative.name);
-  auto stat = JSG_REQUIRE_NONNULL(dir->stat(js, fpath), Error, "file not found");
-  JSG_REQUIRE(stat.type != FsType::DIRECTORY, Error, "Cannot unlink a directory");
+  KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
+    KJ_IF_SOME(dir, parent.tryGet<kj::Rc<workerd::Directory>>()) {
+      kj::Path fpath(relative.name);
+      KJ_IF_SOME(stat, dir->stat(js, fpath)) {
+        if (stat.type == FsType::DIRECTORY) {
+          throwUVException(js, UV_EISDIR, "unlink"_kj, "Cannot unlink a directory"_kj);
+        }
+      } else {
+        throwUVException(js, UV_ENOENT, "unlink"_kj, "File not found"_kj);
+      }
 
-  dir->remove(js, fpath);
+      KJ_SWITCH_ONEOF(dir->remove(js, fpath)) {
+        KJ_CASE_ONEOF(res, bool) {
+          // Ignore the return.
+        }
+        KJ_CASE_ONEOF(err, workerd::FsError) {
+          throwFsError(js, err, "unlink"_kj);
+        }
+      }
+    } else {
+      throwUVException(js, UV_ENOTDIR, "unlink"_kj, "Parent path is not a directory"_kj);
+    }
+  } else {
+    throwUVException(js, UV_ENOENT, "unlink"_kj, "File not found"_kj);
+  }
 }
 
 int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
@@ -633,7 +682,14 @@ void FileSystemModule::renameOrCopy(
 
   KJ_IF_SOME(dir, srcParent) {
     auto relative = srcUrl.getRelative();
-    dir->remove(js, kj::Path({relative.name}), {.recursive = true});
+    KJ_SWITCH_ONEOF(dir->remove(js, kj::Path({relative.name}), {.recursive = true})) {
+      KJ_CASE_ONEOF(res, bool) {
+        // Ignore the return.
+      }
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        throwFsError(js, err, "rename"_kj);
+      }
+    }
   }
 }
 
@@ -649,20 +705,20 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
   KJ_IF_SOME(node, vfs.resolve(js, url, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        JSG_FAIL_REQUIRE(Error, "File already exists"_kj);
+        throwUVException(js, UV_EEXIST, "mkdir"_kj);
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         // The directory already exists. We will just return.
         return kj::none;
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
-        JSG_FAIL_REQUIRE(Error, "File already exists"_kj);
+        throwUVException(js, UV_EEXIST, "mkdir"_kj);
       }
     }
   };
 
   if (options.recursive) {
-    JSG_REQUIRE(!options.tmp, Error, "Cannot recursively create a temporary directory");
+    KJ_ASSERT(!options.tmp);
     // If the recursive option is set, we will create all the directories in the
     // path that do not exist, returning the path to the first one that was created.
     const kj::Path kjPath = normalizedPath;
@@ -682,17 +738,21 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
       // and tryOpen does not us if the directory already existed or was created.
       KJ_IF_SOME(node, current->tryOpen(js, kj::Path({part}))) {
         // Let's make sure the node is a directory.
-        auto& dir = JSG_REQUIRE_NONNULL(
-            node.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
-        // Now we can check the next part of the path.
-        current = kj::mv(dir);
-        continue;
+        KJ_IF_SOME(dir, node.tryGet<kj::Rc<workerd::Directory>>()) {
+          // The node is a directory, we can continue.
+          current = kj::mv(dir);
+          continue;
+        } else {
+          throwUVException(js, UV_ENOTDIR, "mkdir"_kj);
+        }
       }
 
       // The node does not exist, let's create it so long as the current
       // directory is writable.
       auto stat = current->stat(js);
-      JSG_REQUIRE(stat.writable, Error, "access is denied");
+      if (!stat.writable) {
+        throwUVException(js, UV_EPERM, "mkdir"_kj);
+      }
       auto dir = workerd::Directory::newWritable();
       current->add(js, part, dir.addRef());
       current = kj::mv(dir);
@@ -711,25 +771,37 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
   // the parent directory exists. If the parent directory does not exist, we
   // will return an error.
   auto relative = url.getRelative();
-  auto parent =
-      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
-  // Let's make sure the parent is a directory.
-  auto& dir = JSG_REQUIRE_NONNULL(
-      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
-  auto stat = dir->stat(js);
-  JSG_REQUIRE(stat.writable, Error, "access is denied");
-  auto newDir = workerd::Directory::newWritable();
+  KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
+    // Let's make sure the parent is a directory.
+    KJ_IF_SOME(dir, parent.tryGet<kj::Rc<workerd::Directory>>()) {
+      auto stat = dir->stat(js);
+      if (!stat.writable) {
+        throwUVException(js, UV_EPERM, "mkdir"_kj);
+      }
+      auto newDir = workerd::Directory::newWritable();
+      if (options.tmp) {
+        if (tmpFileCounter >= kMax) {
+          throwUVException(js, UV_EPERM, "mkdir"_kj, "Too many temporary directories created"_kj);
+        }
+        auto name = kj::str(relative.name, tmpFileCounter++);
+        dir->add(js, name, kj::mv(newDir));
+        KJ_IF_SOME(newUrl, relative.base.resolve(name)) {
+          // If we are creating a temporary directory, we return the URL of the
+          // new directory.
+          return kj::str(newUrl.getPathname());
+        } else {
+          throwUVException(js, UV_EINVAL, "mkdir"_kj, "Invalid name for temporary directory"_kj);
+        }
+      }
 
-  if (options.tmp) {
-    JSG_REQUIRE(tmpFileCounter < kMax, Error, "Too many temporary directories");
-    auto name = kj::str(relative.name, tmpFileCounter++);
-    dir->add(js, name, kj::mv(newDir));
-    auto newUrl = KJ_REQUIRE_NONNULL(relative.base.resolve(name), "invalid URL");
-    return kj::str(newUrl.getPathname());
+      dir->add(js, relative.name, kj::mv(newDir));
+      return kj::none;
+    } else {
+      throwUVException(js, UV_ENOTDIR, "mkdir"_kj);
+    }
+  } else {
+    throwUVException(js, UV_ENOENT, "mkdir"_kj);
   }
-
-  dir->add(js, relative.name, kj::mv(newDir));
-  return kj::none;
 }
 
 void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
@@ -739,23 +811,41 @@ void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
   NormalizedFilePath normalizedPath(kj::mv(path));
   const jsg::Url& url = normalizedPath;
   auto relative = url.getRelative();
-  auto parent =
-      JSG_REQUIRE_NONNULL(vfs.resolve(js, relative.base), Error, "Directory does not exist"_kj);
-  // Let's make sure the parent is a directory.
-  auto& dir = JSG_REQUIRE_NONNULL(
-      parent.tryGet<kj::Rc<workerd::Directory>>(), Error, "Invalid argument"_kj);
-  auto stat = dir->stat(js);
-  JSG_REQUIRE(stat.writable, Error, "access is denied");
 
-  kj::Path name(relative.name);
+  KJ_IF_SOME(parent, vfs.resolve(js, relative.base)) {
+    KJ_IF_SOME(dir, parent.tryGet<kj::Rc<workerd::Directory>>()) {
+      auto stat = dir->stat(js);
+      if (!stat.writable) {
+        throwUVException(js, UV_EPERM, "rm"_kj);
+      }
 
-  if (options.dironly) {
-    // If the dironly option is set, we will only remove the entry if it is a directory.
-    auto stat = JSG_REQUIRE_NONNULL(dir->stat(js, name), Error, "file not found");
-    JSG_REQUIRE(stat.type == workerd::FsType::DIRECTORY, Error, "Not a directory");
+      kj::Path name(relative.name);
+
+      if (options.dironly) {
+        // If the dironly option is set, we will only remove the entry if it is a directory.
+        KJ_IF_SOME(stat, dir->stat(js, name)) {
+          if (stat.type != workerd::FsType::DIRECTORY) {
+            throwUVException(js, UV_ENOTDIR, "rm"_kj);
+          }
+        } else {
+          throwUVException(js, UV_ENOENT, "rm"_kj);
+        }
+      }
+
+      KJ_SWITCH_ONEOF(dir->remove(js, name, {.recursive = options.recursive})) {
+        KJ_CASE_ONEOF(res, bool) {
+          // Ignore the return.
+        }
+        KJ_CASE_ONEOF(err, workerd::FsError) {
+          throwFsError(js, err, "rm"_kj);
+        }
+      }
+    } else {
+      throwUVException(js, UV_ENOTDIR, "rm"_kj);
+    }
+  } else {
+    throwUVException(js, UV_ENOENT, "rm"_kj);
   }
-
-  dir->remove(js, name, {.recursive = options.recursive});
 }
 
 namespace {
@@ -920,6 +1010,25 @@ namespace {
 constexpr bool isValidFileName(kj::StringPtr name) {
   return name.size() > 0 && name != "."_kj && name != ".."_kj && name.find("/"_kj) == kj::none;
 }
+
+jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsError error) {
+  switch (error) {
+    case workerd::FsError::NOT_DIRECTORY: {
+      return js.domException(kj::str("NotSupportedError"), kj::str("Not a directory"));
+    }
+    case workerd::FsError::NOT_EMPTY: {
+      return js.domException(kj::str("InvalidStateError"), kj::str("Directory not empty"));
+    }
+    case workerd::FsError::READ_ONLY: {
+      return js.domException(kj::str("InvalidStateError"), kj::str("Read-only file system"));
+    }
+    default: {
+      return js.domException(
+          kj::str("UnknownError"), kj::str("Unknown file system error: ", static_cast<int>(error)));
+    }
+  }
+  KJ_UNREACHABLE;
+}
 }  // namespace
 
 jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(
@@ -1022,15 +1131,23 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
   JSG_REQUIRE(isValidFileName(name), TypeError, "Invalid file name");
   auto opts = options.orDefault(FileSystemRemoveOptions{});
 
-  if (inner->remove(js, kj::Path({name}),
-          workerd::Directory::RemoveOptions{
-            .recursive = opts.recursive,
-          })) {
-    return js.resolvedPromise();
+  KJ_SWITCH_ONEOF(inner->remove(js, kj::Path({name}),
+                      workerd::Directory::RemoveOptions{
+                        .recursive = opts.recursive,
+                      })) {
+    KJ_CASE_ONEOF(res, bool) {
+      if (res) {
+        return js.resolvedPromise();
+      }
+      // If the entry was not found, we throw a NotFoundError.
+      auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+      return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+    }
+    KJ_CASE_ONEOF(error, workerd::FsError) {
+      return js.rejectedPromise<void>(exception.wrap(js, fsErrorToDomException(js, error)));
+    }
   }
-
-  auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
-  return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+  KJ_UNREACHABLE;
 }
 
 jsg::Promise<kj::Array<jsg::USVString>> FileSystemDirectoryHandle::resolve(

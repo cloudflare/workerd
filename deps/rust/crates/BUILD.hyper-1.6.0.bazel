@@ -69,7 +69,7 @@ rust_library(
         "@crates_vendor__httparse-1.10.1//:httparse",
         "@crates_vendor__itoa-1.0.15//:itoa",
         "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
-        "@crates_vendor__smallvec-1.15.0//:smallvec",
+        "@crates_vendor__smallvec-1.15.1//:smallvec",
         "@crates_vendor__tokio-1.45.1//:tokio",
         "@crates_vendor__want-0.3.1//:want",
     ] + select({

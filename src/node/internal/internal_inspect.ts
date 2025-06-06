@@ -454,11 +454,15 @@ const meta = [
 // Adopted from https://github.com/chalk/ansi-regex/blob/HEAD/index.js
 // License: MIT, authors: @sindresorhus, Qix-, arjunmehta and LitoMore
 // Matches all ansi escape code sequences in a string
-const ansiPattern =
+const ansiPattern = new RegExp(
   '[\\u001B\\u009B][[\\]()#;?]*' +
-  '(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*' +
-  '|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)' +
-  '|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))';
+    '(?:(?:(?:(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]+)*' +
+    '|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/\\#&.:=?%@~_]*)*)?' +
+    '(?:\\u0007|\\u001B\\u005C|\\u009C))' +
+    '|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?' +
+    '[\\dA-PR-TZcf-nq-uy=><~]))',
+  'g'
+);
 const ansi = new RegExp(ansiPattern, 'g');
 
 interface Context extends Required<InspectOptionsStylized> {
@@ -618,7 +622,8 @@ Object.defineProperty(inspect, 'defaultOptions', {
 // reset code as second entry.
 const defaultFG = 39;
 const defaultBG = 49;
-inspect.colors = {
+const colors: Record<string, [number, number]> = {
+  // @ts-ignore
   __proto__: null,
   reset: [0, 0],
   bold: [1, 22],
@@ -666,6 +671,7 @@ inspect.colors = {
   bgCyanBright: [106, defaultBG],
   bgWhiteBright: [107, defaultBG],
 };
+inspect.colors = colors;
 
 function defineColorAlias(target: string, alias: string) {
   Object.defineProperty(inspect.colors, alias, {

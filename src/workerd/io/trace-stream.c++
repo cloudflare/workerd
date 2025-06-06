@@ -725,7 +725,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // shutdown.
   kj::Promise<void> handleOnset(Worker::Lock& lock,
       IoContext& ioContext,
-      kj::ArrayPtr<tracing::TailEvent> events,
+      kj::Array<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
     // There should be only a single onset event in this batch.
     KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
@@ -835,7 +835,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Promise<void> handleEvents(Worker::Lock& lock,
       const jsg::JsValue& handler,
       IoContext& ioContext,
-      kj::ArrayPtr<tracing::TailEvent> events,
+      kj::Array<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
     jsg::Lock& js = lock;
 
@@ -899,17 +899,16 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         // Synthesize sub-events
         auto open = SpanOpen(span.parentSpanId, kj::str(span.operationName));
         auto close = SpanClose();
-        kj::Vector<workerd::tracing::Attribute> attr(span.tags.size());
-        for (auto& tag: span.tags) {
-          attr.add(workerd::tracing::Attribute(kj::str(tag.key), kj::mv(tag.value)));
-        }
+        kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) -> tracing::Attribute {
+          return tracing::Attribute(kj::mv(tag.key), kj::mv(tag.value));
+        };
         InvocationSpanContext context(event.traceId, event.invocationId, event.spanId);
 
         // TODO(o11y): Replace this with proper instrumentation so that SpanOpen/SpanClose/
         // Attributes events are created and reported individually. Sequence is not supported here yet.
         auto openEvent = TailEvent(context, span.startTime, 0, kj::mv(open));
         auto closeEvent = TailEvent(context, span.endTime, 0, kj::mv(close));
-        auto attrEvent = TailEvent(context, span.startTime, 0, attr.releaseAsArray());
+        auto attrEvent = TailEvent(context, span.startTime, 0, kj::mv(attr));
         processEvent(openEvent);
         processEvent(attrEvent);
         processEvent(closeEvent);
@@ -1148,7 +1147,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
 
   auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
 
-  return kj::refcounted<tracing::TailStreamWriter>(
+  return kj::heap<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lambda holds a bare
