@@ -10,8 +10,6 @@ import {
   closeSync,
   fstatSync,
   ftruncateSync,
-  fsyncSync,
-  fdatasyncSync,
   writeSync,
   writevSync,
   readSync,
@@ -24,34 +22,58 @@ import {
   close,
   fstat,
   ftruncate,
-  fsync,
-  fdatasync,
+  unlinkSync,
 } from 'node:fs';
+
+const kErrInvalidArgType = { code: 'ERR_INVALID_ARG_TYPE' };
+const kErrEBadf = { code: 'EBADF' };
+const kErrEExist = { code: 'EEXIST' };
 
 export const openCloseTest = {
   async test() {
+    throws(() => fstatSync(123), kErrEBadf);
+    throws(() => fstatSync(123, { bigint: 'yes' }), kErrInvalidArgType);
+    throws(() => fstatSync('abc'), kErrInvalidArgType);
+
+    // Test that all the mode combinations work
+    const modes = [
+      'r',
+      'r+',
+      'w',
+      'w+',
+      'a',
+      'a+',
+      'rs',
+      'rs+',
+      'wx',
+      'wx+',
+      'ax',
+      'ax+',
+    ];
+    for (const mode of modes) {
+      // Open the file
+      const fd = openSync('/tmp/test.txt', mode);
+      ok(existsSync('/tmp/test.txt'));
+      const stat = fstatSync(fd, { bigint: true });
+      ok(stat);
+      unlinkSync('/tmp/test.txt');
+    }
+
     ok(!existsSync('/tmp/test.txt'));
     const fd = openSync('/tmp/test.txt', 'w+');
     ok(existsSync('/tmp/test.txt'));
+
+    // Check the exclusive option fails when the file already exists
+    throws(() => openSync('/tmp/test.txt', 'wx'), kErrEExist);
+    throws(() => openSync('/tmp/test.txt', 'wx+'), kErrEExist);
+    throws(() => openSync('/tmp/test.txt', 'ax'), kErrEExist);
+    throws(() => openSync('/tmp/test.txt', 'ax+'), kErrEExist);
 
     const stat = fstatSync(fd, { bigint: true });
     ok(stat);
     ok(stat.isFile());
     ok(!stat.isDirectory());
     strictEqual(stat.size, 0n);
-
-    throws(() => fstatSync(123), {
-      message: /bad file descriptor/,
-      code: 'EBADF',
-    });
-    throws(() => fstatSync(fd, { bigint: 'yes' }), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-    throws(() => fstatSync('abc'), {
-      code: /ERR_INVALID_ARG_TYPE/,
-    });
-
-    strictEqual(fd, 0);
 
     {
       const { promise, resolve, reject } = Promise.withResolvers();
@@ -87,27 +109,6 @@ export const openCloseTest = {
       });
       await promise;
     }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      fsync(fd, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      await promise;
-    }
-
-    {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      fdatasync(fd, (err) => {
-        if (err) return reject(err);
-        resolve();
-      });
-      await promise;
-    }
-
-    fsyncSync(fd);
-    fdatasyncSync(fd);
 
     // Close the file
     closeSync(fd);
@@ -179,7 +180,7 @@ export const writeSyncTest2 = {
 
     // Writing to a position beyond max uint32_t is not allowed.
     throws(() => writeSync(fd, 'Hello World', 2n ** 32n), {
-      message: 'Position out of range',
+      code: 'EINVAL',
     });
     throws(() => writeSync(fd, 'Hello World', 2 ** 32), {
       code: 'ERR_OUT_OF_RANGE',

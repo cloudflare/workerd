@@ -33,17 +33,17 @@ static thread_local TmpDirStoreScope* tmpDirStorageScope = nullptr;
 // the global scope are useful.
 class TmpDirectory final: public Directory {
  public:
-  kj::Maybe<Stat> stat(jsg::Lock& js, kj::PathPtr ptr) override {
+  kj::Maybe<kj::OneOf<FsError, Stat>> stat(jsg::Lock& js, kj::PathPtr ptr) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
-      return dir->stat(js, ptr);
+      return kj::Maybe<kj::OneOf<FsError, Stat>>(dir->stat(js, ptr));
     }
     if (ptr.size() == 0) {
-      return Stat{
+      return kj::Maybe<kj::OneOf<FsError, Stat>>(Stat{
         .type = FsType::DIRECTORY,
         .size = 0,
         .lastModified = kj::UNIX_EPOCH,
         .writable = true,
-      };
+      });
     }
     return kj::none;
   }
@@ -83,19 +83,19 @@ class TmpDirectory final: public Directory {
     return nullptr;
   }
 
-  kj::Maybe<FsNode> tryOpen(jsg::Lock& js, kj::PathPtr path, OpenOptions options = {}) override {
+  kj::Maybe<FsNodeWithError> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, OpenOptions options = {}) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
       return dir->tryOpen(js, path, kj::mv(options));
     }
     return kj::none;
   }
 
-  void add(jsg::Lock& js, kj::StringPtr name, Item entry) override {
+  kj::Maybe<FsError> add(jsg::Lock& js, kj::StringPtr name, Item entry) override {
     KJ_IF_SOME(dir, tryGetDirectory()) {
-      dir->add(js, name, kj::mv(entry));
-      return;
+      return dir->add(js, name, kj::mv(entry));
     }
-    JSG_FAIL_REQUIRE(Error, "Cannot add a file into a read-only directory");
+    return FsError::NOT_PERMITTED;
   }
 
   kj::OneOf<FsError, bool> remove(
@@ -142,7 +142,7 @@ class LazyDirectory final: public Directory {
  public:
   LazyDirectory(kj::Function<kj::Rc<Directory>()> func): lazyDir(kj::mv(func)) {}
 
-  kj::Maybe<Stat> stat(jsg::Lock& js, kj::PathPtr ptr) override {
+  kj::Maybe<kj::OneOf<FsError, Stat>> stat(jsg::Lock& js, kj::PathPtr ptr) override {
     return getDirectory()->stat(js, ptr);
   }
 
@@ -166,12 +166,13 @@ class LazyDirectory final: public Directory {
     return getDirectory()->end();
   }
 
-  kj::Maybe<FsNode> tryOpen(jsg::Lock& js, kj::PathPtr path, OpenOptions options = {}) override {
+  kj::Maybe<FsNodeWithError> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, OpenOptions options = {}) override {
     return getDirectory()->tryOpen(js, path, kj::mv(options));
   }
 
-  void add(jsg::Lock& js, kj::StringPtr name, Item item) override {
-    getDirectory()->add(js, name, kj::mv(item));
+  kj::Maybe<FsError> add(jsg::Lock& js, kj::StringPtr name, Item item) override {
+    return getDirectory()->add(js, name, kj::mv(item));
   }
 
   kj::OneOf<FsError, bool> remove(
@@ -224,12 +225,12 @@ class LazyDirectory final: public Directory {
 
 // Validates that the given path does not contain any path separators and
 // can be parsed as a single path element. Throws if the checks fail.
-void validatePathWithNoSeparators(kj::StringPtr path) {
+bool validatePathWithNoSeparators(kj::StringPtr path) {
   try {
     auto parsed = kj::Path::parse(path);
-    JSG_REQUIRE(parsed.size() == 1, Error, "Invalid path: \"", path, "\"");
+    return parsed.size() == 1;
   } catch (kj::Exception& e) {
-    JSG_FAIL_REQUIRE(Error, "Invalid path: \"", path, "\"");
+    return false;
   }
 }
 
@@ -243,15 +244,15 @@ class DirectoryBase final: public Directory {
     KJ_DASSERT(!Writable);
   }
 
-  kj::Maybe<Stat> stat(jsg::Lock& js, kj::PathPtr ptr) override {
+  kj::Maybe<kj::OneOf<FsError, Stat>> stat(jsg::Lock& js, kj::PathPtr ptr) override {
     // When the path ptr size is 0, then we're looking for the stat of this directory.
     if (ptr.size() == 0) {
-      return Stat{
+      return kj::Maybe<kj::OneOf<FsError, Stat>>(Stat{
         .type = FsType::DIRECTORY,
         .size = 0,
         .lastModified = kj::UNIX_EPOCH,
         .writable = Writable,
-      };
+      });
     }
 
     // Otherwise, we need to look up the entry...
@@ -260,7 +261,7 @@ class DirectoryBase final: public Directory {
         KJ_CASE_ONEOF(file, kj::Rc<File>) {
           // We found a file. If the remaining path is empty, yay! Return the stat.
           if (ptr.size() == 1) {
-            return file->stat(js);
+            return kj::Maybe<kj::OneOf<FsError, Stat>>(file->stat(js));
           }
           // Otherwise we'll fall through to return kj::none
         }
@@ -274,16 +275,22 @@ class DirectoryBase final: public Directory {
           // to something, we will ask it for the stat. Otherwise we return
           // kj::none.
           SymbolicLinkRecursionGuardScope guardScope;
-          guardScope.checkSeen(link.get());
+          KJ_IF_SOME(err, guardScope.checkSeen(link.get())) {
+            return kj::Maybe<kj::OneOf<FsError, Stat>>(err);
+          }
           KJ_IF_SOME(resolved, link->resolve(js)) {
             KJ_SWITCH_ONEOF(resolved) {
               KJ_CASE_ONEOF(file, kj::Rc<File>) {
-                return kj::Maybe(file->stat(js));
+                return kj::Maybe<kj::OneOf<FsError, Stat>>(file->stat(js));
               }
               KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
                 return dir->stat(js, ptr.slice(1, ptr.size()));
               }
+              KJ_CASE_ONEOF(err, FsError) {
+                return kj::Maybe<kj::OneOf<FsError, Stat>>(err);
+              }
             }
+            KJ_UNREACHABLE;
           }
         }
       }
@@ -327,31 +334,35 @@ class DirectoryBase final: public Directory {
     return entries.end();
   }
 
-  kj::Maybe<FsNode> tryOpen(jsg::Lock& js, kj::PathPtr path, OpenOptions opts = {}) override {
+  kj::Maybe<FsNodeWithError> tryOpen(
+      jsg::Lock& js, kj::PathPtr path, OpenOptions opts = {}) override {
     if (path.size() == 0) {
       // An empty path ends up just returning this directory.
-      return kj::Maybe<FsNode>(addRefToThis());
+      return kj::Maybe<FsNodeWithError>(addRefToThis());
     }
+
     KJ_IF_SOME(found, entries.find(path[0])) {
       if (path.size() == 1) {
         // We found the entry, return it.
         KJ_SWITCH_ONEOF(found) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
-            return kj::Maybe<FsNode>(file.addRef());
+            return kj::Maybe<FsNodeWithError>(file.addRef());
           }
           KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-            return kj::Maybe<FsNode>(dir.addRef());
+            return kj::Maybe<FsNodeWithError>(dir.addRef());
           }
           KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
             if (!opts.followLinks) {
               // If we're not following links, when we just return the link itself
               // here.
-              return kj::Maybe<FsNode>(link.addRef());
+              return kj::Maybe<FsNodeWithError>(link.addRef());
             }
             // Resolve the symbolic link and return the target, guarding against
             // recursion while doing so.
             SymbolicLinkRecursionGuardScope guardScope;
-            guardScope.checkSeen(link.get());
+            KJ_IF_SOME(err, guardScope.checkSeen(link.get())) {
+              return kj::Maybe<FsNodeWithError>(err);
+            }
             return link->resolve(js);
           }
         }
@@ -377,7 +388,9 @@ class DirectoryBase final: public Directory {
             return kj::none;
           }
           SymbolicLinkRecursionGuardScope guardScope;
-          guardScope.checkSeen(link.get());
+          KJ_IF_SOME(err, guardScope.checkSeen(link.get())) {
+            return kj::Maybe<FsNodeWithError>(err);
+          }
           KJ_IF_SOME(resolved, link->resolve(js)) {
             KJ_SWITCH_ONEOF(resolved) {
               KJ_CASE_ONEOF(file, kj::Rc<File>) {
@@ -385,6 +398,9 @@ class DirectoryBase final: public Directory {
               }
               KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
                 return dir->tryOpen(js, path, kj::mv(opts));
+              }
+              KJ_CASE_ONEOF(err, FsError) {
+                return kj::Maybe<FsNodeWithError>(err);
               }
             }
           } else {
@@ -402,19 +418,22 @@ class DirectoryBase final: public Directory {
         return tryCreate(js, path, type);
       }
     } else {
-      // If the directory is not writable, we cannot create a new entry
-      JSG_REQUIRE(opts.createAs == kj::none, Error,
-          "Cannot create a new file or directory in a read-only directory");
+      if (opts.createAs != kj::none) {
+        return kj::Maybe<FsNodeWithError>(FsError::READ_ONLY);
+      }
     }
 
     return kj::none;
   }
 
-  void add(jsg::Lock& js, kj::StringPtr name, Item fileOrDirectory) override {
+  kj::Maybe<FsError> add(jsg::Lock& js, kj::StringPtr name, Item fileOrDirectory) override {
     if constexpr (Writable) {
-      validatePathWithNoSeparators(name);
-      JSG_REQUIRE(entries.find(name) == kj::none, Error, "File or directory already exists: \"",
-          name, "\"");
+      if (!validatePathWithNoSeparators(name)) {
+        return FsError::INVALID_PATH;
+      }
+      if (entries.find(name) != kj::none) {
+        return FsError::ALREADY_EXISTS;
+      }
       auto ret = ([&]() -> Item {
         KJ_SWITCH_ONEOF(fileOrDirectory) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
@@ -430,8 +449,9 @@ class DirectoryBase final: public Directory {
         KJ_UNREACHABLE;
       })();
       entries.insert(kj::str(name), kj::mv(ret));
+      return kj::none;
     } else {
-      JSG_FAIL_REQUIRE(Error, "Cannot add a file into a read-only directory");
+      return FsError::NOT_PERMITTED;
     }
   }
 
@@ -508,7 +528,7 @@ class DirectoryBase final: public Directory {
   kj::HashMap<kj::String, Item> entries;
 
   // Called by tryOpen to create a new file or directory at the given path.
-  kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> tryCreate(
+  kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> tryCreate(
       jsg::Lock& js, kj::PathPtr path, FsType createAs) {
     KJ_DASSERT(Writable);
     KJ_DASSERT(path.size() > 0);
@@ -521,16 +541,17 @@ class DirectoryBase final: public Directory {
           auto file = File::newWritable(js);
           auto ret = file.addRef();
           entries.insert(kj::str(path[0]), kj::mv(file));
-          return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(ret));
+          return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(ret));
         }
         case FsType::DIRECTORY: {
           auto dir = Directory::newWritable();
           auto ret = dir.addRef();
           entries.insert(kj::str(path[0]), kj::mv(dir));
-          return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(ret));
+          return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(ret));
         }
         case FsType::SYMLINK: {
-          JSG_FAIL_REQUIRE(Error, "Cannot create a symlink with tryOpen");
+          return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(
+              FsError::NOT_PERMITTED);
         }
       }
     }
@@ -547,13 +568,16 @@ class DirectoryBase final: public Directory {
       entries.insert(kj::str(path[0]), kj::mv(dir));
       KJ_SWITCH_ONEOF(ret) {
         KJ_CASE_ONEOF(file, kj::Rc<File>) {
-          return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
+          return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
         }
         KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-          return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(dir));
+          return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(dir));
         }
         KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
           KJ_UNREACHABLE;
+        }
+        KJ_CASE_ONEOF(err, FsError) {
+          return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(err);
         }
       }
     }
@@ -570,10 +594,11 @@ class FileImpl final: public File {
   // Constructor used to create a writable file.
   FileImpl(kj::Array<kj::byte> owned): ownedOrView(kj::mv(owned)), lastModified(kj::UNIX_EPOCH) {}
 
-  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
     if (isWritable()) {
       lastModified = date;
     }
+    return kj::none;
   }
 
   Stat stat(jsg::Lock& js) override {
@@ -599,19 +624,32 @@ class FileImpl final: public File {
   }
 
   // Writes data to the file at the given offset.
-  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     static constexpr uint32_t kMax = kj::maxValue;
-    JSG_REQUIRE(buffer.size() <= kMax, Error, "File size exceeds maximum limit");
+    if (buffer.size() > kMax) {
+      return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+    }
+    if (!isWritable()) {
+      return FsError::READ_ONLY;
+    }
     auto& owned = writableView();
     size_t end = offset + buffer.size();
-    if (end > owned.size()) resize(js, end);
+    if (end > owned.size()) {
+      KJ_IF_SOME(err, resize(js, end)) {
+        return err;
+      }
+    }
     owned.slice(offset, end).copyFrom(buffer);
-    return buffer.size();
+    return static_cast<uint32_t>(buffer.size());
   }
 
-  void resize(jsg::Lock& js, uint32_t size) override {
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    if (!isWritable()) {
+      return FsError::READ_ONLY;
+    }
     auto& owned = writableView();
-    if (size == owned.size()) return;  // Nothing to do.
+    if (size == owned.size()) return kj::none;  // Nothing to do.
 
     auto newData = kj::heapArray<kj::byte>(size);
 
@@ -624,12 +662,15 @@ class FileImpl final: public File {
       newData.asPtr().copyFrom(owned.first(size));
     }
     ownedOrView = newData.attach(js.getExternalMemoryAdjustment(newData.size()));
+    return kj::none;
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
-    auto& owned = JSG_REQUIRE_NONNULL(
-        ownedOrView.tryGet<kj::Array<kj::byte>>(), Error, "Cannot modify a read-only file");
-    owned.slice(offset.orDefault(0)).fill(value);
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    if (!isWritable()) {
+      return FsError::READ_ONLY;
+    }
+    writableView().slice(offset.orDefault(0)).fill(value);
+    return kj::none;
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -665,9 +706,10 @@ class FileImpl final: public File {
     KJ_UNREACHABLE;
   }
 
-  void replace(jsg::Lock& js, kj::Rc<File> file) override {
-    JSG_REQUIRE_NONNULL(
-        ownedOrView.tryGet<kj::Array<kj::byte>>(), Error, "Cannot replace a read-only file");
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    if (!isWritable()) {
+      return FsError::READ_ONLY;
+    }
 
     auto stat = file->stat(js);
     auto buffer =
@@ -675,6 +717,7 @@ class FileImpl final: public File {
     file->read(js, 0, buffer.asPtr());
     ownedOrView = kj::mv(buffer);
     lastModified = stat.lastModified;
+    return kj::none;
   }
 
  private:
@@ -687,8 +730,7 @@ class FileImpl final: public File {
   }
 
   kj::Array<kj::byte>& writableView() {
-    return JSG_REQUIRE_NONNULL(
-        ownedOrView.tryGet<kj::Array<kj::byte>>(), Error, "Cannot write to a read-only file");
+    return KJ_REQUIRE_NONNULL(ownedOrView.tryGet<kj::Array<kj::byte>>());
   }
 
   kj::ArrayPtr<const kj::byte> readableView() const {
@@ -731,9 +773,9 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     return fsMap->getDevRoot();
   }
 
-  OpenedFile& openFd(jsg::Lock& js, const jsg::Url& url, OpenOptions opts = {}) const override {
+  kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(
+      jsg::Lock& js, const jsg::Url& url, OpenOptions opts = {}) const override {
 
-    kj::Maybe<FsType> createAs = opts.exclusive ? kj::none : kj::Maybe(FsType::FILE);
     kj::Path root{};
     auto str = kj::str(url.getPathname().slice(1));
 
@@ -745,68 +787,103 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     static constexpr int kMax = kj::maxValue;
     if (nextFd == kMax) {
       observer->onMaxFds(openedFiles.size());
-      JSG_FAIL_REQUIRE(Error, "Too many open files");
+      return FsError::TOO_MANY_OPEN_FILES;
     }
 
     // TODO(node-fs): Currently tryOpen will always attempt to follow the
     // symlinks, which means we cannot correctly handle followLinks = false
     // just yet.
-    JSG_REQUIRE(opts.followLinks, Error, "Cannot open a file with followLinks yet");
+    if (!opts.followLinks) {
+      return FsError::NOT_SUPPORTED;
+    }
 
-    KJ_IF_SOME(node,
-        getRoot(js)->tryOpen(js, root.eval(str),
-            Directory::OpenOptions{
-              .createAs = createAs,
-              .followLinks = opts.followLinks,
-            })) {
-      // If the exclusive option is set and we got here, then we need to
-      // throw an error because we cannot open a file that already exists.
-      JSG_REQUIRE(!opts.exclusive, Error, "File already exists");
+    auto rootDir = getRoot(js);
+    auto path = root.eval(str);
 
-      // If we are opening a node for writing, we need to make sure that the
-      // node is writable.
-      if (opts.write) {
-        KJ_SWITCH_ONEOF(node) {
-          KJ_CASE_ONEOF(file, kj::Rc<File>) {
-            auto stat = file->stat(js);
-            JSG_REQUIRE(stat.writable, Error, "File is not writable");
+    if (opts.exclusive && opts.write) {
+      // If the exclusive flag is set with the witable flag, then we fail
+      // if the file already exists.
+      KJ_IF_SOME(maybeStat, rootDir->stat(js, path)) {
+        KJ_SWITCH_ONEOF(maybeStat) {
+          KJ_CASE_ONEOF(stat, Stat) {
+            return FsError::ALREADY_EXISTS;
           }
-          KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-            // Similar to Node.js, we do not allow opening fd's for
-            // directories for writing.
-            JSG_FAIL_REQUIRE(Error, "Directory is not writable");
-          }
-          KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
-            // Symlinks are never directly writable so the write flag
-            // makes no sense.
-            JSG_FAIL_REQUIRE(Error, "Symbolic link is not writable");
+          KJ_CASE_ONEOF(err, FsError) {
+            return err;
           }
         }
+        KJ_UNREACHABLE;
       }
+    }
 
-      KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
-      KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
-      return openedFiles.insert(OpenedFile{
-        .fd = nextFd++,
-        .read = opts.read,
-        .write = opts.write,
-        .append = opts.append,
-        .node = kj::mv(node),
-      });
+    KJ_IF_SOME(node,
+        rootDir->tryOpen(js, root.eval(str),
+            Directory::OpenOptions{
+              .createAs = FsType::FILE,
+              .followLinks = opts.followLinks,
+            })) {
+      KJ_SWITCH_ONEOF(node) {
+        KJ_CASE_ONEOF(file, kj::Rc<File>) {
+          if (opts.write) {
+            auto stat = file->stat(js);
+            if (!stat.writable) return FsError::NOT_PERMITTED;
+          }
+          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
+          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
+          auto fd = nextFd++;
+          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(file));
+          openedFiles.insert(fd, opened.addRef());
+          return kj::mv(opened);
+        }
+        KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
+          if (opts.write) {
+            // Similar to Node.js, we do not allow opening fd's for
+            // directories for writing.
+            return FsError::NOT_PERMITTED_ON_DIRECTORY;
+          }
+          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
+          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
+          auto fd = nextFd++;
+          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(dir));
+          openedFiles.insert(fd, opened.addRef());
+          return kj::mv(opened);
+        }
+        KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
+          // Symlinks are never directly writable so the write flag
+          // makes no sense.
+          if (opts.write) {
+            return FsError::NOT_PERMITTED;
+          }
+          KJ_DASSERT(openedFiles.find(nextFd) == kj::none);
+          KJ_DEFER(observer->onOpen(openedFiles.size(), nextFd));
+          auto fd = nextFd++;
+          auto opened = kj::rc<OpenedFile>(fd, opts.read, opts.write, opts.append, kj::mv(link));
+          openedFiles.insert(fd, opened.addRef());
+          return kj::mv(opened);
+        }
+        KJ_CASE_ONEOF(err, FsError) {
+          // If we got an error, we just return it.
+          return err;
+        }
+      }
+      KJ_UNREACHABLE;
     }
 
     // The file does not exist, and apparently was not created. Likely the
     // directory is not writable or does not exist.
-    JSG_FAIL_REQUIRE(Error, "Cannot open file: ", url);
+    return FsError::FAILED;
   }
 
   void closeFd(jsg::Lock& js, int fd) const override {
-    openedFiles.eraseMatch(fd);
+    openedFiles.erase(fd);
     observer->onClose(openedFiles.size(), nextFd);
   }
 
-  kj::Maybe<OpenedFile&> tryGetFd(jsg::Lock& js, int fd) const override {
-    return openedFiles.find(fd);
+  kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(jsg::Lock& js, int fd) const override {
+    KJ_IF_SOME(opened, openedFiles.find(fd)) {
+      return opened.addRef();
+    }
+    return kj::none;
   }
 
  private:
@@ -817,34 +894,24 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   // The next file descriptor to be used for the next file opened.
   mutable int nextFd = 0;
 
-  struct Callbacks final {
-    int keyForRow(OpenedFile& row) const {
-      return row.fd;
-    }
-    bool matches(OpenedFile& row, int fd) const {
-      return row.fd == fd;
-    }
-    int hashCode(int fd) const {
-      return kj::hashCode(fd);
-    }
-  };
-
-  mutable kj::Table<OpenedFile, kj::HashIndex<Callbacks>> openedFiles;
+  mutable kj::HashMap<int, kj::Rc<OpenedFile>> openedFiles;
 };
 }  // namespace
 
-jsg::JsString File::readAllText(jsg::Lock& js) {
+kj::OneOf<FsError, jsg::JsString> File::readAllText(jsg::Lock& js) {
   auto info = stat(js);
   KJ_DASSERT(info.type == FsType::FILE);
   if (info.size == 0) return js.str();
 
   KJ_STACK_ARRAY(char, data, info.size, 4096, 4096);
   auto size = read(js, 0, data.asBytes());
-  JSG_REQUIRE(size == info.size, Error, "failed to read all data");
+  if (size != info.size) {
+    return FsError::FAILED;
+  }
   return js.str(data);
 }
 
-jsg::BufferSource File::readAllBytes(jsg::Lock& js) {
+kj::OneOf<FsError, jsg::BufferSource> File::readAllBytes(jsg::Lock& js) {
   auto info = stat(js);
   KJ_DASSERT(info.type == FsType::FILE);
   auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(js, info.size);
@@ -856,13 +923,13 @@ jsg::BufferSource File::readAllBytes(jsg::Lock& js) {
 
 void Directory::Builder::add(
     kj::StringPtr name, kj::OneOf<kj::Rc<File>, kj::Rc<Directory>> fileOrDirectory) {
-  validatePathWithNoSeparators(name);
+  KJ_REQUIRE(validatePathWithNoSeparators(name));
   KJ_REQUIRE(entries.find(name) == kj::none, "file or directory already exists: \"", name, "\"");
   entries.insert(kj::str(name), kj::mv(fileOrDirectory));
 }
 
 void Directory::Builder::add(kj::StringPtr name, kj::Own<Directory::Builder> builder) {
-  validatePathWithNoSeparators(name);
+  KJ_REQUIRE(validatePathWithNoSeparators(name));
   KJ_REQUIRE(entries.find(name) == kj::none, "file or directory already exists: \"", name, "\"");
   entries.insert(kj::str(name), kj::mv(builder));
 }
@@ -1007,14 +1074,15 @@ jsg::Url SymbolicLink::getTargetUrl() const {
   return KJ_ASSERT_NONNULL(jsg::Url::tryParse(path, "file:///"_kj));
 }
 
-kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::resolve(jsg::Lock& js) {
+kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::resolve(
+    jsg::Lock& js) {
   KJ_IF_SOME(ret, root->tryOpen(js, getTargetPath())) {
     KJ_SWITCH_ONEOF(ret) {
       KJ_CASE_ONEOF(file, kj::Rc<File>) {
-        return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
+        return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(file));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<Directory>) {
-        return kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(dir));
+        return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(dir));
       }
       KJ_CASE_ONEOF(link, kj::Rc<SymbolicLink>) {
         // The resolve(...) method here follows all symbolic links in the path,
@@ -1022,6 +1090,9 @@ kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::resolve(jsg:
         // will attempt to resolve it into it's target or return kj::none. If
         // you want the symlink itself, then use tryOpen(...) on the directory
         KJ_UNREACHABLE;
+      }
+      KJ_CASE_ONEOF(err, FsError) {
+        return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(err);
       }
     }
     KJ_UNREACHABLE;
@@ -1041,7 +1112,7 @@ kj::Maybe<const VirtualFileSystem&> VirtualFileSystem::tryGetCurrent(jsg::Lock&)
   return Worker::Api::current().getVirtualFileSystem();
 }
 
-kj::Maybe<FsNode> VirtualFileSystem::resolve(
+kj::Maybe<FsNodeWithError> VirtualFileSystem::resolve(
     jsg::Lock& js, const jsg::Url& url, ResolveOptions options) const {
   if (url.getProtocol() != "file:"_kj) {
     // We only accept file URLs.
@@ -1056,7 +1127,8 @@ kj::Maybe<FsNode> VirtualFileSystem::resolve(
       });
 }
 
-kj::Maybe<Stat> VirtualFileSystem::resolveStat(jsg::Lock& js, const jsg::Url& url) const {
+kj::Maybe<kj::OneOf<FsError, Stat>> VirtualFileSystem::resolveStat(
+    jsg::Lock& js, const jsg::Url& url) const {
   if (url.getProtocol() != "file:"_kj) {
     // We only accept file URLs.
     return kj::none;
@@ -1068,10 +1140,7 @@ kj::Maybe<Stat> VirtualFileSystem::resolveStat(jsg::Lock& js, const jsg::Url& ur
 }
 
 kj::Rc<SymbolicLink> VirtualFileSystem::newSymbolicLink(jsg::Lock& js, const jsg::Url& url) const {
-  if (url.getProtocol() != "file:"_kj) {
-    // We only accept file URLs.
-    JSG_FAIL_REQUIRE(Error, "Invalid URL: ", url);
-  }
+  KJ_REQUIRE(url.getProtocol() == "file:"_kj);
   auto path = kj::str(url.getPathname().slice(1));
   kj::Path root{};
   return kj::rc<SymbolicLink>(getRoot(js), root.eval(path));
@@ -1088,13 +1157,16 @@ SymbolicLinkRecursionGuardScope::~SymbolicLinkRecursionGuardScope() noexcept(fal
   }
 }
 
-void SymbolicLinkRecursionGuardScope::checkSeen(SymbolicLink* link) {
+kj::Maybe<FsError> SymbolicLinkRecursionGuardScope::checkSeen(SymbolicLink* link) {
   if (symbolicLinkGuard == nullptr) {
-    return;
+    return kj::none;
   }
   auto& guard = *symbolicLinkGuard;
-  JSG_REQUIRE(guard.linksSeen.find(link) == kj::none, Error, "Recursive symbolic link detected");
+  if (guard.linksSeen.find(link) != kj::none) {
+    return FsError::SYMLINK_DEPTH_EXCEEDED;
+  }
   guard.linksSeen.insert(link);
+  return kj::none;
 }
 
 namespace {
@@ -1121,20 +1193,20 @@ class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile>
     return addRefToThis();
   }
 
-  void replace(jsg::Lock& js, kj::Rc<File> file) override {
-    // No-op.
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    return kj::none;
   }
 
-  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
-    // No-op.
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    return kj::none;
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
-    // No-op.
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    return kj::none;
   }
 
-  void resize(jsg::Lock& js, uint32_t size) override {
-    // No-op.
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    return kj::none;
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -1153,8 +1225,9 @@ class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile>
     return 0;
   }
 
-  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
-    return buffer.size();
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    return static_cast<uint32_t>(buffer.size());
   }
 };
 
@@ -1178,20 +1251,20 @@ class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile>
     return addRefToThis();
   }
 
-  void replace(jsg::Lock& js, kj::Rc<File> file) override {
-    // No-op.
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    return kj::none;
   }
 
-  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
-    // No-op.
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    return kj::none;
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
-    // No-op.
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    return kj::none;
   }
 
-  void resize(jsg::Lock& js, uint32_t size) override {
-    // No-op.
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    return kj::none;
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -1211,8 +1284,9 @@ class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile>
     return buffer.size();
   }
 
-  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
-    return buffer.size();
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    return static_cast<uint32_t>(buffer.size());
   }
 };
 
@@ -1236,20 +1310,20 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
     return addRefToThis();
   }
 
-  void replace(jsg::Lock& js, kj::Rc<File> file) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot replace /dev/full");
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    return FsError::NOT_PERMITTED;
   }
 
-  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
-    // No-op.
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    return kj::none;
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    return FsError::NOT_PERMITTED;
   }
 
-  void resize(jsg::Lock& js, uint32_t size) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    return FsError::NOT_PERMITTED;
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -1269,8 +1343,9 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
     return buffer.size();
   }
 
-  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/full");
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    return FsError::NOT_PERMITTED;
   }
 };
 
@@ -1292,20 +1367,20 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
     return addRefToThis();
   }
 
-  void replace(jsg::Lock& js, kj::Rc<File> file) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot replace /dev/random");
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    return FsError::NOT_PERMITTED;
   }
 
-  void setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    return FsError::NOT_PERMITTED;
   }
 
-  void fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    return FsError::NOT_PERMITTED;
   }
 
-  void resize(jsg::Lock& js, uint32_t size) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    return FsError::NOT_PERMITTED;
   }
 
   kj::StringPtr jsgGetMemoryName() const override {
@@ -1320,8 +1395,9 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
     // No-op.
   }
 
-  uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
-    JSG_FAIL_REQUIRE(Error, "Cannot write to /dev/random");
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    return FsError::NOT_PERMITTED;
   }
 
   uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {

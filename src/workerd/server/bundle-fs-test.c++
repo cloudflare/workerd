@@ -82,8 +82,12 @@ KJ_TEST("The BundleDirectoryDelegate works") {
 
     auto maybeFile = dir->tryOpen(env.js, kj::Path({"a", "commonJsModule"}));
     auto& file = KJ_ASSERT_NONNULL(maybeFile).get<kj::Rc<File>>();
-    KJ_EXPECT(file->readAllText(env.js) == env.js.str("this is a commonjs module"_kj));
-    KJ_EXPECT(file->readAllBytes(env.js).asArrayPtr() == "this is a commonjs module"_kjb);
+
+    auto readText = file->readAllText(env.js).get<jsg::JsString>();
+    KJ_EXPECT(readText == env.js.str("this is a commonjs module"_kj));
+
+    auto readBytes = file->readAllBytes(env.js).get<jsg::BufferSource>();
+    KJ_EXPECT(readBytes.asArrayPtr() == "this is a commonjs module"_kjb);
 
     // Reading five bytes from offset 20 should return "odule".
     kj::byte buffer[5]{};
@@ -99,17 +103,11 @@ KJ_TEST("The BundleDirectoryDelegate works") {
     KJ_EXPECT(error == FsError::READ_ONLY);
 
     // Attempting to create a file should fail.
-    try {
-      dir->tryOpen(env.js, kj::Path({"a", "something", "else"}),
-          Directory::OpenOptions{
-            .createAs = FsType::FILE,
-          });
-      KJ_FAIL_ASSERT("should have failed");
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_EXPECT(ex.getDescription().endsWith(
-          "jsg.Error: Cannot create a new file or directory in a read-only directory"));
-    }
+    auto maybeErr = dir->tryOpen(env.js, kj::Path({"a", "something", "else"}),
+        Directory::OpenOptions{
+          .createAs = FsType::FILE,
+        });
+    KJ_EXPECT(KJ_ASSERT_NONNULL(maybeErr).get<FsError>() == FsError::READ_ONLY);
   });
 }
 
@@ -129,49 +127,25 @@ KJ_TEST("Guarding against circular symlinks works") {
     auto maybeTemp = KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///"_url));
     auto& tempDir = maybeTemp.get<kj::Rc<Directory>>();
 
-    tempDir->add(env.js, "a", vfs->newSymbolicLink(env.js, "file:///b"_url));
-    tempDir->add(env.js, "b", vfs->newSymbolicLink(env.js, "file:///c"_url));
-    tempDir->add(env.js, "c", vfs->newSymbolicLink(env.js, "file:///a"_url));
-    tempDir->add(env.js, "d", vfs->newSymbolicLink(env.js, "file:///e"_url));
+    KJ_EXPECT(tempDir->add(env.js, "a", vfs->newSymbolicLink(env.js, "file:///b"_url)) == kj::none);
+    KJ_EXPECT(tempDir->add(env.js, "b", vfs->newSymbolicLink(env.js, "file:///c"_url)) == kj::none);
+    KJ_EXPECT(tempDir->add(env.js, "c", vfs->newSymbolicLink(env.js, "file:///a"_url)) == kj::none);
+    KJ_EXPECT(tempDir->add(env.js, "d", vfs->newSymbolicLink(env.js, "file:///e"_url)) == kj::none);
 
     // This symlink goes no where. A kj::none should be returned.
     KJ_EXPECT(vfs->resolve(env.js, "file:///d"_url) == kj::none);
 
-    try {
-      // This symlink is circular. It should throw an exception.
-      vfs->resolve(env.js, "file:///a"_url);
-      KJ_FAIL_ASSERT("should have failed");
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_EXPECT(ex.getDescription().endsWith("jsg.Error: Recursive symbolic link detected"));
-    }
+    auto resolved = KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///a"_url));
+    KJ_EXPECT(resolved.get<workerd::FsError>() == workerd::FsError::SYMLINK_DEPTH_EXCEEDED);
 
-    try {
-      // This symlink is circular. It should throw an exception.
-      vfs->resolveStat(env.js, "file:///a"_url);
-      KJ_FAIL_ASSERT("should have failed");
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_EXPECT(ex.getDescription().endsWith("jsg.Error: Recursive symbolic link detected"));
-    }
+    auto resolvedStat = KJ_ASSERT_NONNULL(vfs->resolveStat(env.js, "file:///a"_url));
+    KJ_EXPECT(resolvedStat.get<workerd::FsError>() == workerd::FsError::SYMLINK_DEPTH_EXCEEDED);
 
-    try {
-      // This symlink is circular. It should throw an exception.
-      vfs->resolve(env.js, "file:///b"_url);
-      KJ_FAIL_ASSERT("should have failed");
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_EXPECT(ex.getDescription().endsWith("jsg.Error: Recursive symbolic link detected"));
-    }
+    resolved = KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///b"_url));
+    KJ_EXPECT(resolved.get<workerd::FsError>() == workerd::FsError::SYMLINK_DEPTH_EXCEEDED);
 
-    try {
-      // This symlink is circular. It should throw an exception.
-      vfs->resolve(env.js, "file:///c"_url);
-      KJ_FAIL_ASSERT("should have failed");
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_EXPECT(ex.getDescription().endsWith("jsg.Error: Recursive symbolic link detected"));
-    }
+    resolved = KJ_ASSERT_NONNULL(vfs->resolve(env.js, "file:///c"_url));
+    KJ_EXPECT(resolved.get<workerd::FsError>() == workerd::FsError::SYMLINK_DEPTH_EXCEEDED);
 
     // And while we're at it, let's check that a symlink can be removed
     KJ_EXPECT(tempDir->remove(env.js, kj::Path({"a"})).get<bool>());

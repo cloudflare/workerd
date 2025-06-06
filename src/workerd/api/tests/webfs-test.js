@@ -91,7 +91,8 @@ export const deviceTest = {
     const syncFull = await devFull.createSyncAccessHandle();
     strictEqual(syncFull.getSize(), 0);
     throws(() => syncFull.write(enc.encode('hello world')), {
-      message: 'Cannot write to /dev/full',
+      message: 'Operation not permitted',
+      name: 'NotAllowedError',
     });
     strictEqual(syncFull.getSize(), 0);
     const u8Full = new Buffer.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
@@ -104,7 +105,8 @@ export const deviceTest = {
     const syncRandom = await devRandom.createSyncAccessHandle();
     strictEqual(syncRandom.getSize(), 0);
     throws(() => syncRandom.write(enc.encode('hello world')), {
-      message: 'Cannot write to /dev/random',
+      message: 'Operation not permitted',
+      name: 'NotAllowedError',
     });
     strictEqual(syncRandom.getSize(), 0);
     const u8Random = new Buffer.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
