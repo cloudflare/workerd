@@ -31,7 +31,7 @@ class ContainerStreamSharedState;
 // tryRead() method (which provides those messages to the C++ side).
 struct ContainerAsyncStream final: public kj::AsyncIoStream {
   ContainerAsyncStream(::rust::Box<rust::container::ContainerService> service,
-      kj::Rc<ContainerStreamSharedState> sharedState)
+      kj::Arc<ContainerStreamSharedState> sharedState)
       : service(kj::mv(service)),
         sharedState(kj::mv(sharedState)) {}
 
@@ -43,21 +43,28 @@ struct ContainerAsyncStream final: public kj::AsyncIoStream {
 
  private:
   ::rust::Box<rust::container::ContainerService> service;
-  kj::Rc<ContainerStreamSharedState> sharedState;
+  kj::Arc<ContainerStreamSharedState> sharedState;
 };
 
 // Shared state between MessageCallback and ContainerAsyncStream
-class ContainerStreamSharedState: public kj::Refcounted {
+class ContainerStreamSharedState: public kj::AtomicRefcounted,
+                                  public kj::EnableAddRefToThis<ContainerStreamSharedState> {
  public:
   ContainerStreamSharedState();
 
-  void enqueueMessage(::rust::Slice<const uint8_t> message);
-  kj::Maybe<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes);
-  kj::Promise<void> waitForMessage();
+  void enqueueMessage(::rust::Slice<const uint8_t> message) const;
+  kj::Maybe<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) const;
+  kj::Promise<void> waitForMessage() const;
+
+  using MessageCallback = rust::container::MessageCallback;
+  MessageCallback& messageCallback() const {
+    return const_cast<MessageCallback&>(callback);
+  }
 
  private:
   kj::MutexGuarded<std::queue<kj::byte>> messageQueue;
   kj::MutexGuarded<kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>>> readWaiter;
+  MessageCallback callback;
 };
 
 kj::Own<ContainerAsyncStream> createContainerRpcStream(

@@ -9,9 +9,12 @@
 
 namespace workerd::io {
 
-ContainerStreamSharedState::ContainerStreamSharedState() {}
+ContainerStreamSharedState::ContainerStreamSharedState() {
+  callback = [self = addRefToThis()](
+                 ::rust::Slice<const uint8_t> message) mutable { self->enqueueMessage(message); };
+}
 
-void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> message) {
+void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> message) const {
   auto lockedQueue = messageQueue.lockExclusive();
   for (auto& byte: message) {
     lockedQueue->push(byte);
@@ -25,7 +28,7 @@ void ContainerStreamSharedState::enqueueMessage(::rust::Slice<const uint8_t> mes
 }
 
 kj::Maybe<size_t> ContainerStreamSharedState::tryRead(
-    void* buffer, size_t minBytes, size_t maxBytes) {
+    void* buffer, size_t minBytes, size_t maxBytes) const {
   auto lockedQueue = messageQueue.lockExclusive();
   if (lockedQueue->empty()) {
     return kj::none;
@@ -40,7 +43,7 @@ kj::Maybe<size_t> ContainerStreamSharedState::tryRead(
   return min;
 }
 
-kj::Promise<void> ContainerStreamSharedState::waitForMessage() {
+kj::Promise<void> ContainerStreamSharedState::waitForMessage() const {
   auto lockedWaiter = readWaiter.lockExclusive();
   KJ_REQUIRE(*lockedWaiter == kj::none, "Only one reader can wait at a time");
 
@@ -101,14 +104,10 @@ kj::Promise<void> ContainerAsyncStream::whenWriteDisconnected() {
 
 kj::Own<ContainerAsyncStream> createContainerRpcStream(
     kj::StringPtr address, kj::StringPtr containerName) {
-  auto sharedState = kj::rc<ContainerStreamSharedState>();
+  auto sharedState = kj::arc<ContainerStreamSharedState>();
 
-  rust::container::MessageCallback callback = [sharedState = sharedState.addRef()](
-                                                  ::rust::Slice<const uint8_t> message) mutable {
-    sharedState->enqueueMessage(message);
-  };
-
-  auto service = rust::container::new_service(address.cStr(), containerName.cStr(), callback);
+  auto service = rust::container::new_service(
+      address.cStr(), containerName.cStr(), sharedState->messageCallback());
   return kj::heap<ContainerAsyncStream>(kj::mv(service), kj::mv(sharedState));
 }
 

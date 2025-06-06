@@ -159,11 +159,11 @@ impl Impl {
             local.spawn_local(async move {
                 loop {
                     let mut buf = [0; 8096];
-                    let len = output_receiver.read(&mut buf).await;
-                    if len.is_err() {
+                    let Ok(len) = output_receiver.read(&mut buf).await else {
                         break;
-                    }
-                    messages_callback.as_mut().call(&buf[0..len.unwrap()]);
+                    };
+                    dbg!(len);
+                    messages_callback.as_mut().call(&buf[0..len]);
                 }
                 dbg!("OUTPUT_RECEIVER.RECV() ENDED");
             });
@@ -311,15 +311,17 @@ impl container::Server for Server {
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
+            dbg!("querying status");
             let inspect = docker
                 .inspect_container(&container_name, None::<InspectContainerOptions>)
                 .await
                 .map_err(|e| capnp::Error::failed(e.to_string()))?;
-
+            dbg!(&inspect);
             let mut builder = results.get();
             if let Some(state) = inspect.state {
                 builder.set_running(state.running.unwrap_or(false));
             }
+            dbg!(builder.reborrow_as_reader());
             Ok(())
         })
     }
