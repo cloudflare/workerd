@@ -47,18 +47,16 @@ kj::Promise<void> ContainerStreamSharedState::waitForMessage() const {
   auto lockedWaiter = readWaiter.lockExclusive();
   KJ_REQUIRE(*lockedWaiter == kj::none, "Only one reader can wait at a time");
 
-  auto paf = kj::newPromiseAndFulfiller<void>();
+  auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
   *lockedWaiter = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
 
 void ContainerAsyncStream::shutdownWrite() {
-  KJ_DBG("SHUTDOWN_WRITE");
   service->shutdown_write();
 }
 
 kj::Promise<size_t> ContainerAsyncStream::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
-  KJ_DBG("TRY_READ");
   KJ_IF_SOME(consumed, sharedState->tryRead(buffer, minBytes, maxBytes)) {
     co_return consumed;
   }
@@ -68,13 +66,12 @@ kj::Promise<size_t> ContainerAsyncStream::tryRead(void* buffer, size_t minBytes,
   }
 
   co_await sharedState->waitForMessage();
-  co_return co_await tryRead(buffer, minBytes, maxBytes);
+  auto n = co_await tryRead(buffer, minBytes, maxBytes);
+  co_return n;
 }
 
 kj::Promise<void> ContainerAsyncStream::write(kj::ArrayPtr<const kj::byte> buffer) {
-  KJ_DBG("WRITE");
   if (!service->write_data(buffer.as<Rust>())) {
-    KJ_DBG("WRITE FAILED");
     return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
   }
   return kj::READY_NOW;
@@ -82,14 +79,11 @@ kj::Promise<void> ContainerAsyncStream::write(kj::ArrayPtr<const kj::byte> buffe
 
 kj::Promise<void> ContainerAsyncStream::write(
     kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) {
-  KJ_DBG("WRITE_ALL");
   for (auto piece: pieces) {
     if (!service->write_data(piece.as<Rust>())) {
-      KJ_DBG("WRITE_ALL FAILED");
       return KJ_EXCEPTION(DISCONNECTED, "Write failed: stream is disconnected");
     }
   }
-  KJ_DBG("WRITE_ALL FINISHED");
   return kj::READY_NOW;
 }
 

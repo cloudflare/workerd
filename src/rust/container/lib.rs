@@ -1,6 +1,5 @@
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::mpsc;
 
 use bollard::API_DEFAULT_VERSION;
 use bollard::Docker;
@@ -16,16 +15,13 @@ use capnp::capability::Promise;
 use capnp::message::ReaderOptions;
 use capnp_rpc::rpc_twoparty_capnp;
 use container_capnp::container;
-use futures::AsyncReadExt;
-use futures::AsyncWriteExt;
 use futures::StreamExt;
 use thiserror::Error;
 use tokio::runtime::Builder;
 
 pub mod io;
-use io::channel;
 use io::signo_as_string;
-use tokio::sync::Notify;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Error)]
 pub enum ContainerError {
@@ -99,8 +95,10 @@ impl ContainerService {
         {
             return false;
         }
-        self.r#impl.sender.try_send(data.to_vec()).unwrap();
-        self.r#impl.notify.notify_one();
+        self.r#impl
+            .input_sender
+            .blocking_send(data.to_vec())
+            .expect("todo");
         true
     }
 
@@ -119,8 +117,7 @@ impl ContainerService {
 }
 
 struct Impl {
-    sender: mpsc::SyncSender<Vec<u8>>,
-    notify: Arc<Notify>,
+    input_sender: mpsc::Sender<Vec<u8>>,
     write_shutdown: std::sync::atomic::AtomicBool,
 }
 
@@ -130,61 +127,39 @@ impl Impl {
         container_name: &str,
         mut messages_callback: Pin<&'static mut ffi::MessageCallback>,
     ) -> Result<Self, ContainerError> {
-        let (input_sender, input_receiver) = mpsc::sync_channel::<Vec<u8>>(1000);
-        let (output_sender, mut output_receiver) = channel();
-        let (mut tokio_input_sender, tokio_input_receiver) = channel();
-        let output_notify = Arc::new(Notify::new());
-        let notifiy_awaiter = output_notify.clone();
+        let (output_sender, mut output_receiver) = mpsc::channel(1000);
+        let (input_sender, input_receiver) = mpsc::channel::<Vec<u8>>(1000);
 
         let server = Server::connect(address, container_name)?;
-        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
 
         std::thread::spawn(move || {
-            dbg!("SPAWNING TOKIO");
+            let runtime = Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("todo");
             let local = tokio::task::LocalSet::new();
+
             local.spawn_local(async move {
                 let client: container::Client = capnp_rpc::new_client(server);
-                dbg!("INITIALIZING RPC");
                 let network = capnp_rpc::twoparty::VatNetwork::new(
-                    tokio_input_receiver,
-                    output_sender,
+                    crate::io::MpscReader::new(input_receiver),
+                    crate::io::MpscWriter::new(output_sender),
                     rpc_twoparty_capnp::Side::Server,
                     ReaderOptions::default(),
                 );
                 let rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), Some(client.client));
-
-                dbg!("RPC_SYSTEM SPAWNING");
                 tokio::task::spawn_local(rpc_system);
             });
-            local.spawn_local(async move {
-                loop {
-                    let mut buf = [0; 8096];
-                    let Ok(len) = output_receiver.read(&mut buf).await else {
-                        break;
-                    };
-                    dbg!(len);
-                    messages_callback.as_mut().call(&buf[0..len]);
+            runtime.spawn(async move {
+                while let Some(message) = output_receiver.recv().await {
+                    messages_callback.as_mut().call(&message);
                 }
-                dbg!("OUTPUT_RECEIVER.RECV() ENDED");
-            });
-            local.spawn_local(async move {
-                loop {
-                    notifiy_awaiter.notified().await;
-                    while let Ok(msg) = input_receiver.try_recv() {
-                        if tokio_input_sender.write(&msg).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-                dbg!("INPUT_RECEIVER.RECV() ENDED");
             });
             runtime.block_on(local);
-            dbg!("RPC_SYSTEM DONE");
         });
 
         Ok(Impl {
-            sender: input_sender,
-            notify: output_notify,
+            input_sender,
             write_shutdown: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -197,8 +172,7 @@ struct Server {
 
 impl Server {
     fn connect(address: &str, container_name: &str) -> Result<Self, ContainerError> {
-        dbg!("CONNECT");
-        let docker = Docker::connect_with_socket(address, 120, API_DEFAULT_VERSION)?;
+        let docker = Docker::connect_with_socket(address, 5, API_DEFAULT_VERSION)?;
         Ok(Server {
             docker: docker.into(),
             container_name: container_name.to_owned(),
@@ -212,7 +186,6 @@ impl container::Server for Server {
         _: container::DestroyParams,
         _: container::DestroyResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("DESTROY");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -236,7 +209,6 @@ impl container::Server for Server {
         params: container::SignalParams,
         _: container::SignalResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("SIGNAL");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -261,7 +233,6 @@ impl container::Server for Server {
         raw_params: container::StartParams,
         _: container::StartResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("START");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -307,21 +278,17 @@ impl container::Server for Server {
         _: container::StatusParams,
         mut results: container::StatusResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("STATUS");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
-            dbg!("querying status");
             let inspect = docker
                 .inspect_container(&container_name, None::<InspectContainerOptions>)
                 .await
                 .map_err(|e| capnp::Error::failed(e.to_string()))?;
-            dbg!(&inspect);
             let mut builder = results.get();
             if let Some(state) = inspect.state {
                 builder.set_running(state.running.unwrap_or(false));
             }
-            dbg!(builder.reborrow_as_reader());
             Ok(())
         })
     }
@@ -331,7 +298,6 @@ impl container::Server for Server {
         _: container::MonitorParams,
         _: container::MonitorResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("MONITOR");
         let container_name = self.container_name.clone();
         let docker = self.docker.clone();
         Promise::from_future(async move {
@@ -365,7 +331,6 @@ impl container::Server for Server {
         _params: container::ListenTcpParams,
         _results: container::ListenTcpResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("LISTEN_TCP");
         Promise::from_future(async move {
             Err(capnp::Error::unimplemented(
                 "listen_tcp is not implemented".to_owned(),
@@ -379,7 +344,6 @@ impl container::Server for Server {
         _params: container::GetTcpPortParams,
         _results: container::GetTcpPortResults,
     ) -> Promise<(), capnp::Error> {
-        dbg!("GET_TCP_PORT");
         Promise::from_future(async move {
             Err(capnp::Error::unimplemented(
                 "get_tcp_port is not implemented".to_owned(),
