@@ -10,15 +10,19 @@ import {
 import { getOptions } from 'node-internal:internal_fs_utils';
 import { validateFunction, validateUint32 } from 'node-internal:validators';
 import { ERR_MISSING_ARGS } from 'node-internal:internal_errors';
-
+import type { Buffer } from 'node-internal:internal_buffer';
 const kType = Symbol('type');
 
 export class Dirent {
-  public name: string;
-  public parentPath: string;
+  public name: string | Buffer;
+  public parentPath: string | Buffer;
   private [kType]: number;
 
-  public constructor(name: string, type: number, path: string) {
+  public constructor(
+    name: string | Buffer,
+    type: number,
+    path: string | Buffer
+  ) {
     this.name = name;
     this.parentPath = path;
     this[kType] = type;

@@ -27,7 +27,6 @@ import { default as cffs } from 'cloudflare-internal:filesystem';
 import type {
   FStatOptions,
   MkdirTempSyncOptions,
-  ReadDirOptions,
   ReadDirResult,
   ReadFileSyncOptions,
   ReadLinkSyncOptions,
@@ -41,12 +40,17 @@ import {
   validateChownArgs,
   validateChmodArgs,
   validateStatArgs,
+  validateMkDirArgs,
+  validateRmArgs,
+  validateRmDirArgs,
+  validateReaddirArgs,
   normalizePath,
   Stats,
   type FilePath,
   type Position,
   type RawTime,
   type SymlinkType,
+  type ReadDirOptions,
   getValidatedFd,
 } from 'node-internal:internal_fs_utils';
 import { F_OK } from 'node-internal:internal_fs_constants';
@@ -441,10 +445,11 @@ export function mkdir(
   } else {
     options = optionsOrCallback;
   }
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of mkdir, which does the
-  // validation itself.
-  callWithSingleArgCallback(() => fssync.mkdirSync(path, options), callback);
+  const { path: normalizedPath, recursive } = validateMkDirArgs(path, options);
+  callWithSingleArgCallback(
+    () => fssync.mkdirSync(normalizedPath, { recursive }),
+    callback
+  );
 }
 
 export function mkdtemp(
@@ -803,10 +808,19 @@ export function readdir(
   } else {
     options = optionsOrCallback;
   }
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of readdir, which does the
-  // validation itself.
-  callWithSingleArgCallback(() => fssync.readdirSync(path, options), callback);
+  const {
+    path: normalizedPath,
+    recursive,
+    withFileTypes,
+    encoding,
+  } = validateReaddirArgs(path, options);
+  callWithSingleArgCallback(() => {
+    return fssync.readdirSync(normalizedPath, {
+      recursive,
+      withFileTypes,
+      encoding,
+    });
+  }, callback);
 }
 
 export function readFile(
@@ -927,11 +941,10 @@ export function rmdir(
   } else {
     options = optionsOrCallback;
   }
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of rmdir, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.rmdirSync(path, options), callback);
+  const { path: normalizedPath, recursive } = validateRmDirArgs(path, options);
+  callWithErrorOnlyCallback(() => {
+    fssync.rmdirSync(normalizedPath, { recursive });
+  }, callback);
 }
 
 export function rm(
@@ -946,11 +959,14 @@ export function rm(
   } else {
     options = optionsOrCallback;
   }
-  // We are not performing any argument validation here because we are
-  // falling through to the synchronous version of rm, which does the
-  // validation itself.
-  // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
-  callWithErrorOnlyCallback(() => fssync.rmSync(path, options), callback);
+  const {
+    path: normalizedPath,
+    recursive,
+    force,
+  } = validateRmArgs(path, options);
+  callWithErrorOnlyCallback(() => {
+    fssync.rmSync(normalizedPath, { recursive, force });
+  }, callback);
 }
 
 export function stat(
@@ -1221,15 +1237,20 @@ export function createWriteStream(): void {
 // [x][x][x][x] fs.statfs(path[, options], callback)
 // [x][x][x][x] fs.fdatasync(fd, callback)
 // [x][x][x][x] fs.fsync(fd, callback)
-// [-][-][-][-] fs.unwatchFile(filename[, listener])
-// [-][-][-][-] fs.watch(filename[, options][, listener])
-// [-][-][-][-] fs.watchFile(filename[, options], listener)
 // [x][x][x][x] fs.link(existingPath, newPath, callback)
 // [x][x][x][x] fs.readlink(path[, options], callback)
 // [x][x][x][x] fs.realpath(path[, options], callback)
 // [x][x][x][x] fs.realpath.native(path[, options], callback)
 // [x][x][x][x] fs.symlink(target, path[, type], callback)
 // [x][x][x][x] fs.unlink(path, callback)
+// [x][x][x][x] fs.mkdir(path[, options], callback)
+// [x][x][x][x] fs.mkdtemp(prefix[, options], callback)
+// [x][x][x][x] fs.readdir(path[, options], callback)
+// [x][x][x][x] fs.rmdir(path[, options], callback)
+// [x][x][x][x] fs.rm(path[, options], callback)
+// [-][-][-][-] fs.unwatchFile(filename[, listener])
+// [-][-][-][-] fs.watch(filename[, options][, listener])
+// [-][-][-][-] fs.watchFile(filename[, options], listener)
 //
 // [x][x][ ][ ] fs.appendFile(path, data[, options], callback)
 // [x][x][x][ ] fs.close(fd[, callback])
@@ -1239,20 +1260,15 @@ export function createWriteStream(): void {
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
 // [x][x][x][ ] fs.ftruncate(fd[, len], callback)
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
-// [x][x][ ][ ] fs.mkdir(path[, options], callback)
-// [x][x][ ][ ] fs.mkdtemp(prefix[, options], callback)
 // [x][x][x][ ] fs.open(path[, flags[, mode]], callback)
 // [ ][ ][ ][ ] fs.openAsBlob(path[, options])
 // [x][x][ ][ ] fs.opendir(path[, options], callback)
 // [x][x][ ][ ] fs.read(fd, buffer, offset, length, position, callback)
 // [x][x][ ][ ] fs.read(fd[, options], callback)
 // [x][x][ ][ ] fs.read(fd, buffer[, options], callback)
-// [x][x][ ][ ] fs.readdir(path[, options], callback)
 // [x][x][ ][ ] fs.readFile(path[, options], callback)
 // [x][x][ ][ ] fs.readv(fd, buffers[, position], callback)
 // [x][x][ ][ ] fs.rename(oldPath, newPath, callback)
-// [x][x][ ][ ] fs.rmdir(path[, options], callback)
-// [x][x][ ][ ] fs.rm(path[, options], callback)
 // [x][x][x][ ] fs.truncate(path[, len], callback)
 // [x][x][ ][ ] fs.write(fd, buffer, offset[, length[, position]], callback)
 // [x][x][ ][ ] fs.write(fd, buffer[, options], callback)

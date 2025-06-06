@@ -38,6 +38,7 @@ import {
   validateFunction,
   validateInt32,
   validateUint32,
+  validateEncoding,
   parseFileMode,
 } from 'node-internal:validators';
 import { isDate, isArrayBufferView } from 'node-internal:internal_types';
@@ -72,7 +73,13 @@ import { strictEqual } from 'node-internal:internal_assert';
 import { Buffer } from 'node-internal:internal_buffer';
 export type FilePath = string | URL | Buffer;
 
-import type { CopyOptions, CopySyncOptions, RmDirOptions } from 'node:fs';
+import type {
+  CopyOptions,
+  CopySyncOptions,
+  MakeDirectoryOptions,
+  RmDirOptions,
+  RmOptions,
+} from 'node:fs';
 
 import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
 
@@ -236,6 +243,105 @@ export function validateChmodArgs(
   return {
     pathOrFd: normalizePath(pathOrFd),
     mode: actualMode,
+  };
+}
+
+export function validateMkDirArgs(
+  path: FilePath,
+  options: number | MakeDirectoryOptions
+): { path: URL; recursive: boolean } {
+  const { recursive = false, mode = 0o777 } = ((): MakeDirectoryOptions => {
+    if (typeof options === 'number') {
+      return { mode: options };
+    } else {
+      validateObject(options, 'options');
+      return options;
+    }
+  })();
+
+  validateBoolean(recursive, 'options.recursive');
+
+  // We don't implement the mode option in any meaningful way. We just validate it.
+  parseFileMode(mode, 'mode');
+
+  return {
+    path: normalizePath(path),
+    recursive,
+  };
+}
+
+export function validateRmArgs(
+  path: FilePath,
+  options: RmOptions
+): { path: URL; recursive: boolean; force: boolean } {
+  validateObject(options, 'options');
+  const {
+    force = false,
+    maxRetries = 0,
+    recursive = false,
+    retryDelay = 0,
+  } = options;
+  // We do not implement the maxRetries or retryDelay options in any meaningful
+  // way. We just validate them.
+  validateBoolean(force, 'options.force');
+  validateUint32(maxRetries, 'options.maxRetries');
+  validateBoolean(recursive, 'options.recursive');
+  validateUint32(retryDelay, 'options.retryDelay');
+  return {
+    path: normalizePath(path),
+    recursive,
+    force,
+  };
+}
+
+export function validateRmDirArgs(
+  path: FilePath,
+  options: RmDirOptions
+): { path: URL; recursive: boolean } {
+  validateObject(options, 'options');
+  const { maxRetries = 0, recursive = false, retryDelay = 0 } = options;
+  // We do not implement the maxRetries or retryDelay options in any meaningful
+  // way. We just validate them.
+  validateUint32(maxRetries, 'options.maxRetries');
+  validateBoolean(recursive, 'options.recursive');
+  validateUint32(retryDelay, 'options.retryDelay');
+  return {
+    path: normalizePath(path),
+    recursive,
+  };
+}
+
+// We could use the @types/node definition here but it's a bit overly
+// complex for our needs here.
+export type ReadDirOptions = {
+  encoding?: BufferEncoding | null | undefined;
+  withFileTypes?: boolean | undefined;
+  recursive?: boolean | undefined;
+};
+
+export function validateReaddirArgs(
+  path: FilePath,
+  options: ReadDirOptions
+): {
+  path: URL;
+  encoding: BufferEncoding;
+  withFileTypes: boolean;
+  recursive: boolean;
+} {
+  validateObject(options, 'options');
+  const {
+    encoding = 'utf8',
+    withFileTypes = false,
+    recursive = false,
+  } = options;
+  validateEncoding(encoding, 'options.encoding');
+  validateBoolean(withFileTypes, 'options.withFileTypes');
+  validateBoolean(recursive, 'options.recursive');
+  return {
+    path: normalizePath(path),
+    encoding,
+    withFileTypes,
+    recursive,
   };
 }
 

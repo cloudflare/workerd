@@ -37,11 +37,16 @@ import {
   type Position,
   type RawTime,
   type SymlinkType,
+  type ReadDirOptions,
   validatePosition,
   validateAccessArgs,
   validateChownArgs,
   validateChmodArgs,
   validateStatArgs,
+  validateMkDirArgs,
+  validateRmArgs,
+  validateRmDirArgs,
+  validateReaddirArgs,
 } from 'node-internal:internal_fs_utils';
 import {
   validateInteger,
@@ -383,21 +388,9 @@ export function mkdirSync(
   path: FilePath,
   options: number | MakeDirectoryOptions = {}
 ): string | undefined {
-  const { recursive = false, mode = 0o777 } = ((): MakeDirectoryOptions => {
-    if (typeof options === 'number') {
-      return { mode: options };
-    } else {
-      validateObject(options, 'options');
-      return options;
-    }
-  })();
+  const { path: normalizedPath, recursive } = validateMkDirArgs(path, options);
 
-  validateBoolean(recursive, 'options.recursive');
-
-  // We don't implement the mode option in any meaningful way. We just validate it.
-  parseFileMode(mode, 'mode');
-
-  return cffs.mkdir(normalizePath(path), { recursive, tmp: false });
+  return cffs.mkdir(normalizedPath, { recursive, tmp: false });
 }
 
 export type MkdirTempSyncOptions = {
@@ -463,14 +456,6 @@ export function openSync(
   });
 }
 
-// We could use the @types/node definition here but it's a bit overly
-// complex for our needs here.
-export type ReadDirOptions = {
-  encoding?: BufferEncoding | null | undefined;
-  withFileTypes?: boolean | undefined;
-  recursive?: boolean | undefined;
-};
-
 export type ReadDirResult = string[] | Buffer[] | Dirent[];
 
 export function readdirSync(
@@ -480,26 +465,38 @@ export function readdirSync(
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
-  validateObject(options, 'options');
   const {
-    encoding = 'utf8',
-    withFileTypes = false,
-    recursive = false,
-  } = options;
-  validateEncoding(encoding, 'options.encoding');
-  validateBoolean(withFileTypes, 'options.withFileTypes');
-  validateBoolean(recursive, 'options.recursive');
+    path: normalizedPath,
+    encoding,
+    withFileTypes,
+    recursive,
+  } = validateReaddirArgs(path, options);
 
-  const handles = cffs.readdir(normalizePath(path), { recursive });
+  const handles = cffs.readdir(normalizedPath, { recursive });
 
   if (withFileTypes) {
+    if ((encoding as string) === 'buffer') {
+      return handles.map((handle) => {
+        return new Dirent(
+          Buffer.from(handle.name),
+          handle.type,
+          handle.parentPath
+        );
+      });
+    }
     return handles.map((handle) => {
       return new Dirent(handle.name, handle.type, handle.parentPath);
     });
   }
 
+  if ((encoding as string) === 'buffer') {
+    return handles.map((handle) => {
+      return Buffer.from(handle.name);
+    });
+  }
+
   return handles.map((handle) => {
-    return handle.name;
+    return Buffer.from(handle.name).toString(encoding);
   });
 }
 
@@ -680,33 +677,19 @@ export function renameSync(src: FilePath, dest: FilePath): void {
 }
 
 export function rmdirSync(path: FilePath, options: RmDirOptions = {}): void {
-  validateObject(options, 'options');
-  const { maxRetries = 0, recursive = false, retryDelay = 0 } = options;
-  // We do not implement the maxRetries or retryDelay options in any meaningful
-  // way. We just validate them.
-  validateUint32(maxRetries, 'options.maxRetries');
-  validateBoolean(recursive, 'options.recursive');
-  validateUint32(retryDelay, 'options.retryDelay');
+  const { path: normalizedPath, recursive } = validateRmDirArgs(path, options);
 
-  cffs.rm(normalizePath(path), { recursive, force: false, dironly: true });
+  cffs.rm(normalizedPath, { recursive, force: false, dironly: true });
 }
 
 export function rmSync(path: FilePath, options: RmOptions = {}): void {
-  validateObject(options, 'options');
   const {
-    force = false,
-    maxRetries = 0,
-    recursive = false,
-    retryDelay = 0,
-  } = options;
-  // We do not implement the maxRetries or retryDelay options in any meaningful
-  // way. We just validate them.
-  validateBoolean(force, 'options.force');
-  validateUint32(maxRetries, 'options.maxRetries');
-  validateBoolean(recursive, 'options.recursive');
-  validateUint32(retryDelay, 'options.retryDelay');
+    path: normalizedPath,
+    recursive,
+    force,
+  } = validateRmArgs(path, options);
 
-  cffs.rm(normalizePath(path), { recursive, force, dironly: false });
+  cffs.rm(normalizedPath, { recursive, force, dironly: false });
 }
 
 export function statSync(
@@ -966,14 +949,16 @@ export function writevSync(
 // [x][x][2][x][x] fs.realpathSync.native(path[, options])
 // [x][x][2][x][x] fs.symlinkSync(target, path[, type])
 // [x][x][2][x][x] fs.unlinkSync(path)
+// [x][x][2][x][x] fs.mkdirSync(path[, options])
+// [x][x][2][x][x] fs.mkdtempSync(prefix[, options])
+// [x][x][2][x][x] fs.rmdirSync(path[, options])
+// [x][x][2][x][x] fs.rmSync(path[, options])
 //
 // [x][x][1][ ][ ] fs.appendFileSync(path, data[, options])
 // [x][x][1][ ][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
 // [x][x][1][ ][ ] fs.ftruncateSync(fd[, len])
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])
-// [x][x][1][ ][ ] fs.mkdirSync(path[, options])
-// [x][x][1][ ][ ] fs.mkdtempSync(prefix[, options])
 // [x][ ][ ][ ][ ] fs.opendirSync(path[, options])
 // [x][x][1][ ][ ] fs.openSync(path[, flags[, mode]])
 // [x][x][1][ ][ ] fs.readdirSync(path[, options])
@@ -982,8 +967,6 @@ export function writevSync(
 // [x][x][1][ ][ ] fs.readSync(fd, buffer[, options])
 // [x][x][1][ ][ ] fs.readvSync(fd, buffers[, position])
 // [x][x][1][ ][ ] fs.renameSync(oldPath, newPath)
-// [x][x][1][ ][ ] fs.rmdirSync(path[, options])
-// [x][x][1][ ][ ] fs.rmSync(path[, options])
 // [x][x][1][ ][ ] fs.truncateSync(path[, len])
 // [x][x][1][ ][ ] fs.writeFileSync(file, data[, options])
 // [x][x][1][ ][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
