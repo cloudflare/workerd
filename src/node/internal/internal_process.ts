@@ -6,11 +6,13 @@
 // is only an approximation of process.nextTick semantics. Hopefully it's good
 // enough because we really do not want to implement Node.js' idea of a nextTick
 // queue.
-/* eslint-disable */
 
 import { validateObject } from 'node-internal:validators';
 
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_VALUE,
+  NodeError,
+} from 'node-internal:internal_errors';
 
 import { default as processImpl } from 'node-internal:process';
 import {
@@ -48,95 +50,101 @@ export const config = {
 export const pid = 1;
 export const ppid = 0;
 
-export function getegid() {
+export function getegid(): number {
   return 0;
 }
 
-export function geteuid() {
+export function geteuid(): number {
   return 0;
 }
 
-export function setegid(_guid: number) {
+export function setegid(_guid: number): void {
   // no-op, since we only support gid 0
 }
 
-export function seteuid(_uid: number) {
+export function seteuid(_uid: number): void {
   // no-op, since we only support uid 0
 }
 
-export function setSourceMapsEnabled(_enabled: boolean) {
+export function setSourceMapsEnabled(_enabled: boolean): void {
   // no-op since we do not support disabling source maps
 }
 
-export function nextTick(cb: Function, ...args: unknown[]) {
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+export function nextTick(cb: Function, ...args: unknown[]): void {
   queueMicrotask(() => {
+    // eslint-disable-next-line
     cb(...args);
   });
 }
+
 interface EmitWarningOptions {
   type?: string | undefined;
   code?: string | undefined;
-  ctor?: Function | undefined;
+  ctor?: ErrorConstructor | undefined;
   detail?: string | undefined;
 }
-export function emitWarning(warning: string | Error, ctor?: Function): void;
+
+interface ErrorWithDetail extends Error {
+  detail?: unknown;
+}
+
+export function emitWarning(
+  warning: string | Error,
+  ctor?: ErrorConstructor
+): void;
 export function emitWarning(
   warning: string | Error,
   type?: string,
-  ctor?: Function
+  ctor?: ErrorConstructor
 ): void;
 export function emitWarning(
   warning: string | Error,
   type?: string,
   code?: string,
-  ctor?: Function
+  ctor?: ErrorConstructor
 ): void;
 export function emitWarning(
   warning: string | Error,
-  options?: Function | string | EmitWarningOptions
+  options?: ErrorConstructor | string | EmitWarningOptions,
+  codeOrCtor?: ErrorConstructor | string,
+  maybeCtor?: ErrorConstructor
 ): void {
   let err: Error;
   let name = 'Warning';
   let detail: string | undefined;
   let code: string | undefined;
-  let ctor: Function | undefined;
+  let ctor: ErrorConstructor | undefined;
 
   // Handle different overloads
-  if (
-    typeof options === 'object' &&
-    options !== null &&
-    !(options instanceof Function)
-  ) {
+  if (typeof options === 'object') {
     // emitWarning(warning, options)
     if (options.type) name = options.type;
     if (options.code) code = options.code;
     if (options.detail) detail = options.detail;
     ctor = options.ctor;
   } else {
-    // Handle other overloads
-    const args = Array.from(arguments);
-
-    if (typeof args[1] === 'string') {
+    if (typeof options === 'string') {
       // emitWarning(warning, type, ...)
-      name = args[1];
-      if (typeof args[2] === 'string') {
+      name = options;
+      if (typeof codeOrCtor === 'string') {
         // emitWarning(warning, type, code, ctor)
-        code = args[2];
-        ctor = args[3];
-      } else if (typeof args[2] === 'function') {
+        code = codeOrCtor;
+        if (typeof maybeCtor === 'function') ctor = maybeCtor;
+      } else if (typeof codeOrCtor === 'function') {
         // emitWarning(warning, type, ctor)
-        ctor = args[2];
+        ctor = codeOrCtor;
       }
-    } else if (typeof args[1] === 'function') {
+    } else if (typeof options === 'function') {
       // emitWarning(warning, ctor)
-      ctor = args[1];
+      ctor = options;
     }
   }
 
   // Convert string warning to Error
   if (typeof warning === 'string') {
     // Use the provided constructor if available, otherwise use Error
-    const ErrorConstructor = (ctor as new (message: string) => Error) || Error;
+    const ErrorConstructor = ctor || Error;
     err = new ErrorConstructor(warning);
     err.name = name;
   } else {
@@ -149,19 +157,17 @@ export function emitWarning(
 
   // Add code if provided
   if (code) {
-    (err as any).code = code;
+    (err as NodeError).code = code;
   }
 
   // Add detail if provided
   if (detail) {
-    (err as any).detail = detail;
+    (err as ErrorWithDetail).detail = detail;
   }
 
   // Capture stack trace using the provided constructor or emitWarning itself
   // This excludes the constructor (and frames above it) from the stack trace
-  if (Error.captureStackTrace) {
-    Error.captureStackTrace(err, ctor || emitWarning);
-  }
+  Error.captureStackTrace(err, ctor || emitWarning);
 
   // Emit the warning event on the process object
   // Use nextTick to ensure the warning is emitted asynchronously
@@ -172,8 +178,8 @@ export function emitWarning(
 
 // Decide if a value can round-trip to JSON without losing any information.
 function isJsonSerializable(
-  value: any,
-  seen: Set<Object> = new Set()
+  value: unknown,
+  seen: Set<unknown> = new Set()
 ): boolean {
   switch (typeof value) {
     case 'boolean':
@@ -219,7 +225,9 @@ function isJsonSerializable(
             isJsonSerializable(prop, seen)
           );
         case Array.prototype:
-          return value.every((elem: unknown) => isJsonSerializable(elem, seen));
+          return (value as Array<unknown>).every((elem: unknown) =>
+            isJsonSerializable(elem, seen)
+          );
         default:
           return false;
       }
@@ -230,9 +238,9 @@ function isJsonSerializable(
   }
 }
 
-function getInitialEnv() {
-  let env: Record<string, string> = {};
-  for (let [key, value] of Object.entries(processImpl.getEnvObject())) {
+function getInitialEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(processImpl.getEnvObject())) {
     // Workers environment variables can have a variety of types, but process.env vars are
     // strictly strings. We want to convert our workers env into process.env, but allowing
     // process.env to contain non-strings would probably break Node apps.
@@ -279,14 +287,14 @@ export const env = new Proxy(getInitialEnv(), {
   // When defined using defineProperty, the property descriptor must be writable,
   // configurable, and enumerable using just a falsy check. Getters and setters
   // are not permitted.
-  set(obj: object, prop: PropertyKey, value: any) {
+  set(obj: object, prop: PropertyKey, value: unknown): boolean {
     return Reflect.set(obj, prop, `${value}`);
   },
   defineProperty(
     obj: object,
     prop: PropertyKey,
     descriptor: PropertyDescriptor
-  ) {
+  ): boolean {
     validateObject(descriptor, 'descriptor');
     if (Reflect.has(descriptor, 'get') || Reflect.has(descriptor, 'set')) {
       throw new ERR_INVALID_ARG_VALUE(
@@ -329,11 +337,11 @@ export const env = new Proxy(getInitialEnv(), {
   },
 });
 
-export function getBuiltinModule(id: string): any {
+export function getBuiltinModule(id: string): object {
   return processImpl.getBuiltinModule(id);
 }
 
-export function exit(code: number) {
+export function exit(code: number): void {
   processImpl.processExitImpl(code);
 }
 
@@ -412,11 +420,12 @@ const process = {
 export default process;
 
 // Must be a var binding to support TDZ checks
+// eslint-disable-next-line
 export var _initialized = true;
 
 // Private export, not to be reexported
-export function _initProcess() {
-  Object.setPrototypeOf(process, EventEmitter.prototype);
+export function _initProcess(): void {
+  Object.setPrototypeOf(process, EventEmitter.prototype as object);
   EventEmitter.call(process);
 }
 
