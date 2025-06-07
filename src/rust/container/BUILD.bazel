@@ -1,0 +1,22 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "container",
+    cxx_bridge_deps = [
+        "@capnp-cpp//src/kj",
+        "//src/rust/cxx-integration",
+    ],
+    cxx_bridge_src = "lib.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx-integration",
+        "//src/workerd/io:container_capnp_rust",
+        "@crates_vendor//:bollard",
+        "@crates_vendor//:capnp",
+        "@crates_vendor//:capnp-rpc",
+        "@crates_vendor//:capnpc",
+        "@crates_vendor//:futures",
+        "@crates_vendor//:thiserror",
+        "@crates_vendor//:tokio",
+    ],
+)

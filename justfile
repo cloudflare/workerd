@@ -2,6 +2,7 @@ alias b := build
 alias t := test
 alias f := format
 alias st := stream-test
+alias w := watch
 
 default:
   @just --list
@@ -10,6 +11,9 @@ pwd := `pwd`
 
 prepare:
   cargo install gen-compile-commands
+
+watch +WATCH_TARGET='test':
+    watchexec -rc -w src -- just {{WATCH_TARGET}}
 
 compile-commands:
   rm -f compile_commands.json | gen-compile-commands --root {{pwd}} --compile-flags compile_flags.txt --out compile_commands.json --src-dir {{pwd}}/src
@@ -24,7 +28,7 @@ build-asan *args="//...":
   just build {{args}} --config=asan
 
 test *args="//...":
-  bazel test {{args}}
+  bazel test --config=debug {{args}}
 
 test-asan *args="//...":
   just test {{args}} --config=asan

@@ -102,10 +102,12 @@ class Server final: private kj::TaskSet::ErrorHandler {
     kj::String uniqueKey;
     bool isEvictable;
     bool enableSql;
+    kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
   };
   struct Ephemeral {
     bool isEvictable;
     bool enableSql;
+    kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
   };
   using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 

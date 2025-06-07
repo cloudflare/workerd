@@ -601,6 +601,14 @@ struct Worker {
     # workerd uses SQLite to back all Durable Objects, but the SQL API is hidden by default to
     # emulate behavior of traditional DO namespaces on Cloudflare that aren't SQLite-backed. This
     # flag should be enabled when testing code that will run on a SQLite-backed namespace.
+
+    container @5 :ContainerOptions;
+    # Optional configuration options for local development container interaction.
+
+    struct ContainerOptions {
+      name @0 :Text;
+      # Name of the container associated with the current DO namespace.
+    }
   }
 
   durableObjectUniqueKeyModifier @8 :Text;
@@ -651,6 +659,16 @@ struct Worker {
   streamingTails @15 :List(ServiceDesignator);
   # List of streaming tail worker services that should receive tail events for this worker.
   # NOTE: This will be deleted in a future refactor, do not depend on this.
+
+  container @16 :ContainerConnectionOptions;
+  # Optional attribute to define the connection options used for
+  # interacting with local containers. Only used for local development and testing purposes.
+}
+
+struct ContainerConnectionOptions {
+  address @0 :Text;
+  # Optional socket/unix path used for interacting with local containers.
+  # This field is only used for local development and testing purposes.
 }
 
 struct ExternalServer {

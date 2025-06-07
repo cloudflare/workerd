@@ -11,10 +11,12 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "anyhow": crate.spec(version = "1"),
     "capnp": crate.spec(version = "0"),
     "capnpc": crate.spec(version = "0"),
+    "capnp-rpc": crate.spec(version = "0"),
     "clang-ast": crate.spec(version = "0"),
     "clap": crate.spec(version = "4", default_features = False, features = ["derive", "std", "help"]),
     "codespan-reporting": crate.spec(version = "0"),
     "flate2": crate.spec(version = "1"),
+    "futures": crate.spec(version = "0"),
     "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html.git", rev = "41960f9bb073e34c476516b878123076f8aae182"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),
@@ -28,4 +30,5 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     # tokio is huge, let's enable only features when we actually need them.
     "tokio": crate.spec(version = "1", default_features = False, features = ["net", "rt", "rt-multi-thread", "time"]),
     "tracing": crate.spec(version = "0", default_features = False, features = ["std"]),
+    "bollard": crate.spec(version = "0"),
 }
