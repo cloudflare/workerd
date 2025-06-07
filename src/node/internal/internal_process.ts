@@ -6,24 +6,174 @@
 // is only an approximation of process.nextTick semantics. Hopefully it's good
 // enough because we really do not want to implement Node.js' idea of a nextTick
 // queue.
-/* eslint-disable */
 
 import { validateObject } from 'node-internal:validators';
 
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_VALUE,
+  NodeError,
+} from 'node-internal:internal_errors';
 
-import { default as utilImpl } from 'node-internal:util';
+import { default as processImpl } from 'node-internal:process';
+import {
+  _initialized as eventsInitialized,
+  default as EventEmitter,
+} from 'node-internal:events';
 
-export function nextTick(cb: Function, ...args: unknown[]) {
+export const versions = processImpl.versions;
+
+export const version = `v${processImpl.versions.node}`;
+
+export const title = 'workerd';
+
+export const argv = ['workerd'];
+
+export const argv0 = 'workerd';
+
+export const execArgv = [];
+
+export const arch = 'x64';
+
+export const platform = processImpl.processPlatform;
+
+export const config = {
+  target_defaults: {},
+  variables: {},
+};
+
+export const pid = 1;
+export const ppid = 0;
+
+export function getegid(): number {
+  return 0;
+}
+
+export function geteuid(): number {
+  return 0;
+}
+
+export function setegid(_guid: number): void {
+  // no-op, since we only support gid 0
+}
+
+export function seteuid(_uid: number): void {
+  // no-op, since we only support uid 0
+}
+
+export function setSourceMapsEnabled(_enabled: boolean): void {
+  // no-op since we do not support disabling source maps
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+export function nextTick(cb: Function, ...args: unknown[]): void {
   queueMicrotask(() => {
+    // eslint-disable-next-line
     cb(...args);
+  });
+}
+
+interface EmitWarningOptions {
+  type?: string | undefined;
+  code?: string | undefined;
+  ctor?: ErrorConstructor | undefined;
+  detail?: string | undefined;
+}
+
+interface ErrorWithDetail extends Error {
+  detail?: unknown;
+}
+
+export function emitWarning(
+  warning: string | Error,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
+  warning: string | Error,
+  type?: string,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
+  warning: string | Error,
+  type?: string,
+  code?: string,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
+  warning: string | Error,
+  options?: ErrorConstructor | string | EmitWarningOptions,
+  codeOrCtor?: ErrorConstructor | string,
+  maybeCtor?: ErrorConstructor
+): void {
+  let err: Error;
+  let name = 'Warning';
+  let detail: string | undefined;
+  let code: string | undefined;
+  let ctor: ErrorConstructor | undefined;
+
+  // Handle different overloads
+  if (typeof options === 'object') {
+    // emitWarning(warning, options)
+    if (options.type) name = options.type;
+    if (options.code) code = options.code;
+    if (options.detail) detail = options.detail;
+    ctor = options.ctor;
+  } else {
+    if (typeof options === 'string') {
+      // emitWarning(warning, type, ...)
+      name = options;
+      if (typeof codeOrCtor === 'string') {
+        // emitWarning(warning, type, code, ctor)
+        code = codeOrCtor;
+        if (typeof maybeCtor === 'function') ctor = maybeCtor;
+      } else if (typeof codeOrCtor === 'function') {
+        // emitWarning(warning, type, ctor)
+        ctor = codeOrCtor;
+      }
+    } else if (typeof options === 'function') {
+      // emitWarning(warning, ctor)
+      ctor = options;
+    }
+  }
+
+  // Convert string warning to Error
+  if (typeof warning === 'string') {
+    // Use the provided constructor if available, otherwise use Error
+    const ErrorConstructor = ctor || Error;
+    err = new ErrorConstructor(warning);
+    err.name = name;
+  } else {
+    err = warning;
+    // Override name if provided
+    if (name && name !== 'Warning') {
+      err.name = name;
+    }
+  }
+
+  // Add code if provided
+  if (code) {
+    (err as NodeError).code = code;
+  }
+
+  // Add detail if provided
+  if (detail) {
+    (err as ErrorWithDetail).detail = detail;
+  }
+
+  // Capture stack trace using the provided constructor or emitWarning itself
+  // This excludes the constructor (and frames above it) from the stack trace
+  Error.captureStackTrace(err, ctor || emitWarning);
+
+  // Emit the warning event on the process object
+  // Use nextTick to ensure the warning is emitted asynchronously
+  nextTick(() => {
+    process.emit('warning', err);
   });
 }
 
 // Decide if a value can round-trip to JSON without losing any information.
 function isJsonSerializable(
-  value: any,
-  seen: Set<Object> = new Set()
+  value: unknown,
+  seen: Set<unknown> = new Set()
 ): boolean {
   switch (typeof value) {
     case 'boolean':
@@ -69,7 +219,9 @@ function isJsonSerializable(
             isJsonSerializable(prop, seen)
           );
         case Array.prototype:
-          return value.every((elem: unknown) => isJsonSerializable(elem, seen));
+          return (value as Array<unknown>).every((elem: unknown) =>
+            isJsonSerializable(elem, seen)
+          );
         default:
           return false;
       }
@@ -80,9 +232,9 @@ function isJsonSerializable(
   }
 }
 
-function getInitialEnv() {
-  let env: Record<string, string> = {};
-  for (let [key, value] of Object.entries(utilImpl.getEnvObject())) {
+function getInitialEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(processImpl.getEnvObject())) {
     // Workers environment variables can have a variety of types, but process.env vars are
     // strictly strings. We want to convert our workers env into process.env, but allowing
     // process.env to contain non-strings would probably break Node apps.
@@ -129,14 +281,14 @@ export const env = new Proxy(getInitialEnv(), {
   // When defined using defineProperty, the property descriptor must be writable,
   // configurable, and enumerable using just a falsy check. Getters and setters
   // are not permitted.
-  set(obj: object, prop: PropertyKey, value: any) {
+  set(obj: object, prop: PropertyKey, value: unknown): boolean {
     return Reflect.set(obj, prop, `${value}`);
   },
   defineProperty(
     obj: object,
     prop: PropertyKey,
     descriptor: PropertyDescriptor
-  ) {
+  ): boolean {
     validateObject(descriptor, 'descriptor');
     if (Reflect.has(descriptor, 'get') || Reflect.has(descriptor, 'set')) {
       throw new ERR_INVALID_ARG_VALUE(
@@ -179,15 +331,13 @@ export const env = new Proxy(getInitialEnv(), {
   },
 });
 
-export function getBuiltinModule(id: string): any {
-  return utilImpl.getBuiltinModule(id);
+export function getBuiltinModule(id: string): object {
+  return processImpl.getBuiltinModule(id);
 }
 
-export function exit(code: number) {
-  utilImpl.processExitImpl(code);
+export function exit(code: number): void {
+  processImpl.processExitImpl(code);
 }
-
-export const platform = utilImpl.processPlatform;
 
 // The following features does not include deprecated or experimental flags mentioned in
 // https://nodejs.org/docs/latest/api/process.html
@@ -205,11 +355,75 @@ export const features = Object.freeze({
   tls: true,
 });
 
-export default {
+export const allowedNodeEnvironmentFlags = new Set();
+
+interface Process extends EventEmitter {
+  version: typeof version;
+  versions: typeof versions;
+  title: typeof title;
+  argv: typeof argv;
+  argv0: typeof argv0;
+  execArgv: typeof execArgv;
+  arch: typeof arch;
+  platform: typeof platform;
+  config: typeof config;
+  pid: typeof pid;
+  ppid: typeof ppid;
+  getegid: typeof getegid;
+  geteuid: typeof geteuid;
+  setegid: typeof setegid;
+  seteuid: typeof seteuid;
+  setSourceMapsEnabled: typeof setSourceMapsEnabled;
+  nextTick: typeof nextTick;
+  emitWarning: typeof emitWarning;
+  env: typeof env;
+  exit: typeof exit;
+  getBuiltinModule: typeof getBuiltinModule;
+  features: typeof features;
+  allowedNodeEnvironmentFlags: typeof allowedNodeEnvironmentFlags;
+}
+
+const process = {
+  version,
+  versions,
+  title,
+  argv,
+  argv0,
+  execArgv,
+  arch,
+  platform,
+  config,
+  pid,
+  ppid,
+  getegid,
+  geteuid,
+  setegid,
+  seteuid,
+  setSourceMapsEnabled,
   nextTick,
+  emitWarning,
   env,
   exit,
   getBuiltinModule,
-  platform,
   features,
-};
+  allowedNodeEnvironmentFlags,
+} as Process;
+
+export default process;
+
+// Must be a var binding to support TDZ checks
+// eslint-disable-next-line
+export var _initialized = true;
+
+// Private export, not to be reexported
+export function _initProcess(): void {
+  Object.setPrototypeOf(process, EventEmitter.prototype as object);
+  EventEmitter.call(process);
+}
+
+// If process executes first, events will call _initProcess
+// If events executes first, process calls _initProcess itself
+// This allows us to handle the cycle between process and Events
+if (eventsInitialized) {
+  _initProcess();
+}
