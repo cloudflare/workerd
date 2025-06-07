@@ -1,3 +1,5 @@
+load("@aspect_bazel_lib//lib:base64.bzl", "base64")
+load("@aspect_bazel_lib//lib:strings.bzl", "hex", "ord")
 load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
@@ -42,12 +44,20 @@ def _copy_and_capnp_embed(src, version = None, out_name = None):
         deps = [out_name + "@copy"],
     )
 
+def _b64_to_hex(shasum):
+    shasum = shasum.removeprefix("sha256-")
+    decoded = base64.decode(shasum)
+    result = ""
+    for i in range(len(decoded)):
+        result += hex(ord(decoded[i]))[2:]
+    return result
+
 def _fmt_python_snapshot_release(
         pyodide_version,
         pyodide_date,
         packages,
         backport,
-        baseline_snapshot_hash,
+        baseline_snapshot_integrity,
         flag,
         **_kwds):
     content = ", ".join(
@@ -56,7 +66,7 @@ def _fmt_python_snapshot_release(
             'pyodideRevision = "%s"' % pyodide_date,
             'packages = "%s"' % packages,
             "backport = %s" % backport,
-            'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
+            'baselineSnapshotHash = "%s"' % _b64_to_hex(baseline_snapshot_integrity),
             'flagName = "%s"' % flag,
         ],
     )

@@ -75,7 +75,6 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
         "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
-        "baseline_snapshot_hash": "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5",
     },
     {
         "name": "0.27.7",
@@ -89,7 +88,6 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-86f117585.bin",
         "baseline_snapshot_integrity": "sha256-hvEXWFaRDWq6wKavdbLDoj6nNuXSowpbftTICgK0Cg0=",
-        "baseline_snapshot_hash": "TODO",
     },
     {
         "real_pyodide_version": "0.26.0a2",
@@ -98,6 +96,5 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_date": "dev",
         "id": "dev",
         "flag": "pythonWorkersDevPyodide",
-        "baseline_snapshot_hash": "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae",
     },
 ])
