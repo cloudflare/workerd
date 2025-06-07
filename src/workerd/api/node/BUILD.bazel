@@ -54,6 +54,7 @@ wd_cc_library(
         "buffer-string-search.h",
         "dns.h",
         "i18n.h",
+        "node-version.h",
         "url.h",
     ],
     implementation_deps = [
@@ -72,7 +73,6 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/io",
         "//src/workerd/util:mimetype",
-        "@generated_versions//:versions",
     ],
 )
 

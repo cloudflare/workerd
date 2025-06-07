@@ -3,9 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include "external/generated_versions/versions.h"
-
 #include <workerd/api/node/i18n.h>
+#include <workerd/api/node/node-version.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/mimetype.h>
 
@@ -16,15 +15,7 @@ class ProcessModule final: public jsg::Object {
   ProcessModule() = default;
   ProcessModule(jsg::Lock&, const jsg::Url&) {}
 
-#ifdef _WIN32
-  static constexpr kj::StringPtr processPlatform = "win32"_kj;
-#elif defined(__linux__)
   static constexpr kj::StringPtr processPlatform = "linux"_kj;
-#elif defined(__APPLE__)
-  static constexpr kj::StringPtr processPlatform = "darwin"_kj;
-#else
-  static constexpr kj::StringPtr processPlatform = "unsupported-platform"_kj;
-#endif
 
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
@@ -46,14 +37,9 @@ class ProcessModule final: public jsg::Object {
   // Version getters
   jsg::JsObject getVersions(jsg::Lock& js) const {
     auto versions = js.obj();
-    versions.set(js, "ada"_kj, js.str(workerd::api::node::adaVersion));
+    // Node.js version - represents the most current Node.js version supported
+    // by the platform and will change as Node.js release updates ship
     versions.set(js, "node"_kj, js.str(workerd::api::node::nodeVersion));
-    versions.set(js, "brotli"_kj, js.str(workerd::api::node::brotliVersion));
-    versions.set(js, "simdutf"_kj, js.str(workerd::api::node::simdutfVersion));
-    versions.set(js, "sqlite"_kj, js.str(workerd::api::node::sqliteVersion));
-    versions.set(js, "nbytes"_kj, js.str(workerd::api::node::nbytesVersion));
-    versions.set(js, "ncrypto"_kj, js.str(workerd::api::node::ncryptoVersion));
-    versions.set(js, "v8"_kj, js.str(workerd::api::node::v8Version));
 
     // Get ICU version dynamically from the ICU library
     versions.set(js, "icu"_kj, js.str(i18n::getIcuVersion()));

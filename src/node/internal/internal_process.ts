@@ -26,21 +26,15 @@ export const version = `v${processImpl.versions.node}`;
 
 export const title = 'workerd';
 
-export const argv = ['node'];
+export const argv = ['workerd'];
 
-export const argv0 = 'node';
+export const argv0 = 'workerd';
 
 export const execArgv = [];
 
 export const arch = 'x64';
 
 export const platform = processImpl.processPlatform;
-
-export const release = {
-  name: 'node',
-  sourceUrl: `https://nodejs.org/download/release/v${version}/node-v${version}.tar.gz`,
-  headersUrl: `https://nodejs.org/download/release/v${version}/node-v${version}-headers.tar.gz`,
-};
 
 export const config = {
   target_defaults: {},
