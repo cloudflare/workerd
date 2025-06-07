@@ -171,6 +171,24 @@ enum class FsError {
   NOT_EMPTY,
   // Node is read-only
   READ_ONLY,
+  // Not permitted
+  NOT_PERMITTED,
+  // Not permitted on directory
+  NOT_PERMITTED_ON_DIRECTORY,
+  // Already exists
+  ALREADY_EXISTS,
+  // Too many open files
+  TOO_MANY_OPEN_FILES,
+  // Operation failed
+  FAILED,
+  // Not supported
+  NOT_SUPPORTED,
+  // Invalid path
+  INVALID_PATH,
+  // Exceeds file size limit
+  FILE_SIZE_LIMIT_EXCEEDED,
+  // Symlink depth exceeded
+  SYMLINK_DEPTH_EXCEEDED,
 };
 
 // A file in the virtual file system. If the file is read-only, then the
@@ -182,30 +200,33 @@ class File: public kj::Refcounted {
  public:
   // Attempt to set the last modified time of this node. If the node is
   // read-only, this will be a non-op.
-  virtual void setLastModified(jsg::Lock& js, kj::Date date) = 0;
+  virtual kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date) = 0;
 
   // Returns the metadata for this node.
-  virtual Stat stat(jsg::Lock& js) = 0;
+  virtual Stat stat(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   // Reads all the contents of the file as a string.
-  jsg::JsString readAllText(jsg::Lock& js);
+  kj::OneOf<FsError, jsg::JsString> readAllText(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Reads all the contents of the file as a Uint8Array.
-  jsg::BufferSource readAllBytes(jsg::Lock& js);
+  kj::OneOf<FsError, jsg::BufferSource> readAllBytes(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Reads data from the file at the given offset into the given buffer.
   virtual uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const = 0;
 
   // Replaces the full contents of the file with the given data.
   // Equivalent to resize(js, data.size()) followed by write(js, 0, data).
-  uint32_t writeAll(jsg::Lock& js, kj::ArrayPtr<const kj::byte> data) {
-    resize(js, data.size());
+  kj::OneOf<FsError, uint32_t> writeAll(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT {
+    KJ_IF_SOME(err, resize(js, data.size())) {
+      return err;
+    }
     return write(js, 0, data);
   }
 
   // Replaces the full contents of the file with the given data.
   // Equivalent to resize(js, data.size()) followed by write(js, 0, data).
-  uint32_t writeAll(jsg::Lock& js, kj::StringPtr data) {
+  kj::OneOf<FsError, uint32_t> writeAll(jsg::Lock& js, kj::StringPtr data) KJ_WARN_UNUSED_RESULT {
     return writeAll(js, data.asBytes());
   }
 
@@ -214,22 +235,25 @@ class File: public kj::Refcounted {
   // this will throw an exception. If the offset is greater than the current
   // size of the file, the file may be resized to accommodate the new data or
   // an exception may be thrown (depending on the underlying implementation).
-  virtual uint32_t write(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> data) = 0;
+  virtual kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT = 0;
 
-  uint32_t write(jsg::Lock& js, uint32_t offset, kj::StringPtr data) {
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::StringPtr data) KJ_WARN_UNUSED_RESULT {
     return write(js, offset, data.asBytes());
   }
 
   // Fill the file with the given value from the given offset. This is more
   // efficient that writing the same value as it does not require any allocations.
-  virtual void fill(jsg::Lock& js, kj::byte val, kj::Maybe<uint32_t> offset = kj::none) = 0;
+  virtual kj::Maybe<FsError> fill(
+      jsg::Lock& js, kj::byte val, kj::Maybe<uint32_t> offset = kj::none) KJ_WARN_UNUSED_RESULT = 0;
 
   // Resize the file allocation. Note that this is potentially an expensive
   // operation as it requires allocating a new internal buffer and copying
   // the data. If the size is smaller than the current size, the contents of
   // the fill will be truncated. If the size is larger than the current size,
   // the new contents of the file will be filled with zeroes.
-  virtual void resize(jsg::Lock& js, uint32_t size) = 0;
+  virtual kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) KJ_WARN_UNUSED_RESULT = 0;
 
   // Creates a new readable/writable in-memory file. This file will not be
   // initially included in a directory. To add it to a directory, use the
@@ -243,25 +267,26 @@ class File: public kj::Refcounted {
   // or to resize the file as appropriate to account for the expected writes.
   // This will avoid each individual write causing a reallocation of the
   // internal buffer to accommodate the new data.
-  static kj::Rc<File> newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size = kj::none);
+  static kj::Rc<File> newWritable(
+      jsg::Lock& js, kj::Maybe<uint32_t> size = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Creates a new readable in-memory file wrapping the given data. The file
   // does not take ownership of the data and the data must remain valid for the
   // lifetime of the file. The file will be read-only. It will not be initially
   // included in a directory. The contents of the file will not be tracked and
   // will not count towards the isolate external memory usage.
-  static kj::Rc<File> newReadable(kj::ArrayPtr<const kj::byte> data);
+  static kj::Rc<File> newReadable(kj::ArrayPtr<const kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;
 
   // Creates a copy of this file.
-  virtual kj::Rc<File> clone(jsg::Lock& js) = 0;
+  virtual kj::Rc<File> clone(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   // Replaces the contents of this file with the given file if possible.
   // If this file is read-only, an exception will be thrown.
-  virtual void replace(jsg::Lock& js, kj::Rc<File> file) = 0;
+  virtual kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) KJ_WARN_UNUSED_RESULT = 0;
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -269,14 +294,17 @@ class File: public kj::Refcounted {
 class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory> {
  public:
   // Returns the metadata for this node.
-  virtual kj::Maybe<Stat> stat(jsg::Lock& js, kj::PathPtr ptr) = 0;
-  Stat stat(jsg::Lock& js) {
-    return KJ_ASSERT_NONNULL(stat(js, nullptr));
+  virtual kj::Maybe<kj::OneOf<FsError, Stat>> stat(
+      jsg::Lock& js, kj::PathPtr ptr) KJ_WARN_UNUSED_RESULT = 0;
+  Stat stat(jsg::Lock& js) KJ_WARN_UNUSED_RESULT {
+    // In this case, stat is guaranteed to succeed, so skip the error checking.
+    return KJ_ASSERT_NONNULL(stat(js, nullptr)).get<Stat>();
   }
 
   // Return the number of entries in this directory. If typeFilter is provided,
   // only entries matching the given type will be counted.
-  virtual size_t count(jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) = 0;
+  virtual size_t count(
+      jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) KJ_WARN_UNUSED_RESULT = 0;
 
   using Item = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
   using Entry = kj::HashMap<kj::String, Item>::Entry;
@@ -317,14 +345,17 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // If the path identifies a symbolic link, the symbolic link will be resolved
   // and the target, if it exists, will be returned. If the target does not exist,
   // kj::none will be returned.
-  virtual kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>> tryOpen(
-      jsg::Lock& js, kj::PathPtr path, OpenOptions options = {kj::none, true}) = 0;
+  virtual kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>>
+  tryOpen(jsg::Lock& js,
+      kj::PathPtr path,
+      OpenOptions options = {kj::none, true}) KJ_WARN_UNUSED_RESULT = 0;
 
   // Attempts to move the given file or directory this directory with the given
   // name. If the name already exists an exception will be thrown. The name must
   // not contain any path separators. If this directory is read only, an exception
   // will be thrown.
-  virtual void add(jsg::Lock& js, kj::StringPtr name, Item entry) = 0;
+  virtual kj::Maybe<FsError> add(
+      jsg::Lock& js, kj::StringPtr name, Item entry) KJ_WARN_UNUSED_RESULT = 0;
 
   struct RemoveOptions {
     // If true and the node is a directory, remove all entries in the directory.
@@ -345,7 +376,7 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // If the target is a symbolic link, the symbolic link will be removed but
   // the target will not be removed.
   virtual kj::OneOf<FsError, bool> remove(
-      jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {false}) = 0;
+      jsg::Lock& js, kj::PathPtr path, RemoveOptions options = {false}) KJ_WARN_UNUSED_RESULT = 0;
 
   virtual kj::StringPtr jsgGetMemoryName() const = 0;
   virtual size_t jsgGetMemorySelfSize() const = 0;
@@ -355,7 +386,7 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // not be initially included in a directory. To add it to a directory, use the
   // add method. If the directory is not added, it will be deleted
   // when the handle is dropped.
-  static kj::Rc<Directory> newWritable();
+  static kj::Rc<Directory> newWritable() KJ_WARN_UNUSED_RESULT;
 
   // Used to build a new read-only directory. All files and directories added
   // may or may not be writable. The directory will not be initially included
@@ -381,7 +412,7 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
     // Finalizes and returns the directory. The directory will not be writable.
     // The directory will not be initially included in a directory. To add it
     // to a directory, use the add method.
-    kj::Rc<Directory> finish();
+    kj::Rc<Directory> finish() KJ_WARN_UNUSED_RESULT;
 
     using Map = kj::HashMap<kj::String,
         kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Own<Directory::Builder>>>;
@@ -404,17 +435,18 @@ class SymbolicLink final: public kj::Refcounted {
   KJ_DISALLOW_COPY_AND_MOVE(SymbolicLink);
 
   // Gets the stat for the symbolic link itself.
-  Stat stat(jsg::Lock& js);
+  Stat stat(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Resolves the symbolic link into a file or directory.
-  kj::Maybe<kj::OneOf<kj::Rc<File>, kj::Rc<Directory>>> resolve(jsg::Lock& js);
+  kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> resolve(
+      jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Returns the target path of the symbolic link.
-  kj::PathPtr getTargetPath() const {
+  kj::PathPtr getTargetPath() const KJ_WARN_UNUSED_RESULT {
     return targetPath;
   }
 
-  jsg::Url getTargetUrl() const;
+  jsg::Url getTargetUrl() const KJ_WARN_UNUSED_RESULT;
 
  private:
   kj::Rc<Directory> root;
@@ -422,6 +454,7 @@ class SymbolicLink final: public kj::Refcounted {
 };
 
 using FsNode = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
+using FsNodeWithError = kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
 class FsMap;
 
 // The virtual file system interface. This is the main entry point for accessing the vfs.
@@ -457,30 +490,33 @@ class VirtualFileSystem {
   };
 
   // The root of the virtual file system.
-  virtual kj::Rc<Directory> getRoot(jsg::Lock& js) const = 0;
+  virtual kj::Rc<Directory> getRoot(jsg::Lock& js) const KJ_WARN_UNUSED_RESULT = 0;
 
   struct ResolveOptions {
     bool followLinks = true;
   };
 
   // Resolves the given file URL into a file or directory.
-  kj::Maybe<FsNode> resolve(
-      jsg::Lock& js, const jsg::Url& url, ResolveOptions options = {true}) const;
+  kj::Maybe<FsNodeWithError> resolve(jsg::Lock& js,
+      const jsg::Url& url,
+      ResolveOptions options = {true}) const KJ_WARN_UNUSED_RESULT;
 
   // Resolves the given file URL into metadata for a file or directory.
-  kj::Maybe<Stat> resolveStat(jsg::Lock& js, const jsg::Url& url) const;
+  kj::Maybe<kj::OneOf<FsError, Stat>> resolveStat(
+      jsg::Lock& js, const jsg::Url& url) const KJ_WARN_UNUSED_RESULT;
 
   // Creates a new symbolic link to the given target path. The target path
   // does not need to exist.
-  kj::Rc<SymbolicLink> newSymbolicLink(jsg::Lock& js, const jsg::Url& url) const;
+  kj::Rc<SymbolicLink> newSymbolicLink(
+      jsg::Lock& js, const jsg::Url& url) const KJ_WARN_UNUSED_RESULT;
 
   // Return the configured root paths for the bundle, temp, and dev directories.
-  virtual const jsg::Url& getBundleRoot() const = 0;
-  virtual const jsg::Url& getTmpRoot() const = 0;
-  virtual const jsg::Url& getDevRoot() const = 0;
+  virtual const jsg::Url& getBundleRoot() const KJ_WARN_UNUSED_RESULT = 0;
+  virtual const jsg::Url& getTmpRoot() const KJ_WARN_UNUSED_RESULT = 0;
+  virtual const jsg::Url& getDevRoot() const KJ_WARN_UNUSED_RESULT = 0;
 
   // Get the current virtual file system for the current isolate lock.
-  static kj::Maybe<const VirtualFileSystem&> tryGetCurrent(jsg::Lock&);
+  static kj::Maybe<const VirtualFileSystem&> tryGetCurrent(jsg::Lock&) KJ_WARN_UNUSED_RESULT;
 
   // ==========================================================================
   // File Descriptor support
@@ -504,7 +540,7 @@ class VirtualFileSystem {
   };
 
   // Represents an opened file descriptor.
-  struct OpenedFile {
+  struct OpenedFile: public kj::Refcounted {
     // The file descriptor for the opened file.
     int fd;
     // The file descriptor was opened for reading.
@@ -515,6 +551,13 @@ class VirtualFileSystem {
     bool append;
     // The actual file, directory, or symlink that was opened.
     FsNode node;
+
+    OpenedFile(int fd, bool read, bool write, bool append, FsNode node)
+        : fd(fd),
+          read(read),
+          write(write),
+          append(append),
+          node(kj::mv(node)) {}
 
     // When reading from or writing to the file, if an offset is not
     // explicitly given then the offset will be set to the current
@@ -534,9 +577,9 @@ class VirtualFileSystem {
   // file descriptor will fail.
   //
   // If the file cannot be opened or created, an exception will be thrown.
-  virtual OpenedFile& openFd(jsg::Lock& js,
+  virtual kj::OneOf<FsError, kj::Rc<OpenedFile>> openFd(jsg::Lock& js,
       const jsg::Url& url,
-      OpenOptions options = {true, false, false, false, true}) const = 0;
+      OpenOptions options = {true, false, false, false, true}) const KJ_WARN_UNUSED_RESULT = 0;
 
   // Closes the given file descriptor. This is a no-op if the file descriptor is not open.
   // Using an int fd is not super nice but it is the most compatible with the node:fs
@@ -545,12 +588,14 @@ class VirtualFileSystem {
 
   // Attempts to get the opened file, directory, or symlink for the given file descriptor.
   // Returns kj::none if the fd is not opened/known.
-  virtual kj::Maybe<OpenedFile&> tryGetFd(jsg::Lock& js, int fd) const = 0;
+  virtual kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(
+      jsg::Lock& js, int fd) const KJ_WARN_UNUSED_RESULT = 0;
 };
 
 kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap,
     kj::Rc<Directory>&& root,
-    kj::Own<VirtualFileSystem::Observer> observer = kj::heap<VirtualFileSystem::Observer>());
+    kj::Own<VirtualFileSystem::Observer> observer = kj::heap<VirtualFileSystem::Observer>())
+    KJ_WARN_UNUSED_RESULT;
 
 // The FsMap is a configurable mapping of built-in "known" file system
 // paths to user-configurable locations. It is used to allow user-specified
@@ -636,7 +681,7 @@ class SymbolicLinkRecursionGuardScope final {
   // the recursion guard. If the link has already been seen, an exception
   // will be thrown. If the link has not been seen, it will be recorded
   // as seen so that it can be checked against in the future.
-  static void checkSeen(SymbolicLink* link);
+  static kj::Maybe<FsError> checkSeen(SymbolicLink* link) KJ_WARN_UNUSED_RESULT;
 
  private:
   kj::HashSet<SymbolicLink*> linksSeen;
@@ -649,17 +694,19 @@ class SymbolicLinkRecursionGuardScope final {
 // provides the directory structure for the worker's bundle.
 kj::Own<VirtualFileSystem> newWorkerFileSystem(kj::Own<FsMap> fsMap,
     kj::Rc<Directory> bundleDirectory,
-    kj::Own<VirtualFileSystem::Observer> observer = kj::heap<VirtualFileSystem::Observer>());
+    kj::Own<VirtualFileSystem::Observer> observer = kj::heap<VirtualFileSystem::Observer>())
+    KJ_WARN_UNUSED_RESULT;
 
 // Exposed only for testing purposes.
-kj::Rc<Directory> getTmpDirectoryImpl();
+kj::Rc<Directory> getTmpDirectoryImpl() KJ_WARN_UNUSED_RESULT;
 
 // Returns a directory that is lazily loaded on first access.
-kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func);
+kj::Rc<Directory> getLazyDirectoryImpl(
+    kj::Function<kj::Rc<Directory>()> func) KJ_WARN_UNUSED_RESULT;
 
-kj::Rc<File> getDevNull();
-kj::Rc<File> getDevZero();
-kj::Rc<File> getDevFull();
-kj::Rc<File> getDevRandom();
-kj::Rc<Directory> getDevDirectory();
+kj::Rc<File> getDevNull() KJ_WARN_UNUSED_RESULT;
+kj::Rc<File> getDevZero() KJ_WARN_UNUSED_RESULT;
+kj::Rc<File> getDevFull() KJ_WARN_UNUSED_RESULT;
+kj::Rc<File> getDevRandom() KJ_WARN_UNUSED_RESULT;
+kj::Rc<Directory> getDevDirectory() KJ_WARN_UNUSED_RESULT;
 }  // namespace workerd

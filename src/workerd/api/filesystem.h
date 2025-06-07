@@ -237,7 +237,8 @@ jsg::JsValue createUVException(jsg::Lock& js,
   XX(ENOTDIR, "not a directory")                                                                   \
   XX(ENOTEMPTY, "directory not empty")                                                             \
   XX(EPERM, "operation not permitted")                                                             \
-  XX(EMLINK, "too many links")
+  XX(EMLINK, "too many links")                                                                     \
+  XX(EIO, "input/output error")
 
 #define XX(code, _) constexpr int UV_##code = -code;
 UV_ERRNO_MAP(XX)
@@ -300,10 +301,12 @@ class FileSystemFileHandle: public FileSystemHandle {
     JSG_STRUCT(keepExistingData);
   };
 
-  jsg::Promise<jsg::Ref<File>> getFile(jsg::Lock& js);
+  jsg::Promise<jsg::Ref<File>> getFile(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
-  jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(
-      jsg::Lock& js, jsg::Optional<FileSystemCreateWritableOptions> options);
+  jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
+      jsg::Optional<FileSystemCreateWritableOptions> options,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
   jsg::Promise<jsg::Ref<FileSystemSyncAccessHandle>> createSyncAccessHandle(jsg::Lock& js);
 
@@ -526,10 +529,14 @@ class FileSystemWritableFileStream: public WritableStream {
     JSG_STRUCT(type, size, position, data);
   };
 
-  jsg::Promise<void> write(
-      jsg::Lock& js, kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data);
-  jsg::Promise<void> seek(jsg::Lock& js, uint32_t position);
-  jsg::Promise<void> truncate(jsg::Lock& js, uint32_t size);
+  jsg::Promise<void> write(jsg::Lock& js,
+      kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+  jsg::Promise<void> seek(jsg::Lock& js,
+      uint32_t position,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+  jsg::Promise<void> truncate(
+      jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
   JSG_RESOURCE_TYPE(FileSystemWritableFileStream) {
     JSG_INHERIT(WritableStream);
@@ -553,10 +560,14 @@ class FileSystemSyncAccessHandle final: public jsg::Object {
 
   uint32_t read(
       jsg::Lock& js, jsg::BufferSource buffer, jsg::Optional<FileSystemReadWriteOptions> options);
-  uint32_t write(
-      jsg::Lock& js, jsg::BufferSource buffer, jsg::Optional<FileSystemReadWriteOptions> options);
+  uint32_t write(jsg::Lock& js,
+      jsg::BufferSource buffer,
+      jsg::Optional<FileSystemReadWriteOptions> options,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
-  void truncate(jsg::Lock& js, uint32_t newSize);
+  void truncate(jsg::Lock& js,
+      uint32_t newSize,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
   uint32_t getSize(jsg::Lock& js);
   void flush(jsg::Lock& js);
   void close(jsg::Lock& js);
