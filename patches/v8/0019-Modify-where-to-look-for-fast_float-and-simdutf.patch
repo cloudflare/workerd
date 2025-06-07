@@ -8,10 +8,10 @@ Similar to fp16, these dependencies now needs to be downloaded by bazel.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index a73cfb6e5394041ad502d4bb7ddc83324dc34871..22776066b7ab77a6826adaaf86f6512c263ee657 100644
+index be2889dfc52358a678c5ff121d08de9155bf693e..f445eed022d8183a97c9258fd837fc9d9e114170 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4367,17 +4367,19 @@ cc_library(
+@@ -4407,17 +4407,19 @@ cc_library(
      ],
  )
  
@@ -42,20 +42,25 @@ index a73cfb6e5394041ad502d4bb7ddc83324dc34871..22776066b7ab77a6826adaaf86f6512c
  
  v8_library(
      name = "v8_libshared",
-@@ -4407,9 +4409,9 @@ v8_library(
-         ":noicu/generated_torque_definitions",
+@@ -4448,14 +4450,14 @@ v8_library(
      ],
      deps = [
+         ":lib_dragonbox",
 -        "//third_party/fast_float/src:fast_float",
-+        "@fast_float",
          ":lib_fp16",
 -        ":simdutf",
-+        "@simdutf",
          ":v8_libbase",
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
+         "@abseil-cpp//absl/container:flat_hash_set",
+         "@highway//:hwy",
++        "@fast_float",
++        "@simdutf",
+     ],
+ )
+ 
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index b2cd7e53315beb865a058a315b68f8e8536baacd..59e460655dba1cd9d7fd7cce193ba0ddc0320e9c 100644
+index 918cb873481ada2c6b7cb26aaf3df070122519e7..aa4ae1c9a3d25358f9c17ef663c733d3d1af8045 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -12,7 +12,7 @@
@@ -67,8 +72,21 @@ index b2cd7e53315beb865a058a315b68f8e8536baacd..59e460655dba1cd9d7fd7cce193ba0dd
  
  namespace v8 {
  namespace internal {
+diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
+index 3056a07d334109330f9f92d96b5055ab8d665e09..3578e43f64f59587475a12e027375d6cacc64a4f 100644
+--- a/src/objects/string-inl.h
++++ b/src/objects/string-inl.h
+@@ -38,7 +38,7 @@
+ #include "src/torque/runtime-macro-shims.h"
+ #include "src/torque/runtime-support.h"
+ #include "src/utils/utils.h"
+-#include "third_party/simdutf/simdutf.h"
++#include "simdutf.h"
+ 
+ // Has to be the last include (doesn't have include guards):
+ #include "src/objects/object-macros.h"
 diff --git a/src/objects/string.h b/src/objects/string.h
-index c44a54727be467fc81b16b4b0d45c04f2ea39635..0b60b878836f31afe13c9190f2ec1323c5aeb6c1 100644
+index 77fbde31a0ef8ba1cc08308b7171137e3dda1e16..0ab2a1e6d2958ddbefea227e79c57e29d9e006ba 100644
 --- a/src/objects/string.h
 +++ b/src/objects/string.h
 @@ -21,7 +21,7 @@
@@ -80,3 +98,29 @@ index c44a54727be467fc81b16b4b0d45c04f2ea39635..0b60b878836f31afe13c9190f2ec1323
  
  // Has to be the last include (doesn't have include guards):
  #include "src/objects/object-macros.h"
+diff --git a/src/strings/unicode-inl.h b/src/strings/unicode-inl.h
+index b210e18ebec6a6325233b8d4753ec5856250dd5c..8dc29f2e0fd690076ea79f9d6b4c85c5e7e3449d 100644
+--- a/src/strings/unicode-inl.h
++++ b/src/strings/unicode-inl.h
+@@ -10,7 +10,7 @@
+ 
+ #include "src/base/logging.h"
+ #include "src/utils/utils.h"
+-#include "third_party/simdutf/simdutf.h"
++#include "simdutf.h"
+ 
+ namespace unibrow {
+ 
+diff --git a/src/strings/unicode.cc b/src/strings/unicode.cc
+index 3f318556787f2a5b6955191eb884392f7f3e385b..75b86513c6eb615289b24071f8691391fa0a10d3 100644
+--- a/src/strings/unicode.cc
++++ b/src/strings/unicode.cc
+@@ -21,7 +21,7 @@
+ #include "unicode/uchar.h"
+ #endif
+ 
+-#include "third_party/simdutf/simdutf.h"
++#include "simdutf.h"
+ 
+ namespace unibrow {
+ 
