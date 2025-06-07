@@ -23,7 +23,6 @@ build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
-test:ci --test_tag_filters=-no-ci
 test:ci --test_output=errors
 build:ci --disk_cache=~/bazel-disk-cache
 
@@ -32,6 +31,8 @@ build:ci-test --remote_download_outputs=minimal
 # Enable v8-codegen-opt for test so that python tests run in an acceptable time frame but not for
 # release builds – this sets -O2 and release should keep -O3.
 build:ci-test --config=v8-codegen-opt
+test:ci --test_tag_filters=-no-ci
+test:ci-test --test_tag_filters=-no-ci
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid

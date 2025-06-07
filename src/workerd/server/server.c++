@@ -705,17 +705,16 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "ExternalHttpServer::request()");
       KJ_REQUIRE(wrappedResponse == kj::none, "object should only receive one request");
-      auto& res = response;
       if (parent.rewriter->needsRewriteResponse()) {
         wrappedResponse = response;
-        res = *this;
       }
       if (parent.rewriter->needsRewriteRequest()) {
         auto rewrite = parent.rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
-        co_return co_await parent.serviceAdapter->request(
-            method, url, *rewrite.headers, requestBody, res);
+        co_return co_await parent.serviceAdapter->request(method, url, *rewrite.headers,
+            requestBody, parent.rewriter->needsRewriteResponse() ? *this : response);
       } else {
-        co_return co_await parent.serviceAdapter->request(method, url, headers, requestBody, res);
+        co_return co_await parent.serviceAdapter->request(method, url, headers, requestBody,
+            parent.rewriter->needsRewriteResponse() ? *this : response);
       }
     }
 
