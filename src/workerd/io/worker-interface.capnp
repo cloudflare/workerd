@@ -398,6 +398,11 @@ enum SerializationTag {
   # without breaking things).
 
   abortSignal @9;
+
+  nativeError @10;
+  # A JavaScript native error, such as Error, TypeError, etc. These are typically
+  # not handled as host objects in V8 but we handle them as such in workers in
+  # order to preserve additional information that we may attach to them.
 }
 
 enum StreamEncoding {
