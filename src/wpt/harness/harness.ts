@@ -482,7 +482,7 @@ function printResults(
     results.push(generateStats(moduleBase, config));
   }
 
-  console.log(results.join('\n\n'));
+  console.log(results.join('\n\n***\n\n'));
 }
 
 function generateConfig(
@@ -597,7 +597,7 @@ class CoverageStats {
       this.disabled,
       this.total,
       this.ok_percent.toFixed() + ' %',
-    ].join(' | ');
+    ].join(' / ');
   }
 }
 
@@ -621,7 +621,7 @@ class PassStats {
       this.disabled,
       this.total,
       this.pass_percent.toFixed() + ' %',
-    ].join(' | ');
+    ].join(' / ');
   }
 }
 

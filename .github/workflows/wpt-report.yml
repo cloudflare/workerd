@@ -1,0 +1,25 @@
+name: WPT report
+
+on:
+  # Run a new report every time we release workerd
+  release:
+    types: [published]
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate WPT report
+        run: tools/cross/wpt_logs.py --report=wpt-report.json --stats=$GITHUB_STEP_SUMMARY
+      - name: Upload WPT report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpt-report.json
+          path: wpt-report.json
+
