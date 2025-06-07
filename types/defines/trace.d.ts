@@ -22,6 +22,7 @@ interface ScheduledEventInfo {
   readonly type: "scheduled";
   readonly scheduledTime: Date;
   readonly cron: string;
+  readonly cfJson: string;
 }
 
 interface AlarmEventInfo {

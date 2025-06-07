@@ -325,10 +325,13 @@ tracing::JsRpcEventInfo tracing::JsRpcEventInfo::clone() const {
   return JsRpcEventInfo(kj::str(methodName));
 }
 
-tracing::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
+tracing::ScheduledEventInfo::ScheduledEventInfo(
+    double scheduledTime, kj::String cron, kj::String cfJson)
     : scheduledTime(scheduledTime),
-      cron(kj::mv(cron)) {}
+      cron(kj::mv(cron)),
+      cfJson(kj::mv(cfJson)) {}
 
+// TODO(o11y): Add cfJson to ScheduledEventInfo rpc definition and copy it here and in copyTo.
 tracing::ScheduledEventInfo::ScheduledEventInfo(rpc::Trace::ScheduledEventInfo::Reader reader)
     : scheduledTime(reader.getScheduledTime()),
       cron(kj::str(reader.getCron())) {}
@@ -339,7 +342,7 @@ void tracing::ScheduledEventInfo::copyTo(rpc::Trace::ScheduledEventInfo::Builder
 }
 
 tracing::ScheduledEventInfo tracing::ScheduledEventInfo::clone() const {
-  return ScheduledEventInfo(scheduledTime, kj::str(cron));
+  return ScheduledEventInfo(scheduledTime, kj::str(cron), kj::str(cfJson));
 }
 
 tracing::AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
