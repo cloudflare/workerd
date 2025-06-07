@@ -151,14 +151,14 @@ export class DurableObjectExample extends DurableObject {
 }
 
 // Test basic container status
-// export const testStatus = {
-//   async test(_ctrl, env) {
-//     const id = env.MY_CONTAINER.idFromName(CONTAINER_NAME);
-//     assert.strictEqual(id.name, CONTAINER_NAME);
-//     const container = env.MY_CONTAINER.get(id);
-//     assert.strictEqual(await container.getStatus(), false);
-//   },
-// };
+export const testStatus = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(CONTAINER_NAME);
+    assert.strictEqual(id.name, CONTAINER_NAME);
+    const container = env.MY_CONTAINER.get(id);
+    assert.strictEqual(await container.getStatus(), false);
+  },
+};
 
 // Test basic container functionality
 export const testBasics = {
@@ -170,29 +170,29 @@ export const testBasics = {
 };
 
 // Test container persistence across durable object instances
-// export const testAlreadyRunning = {
-//   async test(_ctrl, env) {
-//     let id = env.MY_CONTAINER.idFromName('testAlreadyRunning');
-//     let stub = env.MY_CONTAINER.get(id);
+export const testAlreadyRunning = {
+  async test(_ctrl, env) {
+    let id = env.MY_CONTAINER.idFromName('testAlreadyRunning');
+    let stub = env.MY_CONTAINER.get(id);
 
-//     await stub.leaveRunning();
+    await stub.leaveRunning();
 
-//     try {
-//       await stub.abort();
-//       throw new Error('Expected abort to throw');
-//     } catch (err) {
-//       assert.strictEqual(err.name, 'Error');
-//       assert.strictEqual(
-//         err.message,
-//         'Application called abort() to reset Durable Object.'
-//       );
-//     }
+    try {
+      await stub.abort();
+      throw new Error('Expected abort to throw');
+    } catch (err) {
+      assert.strictEqual(err.name, 'Error');
+      assert.strictEqual(
+        err.message,
+        'Application called abort() to reset Durable Object.'
+      );
+    }
 
-//     // Recreate stub to get a new instance
-//     stub = env.MY_CONTAINER.get(id);
-//     await stub.checkRunning();
-//   },
-// };
+    // Recreate stub to get a new instance
+    stub = env.MY_CONTAINER.get(id);
+    await stub.checkRunning();
+  },
+};
 
 // // Test WebSocket functionality
 // export const testWebSockets = {
@@ -204,36 +204,36 @@ export const testBasics = {
 // };
 
 // // Test alarm functionality with containers
-// export const testAlarm = {
-//   async test(_ctrl, env) {
-//     // Test that we can recover the use_containers flag correctly in setAlarm
-//     // after a DO has been evicted
-//     let id = env.MY_CONTAINER.idFromName('testAlarm');
-//     let stub = env.MY_CONTAINER.get(id);
+export const testAlarm = {
+  async test(_ctrl, env) {
+    // Test that we can recover the use_containers flag correctly in setAlarm
+    // after a DO has been evicted
+    let id = env.MY_CONTAINER.idFromName('testAlarm');
+    let stub = env.MY_CONTAINER.get(id);
 
-//     // Start immediate alarm
-//     await stub.startAlarm(true, 0);
+    // Start immediate alarm
+    await stub.startAlarm(true, 0);
 
-//     // Wait for alarm to trigger
-//     let retries = 0;
-//     while ((await stub.getAlarmIndex()) === 0 && retries < 50) {
-//       await scheduler.wait(20);
-//       retries++;
-//     }
+    // Wait for alarm to trigger
+    let retries = 0;
+    while ((await stub.getAlarmIndex()) === 0 && retries < 50) {
+      await scheduler.wait(20);
+      retries++;
+    }
 
-//     // Set alarm for future and abort
-//     await stub.startAlarm(false, 1000);
+    // Set alarm for future and abort
+    await stub.startAlarm(false, 1000);
 
-//     try {
-//       await stub.abort();
-//     } catch {
-//       // Expected to throw
-//     }
+    try {
+      await stub.abort();
+    } catch {
+      // Expected to throw
+    }
 
-//     // Wait for alarm to run after abort
-//     await scheduler.wait(1500);
+    // Wait for alarm to run after abort
+    await scheduler.wait(1500);
 
-//     stub = env.MY_CONTAINER.get(id);
-//     await stub.checkAlarmAbortConfirmation();
-//   },
-// };
+    stub = env.MY_CONTAINER.get(id);
+    await stub.checkAlarmAbortConfirmation();
+  },
+};

@@ -64,6 +64,8 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
+
+  kj::StringPtr signalToString(uint32_t signo);
 };
 
 }  // namespace workerd::io

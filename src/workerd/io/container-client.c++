@@ -13,7 +13,6 @@
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/debug.h>
-#include <kj/encoding.h>
 #include <kj/exception.h>
 
 namespace workerd::io {
@@ -26,6 +25,75 @@ typename T::Builder decodeJsonResponse(kj::StringPtr response) {
   auto jsonRoot = message.initRoot<T>();
   codec.decode(response, jsonRoot);
   return jsonRoot;
+}
+
+kj::StringPtr ContainerClient::signalToString(uint32_t signal) {
+  switch (signal) {
+    case 1:
+      return "SIGHUP"_kj;  // Hangup
+    case 2:
+      return "SIGINT"_kj;  // Interrupt
+    case 3:
+      return "SIGQUIT"_kj;  // Quit
+    case 4:
+      return "SIGILL"_kj;  // Illegal instruction
+    case 5:
+      return "SIGTRAP"_kj;  // Trace trap
+    case 6:
+      return "SIGABRT"_kj;  // Abort
+    case 7:
+      return "SIGBUS"_kj;  // Bus error
+    case 8:
+      return "SIGFPE"_kj;  // Floating point exception
+    case 9:
+      return "SIGKILL"_kj;  // Kill
+    case 10:
+      return "SIGUSR1"_kj;  // User signal 1
+    case 11:
+      return "SIGSEGV"_kj;  // Segmentation violation
+    case 12:
+      return "SIGUSR2"_kj;  // User signal 2
+    case 13:
+      return "SIGPIPE"_kj;  // Broken pipe
+    case 14:
+      return "SIGALRM"_kj;  // Alarm clock
+    case 15:
+      return "SIGTERM"_kj;  // Termination
+    case 16:
+      return "SIGSTKFLT"_kj;  // Stack fault (Linux)
+    case 17:
+      return "SIGCHLD"_kj;  // Child status changed
+    case 18:
+      return "SIGCONT"_kj;  // Continue
+    case 19:
+      return "SIGSTOP"_kj;  // Stop
+    case 20:
+      return "SIGTSTP"_kj;  // Terminal stop
+    case 21:
+      return "SIGTTIN"_kj;  // Background read from tty
+    case 22:
+      return "SIGTTOU"_kj;  // Background write to tty
+    case 23:
+      return "SIGURG"_kj;  // Urgent condition on socket
+    case 24:
+      return "SIGXCPU"_kj;  // CPU limit exceeded
+    case 25:
+      return "SIGXFSZ"_kj;  // File size limit exceeded
+    case 26:
+      return "SIGVTALRM"_kj;  // Virtual alarm clock
+    case 27:
+      return "SIGPROF"_kj;  // Profiling alarm clock
+    case 28:
+      return "SIGWINCH"_kj;  // Window size change
+    case 29:
+      return "SIGIO"_kj;  // I/O now possible
+    case 30:
+      return "SIGPWR"_kj;  // Power failure restart (Linux)
+    case 31:
+      return "SIGSYS"_kj;  // Bad system call
+    default:
+      return "SIGKILL"_kj;
+  }
 }
 
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
@@ -133,13 +201,30 @@ kj::Promise<kj::Tuple<bool, kj::HashMap<uint16_t, uint16_t>>> ContainerClient::i
   kj::HashMap<uint16_t, uint16_t> portMappings;
   for (auto portMapping: jsonRoot.getNetworkSettings().getPorts().getObject()) {
     auto port = portMapping.getName();
-    auto portMappingSlashIndex = KJ_ASSERT_NONNULL(port.asString().find("/"));
-    auto portNumberStr = port.asString().slice(0, portMappingSlashIndex);
-    auto portNumber1 = kj::str(portNumberStr);
-    auto portNumber = portNumber1.parseAs<uint16_t>();
-    auto mappedPortStr = portMapping.getValue().getArray()[0].getObject()[1].getValue().getString();
-    auto mappedPort = mappedPortStr.asString().parseAs<uint16_t>();
-    portMappings.insert(portNumber, mappedPort);
+    // We need to get "8080" from "8080/tcp"
+    auto rawPort = port.asString().slice(0, KJ_ASSERT_NONNULL(port.asString().find("/")));
+    auto portNumber = kj::str(rawPort).parseAs<uint16_t>();
+    uint16_t number;
+    {
+      // We need to retrieve "HostPort" from the following JSON structure
+      //
+      // "Ports": {
+      // 	"8080/tcp": [
+      // 		{
+      // 			"HostIp": "0.0.0.0",
+      // 			"HostPort": "55000"
+      // 		}
+      // 	]
+      // },
+      //
+      auto array = portMapping.getValue().getArray();
+      JSG_REQUIRE(array.size() > 0, Error, "Malformed ContainerInspect port mapping response");
+      auto obj = array[0].getObject();
+      JSG_REQUIRE(array.size() > 1, Error, "Malformed ContainerInspect port mapping object");
+      auto mappedPort = obj[1].getValue().getString();
+      number = mappedPort.asString().parseAs<uint16_t>();
+    }
+    portMappings.insert(portNumber, number);
   }
 
   // Look for Status field in the JSON object
@@ -163,7 +248,7 @@ kj::Promise<void> ContainerClient::createContainer(
   // Add entrypoint if provided
   KJ_IF_SOME(ep, entrypoint) {
     auto jsonCmd = jsonRoot.initCmd(ep.size());
-    for (uint32_t i = 0; i < ep.size(); i++) {
+    for (uint32_t i: kj::zeroTo(ep.size())) {
       jsonCmd.set(i, ep[i]);
     }
   }
@@ -171,18 +256,21 @@ kj::Promise<void> ContainerClient::createContainer(
   // Add environment variables if provided
   KJ_IF_SOME(env, environment) {
     auto jsonEnv = jsonRoot.initEnv(env.size());
-    for (uint32_t i = 0; i < env.size(); i++) {
+    for (uint32_t i: kj::zeroTo(env.size())) {
       jsonEnv.set(i, env[i]);
     }
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
+  // We need to publish all ports to properly get the mapped port number locally
   hostConfig.setPublishAllPorts(true);
+  // We need to set a restart policy to avoid having ambiguous states
+  // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
 
   // Encode to JSON string
   kj::String jsonBody = codec.encode(jsonRoot);
-  auto endpoint = kj::str("/containers/create?name=", containerName);
+  const auto endpoint = kj::str("/containers/create?name=", containerName);
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, jsonBody.asPtr());
 
   // statusCode 201 refers to "container created successfully"
@@ -190,60 +278,53 @@ kj::Promise<void> ContainerClient::createContainer(
   // Both are fine, so long as the container exists. Though we might want to call destroy and
   // recreate on 409 in the future.
   if (response.statusCode != 201 && response.statusCode != 409) {
-    if (response.statusCode == 404) {
-      JSG_FAIL_REQUIRE(Error, "No such image available named ", imageName);
-    } else {
-      JSG_FAIL_REQUIRE(Error, "Create container failed with: ", response.body);
-    }
+    JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ", imageName);
+    JSG_FAIL_REQUIRE(Error, "Create container failed with: ", response.body);
   }
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
   // Docker API: POST /containers/{id}/start
-  auto endpoint = kj::str("/containers/", containerName, "/start");
+  const auto endpoint = kj::str("/containers/", containerName, "/start");
   // We have to send an empty body since docker API will throw an error if we don't.
   kj::StringPtr body = "";
-  try {
-    auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
-    // statusCode 204 refers to "no error"
-    // statusCode 304 refers to "container already started"
-    // Both are fine
-    JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304, Error,
-        "Starting container failed with: ", response.body);
-  } catch (...) {
-    auto e = kj::getCaughtExceptionAsKj();
-    kj::throwFatalException(kj::mv(e));
-  }
+  auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
+  // statusCode 204 refers to "no error"
+  // statusCode 304 refers to "container already started"
+  // Both are fine
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304, Error,
+      "Starting container failed with: ", response.body);
 }
 
 kj::Promise<void> ContainerClient::stopContainer() {
   // Docker API: POST /containers/{id}/stop
-  auto endpoint = kj::str("/containers/", containerName, "/stop");
+  const auto endpoint = kj::str("/containers/", containerName, "/stop");
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
   // statusCode 204 refers to "no error"
   // statusCode 304 refers to "container already stopped"
-  // Both are fine
+  // Both are fine to avoid when stop container is called.
   JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304, Error,
       "Stopping container failed with: ", response.body);
 }
 
 kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
-  // TODO: Convert signo to signal string here.
   // Docker API: POST /containers/{id}/kill
-  auto endpoint = kj::str("/containers/", containerName, "/kill?signal=", signal);
+  const auto endpoint =
+      kj::str("/containers/", containerName, "/kill?signal=", signalToString(signal));
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
   // statusCode 409 refers to "container is not running"
+  // We should not throw an error when the container is already not running.
   JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 409, Error,
       "Stopping container failed with: ", response.body);
 }
 
 kj::Promise<void> ContainerClient::status(StatusContext context) {
-  bool running = kj::get<0>(co_await inspectContainer());
+  const bool running = kj::get<0>(co_await inspectContainer());
   context.getResults().setRunning(running);
 }
 
 kj::Promise<void> ContainerClient::start(StartContext context) {
-  auto params = context.getParams();
+  const auto params = context.getParams();
 
   // Get the lists directly from Cap'n Proto
   kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint = kj::none;
@@ -262,7 +343,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   // Docker API: POST /containers/{id}/wait - wait for container to exit
-  auto endpoint = kj::str("/containers/", containerName, "/wait");
+  const auto endpoint = kj::str("/containers/", containerName, "/wait");
   // Monitor is often called right after start but the api layer's start does not await the RPC's
   // start response. That means that the createContainer call might not have even started yet.
   // If it hasn't, we'll give it 3 tries before failing.
@@ -277,8 +358,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     // Parse JSON response
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(
-        statusCode == 0, Error, "Container exited with unexpected exit code ", kj::str(statusCode));
+    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code ", statusCode);
     co_return;
   }
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
@@ -296,8 +376,8 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
     JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
         "Removing a container failed with: ", response.body);
     {
-      auto endpoint = kj::str("/containers/", containerName, "/wait");
-      auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
+      endpoint = kj::str("/containers/", containerName, "/wait");
+      response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
       JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
           "Waiting for container removal failed with: ", response.statusCode, response.body);
     }
@@ -305,12 +385,12 @@ kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {
-  auto params = context.getParams();
+  const auto params = context.getParams();
   co_await killContainer(params.getSigno());
 }
 
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
-  auto params = context.getParams();
+  const auto params = context.getParams();
   uint16_t port = params.getPort();
   auto results = context.getResults();
   auto dockerPort = kj::heap<DockerPort>(*this, kj::str("localhost"), port);
