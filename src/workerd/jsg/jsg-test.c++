@@ -453,7 +453,7 @@ KJ_TEST("External memory adjustment") {
 }
 
 KJ_TEST("External memory adjustment - defered") {
-  kj::Own<const ExternalMemoryTarget> target;
+  kj::Arc<const ExternalMemoryTarget> target;
 
   // A memory allocation that will outlive the isolate
   kj::Array<kj::byte> mem;

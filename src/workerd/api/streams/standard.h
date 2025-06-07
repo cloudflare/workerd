@@ -266,7 +266,7 @@ class WritableImpl {
     }
   };
 
-  WritableImpl(jsg::Lock& js, WritableStream& owner);
+  WritableImpl(jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
 
@@ -573,7 +573,8 @@ class WritableStreamDefaultController: public jsg::Object {
  public:
   using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
-  explicit WritableStreamDefaultController(jsg::Lock& js, WritableStream& owner);
+  explicit WritableStreamDefaultController(
+      jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 

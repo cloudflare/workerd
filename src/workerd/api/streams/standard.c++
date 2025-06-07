@@ -1136,9 +1136,10 @@ kj::Own<typename ReadableImpl<Self>::Consumer> ReadableImpl<Self>::getConsumer(
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(jsg::Lock& js, WritableStream& owner)
+WritableImpl<Self>::WritableImpl(
+    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
     : owner(owner.addWeakRef()),
-      signal(js.alloc<AbortSignal>()) {}
+      signal(kj::mv(abortSignal)) {}
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(
@@ -2507,14 +2508,21 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     JSG_REQUIRE(
         autoAllocateChunkSize > 0, TypeError, "The autoAllocateChunkSize option cannot be zero.");
 
-    state = kj::heap<ByteReadable>(controller.addRef(), *this, autoAllocateChunkSize);
+    // We account for the memory usage of the ByteReadable and its controller together because
+    // their lifetimes are identical (in practice) and memory accounting itself has a memory
+    // overhead. The same applies to ValueReadable below.
+    state = kj::heap<ByteReadable>(controller.addRef(), *this, autoAllocateChunkSize)
+                .attach(js.getExternalMemoryAdjustment(
+                    sizeof(ByteReadable) + sizeof(ReadableByteStreamController)));
     controller->start(js);
   } else {
     JSG_REQUIRE(
         type == "", TypeError, kj::str("\"", type, "\" is not a valid type of ReadableStream."));
     auto controller = js.alloc<ReadableStreamDefaultController>(
         kj::mv(underlyingSource), kj::mv(queuingStrategy));
-    state = kj::heap<ValueReadable>(controller.addRef(), *this);
+    state = kj::heap<ValueReadable>(controller.addRef(), *this)
+                .attach(js.getExternalMemoryAdjustment(
+                    sizeof(ValueReadable) + sizeof(ReadableStreamDefaultController)));
     controller->start(js);
   }
 }
@@ -3172,9 +3180,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 // ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(
-    jsg::Lock& js, WritableStream& owner)
+    jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal)
     : ioContext(tryGetIoContext()),
-      impl(js, owner) {}
+      impl(js, owner, kj::mv(abortSignal)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
     jsg::Lock& js, v8::Local<v8::Value> reason) {
@@ -3404,7 +3412,11 @@ void WritableStreamJsController::setup(jsg::Lock& js,
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = js.alloc<WritableStreamDefaultController>(js, KJ_ASSERT_NONNULL(owner));
+  // We account for the memory usage of the WritableStreamDefaultController and AbortSignal together
+  // because their lifetimes are identical and memory accounting itself has a memory overhead.
+  state = js.allocAccounted<WritableStreamDefaultController>(
+      sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
+      jsg::alloc<AbortSignal>());
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

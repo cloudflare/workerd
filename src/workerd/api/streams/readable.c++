@@ -494,7 +494,11 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(jsg::Lock& js,
       "To use the new ReadableStream() constructor, enable the "
       "streams_enable_constructors compatibility flag. "
       "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
-  auto stream = js.alloc<ReadableStream>(newReadableStreamJsController());
+  // We account for the memory usage of the ReadableStream and its controller together because their
+  // lifetimes are identical and memory accounting itself has a memory overhead.
+  auto controller = newReadableStreamJsController();
+  auto stream = js.allocAccounted<ReadableStream>(
+      sizeof(ReadableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
